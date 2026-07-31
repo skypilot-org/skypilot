@@ -1,3 +1,4 @@
+import ast
 import os
 import tempfile
 import time
@@ -10,6 +11,7 @@ import pytest
 
 from sky import catalog
 from sky.catalog import common as catalog_common
+from sky.catalog.data_fetchers import fetch_runpod
 from sky.utils import annotations
 
 
@@ -18,6 +20,52 @@ def test_rtxpro6000_in_common_gpus():
     # list so that `sky show-gpus` surfaces it across clouds. Naming matches
     # the AWS and RunPod catalogs (no hyphens), not GCP's `nvidia-rtx-pro-6000`.
     assert 'RTXPRO6000' in catalog.get_common_gpus()
+
+
+def test_runpod_gpu_memory_uses_mib_catalog_contract():
+    gpu_info = fetch_runpod.get_gpu_info(
+        'H200-SXM',
+        {
+            'displayName': 'NVIDIA H200 SXM',
+            'manufacturer': 'NVIDIA',
+            'memoryInGb': 141,
+            'lowestPrice': {
+                'minVcpu': 12,
+                'minMemory': 188,
+            },
+        },
+        gpu_count=2,
+    )
+
+    assert gpu_info is not None
+    gpu_info_value = ast.literal_eval(gpu_info['GpuInfo'])
+    assert gpu_info_value['Gpus'][0]['MemoryInfo']['SizeInMiB'] == 144384
+    assert gpu_info_value['TotalGpuMemoryInMiB'] == 288768
+
+    runpod_catalog = pd.DataFrame([
+        {
+            'InstanceType': '2x_H200-SXM_SECURE',
+            'AcceleratorName': 'H200-SXM',
+            'AcceleratorCount': 2.0,
+            'vCPUs': 24.0,
+            'MemoryGiB': 376.0,
+            'Region': 'IN',
+            'SpotPrice': 7.98,
+            'Price': 8.78,
+            'AvailabilityZone': 'AP-IN-1',
+            'GpuInfo': gpu_info['GpuInfo'],
+        },
+    ])
+    accelerators = catalog_common.list_accelerators_impl(
+        'RunPod',
+        runpod_catalog,
+        gpus_only=True,
+        name_filter=None,
+        region_filter=None,
+        quantity_filter=None,
+    )
+
+    assert accelerators['H200-SXM'][0].device_memory == 141
 
 
 @mock.patch('sky.catalog.common.requests.get')
