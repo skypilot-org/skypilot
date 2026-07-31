@@ -2670,6 +2670,7 @@ async def api_cancel(request: fastapi.Request,
 
 @app.get('/api/status')
 async def api_status(
+    request: fastapi.Request,
     request_ids: Optional[List[str]] = fastapi.Query(
         None, description='Request ID prefixes to get status for.'),
     all_status: bool = fastapi.Query(
@@ -2682,6 +2683,10 @@ async def api_status(
         None, description='Filter requests by cluster name.'),
 ) -> List[payloads.RequestPayload]:
     """Gets the list of requests."""
+    # Scope the request body to the caller: the owner sees it, others get null
+    # (see _request_body_for_display).
+    auth_user = request.state.auth_user
+    caller_user_id = auth_user.id if auth_user is not None else None
     # `fields` is caller-supplied and ends up in the SQL column list. Reject an
     # unknown column here so the client gets a 400 instead of a 500 from the
     # query layer.
@@ -2705,7 +2710,8 @@ async def api_status(
                 fields=fields,
                 sort=True,
             ))
-        return requests_lib.encode_requests(request_tasks)
+        return requests_lib.encode_requests(request_tasks,
+                                            caller_user_id=caller_user_id)
     else:
         encoded_request_tasks = []
         for request_id in request_ids:
@@ -2714,7 +2720,8 @@ async def api_status(
             if request_tasks is None:
                 continue
             for request_task in request_tasks:
-                encoded_request_tasks.append(request_task.readable_encode())
+                encoded_request_tasks.append(
+                    request_task.readable_encode(caller_user_id=caller_user_id))
         return encoded_request_tasks
 
 
