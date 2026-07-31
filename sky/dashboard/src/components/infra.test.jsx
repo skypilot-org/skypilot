@@ -74,7 +74,7 @@ describe('InfrastructureSection Slurm partition rows', () => {
       groupedPerNodeGPUs: { 'nebius-slinky': nodes },
     });
 
-  it('collapses to the cluster totals, naming what expanding reveals', () => {
+  it('collapses to the cluster totals, counting what expanding reveals', () => {
     const { container } = renderSlurm();
     const rows = tableRows(container);
     // One row for the cluster's single GPU type, not one per partition.
@@ -89,19 +89,23 @@ describe('InfrastructureSection Slurm partition rows', () => {
     );
   });
 
-  it('renders one row per partition and GPU type once expanded', () => {
+  it('appends the partition rows under the cluster totals when expanded', () => {
     const { container } = renderSlurm();
     expandPartitions();
     const rows = tableRows(container);
-    expect(rows).toHaveLength(4);
-    expect(cellTexts(rows[0])).toContain('fabric-a');
-    expect(cellTexts(rows[1])).toContain('mock');
+    // The cluster's own row stays on top, keeping the aggregate on screen.
+    expect(rows).toHaveLength(5);
+    expect(cellTexts(rows[0])).toEqual(
+      expect.arrayContaining(['3 partitions', 'H100', '12 of 32 free'])
+    );
+    expect(cellTexts(rows[1])).toContain('fabric-a');
+    expect(cellTexts(rows[2])).toContain('mock');
     // The cluster's node count stays deduplicated: 5 nodes, not one per
     // partition membership.
     expect(normalize(rows[0])).toMatch(/nebius-slinky\s*5/);
   });
 
-  it('does not offer a toggle for a single-partition cluster', () => {
+  it('counts a single-partition cluster the same way', () => {
     renderSection({
       isSlurm: true,
       contexts: ['crusoe-slurm-use1'],
@@ -121,8 +125,8 @@ describe('InfrastructureSection Slurm partition rows', () => {
         ],
       },
     });
-    expect(screen.queryByTitle('Show partitions')).toBeNull();
-    // With nothing to expand into, the partition is named outright.
+    expect(screen.getAllByText(/1 partition$/)[0]).toBeTruthy();
+    expandPartitions();
     expect(screen.getAllByText('all')[0]).toBeTruthy();
   });
 
@@ -132,16 +136,16 @@ describe('InfrastructureSection Slurm partition rows', () => {
     const rows = tableRows(container);
     // fabric-a and mock both count n3 + n4's 16 H100s: shared capacity is
     // reachable from either partition, so it is not split between them.
-    expect(cellTexts(rows[0])).toEqual(
-      expect.arrayContaining(['H100', '8 of 16 free'])
-    );
     expect(cellTexts(rows[1])).toEqual(
       expect.arrayContaining(['H100', '8 of 16 free'])
     );
     expect(cellTexts(rows[2])).toEqual(
-      expect.arrayContaining(['A100', '4 of 4 free'])
+      expect.arrayContaining(['H100', '8 of 16 free'])
     );
     expect(cellTexts(rows[3])).toEqual(
+      expect.arrayContaining(['A100', '4 of 4 free'])
+    );
+    expect(cellTexts(rows[4])).toEqual(
       expect.arrayContaining(['H100', '4 of 16 free'])
     );
   });
@@ -151,23 +155,28 @@ describe('InfrastructureSection Slurm partition rows', () => {
     expandPartitions();
     const rows = tableRows(container);
     // The gap before the tag is a margin, not whitespace in the text.
-    expect(cellTexts(rows[3])).toContain('real(default)');
+    expect(cellTexts(rows[4])).toContain('real(default)');
     // 'mock' has H100 and A100 rows, so its cell spans both; the second row
     // carries only the GPU cells.
-    const mockCell = Array.from(rows[1].querySelectorAll('td')).find((td) =>
+    const mockCell = Array.from(rows[2].querySelectorAll('td')).find((td) =>
       td.textContent.includes('mock')
     );
     expect(mockCell.getAttribute('rowspan')).toBe('2');
-    expect(rows[2].querySelectorAll('td')).toHaveLength(3);
+    expect(rows[3].querySelectorAll('td')).toHaveLength(3);
   });
 
-  it('gives the cluster cells a rowSpan covering every partition row', () => {
+  it('gives the cluster cells a rowSpan covering totals and partitions', () => {
     const { container } = renderSlurm();
     expandPartitions();
     const nameCell = Array.from(
       container.querySelectorAll('table tbody td')
     ).find((td) => td.textContent.includes('nebius-slinky'));
-    expect(nameCell.getAttribute('rowspan')).toBe('4');
+    expect(nameCell.getAttribute('rowspan')).toBe('5');
+    // The partition count spans only the cluster's own rows.
+    const summaryCell = Array.from(
+      container.querySelectorAll('table tbody td')
+    ).find((td) => td.textContent.includes('3 partitions'));
+    expect(summaryCell.getAttribute('rowspan')).toBe('1');
   });
 });
 

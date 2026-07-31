@@ -405,23 +405,24 @@ export function InfrastructureSection({
     });
     const typeAgg = Array.from(byType.values());
 
-    // Collapsed: one row per GPU type, from the cluster-wide totals, so the
-    // rows add up to the cluster's capacity.
+    // One row per GPU type, from the cluster-wide totals, so the rows add up to
+    // the cluster's capacity. Always shown; for Slurm they are what the
+    // partition breakdown hangs off.
     const typeRows = typeAgg.map((type) => ({
       key: type.gpu_name,
       label: type.gpu_name,
       type,
     }));
 
-    // Expanded (Slurm only): one row per partition, split by GPU type, since a
-    // partition is what a job is submitted to. A node can be in several
-    // partitions, so these rows overlap — which is why they are behind a
-    // toggle rather than the default view. The partition cell spans its own
-    // type rows.
+    // Slurm only, appended when the cluster is expanded: one row per partition,
+    // split by GPU type, since a partition is what a job is submitted to. A
+    // node can be in several partitions, so these rows overlap — which is why
+    // they are behind a toggle rather than shown by default. The partition cell
+    // spans its own type rows.
     const partitions = isSlurm ? aggregateSlurmPartitions(nodes) : [];
     const partitionRows = partitions.flatMap((partition) =>
       partition.types.map((type, index) => ({
-        key: `${partition.name}/${type ? type.gpu_name : 'none'}`,
+        key: `partition/${partition.name}/${type ? type.gpu_name : 'none'}`,
         type,
         partition,
         partitionRowSpan: index === 0 ? partition.types.length : 0,
@@ -616,12 +617,16 @@ export function InfrastructureSection({
                     workspaces,
                   } = deriveContextData(context);
 
-                  // A single-partition cluster has nothing to expand into: its
-                  // one partition already is the cluster.
-                  const isExpandable = partitions.length > 1;
+                  const isExpandable = partitions.length > 0;
                   const isExpanded =
                     isExpandable && expandedContexts.has(context);
-                  const subRows = isExpanded ? partitionRows : typeRows;
+                  // Expanding appends the partition breakdown under the
+                  // cluster's own totals, so the aggregate stays on screen and
+                  // the toggle keeps its place.
+                  const subRows = isExpanded
+                    ? [...typeRows, ...partitionRows]
+                    : typeRows;
+                  const summaryRowCount = Math.max(1, typeRows.length);
 
                   // CPU-only contexts and contexts still loading GPU data
                   // render a single row.
@@ -709,9 +714,10 @@ export function InfrastructureSection({
                     </>
                   );
 
-                  // Slurm only. Expanded, each partition's cell spans its own
-                  // GPU-type rows; collapsed, one cell spans the whole cluster
-                  // and names what expanding would reveal.
+                  // Slurm only. The cluster's own rows carry one cell counting
+                  // its partitions and toggling them; each partition row below
+                  // names its partition, spanning that partition's GPU-type
+                  // rows.
                   const renderPartitionCell = (subRow, index) => {
                     if (!hasGpuData) {
                       return (
@@ -720,36 +726,43 @@ export function InfrastructureSection({
                         </td>
                       );
                     }
-                    if (!isExpanded) {
-                      if (index > 0) {
-                        return null;
-                      }
-                      return (
+                    if (subRow && subRow.partition) {
+                      return subRow.partitionRowSpan ? (
                         <td
-                          className="p-3 align-top text-gray-700 whitespace-nowrap"
-                          rowSpan={subRowCount}
+                          className="p-3 pl-6 align-top text-gray-700 whitespace-nowrap"
+                          rowSpan={subRow.partitionRowSpan}
                         >
-                          {partitions.length === 0 ? (
-                            <span className="text-gray-400">-</span>
-                          ) : partitions.length === 1 ? (
-                            partitionName(partitions[0])
-                          ) : (
-                            <span className="text-gray-500">
-                              {partitions.length} partitions
-                            </span>
-                          )}
+                          {partitionName(subRow.partition)}
                         </td>
-                      );
+                      ) : null;
                     }
-                    if (!subRow || !subRow.partitionRowSpan) {
+                    if (index > 0) {
                       return null;
                     }
                     return (
                       <td
-                        className="p-3 align-top text-gray-700 whitespace-nowrap"
-                        rowSpan={subRow.partitionRowSpan}
+                        className="p-3 align-top whitespace-nowrap"
+                        rowSpan={summaryRowCount}
                       >
-                        {partitionName(subRow.partition)}
+                        {!isExpandable ? (
+                          <span className="text-gray-400">-</span>
+                        ) : (
+                          <button
+                            className="inline-flex items-center gap-1 text-gray-500 hover:text-gray-700"
+                            title={
+                              isExpanded ? 'Hide partitions' : 'Show partitions'
+                            }
+                            onClick={() => toggleExpanded(context)}
+                          >
+                            {partitions.length} partition
+                            {partitions.length === 1 ? '' : 's'}
+                            {isExpanded ? (
+                              <ChevronDownIcon className="w-4 h-4" />
+                            ) : (
+                              <ChevronRightIcon className="w-4 h-4" />
+                            )}
+                          </button>
+                        )}
                       </td>
                     );
                   };
@@ -794,23 +807,6 @@ export function InfrastructureSection({
                         </td>
                         <td className={sharedCellClass} rowSpan={subRowCount}>
                           <div className="flex items-center gap-2 flex-wrap">
-                            {isExpandable && (
-                              <button
-                                className="text-gray-400 hover:text-gray-600 -ml-1"
-                                title={
-                                  isExpanded
-                                    ? 'Hide partitions'
-                                    : 'Show partitions'
-                                }
-                                onClick={() => toggleExpanded(context)}
-                              >
-                                {isExpanded ? (
-                                  <ChevronDownIcon className="w-4 h-4" />
-                                ) : (
-                                  <ChevronRightIcon className="w-4 h-4" />
-                                )}
-                              </button>
-                            )}
                             <NonCapitalizedTooltip
                               content={displayName}
                               className="text-sm text-muted-foreground"
