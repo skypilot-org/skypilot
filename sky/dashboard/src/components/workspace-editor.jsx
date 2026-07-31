@@ -11,6 +11,7 @@ import {
 } from '@/data/connectors/workspaces';
 import { getClusters } from '@/data/connectors/clusters';
 import { getManagedJobs } from '@/data/connectors/jobs';
+import { NonCapitalizedTooltip } from '@/components/utils';
 import { Layout } from '@/components/elements/layout';
 import Link from 'next/link';
 import Head from 'next/head';
@@ -241,12 +242,16 @@ const WorkspaceBadge = ({ isPrivate, readOnly = false }) => {
         </span>
       )}
       {readOnly && (
-        <span
-          className={`${base} whitespace-nowrap bg-blue-100 text-blue-700 border-blue-300`}
-          title="Non-members can view this workspace and its workloads but cannot modify them"
+        <NonCapitalizedTooltip
+          content="Non-members can view this workspace and its workloads but cannot modify them"
+          className="text-sm text-muted-foreground"
         >
-          Read-only
-        </span>
+          <span
+            className={`${base} whitespace-nowrap bg-blue-100 text-blue-700 border-blue-300`}
+          >
+            Read-only
+          </span>
+        </NonCapitalizedTooltip>
       )}
     </span>
   );
