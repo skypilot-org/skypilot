@@ -1,9 +1,13 @@
 """Unit tests for sky.jobs.utils functions."""
+import contextlib
 import time
 from typing import Any, Dict, List, Optional, Tuple, Union
 from unittest.mock import MagicMock
 
+import filelock
 import pytest
+from sqlalchemy import create_engine
+from sqlalchemy.ext.asyncio import create_async_engine
 
 from sky import exceptions
 from sky.jobs import state as managed_job_state
@@ -1557,3 +1561,276 @@ class TestTryToGetJobEndTime:
         monkeypatch.setattr(jobs_utils, 'get_job_timestamp', _raise)
         with pytest.raises(ValueError):
             jobs_utils.try_to_get_job_end_time(MagicMock(), 'cluster', 1)
+
+
+@pytest.fixture
+def _mock_managed_jobs_db_conn(tmp_path, monkeypatch):
+    """Create a temporary SQLite DB for managed jobs state.
+
+    Same pattern as tests/unit_tests/test_sky/jobs/test_jobs_state.py.
+    """
+    db_path = tmp_path / 'managed_jobs_testing.db'
+    engine = create_engine(f'sqlite:///{db_path}')
+    async_engine = create_async_engine(f'sqlite+aiosqlite:///{db_path}',
+                                       connect_args={'timeout': 30})
+
+    @contextlib.contextmanager
+    def _tmp_db_lock(_section: str):
+        lock_path = tmp_path / f'.{_section}.lock'
+        with filelock.FileLock(str(lock_path), timeout=10):
+            yield
+
+    monkeypatch.setattr(managed_job_state.migration_utils, 'db_lock',
+                        _tmp_db_lock)
+    monkeypatch.setattr(managed_job_state._db_manager, '_engine', engine)
+    monkeypatch.setattr(managed_job_state._db_manager, '_engine_async',
+                        async_engine)
+    managed_job_state.create_table(engine)
+    yield engine
+
+
+class TestHaRecoveryForConsolidationMode:
+    """ha_recovery_for_consolidation_mode: one CAS-guarded reset per job."""
+
+    def _patch_common(self, monkeypatch, tmp_path, jobs=None):
+        """Stub the pieces of the recovery pass we're not exercising.
+
+        jobs, if given, replaces the state query with canned rows (following
+        TestGetManagedJobQueue's convention) instead of reading a real DB.
+        """
+        monkeypatch.setattr(jobs_utils.scheduler, 'maybe_start_controllers',
+                            lambda: None)
+        # Redirect the recovery log off of the real, possibly shared
+        # /tmp/jobs_ha_recovery.log path.
+        monkeypatch.setattr(jobs_utils.constants,
+                            'HA_PERSISTENT_RECOVERY_LOG_PATH',
+                            str(tmp_path / '{}ha_recovery.log'))
+        if jobs is not None:
+            monkeypatch.setattr(jobs_utils.managed_job_state,
+                                'get_managed_jobs_with_filters',
+                                lambda fields=None: (jobs, len(jobs)))
+
+    def _job_row(self, **overrides):
+        job = {
+            'job_id': 1,
+            'controller_pid': 100,
+            'controller_pid_started_at': 1.0,
+            'schedule_state': managed_job_state.ManagedJobScheduleState.ALIVE,
+            'status': managed_job_state.ManagedJobStatus.RUNNING,
+        }
+        job.update(overrides)
+        return job
+
+    def _patch_liveness(self, monkeypatch, alive):
+        """Make controller_process_alive return `alive`, or raise if it is an
+        exception instance."""
+
+        def _check(record, legacy_job_id):
+            del record, legacy_job_id  # Unused.
+            if isinstance(alive, BaseException):
+                raise alive
+            return alive
+
+        monkeypatch.setattr(jobs_utils, 'controller_process_alive', _check)
+
+    def _spy_reset(self, monkeypatch, return_value=None):
+        """Count reset_job_for_recovery calls, delegating to the real one
+        unless return_value is given."""
+        calls = []
+        real = managed_job_state.reset_job_for_recovery
+
+        def _reset(job_id, **kwargs):
+            calls.append((job_id, kwargs))
+            if return_value is not None:
+                return return_value
+            return real(job_id, **kwargs)
+
+        monkeypatch.setattr(jobs_utils.managed_job_state,
+                            'reset_job_for_recovery', _reset)
+        return calls
+
+    def _seed_multi_task_alive_job(self, engine, num_tasks: int, *, pid,
+                                   pid_started_at):
+        """Seed one job with num_tasks tasks, owned by (pid, pid_started_at)
+        and in the ALIVE schedule state."""
+        job_id = managed_job_state.set_job_info_without_job_id(
+            name='multi-task-job',
+            workspace='ws1',
+            entrypoint='ep',
+            pool=None,
+            pool_hash=None,
+            user_hash='user1')
+        for task_id in range(num_tasks):
+            managed_job_state.set_pending(job_id,
+                                          task_id=task_id,
+                                          task_name=f'task{task_id}',
+                                          resources_str='{}',
+                                          metadata='{}')
+        managed_job_state.scheduler_set_waiting([job_id], '/tmp/dag.yaml',
+                                                '/tmp/user.yaml', '/tmp/env',
+                                                None, 100)
+        with managed_job_state.orm.Session(engine) as session:
+            session.query(managed_job_state.job_info_table).filter(
+                managed_job_state.job_info_table.c.spot_job_id == job_id
+            ).update({
+                managed_job_state.job_info_table.c.controller_pid: pid,
+                managed_job_state.job_info_table.c.controller_pid_started_at: pid_started_at,
+                managed_job_state.job_info_table.c.schedule_state:
+                    managed_job_state.ManagedJobScheduleState.ALIVE.value,
+            })
+            session.commit()
+        return job_id
+
+    def _read_job_info(self, engine, job_id):
+        with managed_job_state.orm.Session(engine) as session:
+            return session.execute(
+                managed_job_state.sqlalchemy.select(
+                    managed_job_state.job_info_table.c.controller_pid,
+                    managed_job_state.job_info_table.c.schedule_state,
+                ).where(managed_job_state.job_info_table.c.spot_job_id ==
+                        job_id)).fetchone()
+
+    def test_multi_task_job_is_reset_exactly_once(self, monkeypatch, tmp_path,
+                                                  _mock_managed_jobs_db_conn):
+        """The state query returns one row per task. A multi-task job whose
+        controller is dead must still be reset exactly once: each extra reset
+        can re-orphan the job right after a controller claims it, which is how
+        one recovery pass ends up with several controllers for one job."""
+        engine = _mock_managed_jobs_db_conn
+        job_id = self._seed_multi_task_alive_job(engine,
+                                                 4,
+                                                 pid=100,
+                                                 pid_started_at=1.0)
+        self._patch_common(monkeypatch, tmp_path)
+        self._patch_liveness(monkeypatch, alive=False)
+        calls = self._spy_reset(monkeypatch)
+
+        jobs_utils.ha_recovery_for_consolidation_mode()
+
+        assert calls == [(job_id, {
+            'expected_pid': 100,
+            'expected_pid_started_at': 1.0,
+            'expected_schedule_state':
+                managed_job_state.ManagedJobScheduleState.ALIVE,
+        })]
+        row = self._read_job_info(engine, job_id)
+        assert row.controller_pid is None
+        assert (row.schedule_state ==
+                managed_job_state.ManagedJobScheduleState.WAITING.value)
+
+    def test_dead_controller_reset_passes_observed_values(
+            self, monkeypatch, tmp_path):
+        self._patch_common(monkeypatch, tmp_path, [self._job_row()])
+        self._patch_liveness(monkeypatch, alive=False)
+        calls = self._spy_reset(monkeypatch, return_value=True)
+
+        jobs_utils.ha_recovery_for_consolidation_mode()
+
+        assert calls == [(1, {
+            'expected_pid': 100,
+            'expected_pid_started_at': 1.0,
+            'expected_schedule_state':
+                managed_job_state.ManagedJobScheduleState.ALIVE,
+        })]
+
+    def test_live_controller_is_not_reset(self, monkeypatch, tmp_path):
+        self._patch_common(monkeypatch, tmp_path, [self._job_row()])
+        self._patch_liveness(monkeypatch, alive=True)
+        calls = self._spy_reset(monkeypatch, return_value=True)
+
+        jobs_utils.ha_recovery_for_consolidation_mode()
+
+        assert not calls
+
+    def test_lost_cas_race_does_not_retry_and_continues(self, monkeypatch,
+                                                        tmp_path):
+        """A lost CAS is not retried, and does not stop the pass."""
+        self._patch_common(monkeypatch, tmp_path,
+                           [self._job_row(job_id=1),
+                            self._job_row(job_id=2)])
+        self._patch_liveness(monkeypatch, alive=False)
+        calls = self._spy_reset(monkeypatch, return_value=False)
+
+        jobs_utils.ha_recovery_for_consolidation_mode()
+
+        assert [job_id for job_id, _ in calls] == [1, 2]
+
+    def test_liveness_check_exception_falls_through_to_reset(
+            self, monkeypatch, tmp_path):
+        """A liveness check that raises is logged and then falls through to
+        the reset, and the pass continues to the next job.
+
+        Falling through is deliberate: the check can raise deterministically
+        for a pid that really is gone (e.g. the pid was recycled by another
+        user's process, so reading its cmdline raises every time), and this
+        pass only runs once per leadership acquisition -- skipping such a job
+        would leave it unrecovered until the next one. Distinguishing
+        indeterminate liveness from confirmed death needs a real verdict from
+        the liveness check, which is future work; until then the
+        compare-and-swap is what keeps a wrongly-reset live job from being
+        stolen, since a controller that is actually alive still owns the row.
+        """
+        raising_row = self._job_row(job_id=1)
+        ok_row = self._job_row(job_id=2)
+        self._patch_common(monkeypatch, tmp_path, [raising_row, ok_row])
+        calls = self._spy_reset(monkeypatch, return_value=True)
+
+        def _check(record, legacy_job_id):
+            del record  # Unused.
+            if legacy_job_id == 1:
+                raise RuntimeError('psutil blew up')
+            return False
+
+        monkeypatch.setattr(jobs_utils, 'controller_process_alive', _check)
+
+        jobs_utils.ha_recovery_for_consolidation_mode()
+
+        # Both jobs are reset, with the ownership values observed for each.
+        expected_kwargs = {
+            'expected_pid': 100,
+            'expected_pid_started_at': 1.0,
+            'expected_schedule_state':
+                managed_job_state.ManagedJobScheduleState.ALIVE,
+        }
+        assert calls == [(1, expected_kwargs), (2, expected_kwargs)]
+
+    def test_dedupe_checks_liveness_once_per_job(self, monkeypatch, tmp_path):
+        """The dedupe happens before the liveness check, so a multi-task job
+        costs one process check, not one per task."""
+        self._patch_common(
+            monkeypatch, tmp_path,
+            [self._job_row(), self._job_row(),
+             self._job_row()])
+        checked = []
+
+        def _check(record, legacy_job_id):
+            del record  # Unused.
+            checked.append(legacy_job_id)
+            return False
+
+        monkeypatch.setattr(jobs_utils, 'controller_process_alive', _check)
+        calls = self._spy_reset(monkeypatch, return_value=True)
+
+        jobs_utils.ha_recovery_for_consolidation_mode()
+
+        assert checked == [1]
+        assert len(calls) == 1
+
+    @pytest.mark.parametrize('schedule_state', [
+        managed_job_state.ManagedJobScheduleState.DONE,
+        managed_job_state.ManagedJobScheduleState.WAITING,
+        managed_job_state.ManagedJobScheduleState.INACTIVE,
+    ])
+    def test_not_eligible_schedule_states_are_not_reset(self, monkeypatch,
+                                                        tmp_path,
+                                                        schedule_state):
+        self._patch_common(monkeypatch, tmp_path, [
+            self._job_row(controller_pid=None,
+                          controller_pid_started_at=None,
+                          schedule_state=schedule_state)
+        ])
+        calls = self._spy_reset(monkeypatch, return_value=True)
+
+        jobs_utils.ha_recovery_for_consolidation_mode()
+
+        assert not calls
