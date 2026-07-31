@@ -444,7 +444,24 @@ def ha_recovery_for_consolidation_mode() -> None:
                     # INACTIVE job may be mid-submission, don't set to WAITING.
                     managed_job_state.ManagedJobScheduleState.INACTIVE,
             ]:
-                managed_job_state.reset_job_for_recovery(job_id)
+                # Compare-and-swap against the values we observed above: if a
+                # controller claimed the job since then, the reset must not
+                # apply, or we would orphan the job again immediately after
+                # the claim and end up with a duplicate controller for it.
+                if not managed_job_state.reset_job_for_recovery(
+                        job_id,
+                        expected_pid=controller_pid,
+                        expected_pid_started_at=controller_pid_started_at,
+                        expected_schedule_state=job['schedule_state']):
+                    # Lost the race to a concurrent claim (or to some other
+                    # actor that changed the job's state). Whoever won owns
+                    # the job now, so don't retry - just move on.
+                    message = (f'Skipping recovery of job {job_id}: its '
+                               'controller ownership or schedule state '
+                               'changed since it was observed.\n')
+                    logger.info(message)
+                    f.write(message)
+                    continue
                 message = (f'Job {job_id} completed recovery at '
                            f'{datetime.now()}\n')
                 logger.info(message)
