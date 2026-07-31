@@ -3263,16 +3263,28 @@ export function GPUs() {
     return allGPUs.filter((gpu) => kubeGpuNames.has(gpu.gpu_name));
   }, [allGPUs, perContextGPUs]);
 
-  // Extract Slurm cluster names from perClusterSlurmGPUs
+  // Extract Slurm cluster names. Union the cluster names from both the
+  // GPU-availability data (perClusterSlurmGPUs) and the per-node data
+  // (perNodeSlurmGPUs). GPU availability only reports clusters that have
+  // GPUs, so a CPU-only cluster would otherwise never appear here and the
+  // Slurm section would render "not configured" even though the cluster is
+  // reachable. Node info lists every node regardless of GPUs, so unioning
+  // it in keeps parity with the Kubernetes section, which always lists a
+  // context whether or not it has GPUs (GPU counts are just extra columns).
   const slurmClusters = React.useMemo(() => {
-    if (!perClusterSlurmGPUs || !Array.isArray(perClusterSlurmGPUs)) {
-      return [];
+    const clusterSet = new Set();
+    if (Array.isArray(perClusterSlurmGPUs)) {
+      perClusterSlurmGPUs.forEach((gpu) => {
+        if (gpu.cluster) clusterSet.add(gpu.cluster);
+      });
     }
-    const clusters = [
-      ...new Set(perClusterSlurmGPUs.map((gpu) => gpu.cluster)),
-    ];
-    return clusters.sort();
-  }, [perClusterSlurmGPUs]);
+    if (Array.isArray(perNodeSlurmGPUs)) {
+      perNodeSlurmGPUs.forEach((node) => {
+        if (node.cluster) clusterSet.add(node.cluster);
+      });
+    }
+    return [...clusterSet].sort();
+  }, [perClusterSlurmGPUs, perNodeSlurmGPUs]);
 
   // Group perClusterSlurmGPUs by cluster
   const groupedPerClusterSlurmGPUs = React.useMemo(() => {
