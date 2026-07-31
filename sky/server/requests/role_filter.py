@@ -31,26 +31,14 @@ from sky.users import rbac
 from sky.utils import common as common_lib
 
 
-def _is_admin(request: fastapi.Request) -> bool:
-    """Return True if the authenticated caller has the admin role.
-
-    Uses the in-memory Casbin enforcer state (no DB roundtrip), matching
-    `_is_viewer` and `PermissionService.check_endpoint_permission`.
-    """
-    auth_user = getattr(request.state, 'auth_user', None)
-    if auth_user is None:
-        return False
-    enforcer = permission.permission_service._ensure_enforcer()  # pylint: disable=protected-access
-    roles = enforcer.get_roles_for_user(auth_user.id)
-    return rbac.RoleName.ADMIN.value in roles
-
-
 def request_owner_scope(request: fastapi.Request) -> Optional[str]:
     """The user_id that request-tracking queries must be scoped to.
 
     Returns ``None`` (meaning "no scope — see every user's requests") when:
-      * no authentication is configured (``auth_user`` is unset), i.e. a
-        single-user/local server where ownership is not enforceable; or
+      * the API server has no per-user identity for the caller
+        (``auth_user`` is unset) — either a single-user/local server, or a
+        deployment where auth is terminated upstream (e.g. basic auth at the
+        ingress) so no RBAC applies; or
       * the caller is an admin.
     Otherwise returns the caller's own user id, so a non-admin only ever
     sees or acts on their own requests.
@@ -62,7 +50,10 @@ def request_owner_scope(request: fastapi.Request) -> Optional[str]:
     auth_user = getattr(request.state, 'auth_user', None)
     if auth_user is None:
         return None
-    if _is_admin(request):
+    # In-memory Casbin lookup (no DB roundtrip), matching `_is_viewer`.
+    enforcer = permission.permission_service._ensure_enforcer()  # pylint: disable=protected-access
+    roles = enforcer.get_roles_for_user(auth_user.id)
+    if rbac.RoleName.ADMIN.value in roles:
         return None
     return auth_user.id
 
