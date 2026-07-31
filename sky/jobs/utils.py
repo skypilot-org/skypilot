@@ -390,8 +390,19 @@ def ha_recovery_for_consolidation_mode() -> None:
             'job_id', 'controller_pid', 'controller_pid_started_at',
             'schedule_state', 'status'
         ])
+        # get_managed_jobs_with_filters returns one row per task, but
+        # multi-task jobs share the same job_id (and the same job_info
+        # columns we read here) -- process each job only once. Otherwise a
+        # multi-task job would be reset once per task, and each reset after
+        # the first can re-orphan the job right after a controller has
+        # claimed it, spawning duplicate controllers for the same job.
+        seen_job_ids: Set[int] = set()
         for job in jobs:
             job_id = job['job_id']
+            if job_id in seen_job_ids:
+                continue
+            seen_job_ids.add(job_id)
+
             controller_pid = job['controller_pid']
             controller_pid_started_at = job.get('controller_pid_started_at')
 
