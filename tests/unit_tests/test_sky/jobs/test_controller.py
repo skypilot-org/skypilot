@@ -1860,3 +1860,100 @@ class TestAddK8sAnnotations:
         controller_module._add_k8s_annotations(task, job_id=1)
 
         assert self._pod_config(task) == after_first
+
+
+class TestJobGroupOnRecoveryNetworking:
+    """on_recovery re-runs networking setup after a task recovers.
+
+    Failures on the recovered task's OWN nodes are fatal
+    (ClusterSetUpError -> FAILED_SETUP): its fresh pod has no DNS
+    updater or readiness marker, so without setup its networking wait
+    would stall and fail minutes later with a generic message.
+    Peer-only failures must NOT fail the task: a healthy peer's running
+    updater short-circuits the re-push, so a failing peer is usually
+    itself mid-recovery (simultaneous preemption) and its own recovery
+    re-runs this setup.
+    """
+
+    async def _captured_on_recovery(self,
+                                    setup_failures,
+                                    inter_connection_enabled=True):
+        """Run _monitor_job_group_task with a fake executor, return the
+        captured on_recovery callback invoked under patches."""
+        controller = MagicMock(spec=JobController)
+        controller._job_id = 1
+        controller._dag = MagicMock()
+        controller._dag.inter_connection_enabled = MagicMock(
+            return_value=inter_connection_enabled)
+        task = MagicMock()
+        task.name = 'job-a'
+        peer = MagicMock()
+        peer.name = 'job-b'
+
+        captured = {}
+
+        async def fake_monitor_task(**kwargs):
+            captured['on_recovery'] = kwargs['on_recovery']
+            return True
+
+        executor = MagicMock()
+        executor.monitor_task = fake_monitor_task
+
+        with patch('sky.jobs.controller.job_group_networking') as net, \
+             patch('sky.jobs.controller.managed_job_utils') as utils, \
+             patch('sky.jobs.controller.global_user_state') as gus:
+            net.setup_job_group_networking = AsyncMock(
+                return_value=setup_failures)
+            utils.generate_managed_job_cluster_name.side_effect = (
+                lambda name, job_id: f'{name}-{job_id}')
+            gus.get_handle_from_cluster_name.return_value = MagicMock()
+
+            result = await JobController._monitor_job_group_task(
+                controller, 0, task, 'cluster-a', executor, 'group',
+                [(task, MagicMock()), (peer, MagicMock())])
+            assert result is True
+            error = None
+            try:
+                await captured['on_recovery']()
+            except Exception as e:  # pylint: disable=broad-except
+                error = e
+            return net, error
+
+    @pytest.mark.asyncio
+    async def test_no_failures_no_error(self):
+        net, error = await self._captured_on_recovery(setup_failures=[])
+        assert error is None
+        net.setup_job_group_networking.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_own_node_failure_raises_cluster_setup_error(self):
+        from sky import exceptions
+        _, error = await self._captured_on_recovery(
+            setup_failures=[('job-a', 'job-a-0', 'K8s DNS updater failed')])
+        assert isinstance(error, exceptions.ClusterSetUpError)
+        assert 'job-a' in str(error)
+        assert 'K8s DNS updater failed' in str(error)
+
+    @pytest.mark.asyncio
+    async def test_peer_only_failure_does_not_raise(self):
+        # Simultaneous preemption: the peer is down awaiting its own
+        # recovery; failing this task for it would turn every
+        # multi-task preemption into a group failure.
+        _, error = await self._captured_on_recovery(
+            setup_failures=[('job-b', 'job-b-0', 'K8s DNS updater failed')])
+        assert error is None
+
+    @pytest.mark.asyncio
+    async def test_mixed_failures_raise(self):
+        from sky import exceptions
+        _, error = await self._captured_on_recovery(
+            setup_failures=[('job-b', 'job-b-0',
+                             'peer down'), ('job-a', 'job-a-1', 'timeout')])
+        assert isinstance(error, exceptions.ClusterSetUpError)
+
+    @pytest.mark.asyncio
+    async def test_disabled_inter_connection_skips_setup(self):
+        net, error = await self._captured_on_recovery(
+            setup_failures=[], inter_connection_enabled=False)
+        assert error is None
+        net.setup_job_group_networking.assert_not_awaited()

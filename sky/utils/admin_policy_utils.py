@@ -159,6 +159,13 @@ def apply(
     if dag.is_job_group():
         assert dag.execution is not None
         mutated_dag.set_execution(dag.execution)
+        # Preserve the rest of the JobGroup header: these live on the Dag,
+        # not on the tasks the policy mutates, so a fresh Dag would
+        # silently drop them (e.g., an explicit `inter_connection: false`
+        # would revert to unset, which behaves as enabled).
+        mutated_dag.inter_connection = dag.inter_connection
+        mutated_dag.primary_tasks = dag.primary_tasks
+        mutated_dag.termination_delay = dag.termination_delay
 
     mutated_config = None
     for task in dag.tasks:

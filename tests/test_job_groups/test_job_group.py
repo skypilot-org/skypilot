@@ -1351,3 +1351,47 @@ class TestPrimaryAuxiliaryDagMethods:
 
 if __name__ == '__main__':
     pytest.main([__file__, '-v'])
+
+
+class TestAdminPolicyPreservesJobGroupHeader:
+    """admin_policy_utils.apply builds a fresh Dag for the mutated
+    request; JobGroup header fields live on the Dag (not the tasks the
+    policy mutates), so they must be copied over explicitly. Without
+    this, an explicit `inter_connection: false` silently reverts to
+    unset -- which behaves as enabled -- once any admin policy is
+    registered (and primary_tasks/termination_delay are dropped too).
+    """
+
+    def test_apply_preserves_job_group_header_fields(self, monkeypatch):
+        from sky import admin_policy
+        from sky import dag as dag_lib
+        from sky import task as task_lib
+        from sky.server.requests import request_names
+        from sky.utils import admin_policy_utils
+
+        dag = dag_lib.Dag()
+        dag.name = 'group'
+        dag.add(task_lib.Task(name='job-a', run='echo hi'))
+        dag.set_execution(dag_lib.DagExecution.PARALLEL)
+        dag.inter_connection = False
+        dag.primary_tasks = ['job-a']
+        dag.termination_delay = '30s'
+
+        class _IdentityPolicy:
+
+            def apply(self, user_request):
+                return admin_policy.MutatedUserRequest(
+                    task=user_request.task,
+                    skypilot_config=user_request.skypilot_config)
+
+        monkeypatch.setattr(admin_policy_utils, '_get_policy_impl',
+                            lambda location: _IdentityPolicy())
+
+        mutated_dag, _ = admin_policy_utils.apply(
+            dag, request_name=request_names.AdminPolicyRequestName.JOBS_LAUNCH)
+
+        assert mutated_dag is not dag
+        assert mutated_dag.is_job_group()
+        assert mutated_dag.inter_connection is False
+        assert mutated_dag.primary_tasks == ['job-a']
+        assert mutated_dag.termination_delay == '30s'
