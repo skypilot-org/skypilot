@@ -499,26 +499,26 @@ def _load_job_group(
     """
     if not configs or len(configs) < 2:
         with ux_utils.print_exception_no_traceback():
-            raise ValueError('JobGroup YAML must have at least 2 documents: '
+            raise ValueError('Job Group YAML must have at least 2 documents: '
                              'header and at least one job definition.')
 
     # Parse header
     header = configs[0]
     if header is None:
         with ux_utils.print_exception_no_traceback():
-            raise ValueError('JobGroup header cannot be empty.')
+            raise ValueError('Job Group header cannot be empty.')
 
     # Validate header has required fields
     missing_fields = _JOB_GROUP_REQUIRED_HEADER_FIELDS - set(header.keys())
     if missing_fields:
         with ux_utils.print_exception_no_traceback():
             raise ValueError(
-                f'JobGroup header missing required fields: {missing_fields}')
+                f'Job Group header missing required fields: {missing_fields}')
 
     # Warn about unknown fields in header
     unknown_fields = set(header.keys()) - _JOB_GROUP_HEADER_FIELDS
     if unknown_fields:
-        logger.warning(f'Unknown fields in JobGroup header: {unknown_fields}. '
+        logger.warning(f'Unknown fields in Job Group header: {unknown_fields}. '
                        'These will be ignored.')
 
     group_name = header['name']
@@ -548,7 +548,7 @@ def _load_job_group(
     job_configs = configs[1:]
     if not job_configs:
         with ux_utils.print_exception_no_traceback():
-            raise ValueError('JobGroup must have at least one job definition.')
+            raise ValueError('Job Group must have at least one job definition.')
 
     # Create DAG using context manager pattern (consistent with _load_chain_dag)
     job_names = set()
@@ -562,7 +562,7 @@ def _load_job_group(
             if job_name is None:
                 with ux_utils.print_exception_no_traceback():
                     raise ValueError(
-                        f'Job {i + 1} in JobGroup must have a "name" field.')
+                        f'Job {i + 1} in Job Group must have a "name" field.')
 
             # Validate job name is safe for shell/filesystem use
             if not all(c.isalnum() or c in '-_' for c in job_name):
@@ -576,7 +576,7 @@ def _load_job_group(
             if job_name in job_names:
                 with ux_utils.print_exception_no_traceback():
                     raise ValueError(
-                        f'Duplicate job name in JobGroup: {job_name}')
+                        f'Duplicate job name in Job Group: {job_name}')
             job_names.add(job_name)
 
             # Create task from job config (auto-added to current dag context)
@@ -657,7 +657,7 @@ def _load_job_group(
                                  f'{inter_connection!r}')
         dag.inter_connection = inter_connection
 
-    logger.info(f'Loaded JobGroup "{group_name}" with {len(dag.tasks)} jobs: '
+    logger.info(f'Loaded Job Group "{group_name}" with {len(dag.tasks)} jobs: '
                 f'{[t.name for t in dag.tasks]}')
 
     return dag

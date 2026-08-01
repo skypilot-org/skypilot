@@ -698,11 +698,11 @@ def launch(
     dag.resolve_and_validate_volumes()
     if not dag.is_chain() and not dag.is_job_group():
         with ux_utils.print_exception_no_traceback():
-            raise ValueError('Only single-task, chain DAG, or JobGroup is '
+            raise ValueError('Only single-task, chain DAG, or Job Group is '
                              f'allowed for job_launch. Dag: {dag}')
     if dag.is_job_group() and pool is not None:
         with ux_utils.print_exception_no_traceback():
-            raise ValueError('JobGroups do not support pools. Please remove '
+            raise ValueError('Job Groups do not support pools. Please remove '
                              'the --pool argument when launching a job group.')
     dag.validate()
     # TODO(aylei): use consolidated job controller instead of performing
@@ -746,13 +746,20 @@ def launch(
                 if task_.best_resources is not None and
                 task_.best_resources.cloud is not None
             }
-            assert len(best_clouds) <= 1, (
-                f'JobGroup {dag.name!r} has in-group networking enabled '
-                f'but was placed on multiple clouds: {sorted(best_clouds)}')
-            assert all(
-                cloud.lower() == 'kubernetes' for cloud in best_clouds), (
-                    f'JobGroup {dag.name!r} has in-group networking '
-                    f'enabled but was placed on {sorted(best_clouds)}')
+            if (len(best_clouds) > 1 or not all(cloud.lower() == 'kubernetes'
+                                                for cloud in best_clouds)):
+                with ux_utils.print_exception_no_traceback():
+                    raise RuntimeError(
+                        f'Internal error: Job Group {dag.name!r} requires '
+                        'in-group networking (inter_connection is enabled), '
+                        'which is only supported on a single Kubernetes '
+                        'cluster, but the optimizer placed it on '
+                        f'{sorted(best_clouds)}. This is likely a SkyPilot '
+                        'bug; please report it at '
+                        'https://github.com/skypilot-org/skypilot/issues. '
+                        'Set \'inter_connection: false\' '
+                        'in the job group header if the jobs do not need '
+                        'to reach each other by hostname.')
 
     # If there is a local postgres db, when the api server tries launching on
     # the remote jobs controller it will fail. therefore, we should remove this
