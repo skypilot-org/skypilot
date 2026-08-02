@@ -1,8 +1,14 @@
 """RunPod library wrapper for SkyPilot."""
 
 import base64
+import os
 import time
 from typing import Any, Dict, List, Optional, Tuple
+
+try:
+    import tomllib
+except ImportError:  # Python 3.10
+    import tomli as tomllib
 
 from sky import sky_logging
 from sky.adaptors import runpod
@@ -12,6 +18,28 @@ from sky.skylet import constants
 from sky.utils import common_utils
 
 logger = sky_logging.init_logger(__name__)
+
+
+def _ensure_api_key_configured() -> None:
+    """Load the default RunPod credential into the SDK when needed."""
+    sdk = runpod.runpod.load_module()
+    if getattr(sdk, 'api_key', None):
+        return
+
+    credential_file = os.path.expanduser('~/.runpod/config.toml')
+    try:
+        with open(credential_file, 'rb') as credential_stream:
+            config = tomllib.load(credential_stream)
+    except FileNotFoundError:
+        return
+    except (OSError, TypeError, ValueError) as error:
+        logger.warning('Failed to load RunPod credentials: %s', error)
+        return
+
+    api_key = config.get('default', {}).get('api_key')
+    if isinstance(api_key, str) and api_key:
+        sdk.api_key = api_key
+
 
 GPU_NAME_MAP = {
     # AMD
@@ -191,6 +219,7 @@ def _list_pod_templates_with_container_registry() -> dict:
 
 def list_instances() -> Dict[str, Dict[str, Any]]:
     """Lists instances associated with API key."""
+    _ensure_api_key_configured()
     instances = _sky_get_pods()
 
     instance_dict: Dict[str, Dict[str, Any]] = {}
