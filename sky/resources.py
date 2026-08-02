@@ -2268,14 +2268,23 @@ class Resources:
         # can act on them.
         filtered_new_configs = config_utils.Config()
         new_configs = config_utils.Config(new_override_configs or {})
+        missing = object()
         for key in constants.OVERRIDEABLE_CONFIG_KEYS_IN_TASK:
-            elem = new_configs.get_nested(key, None)
-            if elem is not None:
+            elem = new_configs.get_nested(key, missing)
+            if elem is not missing:
+                # Explicit null values are kept so they can clear an
+                # existing override below.
                 filtered_new_configs.set_nested(key, elem)
         override_configs = skypilot_config.overlay_skypilot_config(
             original_config=config_utils.Config(current_override_configs),
             override_configs=filtered_new_configs,
         )
+        # A null-valued overrideable key (e.g. `--config gcp.vpc_name=null`)
+        # clears the task-level override so the CLI/global config value takes
+        # effect, instead of the existing task value surviving the overlay.
+        for key in constants.OVERRIDEABLE_CONFIG_KEYS_IN_TASK:
+            if override_configs.get_nested(key, missing) is None:
+                override_configs.pop_nested(key, None)
 
         current_autostop_config = None
         if self.autostop_config is not None:
@@ -2669,8 +2678,22 @@ class Resources:
         resources_fields['_is_image_managed'] = config.pop(
             '_is_image_managed', None)
         resources_fields['_requires_fuse'] = config.pop('_requires_fuse', None)
-        resources_fields['_cluster_config_overrides'] = config.pop(
-            '_cluster_config_overrides', None)
+        cluster_config_overrides = config.pop('_cluster_config_overrides', None)
+        if cluster_config_overrides:
+            # A task's `config` field crosses the client/server boundary as
+            # `resources._cluster_config_overrides`, whose entry in the
+            # resources schema is just `{'type': 'object'}` — so unlike
+            # `job_recovery`, the resources-schema validation above does not
+            # cover its contents. Re-validate against the task-level config
+            # schema here: on the server (plugins loaded) this is the strict,
+            # plugin-aware schema, so keys and value shapes a lenient client
+            # passed through are enforced at deserialization.
+            common_utils.validate_schema(
+                cluster_config_overrides,
+                schemas.get_task_schema()['properties']['config'],
+                'Invalid resources.config override: ')
+        resources_fields['_cluster_config_overrides'] = (
+            cluster_config_overrides)
 
         if resources_fields['cpus'] is not None:
             resources_fields['cpus'] = str(resources_fields['cpus'])

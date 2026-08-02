@@ -14,6 +14,7 @@ from sky import clouds
 from sky import skypilot_config
 from sky.resources import Resources
 from sky.skylet import constants
+from sky.utils import config_utils
 from sky.utils import schemas
 
 _TEST_PROP = 'test_task_overrideable_prop'
@@ -103,6 +104,84 @@ def test_copy_filters_unknown_incoming_overrides():
     overrides = copied.cluster_config_overrides
     assert 'jobs' not in overrides
     assert overrides['docker']['run_options'] == ['-v /tmp:/tmp']
+
+
+def test_copy_null_incoming_override_clears_existing():
+    """`--config <key>=null` clears an existing task-level override.
+
+    The override must not survive the overlay — otherwise the task value
+    would keep masking the CLI/global config null.
+    """
+    resources = Resources(
+        cloud=clouds.Kubernetes(),
+        _cluster_config_overrides={'gcp': {
+            'vpc_name': 'task-vpc'
+        }})
+    copied = resources.copy(
+        _cluster_config_overrides={'gcp': {
+            'vpc_name': None
+        }})
+    missing = object()
+    overrides = config_utils.Config(copied.cluster_config_overrides)
+    assert overrides.get_nested(('gcp', 'vpc_name'), missing) is missing
+
+
+def test_from_yaml_config_revalidates_overrides_when_strict(
+        registered_test_key, monkeypatch):
+    """Server-side, deserialized overrides are re-validated.
+
+    A task's `config` field crosses the client/server boundary as
+    `resources._cluster_config_overrides` (schema: bare object), so
+    `Resources.from_yaml_config` must re-validate the contents against
+    the task config schema — which is strict on the server.
+    """
+    monkeypatch.setattr(schemas, '_allow_additional_properties', lambda: False)
+    # Well-formed value passes.
+    resources = next(
+        iter(
+            Resources.from_yaml_config(
+                {'_cluster_config_overrides': {
+                    'jobs': {
+                        _TEST_PROP: True
+                    }
+                }})))
+    assert resources.cluster_config_overrides['jobs'][_TEST_PROP] is True
+    # Malformed value for a registered boolean is rejected.
+    with pytest.raises(ValueError, match='Invalid resources.config override'):
+        Resources.from_yaml_config({
+            '_cluster_config_overrides': {
+                'jobs': {
+                    _TEST_PROP: {
+                        'wrong': 'shape'
+                    }
+                }
+            }
+        })
+    # Unregistered keys are rejected under strict validation.
+    with pytest.raises(ValueError, match='Invalid resources.config override'):
+        Resources.from_yaml_config({
+            '_cluster_config_overrides': {
+                'jobs': {
+                    'unregistered_prop': True
+                }
+            }
+        })
+
+
+def test_from_yaml_config_passes_unknown_overrides_on_client():
+    """Client-side (lenient), unknown override keys still pass through so
+    the server can validate them."""
+    resources = next(
+        iter(
+            Resources.from_yaml_config({
+                '_cluster_config_overrides': {
+                    'jobs': {
+                        'some_server_side_prop': True
+                    }
+                }
+            })))
+    assert resources.cluster_config_overrides['jobs'][
+        'some_server_side_prop'] is True
 
 
 def test_task_config_schema_lenient_on_client(monkeypatch):
