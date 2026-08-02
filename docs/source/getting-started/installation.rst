@@ -182,6 +182,9 @@ Refer to the :ref:`cloud setup section <cloud-account-setup>` to download the ne
         # From source
         pip install -e ".[kubernetes,aws,gcp]"
 
+        # All currently supported cloud dependencies except Azure
+        pip install -e ".[all-except-azure]"
+
 .. note::
 
   When using SkyPilot locally, run :code:`sky api stop` after each upgrade or dependency installation

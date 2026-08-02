@@ -303,6 +303,8 @@ if sys.version_info >= (3, 12):
     # that require ray.
     clouds_for_all -= set(clouds_with_ray)
 
+# Install every cloud that is available for the running Python version except
+# Azure.  Unlike [all], this includes Vast because Azure CLI is absent.
 clouds_for_all_except_azure = clouds_for_all | {'vast'}
 clouds_for_all_except_azure.remove('azure')
 
@@ -316,10 +318,8 @@ extras_require: Dict[str, List[str]] = {
     **cloud_extras,
     'all': list(set().union(*[cloud_extras[cloud] for cloud in clouds_for_all])
                ),
-    'all-except-azure': list(
-        set().union(*[
-            cloud_extras[cloud] for cloud in clouds_for_all_except_azure
-        ])),
+    'all-except-azure': list(set().union(
+        *[cloud_extras[cloud] for cloud in clouds_for_all_except_azure])),
     'remote': remote,
     'server': server_dependencies,
 }
