@@ -1144,7 +1144,13 @@ def _task_config_schema():
         constants.OVERRIDEABLE_CONFIG_KEYS_IN_TASK)['properties']
     return {
         'type': 'object',
-        'additionalProperties': False,
+        # On the client, let unknown keys pass through so config keys
+        # registered as task-overrideable on the server (via
+        # skypilot_config.register_task_overrideable_config_key) are not
+        # rejected by a client that does not know about them — mirroring
+        # how the global config schema handles plugin-registered
+        # properties. The server enforces the full set.
+        'additionalProperties': _allow_additional_properties(),
         'properties': {
             **overrideable,
             'hooks': _HOOKS_SCHEMA,

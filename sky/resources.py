@@ -2258,15 +2258,24 @@ class Resources:
         if current_override_configs is None:
             current_override_configs = {}
         new_override_configs = override.pop('_cluster_config_overrides', {})
-        overlaid_configs = skypilot_config.overlay_skypilot_config(
-            original_config=config_utils.Config(current_override_configs),
-            override_configs=new_override_configs,
-        )
-        override_configs = config_utils.Config()
+        # Only the incoming overrides are filtered to the overrideable
+        # keys. The existing overrides are kept as-is: they were already
+        # accepted when this Resources was constructed, and on the client
+        # the full set of overrideable keys is not known (the server may
+        # register additional keys via
+        # skypilot_config.register_task_overrideable_config_key), so
+        # re-filtering here would silently drop them before the server
+        # can act on them.
+        filtered_new_configs = config_utils.Config()
+        new_configs = config_utils.Config(new_override_configs or {})
         for key in constants.OVERRIDEABLE_CONFIG_KEYS_IN_TASK:
-            elem = overlaid_configs.get_nested(key, None)
+            elem = new_configs.get_nested(key, None)
             if elem is not None:
-                override_configs.set_nested(key, elem)
+                filtered_new_configs.set_nested(key, elem)
+        override_configs = skypilot_config.overlay_skypilot_config(
+            original_config=config_utils.Config(current_override_configs),
+            override_configs=filtered_new_configs,
+        )
 
         current_autostop_config = None
         if self.autostop_config is not None:
