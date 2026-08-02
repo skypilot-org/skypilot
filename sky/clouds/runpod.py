@@ -410,6 +410,14 @@ class RunPod(clouds.Cloud):
                     f'api_key for {profile} profile.',
                 )
 
+            # The RunPod SDK does not reliably load its credential file in
+            # every API-server subprocess. Set the key on the actual imported
+            # module so provisioning calls use the profile validated here.
+            # pylint: disable=import-outside-toplevel
+            from sky.adaptors import runpod as runpod_adaptor
+            runpod_adaptor.runpod.load_module(
+            ).api_key = config[profile]['api_key']
+
         except (TypeError, ValueError):
             return False, '~/.runpod/config.toml is not a valid TOML file.'
 

@@ -587,6 +587,8 @@ OVERRIDEABLE_CONFIG_KEYS_IN_TASK: List[Tuple[str, ...]] = [
     ('vast', 'reliable_hosts'),
     ('vast', 'provision_timeout'),
     ('vast', 'create_instance_kwargs'),
+    ('vast', 'remote_identity'),
+    ('runpod', 'remote_identity'),
     ('slurm', 'sbatch_options'),
     ('slurm', 'cpu_partition'),
     ('active_workspace',),

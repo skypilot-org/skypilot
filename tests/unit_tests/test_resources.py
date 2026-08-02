@@ -985,6 +985,25 @@ def test_set_pod_resource_limits_task_config_override(value):
     assert read == value
 
 
+@pytest.mark.parametrize('provider', ['vast', 'runpod'])
+def test_provider_no_upload_override_survives_copy(provider: str) -> None:
+    overrides = {provider: {'remote_identity': 'NO_UPLOAD'}}
+    resources = Resources(infra=provider,
+                          accelerators='L40S',
+                          _cluster_config_overrides=overrides)
+
+    copied_resources = resources.copy()
+
+    assert copied_resources.cluster_config_overrides == overrides
+    remote_identity = skypilot_config.get_effective_workspace_region_config(
+        cloud=provider,
+        region=None,
+        keys=('remote_identity',),
+        default_value=None,
+        override_configs=copied_resources.cluster_config_overrides)
+    assert remote_identity == 'NO_UPLOAD'
+
+
 def test_network_tier_repr():
     """Test that network tier appears in the string representation."""
     r = Resources(network_tier='best')
