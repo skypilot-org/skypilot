@@ -3,6 +3,7 @@ import os
 import pathlib
 import shutil
 import subprocess
+import tempfile
 import threading
 import time
 
@@ -30,11 +31,13 @@ _LAG_THRESHOLD_SECONDS = 0.25
 # keep that pool busy without turning the benchmark into a DB throughput test.
 _FLOOD_QPS = 100.0
 _STARVATION_FLOOD_QPS = 50.0
-# Concurrent long-lived responses to hold open. These occupy the default
-# thread executor that log streaming reads through (aiofiles) and the
-# connections behind them; they do NOT hold the dedicated auth executor, which
-# the token middleware uses for three finite DB calls per request and releases
-# before the response body streams.
+# Concurrent `sky jobs logs -f` streams to hold open. Each one borrows a
+# worker from the request thread executor for the life of the stream
+# (jobs/server/server.py calls check_request_thread_executor_available before
+# running the tail in a coroutine), so this is real pressure on the pool the
+# flood's requests also need -- exhaustion of it is what returns 503. It does
+# not touch the separate auth executor, which the token middleware uses for
+# three finite DB calls and releases before any body streams.
 _HELD_STREAMS = 32
 
 # Generous by design: this bounds "the server still answers" under held-open
@@ -169,6 +172,51 @@ def _mint_service_account_token(api_url: str) -> str:
     return token
 
 
+def _launch_log_producer(generic_cloud: str) -> str:
+    """Start a job that keeps printing, so there is a real log to tail.
+
+    The held streams are `sky jobs logs -f` against this job. Tailing a real
+    job is the request a user actually makes; the server's own log is served
+    by a special-cased path that never touches the request executor.
+    """
+    job_name = f'loop-lag-log-{int(time.time())}'
+    with tempfile.NamedTemporaryFile('w', suffix='.yaml',
+                                     delete=False) as task_file:
+        task_file.write(
+            'run: |\n'
+            '  while true; do echo "loop-lag benchmark $(date +%s)"; '
+            'sleep 1; done\n')
+        task_path = task_file.name
+    try:
+        subprocess.run([
+            'sky', 'jobs', 'launch', '-n', job_name, '--infra', generic_cloud,
+            '--cpus', '2+', '--memory', '4+', task_path, '-y', '-d'
+        ],
+                       check=True)
+        # The tail has nothing to follow until the job is actually running,
+        # and a stream that opens against a pending job ends immediately --
+        # which the harness would (correctly) call an invalid trial.
+        deadline = time.time() + 900
+        while time.time() < deadline:
+            status = subprocess.run(
+                ['sky', 'jobs', 'queue'],
+                check=False,
+                capture_output=True,
+                text=True,
+            ).stdout
+            if any(job_name in line and 'RUNNING' in line
+                   for line in status.splitlines()):
+                # Give the job a moment to write something to tail.
+                time.sleep(5)
+                return job_name
+            time.sleep(10)
+        raise RuntimeError(
+            f'job {job_name} did not reach RUNNING in 15 minutes; last '
+            f'queue output:\n{status}')
+    finally:
+        os.unlink(task_path)
+
+
 def _publish(result: loop_lag_harness.RunResult, name: str) -> pathlib.Path:
     """Write the run artifact and hand it to Buildkite when running under it."""
     # TODO(kevin): move to a pipeline-level artifact_paths declaration if that
@@ -212,17 +260,17 @@ def _valid_trials(result: loop_lag_harness.RunResult) -> list:
 
 @pytest.mark.benchmark
 @pytest.mark.remote_server
-def test_api_server_event_loop_lag():
+def test_api_server_event_loop_lag(generic_cloud: str):
     """Assert the server's event loop stays responsive under authenticated load.
 
     Two scenarios, both authenticated with a service-account token so every
     request goes through the token middleware's DB lookups:
 
     1. A steady flood, which surfaces any blocking call left on the loop.
-    2. The same flood with long-lived streaming responses held open, which
-       puts the default thread executor (log streaming reads through
-       aiofiles) and the server's connection handling under pressure while
-       authenticated requests keep arriving.
+    2. The same flood while N `sky jobs logs -f` streams are held open
+       against a real running job, so the request thread executor is under
+       the pressure a user's log tails actually create while authenticated
+       requests keep arriving.
     """
     if not smoke_tests_utils.is_docker_remote_api_server():
         pytest.skip('Skipping test in shared remote api server environment as '
@@ -279,28 +327,37 @@ def test_api_server_event_loop_lag():
             f'{trial["lag_max_peak_seconds"]:.3f}s reached '
             f'{_LAG_THRESHOLD_SECONDS}s')
 
-    starvation = loop_lag_harness.HarnessConfig(
-        name='held-stream-pressure',
-        base_url=api_url,
-        metrics_url=metrics_url,
-        requests=[loop_lag_harness.RequestSpec(path='/api/health')],
-        target_qps=_STARVATION_FLOOD_QPS,
-        lag_threshold_seconds=_LAG_THRESHOLD_SECONDS,
-        streams=loop_lag_harness.StreamSpec(
-            path='/api/stream',
-            count=_HELD_STREAMS,
-            # Following the server's own log keeps each response open for the
-            # whole run without needing a cluster or a job to tail.
-            params={
-                'log_path': '~/.sky/api_server/server.log',
-                'follow': 'true',
-                'tail': '10',
-                'format': 'plain',
-            }),
-    )
-    starvation_result = loop_lag_harness.run(starvation, auth)
-    _publish(starvation_result, 'held-stream-pressure')
-    _require_valid(starvation_result, 'held-stream-pressure')
+    job_name = _launch_log_producer(generic_cloud)
+    try:
+        starvation = loop_lag_harness.HarnessConfig(
+            name='executor-starvation',
+            base_url=api_url,
+            metrics_url=metrics_url,
+            requests=[loop_lag_harness.RequestSpec(path='/api/health')],
+            target_qps=_STARVATION_FLOOD_QPS,
+            lag_threshold_seconds=_LAG_THRESHOLD_SECONDS,
+            streams=loop_lag_harness.StreamSpec(
+                path='/jobs/logs',
+                count=_HELD_STREAMS,
+                method='POST',
+                # What `sky jobs logs -f` sends. Unlike a server-log tail,
+                # this takes the real request path: the handler borrows a
+                # worker from the request thread executor and holds it for
+                # the life of the stream, which is the pool the auth lookups
+                # on the flood requests compete for.
+                json_body={
+                    'name': job_name,
+                    'follow': True,
+                    'tail': 10,
+                }),
+        )
+        starvation_result = loop_lag_harness.run(starvation, auth)
+    finally:
+        subprocess.run(['sky', 'jobs', 'cancel', '-n', job_name, '-y'],
+                       check=False,
+                       capture_output=True)
+    _publish(starvation_result, 'executor-starvation')
+    _require_valid(starvation_result, 'executor-starvation')
 
     assert starvation_result.streams_opened == _HELD_STREAMS, (
         f'only {starvation_result.streams_opened}/{_HELD_STREAMS} streams '

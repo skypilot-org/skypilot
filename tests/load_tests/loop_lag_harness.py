@@ -132,6 +132,7 @@ class StreamSpec:
     count: int
     method: str = 'GET'
     params: Optional[Dict[str, str]] = None
+    json_body: Optional[Dict[str, Any]] = None
 
 
 @dataclasses.dataclass
@@ -604,7 +605,10 @@ async def _held_streams(auth: Auth,
         for _ in range(spec.count):
             try:
                 response = await stack.enter_async_context(
-                    client.stream(spec.method, url, params=spec.params))
+                    client.stream(spec.method,
+                                  url,
+                                  params=spec.params,
+                                  json=spec.json_body))
                 if not 200 <= response.status_code < 300:
                     held.failed += 1
                     continue
