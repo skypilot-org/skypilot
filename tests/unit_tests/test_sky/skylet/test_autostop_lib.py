@@ -1,10 +1,127 @@
 """Unit tests for skylet autostop_lib."""
+import pickle
 from unittest import mock
 
 import psutil
 import pytest
 
 from sky.skylet import autostop_lib
+from sky.skylet import configs
+from sky.skylet import runtime_utils
+
+
+@pytest.fixture
+def isolated_autostop_storage(tmp_path, monkeypatch):
+    database_dir = tmp_path / 'skylet-config'
+    database_dir.mkdir()
+    monkeypatch.setattr(configs, '_DB_PATH', None)
+    monkeypatch.setattr(
+        runtime_utils, 'get_runtime_dir_path',
+        lambda relative_path: str(database_dir / relative_path.lstrip('/')))
+    monkeypatch.setattr(autostop_lib,
+                        '_AUTOSTOP_CONFIG_LOCK_PATH',
+                        str(tmp_path / 'autostop-config.lock'),
+                        raising=False)
+
+
+def _set_durable_autodown(*, cluster_hash='cluster-hash', generation=7):
+    autostop_lib.set_autostop(
+        idle_minutes=10,
+        backend='cloud-vm-ray',
+        wait_for=autostop_lib.AutostopWaitFor.JOBS_AND_SSH,
+        down=True,
+        cluster_hash=cluster_hash,
+        generation=generation,
+        execution_strategy=(
+            autostop_lib.AutodownExecutionStrategy.HEAD_WITH_SERVER_FALLBACK),
+    )
+
+
+@pytest.mark.usefixtures('isolated_autostop_storage')
+def test_old_autostop_pickle_defaults_to_legacy_execution():
+    legacy_config = autostop_lib.AutostopConfig(
+        autostop_idle_minutes=10,
+        boot_time=123,
+        backend='cloud-vm-ray',
+        wait_for=autostop_lib.AutostopWaitFor.JOBS_AND_SSH,
+        down=True,
+    )
+    for field in ('cluster_hash', 'generation', 'execution_strategy',
+                  'durable_execution_state', 'error_summary'):
+        legacy_config.__dict__.pop(field, None)
+
+    restored = pickle.loads(pickle.dumps(legacy_config))
+
+    assert restored.cluster_hash is None
+    assert restored.generation is None
+    assert (restored.execution_strategy ==
+            autostop_lib.AutodownExecutionStrategy.LEGACY_HEAD_CREDENTIALS)
+    assert (restored.durable_execution_state ==
+            autostop_lib.DurableAutodownState.ARMED)
+    assert restored.error_summary is None
+
+
+@pytest.mark.usefixtures('isolated_autostop_storage')
+def test_durable_state_transitions_are_generation_and_hash_fenced():
+    _set_durable_autodown()
+
+    assert not autostop_lib.mark_head_teardown_started('stale-hash', 7)
+    assert not autostop_lib.mark_head_teardown_started('cluster-hash', 6)
+    armed = autostop_lib.get_autostop_config()
+    assert (armed.durable_execution_state ==
+            autostop_lib.DurableAutodownState.ARMED)
+
+    assert autostop_lib.mark_head_teardown_started('cluster-hash', 7)
+    started = autostop_lib.get_autostop_config()
+    assert (started.durable_execution_state ==
+            autostop_lib.DurableAutodownState.HEAD_TEARDOWN_STARTED)
+
+    assert autostop_lib.mark_server_teardown_required('cluster-hash', 7,
+                                                      'bounded failure')
+    fallback = autostop_lib.get_autostop_config()
+    assert (fallback.durable_execution_state ==
+            autostop_lib.DurableAutodownState.SERVER_TEARDOWN_REQUIRED)
+    assert fallback.error_summary == 'bounded failure'
+
+
+@pytest.mark.usefixtures('isolated_autostop_storage')
+def test_new_setting_and_cancellation_reset_durable_execution_result():
+    _set_durable_autodown()
+    assert autostop_lib.mark_server_teardown_required('cluster-hash', 7,
+                                                      'failed')
+
+    _set_durable_autodown(cluster_hash='replacement-hash', generation=8)
+    replacement = autostop_lib.get_autostop_config()
+    assert (replacement.durable_execution_state ==
+            autostop_lib.DurableAutodownState.ARMED)
+    assert replacement.error_summary is None
+
+    autostop_lib.set_autostop(
+        idle_minutes=-1,
+        backend=None,
+        wait_for=autostop_lib.AutostopWaitFor.JOBS_AND_SSH,
+        down=True,
+        cluster_hash='replacement-hash',
+        generation=9,
+        execution_strategy=(autostop_lib.AutodownExecutionStrategy.SERVER_ONLY),
+    )
+    cancelled = autostop_lib.get_autostop_config()
+    assert (cancelled.durable_execution_state ==
+            autostop_lib.DurableAutodownState.UNSPECIFIED)
+    assert cancelled.error_summary is None
+
+
+@pytest.mark.usefixtures('isolated_autostop_storage')
+def test_durable_error_summary_is_bounded():
+    _set_durable_autodown()
+
+    assert autostop_lib.mark_server_teardown_required(
+        'cluster-hash', 7,
+        'x' * (autostop_lib.MAX_DURABLE_ERROR_SUMMARY_LENGTH + 100))
+
+    summary = autostop_lib.get_autostop_config().error_summary
+    assert summary is not None
+    assert len(summary) == autostop_lib.MAX_DURABLE_ERROR_SUMMARY_LENGTH
 
 
 def _fake_proc(pid, terminal=None):
