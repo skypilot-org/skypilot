@@ -327,8 +327,6 @@ def _is_managed_secret_reference(value: Any) -> bool:
 def _redact_sensitive_value(value: Any) -> Any:
     if value is None or _is_managed_secret_reference(value):
         return copy.deepcopy(value)
-    if isinstance(value, (dict, list, tuple)):
-        return _redact_task_yaml_value(value)
     return _REDACTED_VALUE
 
 

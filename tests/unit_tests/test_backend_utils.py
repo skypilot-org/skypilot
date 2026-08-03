@@ -103,6 +103,100 @@ def test_persist_redacted_debug_yaml_is_private_and_removes_raw(tmp_path):
     assert 'secrets:workspace.REFERENCED_SECRET' in debug_yaml
 
 
+def test_persist_redacted_debug_yaml_removes_stale_artifact_on_failure(
+        monkeypatch, tmp_path):
+    raw_yaml_path = tmp_path / 'cluster.yml.tmp'
+    debug_yaml_path = tmp_path / 'cluster.yml.debug'
+    raw_yaml_path.write_text('raw-secret', encoding='utf-8')
+    debug_yaml_path.write_text('stale-raw-secret', encoding='utf-8')
+    monkeypatch.setattr(backend_utils.debug_dump_helpers, 'redact_task_yaml',
+                        mock.Mock(side_effect=ValueError('redaction failed')))
+
+    with pytest.raises(ValueError, match='redaction failed'):
+        backend_utils._persist_redacted_debug_yaml(str(raw_yaml_path),
+                                                   str(debug_yaml_path))
+
+    assert not raw_yaml_path.exists()
+    assert not debug_yaml_path.exists()
+
+
+def test_persist_redacted_debug_yaml_keeps_completed_redacted_artifact(
+        monkeypatch, tmp_path):
+    raw_yaml_path = tmp_path / 'cluster.yml.tmp'
+    debug_yaml_path = tmp_path / 'cluster.yml.debug'
+    raw_yaml_path.write_text('password: raw-secret', encoding='utf-8')
+    original_remove = backend_utils.os.remove
+
+    def fail_removing_raw_yaml(path):
+        if path == str(raw_yaml_path):
+            raise PermissionError('cannot remove raw YAML')
+        original_remove(path)
+
+    monkeypatch.setattr(backend_utils.os, 'remove', fail_removing_raw_yaml)
+
+    with pytest.raises(PermissionError, match='cannot remove raw YAML'):
+        backend_utils._persist_redacted_debug_yaml(str(raw_yaml_path),
+                                                   str(debug_yaml_path))
+
+    assert debug_yaml_path.exists()
+    assert 'raw-secret' not in debug_yaml_path.read_text(encoding='utf-8')
+
+
+def test_write_cluster_config_removes_stale_debug_yaml_when_debug_disabled(
+        monkeypatch, tmp_path):
+    cloud = clouds.AWS()
+    resource = Resources(cloud=cloud, instance_type='fake-type')
+    monkeypatch.setattr(
+        resource, 'make_deploy_variables', lambda *args, **kwargs: {
+            'instance_type': 'fake-type',
+            'custom_resources': '{}',
+            'region': 'fake-region',
+            'zones': 'fake-zone',
+            'image_id': 'fake-image',
+            'security_group': 'fake-security-group',
+            'security_group_managed_by_skypilot': 'true',
+        })
+    monkeypatch.setattr(backend_utils.auth_utils, 'get_or_generate_keys',
+                        lambda: ('/tmp/fake-key', '/tmp/fake-key.pub'))
+    yaml_path = tmp_path / 'cluster.yml'
+    debug_yaml_path = pathlib.Path(str(yaml_path) + '.debug')
+    debug_yaml_path.write_text('raw-secret', encoding='utf-8')
+    monkeypatch.setattr(backend_utils, '_get_yaml_path_from_cluster_name',
+                        lambda _: str(yaml_path))
+    monkeypatch.setattr(backend_utils, '_add_auth_to_cluster_config',
+                        lambda *args: None)
+    monkeypatch.setattr(backend_utils, '_deterministic_cluster_yaml_hash',
+                        lambda _: 'fake-hash')
+    monkeypatch.setattr(backend_utils, '_optimize_file_mounts',
+                        lambda _: None)
+    monkeypatch.setattr(common_utils, 'fill_template',
+                        _write_minimal_cluster_yaml)
+    monkeypatch.setattr(sky_check, 'get_cloud_credential_file_mounts',
+                        lambda **kwargs: {})
+    monkeypatch.setattr(backend_utils.global_user_state,
+                        'get_cluster_yaml_str', lambda _: None)
+    monkeypatch.setattr(backend_utils.global_user_state, 'set_cluster_yaml',
+                        lambda *args: None)
+    monkeypatch.setattr(backend_utils.usage_lib.messages.usage,
+                        'update_ray_yaml', lambda _: None)
+    monkeypatch.setattr(backend_utils.sky_logging, 'logging_enabled',
+                        lambda *args: False)
+
+    backend_utils.write_cluster_config(
+        to_provision=resource,
+        num_nodes=1,
+        cluster_config_template='aws-ray.yml.j2',
+        cluster_name='legacy-debug-cleanup',
+        local_wheel_path=pathlib.Path('/tmp/fake'),
+        wheel_hash='fake-hash',
+        region=clouds.Region(name='fake-region'),
+        zones=[clouds.Zone(name='fake-zone')],
+        dryrun=False)
+
+    assert not pathlib.Path(str(yaml_path) + '.tmp').exists()
+    assert not debug_yaml_path.exists()
+
+
 def test_runpod_no_upload_s3_file_mount_includes_only_aws_credentials(
         monkeypatch):
     credential_clouds = _mock_credential_file_mounts(monkeypatch)
