@@ -626,12 +626,14 @@ def get_autodown_intent(cluster_name: str) -> Optional[AutodownIntent]:
 @metrics_lib.time_me
 def list_due_autodown_intents(
         now: Optional[int] = None,
-        limit: Optional[int] = None) -> List[AutodownIntent]:
+        limit: Optional[int] = None,
+        start_after: Optional[Tuple[int, str]] = None) -> List[AutodownIntent]:
     """List due reconciliation work in retry time then cluster-name order.
 
     PREPARING, READY, and EXECUTING rows are immediately due. RETRY_WAIT rows
     become due at ``next_retry_at``. Configuration, armed, and terminal rows
-    are intentionally excluded.
+    are intentionally excluded. ``start_after`` rotates the same ordering and
+    wraps at the end without changing the default query semantics.
     """
     if now is None:
         now = int(time.time())
@@ -640,7 +642,9 @@ def list_due_autodown_intents(
     ]
     engine = _db_manager.get_engine()
     with orm.Session(engine) as session:
-        query = session.query(autodown_intent_table).filter(
+        retry_order = sqlalchemy.func.coalesce(
+            autodown_intent_table.c.next_retry_at, 0)
+        base_query = session.query(autodown_intent_table).filter(
             sqlalchemy.or_(
                 autodown_intent_table.c.state.in_(immediate_state_values),
                 sqlalchemy.and_(
@@ -649,14 +653,82 @@ def list_due_autodown_intents(
                     autodown_intent_table.c.next_retry_at.is_not(None),
                     autodown_intent_table.c.next_retry_at <= now,
                 ),
-            ),).order_by(
-                sqlalchemy.func.coalesce(autodown_intent_table.c.next_retry_at,
-                                         0),
-                autodown_intent_table.c.cluster_name,
-            )
-        if limit is not None:
-            query = query.limit(limit)
-        rows = query.all()
+            ),)
+
+        def ordered(query: Any) -> Any:
+            return query.order_by(retry_order,
+                                  autodown_intent_table.c.cluster_name)
+
+        if start_after is None:
+            query = ordered(base_query)
+            if limit is not None:
+                query = query.limit(limit)
+            rows = query.all()
+        else:
+            cursor_retry_at, cursor_name = start_after
+            after_cursor = ordered(
+                base_query.filter(
+                    sqlalchemy.or_(
+                        retry_order > cursor_retry_at,
+                        sqlalchemy.and_(
+                            retry_order == cursor_retry_at,
+                            autodown_intent_table.c.cluster_name > cursor_name),
+                    )))
+            if limit is not None:
+                after_cursor = after_cursor.limit(limit)
+            rows = after_cursor.all()
+            if limit is None or len(rows) < limit:
+                before_cursor = ordered(
+                    base_query.filter(
+                        sqlalchemy.or_(
+                            retry_order < cursor_retry_at,
+                            sqlalchemy.and_(
+                                retry_order == cursor_retry_at,
+                                autodown_intent_table.c.cluster_name <=
+                                cursor_name),
+                        )))
+                if limit is not None:
+                    before_cursor = before_cursor.limit(limit - len(rows))
+                rows.extend(before_cursor.all())
+    return [_autodown_intent_from_row(row) for row in rows]
+
+
+@metrics_lib.time_me
+def list_polling_autodown_intents(
+        limit: Optional[int] = None,
+        start_after: Optional[str] = None) -> List[AutodownIntent]:
+    """List polling intents in name order, optionally rotating with wrap."""
+    polling_state_values = [
+        AutodownIntentState.CONFIGURING.value,
+        AutodownIntentState.ARMED.value,
+    ]
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
+        base_query = session.query(autodown_intent_table).filter(
+            autodown_intent_table.c.state.in_(polling_state_values),)
+
+        def ordered(query: Any) -> Any:
+            return query.order_by(autodown_intent_table.c.cluster_name)
+
+        if start_after is None:
+            query = ordered(base_query)
+            if limit is not None:
+                query = query.limit(limit)
+            rows = query.all()
+        else:
+            after_cursor = ordered(
+                base_query.filter(
+                    autodown_intent_table.c.cluster_name > start_after))
+            if limit is not None:
+                after_cursor = after_cursor.limit(limit)
+            rows = after_cursor.all()
+            if limit is None or len(rows) < limit:
+                before_cursor = ordered(
+                    base_query.filter(
+                        autodown_intent_table.c.cluster_name <= start_after))
+                if limit is not None:
+                    before_cursor = before_cursor.limit(limit - len(rows))
+                rows.extend(before_cursor.all())
     return [_autodown_intent_from_row(row) for row in rows]
 
 

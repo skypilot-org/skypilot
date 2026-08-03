@@ -383,6 +383,49 @@ def test_due_actionable_intents_are_filtered_and_deterministic(
         'charlie',
         'beta',
     ]
+    wrapped = global_user_state.list_due_autodown_intents(
+        now=250, limit=2, start_after=(0, 'charlie'))
+    assert [intent.cluster_name for intent in wrapped] == ['beta', 'alpha']
+
+
+def test_polling_intents_are_bounded_filtered_and_deterministic(
+        tmp_path, monkeypatch):
+    _fresh_db(tmp_path, monkeypatch)
+    charlie = _create_intent('charlie', 'hash-charlie')
+    alpha = _create_intent('alpha', 'hash-alpha')
+    beta = _create_intent('beta', 'hash-beta')
+    ready = _create_intent('ready', 'hash-ready')
+    terminal = _create_intent('terminal', 'hash-terminal')
+
+    assert _transition(
+        beta,
+        {global_user_state.AutodownIntentState.CONFIGURING},
+        global_user_state.AutodownIntentState.ARMED,
+    )
+    assert _transition(
+        ready,
+        {global_user_state.AutodownIntentState.CONFIGURING},
+        global_user_state.AutodownIntentState.READY,
+    )
+    assert _transition(
+        terminal,
+        {global_user_state.AutodownIntentState.CONFIGURING},
+        global_user_state.AutodownIntentState.CANCELLED,
+    )
+
+    polling = global_user_state.list_polling_autodown_intents(limit=2)
+
+    assert [intent.cluster_name for intent in polling] == ['alpha', 'beta']
+    assert [intent.state for intent in polling] == [
+        global_user_state.AutodownIntentState.CONFIGURING,
+        global_user_state.AutodownIntentState.ARMED,
+    ]
+    assert charlie.cluster_name not in {
+        intent.cluster_name for intent in polling
+    }
+    wrapped = global_user_state.list_polling_autodown_intents(
+        limit=2, start_after='beta')
+    assert [intent.cluster_name for intent in wrapped] == ['charlie', 'alpha']
 
 
 def test_retry_wait_without_deadline_is_not_due(tmp_path, monkeypatch):
