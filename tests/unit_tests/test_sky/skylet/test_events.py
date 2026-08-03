@@ -147,6 +147,29 @@ def test_server_only_prepares_head_without_partial_provider_teardown(
 
 
 @pytest.mark.usefixtures('isolated_autostop_storage')
+def test_server_only_preparation_failure_records_sanitized_error(monkeypatch):
+    config = _store_config(autostop_lib.AutodownExecutionStrategy.SERVER_ONLY)
+    (stop_event, _, subprocess_run, terminate_instances, stop_instances,
+     terminate_current_pod) = _configure_event(monkeypatch,
+                                               provider_name='aws',
+                                               uses_ray=True)
+    subprocess_run.side_effect = RuntimeError(
+        'AWS_SECRET_ACCESS_KEY=secret; provider response')
+
+    stop_event._stop_cluster(config)
+
+    terminate_instances.assert_not_called()
+    stop_instances.assert_not_called()
+    terminate_current_pod.assert_not_called()
+    stored = autostop_lib.get_autostop_config()
+    assert (stored.durable_execution_state ==
+            autostop_lib.DurableAutodownState.SERVER_TEARDOWN_REQUIRED)
+    assert stored.error_summary == (
+        'Head-side teardown preparation failed; server teardown required.')
+    assert 'secret' not in stored.error_summary
+
+
+@pytest.mark.usefixtures('isolated_autostop_storage')
 def test_server_only_avoids_legacy_ray_provider_teardown(monkeypatch):
     config = _store_config(autostop_lib.AutodownExecutionStrategy.SERVER_ONLY)
     (stop_event, execute_hook, subprocess_run, terminate_instances,

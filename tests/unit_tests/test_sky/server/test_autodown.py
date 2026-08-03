@@ -708,6 +708,41 @@ def test_polling_cursor_wraps_without_starving_stable_armed_intents(
     assert backend.status_calls == ['alpha', 'beta', 'gamma', 'alpha']
 
 
+def test_actionable_teardown_runs_before_slow_head_polling(
+        reconciler, monkeypatch):
+    engine, backend, _ = reconciler
+    ready = _create_intent(engine,
+                           'ready',
+                           'hash-ready',
+                           state=global_user_state.AutodownIntentState.READY)
+    armed = _create_intent(engine,
+                           'armed',
+                           'hash-armed',
+                           state=global_user_state.AutodownIntentState.ARMED)
+    backend.status_results[armed.cluster_name] = _status(
+        armed, autostopv1_pb2.DURABLE_AUTODOWN_STATE_ARMED)
+    call_order = []
+    original_status = backend.get_durable_autodown_status
+
+    def status(handle):
+        call_order.append('poll')
+        return original_status(handle)
+
+    def teardown(handle):
+        call_order.append('teardown')
+        _delete_cluster(engine, handle.cluster_name)
+
+    monkeypatch.setattr(backend, 'get_durable_autodown_status', status)
+    backend.teardown_effect = teardown
+
+    autodown.reconcile_autodown_intents(now=100)
+
+    assert call_order == ['teardown', 'poll']
+    current = global_user_state.get_autodown_intent(ready.cluster_name)
+    assert current is not None
+    assert current.state is global_user_state.AutodownIntentState.SUCCEEDED
+
+
 @pytest.mark.parametrize('target_state', [
     global_user_state.AutodownIntentState.READY,
     global_user_state.AutodownIntentState.EXECUTING,

@@ -465,16 +465,19 @@ class StopEvent(SkyletEvent):
                 autostop_config.down and execution_strategy == autostop_lib.
                 AutodownExecutionStrategy.HEAD_WITH_SERVER_FALLBACK)
             if server_only:
+                preparation_error = None
                 try:
                     logger.info('Stopping the ray cluster.')
                     subprocess.run(f'{constants.SKY_RAY_CMD} stop',
                                    shell=True,
                                    check=True)
                 except Exception:  # pylint: disable=broad-except
+                    preparation_error = _HEAD_PREPARATION_ERROR
                     logger.warning('Head preparation failed; server teardown '
                                    'still requested.')
                 assert durable_identity is not None
-                autostop_lib.mark_server_teardown_required(*durable_identity)
+                autostop_lib.mark_server_teardown_required(
+                    *durable_identity, preparation_error)
                 return
 
             if head_with_server_fallback:

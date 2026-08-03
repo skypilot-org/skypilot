@@ -339,16 +339,16 @@ def reconcile_autodown_intents(now: Optional[int] = None,
         [intent.cluster_name for intent in polling_intents],
         include_user_info=False,
     )
+    for intent in due_intents:
+        try:
+            _reconcile_actionable_intent(intent, backend, now)
+        except Exception:  # pylint: disable=broad-except
+            logger.info('Durable autodown action deferred for cluster %r.',
+                        intent.cluster_name)
     for intent in polling_intents:
         try:
             _poll_intent(intent, polling_records.get(intent.cluster_name),
                          backend)
         except Exception:  # pylint: disable=broad-except
             logger.info('Durable autodown polling deferred for cluster %r.',
-                        intent.cluster_name)
-    for intent in due_intents:
-        try:
-            _reconcile_actionable_intent(intent, backend, now)
-        except Exception:  # pylint: disable=broad-except
-            logger.info('Durable autodown action deferred for cluster %r.',
                         intent.cluster_name)

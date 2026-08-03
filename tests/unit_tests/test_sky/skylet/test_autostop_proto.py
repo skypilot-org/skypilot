@@ -6,7 +6,7 @@ from sky.skylet import constants
 
 def test_skylet_versions_reload_durable_autodown_runtime():
     assert constants.SKYLET_LIB_VERSION >= 8
-    assert int(constants.SKYLET_VERSION) >= 40
+    assert int(constants.SKYLET_VERSION) >= 41
 
 
 def test_set_autostop_request_preserves_fields_and_adds_durable_presence():

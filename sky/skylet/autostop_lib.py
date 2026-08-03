@@ -270,6 +270,8 @@ def _get_autostop_config_unlocked() -> AutostopConfig:
         config.hook = None
     if not hasattr(config, 'hook_timeout'):
         config.hook_timeout = constants.DEFAULT_HOOK_TIMEOUT_SECONDS
+    if _is_strict_config(config) and config.durable_hooks is None:
+        config.durable_hooks = get_hooks()
     return config
 
 
@@ -747,10 +749,11 @@ class AutostopCodeGen:
                      hooks: Optional[List[Dict[str, Any]]] = None) -> str:
         """Render skylet-side autostop + hooks setup as a Python one-liner.
 
-        Dual-emits for mixed-version environments:
+        Emits version-specific calls for mixed-version environments:
           - skylet < 4 / 5: legacy signatures (no hook / waitless)
           - skylet 5–6: single-hook form via `hook` / `hook_timeout`
-          - skylet ≥ 7: set_autostop + set_hooks(full list)
+          - skylet 7: set_autostop + set_hooks(full list)
+          - skylet ≥ 8: one atomic set_autostop call with inline hooks
         """
         if wait_for is None:
             wait_for = DEFAULT_AUTOSTOP_WAIT_FOR
@@ -766,7 +769,7 @@ class AutostopCodeGen:
                     flat_hook = entry['run']
                     flat_timeout = entry.get('timeout')
                     break
-        # v7+ branch: forward ``hook`` / ``hook_timeout`` so the
+        # v7 branch: forward ``hook`` / ``hook_timeout`` so the
         # skylet's set_autostop routing bridges a pre-v7 client's
         # legacy hook arg into the new hooks list (see
         # autostop_lib.set_autostop ~line 200). Only emit
@@ -777,10 +780,8 @@ class AutostopCodeGen:
         # as `TestBackwardCompatibility::
         # test_client_server_compatibility_new_server` timing out
         # waiting for AUTOSTOPPING.
-        if hooks is None:
-            set_hooks_line = ''
-        else:
-            set_hooks_line = f'\n autostop_lib.set_hooks({hooks!r})'
+        set_hooks_line = ('' if hooks is None else
+                          f'\n autostop_lib.set_hooks({hooks!r})')
         code = [
             '\nskylet_lib_version = getattr(constants, "SKYLET_LIB_VERSION", 1)'
             '\nif skylet_lib_version < 4: '
@@ -793,11 +794,16 @@ class AutostopCodeGen:
             f'\n autostop_lib.set_autostop({idle_minutes}, {backend!r}, '
             f'autostop_lib.{wait_for}, {down}, hook={flat_hook!r}, '
             f'hook_timeout={flat_timeout})'
-            '\nelse: '
+            '\nelif skylet_lib_version < 8: '
             f'\n autostop_lib.set_autostop({idle_minutes}, {backend!r}, '
             f'autostop_lib.{wait_for}, {down}, hook={hook!r}, '
             f'hook_timeout={hook_timeout})'
-            f'{set_hooks_line}',
+            f'{set_hooks_line}'
+            '\nelse: '
+            f'\n autostop_lib.set_autostop({idle_minutes}, {backend!r}, '
+            f'autostop_lib.{wait_for}, {down}, hook={hook!r}, '
+            f'hook_timeout={hook_timeout}, hooks={hooks!r}, '
+            f'clear_hooks={hooks == []})',
         ]
         return cls._build(code)
 

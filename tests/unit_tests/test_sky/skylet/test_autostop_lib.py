@@ -277,6 +277,45 @@ def test_exact_strict_autostop_replay_keeps_timer_state_and_legacy_hook():
 
 
 @pytest.mark.usefixtures('isolated_autostop_storage')
+def test_parent_persisted_strict_config_replays_with_stored_hooks():
+    hooks = [{
+        'run': 'echo durable hook',
+        'events': ['down'],
+        'timeout': 60,
+    }]
+    autostop_lib.set_autostop(
+        idle_minutes=10,
+        backend='cloud-vm-ray',
+        wait_for=autostop_lib.AutostopWaitFor.JOBS_AND_SSH,
+        down=True,
+        hooks=hooks,
+        cluster_hash='cluster-hash',
+        generation=7,
+        execution_strategy=(
+            autostop_lib.AutodownExecutionStrategy.HEAD_WITH_SERVER_FALLBACK),
+    )
+    parent_config = autostop_lib.get_autostop_config()
+    parent_config.durable_hooks = None
+    configs.set_config(autostop_lib._AUTOSTOP_CONFIG_KEY,
+                       pickle.dumps(parent_config))
+
+    result = autostop_lib.set_autostop(
+        idle_minutes=10,
+        backend='cloud-vm-ray',
+        wait_for=autostop_lib.AutostopWaitFor.JOBS_AND_SSH,
+        down=True,
+        hooks=hooks,
+        cluster_hash='cluster-hash',
+        generation=7,
+        execution_strategy=(
+            autostop_lib.AutodownExecutionStrategy.HEAD_WITH_SERVER_FALLBACK),
+    )
+
+    assert result == autostop_lib.AutostopConfigUpdateResult.REPLAYED
+    assert autostop_lib.get_hooks() == hooks
+
+
+@pytest.mark.usefixtures('isolated_autostop_storage')
 def test_legacy_autostop_cannot_overwrite_strict_config():
     _set_durable_autodown()
 
