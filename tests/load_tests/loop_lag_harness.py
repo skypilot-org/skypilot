@@ -862,42 +862,61 @@ def _format_bound(bound: float) -> str:
     return f'<={bound:g}s'
 
 
-def format_latency_chart(histogram: Mapping[str, int],
-                         title: str = 'Client-observed latency',
-                         width: int = 44,
-                         threshold: Optional[float] = None) -> str:
-    """Draw the latency distribution as an ASCII bar chart.
+def decumulate(cumulative: Mapping[str, float]) -> Dict[str, float]:
+    """Per-bucket counts from a cumulative (prometheus) histogram.
+
+    The server's lag histogram counts observations *at or below* each bound,
+    which is the wrong shape to draw: every bar would include the ones before
+    it and the picture would only ever climb.
+    """
+    per_bucket: Dict[str, float] = {}
+    previous = 0.0
+    for bound in sorted(cumulative, key=float):
+        count = cumulative[bound]
+        per_bucket[bound] = max(0.0, count - previous)
+        previous = count
+    return per_bucket
+
+
+def format_histogram_chart(histogram: Mapping[str, float],
+                           title: str,
+                           unit: str = 'requests',
+                           width: int = 44,
+                           threshold: Optional[float] = None) -> str:
+    """Draw a bucketed distribution as an ASCII bar chart.
 
     A second mode is obvious in a picture and easy to miss in a column of
     numbers, and this renders anywhere a log does -- no artifact download and
-    no image viewer.
+    no image viewer. Bucket bounds come from the histogram's own keys, so the
+    client-side latency buckets and the server's lag buckets both draw.
 
-    Bars are log-scaled: the interesting mode carries ~1% of the requests
-    while the healthy one carries ~99%, so on a linear scale the thing worth
-    looking at is a single character wide. Counts and percentages are printed
+    Bars are log-scaled: the interesting mode carries ~1% of the samples while
+    the healthy one carries ~99%, so on a linear scale the thing worth looking
+    at is a single character wide. Counts and percentages are printed
     alongside, since a log bar cannot be read quantitatively.
     """
     total = sum(histogram.values())
     if not total:
         return ''
+    bounds = sorted((float(bound) for bound in histogram), key=float)
     largest = max(histogram.values())
     scale = math.log10(largest + 1) if largest else 0.0
     threshold = (SLOW_REQUEST_THRESHOLD_SECONDS
                  if threshold is None else threshold)
+    # An empty bucket past the tail is noise; an empty one inside it is
+    # information (a gap between modes), so keep zeros up to the last bucket
+    # that has anything.
+    filled = max(
+        (i for i, bound in enumerate(bounds) if histogram.get(str(bound), 0)),
+        default=0)
 
-    lines = [f'{title} ({total} requests, log-scaled bars):']
-    slow = 0
-    for bound in LATENCY_HISTOGRAM_BOUNDS:
+    lines = [f'{title} ({total:g} {unit}, log-scaled bars):']
+    over = 0.0
+    for index, bound in enumerate(bounds):
         count = histogram.get(str(bound), 0)
         if bound > threshold:
-            slow += count
-        # An empty bucket past the tail is noise; an empty one inside it is
-        # information (a gap between modes), so keep zeros up to the last
-        # bucket that has anything.
-        filled = max((i for i, b in enumerate(LATENCY_HISTOGRAM_BOUNDS)
-                      if histogram.get(str(b), 0)),
-                     default=0)
-        if LATENCY_HISTOGRAM_BOUNDS.index(bound) > filled:
+            over += count
+        if index > filled:
             break
         bar_len = (int(round(math.log10(count + 1) / scale *
                              width)) if scale and count else 0)
@@ -908,10 +927,49 @@ def format_latency_chart(histogram: Mapping[str, int],
             bar = '.'
         marker = ' <' if bound == threshold else '  '
         lines.append(f'  {_format_bound(bound):>9}{marker} {bar:<{width}} '
-                     f'{count:>7} {count / total * 100:6.2f}%')
-    lines.append(f'  {"":>9}   slower than {threshold * 1000:g}ms: '
-                 f'{slow} ({slow / total * 100:.2f}%)')
+                     f'{count:>7g} {count / total * 100:6.2f}%')
+    lines.append(f'  {"":>9}   over {threshold * 1000:g}ms: '
+                 f'{over:g} ({over / total * 100:.2f}%)')
     return '\n'.join(lines)
+
+
+def pooled_lag_buckets(artifact: Mapping[str, Any]) -> Dict[str, float]:
+    """Per-bucket event loop lag observations over a run's valid trials.
+
+    The server reports lag cumulatively, so the summed deltas are de-cumulated
+    here; the result is how many loop ticks landed in each lateness band --
+    the server-side view of the same stalls the client sees as slow requests.
+    """
+    pooled: Dict[str, float] = {}
+    for trial in artifact.get('trials', []):
+        if trial.get('status') != Status.OK.value:
+            continue
+        for bound, count in (trial.get('lag_bucket_deltas') or {}).items():
+            pooled[bound] = pooled.get(bound, 0.0) + count
+    return decumulate(pooled)
+
+
+def format_run_charts(artifact: Mapping[str, Any],
+                      prefix: str = '') -> List[str]:
+    """Both views of one run: what the client saw, and what the loop did.
+
+    The two answer different questions -- client latency is what a user feels,
+    loop lag is the server-side cause -- and a slow mode that appears in one
+    and not the other is itself the finding.
+    """
+    config = artifact.get('config', {})
+    name = artifact.get('name', 'run')
+    return [
+        format_histogram_chart(
+            pooled_histogram(artifact),
+            title=f'{prefix}Client-observed latency for {name}',
+            threshold=config.get('slow_request_threshold_seconds')),
+        format_histogram_chart(
+            pooled_lag_buckets(artifact),
+            title=f'{prefix}Server event loop lag for {name}',
+            unit='loop ticks',
+            threshold=config.get('lag_threshold_seconds')),
+    ]
 
 
 def format_histograms(baseline: Mapping[str, Any],
@@ -1004,11 +1062,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         artifact = _load_artifact(args.artifact)
         print(f'{artifact.get("name")} ({artifact.get("created_at")}), '
               f'status={artifact.get("status")}')
-        chart = format_latency_chart(
-            pooled_histogram(artifact),
-            threshold=artifact.get('config',
-                                   {}).get('slow_request_threshold_seconds'))
-        print(chart if chart else 'No latency samples in this artifact.')
+        charts = [chart for chart in format_run_charts(artifact) if chart]
+        print('\n\n'.join(charts) if charts else 'No samples in this artifact.')
         return 0
 
     baseline = _load_artifact(args.baseline)
@@ -1038,14 +1093,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     if histograms:
         print(histograms)
     for name, artifact in (('baseline', baseline), ('candidate', candidate)):
-        chart = format_latency_chart(
-            pooled_histogram(artifact),
-            title=f'{name}: {artifact.get("name")}',
-            threshold=artifact.get('config',
-                                   {}).get('slow_request_threshold_seconds'))
-        if chart:
-            print()
-            print(chart)
+        for chart in format_run_charts(artifact, prefix=f'{name}: '):
+            if chart:
+                print()
+                print(chart)
     return 0
 
 

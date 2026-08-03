@@ -182,11 +182,9 @@ def _publish(result: loop_lag_harness.RunResult, name: str) -> pathlib.Path:
     # Draw the distribution into the build log: the shape (one mode or two,
     # and how heavy the slow one is) is the part a reader wants, and this way
     # it is on screen without downloading the artifact.
-    chart = loop_lag_harness.format_latency_chart(
-        loop_lag_harness.pooled_histogram(result.to_dict()),
-        title=f'Client-observed latency for {name}')
-    if chart:
-        print(chart)
+    for chart in loop_lag_harness.format_run_charts(result.to_dict()):
+        if chart:
+            print(chart)
     return path
 
 

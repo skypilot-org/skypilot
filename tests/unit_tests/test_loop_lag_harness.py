@@ -274,7 +274,7 @@ def test_latency_chart_makes_a_rare_mode_visible():
     99% mode on a linear scale -- i.e. invisible in the one view whose whole
     job is to show it.
     """
-    chart = harness.format_latency_chart({'0.01': 9900, '0.5': 100})
+    chart = harness.format_histogram_chart({'0.01': 9900, '0.5': 100}, 'x')
     lines = {
         line.split()[0]: line
         for line in chart.splitlines()
@@ -288,19 +288,28 @@ def test_latency_chart_makes_a_rare_mode_visible():
 
 
 def test_latency_chart_never_renders_a_used_bucket_as_blank():
-    chart = harness.format_latency_chart({'0.01': 100000, '1.0': 1})
+    chart = harness.format_histogram_chart({'0.01': 100000, '1.0': 1}, 'x')
     tail = [line for line in chart.splitlines() if '<=1s' in line][0]
     assert '#' in tail or '.' in tail
 
 
 def test_latency_chart_reports_the_slow_rate_and_marks_the_threshold():
-    chart = harness.format_latency_chart({'0.01': 90, '0.5': 10}, threshold=0.1)
-    assert 'slower than 100ms: 10 (10.00%)' in chart
-    assert '<' in [line for line in chart.splitlines() if '<=100ms' in line][0]
+    chart = harness.format_histogram_chart({
+        '0.01': 90,
+        '0.1': 0,
+        '0.5': 10
+    },
+                                           'x',
+                                           threshold=0.1)
+    assert 'over 100ms: 10 (10.00%)' in chart
+    # The threshold bucket is marked so a reader can see where the count is
+    # taken from.
+    marked = [line for line in chart.splitlines() if '<=100ms' in line][0]
+    assert '<' in marked
 
 
 def test_latency_chart_is_empty_without_samples():
-    assert harness.format_latency_chart({}) == ''
+    assert harness.format_histogram_chart({}, 'x') == ''
 
 
 def test_show_cli_draws_the_distribution(tmp_path, capsys):
@@ -317,7 +326,87 @@ def test_show_cli_draws_the_distribution(tmp_path, capsys):
     assert harness.main(['show', str(path)]) == 0
     out = capsys.readouterr().out
     assert 'Client-observed latency' in out
-    assert 'slower than' in out
+    assert 'over 100ms' in out
+
+
+def test_decumulate_turns_cumulative_buckets_into_per_bucket_counts():
+    # The server's histogram counts observations at or below each bound.
+    cumulative = {'0.005': 100, '0.05': 108, '0.25': 110, 'inf': 110}
+    assert harness.decumulate(cumulative) == {
+        '0.005': 100,
+        '0.05': 8,
+        '0.25': 2,
+        'inf': 0,
+    }
+
+
+def test_decumulate_clamps_a_counter_that_went_backwards():
+    # A worker restarting mid-run resets its counters; a negative bucket must
+    # not subtract from the observations the other workers recorded.
+    assert harness.decumulate({'0.005': 10, '0.05': 4})['0.05'] == 0
+
+
+def test_pooled_lag_buckets_sums_trials_then_decumulates():
+    artifact = {
+        'trials': [
+            {
+                'status': 'ok',
+                'lag_bucket_deltas': {
+                    '0.005': 10,
+                    '0.25': 12,
+                    'inf': 12
+                }
+            },
+            {
+                'status': 'ok',
+                'lag_bucket_deltas': {
+                    '0.005': 20,
+                    '0.25': 21,
+                    'inf': 21
+                }
+            },
+            {
+                'status': 'invalid',
+                'lag_bucket_deltas': {
+                    '0.005': 999,
+                    'inf': 999
+                }
+            },
+        ]
+    }
+    pooled = harness.pooled_lag_buckets(artifact)
+    assert pooled['0.005'] == 30
+    assert pooled['0.25'] == 3
+    assert pooled['inf'] == 0
+
+
+def test_run_charts_cover_both_the_client_and_the_loop():
+    artifact = {
+        'name': 'run',
+        'config': {
+            'slow_request_threshold_seconds': 0.1,
+            'lag_threshold_seconds': 0.25,
+        },
+        'trials': [{
+            'status': 'ok',
+            'latency_histogram': {
+                '0.01': 90,
+                '0.5': 10
+            },
+            'lag_bucket_deltas': {
+                '0.005': 100,
+                '0.5': 105,
+                'inf': 105
+            },
+        }],
+    }
+    latency, lag = harness.format_run_charts(artifact)
+    assert 'Client-observed latency' in latency and 'requests' in latency
+    assert 'Server event loop lag' in lag and 'loop ticks' in lag
+    # The lag chart must show per-bucket counts, not the cumulative ones: the
+    # 0.5 bucket holds 105-100=5 ticks, not 105.
+    tail = [line for line in lag.splitlines() if '<=500ms' in line][0]
+    assert tail.split()[-2] == '5'
 
 
 def test_format_histograms_shows_both_distributions():
