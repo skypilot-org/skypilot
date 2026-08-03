@@ -24,6 +24,8 @@ import time
 import typing
 from typing import Any, Dict, List, Optional
 
+import filelock
+
 from sky import sky_logging
 from sky.adaptors import common as adaptors_common
 from sky.skylet import configs
@@ -46,6 +48,8 @@ logger = sky_logging.init_logger(__name__)
 
 _AUTOSTOP_CONFIG_KEY = 'autostop_config'
 _HOOKS_CONFIG_KEY = 'lifecycle_hooks'
+_AUTOSTOP_CONFIG_LOCK_PATH = '~/.sky/locks/.autostop_config.lock'
+MAX_DURABLE_ERROR_SUMMARY_LENGTH = 256
 
 # This key-value is stored inside the 'configs' sqlite3 database, because both
 # user-issued commands (this module) and the Skylet process running the
@@ -134,17 +138,80 @@ This option works in conjunction with ``--{pair}``. Options:
 DEFAULT_AUTOSTOP_WAIT_FOR: AutostopWaitFor = AutostopWaitFor.JOBS_AND_SSH
 
 
-class AutostopConfig:
-    """Autostop configuration."""
+class AutodownExecutionStrategy(enum.Enum):
+    """Where an autodown teardown is allowed to execute."""
 
-    def __init__(self,
-                 autostop_idle_minutes: int,
-                 boot_time: float,
-                 backend: Optional[str],
-                 wait_for: AutostopWaitFor,
-                 down: bool = False,
-                 hook: Optional[str] = None,
-                 hook_timeout: Optional[int] = None):
+    SERVER_ONLY = 'server_only'
+    HEAD_WITH_SERVER_FALLBACK = 'head_with_server_fallback'
+    LEGACY_HEAD_CREDENTIALS = 'legacy_head_credentials'
+
+    @classmethod
+    def from_protobuf(
+        cls, protobuf_value: 'autostopv1_pb2.AutodownExecutionStrategy'
+    ) -> 'AutodownExecutionStrategy':
+        head_with_fallback = (
+            autostopv1_pb2.AUTODOWN_EXECUTION_STRATEGY_HEAD_WITH_SERVER_FALLBACK
+        )
+        protobuf_to_enum = {
+            autostopv1_pb2.AUTODOWN_EXECUTION_STRATEGY_SERVER_ONLY:
+                cls.SERVER_ONLY,
+            head_with_fallback: cls.HEAD_WITH_SERVER_FALLBACK,
+            autostopv1_pb2.AUTODOWN_EXECUTION_STRATEGY_LEGACY_HEAD_CREDENTIALS:
+                cls.LEGACY_HEAD_CREDENTIALS,
+        }
+        if protobuf_value not in protobuf_to_enum:
+            raise ValueError('Unknown autodown execution strategy.')
+        return protobuf_to_enum[protobuf_value]
+
+
+DEFAULT_AUTODOWN_EXECUTION_STRATEGY = (
+    AutodownExecutionStrategy.LEGACY_HEAD_CREDENTIALS)
+
+
+class DurableAutodownState(enum.Enum):
+    """Durable execution progress visible to the server reconciler."""
+
+    UNSPECIFIED = 'unspecified'
+    ARMED = 'armed'
+    HEAD_TEARDOWN_STARTED = 'head_teardown_started'
+    SERVER_TEARDOWN_REQUIRED = 'server_teardown_required'
+
+    def to_protobuf(self) -> 'autostopv1_pb2.DurableAutodownState':
+        enum_to_protobuf = {
+            DurableAutodownState.UNSPECIFIED:
+                autostopv1_pb2.DURABLE_AUTODOWN_STATE_UNSPECIFIED,
+            DurableAutodownState.ARMED:
+                autostopv1_pb2.DURABLE_AUTODOWN_STATE_ARMED,
+            DurableAutodownState.HEAD_TEARDOWN_STARTED:
+                autostopv1_pb2.DURABLE_AUTODOWN_STATE_HEAD_TEARDOWN_STARTED,
+            DurableAutodownState.SERVER_TEARDOWN_REQUIRED:
+                autostopv1_pb2.DURABLE_AUTODOWN_STATE_SERVER_TEARDOWN_REQUIRED,
+        }
+        return enum_to_protobuf[self]
+
+
+class AutostopConfig:
+    """Autostop configuration persisted by the skylet.
+
+    Active autodown settings start in ``ARMED``. Strict execution may advance
+    once to ``HEAD_TEARDOWN_STARTED`` and then, on failure, to
+    ``SERVER_TEARDOWN_REQUIRED``. Storing any new setting replaces that state;
+    cancellation and non-down autostop use ``UNSPECIFIED``.
+    """
+
+    def __init__(
+        self,
+        autostop_idle_minutes: int,
+        boot_time: float,
+        backend: Optional[str],
+        wait_for: AutostopWaitFor,
+        down: bool = False,
+        hook: Optional[str] = None,
+        hook_timeout: Optional[int] = None,
+        cluster_hash: Optional[str] = None,
+        generation: Optional[int] = None,
+        execution_strategy:
+        AutodownExecutionStrategy = DEFAULT_AUTODOWN_EXECUTION_STRATEGY):
         assert autostop_idle_minutes < 0 or backend is not None, (
             autostop_idle_minutes, backend)
         self.autostop_idle_minutes = autostop_idle_minutes
@@ -157,15 +224,33 @@ class AutostopConfig:
         if hook_timeout is None:
             hook_timeout = constants.DEFAULT_HOOK_TIMEOUT_SECONDS
         self.hook_timeout = hook_timeout
+        self.cluster_hash = cluster_hash
+        self.generation = generation
+        self.execution_strategy = execution_strategy
+        if down and autostop_idle_minutes >= 0:
+            self.durable_execution_state = DurableAutodownState.ARMED
+        else:
+            self.durable_execution_state = DurableAutodownState.UNSPECIFIED
+        self.error_summary: Optional[str] = None
 
     def __setstate__(self, state: dict):
         state.setdefault('down', False)
         state.setdefault('hook', None)
         state.setdefault('hook_timeout', constants.DEFAULT_HOOK_TIMEOUT_SECONDS)
+        state.setdefault('cluster_hash', None)
+        state.setdefault('generation', None)
+        state.setdefault('execution_strategy',
+                         DEFAULT_AUTODOWN_EXECUTION_STRATEGY)
+        default_durable_state = DurableAutodownState.UNSPECIFIED
+        if state.get('down',
+                     False) and state.get('autostop_idle_minutes', -1) >= 0:
+            default_durable_state = DurableAutodownState.ARMED
+        state.setdefault('durable_execution_state', default_durable_state)
+        state.setdefault('error_summary', None)
         self.__dict__.update(state)
 
 
-def get_autostop_config() -> AutostopConfig:
+def _get_autostop_config_unlocked() -> AutostopConfig:
     config_str = configs.get_config(_AUTOSTOP_CONFIG_KEY)
     if config_str is None:
         return AutostopConfig(-1, -1, None, DEFAULT_AUTOSTOP_WAIT_FOR)
@@ -178,12 +263,29 @@ def get_autostop_config() -> AutostopConfig:
     return config
 
 
-def set_autostop(idle_minutes: int,
-                 backend: Optional[str],
-                 wait_for: AutostopWaitFor,
-                 down: bool,
-                 hook: Optional[str] = None,
-                 hook_timeout: Optional[int] = None) -> None:
+def _get_autostop_config_lock() -> filelock.FileLock:
+    lock_path = os.path.expanduser(_AUTOSTOP_CONFIG_LOCK_PATH)
+    os.makedirs(os.path.dirname(lock_path), exist_ok=True)
+    return filelock.FileLock(lock_path)
+
+
+def get_autostop_config() -> AutostopConfig:
+    with _get_autostop_config_lock():
+        return _get_autostop_config_unlocked()
+
+
+def set_autostop(
+    idle_minutes: int,
+    backend: Optional[str],
+    wait_for: AutostopWaitFor,
+    down: bool,
+    hook: Optional[str] = None,
+    hook_timeout: Optional[int] = None,
+    cluster_hash: Optional[str] = None,
+    generation: Optional[int] = None,
+    execution_strategy:
+    AutodownExecutionStrategy = DEFAULT_AUTODOWN_EXECUTION_STRATEGY
+) -> None:
     """Set autostop configuration.
 
     Args:
@@ -196,12 +298,17 @@ def set_autostop(idle_minutes: int,
             clients talking to a v7+ skylet still get their autostop
             hook routed into the generalized hooks list.
         hook_timeout: DEPRECATED timeout for the single hook.
+        cluster_hash: Durable identity for the cluster incarnation.
+        generation: Durable setting generation allocated by the server.
+        execution_strategy: Where autodown teardown is allowed to execute.
     """
     boot_time = psutil.boot_time()
 
     autostop_config = AutostopConfig(idle_minutes, boot_time, backend, wait_for,
-                                     down, hook, hook_timeout)
-    configs.set_config(_AUTOSTOP_CONFIG_KEY, pickle.dumps(autostop_config))
+                                     down, hook, hook_timeout, cluster_hash,
+                                     generation, execution_strategy)
+    with _get_autostop_config_lock():
+        configs.set_config(_AUTOSTOP_CONFIG_KEY, pickle.dumps(autostop_config))
 
     # A pre-v7 client routes its hook via `hook` / `hook_timeout`;
     # translate it into the generalized hooks list so hook_executor
@@ -223,10 +330,74 @@ def set_autostop(idle_minutes: int,
     logger.debug(
         f'set_autostop(): idle_minutes {idle_minutes}, down {down}, '
         f'wait_for {wait_for.value}, hook {"present" if hook else "none"}, '
-        f'hook_timeout {hook_timeout}s.')
+        f'hook_timeout {hook_timeout}s, execution_strategy '
+        f'{execution_strategy.value}.')
     # Reset timer whenever an autostop setting is submitted, i.e. the idle
     # time will be counted from now.
     set_last_active_time_to_now()
+
+
+def _matches_current_durable_config(config: AutostopConfig, cluster_hash: str,
+                                    generation: int) -> bool:
+    return (config.autostop_idle_minutes >= 0 and config.down and
+            config.cluster_hash == cluster_hash and
+            config.generation == generation)
+
+
+def _normalize_and_bound_error_summary(
+        error_summary: Optional[str]) -> Optional[str]:
+    """Bound a caller-provided generic summary for wire transport.
+
+    Callers must not pass raw exceptions or provider responses. This helper
+    normalizes whitespace and enforces the storage limit; it cannot identify
+    arbitrary credentials embedded in input text.
+    """
+    if error_summary is None:
+        return None
+    normalized = ' '.join(error_summary.split())
+    return normalized[:MAX_DURABLE_ERROR_SUMMARY_LENGTH]
+
+
+def mark_head_teardown_started(cluster_hash: str, generation: int) -> bool:
+    """Atomically start head teardown for the matching armed setting.
+
+    Returns false without changing storage when the identity is stale or the
+    current setting already left ``ARMED``.
+    """
+    with _get_autostop_config_lock():
+        config = _get_autostop_config_unlocked()
+        if (not _matches_current_durable_config(config, cluster_hash,
+                                                generation) or
+                config.durable_execution_state != DurableAutodownState.ARMED):
+            return False
+        config.durable_execution_state = (
+            DurableAutodownState.HEAD_TEARDOWN_STARTED)
+        config.error_summary = None
+        configs.set_config(_AUTOSTOP_CONFIG_KEY, pickle.dumps(config))
+        return True
+
+
+def mark_server_teardown_required(cluster_hash: str,
+                                  generation: int,
+                                  error_summary: Optional[str] = None) -> bool:
+    """Atomically request server teardown for the matching current setting.
+
+    ``ARMED`` server-only settings and failed ``HEAD_TEARDOWN_STARTED``
+    settings may transition. Returns false for stale identities or an already
+    completed transition.
+    """
+    with _get_autostop_config_lock():
+        config = _get_autostop_config_unlocked()
+        if (not _matches_current_durable_config(config, cluster_hash,
+                                                generation) or
+                config.durable_execution_state
+                == DurableAutodownState.SERVER_TEARDOWN_REQUIRED):
+            return False
+        config.durable_execution_state = (
+            DurableAutodownState.SERVER_TEARDOWN_REQUIRED)
+        config.error_summary = _normalize_and_bound_error_summary(error_summary)
+        configs.set_config(_AUTOSTOP_CONFIG_KEY, pickle.dumps(config))
+        return True
 
 
 def set_autostopping_started() -> None:

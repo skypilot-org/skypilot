@@ -5,12 +5,13 @@ import re
 import subprocess
 import time
 import traceback
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 import psutil
 
 from sky import clouds
 from sky import sky_logging
+from sky.adaptors import runpod as runpod_adaptor
 from sky.backends import cloud_vm_ray_backend
 from sky.jobs import constants as managed_job_constants
 from sky.jobs import scheduler
@@ -31,6 +32,24 @@ from sky.utils import yaml_utils
 # Seconds of sleep between the processing of skylet events.
 EVENT_CHECKING_INTERVAL_SECONDS = 20
 logger = sky_logging.init_logger(__name__)
+
+_RUNPOD_HEAD_TEARDOWN_ERROR = (
+    'RunPod head teardown failed; server teardown required.')
+_PROVIDER_HEAD_TEARDOWN_ERROR = (
+    'Head-side provider teardown failed; server teardown required.')
+
+
+def _get_durable_autodown_identity(
+        autostop_config: autostop_lib.AutostopConfig
+) -> Optional[Tuple[str, int]]:
+    """Return the fencing identity required by strict execution strategies."""
+    cluster_hash = autostop_config.cluster_hash
+    generation = autostop_config.generation
+    if cluster_hash is None or generation is None:
+        logger.warning('Durable autodown setting has no identity; skipping '
+                       'provider teardown.')
+        return None
+    return cluster_hash, generation
 
 
 class SkyletEvent:
@@ -404,53 +423,111 @@ class StopEvent(SkyletEvent):
             env.pop('AWS_ACCESS_KEY_ID', None)
             env.pop('AWS_SECRET_ACCESS_KEY', None)
 
+            execution_strategy = autostop_config.execution_strategy
+            server_only = (
+                autostop_config.down and execution_strategy
+                == autostop_lib.AutodownExecutionStrategy.SERVER_ONLY)
+            head_with_server_fallback = (
+                autostop_config.down and execution_strategy == autostop_lib.
+                AutodownExecutionStrategy.HEAD_WITH_SERVER_FALLBACK)
+            durable_identity = None
+            if server_only or head_with_server_fallback:
+                durable_identity = _get_durable_autodown_identity(
+                    autostop_config)
+                if durable_identity is None:
+                    return
+
+            if server_only:
+                try:
+                    logger.info('Stopping the ray cluster.')
+                    subprocess.run(f'{constants.SKY_RAY_CMD} stop',
+                                   shell=True,
+                                   check=True)
+                except Exception:  # pylint: disable=broad-except
+                    logger.warning('Head preparation failed; server teardown '
+                                   'still requested.')
+                assert durable_identity is not None
+                autostop_lib.mark_server_teardown_required(*durable_identity)
+                return
+
+            if head_with_server_fallback:
+                assert durable_identity is not None
+                if not autostop_lib.mark_head_teardown_started(
+                        *durable_identity):
+                    logger.info('Durable autodown setting is stale or '
+                                'complete; skipping provider teardown.')
+                    return
+                if provider_name == 'runpod':
+                    try:
+                        logger.info('Stopping the ray cluster.')
+                        subprocess.run(f'{constants.SKY_RAY_CMD} stop',
+                                       shell=True,
+                                       check=True)
+                        runpod_adaptor.terminate_current_pod()
+                    except Exception:  # pylint: disable=broad-except
+                        autostop_lib.mark_server_teardown_required(
+                            *durable_identity, _RUNPOD_HEAD_TEARDOWN_ERROR)
+                        logger.warning('RunPod head teardown failed; server '
+                                       'teardown requested.')
+                    return
+
             # We do "initial ray up + ray down --workers-only" only for
             # multinode clusters as they are not needed for single-node.
-            if is_cluster_multinode:
-                # `ray up` is required to reset the upscaling speed and min/max
-                # workers. Otherwise, `ray down --workers-only` will
-                # continuously scale down and up.
-                logger.info('Running ray up.')
-                script = (cloud_vm_ray_backend.
-                          write_ray_up_script_with_patched_launch_hash_fn(
-                              config_path,
-                              ray_up_kwargs={'restart_only': True}))
-                # Passing env inherited from os.environ is technically not
-                # needed, because we call `python <script>` rather than `ray
-                # <cmd>`. We just need the {RAY_USAGE_STATS_ENABLED: 0} part.
-                subprocess.run(f'{constants.SKY_PYTHON_CMD} {script}',
-                               check=True,
-                               shell=True,
-                               env=env)
+            try:
+                if is_cluster_multinode:
+                    # `ray up` is required to reset the upscaling speed and
+                    # min/max workers. Otherwise, `ray down --workers-only`
+                    # will continuously scale down and up.
+                    logger.info('Running ray up.')
+                    script = (cloud_vm_ray_backend.
+                              write_ray_up_script_with_patched_launch_hash_fn(
+                                  config_path,
+                                  ray_up_kwargs={'restart_only': True}))
+                    # Passing env inherited from os.environ is technically not
+                    # needed, because we call `python <script>` rather than
+                    # `ray <cmd>`. We just need RAY_USAGE_STATS_ENABLED=0.
+                    subprocess.run(f'{constants.SKY_PYTHON_CMD} {script}',
+                                   check=True,
+                                   shell=True,
+                                   env=env)
 
-                logger.info('Running ray down.')
-                # Stop the workers first to avoid orphan workers.
+                    logger.info('Running ray down.')
+                    # Stop the workers first to avoid orphan workers.
+                    subprocess.run(
+                        f'{constants.SKY_RAY_CMD} down -y --workers-only '
+                        f'{config_path}',
+                        check=True,
+                        shell=True,
+                        # We pass env inherited from os.environ due to calling
+                        # `ray <cmd>`.
+                        env=env)
+
+                # Stop the ray autoscaler to avoid scaling up, during
+                # stopping/terminating of the cluster. We do not rely `ray
+                # down` below for stopping ray cluster, as it will not use the
+                # correct ray path.
+                logger.info('Stopping the ray cluster.')
+                subprocess.run(f'{constants.SKY_RAY_CMD} stop',
+                               shell=True,
+                               check=True)
+
+                logger.info('Running final ray down.')
                 subprocess.run(
-                    f'{constants.SKY_RAY_CMD} down -y --workers-only '
-                    f'{config_path}',
+                    f'{constants.SKY_RAY_CMD} down -y {config_path}',
                     check=True,
                     shell=True,
                     # We pass env inherited from os.environ due to calling `ray
                     # <cmd>`.
                     env=env)
-
-            # Stop the ray autoscaler to avoid scaling up, during
-            # stopping/terminating of the cluster. We do not rely `ray down`
-            # below for stopping ray cluster, as it will not use the correct
-            # ray path.
-            logger.info('Stopping the ray cluster.')
-            subprocess.run(f'{constants.SKY_RAY_CMD} stop',
-                           shell=True,
-                           check=True)
-
-            logger.info('Running final ray down.')
-            subprocess.run(
-                f'{constants.SKY_RAY_CMD} down -y {config_path}',
-                check=True,
-                shell=True,
-                # We pass env inherited from os.environ due to calling `ray
-                # <cmd>`.
-                env=env)
+            except Exception:  # pylint: disable=broad-except
+                if head_with_server_fallback:
+                    assert durable_identity is not None
+                    autostop_lib.mark_server_teardown_required(
+                        *durable_identity, _PROVIDER_HEAD_TEARDOWN_ERROR)
+                    logger.warning('Head-side provider teardown failed; '
+                                   'server teardown requested.')
+                    return
+                raise
         else:
             raise NotImplementedError
 
@@ -489,6 +566,45 @@ class StopEvent(SkyletEvent):
                            shell=True,
                            check=True)
 
+        execution_strategy = autostop_config.execution_strategy
+        durable_identity = None
+        if (autostop_config.down and execution_strategy !=
+                autostop_lib.AutodownExecutionStrategy.LEGACY_HEAD_CREDENTIALS):
+            durable_identity = _get_durable_autodown_identity(autostop_config)
+            if durable_identity is None:
+                return
+        if (autostop_config.down and execution_strategy
+                == autostop_lib.AutodownExecutionStrategy.SERVER_ONLY):
+            assert durable_identity is not None
+            marked = autostop_lib.mark_server_teardown_required(
+                *durable_identity)
+            if marked:
+                logger.info('Server-side autodown teardown requested.')
+            else:
+                logger.info('Durable autodown setting is stale or complete; '
+                            'skipping provider teardown.')
+            return
+
+        head_with_server_fallback = (
+            autostop_config.down and execution_strategy
+            == autostop_lib.AutodownExecutionStrategy.HEAD_WITH_SERVER_FALLBACK)
+        if head_with_server_fallback:
+            assert durable_identity is not None
+            marked = autostop_lib.mark_head_teardown_started(*durable_identity)
+            if not marked:
+                logger.info('Durable autodown setting is stale or complete; '
+                            'skipping provider teardown.')
+                return
+            if provider_name == 'runpod':
+                try:
+                    runpod_adaptor.terminate_current_pod()
+                except Exception:  # pylint: disable=broad-except
+                    autostop_lib.mark_server_teardown_required(
+                        *durable_identity, _RUNPOD_HEAD_TEARDOWN_ERROR)
+                    logger.warning('RunPod head teardown failed; server '
+                                   'teardown requested.')
+                return
+
         operation_fn = provision_lib.stop_instances
         if autostop_config.down:
             operation_fn = provision_lib.terminate_instances
@@ -504,16 +620,26 @@ class StopEvent(SkyletEvent):
             k8s_instance.emit_autostop_event_best_effort(
                 cluster_config['provider'], cluster_name_on_cloud)
 
-        if is_cluster_multinode:
-            logger.info('Terminating worker nodes first.')
+        try:
+            if is_cluster_multinode:
+                logger.info('Terminating worker nodes first.')
+                operation_fn(provider_name=provider_name,
+                             cluster_name_on_cloud=cluster_name_on_cloud,
+                             provider_config=cluster_config['provider'],
+                             worker_only=True)
+            logger.info('Terminating head node.')
             operation_fn(provider_name=provider_name,
                          cluster_name_on_cloud=cluster_name_on_cloud,
-                         provider_config=cluster_config['provider'],
-                         worker_only=True)
-        logger.info('Terminating head node.')
-        operation_fn(provider_name=provider_name,
-                     cluster_name_on_cloud=cluster_name_on_cloud,
-                     provider_config=cluster_config['provider'])
+                         provider_config=cluster_config['provider'])
+        except Exception:  # pylint: disable=broad-except
+            if head_with_server_fallback:
+                assert durable_identity is not None
+                autostop_lib.mark_server_teardown_required(
+                    *durable_identity, _PROVIDER_HEAD_TEARDOWN_ERROR)
+                logger.warning('Head-side provider teardown failed; server '
+                               'teardown requested.')
+                return
+            raise
 
     def _replace_yaml_for_stopping(self, yaml_path: str, down: bool):
         with open(yaml_path, 'r', encoding='utf-8') as f:
