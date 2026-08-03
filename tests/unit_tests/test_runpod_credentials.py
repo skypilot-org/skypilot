@@ -1,11 +1,15 @@
 import importlib.metadata
 import types
+from unittest import mock
 
 import pytest
+import requests
 
 from sky.adaptors import runpod as runpod_adaptor
 from sky.clouds import runpod as runpod_cloud
+from sky.clouds.cloud import TeardownExecutionStrategy
 from sky.provision.runpod import utils as runpod_utils
+from sky.utils import schemas
 
 
 class _FakeLazyRunPod:
@@ -15,6 +19,13 @@ class _FakeLazyRunPod:
 
     def load_module(self) -> types.SimpleNamespace:
         return self._module
+
+
+class _Response:
+
+    def __init__(self, status_code: int, text: str = '') -> None:
+        self.status_code = status_code
+        self.text = text
 
 
 def _write_runpod_config(tmp_path, monkeypatch, api_key: str) -> None:
@@ -68,3 +79,129 @@ def test_credential_check_enforces_runpod_sdk_minimum(monkeypatch,
     assert valid is expected_valid
     if not expected_valid:
         assert 'runpod>=1.7.10' in error
+
+
+@pytest.mark.parametrize(
+    ('remote_identity', 'expected_strategy'),
+    [
+        (schemas.RemoteIdentityOptions.LOCAL_CREDENTIALS.value,
+         TeardownExecutionStrategy.LEGACY_HEAD_CREDENTIALS),
+        (schemas.RemoteIdentityOptions.NO_UPLOAD.value,
+         TeardownExecutionStrategy.HEAD_WITH_SERVER_FALLBACK),
+    ],
+)
+def test_runpod_teardown_execution_strategy_for_remote_identity(
+        remote_identity, expected_strategy):
+    assert (runpod_cloud.RunPod().get_teardown_execution_strategy(
+        remote_identity) == expected_strategy)
+
+
+def _set_pod_identity(monkeypatch) -> None:
+    monkeypatch.setenv('RUNPOD_POD_ID', 'pod-123')
+    monkeypatch.setenv('RUNPOD_API_KEY', 'pod-api-key')
+
+
+def _mock_http_request(monkeypatch, side_effect):
+    if isinstance(side_effect, list):
+        request = mock.Mock(side_effect=side_effect)
+    else:
+        request = mock.Mock(return_value=side_effect)
+    monkeypatch.setattr(runpod_adaptor.requests, 'request', request)
+    return request
+
+
+@pytest.mark.parametrize('status_code', [200, 204, 404, 410])
+def test_terminate_current_pod_deletes_pod_with_idempotent_success(
+        monkeypatch, status_code):
+    _set_pod_identity(monkeypatch)
+    request = _mock_http_request(monkeypatch, _Response(status_code))
+
+    assert runpod_adaptor.terminate_current_pod() is None
+
+    request.assert_called_once_with(
+        'DELETE',
+        'https://rest.runpod.io/v1/pods/pod-123',
+        headers={'Authorization': 'Bearer pod-api-key'},
+        timeout=10,
+    )
+
+
+@pytest.mark.parametrize('missing_variable',
+                         ['RUNPOD_POD_ID', 'RUNPOD_API_KEY'])
+def test_terminate_current_pod_requires_pod_identity(monkeypatch,
+                                                     missing_variable):
+    _set_pod_identity(monkeypatch)
+    monkeypatch.delenv(missing_variable)
+    request = _mock_http_request(monkeypatch, _Response(204))
+
+    with pytest.raises(RuntimeError, match=missing_variable):
+        runpod_adaptor.terminate_current_pod()
+
+    request.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    'responses',
+    [
+        [requests.ConnectionError('transient network failure'),
+         _Response(204)],
+        [_Response(429), _Response(204)],
+        [_Response(503), _Response(204)],
+    ],
+)
+def test_terminate_current_pod_retries_transient_failures(
+        monkeypatch, responses):
+    _set_pod_identity(monkeypatch)
+    request = _mock_http_request(monkeypatch, responses)
+
+    assert runpod_adaptor.terminate_current_pod() is None
+
+    assert request.call_count == 2
+
+
+@pytest.mark.parametrize('status_code', [400, 401, 403])
+def test_terminate_current_pod_sanitizes_terminal_error(monkeypatch,
+                                                        status_code):
+    _set_pod_identity(monkeypatch)
+    request = _mock_http_request(
+        monkeypatch,
+        _Response(status_code,
+                  'body contains pod-api-key and ?secret=should-not-leak'),
+    )
+
+    with pytest.raises(RuntimeError) as error:
+        runpod_adaptor.terminate_current_pod()
+
+    assert str(error.value) == (
+        f'RunPod self-termination failed with status {status_code}.')
+    request.assert_called_once()
+
+
+def test_terminate_current_pod_bounds_transient_status_retries(monkeypatch):
+    _set_pod_identity(monkeypatch)
+    request = _mock_http_request(
+        monkeypatch,
+        [_Response(503)] * runpod_adaptor._MAX_RETRIES,
+    )
+
+    with pytest.raises(RuntimeError) as error:
+        runpod_adaptor.terminate_current_pod()
+
+    assert str(error.value) == 'RunPod self-termination failed with status 503.'
+    assert request.call_count == runpod_adaptor._MAX_RETRIES
+
+
+def test_terminate_current_pod_bounds_network_retries(monkeypatch):
+    _set_pod_identity(monkeypatch)
+    request = _mock_http_request(
+        monkeypatch,
+        [requests.ConnectionError('network failure')] *
+        runpod_adaptor._MAX_RETRIES,
+    )
+
+    with pytest.raises(RuntimeError) as error:
+        runpod_adaptor.terminate_current_pod()
+
+    assert str(
+        error.value) == 'RunPod self-termination failed due to a network error.'
+    assert request.call_count == runpod_adaptor._MAX_RETRIES

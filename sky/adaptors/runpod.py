@@ -56,6 +56,51 @@ def _get_api_key() -> str:
     return str(api_key)
 
 
+def terminate_current_pod() -> None:
+    """Delete the RunPod pod identified by the process environment.
+
+    This uses the pod-scoped identity injected into the workload. It is kept
+    separate from ``rest_request()`` so failures never expose provider response
+    bodies or credentials.
+    """
+    pod_id = os.environ.get('RUNPOD_POD_ID')
+    if not pod_id:
+        raise RuntimeError(
+            'RunPod self-termination requires RUNPOD_POD_ID to be set.')
+    api_key = os.environ.get('RUNPOD_API_KEY')
+    if not api_key:
+        raise RuntimeError(
+            'RunPod self-termination requires RUNPOD_API_KEY to be set.')
+
+    url = f'{_REST_BASE}/pods/{pod_id}'
+    headers = {'Authorization': f'Bearer {api_key}'}
+    for attempt in range(_MAX_RETRIES):
+        try:
+            response = requests.request('DELETE',
+                                        url,
+                                        headers=headers,
+                                        timeout=_TIMEOUT)
+        except requests.RequestException:
+            if attempt == _MAX_RETRIES - 1:
+                raise RuntimeError(
+                    'RunPod self-termination failed due to a network error.'
+                ) from None
+            time.sleep(1)
+            continue
+
+        status_code = response.status_code
+        if 200 <= status_code < 300 or status_code in (404, 410):
+            return None
+        if status_code == 429 or status_code >= 500:
+            if attempt == _MAX_RETRIES - 1:
+                raise RuntimeError('RunPod self-termination failed with status '
+                                   f'{status_code}.')
+            time.sleep(1)
+            continue
+        raise RuntimeError('RunPod self-termination failed with status '
+                           f'{status_code}.')
+
+
 def rest_request(method: str,
                  path: str,
                  json: Optional[Dict[str, Any]] = None) -> Any:

@@ -8,9 +8,11 @@ from typing import Dict, Iterator, List, Optional, Tuple, Union
 from sky import catalog
 from sky import clouds
 from sky.adaptors import runpod as runpod_sdk_adaptor
+from sky.clouds.cloud import TeardownExecutionStrategy
 from sky.utils import common_utils
 from sky.utils import registry
 from sky.utils import resources_utils
+from sky.utils import schemas
 
 if typing.TYPE_CHECKING:
     from sky import resources as resources_lib
@@ -52,6 +54,13 @@ class RunPod(clouds.Cloud):
     PROVISIONER_VERSION = clouds.ProvisionerVersion.SKYPILOT
     STATUS_VERSION = clouds.StatusVersion.SKYPILOT
     OPEN_PORTS_VERSION = clouds.OpenPortsVersion.LAUNCH_ONLY
+
+    @classmethod
+    def get_teardown_execution_strategy(
+            cls, remote_identity: str) -> TeardownExecutionStrategy:
+        if remote_identity == schemas.RemoteIdentityOptions.NO_UPLOAD.value:
+            return TeardownExecutionStrategy.HEAD_WITH_SERVER_FALLBACK
+        return super().get_teardown_execution_strategy(remote_identity)
 
     @classmethod
     def _unsupported_features_for_resources(
