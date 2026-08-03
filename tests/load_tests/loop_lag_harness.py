@@ -854,6 +854,67 @@ def pooled_histogram(artifact: Mapping[str, Any]) -> Dict[str, int]:
     return pooled
 
 
+def _format_bound(bound: float) -> str:
+    """Human bucket label: milliseconds while they stay readable."""
+    if bound == float('inf'):
+        return 'slower'
+    if bound < 1.0:
+        return f'<={bound * 1000:g}ms'
+    return f'<={bound:g}s'
+
+
+def format_latency_chart(histogram: Mapping[str, int],
+                         title: str = 'Client-observed latency',
+                         width: int = 44,
+                         threshold: Optional[float] = None) -> str:
+    """Draw the latency distribution as an ASCII bar chart.
+
+    A second mode is obvious in a picture and easy to miss in a column of
+    numbers, and this renders anywhere a log does -- no artifact download and
+    no image viewer.
+
+    Bars are log-scaled: the interesting mode carries ~1% of the requests
+    while the healthy one carries ~99%, so on a linear scale the thing worth
+    looking at is a single character wide. Counts and percentages are printed
+    alongside, since a log bar cannot be read quantitatively.
+    """
+    total = sum(histogram.values())
+    if not total:
+        return ''
+    largest = max(histogram.values())
+    scale = math.log10(largest + 1) if largest else 0.0
+    threshold = (SLOW_REQUEST_THRESHOLD_SECONDS
+                 if threshold is None else threshold)
+
+    lines = [f'{title} ({total} requests, log-scaled bars):']
+    slow = 0
+    for bound in LATENCY_HISTOGRAM_BOUNDS:
+        count = histogram.get(str(bound), 0)
+        if bound > threshold:
+            slow += count
+        # An empty bucket past the tail is noise; an empty one inside it is
+        # information (a gap between modes), so keep zeros up to the last
+        # bucket that has anything.
+        filled = max((i for i, b in enumerate(LATENCY_HISTOGRAM_BOUNDS)
+                      if histogram.get(str(b), 0)),
+                     default=0)
+        if LATENCY_HISTOGRAM_BOUNDS.index(bound) > filled:
+            break
+        bar_len = (int(round(math.log10(count + 1) / scale *
+                             width)) if scale and count else 0)
+        bar = '#' * bar_len
+        if count and not bar_len:
+            # Never render a non-empty bucket as blank: the rare buckets are
+            # exactly the ones worth seeing.
+            bar = '.'
+        marker = ' <' if bound == threshold else '  '
+        lines.append(f'  {_format_bound(bound):>9}{marker} {bar:<{width}} '
+                     f'{count:>7} {count / total * 100:6.2f}%')
+    lines.append(f'  {"":>9}   slower than {threshold * 1000:g}ms: '
+                 f'{slow} ({slow / total * 100:.2f}%)')
+    return '\n'.join(lines)
+
+
 def format_histograms(baseline: Mapping[str, Any],
                       candidate: Mapping[str, Any]) -> str:
     """Render both runs' pooled latency distributions side by side."""
@@ -935,7 +996,21 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         '--noise-floor',
         help='a second artifact from the base build; deltas no larger than '
         'the baseline-to-noise-floor delta are reported as noise')
+    show_parser = subparsers.add_parser(
+        'show', help='draw one run artifact latency distribution')
+    show_parser.add_argument('artifact', help='a run artifact')
     args = parser.parse_args(argv)
+
+    if args.command == 'show':
+        artifact = _load_artifact(args.artifact)
+        print(f'{artifact.get("name")} ({artifact.get("created_at")}), '
+              f'status={artifact.get("status")}')
+        chart = format_latency_chart(
+            pooled_histogram(artifact),
+            threshold=artifact.get('config',
+                                   {}).get('slow_request_threshold_seconds'))
+        print(chart if chart else 'No latency samples in this artifact.')
+        return 0
 
     baseline = _load_artifact(args.baseline)
     candidate = _load_artifact(args.candidate)
@@ -963,6 +1038,15 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     histograms = format_histograms(baseline, candidate)
     if histograms:
         print(histograms)
+    for name, artifact in (('baseline', baseline), ('candidate', candidate)):
+        chart = format_latency_chart(
+            pooled_histogram(artifact),
+            title=f'{name}: {artifact.get("name")}',
+            threshold=artifact.get('config',
+                                   {}).get('slow_request_threshold_seconds'))
+        if chart:
+            print()
+            print(chart)
     return 0
 
 

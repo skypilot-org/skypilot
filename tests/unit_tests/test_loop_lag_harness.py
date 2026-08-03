@@ -267,6 +267,59 @@ def test_pooled_histogram_sums_valid_trials_only():
     assert pooled['0.25'] == 3
 
 
+def test_latency_chart_makes_a_rare_mode_visible():
+    """The reason the bars are log-scaled.
+
+    A mode holding 1% of requests would be under one character wide against a
+    99% mode on a linear scale -- i.e. invisible in the one view whose whole
+    job is to show it.
+    """
+    chart = harness.format_latency_chart({'0.01': 9900, '0.5': 100})
+    lines = {
+        line.split()[0]: line
+        for line in chart.splitlines()
+        if line.strip().startswith('<=')
+    }
+    fast, slow = lines['<=10ms'], lines['<=500ms']
+    fast_bar = fast.count('#')
+    slow_bar = slow.count('#')
+    assert fast_bar > slow_bar > fast_bar // 3
+    assert '9900' in fast and '100' in slow
+
+
+def test_latency_chart_never_renders_a_used_bucket_as_blank():
+    chart = harness.format_latency_chart({'0.01': 100000, '1.0': 1})
+    tail = [line for line in chart.splitlines() if '<=1s' in line][0]
+    assert '#' in tail or '.' in tail
+
+
+def test_latency_chart_reports_the_slow_rate_and_marks_the_threshold():
+    chart = harness.format_latency_chart({'0.01': 90, '0.5': 10}, threshold=0.1)
+    assert 'slower than 100ms: 10 (10.00%)' in chart
+    assert '<' in [line for line in chart.splitlines() if '<=100ms' in line][0]
+
+
+def test_latency_chart_is_empty_without_samples():
+    assert harness.format_latency_chart({}) == ''
+
+
+def test_show_cli_draws_the_distribution(tmp_path, capsys):
+    artifact = _artifact('run', 0.01)
+    artifact['trials'] = [{
+        'status': 'ok',
+        'latency_histogram': {
+            '0.01': 90,
+            '0.5': 10
+        }
+    }]
+    path = tmp_path / 'run.json'
+    path.write_text(json.dumps(artifact))
+    assert harness.main(['show', str(path)]) == 0
+    out = capsys.readouterr().out
+    assert 'Client-observed latency' in out
+    assert 'slower than' in out
+
+
 def test_format_histograms_shows_both_distributions():
 
     def _hist_artifact(slow):

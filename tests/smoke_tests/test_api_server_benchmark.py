@@ -179,6 +179,14 @@ def _publish(result: loop_lag_harness.RunResult, name: str) -> pathlib.Path:
             print(f'buildkite-agent could not upload {path}; the file is still '
                   'on the agent')
     print(f'Event loop lag artifact for {name}: {path}')
+    # Draw the distribution into the build log: the shape (one mode or two,
+    # and how heavy the slow one is) is the part a reader wants, and this way
+    # it is on screen without downloading the artifact.
+    chart = loop_lag_harness.format_latency_chart(
+        loop_lag_harness.pooled_histogram(result.to_dict()),
+        title=f'Client-observed latency for {name}')
+    if chart:
+        print(chart)
     return path
 
 
