@@ -2701,6 +2701,10 @@ have a reliability score of at least ``0.99``, and advertise at least
 It applies only while selecting the live marketplace offer; it does not change
 the stable catalog resource type used during planning.
 
+To also require at least ``1000 Mbps`` advertised upload bandwidth, set
+``resources.network_tier: best``. That resource setting includes the download
+requirement, so the query contains each bandwidth constraint only once.
+
 Default: ``false``
 
 .. _config-yaml-vast-provision-timeout:
