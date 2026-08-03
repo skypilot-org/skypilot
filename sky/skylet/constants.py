@@ -76,9 +76,12 @@ SKY_UNSET_PYTHONPATH_AND_SET_CWD = 'env -u PYTHONPATH -C $HOME'
 # used for installing SkyPilot runtime (ray and skypilot).
 SKY_PYTHON_PATH_FILE = f'{SKY_RUNTIME_DIR}/.sky/python_path'
 SKY_RAY_PATH_FILE = f'{SKY_RUNTIME_DIR}/.sky/ray_path'
-SKY_GET_PYTHON_PATH_CMD = (f'[ -s {SKY_PYTHON_PATH_FILE} ] && '
-                           f'cat {SKY_PYTHON_PATH_FILE} 2> /dev/null || '
-                           'which python3')
+SKY_GET_PYTHON_PATH_CMD = (
+    f'[ -s {SKY_PYTHON_PATH_FILE} ] && '
+    f'cat {SKY_PYTHON_PATH_FILE} 2> /dev/null || '
+    # POSIX builtin, present even when the `which` binary
+    # is not (e.g. minimal RHEL/Rocky images ship no which).
+    'command -v python3')
 # Python executable, e.g., /opt/conda/bin/python3
 SKY_PYTHON_CMD = (f'{SKY_UNSET_PYTHONPATH_AND_SET_CWD} '
                   f'$({SKY_GET_PYTHON_PATH_CMD})')
@@ -90,7 +93,7 @@ SKY_PIP_CMD = f'{SKY_PYTHON_CMD} -m pip'
 # The ray executable is a python script with a header like:
 #   #!/opt/conda/bin/python3
 SKY_RAY_CMD = (f'{SKY_PYTHON_CMD} $([ -s {SKY_RAY_PATH_FILE} ] && '
-               f'cat {SKY_RAY_PATH_FILE} 2> /dev/null || which ray)')
+               f'cat {SKY_RAY_PATH_FILE} 2> /dev/null || command -v ray)')
 
 # Use $(which env) to find env, falling back to /usr/bin/env if which is
 # unavailable. This works around a Slurm quirk where srun's execvp() doesn't
@@ -264,7 +267,7 @@ SETUP_SKY_DIRS_COMMANDS = (f'mkdir -p ~/sky_workdir && '
 # the SkyPilot runtime lives in a separate uv venv, and conda is user-facing.
 # https://github.com/ray-project/ray/issues/31606
 CONDA_INSTALLATION_COMMANDS = (
-    'which conda > /dev/null 2>&1 || '
+    'command -v conda > /dev/null 2>&1 || '
     '{ '
     # Use uname -m to get the architecture of the machine and download the
     # corresponding Miniforge installer. `-L` is required to follow the GitHub
@@ -367,9 +370,14 @@ RAY_INSTALLATION_COMMANDS = (
     # mentioned above are resolved.
     f'export PATH=$PATH:{SKY_RUNTIME_DIR}/.local/bin; '
     # Writes ray path to file if it does not exist or the file is empty.
+    # Run `command -v` under `sh -c`: SKY_UV_RUN_CMD ends in `uv run`, which
+    # spawns its first arg as an executable -- `command` is a shell builtin, not
+    # a binary, so bare `uv run command -v ray` fails to spawn on the default
+    # image's uv. `sh` is a real binary uv can spawn; `command -v` then resolves
+    # ray's path as a builtin (and needs no external `which`, unlike before).
     f'[ -s {SKY_RAY_PATH_FILE} ] || '
     f'{{ {SKY_UV_RUN_CMD} '
-    f'which ray > {SKY_RAY_PATH_FILE} || exit 1; }}; ')
+    f'sh -c "command -v ray" > {SKY_RAY_PATH_FILE} || exit 1; }}; ')
 
 # Copy SkyPilot templates from the installed wheel to ~/sky_templates.
 # This must run after the skypilot wheel is installed.
@@ -458,7 +466,30 @@ SET_SSH_MAX_SESSIONS_CONFIG_CMD = (
     'sudo bash -c \''
     'echo "MaxSessions 200" >> /etc/ssh/sshd_config; '
     'echo "MaxStartups 150:30:200" >> /etc/ssh/sshd_config; '
-    '(systemctl reload sshd || service ssh reload); '
+    # Make the live reload best-effort. On containers with no systemd (all K8s
+    # pods) `systemctl reload sshd` fails, and on non-Debian images (RHEL/UBI)
+    # there is also no `service` command, so this line exited 127 and failed the
+    # whole runtime setup even though sshd is already running. A failed live
+    # reload must not abort the launch.
+    #
+    # Which link actually applies the setting matters, because this command is
+    # rendered into setup_commands -- it runs over SSH, i.e. AFTER the pod's
+    # sshd is already up. There is no "next sshd start" for a K8s pod: the
+    # container does not restart, and if it did, the writable layer (and these
+    # appended lines) would be gone. So on RHEL/UBI, where systemctl and
+    # service are both unavailable, `kill -HUP` is what applies it -- sshd
+    # re-execs on SIGHUP and re-reads the config. That works because the pod
+    # starts sshd via a bare `sshd`/`/usr/sbin/sshd`, which writes
+    # /var/run/sshd.pid. If every link fails, the setting is simply never
+    # applied for that pod's lifetime; the cluster still comes up, just with
+    # sshd's default limits.
+    #
+    # Verified on a live docker:rockylinux:9 launch: `kill -HUP` was the link
+    # that won, and the running listener reported our values (its process title
+    # read "0 of 150-200 startups" against a default of 10-100).
+    '(systemctl reload sshd 2>/dev/null || service ssh reload 2>/dev/null || '
+    'service sshd reload 2>/dev/null || '
+    'kill -HUP $(cat /var/run/sshd.pid 2>/dev/null) 2>/dev/null || true); '
     '\'')
 
 # Internal: Env var indicating the system is running with a remote API server.

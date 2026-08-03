@@ -507,6 +507,81 @@ def test_docker_preinstalled_package(generic_cloud: str):
     smoke_tests_utils.run_one_test(test)
 
 
+@pytest.mark.kubernetes
+@pytest.mark.parametrize(
+    'image,pkg_mgr,num_nodes',
+    [
+        # Both run 2 nodes so the worker-join /dev/tcp probe is exercised on a
+        # non-Debian image. rockylinux:9 = community rebuild; redhat/ubi9 =
+        # Red Hat's official UBI (the motivating family; ships the free ubi repos).
+        ('rockylinux:9', 'dnf', 2),
+        ('redhat/ubi9', 'dnf', 2),
+    ])
+def test_kubernetes_non_debian_image(image, pkg_mgr, num_nodes):
+    """Non-Debian images boot on Kubernetes (pkg-manager-agnostic bootstrap).
+
+    The per-node bootstrap detects the image's package manager (dnf here)
+    rather than assuming Debian apt/dpkg, so RHEL-family images reach the
+    SkyPilot runtime and run jobs. Regression test for the previously
+    Debian-only bootstrap, which failed such images during setup with a
+    misleading `container not found ("ray-node")`. The 2-node case also covers
+    the worker-join /dev/tcp probe.
+
+    All images are glibc-based; Alpine/musl is intentionally excluded (its
+    conda/uv runtime is unrelated to this path, and Ray publishes no musl
+    wheels). The zypper/openSUSE case was dropped after it proved flaky
+    end-to-end; the zypper name mapping is covered by the map_pkg_names unit
+    test instead.
+    """
+    # get_cluster_name() keys off the (shared) test function name, so the
+    # parametrized cases would otherwise collide on one cluster name -- append a
+    # per-image suffix (e.g. rockyl / ubi9) to keep each unique.
+    name = (smoke_tests_utils.get_cluster_name() + '-' +
+            image.split(':')[0].split('/')[-1][:6])
+    test = smoke_tests_utils.Test(
+        'kubernetes_non_debian_image',
+        [
+            # `sky launch` returns 0 only if the non-apt bootstrap installed the
+            # prereqs and ray came up on the non-Debian image.
+            f'sky launch -y -c {name} --infra kubernetes '
+            f'--num-nodes {num_nodes} {smoke_tests_utils.LOW_RESOURCE_ARG} '
+            f'--image-id docker:{image}',
+            # Confirm it really ran on the non-Debian image (not a fallback):
+            # the image's own package manager is present and apt-get is not.
+            f'sky exec {name} '
+            f'\'command -v {pkg_mgr} && ! command -v apt-get\'',
+            f'sky logs {name} 1 --status',
+            # The sshd MaxSessions/MaxStartups tuning must survive on an image
+            # where the reload has no systemd AND no `service` command, which is
+            # why this PR made that reload best-effort with a SIGHUP fallback.
+            # Two assertions:
+            #   1. the directives are appended to sshd_config, and
+            #   2. `sshd -T` reports them. This is the load-bearing check:
+            #      sshd_config is first-wins and RHEL-family images
+            #      `Include /etc/ssh/sshd_config.d/*.conf` from line ~15, so an
+            #      appended value can be silently shadowed by a drop-in, which
+            #      grepping the file alone would not catch. `sshd -T` resolves
+            #      includes and precedence.
+            # Scope, deliberately: `sshd -T` RE-PARSES the config in a fresh
+            # process, so this proves the config a starting/re-execing sshd will
+            # use -- not that the already-running daemon reloaded. Asserting the
+            # latter needs the live listener's own state, which has no portable
+            # probe. `sshd -T` also needs root, which both images here are.
+            f'sky exec {name} \''
+            f'grep -q "^MaxSessions 200" /etc/ssh/sshd_config && '
+            f'grep -q "^MaxStartups 150:30:200" /etc/ssh/sshd_config && '
+            f'{{ sshd -T || /usr/sbin/sshd -T || /sbin/sshd -T; }} 2>/dev/null | '
+            f'grep -qx "maxsessions 200"\'',
+            f'sky logs {name} 2 --status',
+        ],
+        f'sky down -y {name}',
+        # A from-scratch runtime bootstrap on a non-Debian base + image pull is
+        # slower than the Debian happy path; give it headroom.
+        timeout=25 * 60,
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
 @pytest.mark.slurm
 def test_docker_preinstalled_package_slurm_sqsh(generic_cloud: str):
     """Test local .sqsh container images on Slurm (both absolute and relative paths)."""
