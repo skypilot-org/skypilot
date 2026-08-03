@@ -2038,3 +2038,62 @@ class TestOnRecoveryIncludesInlineTasks:
             passed_tasks = [t for t, _ in passed_handles]
             assert passed_tasks == [task, inline_peer]
             net.dns_addresses_for_task.assert_not_called()
+
+
+class TestOnRecoveryClusterSetUpErrorHandling:
+    """ClusterSetUpError from a Job Group's on_recovery callback must be
+    converted at the _monitor_one_task call site into a terminal
+    FAILED_SETUP (with the real reason) + return False.
+
+    Letting it propagate instead would terminate the Phase 4 monitor
+    asyncio.Task with an exception, which the Phase 4 collection loop
+    swallows into task_results with no terminal state ever set for the
+    task -- run()'s finally would then mislabel the still-RUNNING task
+    as CANCELLED, with the failure reason existing only in controller
+    logs.
+    """
+
+    @pytest.mark.asyncio
+    async def test_sets_failed_setup_and_returns_false(self):
+        from sky import exceptions
+
+        controller = JobController.__new__(JobController)
+        controller._job_id = 1
+        controller._pool = None
+        controller._backend = MagicMock()
+        controller._cleanup_cluster = AsyncMock()
+
+        mock_task = MagicMock()
+        mock_task.name = 'test-task'
+        mock_task.num_nodes = 1
+
+        executor = MagicMock()
+        executor.recover = AsyncMock(return_value=12345.0)
+
+        on_recovery = AsyncMock(
+            side_effect=exceptions.ClusterSetUpError('networking gone'))
+
+        with patch('asyncio.sleep', new=AsyncMock()), \
+             patch('sky.jobs.state.get_job_status_with_task_id_async',
+                   new=AsyncMock(return_value=managed_job_state.
+                                 ManagedJobStatus.RECOVERING)), \
+             patch('sky.jobs.state.set_recovered_async', new=AsyncMock()), \
+             patch('sky.jobs.state.set_failed_async',
+                   new=AsyncMock()) as mock_set_failed:
+            succeeded = await controller._monitor_one_task(
+                task_id=0,
+                task=mock_task,
+                cluster_name='test-cluster',
+                executor=executor,
+                callback_func=MagicMock(),
+                force_transit_to_recovering=True,
+                on_recovery=on_recovery,
+            )
+
+        assert succeeded is False
+        on_recovery.assert_awaited_once()
+        mock_set_failed.assert_awaited_once()
+        kwargs = mock_set_failed.call_args.kwargs
+        assert (kwargs['failure_type'] ==
+                managed_job_state.ManagedJobStatus.FAILED_SETUP)
+        assert 'networking gone' in kwargs['failure_reason']
