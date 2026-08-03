@@ -951,7 +951,7 @@ Go to the `Settings <https://www.runpod.io/console/user/settings>`_ page on your
 
 .. code-block:: shell
 
-  pip install "runpod>=1.6.1"
+  pip install "runpod>=1.7.10"
   runpod config
 
 OCI |community-badge|
