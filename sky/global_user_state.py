@@ -483,6 +483,8 @@ _db_manager = db_utils.DatabaseManager(
     'state', create_table, post_init_fn=lambda _: _sqlite_supports_returning())
 initialize_and_get_db = _db_manager.get_engine
 
+_AUTODOWN_INTENT_IN_QUERY_CHUNK_SIZE = 500
+
 
 def _autodown_intent_from_row(row: Any) -> AutodownIntent:
     return AutodownIntent(
@@ -635,6 +637,26 @@ def get_autodown_intent(cluster_name: str) -> Optional[AutodownIntent]:
     if row is None:
         return None
     return _autodown_intent_from_row(row)
+
+
+@metrics_lib.time_me
+def get_autodown_intents(cluster_names: List[str]) -> Dict[str, AutodownIntent]:
+    """Return durable autodown intents for the requested cluster names."""
+    if not cluster_names:
+        return {}
+    intents: Dict[str, AutodownIntent] = {}
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
+        for offset in range(0, len(cluster_names),
+                            _AUTODOWN_INTENT_IN_QUERY_CHUNK_SIZE):
+            batch = cluster_names[offset:offset +
+                                  _AUTODOWN_INTENT_IN_QUERY_CHUNK_SIZE]
+            rows = session.query(autodown_intent_table).filter(
+                autodown_intent_table.c.cluster_name.in_(batch)).all()
+            intents.update({
+                row.cluster_name: _autodown_intent_from_row(row) for row in rows
+            })
+    return intents
 
 
 @metrics_lib.time_me

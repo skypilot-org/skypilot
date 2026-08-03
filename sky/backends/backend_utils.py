@@ -4035,6 +4035,21 @@ def _update_records_with_handle_info(records_with_handle: List[Dict[str, Any]],
             record['cluster_name_on_cloud'] = handle.cluster_name_on_cloud
 
 
+def _update_records_with_autodown_intents(
+        records: List[Dict[str, Any]]) -> None:
+    """Add hash-fenced durable autodown recovery fields to cluster records."""
+    intents = global_user_state.get_autodown_intents(
+        [record['name'] for record in records])
+    for record in records:
+        intent = intents.get(record['name'])
+        if intent is None or intent.cluster_hash != record['cluster_hash']:
+            continue
+        record['autodown_recovery_state'] = intent.state.value
+        record['autodown_execution_strategy'] = intent.execution_strategy
+        record['autodown_generation'] = intent.generation
+        record['autodown_attempt_count'] = intent.attempt_count
+
+
 def get_clusters(
     refresh: common.StatusRefreshMode,
     cluster_names: Optional[Union[str, List[str]]] = None,
@@ -4208,6 +4223,7 @@ def get_clusters(
     if refresh == common.StatusRefreshMode.NONE:
         # Add resources to the records
         _update_records_with_resources(records)
+        _update_records_with_autodown_intents(records)
         return records
 
     plural = 's' if len(records) > 1 else ''
@@ -4316,6 +4332,7 @@ def get_clusters(
 
     # Add resources to the records
     _update_records_with_resources(kept_records)
+    _update_records_with_autodown_intents(kept_records)
     return kept_records
 
 

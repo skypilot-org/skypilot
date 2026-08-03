@@ -56,6 +56,33 @@ describe('getClusters all_users scoping', () => {
     const [, body] = apiClient.fetch.mock.calls[0];
     expect(body.all_users).toBe(false);
   });
+
+  it('maps durable autodown recovery fields for cluster details', async () => {
+    apiClient.fetch.mockResolvedValue([
+      {
+        name: 'train-cluster',
+        status: 'AUTOSTOPPING',
+        cluster_hash: 'hash',
+        launched_at: 1,
+        workspace: 'default',
+        autostop: 5,
+        to_down: true,
+        autodown_recovery_state: 'RETRY_WAIT',
+        autodown_execution_strategy: 'head_with_server_fallback',
+        autodown_generation: 3,
+        autodown_attempt_count: 2,
+      },
+    ]);
+
+    const [cluster] = await getClusters({ clusterNames: ['train-cluster'] });
+
+    expect(cluster.autodown_recovery_state).toBe('RETRY_WAIT');
+    expect(cluster.autodown_execution_strategy).toBe(
+      'head_with_server_fallback'
+    );
+    expect(cluster.autodown_generation).toBe(3);
+    expect(cluster.autodown_attempt_count).toBe(2);
+  });
 });
 
 describe('getOtherUsersClustersCount', () => {

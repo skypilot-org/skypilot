@@ -152,6 +152,10 @@ class StatusResponse(ResponseBaseModel):
     # Currently populated with cloud-provider instance console URLs at launch
     # time (mirrors ManagedJobRecord.links). Shape: {label: url}.
     links: Optional[Dict[str, str]] = None
+    autodown_recovery_state: Optional[str] = None
+    autodown_execution_strategy: Optional[str] = None
+    autodown_generation: Optional[int] = None
+    autodown_attempt_count: Optional[int] = None
 
 
 class ClusterJobRecord(ResponseBaseModel):
