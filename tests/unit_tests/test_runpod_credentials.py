@@ -146,9 +146,16 @@ def test_terminate_current_pod_requires_pod_identity(monkeypatch,
     request.assert_not_called()
 
 
-@pytest.mark.parametrize('pod_id', ['AbC123-_~.opaque', 'Pod-Id_42~candidate'])
+@pytest.mark.parametrize(
+    ('pod_id', 'encoded_pod_id'),
+    [
+        ('AbC123-_~.opaque', 'AbC123-_~.opaque'),
+        ('Pod-Id_42~candidate', 'Pod-Id_42~candidate'),
+        ('alt:pod@id', 'alt%3Apod%40id'),
+    ],
+)
 def test_terminate_current_pod_uses_safe_opaque_pod_identity(
-        monkeypatch, pod_id):
+        monkeypatch, pod_id, encoded_pod_id):
     _set_pod_identity(monkeypatch)
     monkeypatch.setenv('RUNPOD_POD_ID', pod_id)
     request = _mock_http_request(monkeypatch, _Response(204))
@@ -157,7 +164,7 @@ def test_terminate_current_pod_uses_safe_opaque_pod_identity(
 
     request.assert_called_once_with(
         'DELETE',
-        f'https://rest.runpod.io/v1/pods/{pod_id}',
+        f'https://rest.runpod.io/v1/pods/{encoded_pod_id}',
         headers={'Authorization': 'Bearer pod-api-key'},
         timeout=10,
     )
@@ -170,6 +177,7 @@ def test_terminate_current_pod_uses_safe_opaque_pod_identity(
         '..',
         '../other',
         'safe/other',
+        'safe\\other',
         'safe?query=true',
         'safe#fragment',
         'safe value',

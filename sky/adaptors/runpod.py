@@ -2,7 +2,6 @@
 
 from importlib import metadata as import_lib_metadata
 import os
-import re
 import time
 from typing import Any, Dict, Optional
 from urllib.parse import quote
@@ -24,7 +23,8 @@ requests = common.LazyImport('requests')
 _REST_BASE = 'https://rest.runpod.io/v1'
 _MAX_RETRIES = 3
 _TIMEOUT = 10
-_POD_ID_PATTERN = re.compile(r'^[A-Za-z0-9._~-]{1,128}$')
+_MAX_POD_ID_LENGTH = 128
+_UNSAFE_POD_ID_CHARACTERS = frozenset('/\\?#')
 
 
 def get_sdk_version_error() -> Optional[str]:
@@ -74,7 +74,12 @@ def terminate_current_pod() -> None:
     if not pod_id:
         raise RuntimeError(
             'RunPod self-termination requires RUNPOD_POD_ID to be set.')
-    if pod_id in ('.', '..') or _POD_ID_PATTERN.fullmatch(pod_id) is None:
+    invalid_pod_id = (len(pod_id) > _MAX_POD_ID_LENGTH or
+                      pod_id in ('.', '..') or
+                      any(not character.isprintable() or character.isspace() or
+                          character in _UNSAFE_POD_ID_CHARACTERS
+                          for character in pod_id))
+    if invalid_pod_id:
         raise RuntimeError(
             'RunPod self-termination requires a valid RUNPOD_POD_ID.')
     api_key = os.environ.get('RUNPOD_API_KEY')
