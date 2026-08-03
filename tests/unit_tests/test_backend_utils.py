@@ -9,6 +9,7 @@ from sky import check as sky_check
 from sky import clouds
 from sky import dag as dag_lib
 from sky import exceptions
+from sky import global_user_state
 from sky import skypilot_config
 from sky import task as task_lib
 from sky.backends import backend_utils
@@ -168,14 +169,13 @@ def test_write_cluster_config_removes_stale_debug_yaml_when_debug_disabled(
                         lambda *args: None)
     monkeypatch.setattr(backend_utils, '_deterministic_cluster_yaml_hash',
                         lambda _: 'fake-hash')
-    monkeypatch.setattr(backend_utils, '_optimize_file_mounts',
-                        lambda _: None)
+    monkeypatch.setattr(backend_utils, '_optimize_file_mounts', lambda _: None)
     monkeypatch.setattr(common_utils, 'fill_template',
                         _write_minimal_cluster_yaml)
     monkeypatch.setattr(sky_check, 'get_cloud_credential_file_mounts',
                         lambda **kwargs: {})
-    monkeypatch.setattr(backend_utils.global_user_state,
-                        'get_cluster_yaml_str', lambda _: None)
+    monkeypatch.setattr(backend_utils.global_user_state, 'get_cluster_yaml_str',
+                        lambda _: None)
     monkeypatch.setattr(backend_utils.global_user_state, 'set_cluster_yaml',
                         lambda *args: None)
     monkeypatch.setattr(backend_utils.usage_lib.messages.usage,
@@ -763,6 +763,48 @@ def test_get_clusters_launch_refresh(monkeypatch):
 
     assert len(
         backend_utils.get_clusters(refresh=common.StatusRefreshMode.FORCE)) == 2
+
+
+def test_update_records_with_autodown_intents_is_hash_fenced(monkeypatch):
+    intent = global_user_state.AutodownIntent(
+        cluster_name='current',
+        cluster_hash='current-hash',
+        generation=4,
+        state=global_user_state.AutodownIntentState.RETRY_WAIT,
+        idle_minutes=5,
+        to_down=True,
+        execution_strategy=(
+            TeardownExecutionStrategy.HEAD_WITH_SERVER_FALLBACK.value),
+        user_hash='user-hash',
+        workspace='default',
+        attempt_count=2,
+        next_retry_at=123,
+        last_error='Autodown reconciliation failed.',
+        created_at=1,
+        updated_at=2,
+    )
+    get_intents = mock.Mock(return_value={
+        'current': intent,
+        'replacement': intent,
+    })
+    monkeypatch.setattr(global_user_state, 'get_autodown_intents', get_intents)
+    records = [{
+        'name': 'current',
+        'cluster_hash': 'current-hash',
+    }, {
+        'name': 'replacement',
+        'cluster_hash': 'replacement-hash',
+    }]
+
+    backend_utils._update_records_with_autodown_intents(records)
+
+    get_intents.assert_called_once_with(['current', 'replacement'])
+    assert records[0]['autodown_recovery_state'] == 'RETRY_WAIT'
+    assert records[0]['autodown_execution_strategy'] == (
+        TeardownExecutionStrategy.HEAD_WITH_SERVER_FALLBACK.value)
+    assert records[0]['autodown_generation'] == 4
+    assert records[0]['autodown_attempt_count'] == 2
+    assert 'autodown_recovery_state' not in records[1]
 
 
 def test_kubeconfig_upload_with_kubernetes_exclusion():

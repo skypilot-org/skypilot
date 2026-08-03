@@ -192,6 +192,22 @@ def test_concurrent_first_insert_is_insert_if_absent(tmp_path, monkeypatch):
     assert current_intent == created[0]
 
 
+def test_get_autodown_intents_batches_names_and_omits_missing(
+        tmp_path, monkeypatch):
+    _fresh_db(tmp_path, monkeypatch)
+    alpha = _create_intent('alpha', 'hash-alpha')
+    beta = _create_intent('beta', 'hash-beta')
+    assert alpha is not None
+    assert beta is not None
+    monkeypatch.setattr(global_user_state,
+                        '_AUTODOWN_INTENT_IN_QUERY_CHUNK_SIZE', 1)
+
+    intents = global_user_state.get_autodown_intents(
+        ['beta', 'missing', 'alpha'])
+
+    assert intents == {'alpha': alpha, 'beta': beta}
+
+
 def test_postgres_first_insert_uses_returned_row_not_rowcount():
     engine = mock.Mock()
     engine.dialect.name = 'postgresql'

@@ -166,6 +166,10 @@ export async function getClusters({
         statusTooltip:
           cluster.status === 'INIT' ? cluster.init_status_reason : null,
         to_down: cluster.to_down,
+        autodown_recovery_state: cluster.autodown_recovery_state,
+        autodown_execution_strategy: cluster.autodown_execution_strategy,
+        autodown_generation: cluster.autodown_generation,
+        autodown_attempt_count: cluster.autodown_attempt_count,
         cluster_name_on_cloud: cluster.cluster_name_on_cloud,
         labels: cluster.labels || {},
         node_names: cluster.node_names || null,
