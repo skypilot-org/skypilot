@@ -1147,7 +1147,9 @@ def test_task_labels_aws():
                     '--filters "Name=tag:inlinelabel2,Values=inlinevalue2" '
                     '--region us-east-1 --output text'),
             ],
-            f'sky down -y {name} && {smoke_tests_utils.down_cluster_for_cloud_cmd(name)}',
+            smoke_tests_utils.chain_teardown(
+                f'sky down -y {name}',
+                smoke_tests_utils.down_cluster_for_cloud_cmd(name)),
         )
         smoke_tests_utils.run_one_test(test)
 
@@ -1178,7 +1180,9 @@ def test_task_labels_gcp():
                      'labels.inlinelabel2=\'inlinevalue2\'" '
                      '--format="value(name)" | grep .')),
             ],
-            f'sky down -y {name} && {smoke_tests_utils.down_cluster_for_cloud_cmd(name)}',
+            smoke_tests_utils.chain_teardown(
+                f'sky down -y {name}',
+                smoke_tests_utils.down_cluster_for_cloud_cmd(name)),
         )
         smoke_tests_utils.run_one_test(test)
 
@@ -1288,7 +1292,9 @@ def test_task_labels_azure():
                     '&& tags.inlinelabel2==\'inlinevalue2\'].name" '
                     '--output tsv | grep .'),
             ],
-            f'sky down -y {name} && {smoke_tests_utils.down_cluster_for_cloud_cmd(name)}',
+            smoke_tests_utils.chain_teardown(
+                f'sky down -y {name}',
+                smoke_tests_utils.down_cluster_for_cloud_cmd(name)),
         )
         smoke_tests_utils.run_one_test(test)
 
@@ -1324,8 +1330,9 @@ def test_task_labels_kubernetes():
                     f'grep \'^{common_utils.make_cluster_name_on_cloud(name, sky.Kubernetes.max_cluster_name_length())}\''
                 )
             ],
-            f'sky down -y {name} && '
-            f'{smoke_tests_utils.down_cluster_for_cloud_cmd(name)}',
+            smoke_tests_utils.chain_teardown(
+                f'sky down -y {name}',
+                smoke_tests_utils.down_cluster_for_cloud_cmd(name)),
         )
         smoke_tests_utils.run_one_test(test)
 
@@ -1351,8 +1358,9 @@ def test_services_on_kubernetes():
             smoke_tests_utils.resolve_k8s_context_cmd(name),
             smoke_tests_utils.launch_cloud_cmd_on_landed_context(name),
         ],
-        f'sky down -y {name} && {service_check} && '
-        f'{smoke_tests_utils.down_cluster_for_cloud_cmd(name)}',
+        smoke_tests_utils.chain_teardown(
+            f'sky down -y {name}', service_check,
+            smoke_tests_utils.down_cluster_for_cloud_cmd(name)),
     )
     smoke_tests_utils.run_one_test(test)
 
@@ -1390,8 +1398,9 @@ def test_add_pod_annotations_for_autodown_with_launch():
                 'pod_tag=$(kubectl describe $pod_2); echo "$pod_tag"; echo "$pod_tag" | grep -q skypilot.co/idle_minutes_to_autostop'
             ),
         ],
-        f'sky down -y {name} && '
-        f'{smoke_tests_utils.down_cluster_for_cloud_cmd(name)}',
+        smoke_tests_utils.chain_teardown(
+            f'sky down -y {name}',
+            smoke_tests_utils.down_cluster_for_cloud_cmd(name)),
     )
     smoke_tests_utils.run_one_test(test)
 
@@ -1445,8 +1454,9 @@ def test_add_and_remove_pod_annotations_with_autostop():
                 'pod_tag=$(kubectl describe $pod_2); echo "$pod_tag"; ! echo "$pod_tag" | grep -q skypilot.co/idle_minutes_to_autostop',
             ),
         ],
-        f'sky down -y {name} && '
-        f'{smoke_tests_utils.down_cluster_for_cloud_cmd(name)}',
+        smoke_tests_utils.chain_teardown(
+            f'sky down -y {name}',
+            smoke_tests_utils.down_cluster_for_cloud_cmd(name)),
     )
     smoke_tests_utils.run_one_test(test)
 
@@ -1552,7 +1562,13 @@ def test_volumes_on_kubernetes():
                 'if ! echo "$pvcs" | grep -q "existing1"; then echo "pvc for imported volume vol-existing1 was unexpectedly deleted" && exit 1; else echo "pvc for imported volume vol-existing1 preserved"; fi',
             ),
         ],
-        f'{smoke_tests_utils.down_cluster_for_cloud_cmd(name)} && vols=$(sky volumes ls) && echo "$vols" && vol=$(echo "$vols" | grep "existing0"); if [ -n "$vol" ]; then sky volumes delete existing0 -y; fi && vol=$(echo "$vols" | grep "pvc0"); if [ -n "$vol" ]; then sky volumes delete pvc0 -y; fi && vol=$(echo "$vols" | grep "pvc1"); if [ -n "$vol" ]; then sky volumes delete pvc1 -y; fi && vol=$(echo "$vols" | grep "vol-existing1"); if [ -n "$vol" ]; then sky volumes delete vol-existing1 -y; fi',
+        smoke_tests_utils.chain_teardown(
+            smoke_tests_utils.down_cluster_for_cloud_cmd(name),
+            'vols=$(sky volumes ls) && echo "$vols"', *[
+                f'if echo "$vols" | grep -q "{vol}"; then '
+                f'sky volumes delete {vol} -y; fi'
+                for vol in ['existing0', 'pvc0', 'pvc1', 'vol-existing1']
+            ]),
     )
     smoke_tests_utils.run_one_test(test)
 
@@ -1607,7 +1623,7 @@ def test_enable_docker_on_kubernetes(yaml_file, volumes_needed, sidecar,
     ]
     for vol in volumes_needed:
         teardown_parts.append(f'sky volumes delete {vol} -y || true')
-    teardown = ' && '.join(teardown_parts)
+    teardown = smoke_tests_utils.chain_teardown(*teardown_parts)
 
     test = smoke_tests_utils.Test(
         'enable_docker_on_kubernetes',
@@ -1642,7 +1658,7 @@ def test_volume_env_mount_kubernetes():
                 f'sky volumes apply -y -n {full_pvc_name} --type k8s-pvc --size 2GB',
                 f's=$(sky jobs launch -y --infra kubernetes {f.name} --env USERNAME=user); echo "$s"; echo "$s" | grep "Job finished (status: SUCCEEDED)"',
             ],
-            ' && '.join([
+            smoke_tests_utils.chain_teardown(
                 'sky jobs cancel -a -y || true',
                 # The managed job's worker cluster is torn down in the
                 # controller's `finally` block, and the controller only sets
@@ -1664,8 +1680,7 @@ def test_volume_env_mount_kubernetes():
                 f'sky volumes delete {full_pvc_name} -y',
                 f'(vol=$(sky volumes ls | grep "{full_pvc_name}"); '
                 f'if [ -n "$vol" ]; then echo "{full_pvc_name} not deleted" '
-                f'&& exit 1; else echo "{full_pvc_name} deleted"; fi)'
-            ]),
+                f'&& exit 1; else echo "{full_pvc_name} deleted"; fi)'),
         )
         smoke_tests_utils.run_one_test(test)
 
@@ -1734,9 +1749,10 @@ def test_hostpath_volume_on_kubernetes():
                     f'echo "$spec" | grep "path: {host_path}"',
                 ),
             ],
-            f'sky down -y {name} && '
-            f'sky volumes delete {volume_name} -y || true && '
-            f'{smoke_tests_utils.down_cluster_for_cloud_cmd(name)}',
+            smoke_tests_utils.chain_teardown(
+                f'sky down -y {name}',
+                f'sky volumes delete {volume_name} -y || true',
+                smoke_tests_utils.down_cluster_for_cloud_cmd(name)),
         )
         smoke_tests_utils.run_one_test(test)
 
@@ -1820,8 +1836,9 @@ def test_container_logs_multinode_kubernetes():
                 _check_container_logs(name, head_logs, 9, 1),
                 _check_container_logs(name, worker_logs, 9, 1),
             ],
-            f'sky down -y {name} && '
-            f'{smoke_tests_utils.down_cluster_for_cloud_cmd(name)}',
+            smoke_tests_utils.chain_teardown(
+                f'sky down -y {name}',
+                smoke_tests_utils.down_cluster_for_cloud_cmd(name)),
         )
         smoke_tests_utils.run_one_test(test)
 
@@ -1849,8 +1866,9 @@ def test_container_logs_two_jobs_kubernetes():
                 smoke_tests_utils.launch_cloud_cmd_on_landed_context(name),
                 _check_container_logs(name, pod_logs, 9, 2),
             ],
-            f'sky down -y {name} && '
-            f'{smoke_tests_utils.down_cluster_for_cloud_cmd(name)}',
+            smoke_tests_utils.chain_teardown(
+                f'sky down -y {name}',
+                smoke_tests_utils.down_cluster_for_cloud_cmd(name)),
         )
         smoke_tests_utils.run_one_test(test)
 
@@ -1880,8 +1898,9 @@ def test_container_logs_two_simultaneous_jobs_kubernetes():
                 'sleep 30',
                 _check_container_logs(name, pod_logs, 9, 2),
             ],
-            f'sky down -y {name} && '
-            f'{smoke_tests_utils.down_cluster_for_cloud_cmd(name)}',
+            smoke_tests_utils.chain_teardown(
+                f'sky down -y {name}',
+                smoke_tests_utils.down_cluster_for_cloud_cmd(name)),
         )
         smoke_tests_utils.run_one_test(test)
 
@@ -2622,8 +2641,9 @@ def test_kubernetes_pod_failed_mount_escalation():
                 f'echo "$s" | grep "FailedMount" && '
                 f'echo "$s" | grep "MountVolume.SetUp failed"',
             ],
-            f'sky down -y {name} && '
-            f'{smoke_tests_utils.down_cluster_for_cloud_cmd(name)}',
+            smoke_tests_utils.chain_teardown(
+                f'sky down -y {name}',
+                smoke_tests_utils.down_cluster_for_cloud_cmd(name)),
             timeout=25 * 60,
         )
         smoke_tests_utils.run_one_test(test)
@@ -2764,7 +2784,9 @@ def test_aws_disk_tier():
                       _get_aws_query_command(region, '$id', 'Throughput',
                                              specs['disk_throughput'])))),
             ],
-            f'sky down -y {name} && {smoke_tests_utils.down_cluster_for_cloud_cmd(name)}',
+            smoke_tests_utils.chain_teardown(
+                f'sky down -y {name}',
+                smoke_tests_utils.down_cluster_for_cloud_cmd(name)),
             timeout=10 * 60,  # 10 mins  (it takes around ~6 mins)
         )
         smoke_tests_utils.run_one_test(test)
@@ -2820,7 +2842,9 @@ def test_gcp_disk_tier(instance_types: List[str]):
                              f'gcloud compute disks list --filter="name=$name" '
                              f'--format="value(type)" | grep {disk_type}'))
                 ],
-                f'sky down -y {name} && {smoke_tests_utils.down_cluster_for_cloud_cmd(name)}',
+                smoke_tests_utils.chain_teardown(
+                    f'sky down -y {name}',
+                    smoke_tests_utils.down_cluster_for_cloud_cmd(name)),
                 timeout=6 * 60,  # 6 mins  (it takes around ~3 mins)
             )
             smoke_tests_utils.run_one_test(test)
@@ -2994,7 +3018,9 @@ def test_gcp_network_tier():
     test = smoke_tests_utils.Test(
         f'gcp-network-tier-{network_tier.value}',
         test_commands,
-        f'sky down -y {name} && {smoke_tests_utils.down_cluster_for_cloud_cmd(name)}',
+        smoke_tests_utils.chain_teardown(
+            f'sky down -y {name}',
+            smoke_tests_utils.down_cluster_for_cloud_cmd(name)),
         timeout=10 * 60,  # 10 mins
     )
     smoke_tests_utils.run_one_test(test)
@@ -3016,7 +3042,9 @@ def test_gcp_network_tier_with_gpu():
             # Check if LD_LIBRARY_PATH contains the required NCCL and TCPX paths for GPU workloads
             f'sky exec {name} {shlex.quote(cmd)} && sky logs {name} --status'
         ],
-        f'sky down -y {name} && {smoke_tests_utils.down_cluster_for_cloud_cmd(name)}',
+        smoke_tests_utils.chain_teardown(
+            f'sky down -y {name}',
+            smoke_tests_utils.down_cluster_for_cloud_cmd(name)),
         timeout=35 * 60,  # 35 mins for GPU provisioning
     )
     smoke_tests_utils.run_one_test(test)
@@ -3244,8 +3272,9 @@ def test_kubernetes_recovery():
             # Check status
             f'sky status -r {name} --no-show-pools --no-show-services --no-show-managed-jobs',
         ],
-        f'sky down -y {name} && {service_cleanup_check} && '
-        f'{smoke_tests_utils.down_cluster_for_cloud_cmd(name)}',
+        smoke_tests_utils.chain_teardown(
+            f'sky down -y {name}', service_cleanup_check,
+            smoke_tests_utils.down_cluster_for_cloud_cmd(name)),
         timeout=30 * 60,
     )
     smoke_tests_utils.run_one_test(test)
@@ -3487,8 +3516,9 @@ def test_kubernetes_pod_config_pvc():
                     f'kubectl delete pvc {pvc_name} --ignore-not-found=true --wait=false || true'
                 ),
             ],
-            f'sky down -y {name} && '
-            f'{smoke_tests_utils.down_cluster_for_cloud_cmd(name)}',
+            smoke_tests_utils.chain_teardown(
+                f'sky down -y {name}',
+                smoke_tests_utils.down_cluster_for_cloud_cmd(name)),
             timeout=10 * 60,
         )
         smoke_tests_utils.run_one_test(test)
@@ -3549,8 +3579,9 @@ def test_launching_with_pending_pods():
                 f'pod=$(kubectl get pod -l ray-cluster-name={name_on_cloud} | grep {head}); if [ -n "$pod" ]; then exit 1; fi'
             ),
         ],
-        f'sky down -y {name} && '
-        f'{smoke_tests_utils.down_cluster_for_cloud_cmd(name)}',
+        smoke_tests_utils.chain_teardown(
+            f'sky down -y {name}',
+            smoke_tests_utils.down_cluster_for_cloud_cmd(name)),
         timeout=10 * 60,
     )
     smoke_tests_utils.run_one_test(test)
@@ -3599,8 +3630,9 @@ def test_kubernetes_pod_config_change_detection():
                 f's=$(SKYPILOT_DEBUG=0 sky launch -y -c {name} --infra kubernetes {smoke_tests_utils.LOW_RESOURCE_ARG} {task_yaml_2_path}); echo "$s"; echo; echo; echo "$s" | grep "TEST_VAR_1 = 2" && '
                 f'echo "$s" | grep "TEST_VAR_2 = 2"',
             ],
-            f'sky down -y {name} && '
-            f'{smoke_tests_utils.down_cluster_for_cloud_cmd(name)}',
+            smoke_tests_utils.chain_teardown(
+                f'sky down -y {name}',
+                smoke_tests_utils.down_cluster_for_cloud_cmd(name)),
             timeout=10 * 60,
         )
         smoke_tests_utils.run_one_test(test)
@@ -3694,8 +3726,9 @@ def test_kubernetes_pod_config_sidecar():
                     f'kubectl logs -l skypilot-cluster-name={name_on_cloud} '
                     '-c sidecar --tail=5 | grep "sidecar running"'),
             ],
-            f'sky down -y {name} && '
-            f'{smoke_tests_utils.down_cluster_for_cloud_cmd(name)}',
+            smoke_tests_utils.chain_teardown(
+                f'sky down -y {name}',
+                smoke_tests_utils.down_cluster_for_cloud_cmd(name)),
             timeout=10 * 60,
         )
         smoke_tests_utils.run_one_test(test)
@@ -3750,9 +3783,10 @@ def test_kubernetes_set_pod_resource_limits():
                     '-o jsonpath=\'{.items[0].spec.containers[0].resources.limits.memory}\' '
                     '| grep -E "^4.*G"'),
             ],
-            f'sky down -y {name} && '
-            f'{smoke_tests_utils.down_cluster_for_cloud_cmd(name)} && '
-            f'rm -f {config_path}',
+            smoke_tests_utils.chain_teardown(
+                f'sky down -y {name}',
+                smoke_tests_utils.down_cluster_for_cloud_cmd(name),
+                f'rm -f {config_path}'),
             timeout=10 * 60,
             env={
                 skypilot_config.ENV_VAR_GLOBAL_CONFIG: config_path,
