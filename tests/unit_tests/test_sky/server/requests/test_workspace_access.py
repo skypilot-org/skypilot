@@ -147,6 +147,7 @@ _EXPECTED: Dict[Tuple[str, str], str] = {
     ('POST', '/serve/logs'): READ,
     ('POST', '/serve/status'): READ,
     ('POST', '/serve/sync-down-logs'): READ,
+    ('POST', '/slurm_cluster_names'): READ,
     ('POST', '/slurm_gpu_availability'): READ,
     ('GET', '/slurm_node_info'): READ,
     ('POST', '/slurm_node_info'): READ,
