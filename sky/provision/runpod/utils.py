@@ -12,10 +12,12 @@ except ImportError:  # Python 3.10
 
 from sky import sky_logging
 from sky.adaptors import runpod
+from sky.provision import constants as provision_constants
 from sky.provision import docker_utils
 from sky.provision.runpod.api import commands as runpod_commands
 from sky.skylet import constants
 from sky.utils import common_utils
+from sky.utils import resources_utils
 
 logger = sky_logging.init_logger(__name__)
 
@@ -328,6 +330,8 @@ def launch(
     *,
     network_volume_id: Optional[str] = None,
     volume_mount_path: Optional[str] = None,
+    network_tier: resources_utils.NetworkTier = (
+        resources_utils.NetworkTier.STANDARD),
 ) -> str:
     """Launches an instance with the given parameters.
 
@@ -340,6 +344,10 @@ def launch(
     Returns:
         instance_id: The instance ID.
     """
+    sdk_version_error = runpod.get_sdk_version_error()
+    if sdk_version_error is not None:
+        raise RuntimeError(sdk_version_error)
+
     name = f'{cluster_name}-{node_type}'
 
     # TODO(zhwu): keep this align with setups in
@@ -397,6 +405,12 @@ def launch(
         'docker_args': docker_args,
         'template_id': template_id,
     }
+
+    if network_tier is resources_utils.NetworkTier.BEST:
+        minimum_bandwidth = (
+            provision_constants.MARKETPLACE_BEST_NETWORK_MIN_BANDWIDTH_MBPS)
+        params['min_download'] = minimum_bandwidth
+        params['min_upload'] = minimum_bandwidth
 
     # Optional network volume mount.
     if volume_mount_path is not None:

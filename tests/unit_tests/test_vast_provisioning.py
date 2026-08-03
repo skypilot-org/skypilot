@@ -10,6 +10,7 @@ from sky import exceptions
 from sky.provision import common
 from sky.provision.vast import instance as vast_instance
 from sky.provision.vast import utils as vast_utils
+from sky.utils import resources_utils
 from sky.utils import status_lib
 
 
@@ -44,6 +45,55 @@ def _provision_config() -> common.ProvisionConfig:
         resume_stopped_nodes=False,
         ports_to_open_on_launch=None,
     )
+
+
+def _launch_vast(network_tier: resources_utils.NetworkTier,
+                 reliable_hosts: bool = False) -> str:
+    return vast_utils.launch(
+        name='test-head',
+        instance_type='1x-A100-4-8192',
+        region='US',
+        disk_size=30,
+        image_name='vastai/base:0.0.2',
+        ports=None,
+        preemptible=False,
+        secure_only=False,
+        reliable_hosts=reliable_hosts,
+        network_tier=network_tier,
+    )
+
+
+def _mock_vast_sdk(monkeypatch):
+    sdk = mock.MagicMock()
+    sdk.search_offers.return_value = [{
+        'id': 1,
+        'machine_id': 2,
+    }]
+    sdk.create_instance.return_value = {'new_contract': '3'}
+    sdk.show_instance.return_value = {'id': '3'}
+    monkeypatch.setattr(vast_utils.vast, 'vast', lambda: sdk)
+    return sdk
+
+
+def test_launch_best_network_tier_filters_symmetric_bandwidth(monkeypatch):
+    sdk = _mock_vast_sdk(monkeypatch)
+
+    assert _launch_vast(resources_utils.NetworkTier.BEST) == '3'
+
+    query = sdk.search_offers.call_args.kwargs['query']
+    assert 'inet_down>=1000' in query
+    assert 'inet_up>=1000' in query
+
+
+def test_launch_standard_network_tier_preserves_reliable_host_filter(
+        monkeypatch):
+    sdk = _mock_vast_sdk(monkeypatch)
+
+    _launch_vast(resources_utils.NetworkTier.STANDARD, reliable_hosts=True)
+
+    query = sdk.search_offers.call_args.kwargs['query']
+    assert query.count('inet_down>=1000') == 1
+    assert 'inet_up>=1000' not in query
 
 
 def test_wait_for_instances_ready_treats_null_as_pending(monkeypatch):

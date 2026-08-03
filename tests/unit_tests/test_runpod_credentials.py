@@ -1,4 +1,7 @@
+import importlib.metadata
 import types
+
+import pytest
 
 from sky.adaptors import runpod as runpod_adaptor
 from sky.clouds import runpod as runpod_cloud
@@ -42,3 +45,26 @@ def test_provisioning_loads_api_key_from_config(tmp_path, monkeypatch) -> None:
     runpod_utils._ensure_api_key_configured()
 
     assert sdk_module.api_key == 'provisioning-key'
+
+
+@pytest.mark.parametrize(
+    ('installed_version', 'expected_valid'),
+    [('1.7.9', False), ('1.7.10', True), ('2.0.0', True)],
+)
+def test_credential_check_enforces_runpod_sdk_minimum(monkeypatch,
+                                                      installed_version,
+                                                      expected_valid):
+    monkeypatch.setattr(runpod_cloud.import_lib_util, 'find_spec',
+                        lambda _name: object())
+    monkeypatch.setattr(importlib.metadata, 'version',
+                        lambda _name: installed_version)
+    monkeypatch.setattr(runpod_cloud.RunPod, '_check_runpod_credentials',
+                        lambda: (True, None))
+    monkeypatch.setattr(runpod_cloud.RunPod, '_validate_api_key', lambda:
+                        (True, None))
+
+    valid, error = runpod_cloud.RunPod._check_credentials()
+
+    assert valid is expected_valid
+    if not expected_valid:
+        assert 'runpod>=1.7.10' in error

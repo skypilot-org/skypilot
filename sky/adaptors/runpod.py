@@ -1,10 +1,15 @@
 """RunPod cloud adaptor."""
 
+from importlib import metadata as import_lib_metadata
 import os
 import time
 from typing import Any, Dict, Optional
 
+from packaging import version as version_lib
+
 from sky.adaptors import common
+
+MINIMUM_SDK_VERSION = '1.7.10'
 
 runpod = common.LazyImport(
     'runpod',
@@ -17,6 +22,26 @@ requests = common.LazyImport('requests')
 _REST_BASE = 'https://rest.runpod.io/v1'
 _MAX_RETRIES = 3
 _TIMEOUT = 10
+
+
+def get_sdk_version_error() -> Optional[str]:
+    """Return an actionable error when the RunPod SDK is not supported."""
+    try:
+        installed_version = import_lib_metadata.version('runpod')
+    except import_lib_metadata.PackageNotFoundError:
+        return ('RunPod SDK is not installed. Install it with: pip install '
+                '"skypilot[runpod]".')
+    try:
+        supported = (version_lib.Version(installed_version) >=
+                     version_lib.Version(MINIMUM_SDK_VERSION))
+    except version_lib.InvalidVersion:
+        return (f'RunPod SDK version {installed_version!r} is invalid. Install '
+                'a supported version with: pip install "skypilot[runpod]".')
+    if supported:
+        return None
+    return (f'RunPod SDK {installed_version} is too old. Install '
+            f'"runpod>={MINIMUM_SDK_VERSION}" with: pip install '
+            '"skypilot[runpod]".')
 
 
 def _get_api_key() -> str:
