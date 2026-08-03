@@ -1335,7 +1335,8 @@ def test_tail_hook_logs_minimal_api_version_required(monkeypatch):
 #   < 4:  legacy waitless single-positional
 #   < 5:  + wait_for
 #   < 7:  + hook / hook_timeout (master's pre-PR1 single-hook path)
-#   >= 7: set_autostop + set_hooks(...)   (new dual-emit path)
+#   7: set_autostop + set_hooks(...)      (compatibility dual-emit path)
+#   >= 8: set_autostop(..., hooks=...)    (atomic update path)
 #
 # The four tests below pin each non-trivial branch's emitted shape so
 # regressions to the cross-version contract surface in unit tests rather
@@ -1478,11 +1479,11 @@ def test_codegen_v7_branch_preserves_legacy_hook_when_hooks_none():
     parts = _shlex.split(rendered)
     payload = parts[-1]
 
-    # The v7+ (else:) branch is the last block; it must include the
+    # The v7+ branches must include the
     # legacy hook in the set_autostop call so the skylet's routing
     # bridge fires.
     assert "'sleep 120'" in payload, (
-        f'Codegen v7+ branch must forward the legacy ``hook`` arg to '
+        f'Codegen v7+ branches must forward the legacy ``hook`` arg to '
         f'set_autostop; otherwise the skylet has no way to route the '
         f'master client\'s ``hook=`` into the new hooks list. Rendered '
         f'payload:\n{payload}')
@@ -1498,7 +1499,7 @@ def test_codegen_v7_branch_preserves_legacy_hook_when_hooks_none():
         f'Rendered payload:\n{payload}')
 
 
-def test_codegen_v7_branch_explicit_clear_hooks_still_works():
+def test_codegen_v8_branch_explicit_clear_hooks_is_atomic():
     """Re-launches that drop hooks pass ``hooks=[]`` to explicitly clear.
 
     Guarding the corollary of the previous test: the codegen must still
@@ -1517,18 +1518,12 @@ def test_codegen_v7_branch_explicit_clear_hooks_still_works():
     import shlex as _shlex
     parts = _shlex.split(rendered)
     payload = parts[-1]
-    assert 'set_hooks([])' in payload, (
-        f'Explicit hooks=[] must still emit set_hooks([]) so the skylet '
-        f'clears its stored hooks list. Rendered:\n{payload}')
+    assert 'elif skylet_lib_version < 8' in payload
+    assert 'clear_hooks=True' in payload
 
 
-def test_codegen_v7_branch_dual_emits_set_autostop_and_set_hooks():
-    """v7+ skylets get the full ``set_hooks(...)`` call alongside the
-    legacy-shape ``set_autostop(...)``. Dual-emit lets a single rendered
-    payload work on both pre-v7 and v7+ skylets — pre-v7 takes the
-    ``hook=``/``hook_timeout=`` branch, v7+ takes the ``set_hooks``
-    branch. Without dual-emit a brand-new client would NOT propagate
-    hooks to a brand-new cluster.
+def test_codegen_v7_compat_and_v8_atomic_hooks_paths():
+    """v7 retains dual writes while v8 updates config and hooks atomically.
     """
     hooks = [
         {
@@ -1542,9 +1537,9 @@ def test_codegen_v7_branch_dual_emits_set_autostop_and_set_hooks():
         },
     ]
     payload = _render_codegen(down=False, hooks=hooks)
-    # The else (>= 7) branch invokes set_hooks with the full list.
+    # The v7 compatibility branch invokes set_hooks with the full list.
     assert 'autostop_lib.set_hooks(' in payload, (
-        f"v7+ branch must invoke set_hooks(...); got:\n{payload}")
+        f"v7 branch must invoke set_hooks(...); got:\n{payload}")
     # And the payload contains both hooks (the actual list literal).
     assert "'run': 'a.sh'" in payload and "'run': 'b.sh'" in payload, (
         f"set_hooks payload should carry every hook from the input "
@@ -1554,6 +1549,9 @@ def test_codegen_v7_branch_dual_emits_set_autostop_and_set_hooks():
     assert 'if skylet_lib_version < 7' in payload, (
         f"Dual-emit must keep the pre-v7 branch (`< 7`) alive; got:\n"
         f"{payload}")
+    assert 'elif skylet_lib_version < 8' in payload
+    assert f'hooks={hooks!r}' in payload
+    assert 'clear_hooks=False' in payload
 
 
 def test_set_autostop_skylet_side_routes_legacy_hook_arg_down_aware(
