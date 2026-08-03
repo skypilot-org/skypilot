@@ -72,6 +72,67 @@ def test_runpod_no_upload_task_mounts_no_provider_credentials(monkeypatch):
     assert credentials == {}
 
 
+def test_runpod_no_upload_s3_file_mount_includes_only_aws_credentials(
+        monkeypatch):
+    credential_clouds = _mock_credential_file_mounts(monkeypatch)
+    task = task_lib.Task(file_mounts={'/dataset': 's3://datasets/train'})
+    original_file_mounts = dict(task.file_mounts)
+    original_storage_mounts = dict(task.storage_mounts)
+
+    allowed_clouds = backend_utils._get_credential_provider_allowlist(
+        task=task,
+        compute_cloud=credential_clouds['runpod'],
+        remote_identity=schemas.RemoteIdentityOptions.NO_UPLOAD.value)
+    credentials = sky_check.get_cloud_credential_file_mounts(
+        excluded_clouds=None, allowed_clouds=allowed_clouds)
+
+    assert credentials == {'~/.aws/credentials': '/credentials/aws'}
+    assert task.file_mounts == original_file_mounts
+    assert task.storage_mounts == original_storage_mounts
+
+
+def test_runpod_no_upload_gcs_file_mount_includes_only_gcp_credentials(
+        monkeypatch):
+    credential_clouds = _mock_credential_file_mounts(monkeypatch)
+    task = task_lib.Task(file_mounts={'/dataset': 'gs://datasets/train'})
+    original_file_mounts = dict(task.file_mounts)
+    original_storage_mounts = dict(task.storage_mounts)
+
+    allowed_clouds = backend_utils._get_credential_provider_allowlist(
+        task=task,
+        compute_cloud=credential_clouds['runpod'],
+        remote_identity=schemas.RemoteIdentityOptions.NO_UPLOAD.value)
+    credentials = sky_check.get_cloud_credential_file_mounts(
+        excluded_clouds=None, allowed_clouds=allowed_clouds)
+
+    assert credentials == {'~/.config/gcloud': '/credentials/gcp'}
+    assert task.file_mounts == original_file_mounts
+    assert task.storage_mounts == original_storage_mounts
+
+
+@pytest.mark.parametrize('source', [
+    'unknown://datasets/train',
+    '/local/datasets/train',
+])
+def test_runpod_no_upload_unknown_file_mount_url_mounts_no_credentials(
+        monkeypatch, source):
+    credential_clouds = _mock_credential_file_mounts(monkeypatch)
+    task = task_lib.Task(file_mounts={'/dataset': source})
+    original_file_mounts = dict(task.file_mounts)
+    original_storage_mounts = dict(task.storage_mounts)
+
+    allowed_clouds = backend_utils._get_credential_provider_allowlist(
+        task=task,
+        compute_cloud=credential_clouds['runpod'],
+        remote_identity=schemas.RemoteIdentityOptions.NO_UPLOAD.value)
+    credentials = sky_check.get_cloud_credential_file_mounts(
+        excluded_clouds=None, allowed_clouds=allowed_clouds)
+
+    assert credentials == {}
+    assert task.file_mounts == original_file_mounts
+    assert task.storage_mounts == original_storage_mounts
+
+
 def test_credential_allowlist_mounts_selected_compute_and_storage(monkeypatch):
     credential_clouds = _mock_credential_file_mounts(monkeypatch)
     task = task_lib.Task(

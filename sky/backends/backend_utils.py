@@ -738,10 +738,10 @@ def _get_credential_provider_allowlist(
     if remote_identity == schemas.RemoteIdentityOptions.LOCAL_CREDENTIALS.value:
         allowed_clouds.add(compute_cloud)
 
-    tasks_with_storage = [] if task is None else [task]
+    tasks_with_provider_dependencies = [] if task is None else [task]
     if task is not None and task.managed_job_dag is not None:
         for workload_task in task.managed_job_dag.tasks:
-            tasks_with_storage.append(workload_task)
+            tasks_with_provider_dependencies.append(workload_task)
             for resources in workload_task.resources:
                 if resources.cloud is not None:
                     allowed_clouds.add(resources.cloud)
@@ -749,9 +749,10 @@ def _get_credential_provider_allowlist(
     storage_only_cloud_names = {
         cloud_name.lower() for cloud_name in sky_check.STORAGE_ONLY_CLOUDS
     }
-    for task_with_storage in tasks_with_storage:
-        for storage in task_with_storage.storage_mounts.values():
-            store_types = set(storage.stores)
+    for task_with_dependencies in tasks_with_provider_dependencies:
+        store_types = set()
+        for storage in task_with_dependencies.storage_mounts.values():
+            store_types.update(storage.stores)
             if isinstance(storage.source, str):
                 try:
                     source_store_type, _, _, _, _ = (
@@ -760,19 +761,29 @@ def _get_credential_provider_allowlist(
                     store_types.add(source_store_type)
                 except ValueError:
                     pass
-            for store_type in store_types:
-                if not isinstance(store_type, storage_lib.StoreType):
-                    continue
+        remote_file_mounts = (
+            task_with_dependencies.get_cloud_to_remote_file_mounts())
+        if remote_file_mounts is not None:
+            for source in remote_file_mounts.values():
                 try:
-                    storage_cloud_name = store_type.to_cloud()
+                    source_store_type, _, _, _, _ = (
+                        storage_lib.StoreType.get_fields_from_store_url(source))
+                    store_types.add(source_store_type)
                 except ValueError:
-                    continue
-                storage_cloud = registry.CLOUD_REGISTRY.get(
-                    storage_cloud_name.lower())
-                if storage_cloud is not None:
-                    allowed_clouds.add(storage_cloud)
-                elif storage_cloud_name.lower() in storage_only_cloud_names:
-                    allowed_clouds.add(storage_cloud_name)
+                    pass
+        for store_type in store_types:
+            if not isinstance(store_type, storage_lib.StoreType):
+                continue
+            try:
+                storage_cloud_name = store_type.to_cloud()
+            except ValueError:
+                continue
+            storage_cloud = registry.CLOUD_REGISTRY.get(
+                storage_cloud_name.lower())
+            if storage_cloud is not None:
+                allowed_clouds.add(storage_cloud)
+            elif storage_cloud_name.lower() in storage_only_cloud_names:
+                allowed_clouds.add(storage_cloud_name)
     return allowed_clouds
 
 
