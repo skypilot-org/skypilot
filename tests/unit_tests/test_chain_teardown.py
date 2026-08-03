@@ -1,4 +1,9 @@
-"""Tests for the smoke test helpers in tests/smoke_tests/smoke_tests_utils.py."""
+"""Tests for smoke_tests_utils.chain_teardown().
+
+Keep 'smoke_tests' out of this file's path: tests/conftest.py treats a session
+as a smoke-test session when any collected item's path contains it, which
+wraps the whole session in a config override.
+"""
 import subprocess
 from typing import List, Tuple
 
