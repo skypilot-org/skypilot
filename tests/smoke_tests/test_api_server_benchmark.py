@@ -172,12 +172,17 @@ def _mint_service_account_token(api_url: str) -> str:
     return token
 
 
-def _launch_log_producer(generic_cloud: str) -> str:
+def _launch_log_producer() -> str:
     """Start a job that keeps printing, so there is a real log to tail.
 
     The held streams are `sky jobs logs -f` against this job. Tailing a real
     job is the request a user actually makes; the server's own log is served
     by a special-cased path that never touches the request executor.
+
+    Always on Kubernetes, whatever cloud the rest of the run uses: the job is
+    scaffolding for the log stream, not part of what is being measured, and
+    the lane's local kind cluster starts it in seconds for nothing. It is
+    also what most deployments run.
     """
     job_name = f'loop-lag-log-{int(time.time())}'
     with tempfile.NamedTemporaryFile('w', suffix='.yaml',
@@ -189,7 +194,7 @@ def _launch_log_producer(generic_cloud: str) -> str:
         task_path = task_file.name
     try:
         subprocess.run([
-            'sky', 'jobs', 'launch', '-n', job_name, '--infra', generic_cloud,
+            'sky', 'jobs', 'launch', '-n', job_name, '--infra', 'kubernetes',
             '--cpus', '2+', '--memory', '4+', task_path, '-y', '-d'
         ],
                        check=True)
@@ -260,7 +265,7 @@ def _valid_trials(result: loop_lag_harness.RunResult) -> list:
 
 @pytest.mark.benchmark
 @pytest.mark.remote_server
-def test_api_server_event_loop_lag(generic_cloud: str):
+def test_api_server_event_loop_lag():
     """Assert the server's event loop stays responsive under authenticated load.
 
     Two scenarios, both authenticated with a service-account token so every
@@ -327,7 +332,7 @@ def test_api_server_event_loop_lag(generic_cloud: str):
             f'{trial["lag_max_peak_seconds"]:.3f}s reached '
             f'{_LAG_THRESHOLD_SECONDS}s')
 
-    job_name = _launch_log_producer(generic_cloud)
+    job_name = _launch_log_producer()
     try:
         starvation = loop_lag_harness.HarnessConfig(
             name='executor-starvation',
