@@ -553,20 +553,39 @@ def get_cached_enabled_clouds_or_refresh(
 
 
 def get_cloud_credential_file_mounts(
-        excluded_clouds: Optional[Iterable[sky_clouds.Cloud]]
+    excluded_clouds: Optional[Iterable[sky_clouds.Cloud]] = None,
+    allowed_clouds: Optional[Iterable[Union[sky_clouds.Cloud, str]]] = None,
 ) -> Dict[str, str]:
-    """Returns the files necessary to access all clouds.
+    """Returns credential files for the explicitly allowed cloud providers.
+
+    If ``allowed_clouds`` is None, preserve the legacy behavior of collecting
+    credentials from all registered and storage-only clouds. An explicit empty
+    iterable returns no cloud credentials. Registered clouds are represented by
+    ``Cloud`` objects; storage-only clouds use their existing provider names.
 
     Returns a dictionary that will be added to a task's file mounts
     and a list of patterns that will be excluded (used as rsync_exclude).
     """
-    # Uploading credentials for all clouds instead of only sky check
-    # enabled clouds because users may have partial credentials for some
-    # clouds to access their specific resources (e.g. cloud storage) but
-    # not have the complete credentials to pass sky check.
-    clouds = registry.CLOUD_REGISTRY.values()
+    # Preserve legacy broad discovery when no explicit provider scope is
+    # supplied: storage access can require credentials for a cloud that does
+    # not pass the full compute credential check.
+    allowed_registered_clouds = None
+    allowed_storage_cloud_names = None
+    if allowed_clouds is not None:
+        allowed_clouds = tuple(allowed_clouds)
+        allowed_registered_clouds = tuple(
+            cloud for cloud in allowed_clouds
+            if isinstance(cloud, sky_clouds.Cloud))
+        allowed_storage_cloud_names = {
+            cloud.lower() for cloud in allowed_clouds if isinstance(cloud, str)
+        }
+
     file_mounts = {}
-    for cloud in clouds:
+    for cloud in registry.CLOUD_REGISTRY.values():
+        if (allowed_registered_clouds is not None and
+                not sky_clouds.cloud_in_iterable(cloud,
+                                                 allowed_registered_clouds)):
+            continue
         if (excluded_clouds is not None and
                 sky_clouds.cloud_in_iterable(cloud, excluded_clouds)):
             continue
@@ -579,25 +598,14 @@ def get_cloud_credential_file_mounts(
     # storage-only clouds as only clouds with computing instances are
     # marked as enabled by skypilot.
     # TODO (kyuds): recognize storage-only clouds as clouds.
-    r2_is_enabled, _ = cloudflare.check_storage_credentials()
-    if r2_is_enabled:
-        r2_credential_mounts = cloudflare.get_credential_file_mounts()
-        file_mounts.update(r2_credential_mounts)
-
-    coreweave_is_enabled, _ = coreweave.check_storage_credentials()
-    if coreweave_is_enabled:
-        coreweave_credential_mounts = coreweave.get_credential_file_mounts()
-        file_mounts.update(coreweave_credential_mounts)
-
-    vastdata_is_enabled, _ = vastdata.check_storage_credentials()
-    if vastdata_is_enabled:
-        vastdata_credential_mounts = vastdata.get_credential_file_mounts()
-        file_mounts.update(vastdata_credential_mounts)
-
-    hf_is_enabled, _ = huggingface.check_storage_credentials()
-    if hf_is_enabled:
-        hf_credential_mounts = huggingface.get_credential_file_mounts()
-        file_mounts.update(hf_credential_mounts)
+    storage_only_clouds = (cloudflare, coreweave, vastdata, huggingface)
+    for storage_cloud in storage_only_clouds:
+        if (allowed_storage_cloud_names is not None and
+                storage_cloud.NAME.lower() not in allowed_storage_cloud_names):
+            continue
+        storage_cloud_is_enabled, _ = storage_cloud.check_storage_credentials()
+        if storage_cloud_is_enabled:
+            file_mounts.update(storage_cloud.get_credential_file_mounts())
     return file_mounts
 
 
