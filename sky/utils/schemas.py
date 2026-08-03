@@ -2184,6 +2184,12 @@ def get_config_schema():
                 }
             },
         },
+        'runpod': {
+            'type': 'object',
+            'required': [],
+            'additionalProperties': False,
+            'properties': {}
+        },
         'vast': {
             'type': 'object',
             'required': [],

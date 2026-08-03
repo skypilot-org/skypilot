@@ -32,7 +32,13 @@ def _launch_runpod(network_tier: resources_utils.NetworkTier,
 def test_launch_best_network_tier_passes_bandwidth_requirements(preemptible):
     with patch('sky.provision.runpod.utils.runpod') as mock_runpod, patch(
             'sky.provision.runpod.utils.runpod_commands.create_spot_pod',
-            return_value={'id': 'pod-id'}) as create_spot_pod:
+            return_value={'id': 'pod-id'}) as create_spot_pod, patch(
+                'sky.provision.runpod.utils._rest_launchable_data_center_ids',
+                return_value={'US-CA-2'}), patch(
+                    'sky.provision.runpod.utils._available_data_center_ids',
+                    return_value={'US-CA-2'}), patch(
+                        'sky.provision.runpod.utils._create_pod_via_rest',
+                        return_value={'id': 'pod-id'}) as create_rest_pod:
         mock_runpod.get_sdk_version_error.return_value = None
         mock_runpod.runpod.get_gpu.return_value = {'memoryInGb': 80}
         mock_runpod.runpod.create_pod.return_value = {'id': 'pod-id'}
@@ -40,23 +46,33 @@ def test_launch_best_network_tier_passes_bandwidth_requirements(preemptible):
         assert (_launch_runpod(resources_utils.NetworkTier.BEST,
                                preemptible=preemptible) == 'pod-id')
 
-    create_call = (create_spot_pod.call_args
-                   if preemptible else mock_runpod.runpod.create_pod.call_args)
-    assert create_call.kwargs['min_download'] == 1000
-    assert create_call.kwargs['min_upload'] == 1000
+    if preemptible:
+        create_kwargs = create_spot_pod.call_args.kwargs
+        assert create_kwargs['min_download'] == 1000
+        assert create_kwargs['min_upload'] == 1000
+    else:
+        create_params = create_rest_pod.call_args.args[0]
+        assert create_params['minDownloadMbps'] == 1000
+        assert create_params['minUploadMbps'] == 1000
 
 
 def test_launch_standard_network_tier_omits_bandwidth_requirements():
-    with patch('sky.provision.runpod.utils.runpod') as mock_runpod:
+    with patch('sky.provision.runpod.utils.runpod') as mock_runpod, patch(
+            'sky.provision.runpod.utils._rest_launchable_data_center_ids',
+            return_value={'US-CA-2'}), patch(
+                'sky.provision.runpod.utils._available_data_center_ids',
+                return_value={'US-CA-2'}), patch(
+                    'sky.provision.runpod.utils._create_pod_via_rest',
+                    return_value={'id': 'pod-id'}) as create_rest_pod:
         mock_runpod.get_sdk_version_error.return_value = None
         mock_runpod.runpod.get_gpu.return_value = {'memoryInGb': 80}
         mock_runpod.runpod.create_pod.return_value = {'id': 'pod-id'}
 
         _launch_runpod(resources_utils.NetworkTier.STANDARD)
 
-    create_kwargs = mock_runpod.runpod.create_pod.call_args.kwargs
-    assert 'min_download' not in create_kwargs
-    assert 'min_upload' not in create_kwargs
+    create_params = create_rest_pod.call_args.args[0]
+    assert 'minDownloadMbps' not in create_params
+    assert 'minUploadMbps' not in create_params
 
 
 def test_launch_rejects_unsupported_sdk_version():

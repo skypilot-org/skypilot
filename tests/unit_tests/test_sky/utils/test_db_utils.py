@@ -10,6 +10,19 @@ import sqlalchemy
 from sky.utils.db import db_utils
 
 
+def test_add_existing_alembic_column_avoids_alter_table():
+    inspector = mock.Mock()
+    inspector.get_columns.return_value = [{'name': 'age'}]
+
+    with mock.patch('alembic.op.get_bind', return_value=mock.Mock()), \
+            mock.patch('sqlalchemy.inspect', return_value=inspector), \
+            mock.patch('alembic.op.add_column') as add_column:
+        db_utils.add_column_to_table_alembic('test_table', 'age',
+                                             sqlalchemy.Integer())
+
+    add_column.assert_not_called()
+
+
 class TestSkyRuntimeDirEnvVar:
     """Test that db_utils correctly uses SKY_RUNTIME_DIR for database paths."""
 

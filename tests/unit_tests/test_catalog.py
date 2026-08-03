@@ -68,6 +68,26 @@ def test_runpod_gpu_memory_uses_mib_catalog_contract():
     assert accelerators['H200-SXM'][0].device_memory == 141
 
 
+def test_runpod_invalid_gpu_warning_includes_vcpu_value(capsys):
+    gpu_info = fetch_runpod.get_gpu_info(
+        'B300',
+        {
+            'displayName': 'NVIDIA B300',
+            'manufacturer': 'NVIDIA',
+            'memoryInGb': 288,
+            'lowestPrice': {
+                'minVcpu': None,
+                'minMemory': 256,
+            },
+        },
+        gpu_count=1,
+    )
+
+    assert gpu_info is None
+    warning = capsys.readouterr().out
+    assert 'vCPUs must be a positive number, not None' in warning
+
+
 @mock.patch('sky.catalog.common.requests.get')
 def test_read_catalog_triggers_update_on_stale_file(mock_get):
     """Test that read_catalog (and the LazyDataFrame it returns)
