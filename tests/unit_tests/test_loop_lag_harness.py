@@ -203,6 +203,36 @@ async def test_held_streams_liveness_counts_only_running_readers():
 
 
 @pytest.mark.asyncio
+async def test_sample_lag_peak_catches_a_spike_that_ages_out():
+    """The gauge is a 30s tumbling window, so the last read is not the peak.
+
+    A spike early in a trial is gone from the gauge by the time the trial
+    ends; only sampling during the trial can see it. The sampler keeps every
+    reading so the trial can take the max.
+    """
+    app = _StubApp()
+    # A big peak, then a quiet gauge -- a spike that has aged out.
+    app.metrics_pages = [
+        _quiet_metrics(10, lag_max_by_pid={'1': 1.75}),
+        _quiet_metrics(10, lag_max_by_pid={'1': 0.002}),
+    ]
+    with _StubServer(app) as server:
+        config = _config(server.url, lag_gauge_sample_seconds=0.02)
+        peaks: list = []
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            sampler = asyncio.ensure_future(
+                harness._sample_lag_peak(client, config, peaks))  # pylint: disable=protected-access
+            await asyncio.sleep(0.2)
+            sampler.cancel()
+            await asyncio.gather(sampler, return_exceptions=True)
+
+    assert len(peaks) > 1, 'sampler should have taken several readings'
+    assert peaks[-1] == pytest.approx(0.002), 'gauge went quiet as intended'
+    # The point: the aged-out spike survives in the record.
+    assert max(peaks) == pytest.approx(1.75)
+
+
+@pytest.mark.asyncio
 async def test_streams_that_never_opened_invalidate_the_trial():
     """Zero opened streams must not read as "nothing to check".
 
@@ -252,6 +282,7 @@ def test_summary_ignores_invalid_trials():
                                    lag_bucket_deltas={},
                                    lag_observations_above_threshold=0.0,
                                    lag_max_peak_seconds=0.0,
+                                   lag_gauge_samples=0,
                                    cpu_seconds_delta=1.0,
                                    cpu_seconds_per_request=0.1)
 

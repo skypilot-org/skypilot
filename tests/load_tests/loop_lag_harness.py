@@ -167,6 +167,14 @@ class HarnessConfig:
     max_send_lateness_seconds: float = 0.2
     # Requests slower than this count toward slow_request_rate.
     slow_request_threshold_seconds: float = SLOW_REQUEST_THRESHOLD_SECONDS
+    # How often to read the peak-lag gauge during a trial. The gauge holds the
+    # peak of a 30s tumbling window, so reading it only at the end of a 60s
+    # trial misses any spike from the first window entirely; sampling below
+    # the window length means every window is observed. The cost is a handful
+    # of extra /metrics reads per trial, which do land on the loop being
+    # measured (the metrics app is a task on the same loop) -- ~4 scrapes
+    # against 6000 requests.
+    lag_gauge_sample_seconds: float = 15.0
     request_timeout_seconds: float = 30.0
     max_connections: int = 512
     verify_tls: bool = True
@@ -199,7 +207,10 @@ class TrialResult:
     slow_request_rate: Optional[float]
     lag_bucket_deltas: Dict[str, float]
     lag_observations_above_threshold: float
+    # Max over the gauge samples taken during the trial, not a single
+    # end-of-trial read; see _sample_lag_peak.
     lag_max_peak_seconds: float
+    lag_gauge_samples: int
     cpu_seconds_delta: float
     cpu_seconds_per_request: Optional[float]
 
@@ -643,6 +654,25 @@ async def _scrape(client: httpx.AsyncClient, metrics_url: str) -> str:
 # --------------------------------------------------------------------------
 
 
+async def _sample_lag_peak(metrics_client: httpx.AsyncClient,
+                           config: HarnessConfig, peaks: List[float]) -> None:
+    """Read the peak-lag gauge until cancelled, recording every value.
+
+    The gauge resets each 30s window, so the trial's true peak is the maximum
+    over samples taken during it, not the single value left at the end.
+    """
+    while True:
+        try:
+            peaks.append(
+                parse_lag_max(await _scrape(metrics_client,
+                                            config.metrics_url)))
+        except Exception:  # pylint: disable=broad-except
+            # A scrape that fails mid-trial should not fail the trial; the
+            # remaining samples still bound the peak.
+            pass
+        await asyncio.sleep(config.lag_gauge_sample_seconds)
+
+
 async def _run_baseline(metrics_client: httpx.AsyncClient,
                         config: HarnessConfig) -> BaselineResult:
     """Measure lag with no load; a server already lagging invalidates the run.
@@ -683,8 +713,15 @@ async def _run_trial(load_client: httpx.AsyncClient,
     before_buckets = parse_lag_buckets(before_text)
     before_cpu = parse_cpu_total(before_text)
 
+    peaks: List[float] = []
+    sampler = asyncio.ensure_future(
+        _sample_lag_peak(metrics_client, config, peaks))
     started = time.monotonic()
-    samples = await _drive_load(load_client, config, config.trial_seconds)
+    try:
+        samples = await _drive_load(load_client, config, config.trial_seconds)
+    finally:
+        sampler.cancel()
+        await asyncio.gather(sampler, return_exceptions=True)
     elapsed = time.monotonic() - started
 
     after_text = await _scrape(metrics_client, config.metrics_url)
@@ -737,7 +774,8 @@ async def _run_trial(load_client: httpx.AsyncClient,
         lag_bucket_deltas={str(k): v for k, v in sorted(deltas.items())},
         lag_observations_above_threshold=observations_above(
             deltas, config.lag_threshold_seconds),
-        lag_max_peak_seconds=parse_lag_max(after_text),
+        lag_max_peak_seconds=max(peaks + [parse_lag_max(after_text)]),
+        lag_gauge_samples=len(peaks),
         cpu_seconds_delta=cpu_delta,
         cpu_seconds_per_request=cpu_delta / completed if completed else None,
     )
