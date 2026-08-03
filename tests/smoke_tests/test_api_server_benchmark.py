@@ -265,6 +265,10 @@ def _valid_trials(result: loop_lag_harness.RunResult) -> list:
 
 @pytest.mark.benchmark
 @pytest.mark.remote_server
+# The scenarios need a Kubernetes cluster regardless of how the run is
+# triggered: the log-producer job launches there. The benchmark mark still
+# routes this to its own dedicated agent.
+@pytest.mark.kubernetes
 def test_api_server_event_loop_lag():
     """Assert the server's event loop stays responsive under authenticated load.
 
