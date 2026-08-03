@@ -2517,7 +2517,19 @@ def stream_and_get(
                  None),
         stream=True)
     if response.status_code in [404, 400]:
-        detail = response.json().get('detail')
+        # ``response`` is a streaming request; on some pooled connections the
+        # small error body cannot be read back and raises a
+        # ChunkedEncodingError. Read the detail defensively and fall back to a
+        # status-based message so the user gets a clean error, not a traceback.
+        detail = None
+        try:
+            detail = response.json().get('detail')
+        except Exception:  # pylint: disable=broad-except
+            pass
+        if not detail:
+            detail = ('the request or log path was not found or is not '
+                      'accessible' if response.status_code == 404 else
+                      'the request was invalid')
         with ux_utils.print_exception_no_traceback():
             raise exceptions.ClientError(f'Failed to stream logs: {detail}')
     stream_request_id: Optional[server_common.RequestId[
