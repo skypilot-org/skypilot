@@ -96,6 +96,14 @@ def test_runpod_teardown_execution_strategy_for_remote_identity(
         remote_identity) == expected_strategy)
 
 
+def test_runpod_default_remote_identity_uses_server_backed_teardown():
+    remote_identity = schemas.get_default_remote_identity('runpod')
+
+    assert remote_identity == schemas.RemoteIdentityOptions.NO_UPLOAD.value
+    assert (runpod_cloud.RunPod().get_teardown_execution_strategy(
+        remote_identity) == TeardownExecutionStrategy.HEAD_WITH_SERVER_FALLBACK)
+
+
 def _set_pod_identity(monkeypatch) -> None:
     monkeypatch.setenv('RUNPOD_POD_ID', 'xedezhzb9la3ye')
     monkeypatch.setenv('RUNPOD_API_KEY', 'pod-api-key')

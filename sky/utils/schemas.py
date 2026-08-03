@@ -1431,6 +1431,8 @@ def get_default_remote_identity(cloud: str) -> str:
     """Get the default remote identity for the specified cloud."""
     if cloud in ('kubernetes', 'ssh'):
         return RemoteIdentityOptions.SERVICE_ACCOUNT.value
+    if cloud == 'runpod':
+        return RemoteIdentityOptions.NO_UPLOAD.value
     return RemoteIdentityOptions.LOCAL_CREDENTIALS.value
 
 
