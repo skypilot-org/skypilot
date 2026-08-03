@@ -319,6 +319,69 @@ _DEFAULT_VIEWER_ALLOWLIST = [
     },
 ]
 
+# Endpoints that need no *write* access to the caller's active workspace but
+# that the viewer allowlist cannot express, because `RBACMiddleware`
+# short-circuits the `/api/` and `/dashboard/` prefixes before any allowlist
+# is consulted — so an entry here would be dead weight for the viewer role.
+# Consumed only by the workspace-access classification (see
+# `sky/server/requests/workspace_access.py`), never by the viewer role.
+_WORKSPACE_READ_EXTRA_ENDPOINTS = [
+    # Cancelling a request touches the request queue, not any workspace.
+    # Requiring write on the active workspace would deny it to a user whose
+    # only accessible workspace is read-only.
+    {
+        'path': '/api/cancel',
+        'method': 'POST'
+    },
+]
+
+# Endpoints that must ALWAYS require write on the caller's active workspace,
+# regardless of the viewer allowlist. These create a resource in the active
+# workspace, so the active-workspace write gate is their
+# real authorization -- misclassifying one as read
+# would let a non-member create into a workspace they cannot write.
+# Consulted by `is_read_only_endpoint` (via `is_always_write_endpoint`) which
+# short-circuits to "write" on a match.
+_ALWAYS_WRITE_ENDPOINTS = [
+    {
+        'path': '/launch',
+        'method': 'POST'
+    },
+    {
+        'path': '/jobs/launch',
+        'method': 'POST'
+    },
+    {
+        'path': '/jobs/pool_apply',
+        'method': 'POST'
+    },
+    {
+        'path': '/serve/up',
+        'method': 'POST'
+    },
+    {
+        'path': '/serve/update',
+        'method': 'POST'
+    },
+    {
+        'path': '/volumes/apply',
+        'method': 'POST'
+    },
+]
+
+_ALWAYS_WRITE_ENDPOINT_KEYS = frozenset(
+    (rule['path'], rule['method']) for rule in _ALWAYS_WRITE_ENDPOINTS)
+
+
+def is_always_write_endpoint(path: str, method: str) -> bool:
+    """Whether this endpoint must always require active-workspace write.
+
+    Exact (path, method) match against `_ALWAYS_WRITE_ENDPOINTS`. Used as a
+    hard guardrail so a viewer-allowlist entry (operator- or plugin-supplied)
+    can never relax one of these create endpoints to read.
+    """
+    return (path, method) in _ALWAYS_WRITE_ENDPOINT_KEYS
+
 
 # Define roles
 class RoleName(str, enum.Enum):
@@ -389,6 +452,50 @@ def get_viewer_allowlist(
             if entry not in combined:
                 combined.append(entry)
 
+    return combined
+
+
+def get_read_only_endpoints(
+    plugin_allowlist: Optional[List[Dict[str, str]]] = None
+) -> List[Dict[str, str]]:
+    """Get the endpoints that only read, for workspace-access purposes.
+
+    This is the viewer role's allowlist (OSS defaults + operator config +
+    plugin ``BasePlugin.viewer_allowlist``) plus
+    `_WORKSPACE_READ_EXTRA_ENDPOINTS`. The viewer allowlist is exactly "the
+    endpoints a strictly-read-only role may call", so reusing it avoids
+    maintaining a second read/write classification of the same endpoints —
+    and it is the only declaration that plugins already populate for their
+    own endpoints.
+
+    An endpoint deliberately kept *off* the viewer allowlist is therefore
+    treated as a write here. That errs on the strict side, which is the safe
+    direction for a workspace the caller can only read.
+
+    Args:
+        plugin_allowlist: Optional list of `{path, method}` records
+            collected from loaded plugins.
+
+    Returns:
+        Combined list of `{path, method}` records, Casbin `keyMatch2` syntax.
+    """
+    combined = get_viewer_allowlist(plugin_allowlist=plugin_allowlist)
+    for rule in _WORKSPACE_READ_EXTRA_ENDPOINTS:
+        entry = {'path': rule['path'], 'method': rule['method']}
+        if entry not in combined:
+            combined.append(entry)
+    # Guardrail observability: an always-write endpoint should never be
+    # declared read. `is_read_only_endpoint` already forces these to write at
+    # match time (which also catches wildcard viewer entries), but flag an
+    # exact-match declaration so the operator/plugin author notices. We only
+    # warn here; the runtime short-circuit does the actual enforcement.
+    for entry in combined:
+        if is_always_write_endpoint(entry['path'], entry['method']):
+            logger.warning(
+                f'Viewer allowlist declares {entry["method"]} '
+                f'{entry["path"]} as read-only, but it is an always-write '
+                f'(create) endpoint; it will still require active-workspace '
+                f'write.')
     return combined
 
 

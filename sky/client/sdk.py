@@ -492,7 +492,9 @@ def set_preferred_workspace(preferred: Optional[str]) -> Dict[str, Any]:
     """
     response = server_common.make_authenticated_request(
         'POST', '/users/me/workspace', json={'preferred': preferred})
-    response.raise_for_status()
+    # Render a permission denial (setting a workspace the user cannot access)
+    # as a clean message rather than a raw HTTPError traceback.
+    server_common.handle_request_error(response)
     return response.json()
 
 
@@ -547,7 +549,9 @@ def get_user_workspace(requested: Optional[str] = None) -> Dict[str, Any]:
     if requested is not None:
         url += f'?requested={urlparse.quote(requested)}'
     response = server_common.make_authenticated_request('GET', url)
-    response.raise_for_status()
+    # Render a permission denial (querying a workspace the user cannot access)
+    # as a clean message rather than a raw HTTPError traceback.
+    server_common.handle_request_error(response)
     return response.json()
 
 

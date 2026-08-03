@@ -2435,6 +2435,17 @@ def get_config_schema():
                         'type': 'string',
                     },
                 },
+                # Who may read a (private) workspace. 'allowed_users'
+                # (default): only the workspace's allowed users (members)
+                # and admins can see it; it is hidden from everyone else.
+                # 'all': anyone can see the workspace and its clusters/jobs, but
+                # writes stay members-only, so non-members get read-only access.
+                # Only meaningful for private workspaces; an open (non-private)
+                # workspace is usable by everyone regardless.
+                'read_access': {
+                    'type': 'string',
+                    'enum': ['allowed_users', 'all'],
+                },
                 'gcp': {
                     'type': 'object',
                     'properties': {
@@ -2811,6 +2822,21 @@ def get_config_schema():
             'api_server': api_server,
             'active_workspace': workspace_schema,
             'workspaces': workspaces_schema,
+            # Org-wide defaults applied to every workspace unless the
+            # workspace overrides them under `workspaces.<name>`.
+            'workspace_config': {
+                'type': 'object',
+                'required': [],
+                'additionalProperties': False,
+                'properties': {
+                    # Default read access for private workspaces. A
+                    # per-workspace `read_access` overrides this.
+                    'read_access': {
+                        'type': 'string',
+                        'enum': ['allowed_users', 'all'],
+                    },
+                },
+            },
             'provision': provision_configs,
             'rbac': rbac_schema,
             'logs': logs_schema,
