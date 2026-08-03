@@ -1809,16 +1809,22 @@ class JobController:
             """
             if not self._dag.inter_connection_enabled():
                 return
-            updated_handles = []
-            for t, _ in all_tasks_handles:
+
+            async def _fetch_handle(t: 'sky.Task') -> typing.Any:
                 t_name = t.name
                 assert t_name is not None
                 # JobGroups don't support pools, cluster name is deterministic
                 t_cluster = managed_job_utils.generate_managed_job_cluster_name(
                     t_name, self._job_id)
-                t_handle = await asyncio.to_thread(
+                return await asyncio.to_thread(
                     global_user_state.get_handle_from_cluster_name, t_cluster)
-                updated_handles.append((t, t_handle))
+
+            # Independent DB reads; fetched in parallel, mirroring the
+            # Phase 2 handle sync.
+            group_tasks = [t for t, _ in all_tasks_handles]
+            handles = await asyncio.gather(
+                *(_fetch_handle(t) for t in group_tasks))
+            updated_handles = list(zip(group_tasks, handles))
 
             failed_nodes = await (
                 job_group_networking.setup_job_group_networking(
