@@ -11,6 +11,36 @@ from sky.clouds import nebius
 from sky.utils import resources_utils
 
 
+class TestNebiusAdaptorSDK:
+    """Tests for SkyPilot's Nebius SDK configuration."""
+
+    def test_user_agent_prefix_is_passed_for_all_credentials(self):
+        mock_nebius = MagicMock()
+        with patch.object(nebius_adaptor, 'nebius', mock_nebius), \
+             patch.object(nebius_adaptor,
+                          'api_domain',
+                          return_value='api.nebius.test'), \
+             patch('sky.__version__', '1.2.3'):
+            nebius_adaptor._sdk.cache_clear()
+            try:
+                nebius_adaptor._sdk('iam-token', None)
+                nebius_adaptor._sdk(None, '~/credentials.json')
+            finally:
+                nebius_adaptor._sdk.cache_clear()
+
+        calls = mock_nebius.sdk.SDK.call_args_list
+        assert calls[0].kwargs == {
+            'credentials': 'iam-token',
+            'domain': 'api.nebius.test',
+            'user_agent_prefix': 'skypilot/1.2.3',
+        }
+        assert calls[1].kwargs == {
+            'credentials_file_name': os.path.expanduser('~/credentials.json'),
+            'domain': 'api.nebius.test',
+            'user_agent_prefix': 'skypilot/1.2.3',
+        }
+
+
 class TestNebiusNetworkTier:
     """Test cases for Nebius network_tier functionality."""
 
