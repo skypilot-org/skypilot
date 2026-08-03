@@ -127,10 +127,10 @@ class AutostopServiceImpl(autostopv1_pb2_grpc.AutostopServiceServicer):
                 raise ValueError('Autostop configuration was rejected.')
             return autostopv1_pb2.SetAutostopResponse(
                 supports_durable_autodown=True)
-        except Exception:  # pylint: disable=broad-except
+        except Exception as exc:  # pylint: disable=broad-except
             context.abort(grpc.StatusCode.INTERNAL,
                           'Failed to set autostop configuration.')
-            raise RuntimeError('context.abort() unexpectedly returned')
+            raise RuntimeError('context.abort() unexpectedly returned') from exc
 
     def IsAutostopping(  # type: ignore[return]
             self, request: autostopv1_pb2.IsAutostoppingRequest,

@@ -826,19 +826,29 @@ def cancel_autodown_intent(cluster_name: str, cluster_hash: str,
 def restore_predecessor_autodown_intent(replacement: AutodownIntent,
                                         predecessor: AutodownIntent,
                                         new_state: AutodownIntentState) -> bool:
-    """Restore an irreversibly claimed predecessor over its replacement.
+    """Restore a recoverable predecessor over its rejected replacement.
 
     A skylet may claim generation N while the server is applying generation
     N+1. If the skylet rejects N+1, its status and the reconciler must continue
-    using exact generation N. The complete N+1 CONFIGURING fence below makes
-    this exceptional restoration safe against delayed or concurrent writers.
+    using exact generation N. If status is temporarily unavailable, restoring
+    N's original polling state keeps that possible claim discoverable. The
+    complete N+1 CONFIGURING fence below makes this exceptional restoration safe
+    against delayed or concurrent writers.
     """
     new_state = AutodownIntentState(new_state)
-    if new_state not in {
-            AutodownIntentState.PREPARING,
-            AutodownIntentState.READY,
-    }:
-        raise ValueError('A claimed predecessor must be actionable.')
+    actionable_states = {
+        AutodownIntentState.PREPARING,
+        AutodownIntentState.READY,
+    }
+    polling_states = {
+        AutodownIntentState.CONFIGURING,
+        AutodownIntentState.ARMED,
+    }
+    if (new_state in polling_states and new_state is not predecessor.state):
+        raise ValueError(
+            'A polling predecessor must retain its original state.')
+    if new_state not in actionable_states | polling_states:
+        raise ValueError('A predecessor must remain polling or actionable.')
     if (replacement.cluster_name != predecessor.cluster_name or
             replacement.cluster_hash != predecessor.cluster_hash or
             replacement.generation != predecessor.generation + 1 or
