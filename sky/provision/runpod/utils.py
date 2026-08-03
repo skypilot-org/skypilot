@@ -5,6 +5,8 @@ import os
 import time
 from typing import Any, Dict, List, Optional, Tuple
 
+import requests
+
 try:
     import tomllib
 except ImportError:  # Python 3.10
@@ -15,11 +17,80 @@ from sky.adaptors import runpod
 from sky.provision import constants as provision_constants
 from sky.provision import docker_utils
 from sky.provision.runpod.api import commands as runpod_commands
-from sky.skylet import constants
 from sky.utils import common_utils
 from sky.utils import resources_utils
 
 logger = sky_logging.init_logger(__name__)
+
+_REST_API_BASE_URL = 'https://rest.runpod.io/v1'
+_REST_API_TIMEOUT_SECONDS = 120
+
+_rest_data_center_ids: Optional[set] = None
+
+
+def _rest_launchable_data_center_ids() -> Optional[set]:
+    """Data center ids accepted by the REST create-pod API, or None if unknown.
+
+    The REST enum is a strict subset of both GraphQL's dataCenters list and
+    the catalog's region/zone table. One unknown id rejects the whole create
+    request with a 400, so ids must be filtered against this list first.
+    """
+    global _rest_data_center_ids
+    if _rest_data_center_ids is not None:
+        return _rest_data_center_ids
+    try:
+        response = requests.get(f'{_REST_API_BASE_URL}/openapi.json',
+                                timeout=_REST_API_TIMEOUT_SECONDS)
+        response.raise_for_status()
+        properties = (response.json()['components']['schemas']['PodCreateInput']
+                      ['properties'])
+        _rest_data_center_ids = set(
+            properties['dataCenterIds']['items']['enum'])
+    except (requests.RequestException, KeyError, TypeError, ValueError) as e:
+        logger.warning('Could not fetch the RunPod REST data center list; '
+                       f'sending zone ids unfiltered: {e}')
+        return None
+    return _rest_data_center_ids
+
+
+_GPU_AVAILABILITY_TTL_SECONDS = 20
+_gpu_availability_cache: Dict[Tuple[str, int, bool], Tuple[float, set]] = {}
+
+
+def _available_data_center_ids(gpu_type_id: str, gpu_count: int,
+                               secure_cloud: bool) -> Optional[set]:
+    """Data centers currently reporting stock for the GPU, or None if unknown.
+
+    Advisory pre-check so region attempts skip data centers with no stock
+    instead of paying a create-and-fail round trip. Marketplace stock moves
+    fast, so results are cached only briefly, and any query failure falls
+    back to attempting the create anyway.
+    """
+    cache_key = (gpu_type_id, gpu_count, secure_cloud)
+    cached = _gpu_availability_cache.get(cache_key)
+    if cached is not None and (time.time() - cached[0] <
+                               _GPU_AVAILABILITY_TTL_SECONDS):
+        return cached[1]
+    secure_literal = 'true' if secure_cloud else 'false'
+    query = ('query { dataCenters { id gpuAvailability(input: '
+             f'{{gpuCount: {gpu_count}, secureCloud: {secure_literal}}}) '
+             '{ gpuTypeId available } } }')
+    try:
+        _ensure_api_key_configured()
+        result = runpod.runpod.api.graphql.run_graphql_query(query)
+        data_centers = result['data']['dataCenters']
+    except Exception as e:  # pylint: disable=broad-except
+        logger.warning('Could not query RunPod GPU availability; '
+                       f'attempting creation without the pre-check: {e}')
+        return None
+    available = {
+        data_center['id']
+        for data_center in data_centers
+        for entry in (data_center.get('gpuAvailability') or [])
+        if entry.get('gpuTypeId') == gpu_type_id and entry.get('available')
+    }
+    _gpu_availability_cache[cache_key] = (time.time(), available)
+    return available
 
 
 def _ensure_api_key_configured() -> None:
@@ -379,17 +450,27 @@ def launch(
     # Use base64 to deal with the tricky quoting issues caused by runpod API.
     encoded = base64.b64encode(setup_cmd.encode('utf-8')).decode('utf-8')
 
-    docker_args = (f'bash -c \'echo {encoded} | base64 --decode > init.sh; '
-                   f'bash init.sh\'')
+    bootstrap_cmd = (f'echo {encoded} | base64 --decode > init.sh; '
+                     'bash init.sh')
+    # Spot and CPU pods are created through the GraphQL SDK, which can only
+    # pass the bootstrap as the container CMD. It then runs through the
+    # image's own ENTRYPOINT, so those images must keep a shell-compatible
+    # entrypoint. On-demand GPU pods are created through the REST API below,
+    # which overrides the entrypoint entirely.
+    docker_args = f'bash -c \'{bootstrap_cmd}\''
 
     # Port 8081 is occupied for nginx in the base image.
     custom_ports_str = ''
     if ports is not None:
         custom_ports_str = ''.join([f'{p}/tcp,' for p in ports])
-    ports_str = (f'22/tcp,'
-                 f'{custom_ports_str}'
-                 f'{constants.SKY_REMOTE_RAY_DASHBOARD_PORT}/http,'
-                 f'{constants.SKY_REMOTE_RAY_PORT}/http')
+    # Only SSH and user-requested ports are published. The internal Ray
+    # ports (6380 GCS, 8266 dashboard) are intentionally not exposed: the
+    # dashboard binds to 127.0.0.1 and GCS speaks gRPC, so RunPod's HTTP
+    # proxy can never serve them and only showed them as perpetually
+    # "Initializing" in the console. All SkyPilot traffic uses the SSH
+    # tunnel, and multi-node Ray connects through internal IPs from
+    # get_cluster_info, so nothing consumes public mappings of those ports.
+    ports_str = f'22/tcp,{custom_ports_str}'.rstrip(',')
 
     image_name_formatted, template_id = _create_template_for_docker_login(
         cluster_name, image_name, docker_login_config)
@@ -440,7 +521,11 @@ def launch(
         })
 
     if preemptible is None or not preemptible:
-        new_instance = runpod.runpod.create_pod(**params)
+        if is_cpu_instance:
+            new_instance = runpod.runpod.create_pod(**params)
+        else:
+            new_instance = _create_pod_via_rest(
+                _rest_pod_create_params(params, bootstrap_cmd))
     else:
         new_instance = runpod_commands.create_spot_pod(
             bid_per_gpu=bid_per_gpu,
@@ -448,6 +533,91 @@ def launch(
         )
 
     return new_instance['id']
+
+
+def _rest_pod_create_params(params: Dict[str, Any],
+                            bootstrap_cmd: str) -> Dict[str, Any]:
+    """Translate SDK create_pod kwargs into REST PodCreateInput fields.
+
+    Only the REST API can override the image ENTRYPOINT via
+    dockerEntrypoint/dockerStartCmd. The GraphQL API used by the runpod SDK
+    passes dockerArgs through the image's own ENTRYPOINT, which breaks any
+    image whose entrypoint is not a shell (e.g. a CLI entrypoint would
+    receive `bash -c ...` as its arguments). Every other SkyPilot
+    provisioner already bypasses image entrypoints; see
+    `--entrypoint=/bin/bash` in sky/provision/docker_utils.py.
+    """
+    zone = params.get('data_center_id')
+    region = params.get('country_code')
+    gpu_count = params['gpu_count']
+    rest_params: Dict[str, Any] = {
+        'name': params['name'],
+        'imageName': params['image_name'],
+        'containerDiskInGb': params['container_disk_in_gb'],
+        'ports': [port for port in params['ports'].split(',') if port],
+        'supportPublicIp': params['support_public_ip'],
+        'computeType': 'GPU',
+        'cloudType': params['cloud_type'],
+        'gpuTypeIds': [params['gpu_type_id']],
+        'gpuCount': gpu_count,
+        'minVCPUPerGPU': int(params['min_vcpu_count'] // gpu_count),
+        'minRAMPerGPU': int(params['min_memory_in_gb'] // gpu_count),
+        'dockerEntrypoint': ['bash', '-c'],
+        'dockerStartCmd': [bootstrap_cmd],
+    }
+    if zone:
+        zone_ids = zone.split(',')
+        launchable = _rest_launchable_data_center_ids()
+        if launchable is not None:
+            supported_zone_ids = [z for z in zone_ids if z in launchable]
+            dropped = sorted(set(zone_ids) - set(supported_zone_ids))
+            if dropped:
+                logger.debug('Dropping data center ids the RunPod REST API '
+                             f'does not accept: {", ".join(dropped)}')
+            if not supported_zone_ids:
+                raise RuntimeError(
+                    'RunPod REST API does not support launching in any of '
+                    f'the requested data centers ({zone}).')
+            zone_ids = supported_zone_ids
+        available = _available_data_center_ids(params['gpu_type_id'], gpu_count,
+                                               params['cloud_type'] == 'SECURE')
+        if available is not None:
+            stocked_zone_ids = [z for z in zone_ids if z in available]
+            if not stocked_zone_ids:
+                raise RuntimeError(
+                    f'No {params["gpu_type_id"]} capacity currently '
+                    f'reported in data center(s) {",".join(zone_ids)}.')
+            zone_ids = stocked_zone_ids
+        rest_params['dataCenterIds'] = zone_ids
+    elif region:
+        rest_params['countryCodes'] = [region]
+    if params.get('template_id'):
+        rest_params['templateId'] = params['template_id']
+    if params.get('min_download'):
+        rest_params['minDownloadMbps'] = params['min_download']
+    if params.get('min_upload'):
+        rest_params['minUploadMbps'] = params['min_upload']
+    if params.get('network_volume_id'):
+        rest_params['networkVolumeId'] = params['network_volume_id']
+    if params.get('volume_mount_path'):
+        rest_params['volumeMountPath'] = params['volume_mount_path']
+    return rest_params
+
+
+def _create_pod_via_rest(create_params: Dict[str, Any]) -> Dict[str, Any]:
+    """Create an on-demand pod through RunPod's REST API."""
+    _ensure_api_key_configured()
+    api_key = getattr(runpod.runpod, 'api_key', None)
+    response = requests.post(
+        f'{_REST_API_BASE_URL}/pods',
+        headers={'Authorization': f'Bearer {api_key}'},
+        json=create_params,
+        timeout=_REST_API_TIMEOUT_SECONDS,
+    )
+    if not response.ok:
+        raise RuntimeError('RunPod REST pod creation failed with status '
+                           f'{response.status_code}: {response.text}')
+    return response.json()
 
 
 def get_registry_auth_resources(
