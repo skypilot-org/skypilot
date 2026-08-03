@@ -3775,18 +3775,50 @@ def reset_jobs_for_recovery() -> None:
         session.commit()
 
 
-def reset_job_for_recovery(job_id: int) -> None:
-    """Set a job to WAITING and remove PID, allowing it to be recovered."""
+def reset_job_for_recovery(
+        job_id: int, *, expected_pid: Optional[int],
+        expected_pid_started_at: Optional[float],
+        expected_schedule_state: Optional[ManagedJobScheduleState]) -> bool:
+    """Set a job to WAITING and remove PID, allowing it to be recovered.
+
+    This is a compare-and-swap: the reset only takes effect if the job's
+    current controller_pid, controller_pid_started_at, and schedule_state
+    still match what the caller observed. All three are compared NULL-safely,
+    so an observed pid of None (the job was never claimed) only matches a
+    column that is still NULL - it is not an unconditional reset. This guards
+    against a race where a controller claimed (or re-claimed) the job between
+    the caller's observation and this write; without the CAS, the reset would
+    immediately orphan the job again, and the claiming controller would keep
+    running while another controller picks the job up.
+
+    schedule_state is part of the comparison too: a row whose schedule_state
+    moved on (e.g. to DONE) without any change to the pid columns must not be
+    re-armed to WAITING.
+
+    Returns whether the reset was applied.
+    """
+    expected_schedule_state_value = (None if expected_schedule_state is None
+                                     else expected_schedule_state.value)
     engine = _db_manager.get_engine()
     with orm.Session(engine) as session:
-        session.query(job_info_table).filter(
-            job_info_table.c.spot_job_id == job_id).update({
-                job_info_table.c.controller_pid: None,
-                job_info_table.c.controller_pid_started_at: None,
-                job_info_table.c.schedule_state:
-                    ManagedJobScheduleState.WAITING.value,
-            })
+        result = session.execute(
+            sqlalchemy.update(job_info_table).where(
+                sqlalchemy.and_(
+                    job_info_table.c.spot_job_id == job_id,
+                    job_info_table.c.controller_pid.is_not_distinct_from(
+                        expected_pid),
+                    job_info_table.c.controller_pid_started_at.
+                    is_not_distinct_from(expected_pid_started_at),
+                    job_info_table.c.schedule_state.is_not_distinct_from(
+                        expected_schedule_state_value),
+                )).values({
+                    job_info_table.c.controller_pid: None,
+                    job_info_table.c.controller_pid_started_at: None,
+                    job_info_table.c.schedule_state:
+                        ManagedJobScheduleState.WAITING.value,
+                }))
         session.commit()
+        return result.rowcount == 1
 
 
 def get_all_job_ids_by_name(name: Optional[str]) -> List[int]:
