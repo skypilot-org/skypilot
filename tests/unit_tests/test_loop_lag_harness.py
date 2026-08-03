@@ -179,6 +179,8 @@ def test_summary_ignores_invalid_trials():
                                    latency_p99=p99,
                                    latency_p999=0.01,
                                    latency_max=0.02,
+                                   latency_histogram={},
+                                   slow_request_rate=0.0,
                                    lag_bucket_deltas={},
                                    lag_observations_above_threshold=0.0,
                                    lag_max_peak_seconds=0.0,
@@ -193,6 +195,95 @@ def test_summary_ignores_invalid_trials():
     summary = harness.summarize(trials)
     assert summary['latency_p99']['median'] == pytest.approx(0.02)
     assert summary['latency_p99']['n'] == 2
+
+
+# ---------------------------------------------------------------------------
+# Latency distribution
+# ---------------------------------------------------------------------------
+
+
+def test_latency_histogram_buckets_by_upper_bound():
+    hist = harness.latency_histogram([0.0005, 0.003, 0.003, 0.2, 99.0])
+    assert hist['0.001'] == 1
+    assert hist['0.005'] == 2
+    assert hist['0.25'] == 1
+    assert hist['inf'] == 1
+    assert sum(hist.values()) == 5
+
+
+def test_latency_histogram_conserves_every_sample():
+    samples = [0.001 * i for i in range(1, 500)]
+    assert sum(harness.latency_histogram(samples).values()) == len(samples)
+
+
+def test_rate_above_counts_only_slower_samples():
+    samples = [0.01] * 99 + [0.5]
+    assert harness.rate_above(samples, 0.1) == pytest.approx(0.01)
+    assert harness.rate_above(samples, 1.0) == 0.0
+
+
+def test_rate_above_is_stable_where_a_percentile_flips():
+    """The reason slow_request_rate exists.
+
+    Two runs whose slow-mode weight differs by a hair (0.9% vs 1.1%) put p99
+    on opposite sides of the mode -- 10ms vs 500ms -- while the rate reports
+    the small difference that is actually there.
+    """
+    below = [0.01] * 991 + [0.5] * 9
+    above = [0.01] * 989 + [0.5] * 11
+    assert harness.percentile(below, 99) == pytest.approx(0.01)
+    assert harness.percentile(above, 99) == pytest.approx(0.5)
+    assert harness.rate_above(below, 0.1) == pytest.approx(0.009)
+    assert harness.rate_above(above, 0.1) == pytest.approx(0.011)
+
+
+def test_pooled_histogram_sums_valid_trials_only():
+    artifact = {
+        'trials': [
+            {
+                'status': 'ok',
+                'latency_histogram': {
+                    '0.01': 5,
+                    '0.25': 1
+                }
+            },
+            {
+                'status': 'ok',
+                'latency_histogram': {
+                    '0.01': 3,
+                    '0.25': 2
+                }
+            },
+            {
+                'status': 'invalid',
+                'latency_histogram': {
+                    '0.01': 99
+                }
+            },
+        ]
+    }
+    pooled = harness.pooled_histogram(artifact)
+    assert pooled['0.01'] == 8
+    assert pooled['0.25'] == 3
+
+
+def test_format_histograms_shows_both_distributions():
+
+    def _hist_artifact(slow):
+        return {
+            'trials': [{
+                'status': 'ok',
+                'latency_histogram': {
+                    '0.01': 100 - slow,
+                    '0.25': slow
+                }
+            }]
+        }
+
+    out = harness.format_histograms(_hist_artifact(1), _hist_artifact(20))
+    assert 'Pooled latency distribution' in out
+    assert '1.00%' in out
+    assert '20.00%' in out
 
 
 # ---------------------------------------------------------------------------

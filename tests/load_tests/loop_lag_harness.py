@@ -50,6 +50,20 @@ from prometheus_client import parser as prom_parser
 # unreadable by `compare`.
 ARTIFACT_VERSION = 1
 
+# Upper bounds (seconds) of the client-side latency histogram carried in every
+# trial. Point percentiles alone cannot answer distribution questions after the
+# fact -- notably how *often* requests land in a slow mode, which is the stable
+# way to measure a second mode that sits near a percentile boundary. Log-spaced
+# so the tail keeps resolution without inflating the artifact.
+LATENCY_HISTOGRAM_BOUNDS = (0.001, 0.0025, 0.005, 0.01, 0.025, 0.05, 0.075, 0.1,
+                            0.15, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0, float('inf'))
+
+# A request this slow is user-visible and well above the healthy mode of every
+# lane measured so far, so the fraction of requests above it is a direct
+# measure of a slow mode's weight rather than of where a percentile happened
+# to land.
+SLOW_REQUEST_THRESHOLD_SECONDS = 0.1
+
 # Server-side metrics the harness scrapes. These are the names of the metric
 # *families*; the histogram's samples carry the `_bucket`/`_sum`/`_count`
 # suffixes.
@@ -65,6 +79,7 @@ SUMMARY_METRICS = (
     'latency_p99',
     'latency_p999',
     'latency_max',
+    'slow_request_rate',
     'achieved_qps',
     'lag_observations_above_threshold',
     'lag_max_peak_seconds',
@@ -149,6 +164,8 @@ class HarnessConfig:
     # A trial whose p99 send lateness exceeds this was starved on the client
     # side, so its numbers describe the load generator, not the server.
     max_send_lateness_seconds: float = 0.2
+    # Requests slower than this count toward slow_request_rate.
+    slow_request_threshold_seconds: float = SLOW_REQUEST_THRESHOLD_SECONDS
     request_timeout_seconds: float = 30.0
     max_connections: int = 512
     verify_tls: bool = True
@@ -173,6 +190,8 @@ class TrialResult:
     latency_p99: Optional[float]
     latency_p999: Optional[float]
     latency_max: Optional[float]
+    latency_histogram: Dict[str, int]
+    slow_request_rate: Optional[float]
     lag_bucket_deltas: Dict[str, float]
     lag_observations_above_threshold: float
     lag_max_peak_seconds: float
@@ -255,6 +274,35 @@ def select_spec(specs: Sequence[RequestSpec], index: int) -> RequestSpec:
             return spec
         position -= weight
     raise AssertionError('unreachable: position exceeded total weight')
+
+
+def latency_histogram(samples: Sequence[float]) -> Dict[str, int]:
+    """Bucket raw latencies by upper bound, keyed for JSON.
+
+    Non-cumulative: each bucket holds the samples that fell in it, so a
+    reader can recover both a distribution and any above-threshold rate
+    without the raw samples, which are far too many to carry.
+    """
+    counts = {str(bound): 0 for bound in LATENCY_HISTOGRAM_BOUNDS}
+    for sample in samples:
+        for bound in LATENCY_HISTOGRAM_BOUNDS:
+            if sample <= bound:
+                counts[str(bound)] += 1
+                break
+    return counts
+
+
+def rate_above(samples: Sequence[float], threshold: float) -> float:
+    """Fraction of samples slower than `threshold`.
+
+    A rate rather than a quantile: when a slow mode's weight sits near a
+    percentile boundary (~1% for p99), that percentile flips between runs
+    while the rate itself moves smoothly, so this is what a comparison can
+    actually be made on.
+    """
+    if not samples:
+        return 0.0
+    return sum(1 for sample in samples if sample > threshold) / len(samples)
 
 
 def percentile(samples: Sequence[float], q: float) -> float:
@@ -625,6 +673,10 @@ async def _run_trial(load_client: httpx.AsyncClient,
         latency_p99=percentile(latencies, 99) if latencies else None,
         latency_p999=percentile(latencies, 99.9) if latencies else None,
         latency_max=max(latencies) if latencies else None,
+        latency_histogram=latency_histogram(latencies),
+        slow_request_rate=(rate_above(latencies,
+                                      config.slow_request_threshold_seconds)
+                           if latencies else None),
         lag_bucket_deltas={str(k): v for k, v in sorted(deltas.items())},
         lag_observations_above_threshold=observations_above(
             deltas, config.lag_threshold_seconds),
@@ -786,6 +838,56 @@ def compare(
     return comparisons
 
 
+def pooled_histogram(artifact: Mapping[str, Any]) -> Dict[str, int]:
+    """Sum every valid trial's latency histogram in a run.
+
+    Pooling across trials is what makes a slow mode legible: per trial it can
+    sit on either side of a percentile boundary, but its weight over the whole
+    run is a stable number.
+    """
+    pooled = {str(bound): 0 for bound in LATENCY_HISTOGRAM_BOUNDS}
+    for trial in artifact.get('trials', []):
+        if trial.get('status') != Status.OK.value:
+            continue
+        for bound, count in (trial.get('latency_histogram') or {}).items():
+            pooled[bound] = pooled.get(bound, 0) + count
+    return pooled
+
+
+def format_histograms(baseline: Mapping[str, Any],
+                      candidate: Mapping[str, Any]) -> str:
+    """Render both runs' pooled latency distributions side by side."""
+    base_hist = pooled_histogram(baseline)
+    cand_hist = pooled_histogram(candidate)
+    base_total = sum(base_hist.values())
+    cand_total = sum(cand_hist.values())
+    if not base_total or not cand_total:
+        return ''
+
+    rows = [('latency <=', 'baseline', '%', 'candidate', '%')]
+    for bound in LATENCY_HISTOGRAM_BOUNDS:
+        key = str(bound)
+        base_count = base_hist.get(key, 0)
+        cand_count = cand_hist.get(key, 0)
+        if not base_count and not cand_count:
+            continue
+        rows.append((
+            'inf' if bound == float('inf') else f'{bound:g}s',
+            str(base_count),
+            f'{base_count / base_total * 100:.2f}%',
+            str(cand_count),
+            f'{cand_count / cand_total * 100:.2f}%',
+        ))
+    widths = [max(len(row[i]) for row in rows) for i in range(len(rows[0]))]
+    lines = ['', 'Pooled latency distribution (all valid trials):']
+    for position, row in enumerate(rows):
+        lines.append('  '.join(
+            value.rjust(widths[i]) for i, value in enumerate(row)).rstrip())
+        if position == 0:
+            lines.append('  '.join('-' * width for width in widths))
+    return '\n'.join(lines)
+
+
 def format_comparison(comparisons: Sequence[MetricComparison]) -> str:
     """Render a comparison as a fixed-width table."""
     header = ('metric', 'baseline', 'candidate', 'delta', 'pct', 'a/a',
@@ -858,6 +960,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         print('No metrics in common between the two artifacts.')
         return 1
     print(format_comparison(comparisons))
+    histograms = format_histograms(baseline, candidate)
+    if histograms:
+        print(histograms)
     return 0
 
 
