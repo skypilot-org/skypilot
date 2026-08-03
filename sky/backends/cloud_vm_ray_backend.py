@@ -1160,6 +1160,7 @@ class RetryingVmProvisioner(object):
                         volume_mounts=volume_mounts,
                         cloud_specific_failover_overrides=failover_overrides,
                         extra_template_variables=extra_vars,
+                        task=task,
                     )
                 except exceptions.ResourcesUnavailableError as e:
                     # Failed due to catalog issue, e.g. image not found, or
