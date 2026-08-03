@@ -160,6 +160,52 @@ def test_trial_is_invalid_when_nothing_completed():
     assert status is harness.Status.INVALID
 
 
+def test_a_brief_client_stall_survives_a_percentile_but_not_the_gate():
+    """Why the gate is the maximum and not p99.
+
+    A 400ms client stall in a 60s/100qps trial delays ~40 of 6000 requests --
+    0.67%, so p99 sees nothing at all, while those 40 requests each carry
+    400ms of client-side delay in their reported latency. Gating on the
+    percentile would discard exactly the event the gate exists to catch.
+    """
+    lateness = [0.0] * 5960 + [0.4] * 40
+    assert harness.percentile(lateness, 99) == pytest.approx(0.0)
+    assert harness.classify_trial(6000, harness.percentile(lateness, 99),
+                                  0.2)[0] is harness.Status.OK
+    status, reason = harness.classify_trial(6000, max(lateness), 0.2)
+    assert status is harness.Status.INVALID
+    assert 'fell behind schedule' in reason
+
+
+def test_trial_is_invalid_when_held_streams_closed_early():
+    status, reason = harness.classify_trial(100,
+                                            0.01,
+                                            0.2,
+                                            streams_expected=32,
+                                            streams_live=31)
+    assert status is harness.Status.INVALID
+    assert '1 of 32' in reason
+
+
+def test_held_streams_liveness_counts_only_running_readers():
+
+    async def _run():
+        held = harness._HeldStreams()  # pylint: disable=protected-access
+        forever = asyncio.ensure_future(asyncio.sleep(30))
+        finished = asyncio.ensure_future(asyncio.sleep(0))
+        held.readers = [forever, finished]
+        held.opened = 2
+        await asyncio.sleep(0.05)
+        live = held.live()
+        forever.cancel()
+        await asyncio.gather(forever, finished, return_exceptions=True)
+        return live
+
+    # A reader that returned (server closed the stream) is not holding
+    # anything, which is the whole distinction opened/live draws.
+    assert asyncio.run(_run()) == 1
+
+
 def test_summary_ignores_invalid_trials():
 
     def _trial(index, status, p99):
@@ -174,6 +220,8 @@ def test_summary_ignores_invalid_trials():
                                    status_counts={'200': 10},
                                    failure_count=0,
                                    send_lateness_p99=0.001,
+                                   send_lateness_max=0.002,
+                                   streams_live=0,
                                    latency_p50=0.001,
                                    latency_p90=0.002,
                                    latency_p99=p99,
@@ -522,6 +570,7 @@ def _artifact(name, p99, lag_above=0.0, status=harness.Status.OK):
             },
         },
         'streams_opened': 0,
+        'streams_live_at_end': 0,
         'streams_failed': 0,
     }
 
@@ -1049,6 +1098,7 @@ def test_artifact_round_trips_through_json(tmp_path):
         }},
         streams_opened=0,
         streams_failed=0,
+        streams_live_at_end=0,
     )
     path = app_summary.write(tmp_path / 'nested' / 'run.json')
     reloaded = json.loads(pathlib.Path(path).read_text())

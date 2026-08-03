@@ -30,7 +30,11 @@ _LAG_THRESHOLD_SECONDS = 0.25
 # keep that pool busy without turning the benchmark into a DB throughput test.
 _FLOOD_QPS = 100.0
 _STARVATION_FLOOD_QPS = 50.0
-# Enough concurrent streams to occupy the auth pool's worth of workers.
+# Concurrent long-lived responses to hold open. These occupy the default
+# thread executor that log streaming reads through (aiofiles) and the
+# connections behind them; they do NOT hold the dedicated auth executor, which
+# the token middleware uses for three finite DB calls per request and releases
+# before the response body streams.
 _HELD_STREAMS = 32
 
 # Generous by design: this bounds "the server still answers" under held-open
@@ -251,6 +255,18 @@ def test_api_server_event_loop_lag():
     _require_valid(flood_result, 'authenticated-flood')
 
     for trial in _valid_trials(flood_result):
+        # Without this the lag assertions below pass on a server that answered
+        # every request 401 or 503 -- and a 503 is exactly what an exhausted
+        # auth executor returns, so the failure mode this benchmark exists for
+        # would read as a clean run.
+        assert trial['failure_count'] == 0, (
+            f'trial {trial["index"]}: {trial["failure_count"]} of '
+            f'{trial["completed_requests"]} authenticated requests failed; '
+            f'statuses: {trial["status_counts"]}')
+        assert set(trial['status_counts']) == {
+            '200'
+        }, (f'trial {trial["index"]}: expected only 200s, got '
+            f'{trial["status_counts"]}')
         assert trial['lag_observations_above_threshold'] == 0, (
             f'trial {trial["index"]}: {trial["lag_observations_above_threshold"]:.0f} '
             f'event loop tick(s) landed above {_LAG_THRESHOLD_SECONDS}s under '
@@ -286,8 +302,16 @@ def test_api_server_event_loop_lag():
 
     assert starvation_result.streams_opened == _HELD_STREAMS, (
         f'only {starvation_result.streams_opened}/{_HELD_STREAMS} streams '
-        f'stayed open ({starvation_result.streams_failed} failed); the '
-        'scenario did not put the server under the load it claims to')
+        f'opened ({starvation_result.streams_failed} failed); the scenario '
+        'did not put the server under the load it claims to')
+    # Opening is not holding: a stream the server closed leaves the opened
+    # count untouched while the concurrency disappears. Per-trial validity
+    # covers this too, but assert it here so the run-level number is checked
+    # even if every trial were somehow excluded.
+    assert starvation_result.streams_live_at_end == _HELD_STREAMS, (
+        f'{_HELD_STREAMS - starvation_result.streams_live_at_end} of '
+        f'{_HELD_STREAMS} streams closed before the run ended; the server was '
+        'not held at the concurrency this scenario measures')
 
     for trial in _valid_trials(starvation_result):
         assert trial['failure_count'] == 0, (

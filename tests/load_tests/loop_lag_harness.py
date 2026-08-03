@@ -161,7 +161,7 @@ class HarnessConfig:
     baseline_lag_threshold_seconds: float = 0.25
     # Also the threshold the per-trial lag observation count is taken above.
     lag_threshold_seconds: float = 0.25
-    # A trial whose p99 send lateness exceeds this was starved on the client
+    # A trial whose worst send lateness exceeds this was starved on the client
     # side, so its numbers describe the load generator, not the server.
     max_send_lateness_seconds: float = 0.2
     # Requests slower than this count toward slow_request_rate.
@@ -185,6 +185,10 @@ class TrialResult:
     status_counts: Dict[str, int]
     failure_count: int
     send_lateness_p99: Optional[float]
+    # The gate; see classify_trial for why the worst case and not a quantile.
+    send_lateness_max: Optional[float]
+    # How many held streams were still open when the trial ended.
+    streams_live: int
     latency_p50: Optional[float]
     latency_p90: Optional[float]
     latency_p99: Optional[float]
@@ -223,6 +227,10 @@ class RunResult:
     trials: List[Dict[str, Any]]
     summary: Dict[str, Dict[str, float]]
     streams_opened: int
+    # Opened counts connections that were established; this counts the ones
+    # that were still open when the run ended, which is what the scenario
+    # actually depends on.
+    streams_live_at_end: int
     streams_failed: int
 
     def to_dict(self) -> Dict[str, Any]:
@@ -327,8 +335,11 @@ def percentile(samples: Sequence[float], q: float) -> float:
     return ordered[lower] * (1.0 - weight) + ordered[upper] * weight
 
 
-def classify_trial(completed_requests: int, send_lateness_p99: Optional[float],
-                   max_send_lateness: float) -> Tuple[Status, Optional[str]]:
+def classify_trial(completed_requests: int,
+                   send_lateness_max: Optional[float],
+                   max_send_lateness: float,
+                   streams_expected: int = 0,
+                   streams_live: int = 0) -> Tuple[Status, Optional[str]]:
     """Decide whether a trial's numbers are usable.
 
     The gate is *send lateness* -- how far behind schedule requests actually
@@ -340,15 +351,29 @@ def classify_trial(completed_requests: int, send_lateness_p99: Optional[float],
     judge as pass or fail. A completion-rate gate cannot tell these apart: a
     server stall stretches the interval and reads as the client falling
     behind.
+
+    Lateness is judged on the *maximum*, not a percentile: a client stall is a
+    brief event, and a 400ms stall in a 6000-request trial delays ~0.7% of
+    them, which a p99 discards entirely -- the statistic would drop exactly
+    the event it exists to catch. Any request that departed late carries that
+    delay in its latency, so the worst one bounds the contamination.
+
+    A scenario that holds streams open is only that scenario while they are
+    open, so a trial that lost some has not measured what it claims.
     """
     if completed_requests <= 0:
         return Status.INVALID, 'no requests completed'
-    if send_lateness_p99 is not None and send_lateness_p99 > max_send_lateness:
+    if send_lateness_max is not None and send_lateness_max > max_send_lateness:
         return (Status.INVALID,
-                f'load generator fell behind schedule: p99 send lateness '
-                f'{send_lateness_p99:.3f}s exceeds {max_send_lateness}s; the '
+                f'load generator fell behind schedule: worst send lateness '
+                f'{send_lateness_max:.3f}s exceeds {max_send_lateness}s; the '
                 'client was starved, so the numbers do not describe the '
                 'server')
+    if streams_expected and streams_live < streams_expected:
+        return (Status.INVALID,
+                f'{streams_expected - streams_live} of {streams_expected} '
+                'held streams closed before the trial ended, so the server '
+                'was not under the concurrency this scenario measures')
     return Status.OK, None
 
 
@@ -533,23 +558,39 @@ async def _drive_load(client: httpx.AsyncClient, config: HarnessConfig,
     return samples
 
 
+@dataclasses.dataclass
+class _HeldStreams:
+    """Streams opened for a run, and whether they are still open.
+
+    Opening a stream is not the same as holding one: a server that closes the
+    response, or a reader that dies, leaves the count of opened streams
+    unchanged while the concurrency the scenario is built on quietly
+    disappears. `live()` is what a trial must be judged against.
+    """
+    opened: int = 0
+    failed: int = 0
+    readers: List['asyncio.Task'] = dataclasses.field(default_factory=list)
+
+    def live(self) -> int:
+        return sum(1 for reader in self.readers if not reader.done())
+
+
 @contextlib.asynccontextmanager
-async def _held_streams(
-        auth: Auth, config: HarnessConfig) -> AsyncIterator[Tuple[int, int]]:
+async def _held_streams(auth: Auth,
+                        config: HarnessConfig) -> AsyncIterator[_HeldStreams]:
     """Hold `config.streams.count` responses open for the enclosed block.
 
-    Yields (opened, failed). Read timeouts are disabled because a followed log
-    that produces no output is the normal case, not a hang.
+    Read timeouts are disabled because a followed log that produces no output
+    is the normal case, not a hang.
     """
+    held = _HeldStreams()
     if config.streams is None or config.streams.count <= 0:
-        yield 0, 0
+        yield held
         return
 
     spec = config.streams
     url = config.base_url.rstrip('/') + spec.path
     stack = contextlib.AsyncExitStack()
-    opened = 0
-    failed = 0
     client = httpx.AsyncClient(
         headers=auth.headers,
         cookies=auth.cookies,
@@ -559,24 +600,24 @@ async def _held_streams(
                             max_keepalive_connections=spec.count * 2),
     )
     await stack.enter_async_context(client)
-    readers: List[asyncio.Task] = []
     try:
         for _ in range(spec.count):
             try:
                 response = await stack.enter_async_context(
                     client.stream(spec.method, url, params=spec.params))
                 if not 200 <= response.status_code < 300:
-                    failed += 1
+                    held.failed += 1
                     continue
-                readers.append(asyncio.ensure_future(_consume_stream(response)))
-                opened += 1
+                held.readers.append(
+                    asyncio.ensure_future(_consume_stream(response)))
+                held.opened += 1
             except Exception:  # pylint: disable=broad-except
-                failed += 1
-        yield opened, failed
+                held.failed += 1
+        yield held
     finally:
-        for reader in readers:
+        for reader in held.readers:
             reader.cancel()
-        await asyncio.gather(*readers, return_exceptions=True)
+        await asyncio.gather(*held.readers, return_exceptions=True)
         await stack.aclose()
 
 
@@ -633,7 +674,7 @@ async def _run_baseline(metrics_client: httpx.AsyncClient,
 
 async def _run_trial(load_client: httpx.AsyncClient,
                      metrics_client: httpx.AsyncClient, config: HarnessConfig,
-                     index: int) -> TrialResult:
+                     index: int, held: '_HeldStreams') -> TrialResult:
     before_text = await _scrape(metrics_client, config.metrics_url)
     before_buckets = parse_lag_buckets(before_text)
     before_cpu = parse_cpu_total(before_text)
@@ -651,8 +692,15 @@ async def _run_trial(load_client: httpx.AsyncClient,
     achieved_qps = completed / elapsed if elapsed > 0 else 0.0
     lateness_p99 = (percentile(samples.send_lateness, 99)
                     if samples.send_lateness else None)
-    status, reason = classify_trial(completed, lateness_p99,
-                                    config.max_send_lateness_seconds)
+    lateness_max = max(samples.send_lateness) if samples.send_lateness else None
+    # Read liveness after the load, so a stream that died mid-trial counts
+    # against the trial it actually affected.
+    streams_live = held.live()
+    status, reason = classify_trial(completed,
+                                    lateness_max,
+                                    config.max_send_lateness_seconds,
+                                    streams_expected=held.opened,
+                                    streams_live=streams_live)
 
     latencies = samples.latencies
     return TrialResult(
@@ -667,6 +715,8 @@ async def _run_trial(load_client: httpx.AsyncClient,
         status_counts=dict(samples.status_counts),
         failure_count=samples.failures,
         send_lateness_p99=lateness_p99,
+        send_lateness_max=lateness_max,
+        streams_live=streams_live,
         latency_p50=percentile(latencies, 50) if latencies else None,
         latency_p90=percentile(latencies, 90) if latencies else None,
         latency_p99=percentile(latencies, 99) if latencies else None,
@@ -707,9 +757,10 @@ async def run_async(config: HarnessConfig, auth: Auth) -> RunResult:
                              trials=[],
                              summary={},
                              streams_opened=0,
-                             streams_failed=0)
+                             streams_failed=0,
+                             streams_live_at_end=0)
 
-        async with _held_streams(auth, config) as (opened, failed):
+        async with _held_streams(auth, config) as held:
             async with httpx.AsyncClient(
                     headers=auth.headers,
                     cookies=auth.cookies,
@@ -724,7 +775,8 @@ async def run_async(config: HarnessConfig, auth: Auth) -> RunResult:
                     if index > 0 and config.inter_trial_seconds > 0:
                         await asyncio.sleep(config.inter_trial_seconds)
                     trials.append(await _run_trial(load_client, metrics_client,
-                                                   config, index))
+                                                   config, index, held))
+                streams_live_at_end = held.live()
 
     usable = [trial for trial in trials if trial.status is Status.OK]
     status = Status.OK if usable else Status.INVALID
@@ -739,8 +791,9 @@ async def run_async(config: HarnessConfig, auth: Auth) -> RunResult:
         baseline=dataclasses.asdict(baseline),
         trials=[dataclasses.asdict(trial) for trial in trials],
         summary=summarize(trials),
-        streams_opened=opened,
-        streams_failed=failed,
+        streams_opened=held.opened,
+        streams_failed=held.failed,
+        streams_live_at_end=streams_live_at_end,
     )
 
 
@@ -764,6 +817,13 @@ CONFIG_COMPARE_KEYS = (
     'num_trials',
     'warmup_seconds',
     'lag_threshold_seconds',
+    # Changes what slow_request_rate counts.
+    'slow_request_threshold_seconds',
+    # Both reshape the latency distribution rather than the server's
+    # behaviour: a smaller pool queues requests in the client, and a shorter
+    # timeout censors the tail into errors.
+    'max_connections',
+    'request_timeout_seconds',
 )
 
 
