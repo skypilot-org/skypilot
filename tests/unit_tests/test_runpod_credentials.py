@@ -110,6 +110,12 @@ def _mock_http_request(monkeypatch, side_effect):
     return request
 
 
+def _mock_retry_sleep(monkeypatch):
+    sleep = mock.Mock()
+    monkeypatch.setattr(runpod_adaptor.time, 'sleep', sleep)
+    return sleep
+
+
 @pytest.mark.parametrize('status_code', [200, 204, 404, 410])
 def test_terminate_current_pod_deletes_pod_with_idempotent_success(
         monkeypatch, status_code):
@@ -140,16 +146,35 @@ def test_terminate_current_pod_requires_pod_identity(monkeypatch,
     request.assert_not_called()
 
 
+@pytest.mark.parametrize('pod_id', ['AbC123-_~.opaque', 'Pod-Id_42~candidate'])
+def test_terminate_current_pod_uses_safe_opaque_pod_identity(
+        monkeypatch, pod_id):
+    _set_pod_identity(monkeypatch)
+    monkeypatch.setenv('RUNPOD_POD_ID', pod_id)
+    request = _mock_http_request(monkeypatch, _Response(204))
+
+    assert runpod_adaptor.terminate_current_pod() is None
+
+    request.assert_called_once_with(
+        'DELETE',
+        f'https://rest.runpod.io/v1/pods/{pod_id}',
+        headers={'Authorization': 'Bearer pod-api-key'},
+        timeout=10,
+    )
+
+
 @pytest.mark.parametrize(
     'pod_id',
     [
-        'xedezhzb9la3ye/other',
-        'xedezhzb9la3ye?includeMachine=true',
-        'xedezhzb9la3ye#fragment',
-        'xedezh zb9la3ye',
-        'xedezhzb9la3ye\n',
-        'xedezhzb9la3y%',
-        'Xedezhzb9la3ye',
+        '.',
+        '..',
+        '../other',
+        'safe/other',
+        'safe?query=true',
+        'safe#fragment',
+        'safe value',
+        'safe\nvalue',
+        'a' * 129,
     ],
 )
 def test_terminate_current_pod_rejects_malformed_pod_identity(
@@ -182,10 +207,12 @@ def test_terminate_current_pod_retries_transient_failures(
         monkeypatch, responses):
     _set_pod_identity(monkeypatch)
     request = _mock_http_request(monkeypatch, responses)
+    sleep = _mock_retry_sleep(monkeypatch)
 
     assert runpod_adaptor.terminate_current_pod() is None
 
     assert request.call_count == 2
+    sleep.assert_called_once_with(1)
 
 
 def test_terminate_current_pod_does_not_retry_terminal_request_error(
@@ -228,12 +255,14 @@ def test_terminate_current_pod_bounds_transient_status_retries(monkeypatch):
         monkeypatch,
         [_Response(503)] * runpod_adaptor._MAX_RETRIES,
     )
+    sleep = _mock_retry_sleep(monkeypatch)
 
     with pytest.raises(RuntimeError) as error:
         runpod_adaptor.terminate_current_pod()
 
     assert str(error.value) == 'RunPod self-termination failed with status 503.'
     assert request.call_count == runpod_adaptor._MAX_RETRIES
+    assert sleep.call_args_list == [mock.call(1), mock.call(1)]
 
 
 def test_terminate_current_pod_does_not_retry_invalid_http_status(monkeypatch):
@@ -254,6 +283,7 @@ def test_terminate_current_pod_bounds_network_retries(monkeypatch):
         [requests.ConnectionError('network failure')] *
         runpod_adaptor._MAX_RETRIES,
     )
+    sleep = _mock_retry_sleep(monkeypatch)
 
     with pytest.raises(RuntimeError) as error:
         runpod_adaptor.terminate_current_pod()
@@ -261,3 +291,4 @@ def test_terminate_current_pod_bounds_network_retries(monkeypatch):
     assert str(
         error.value) == 'RunPod self-termination failed due to a network error.'
     assert request.call_count == runpod_adaptor._MAX_RETRIES
+    assert sleep.call_args_list == [mock.call(1), mock.call(1)]

@@ -5,6 +5,7 @@ import os
 import re
 import time
 from typing import Any, Dict, Optional
+from urllib.parse import quote
 
 from packaging import version as version_lib
 
@@ -23,7 +24,7 @@ requests = common.LazyImport('requests')
 _REST_BASE = 'https://rest.runpod.io/v1'
 _MAX_RETRIES = 3
 _TIMEOUT = 10
-_POD_ID_PATTERN = re.compile(r'^[a-z0-9]{14}$')
+_POD_ID_PATTERN = re.compile(r'^[A-Za-z0-9._~-]{1,128}$')
 
 
 def get_sdk_version_error() -> Optional[str]:
@@ -65,11 +66,15 @@ def terminate_current_pod() -> None:
     separate from ``rest_request()`` so failures never expose provider response
     bodies or credentials.
     """
+    # RunPod injects the current pod's ID and pod-scoped API key. Do not fall
+    # back to _get_api_key(): controller or local credentials could target a
+    # different pod. See:
+    # https://docs.runpod.io/pods/templates/environment-variables
     pod_id = os.environ.get('RUNPOD_POD_ID')
     if not pod_id:
         raise RuntimeError(
             'RunPod self-termination requires RUNPOD_POD_ID to be set.')
-    if _POD_ID_PATTERN.fullmatch(pod_id) is None:
+    if pod_id in ('.', '..') or _POD_ID_PATTERN.fullmatch(pod_id) is None:
         raise RuntimeError(
             'RunPod self-termination requires a valid RUNPOD_POD_ID.')
     api_key = os.environ.get('RUNPOD_API_KEY')
@@ -77,7 +82,7 @@ def terminate_current_pod() -> None:
         raise RuntimeError(
             'RunPod self-termination requires RUNPOD_API_KEY to be set.')
 
-    url = f'{_REST_BASE}/pods/{pod_id}'
+    url = f'{_REST_BASE}/pods/{quote(pod_id, safe="")}'
     headers = {'Authorization': f'Bearer {api_key}'}
     for attempt in range(_MAX_RETRIES):
         try:
