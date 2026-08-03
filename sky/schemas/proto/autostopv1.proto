@@ -21,6 +21,9 @@ service AutostopService {
   // ``hooks`` / ``clear_hooks`` fields on the request). This is a
   // wire-compat shim — see the comment on the service above.
   rpc SetAutostop(SetAutostopRequest) returns (SetAutostopResponse);
+  // Apply a strictly fenced durable autodown intent. Unlike SetAutostop,
+  // this method rejects legacy requests before it can mutate skylet state.
+  rpc ApplyAutodownIntent(SetAutostopRequest) returns (SetAutostopResponse);
   // Check if the cluster is currently autostopping.
   rpc IsAutostopping(IsAutostoppingRequest) returns (IsAutostoppingResponse);
 }

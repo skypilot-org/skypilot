@@ -45,7 +45,7 @@ def _get_durable_autodown_identity(
     """Return the fencing identity required by strict execution strategies."""
     cluster_hash = autostop_config.cluster_hash
     generation = autostop_config.generation
-    if cluster_hash is None or generation is None:
+    if not cluster_hash or generation is None or generation <= 0:
         logger.warning('Durable autodown setting has no identity; skipping '
                        'provider teardown.')
         return None
@@ -378,6 +378,20 @@ class StopEvent(SkyletEvent):
     def _stop_cluster(self, autostop_config):
         if (autostop_config.backend ==
                 cloud_vm_ray_backend.CloudVmRayBackend.NAME):
+            execution_strategy = autostop_config.execution_strategy
+            durable_identity = None
+            if (autostop_config.down and execution_strategy != autostop_lib.
+                    AutodownExecutionStrategy.LEGACY_HEAD_CREDENTIALS):
+                durable_identity = _get_durable_autodown_identity(
+                    autostop_config)
+                if durable_identity is None:
+                    return
+                if not autostop_lib.mark_head_teardown_started(
+                        *durable_identity):
+                    logger.info('Durable autodown setting is stale or '
+                                'complete; skipping teardown.')
+                    return
+
             autostop_lib.set_autostopping_started()
 
             config_path = os.path.abspath(
@@ -391,7 +405,8 @@ class StopEvent(SkyletEvent):
                     RAY_PROVISIONER_SKYPILOT_TERMINATOR):
                 logger.info('Using new provisioner to stop the cluster.')
                 self._stop_cluster_with_new_provisioner(autostop_config, config,
-                                                        provider_name, cloud)
+                                                        provider_name, cloud,
+                                                        durable_identity)
                 return
             logger.info('Not using new provisioner to stop the cluster. '
                         f'Cloud of this cluster: {provider_name}')
@@ -423,20 +438,12 @@ class StopEvent(SkyletEvent):
             env.pop('AWS_ACCESS_KEY_ID', None)
             env.pop('AWS_SECRET_ACCESS_KEY', None)
 
-            execution_strategy = autostop_config.execution_strategy
             server_only = (
                 autostop_config.down and execution_strategy
                 == autostop_lib.AutodownExecutionStrategy.SERVER_ONLY)
             head_with_server_fallback = (
                 autostop_config.down and execution_strategy == autostop_lib.
                 AutodownExecutionStrategy.HEAD_WITH_SERVER_FALLBACK)
-            durable_identity = None
-            if server_only or head_with_server_fallback:
-                durable_identity = _get_durable_autodown_identity(
-                    autostop_config)
-                if durable_identity is None:
-                    return
-
             if server_only:
                 try:
                     logger.info('Stopping the ray cluster.')
@@ -452,11 +459,6 @@ class StopEvent(SkyletEvent):
 
             if head_with_server_fallback:
                 assert durable_identity is not None
-                if not autostop_lib.mark_head_teardown_started(
-                        *durable_identity):
-                    logger.info('Durable autodown setting is stale or '
-                                'complete; skipping provider teardown.')
-                    return
                 if provider_name == 'runpod':
                     try:
                         logger.info('Stopping the ray cluster.')
@@ -531,9 +533,9 @@ class StopEvent(SkyletEvent):
         else:
             raise NotImplementedError
 
-    def _stop_cluster_with_new_provisioner(self, autostop_config,
-                                           cluster_config, provider_name,
-                                           cloud):
+    def _stop_cluster_with_new_provisioner(
+            self, autostop_config, cluster_config, provider_name, cloud,
+            durable_identity: Optional[Tuple[str, int]]):
         # pylint: disable=import-outside-toplevel
         from sky import provision as provision_lib
         autostop_lib.set_autostopping_started()
@@ -567,12 +569,6 @@ class StopEvent(SkyletEvent):
                            check=True)
 
         execution_strategy = autostop_config.execution_strategy
-        durable_identity = None
-        if (autostop_config.down and execution_strategy !=
-                autostop_lib.AutodownExecutionStrategy.LEGACY_HEAD_CREDENTIALS):
-            durable_identity = _get_durable_autodown_identity(autostop_config)
-            if durable_identity is None:
-                return
         if (autostop_config.down and execution_strategy
                 == autostop_lib.AutodownExecutionStrategy.SERVER_ONLY):
             assert durable_identity is not None
@@ -590,17 +586,13 @@ class StopEvent(SkyletEvent):
             == autostop_lib.AutodownExecutionStrategy.HEAD_WITH_SERVER_FALLBACK)
         if head_with_server_fallback:
             assert durable_identity is not None
-            marked = autostop_lib.mark_head_teardown_started(*durable_identity)
-            if not marked:
-                logger.info('Durable autodown setting is stale or complete; '
-                            'skipping provider teardown.')
-                return
             if provider_name == 'runpod':
                 try:
                     runpod_adaptor.terminate_current_pod()
                 except Exception:  # pylint: disable=broad-except
                     autostop_lib.mark_server_teardown_required(
-                        *durable_identity, _RUNPOD_HEAD_TEARDOWN_ERROR)
+                        durable_identity[0], durable_identity[1],
+                        _RUNPOD_HEAD_TEARDOWN_ERROR)
                     logger.warning('RunPod head teardown failed; server '
                                    'teardown requested.')
                 return
@@ -635,7 +627,8 @@ class StopEvent(SkyletEvent):
             if head_with_server_fallback:
                 assert durable_identity is not None
                 autostop_lib.mark_server_teardown_required(
-                    *durable_identity, _PROVIDER_HEAD_TEARDOWN_ERROR)
+                    durable_identity[0], durable_identity[1],
+                    _PROVIDER_HEAD_TEARDOWN_ERROR)
                 logger.warning('Head-side provider teardown failed; server '
                                'teardown requested.')
                 return

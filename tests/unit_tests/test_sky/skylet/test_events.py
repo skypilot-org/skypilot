@@ -282,12 +282,15 @@ def test_stale_durable_config_does_not_start_provider_teardown(monkeypatch):
         cluster_hash='current-hash',
         generation=2,
     )
-    (stop_event, _, _, terminate_instances, _,
+    (stop_event, execute_hook, subprocess_run, terminate_instances, _,
      terminate_current_pod) = _configure_event(monkeypatch,
                                                provider_name='runpod')
 
     stop_event._stop_cluster(stale_config)
 
+    execute_hook.assert_not_called()
+    stop_event._replace_yaml_for_stopping.assert_not_called()
+    subprocess_run.assert_not_called()
     terminate_instances.assert_not_called()
     terminate_current_pod.assert_not_called()
     stored = autostop_lib.get_autostop_config()
@@ -295,6 +298,80 @@ def test_stale_durable_config_does_not_start_provider_teardown(monkeypatch):
     assert stored.generation == 2
     assert (stored.durable_execution_state ==
             autostop_lib.DurableAutodownState.ARMED)
+
+
+@pytest.mark.usefixtures('isolated_autostop_storage')
+def test_cancelled_server_only_config_skips_all_head_preparation(monkeypatch):
+    stale_config = _store_config(
+        autostop_lib.AutodownExecutionStrategy.SERVER_ONLY,
+        cluster_hash='cluster-hash',
+        generation=7,
+    )
+    autostop_lib.set_autostop(
+        idle_minutes=-1,
+        backend=None,
+        wait_for=autostop_lib.AutostopWaitFor.JOBS_AND_SSH,
+        down=True,
+        cluster_hash='cluster-hash',
+        generation=8,
+        execution_strategy=autostop_lib.AutodownExecutionStrategy.SERVER_ONLY,
+    )
+    (stop_event, execute_hook, subprocess_run, terminate_instances,
+     stop_instances,
+     terminate_current_pod) = _configure_event(monkeypatch,
+                                               provider_name='aws',
+                                               uses_ray=True)
+
+    stop_event._stop_cluster(stale_config)
+
+    execute_hook.assert_not_called()
+    stop_event._replace_yaml_for_stopping.assert_not_called()
+    subprocess_run.assert_not_called()
+    terminate_instances.assert_not_called()
+    stop_instances.assert_not_called()
+    terminate_current_pod.assert_not_called()
+
+
+@pytest.mark.usefixtures('isolated_autostop_storage')
+@pytest.mark.parametrize(
+    ('strategy', 'provider_name'),
+    [
+        (autostop_lib.AutodownExecutionStrategy.SERVER_ONLY, 'aws'),
+        (autostop_lib.AutodownExecutionStrategy.HEAD_WITH_SERVER_FALLBACK,
+         'runpod'),
+    ],
+)
+def test_cancelled_strict_new_provisioner_skips_all_head_side_effects(
+        monkeypatch, strategy, provider_name):
+    stale_config = _store_config(strategy,
+                                 cluster_hash='cluster-hash',
+                                 generation=7)
+    autostop_lib.set_autostop(
+        idle_minutes=-1,
+        backend=None,
+        wait_for=autostop_lib.AutostopWaitFor.JOBS_AND_SSH,
+        down=True,
+        cluster_hash='cluster-hash',
+        generation=8,
+        execution_strategy=strategy,
+    )
+    (stop_event, execute_hook, subprocess_run, terminate_instances,
+     stop_instances, terminate_current_pod) = _configure_event(
+         monkeypatch,
+         provider_name=provider_name,
+         uses_ray=True,
+         provisioner_version=(
+             clouds.ProvisionerVersion.RAY_PROVISIONER_SKYPILOT_TERMINATOR),
+     )
+
+    stop_event._stop_cluster(stale_config)
+
+    execute_hook.assert_not_called()
+    stop_event._replace_yaml_for_stopping.assert_not_called()
+    subprocess_run.assert_not_called()
+    terminate_instances.assert_not_called()
+    stop_instances.assert_not_called()
+    terminate_current_pod.assert_not_called()
 
 
 @pytest.mark.usefixtures('isolated_autostop_storage')

@@ -1,5 +1,6 @@
 """Unit tests for skylet autostop_lib."""
 import pickle
+import threading
 from unittest import mock
 
 import psutil
@@ -122,6 +123,208 @@ def test_durable_error_summary_is_bounded():
     summary = autostop_lib.get_autostop_config().error_summary
     assert summary is not None
     assert len(summary) == autostop_lib.MAX_DURABLE_ERROR_SUMMARY_LENGTH
+
+
+@pytest.mark.usefixtures('isolated_autostop_storage')
+def test_strict_autostop_rejects_same_generation_conflicting_config():
+    _set_durable_autodown()
+
+    result = autostop_lib.set_autostop(
+        idle_minutes=11,
+        backend='cloud-vm-ray',
+        wait_for=autostop_lib.AutostopWaitFor.JOBS_AND_SSH,
+        down=True,
+        cluster_hash='cluster-hash',
+        generation=7,
+        execution_strategy=(
+            autostop_lib.AutodownExecutionStrategy.HEAD_WITH_SERVER_FALLBACK),
+    )
+
+    assert result == autostop_lib.AutostopConfigUpdateResult.REJECTED
+    stored = autostop_lib.get_autostop_config()
+    assert stored.autostop_idle_minutes == 10
+    assert stored.cluster_hash == 'cluster-hash'
+    assert stored.generation == 7
+
+
+@pytest.mark.usefixtures('isolated_autostop_storage')
+def test_strict_autostop_rejects_same_generation_different_hash():
+    _set_durable_autodown()
+
+    result = autostop_lib.set_autostop(
+        idle_minutes=10,
+        backend='cloud-vm-ray',
+        wait_for=autostop_lib.AutostopWaitFor.JOBS_AND_SSH,
+        down=True,
+        cluster_hash='conflicting-hash',
+        generation=7,
+        execution_strategy=(
+            autostop_lib.AutodownExecutionStrategy.HEAD_WITH_SERVER_FALLBACK),
+    )
+
+    assert result == autostop_lib.AutostopConfigUpdateResult.REJECTED
+    assert autostop_lib.get_autostop_config().cluster_hash == 'cluster-hash'
+
+
+@pytest.mark.usefixtures('isolated_autostop_storage')
+def test_exact_strict_autostop_replay_keeps_timer_state_and_legacy_hook():
+    autostop_lib.set_autostop(
+        idle_minutes=10,
+        backend='cloud-vm-ray',
+        wait_for=autostop_lib.AutostopWaitFor.JOBS_AND_SSH,
+        down=True,
+        hook='echo durable hook',
+        cluster_hash='cluster-hash',
+        generation=7,
+        execution_strategy=(
+            autostop_lib.AutodownExecutionStrategy.HEAD_WITH_SERVER_FALLBACK),
+    )
+    assert autostop_lib.mark_head_teardown_started('cluster-hash', 7)
+    original_hooks = autostop_lib.get_hooks()
+
+    with mock.patch.object(autostop_lib,
+                           'set_last_active_time_to_now') as reset_timer, \
+            mock.patch.object(autostop_lib, 'set_hooks') as set_hooks:
+        result = autostop_lib.set_autostop(
+            idle_minutes=10,
+            backend='cloud-vm-ray',
+            wait_for=autostop_lib.AutostopWaitFor.JOBS_AND_SSH,
+            down=True,
+            hook='echo durable hook',
+            cluster_hash='cluster-hash',
+            generation=7,
+            execution_strategy=(autostop_lib.AutodownExecutionStrategy.
+                                HEAD_WITH_SERVER_FALLBACK),
+        )
+
+    assert result == autostop_lib.AutostopConfigUpdateResult.REPLAYED
+    reset_timer.assert_not_called()
+    set_hooks.assert_not_called()
+    stored = autostop_lib.get_autostop_config()
+    assert (stored.durable_execution_state ==
+            autostop_lib.DurableAutodownState.HEAD_TEARDOWN_STARTED)
+    assert autostop_lib.get_hooks() == original_hooks
+
+
+@pytest.mark.usefixtures('isolated_autostop_storage')
+def test_legacy_autostop_cannot_overwrite_strict_config():
+    _set_durable_autodown()
+
+    result = autostop_lib.set_autostop(
+        idle_minutes=-1,
+        backend=None,
+        wait_for=autostop_lib.AutostopWaitFor.JOBS_AND_SSH,
+        down=True,
+    )
+
+    assert result == autostop_lib.AutostopConfigUpdateResult.REJECTED
+    stored = autostop_lib.get_autostop_config()
+    assert stored.cluster_hash == 'cluster-hash'
+    assert stored.generation == 7
+
+
+@pytest.mark.usefixtures('isolated_autostop_storage')
+def test_new_strict_hash_generation_rejects_delayed_old_hash():
+    _set_durable_autodown(cluster_hash='first-hash', generation=1)
+    assert autostop_lib.set_autostop(
+        idle_minutes=20,
+        backend='cloud-vm-ray',
+        wait_for=autostop_lib.AutostopWaitFor.JOBS_AND_SSH,
+        down=True,
+        cluster_hash='second-hash',
+        generation=2,
+        execution_strategy=(
+            autostop_lib.AutodownExecutionStrategy.HEAD_WITH_SERVER_FALLBACK),
+    ) == autostop_lib.AutostopConfigUpdateResult.APPLIED
+
+    result = autostop_lib.set_autostop(
+        idle_minutes=10,
+        backend='cloud-vm-ray',
+        wait_for=autostop_lib.AutostopWaitFor.JOBS_AND_SSH,
+        down=True,
+        cluster_hash='first-hash',
+        generation=1,
+        execution_strategy=(
+            autostop_lib.AutodownExecutionStrategy.HEAD_WITH_SERVER_FALLBACK),
+    )
+
+    assert result == autostop_lib.AutostopConfigUpdateResult.REJECTED
+    stored = autostop_lib.get_autostop_config()
+    assert stored.cluster_hash == 'second-hash'
+    assert stored.generation == 2
+    assert stored.autostop_idle_minutes == 20
+
+
+@pytest.mark.usefixtures('isolated_autostop_storage')
+def test_concurrent_delayed_strict_generation_cannot_overwrite_newer_config(
+        monkeypatch):
+    original_get_lock = autostop_lib._get_autostop_config_lock
+    delayed_writer_at_barrier = threading.Barrier(2)
+    resume_delayed_writer = threading.Event()
+
+    class _DelayedLock:
+        """Pauses generation one before it acquires the real file lock."""
+
+        def __init__(self, lock):
+            self._lock = lock
+
+        def __enter__(self):
+            delayed_writer_at_barrier.wait(timeout=2)
+            assert resume_delayed_writer.wait(timeout=2)
+            return self._lock.__enter__()
+
+        def __exit__(self, *args):
+            return self._lock.__exit__(*args)
+
+    def get_lock():
+        lock = original_get_lock()
+        if threading.current_thread().name == 'delayed-generation-1':
+            return _DelayedLock(lock)
+        return lock
+
+    monkeypatch.setattr(autostop_lib, '_get_autostop_config_lock', get_lock)
+    results = {}
+
+    def write_generation_one():
+        results['generation_one'] = autostop_lib.set_autostop(
+            idle_minutes=10,
+            backend='cloud-vm-ray',
+            wait_for=autostop_lib.AutostopWaitFor.JOBS_AND_SSH,
+            down=True,
+            cluster_hash='first-hash',
+            generation=1,
+            execution_strategy=(autostop_lib.AutodownExecutionStrategy.
+                                HEAD_WITH_SERVER_FALLBACK),
+        )
+
+    delayed_writer = threading.Thread(target=write_generation_one,
+                                      name='delayed-generation-1')
+    delayed_writer.start()
+    delayed_writer_at_barrier.wait(timeout=2)
+    try:
+        results['generation_two'] = autostop_lib.set_autostop(
+            idle_minutes=20,
+            backend='cloud-vm-ray',
+            wait_for=autostop_lib.AutostopWaitFor.JOBS_AND_SSH,
+            down=True,
+            cluster_hash='second-hash',
+            generation=2,
+            execution_strategy=(autostop_lib.AutodownExecutionStrategy.
+                                HEAD_WITH_SERVER_FALLBACK),
+        )
+    finally:
+        resume_delayed_writer.set()
+    delayed_writer.join(timeout=2)
+
+    assert not delayed_writer.is_alive()
+    assert results['generation_one'] == (
+        autostop_lib.AutostopConfigUpdateResult.REJECTED)
+    assert results['generation_two'] == (
+        autostop_lib.AutostopConfigUpdateResult.APPLIED)
+    stored = autostop_lib.get_autostop_config()
+    assert stored.cluster_hash == 'second-hash'
+    assert stored.generation == 2
+    assert stored.autostop_idle_minutes == 20
 
 
 def _fake_proc(pid, terminal=None):

@@ -190,6 +190,14 @@ class DurableAutodownState(enum.Enum):
         return enum_to_protobuf[self]
 
 
+class AutostopConfigUpdateResult(enum.Enum):
+    """Outcome of a durable autostop configuration update."""
+
+    APPLIED = 'applied'
+    REPLAYED = 'replayed'
+    REJECTED = 'rejected'
+
+
 class AutostopConfig:
     """Autostop configuration persisted by the skylet.
 
@@ -274,6 +282,34 @@ def get_autostop_config() -> AutostopConfig:
         return _get_autostop_config_unlocked()
 
 
+def _has_strict_identity(cluster_hash: Optional[str],
+                         generation: Optional[int]) -> bool:
+    return bool(cluster_hash) and generation is not None and generation > 0
+
+
+def _is_strict_execution_strategy(
+        execution_strategy: AutodownExecutionStrategy) -> bool:
+    return execution_strategy != DEFAULT_AUTODOWN_EXECUTION_STRATEGY
+
+
+def _is_strict_config(config: AutostopConfig) -> bool:
+    return (_is_strict_execution_strategy(config.execution_strategy) and
+            _has_strict_identity(config.cluster_hash, config.generation))
+
+
+def _same_desired_autostop_config(current: AutostopConfig,
+                                  requested: AutostopConfig) -> bool:
+    return (current.autostop_idle_minutes == requested.autostop_idle_minutes and
+            current.backend == requested.backend and
+            current.wait_for == requested.wait_for and
+            current.down == requested.down and
+            current.hook == requested.hook and
+            current.hook_timeout == requested.hook_timeout and
+            current.cluster_hash == requested.cluster_hash and
+            current.generation == requested.generation and
+            current.execution_strategy == requested.execution_strategy)
+
+
 def set_autostop(
     idle_minutes: int,
     backend: Optional[str],
@@ -284,8 +320,10 @@ def set_autostop(
     cluster_hash: Optional[str] = None,
     generation: Optional[int] = None,
     execution_strategy:
-    AutodownExecutionStrategy = DEFAULT_AUTODOWN_EXECUTION_STRATEGY
-) -> None:
+    AutodownExecutionStrategy = DEFAULT_AUTODOWN_EXECUTION_STRATEGY,
+    hooks: Optional[List[Dict[str, Any]]] = None,
+    clear_hooks: bool = False,
+) -> AutostopConfigUpdateResult:
     """Set autostop configuration.
 
     Args:
@@ -301,40 +339,67 @@ def set_autostop(
         cluster_hash: Durable identity for the cluster incarnation.
         generation: Durable setting generation allocated by the server.
         execution_strategy: Where autodown teardown is allowed to execute.
+        hooks: Full lifecycle-hooks list supplied by a v7+ gRPC request.
+        clear_hooks: Whether a v7+ gRPC request explicitly clears hooks.
     """
+    is_strict_request = _is_strict_execution_strategy(execution_strategy)
+    if (is_strict_request and
+            not _has_strict_identity(cluster_hash, generation)):
+        raise ValueError(
+            'Durable autodown requires a non-empty cluster hash and positive '
+            'generation.')
+
     boot_time = psutil.boot_time()
 
     autostop_config = AutostopConfig(idle_minutes, boot_time, backend, wait_for,
                                      down, hook, hook_timeout, cluster_hash,
                                      generation, execution_strategy)
     with _get_autostop_config_lock():
-        configs.set_config(_AUTOSTOP_CONFIG_KEY, pickle.dumps(autostop_config))
+        current_config = _get_autostop_config_unlocked()
+        if _is_strict_config(current_config):
+            if not is_strict_request:
+                return AutostopConfigUpdateResult.REJECTED
+            assert generation is not None
+            assert current_config.generation is not None
+            if generation < current_config.generation:
+                return AutostopConfigUpdateResult.REJECTED
+            if generation == current_config.generation:
+                if (cluster_hash != current_config.cluster_hash or
+                        not _same_desired_autostop_config(
+                            current_config, autostop_config)):
+                    return AutostopConfigUpdateResult.REJECTED
+                return AutostopConfigUpdateResult.REPLAYED
 
-    # A pre-v7 client routes its hook via `hook` / `hook_timeout`;
-    # translate it into the generalized hooks list so hook_executor
-    # sees a single source of truth. Pre-v7 master had a single
-    # autostop hook that fired on idle-timer teardown regardless of
-    # autodown — route it to ``down`` for autodown and ``stop``
-    # otherwise so the new event taxonomy stays consistent.
-    # TODO(zpoint): drop the `hook` / `hook_timeout` parameters and
-    # this translation once SKYLET_LIB_VERSION's minimum supported
-    # client is ≥ 7.
-    if hook:
-        legacy_event = 'down' if down else 'stop'
-        set_hooks([{
-            'run': hook,
-            'events': [legacy_event],
-            'timeout': (hook_timeout or constants.DEFAULT_HOOK_TIMEOUT_SECONDS),
-        }])
+        configs.set_config(_AUTOSTOP_CONFIG_KEY, pickle.dumps(autostop_config))
+        if clear_hooks:
+            set_hooks([])
+        elif hooks:
+            set_hooks(hooks)
+        elif hook:
+            # A pre-v7 client routes its hook via `hook` / `hook_timeout`;
+            # translate it into the generalized hooks list so hook_executor
+            # sees a single source of truth. Pre-v7 master had a single
+            # autostop hook that fired on idle-timer teardown regardless of
+            # autodown — route it to ``down`` for autodown and ``stop``
+            # otherwise so the new event taxonomy stays consistent.
+            # TODO(zpoint): drop the `hook` / `hook_timeout` parameters and
+            # this translation once SKYLET_LIB_VERSION's minimum supported
+            # client is ≥ 7.
+            legacy_event = 'down' if down else 'stop'
+            set_hooks([{
+                'run': hook,
+                'events': [legacy_event],
+                'timeout': (hook_timeout or
+                            constants.DEFAULT_HOOK_TIMEOUT_SECONDS),
+            }])
+        set_last_active_time_to_now()
 
     logger.debug(
         f'set_autostop(): idle_minutes {idle_minutes}, down {down}, '
         f'wait_for {wait_for.value}, hook {"present" if hook else "none"}, '
         f'hook_timeout {hook_timeout}s, execution_strategy '
         f'{execution_strategy.value}.')
-    # Reset timer whenever an autostop setting is submitted, i.e. the idle
-    # time will be counted from now.
-    set_last_active_time_to_now()
+    return AutostopConfigUpdateResult.APPLIED
 
 
 def _matches_current_durable_config(config: AutostopConfig, cluster_hash: str,

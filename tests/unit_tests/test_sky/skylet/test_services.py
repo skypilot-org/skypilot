@@ -84,6 +84,100 @@ def test_set_autostop_forwards_present_durable_identity_and_strategy():
     context.abort.assert_not_called()
 
 
+def test_set_autostop_rejection_does_not_mutate_hook_list():
+    service = services.AutostopServiceImpl()
+    request = autostopv1_pb2.SetAutostopRequest(
+        idle_minutes=-1,
+        backend='cloud-vm-ray',
+        wait_for=autostopv1_pb2.AUTOSTOP_WAIT_FOR_JOBS,
+        down=True,
+        cluster_hash='old-hash',
+        generation=1,
+        execution_strategy=(
+            autostopv1_pb2.AUTODOWN_EXECUTION_STRATEGY_SERVER_ONLY),
+        clear_hooks=True,
+    )
+    context = mock.Mock()
+    context.abort.side_effect = RuntimeError('aborted')
+
+    with mock.patch.object(autostop_lib,
+                           'set_autostop',
+                           return_value=autostop_lib.AutostopConfigUpdateResult.
+                           REJECTED) as set_autostop, mock.patch.object(
+                               autostop_lib, 'set_hooks') as set_hooks:
+        with pytest.raises(RuntimeError, match='aborted'):
+            service.SetAutostop(request, context)
+
+    set_autostop.assert_called_once_with(
+        idle_minutes=-1,
+        backend='cloud-vm-ray',
+        wait_for=autostop_lib.AutostopWaitFor.JOBS,
+        down=True,
+        hook=None,
+        hook_timeout=None,
+        cluster_hash='old-hash',
+        generation=1,
+        execution_strategy=(autostop_lib.AutodownExecutionStrategy.SERVER_ONLY),
+        hooks=[],
+        clear_hooks=True,
+    )
+    set_hooks.assert_not_called()
+    context.abort.assert_called_once_with(
+        grpc.StatusCode.INTERNAL, 'Failed to set autostop configuration.')
+
+
+def test_apply_autodown_intent_requires_strict_request_before_mutation():
+    service = services.AutostopServiceImpl()
+    request = autostopv1_pb2.SetAutostopRequest(
+        idle_minutes=-1,
+        backend='cloud-vm-ray',
+        wait_for=autostopv1_pb2.AUTOSTOP_WAIT_FOR_JOBS,
+        down=True,
+    )
+    context = mock.Mock()
+    context.abort.side_effect = RuntimeError('aborted')
+
+    with mock.patch.object(autostop_lib, 'set_autostop') as set_autostop:
+        with pytest.raises(RuntimeError, match='aborted'):
+            service.ApplyAutodownIntent(request, context)
+
+    set_autostop.assert_not_called()
+    context.abort.assert_called_once_with(
+        grpc.StatusCode.INTERNAL, 'Failed to set autostop configuration.')
+
+
+def test_apply_autodown_intent_forwards_strict_request_to_shared_handler():
+    service = services.AutostopServiceImpl()
+    request = autostopv1_pb2.SetAutostopRequest(
+        idle_minutes=10,
+        backend='cloud-vm-ray',
+        wait_for=autostopv1_pb2.AUTOSTOP_WAIT_FOR_JOBS,
+        down=True,
+        cluster_hash='strict-hash',
+        generation=2,
+        execution_strategy=(
+            autostopv1_pb2.AUTODOWN_EXECUTION_STRATEGY_SERVER_ONLY),
+    )
+    context = mock.Mock()
+
+    with mock.patch.object(autostop_lib, 'set_autostop') as set_autostop:
+        response = service.ApplyAutodownIntent(request, context)
+
+    set_autostop.assert_called_once_with(
+        idle_minutes=10,
+        backend='cloud-vm-ray',
+        wait_for=autostop_lib.AutostopWaitFor.JOBS,
+        down=True,
+        hook=None,
+        hook_timeout=None,
+        cluster_hash='strict-hash',
+        generation=2,
+        execution_strategy=(autostop_lib.AutodownExecutionStrategy.SERVER_ONLY),
+    )
+    assert response.supports_durable_autodown
+    context.abort.assert_not_called()
+
+
 def test_is_autostopping_reports_capability_and_exact_stored_generation():
     service = services.AutostopServiceImpl()
     config = autostop_lib.AutostopConfig(

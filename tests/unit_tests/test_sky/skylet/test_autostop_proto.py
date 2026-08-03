@@ -71,3 +71,17 @@ def test_durable_autodown_enums_cover_execution_and_fallback_states():
         autostopv1_pb2.DURABLE_AUTODOWN_STATE_HEAD_TEARDOWN_STARTED,
         autostopv1_pb2.DURABLE_AUTODOWN_STATE_SERVER_TEARDOWN_REQUIRED,
     } == {1, 2, 3}
+
+
+def test_autostop_service_adds_strict_intent_rpc_without_changing_legacy_rpc():
+    service = autostopv1_pb2.DESCRIPTOR.services_by_name['AutostopService']
+
+    assert [method.name for method in service.methods] == [
+        'SetAutostop',
+        'ApplyAutodownIntent',
+        'IsAutostopping',
+    ]
+    apply_intent = service.methods_by_name['ApplyAutodownIntent']
+    assert (
+        apply_intent.input_type.full_name == 'autostop.v1.SetAutostopRequest')
+    assert apply_intent.output_type.full_name == 'autostop.v1.SetAutostopResponse'
