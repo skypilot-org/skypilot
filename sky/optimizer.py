@@ -1259,12 +1259,14 @@ class Optimizer:
                     matched_resources = resources
                     break
             # Same invariant as above, at region granularity.
+            candidate_regions = sorted(
+                {str(r.region) for r in candidates[matching_cloud]})
             assert matched_resources is not None, (
                 f'Job {task.name!r} has no candidate in the selected region '
                 f'{cloud_name}/{region}; its candidate regions in that cloud '
-                f'are {sorted({str(r.region) for r in candidates[matching_cloud]})}. '
-                'Likely a bug in _find_common_infras or in how candidate '
-                'regions are matched.')
+                f'are {candidate_regions}. Likely a bug in '
+                '_find_common_infras or in how candidate regions are '
+                'matched.')
 
             # Set best_resources on the task
             task.best_resources = matched_resources
