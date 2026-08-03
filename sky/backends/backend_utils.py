@@ -60,6 +60,7 @@ from sky.utils import common_utils
 from sky.utils import context as context_lib
 from sky.utils import context_utils
 from sky.utils import controller_utils
+from sky.utils import debug_dump_helpers
 from sky.utils import env_options
 from sky.utils import locks
 from sky.utils import registry
@@ -318,6 +319,24 @@ def _get_yaml_path_from_cluster_name(cluster_name: str,
         pathlib.Path(prefix)).resolve() / f'{cluster_name}.yml'
     os.makedirs(output_path.parents[0], exist_ok=True)
     return str(output_path)
+
+
+def _persist_redacted_debug_yaml(tmp_yaml_path: str,
+                                 debug_yaml_path: str) -> None:
+    """Persist a private redacted debug YAML and delete its raw source."""
+    try:
+        with open(tmp_yaml_path, 'r', encoding='utf-8') as raw_yaml_file:
+            redacted_yaml = debug_dump_helpers.redact_task_yaml(
+                raw_yaml_file.read())
+        file_descriptor = os.open(debug_yaml_path,
+                                  os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(file_descriptor, 'w', encoding='utf-8') as debug_file:
+            # An existing .debug path may retain prior permissions; set the
+            # descriptor mode before writing to never persist debug YAML openly.
+            os.fchmod(debug_file.fileno(), 0o600)
+            debug_file.write(redacted_yaml)
+    finally:
+        os.remove(tmp_yaml_path)
 
 
 # Add retry for the file mounts optimization, as the underlying cp command may
@@ -1303,6 +1322,7 @@ def write_cluster_config(
     common_utils.fill_template(cluster_config_template,
                                variables,
                                output_path=tmp_yaml_path)
+    os.chmod(tmp_yaml_path, 0o600)
     config_dict['cluster_name'] = cluster_name
     config_dict['ray'] = yaml_path
 
@@ -1379,6 +1399,7 @@ def write_cluster_config(
     # Note that the ray yaml file will be copied into that special dir (i.e.,
     # uploaded as part of the file_mounts), so the restore for backward
     # compatibility should go before this call.
+    os.chmod(tmp_yaml_path, 0o600)
     _optimize_file_mounts(tmp_yaml_path)
 
     # commit the final yaml to the database
@@ -1388,10 +1409,9 @@ def write_cluster_config(
 
     usage_lib.messages.usage.update_ray_yaml(tmp_yaml_path)
 
-    # Remove the tmp file.
     if sky_logging.logging_enabled(logger, sky_logging.DEBUG):
         debug_yaml_path = yaml_path + '.debug'
-        os.rename(tmp_yaml_path, debug_yaml_path)
+        _persist_redacted_debug_yaml(tmp_yaml_path, debug_yaml_path)
     else:
         os.remove(tmp_yaml_path)
 

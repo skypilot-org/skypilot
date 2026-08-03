@@ -23,6 +23,12 @@ from sky.utils import status_lib
 from sky.utils import yaml_utils
 
 
+def _write_minimal_cluster_yaml(*args, **kwargs):
+    output_path = pathlib.Path(kwargs['output_path'])
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text('cluster_name: display\n', encoding='utf-8')
+
+
 def _mock_credential_file_mounts(monkeypatch):
     credential_clouds = [
         (clouds.AWS(), {
@@ -70,6 +76,31 @@ def test_runpod_no_upload_task_mounts_no_provider_credentials(monkeypatch):
         excluded_clouds=None, allowed_clouds=allowed_clouds)
 
     assert credentials == {}
+
+
+def test_persist_redacted_debug_yaml_is_private_and_removes_raw(tmp_path):
+    raw_yaml_path = tmp_path / 'cluster.yml.tmp'
+    debug_yaml_path = tmp_path / 'cluster.yml.debug'
+    raw_yaml_path.write_text(
+        'provider:\n'
+        '  registry:\n'
+        '    password: registry-password\n'
+        '    headers:\n'
+        '      Authorization: Bearer provider-token\n'
+        'secrets:\n'
+        '  secrets:workspace.REFERENCED_SECRET: null\n',
+        encoding='utf-8')
+    os.chmod(raw_yaml_path, 0o600)
+
+    backend_utils._persist_redacted_debug_yaml(str(raw_yaml_path),
+                                               str(debug_yaml_path))
+
+    assert not raw_yaml_path.exists()
+    assert (debug_yaml_path.stat().st_mode & 0o777) == 0o600
+    debug_yaml = debug_yaml_path.read_text(encoding='utf-8')
+    assert 'registry-password' not in debug_yaml
+    assert 'provider-token' not in debug_yaml
+    assert 'secrets:workspace.REFERENCED_SECRET' in debug_yaml
 
 
 def test_runpod_no_upload_s3_file_mount_includes_only_aws_credentials(
@@ -276,6 +307,7 @@ def test_write_cluster_config_w_remote_identity(mock_fill_template,
     resource = Resources(cloud=cloud, instance_type='fake-type: 3')
 
     cluster_config_template = 'aws-ray.yml.j2'
+    mock_fill_template.side_effect = _write_minimal_cluster_yaml
 
     # test default
     backend_utils.write_cluster_config(
@@ -363,7 +395,7 @@ def test_write_cluster_config_w_remote_identity(mock_fill_template,
 
 @mock.patch.object(skypilot_config, '_global_config_context',
                    skypilot_config.ConfigContext())
-def test_write_cluster_config_scopes_storage_credentials(monkeypatch):
+def test_write_cluster_config_scopes_storage_credentials(monkeypatch, tmp_path):
     monkeypatch.delenv(skypilot_config.ENV_VAR_SKYPILOT_CONFIG, raising=False)
     skypilot_config.reload_config()
 
@@ -386,12 +418,13 @@ def test_write_cluster_config_scopes_storage_credentials(monkeypatch):
         })
     monkeypatch.setattr(backend_utils.auth_utils, 'get_or_generate_keys',
                         lambda: ('/tmp/fake-key', '/tmp/fake-key.pub'))
+    yaml_path = tmp_path / 'fake-path'
     monkeypatch.setattr(backend_utils, '_get_yaml_path_from_cluster_name',
-                        lambda _: '/tmp/fake-path')
+                        lambda _: str(yaml_path))
     monkeypatch.setattr(backend_utils, '_deterministic_cluster_yaml_hash',
                         lambda _: 'fake-hash')
     monkeypatch.setattr(common_utils, 'fill_template',
-                        lambda *args, **kwargs: None)
+                        _write_minimal_cluster_yaml)
     credential_file_mounts = mock.Mock(return_value={})
     monkeypatch.setattr(sky_check, 'get_cloud_credential_file_mounts',
                         credential_file_mounts)
@@ -412,6 +445,8 @@ def test_write_cluster_config_scopes_storage_credentials(monkeypatch):
     assert clouds.cloud_in_iterable(clouds.AWS(), allowed_clouds)
     assert clouds.cloud_in_iterable(clouds.GCP(), allowed_clouds)
     assert len(allowed_clouds) == 2
+    assert ((yaml_path.with_name(yaml_path.name + '.tmp').stat().st_mode &
+             0o777) == 0o600)
 
 
 @mock.patch.object(skypilot_config, '_global_config_context',
@@ -436,6 +471,7 @@ def test_write_cluster_config_w_post_provision_runcmd_aws(
     zones = [clouds.Zone(name='fake-zone')]
     resource = Resources(cloud=cloud, instance_type='fake-type: 3')
     cluster_config_template = 'aws-ray.yml.j2'
+    mock_fill_template.side_effect = _write_minimal_cluster_yaml
 
     backend_utils.write_cluster_config(
         to_provision=resource,
