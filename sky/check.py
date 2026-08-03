@@ -26,6 +26,7 @@ from sky.utils import registry
 from sky.utils import rich_utils
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
+from sky.workspaces import constants as workspace_constants
 
 CHECK_MARK_EMOJI = '\U00002714'  # Heavy check mark unicode
 PARTY_POPPER_EMOJI = '\U0001F389'  # Party popper unicode
@@ -161,7 +162,13 @@ def check_capabilities(
     all_workspaces_results: Dict[str,
                                  Dict[str,
                                       List[sky_cloud.CloudCapability]]] = {}
-    available_workspaces = list(core.get_accessible_workspace_names())
+    # Explicitly the writable set, even though that is already the default:
+    # every workspace this loop visits gets its cached enabled-clouds and
+    # check-results rows overwritten below, so this is the gate on a mutation
+    # of per-workspace shared state, not just on what the caller may see.
+    available_workspaces = list(
+        core.get_accessible_workspace_names(
+            action=workspace_constants.WORKSPACE_ACTION_WRITE))
     hide_workspace_str = (available_workspaces == [
         constants.SKYPILOT_DEFAULT_WORKSPACE
     ])

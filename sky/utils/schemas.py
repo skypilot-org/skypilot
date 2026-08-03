@@ -1144,7 +1144,13 @@ def _task_config_schema():
         constants.OVERRIDEABLE_CONFIG_KEYS_IN_TASK)['properties']
     return {
         'type': 'object',
-        'additionalProperties': False,
+        # On the client, let unknown keys pass through so config keys
+        # registered as task-overrideable on the server (via
+        # skypilot_config.register_task_overrideable_config_key) are not
+        # rejected by a client that does not know about them — mirroring
+        # how the global config schema handles plugin-registered
+        # properties. The server enforces the full set.
+        'additionalProperties': _allow_additional_properties(),
         'properties': {
             **overrideable,
             'hooks': _HOOKS_SCHEMA,
@@ -2435,6 +2441,17 @@ def get_config_schema():
                         'type': 'string',
                     },
                 },
+                # Who may read a (private) workspace. 'allowed_users'
+                # (default): only the workspace's allowed users (members)
+                # and admins can see it; it is hidden from everyone else.
+                # 'all': anyone can see the workspace and its clusters/jobs, but
+                # writes stay members-only, so non-members get read-only access.
+                # Only meaningful for private workspaces; an open (non-private)
+                # workspace is usable by everyone regardless.
+                'read_access': {
+                    'type': 'string',
+                    'enum': ['allowed_users', 'all'],
+                },
                 'gcp': {
                     'type': 'object',
                     'properties': {
@@ -2811,6 +2828,21 @@ def get_config_schema():
             'api_server': api_server,
             'active_workspace': workspace_schema,
             'workspaces': workspaces_schema,
+            # Org-wide defaults applied to every workspace unless the
+            # workspace overrides them under `workspaces.<name>`.
+            'workspace_config': {
+                'type': 'object',
+                'required': [],
+                'additionalProperties': False,
+                'properties': {
+                    # Default read access for private workspaces. A
+                    # per-workspace `read_access` overrides this.
+                    'read_access': {
+                        'type': 'string',
+                        'enum': ['allowed_users', 'all'],
+                    },
+                },
+            },
             'provision': provision_configs,
             'rbac': rbac_schema,
             'logs': logs_schema,

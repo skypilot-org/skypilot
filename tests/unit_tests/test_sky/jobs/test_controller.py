@@ -9,6 +9,7 @@ Also tests the cancelled job log download feature in ControllerManager
 and file mount cleanup in task_cleanup().
 """
 import asyncio
+import copy
 import runpy
 import sys
 from typing import Dict, List, Optional, Tuple
@@ -19,6 +20,8 @@ import warnings
 
 import pytest
 
+import sky
+from sky import task as task_lib
 from sky.jobs import controller as controller_module
 from sky.jobs import state as managed_job_state
 from sky.jobs import utils as managed_job_utils
@@ -1665,3 +1668,114 @@ class TestTransientJobStatusRecoveryWindow:
                 executor=MagicMock())
 
         status_logger.flush.assert_called_once()
+
+
+class TestAddK8sAnnotations:
+    """Tests for _add_k8s_annotations.
+
+    The function stamps two pod annotations onto every resource. It must add
+    only those annotations: it used to pass the resource's whole config as the
+    override to Resources.copy(), which overlays the config on top of itself.
+    """
+
+    def _make_task(self, pod_config):
+        task = task_lib.Task(name='test-task', run='echo hi')
+        task.set_resources(
+            sky.Resources(cpus=2,
+                          _cluster_config_overrides={
+                              'kubernetes': {
+                                  'pod_config': pod_config
+                              }
+                          }))
+        return task
+
+    @staticmethod
+    def _pod_config(resource_or_task):
+        # Task.resources is a set before _add_k8s_annotations and a list
+        # after it, so index through a list either way.
+        resource = resource_or_task
+        if isinstance(resource_or_task, task_lib.Task):
+            resource = list(resource_or_task.resources)[0]
+        return resource.cluster_config_overrides['kubernetes']['pod_config']
+
+    def test_lists_without_patch_merge_key_not_duplicated(self):
+        """Lists appended by the merge must not be doubled."""
+        task = self._make_task({
+            'spec': {
+                'tolerations': [{
+                    'key': 'nvidia.com/gpu',
+                    'operator': 'Exists'
+                }],
+                'dnsConfig': {
+                    'nameservers': ['1.1.1.1']
+                },
+            }
+        })
+
+        controller_module._add_k8s_annotations(task, job_id=1)
+
+        spec = self._pod_config(task)['spec']
+        assert spec['tolerations'] == [{
+            'key': 'nvidia.com/gpu',
+            'operator': 'Exists'
+        }]
+        assert spec['dnsConfig']['nameservers'] == ['1.1.1.1']
+
+    def test_original_resource_config_not_mutated(self):
+        """The annotations must not leak into the resource we copied from."""
+        task = self._make_task({'spec': {'runtimeClassName': 'nvidia'}})
+        original_resource = list(task.resources)[0]
+
+        controller_module._add_k8s_annotations(task, job_id=1)
+
+        assert 'metadata' not in self._pod_config(original_resource)
+
+    def test_empty_image_pull_secrets_preserved(self):
+        """A task clearing imagePullSecrets must not break the job loop."""
+        task = self._make_task({
+            'spec': {
+                'containers': [{
+                    'imagePullPolicy': 'IfNotPresent'
+                }],
+                'imagePullSecrets': [],
+            }
+        })
+
+        controller_module._add_k8s_annotations(task, job_id=1)
+
+        spec = self._pod_config(task)['spec']
+        assert spec['imagePullSecrets'] == []
+        assert spec['containers'] == [{'imagePullPolicy': 'IfNotPresent'}]
+
+    def test_annotations_added_without_dropping_existing_ones(self):
+        task = self._make_task(
+            {'metadata': {
+                'annotations': {
+                    'user': 'annotation'
+                }
+            }})
+
+        controller_module._add_k8s_annotations(task, job_id=384)
+
+        assert self._pod_config(task)['metadata']['annotations'] == {
+            'user': 'annotation',
+            'skypilot-managed-job-id': '384',
+            'skypilot-managed-job-name': 'test-task',
+        }
+
+    def test_repeated_calls_are_idempotent(self):
+        """Every emergency-recovery retry re-runs this on the same task."""
+        task = self._make_task({
+            'spec': {
+                'tolerations': [{
+                    'key': 'nvidia.com/gpu',
+                    'operator': 'Exists'
+                }]
+            }
+        })
+
+        controller_module._add_k8s_annotations(task, job_id=1)
+        after_first = copy.deepcopy(self._pod_config(task))
+        controller_module._add_k8s_annotations(task, job_id=1)
+
+        assert self._pod_config(task) == after_first

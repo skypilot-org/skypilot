@@ -86,6 +86,7 @@ from sky.server.requests import preconditions
 from sky.server.requests import request_names
 from sky.server.requests import requests as requests_lib
 from sky.server.requests import role_filter
+from sky.server.requests import workspace_access
 from sky.skylet import constants
 from sky.skylet import runtime_utils
 from sky.ssh_node_pools import server as ssh_node_pools_rest
@@ -112,6 +113,8 @@ from sky.utils import ux_utils
 from sky.utils.db import db_utils
 from sky.utils.kubernetes import gpu_labeler
 from sky.volumes.server import server as volumes_rest
+from sky.workspaces import constants as workspace_constants
+from sky.workspaces import core as workspaces_core
 from sky.workspaces import server as workspaces_rest
 
 if typing.TYPE_CHECKING:
@@ -1005,9 +1008,25 @@ class GracefulShutdownMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
 
 @middleware_utils.websocket_aware
 class APIVersionMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
-    """Middleware to add API version to the request."""
+    """Middleware to add API version to the request.
+
+    Also records the dispatched endpoint context-locally for workspace-access
+    classification (see `sky.server.requests.workspace_access`). The access
+    level a request needs on the caller's active workspace is derived from the
+    endpoint rather than from the request name, so plugin endpoints are covered
+    by the same declaration as OSS ones. This is folded in here (rather than a
+    dedicated middleware) to avoid an extra `BaseHTTPMiddleware` layer -- each
+    such layer opens an anyio task group + memory stream per request, and the
+    API server is latency-sensitive.
+
+    This layer sits inside `PathCleanMiddleware` / `InternalDashboardPrefix
+    Middleware`, so `request.url.path` here is the router-matched path after
+    their rewrites -- the same path `RBACMiddleware` evaluates. It must stay
+    inside those two for the recorded path to be correct.
+    """
 
     async def dispatch(self, request: fastapi.Request, call_next):
+        workspace_access.set_request_endpoint(request.url.path, request.method)
         version_info = versions.check_compatibility_at_server(request.headers)
         # Bypass version handling for backward compatibility with clients prior
         # to v0.11.0, the client will check the version in the body of
@@ -1045,6 +1064,10 @@ app = fastapi.FastAPI(prefix='/api/v1', debug=True, lifespan=lifespan)
 # Use environment variable to make the metrics middleware optional.
 if os.environ.get(constants.ENV_VAR_SERVER_METRICS_ENABLED):
     app.add_middleware(metrics.PrometheusMiddleware)
+# APIVersionMiddleware also records the dispatched endpoint for workspace-access
+# classification. Added near-first => inner to PathCleanMiddleware /
+# InternalDashboardPrefixMiddleware, so the path it records is the router-
+# matched one after their rewrites (see the class docstring).
 app.add_middleware(APIVersionMiddleware)
 # The order of all the authentication-related middleware is important.
 # RBACMiddleware must precede all the auth middleware, so it can access
@@ -1306,9 +1329,15 @@ async def enabled_clouds_batch(request: fastapi.Request,
     # before the request reaches the core function (defense-in-depth).
     auth_user = request.state.auth_user
     if auth_user is not None and workspace_list:
+        # Visibility, not usability: reporting a workspace's enabled clouds is a
+        # read, so a read-only-visible workspace must survive this filter (the
+        # dashboard asks for every workspace it can see at once, and dropping
+        # one would fail the whole batch).
         workspace_list = list(
             permission.permission_service.get_accessible_workspace_names(
-                auth_user.id, set(workspace_list)))
+                auth_user.id,
+                set(workspace_list),
+                action=workspace_constants.WORKSPACE_ACTION_READ))
     await executor.schedule_request_async(
         request_id=request.state.request_id,
         request_name=request_names.RequestName.ENABLED_CLOUDS_BATCH,
@@ -1899,11 +1928,42 @@ async def launch(launch_body: payloads.LaunchBody,
     )
 
 
+async def _reject_cluster_write_for_unauthorized(
+        request: fastapi.Request, cluster_name: Optional[str]) -> None:
+    """Rejects a mutating request on a cluster the user cannot write to.
+
+    Mutating an *existing* cluster (down/stop/start/autostop/cancel/exec) must
+    be gated by the cluster's *own* workspace. The executor's active-workspace
+    gate only checks the caller's active workspace (resolved from their own
+    context), which is not the cluster's workspace, so it does not protect an
+    existing cluster from a non-member.
+
+    This helper only covers the HTTP endpoints. SSH/VSCode go over a websocket,
+    which does not pass through here; that path calls the same
+    ``check_cluster_write_permission`` inline in
+    ``_validate_cluster_for_ssh_proxy_ws``.
+
+    Runs at the API boundary (before a worker is scheduled) so external
+    requests are gated while internal ``core.*`` callers (controllers,
+    recovery, daemons) are untouched.
+    """
+    auth_user = request.state.auth_user
+    if auth_user is None or cluster_name is None:
+        return
+    try:
+        await context_utils.to_thread_with_executor(
+            None, workspaces_core.check_cluster_write_permission, auth_user,
+            cluster_name)
+    except exceptions.PermissionDeniedError as e:
+        raise fastapi.HTTPException(status_code=403, detail=str(e)) from e
+
+
 @app.post('/exec')
 # pylint: disable=redefined-builtin
 async def exec(request: fastapi.Request, exec_body: payloads.ExecBody) -> None:
     """Executes a task on an existing cluster."""
     cluster_name = exec_body.cluster_name
+    await _reject_cluster_write_for_unauthorized(request, cluster_name)
     await executor.schedule_request_async(
         request_id=request.state.request_id,
         request_name=request_names.RequestName.CLUSTER_EXEC,
@@ -1923,6 +1983,8 @@ async def exec(request: fastapi.Request, exec_body: payloads.ExecBody) -> None:
 async def stop(request: fastapi.Request,
                stop_body: payloads.StopOrDownBody) -> None:
     """Stops a cluster."""
+    await _reject_cluster_write_for_unauthorized(request,
+                                                 stop_body.cluster_name)
     await executor.schedule_request_async(
         request_id=request.state.request_id,
         request_name=request_names.RequestName.CLUSTER_STOP,
@@ -1976,6 +2038,8 @@ async def endpoints(request: fastapi.Request,
 async def down(request: fastapi.Request,
                down_body: payloads.StopOrDownBody) -> None:
     """Tears down a cluster."""
+    await _reject_cluster_write_for_unauthorized(request,
+                                                 down_body.cluster_name)
     await executor.schedule_request_async(
         request_id=request.state.request_id,
         request_name=request_names.RequestName.CLUSTER_DOWN,
@@ -1991,6 +2055,8 @@ async def down(request: fastapi.Request,
 async def start(request: fastapi.Request,
                 start_body: payloads.StartBody) -> None:
     """Restarts a cluster."""
+    await _reject_cluster_write_for_unauthorized(request,
+                                                 start_body.cluster_name)
     await executor.schedule_request_async(
         request_id=request.state.request_id,
         request_name=request_names.RequestName.CLUSTER_START,
@@ -2006,6 +2072,8 @@ async def start(request: fastapi.Request,
 async def autostop(request: fastapi.Request,
                    autostop_body: payloads.AutostopBody) -> None:
     """Schedules an autostop/autodown for a cluster."""
+    await _reject_cluster_write_for_unauthorized(request,
+                                                 autostop_body.cluster_name)
     await executor.schedule_request_async(
         request_id=request.state.request_id,
         request_name=request_names.RequestName.CLUSTER_AUTOSTOP,
@@ -2051,6 +2119,8 @@ async def job_status(request: fastapi.Request,
 async def cancel(request: fastapi.Request,
                  cancel_body: payloads.CancelBody) -> None:
     """Cancels jobs on a cluster."""
+    await _reject_cluster_write_for_unauthorized(request,
+                                                 cancel_body.cluster_name)
     await executor.schedule_request_async(
         request_id=request.state.request_id,
         request_name=request_names.RequestName.CLUSTER_JOB_CANCEL,
@@ -3064,6 +3134,20 @@ async def _validate_cluster_for_ssh_proxy_ws(
     the caller can bail out cleanly.
     """
     try:
+        # SSH into an existing cluster is a write (it grants an interactive
+        # shell / arbitrary code execution), so gate it by the cluster's own
+        # workspace, not the caller's active workspace. auth_user is set on
+        # the connection scope by the websocket-aware auth middleware; a
+        # missing one (loopback / local CLI) is trusted.
+        auth_user = getattr(websocket.state, 'auth_user', None)
+        if auth_user is not None:
+            try:
+                await context_utils.to_thread_with_executor(
+                    None, workspaces_core.check_cluster_write_permission,
+                    auth_user, cluster_name)
+            except exceptions.PermissionDeniedError as e:
+                raise fastapi.HTTPException(status_code=403,
+                                            detail=str(e)) from e
         return await _get_cluster_and_validate(cluster_name, cloud_type)
     except fastapi.HTTPException as e:
         logger.info(f'Closing SSH proxy websocket for cluster '

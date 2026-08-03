@@ -2647,6 +2647,57 @@ def test_kubernetes_pod_long_image_pull():
     smoke_tests_utils.run_one_test(test)
 
 
+@pytest.mark.kubernetes
+def test_kubernetes_task_clears_image_pull_secrets():
+    """A task-level empty imagePullSecrets clears the server-side one.
+
+    The server config sets an imagePullSecrets entry and the task config
+    (tests/test_yamls/test_k8s_pod_config_image_pull_secrets.yaml) sets an
+    empty list, so both sides of the pod_config merge carry the field. The
+    launch used to fail outright in that case.
+
+    The referenced secret does not exist: kubelet warns and falls back to an
+    anonymous pull, which is enough for the public test image. If that ever
+    turns flaky, create a dummy docker-registry secret instead.
+    """
+    name = smoke_tests_utils.get_cluster_name()
+    task_yaml = 'tests/test_yamls/test_k8s_pod_config_image_pull_secrets.yaml'
+    test = smoke_tests_utils.Test(
+        'kubernetes_task_clears_image_pull_secrets',
+        [
+            f'sky launch -y -c {name} --infra kubernetes '
+            f'{smoke_tests_utils.LOW_RESOURCE_ARG} {task_yaml}',
+            f'sky logs {name} 1 --status',
+            f'sky logs {name} 1 --no-follow | grep "image_pull_secrets_check: ok"',
+            smoke_tests_utils.resolve_k8s_context_cmd(name),
+            smoke_tests_utils.launch_cloud_cmd_on_landed_context(name),
+            # The task's empty list must win over the server config, so the
+            # pod carries no imagePullSecrets at all.
+            smoke_tests_utils.run_cloud_cmd_on_cluster(
+                name,
+                f"pod=$(kubectl get pods -o custom-columns=NAME:.metadata.name,ANN:.metadata.annotations.skypilot-cluster-name --no-headers | awk -v n=\"{name}\" '$NF==n{{print $1}}' | sed -n 1p) && "
+                'echo "pod=$pod" && test -n "$pod" && '
+                'secrets=$(kubectl get pod $pod -o jsonpath="{.spec.imagePullSecrets}") && '
+                'echo "imagePullSecrets=$secrets" && '
+                '! echo "$secrets" | grep -q absent-regcred'),
+        ],
+        f'sky down -y {name}; '
+        f'{smoke_tests_utils.down_cluster_for_cloud_cmd(name)}',
+        timeout=25 * 60,
+        config_dict={
+            'kubernetes': {
+                'pod_config': {
+                    'spec': {
+                        'imagePullSecrets': [{
+                            'name': f'{name}-absent-regcred'
+                        }]
+                    }
+                }
+            }
+        })
+    smoke_tests_utils.run_one_test(test)
+
+
 @pytest.mark.azure
 def test_azure_start_stop_two_nodes():
     name = smoke_tests_utils.get_cluster_name()
