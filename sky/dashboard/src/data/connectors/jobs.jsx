@@ -16,6 +16,19 @@ import { apiClient } from './client';
 import { trackJobAction } from '@/lib/analytics';
 import { applyEnhancements } from '@/plugins/dataEnhancement';
 
+/**
+ * Tooltip for a job's status badge: pending reason for PENDING jobs, and
+ * the failure details (which carry the failure attribution and exit code,
+ * e.g. "Job exited with exit code 7 (user program failure). ...") for
+ * FAILED* jobs. Same text as the details column, surfaced on hover.
+ */
+function getStatusTooltip(job) {
+  if (job.status === 'PENDING' || job.status?.startsWith('FAILED')) {
+    return job.details || job.failure_reason || null;
+  }
+  return null;
+}
+
 // ============ Pagination Plugin Integration ============
 
 /**
@@ -328,9 +341,10 @@ export async function getManagedJobs(options = {}) {
         recoveries: job.recovery_count,
         details: job.details || job.failure_reason,
         // Mirror the cluster INIT tooltip: surface the pending reason on
-        // the status badge so users can see why a job is stuck in PENDING
-        // without opening the job details view.
-        statusTooltip: job.status === 'PENDING' ? job.details || null : null,
+        // the status badge so users can see why a job is stuck in PENDING,
+        // and the failure attribution (user program vs SkyPilot/infra) on
+        // FAILED* badges, without opening the job details view.
+        statusTooltip: getStatusTooltip(job),
         user: job.user_name,
         user_hash: job.user_hash,
         submitted_at: job.submitted_at

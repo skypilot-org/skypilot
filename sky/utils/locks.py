@@ -206,7 +206,12 @@ class PostgresLock(DistributedLock):
     @db_retries.retry
     def _get_connection(self) -> sqlalchemy.pool.PoolProxiedConnection:
         """Get database connection."""
-        engine = global_user_state.initialize_and_get_db()
+        # Session-scoped advisory locks hold one connection across their whole
+        # lifetime, which is unsafe through a transaction-mode pooler (the
+        # backend can change between statements). Use a direct engine so the
+        # lock connection bypasses any configured pooler; when none is
+        # configured this is the same engine global_user_state uses.
+        engine = db_utils.get_engine(None, direct=True)
         if engine.dialect.name != db_utils.SQLAlchemyDialect.POSTGRESQL.value:
             raise ValueError('PostgresLock requires PostgreSQL database. '
                              f'Current dialect: {engine.dialect.name}')

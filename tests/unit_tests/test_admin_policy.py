@@ -560,6 +560,49 @@ def test_apply_no_client_version_at_client_side(add_example_policy_paths, task):
         versions.set_remote_version('unknown')
 
 
+def test_apply_surfaces_resolved_active_workspace(add_example_policy_paths,
+                                                  task):
+    """The resolved active workspace is surfaced to the policy's config.
+
+    The active workspace can be resolved into a thread-local context (e.g. by
+    the server-side workspace resolver) rather than being written into the
+    config file. Verify that admin policies still receive it as
+    `active_workspace` instead of `None`.
+    """
+    captured_requests = []
+
+    class CaptureWorkspacePolicy(sky.AdminPolicy):
+
+        @classmethod
+        def validate_and_mutate(cls, user_request):
+            captured_requests.append(user_request)
+            return sky.MutatedUserRequest(user_request.task,
+                                          user_request.skypilot_config)
+
+    with mock.patch('sky.utils.admin_policy_utils._get_policy_impl',
+                    return_value=CaptureWorkspacePolicy()):
+        # add_labels.yaml does not set active_workspace, so without the fix
+        # the policy would receive `active_workspace: None`.
+        os.environ[skypilot_config.ENV_VAR_SKYPILOT_CONFIG] = os.path.join(
+            POLICY_PATH, 'add_labels.yaml')
+        importlib.reload(skypilot_config)
+
+        # Simulate the server-side resolver setting the active workspace in a
+        # thread-local context rather than in the config file.
+        with skypilot_config.local_active_workspace_ctx('team-a'):
+            dag, mutated_config = admin_policy_utils.apply(
+                task,
+                request_name=request_names.AdminPolicyRequestName.
+                CLUSTER_LAUNCH,
+                at_client_side=True)
+
+    assert len(captured_requests) == 1
+    assert captured_requests[0].skypilot_config.get(
+        'active_workspace') == 'team-a', (
+            'Policy should receive the resolved active workspace')
+    assert mutated_config.get('active_workspace') == 'team-a'
+
+
 def test_reject_old_clients_policy(add_example_policy_paths, task):
     """Test RejectOldClientsPolicy rejects old clients."""
     from example_policy.skypilot_policy import RejectOldClientsPolicy

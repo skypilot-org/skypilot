@@ -44,7 +44,10 @@ import {
 } from '@/components/elements/icons';
 import { ErrorDisplay } from '@/components/elements/ErrorDisplay';
 import { RotateCwIcon, PlusIcon, Trash2Icon, EditIcon } from 'lucide-react';
-import { LastUpdatedTimestamp } from '@/components/utils';
+import {
+  LastUpdatedTimestamp,
+  NonCapitalizedTooltip,
+} from '@/components/utils';
 import { useMobile } from '@/hooks/useMobile';
 import { statusGroups } from './jobs';
 import dashboardCache from '@/lib/cache';
@@ -186,18 +189,38 @@ const WorkspaceConfigDescription = ({ workspaceName, config }) => {
   return null;
 };
 
-// Workspace badge component for private/public status
-const WorkspaceBadge = ({ isPrivate }) => {
-  if (isPrivate) {
-    return (
-      <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-700 border border-gray-300">
-        Private
-      </span>
-    );
-  }
+// Workspace badge component for private/public status. `readOnly` marks a
+// private workspace that non-members may see but not modify (read-only
+// visibility); an extra "Read-only" chip is shown alongside, with a tooltip
+// clarifying the scope (non-members, not the whole workspace).
+const WorkspaceBadge = ({ isPrivate, readOnly = false }) => {
+  const base =
+    'inline-flex items-center px-2 py-1 rounded-full text-xs font-medium border';
   return (
-    <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-700 border border-green-300">
-      Public
+    <span className="inline-flex items-center gap-1">
+      {isPrivate ? (
+        <span className={`${base} bg-gray-100 text-gray-700 border-gray-300`}>
+          Private
+        </span>
+      ) : (
+        <span
+          className={`${base} bg-green-100 text-green-700 border-green-300`}
+        >
+          Public
+        </span>
+      )}
+      {readOnly && (
+        <NonCapitalizedTooltip
+          content="Non-members can view this workspace and its workloads but cannot modify them"
+          className="text-sm text-muted-foreground"
+        >
+          <span
+            className={`${base} whitespace-nowrap bg-blue-100 text-blue-700 border-blue-300`}
+          >
+            Read-only
+          </span>
+        </NonCapitalizedTooltip>
+      )}
     </span>
   );
 };
@@ -955,6 +978,11 @@ export function Workspaces() {
                     const workspaceConfig =
                       rawWorkspacesData?.[workspace.name] || {};
                     const isPrivate = workspaceConfig.private === true;
+                    // Server-computed flag: already accounts for the org-wide
+                    // workspace_config.read_access fallback, so a private
+                    // workspace with no per-workspace override is flagged
+                    // read-only when the global default is read_access: all.
+                    const isReadOnly = workspaceConfig.read_only === true;
 
                     return (
                       <TableRow
@@ -970,7 +998,10 @@ export function Workspaces() {
                             {workspace.name}
                           </button>
                           <span className="ml-2">
-                            <WorkspaceBadge isPrivate={isPrivate} />
+                            <WorkspaceBadge
+                              isPrivate={isPrivate}
+                              readOnly={isReadOnly}
+                            />
                           </span>
                         </TableCell>
                         <TableCell>

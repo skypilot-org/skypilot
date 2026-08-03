@@ -951,6 +951,25 @@ VALIDATE_LAUNCH_OUTPUT_NO_PG_CONN_CLOSED_ERROR = (
     '! echo "$s" | grep -i "psycopg2.InterfaceError: connection already closed"'
 )
 
+# Asserts that the raylet's soft nofile limit was raised. SkyPilot targets
+# 1048576, but a host whose hard limit is lower cannot reach it (raising a hard
+# limit requires CAP_SYS_RESOURCE, which containers usually lack), so the
+# expected value is min(1048576, hard limit).
+_CHECK_RAYLET_NOFILE_LIMIT = (
+    "pid=$(pgrep -f 'raylet/raylet --raylet_socket_name'); "
+    'soft=$(prlimit --nofile --pid=$pid --noheadings --output=SOFT); '
+    'hard=$(prlimit --nofile --pid=$pid --noheadings --output=HARD); '
+    'expected=1048576; '
+    'if [ "$hard" != unlimited ] && [ "$hard" -lt 1048576 ]; then '
+    'expected=$hard; fi; '
+    'echo "raylet $pid nofile: soft=$soft hard=$hard expected=$expected"; '
+    '[ "$soft" = "$expected" ]')
+
+
+def get_check_raylet_nofile_limit_cmd(cluster_name: str) -> str:
+    """Returns a `sky exec` checking the raylet's open files limit."""
+    return f'sky exec {cluster_name} {shlex.quote(_CHECK_RAYLET_NOFILE_LIMIT)}'
+
 
 def get_disk_size_and_validate_launch_output(generic_cloud: str):
     """Get DISK_SIZE_PARAM and VALIDATE_LAUNCH_OUTPUT for a given cloud.
@@ -1006,7 +1025,8 @@ _CLOUD_CMD_CLUSTER_NAME_SUFFIX = '-cloud-cmd'
 #         run_cloud_cmd_on_cluster('mytest-cluster', 'aws ec2 describe-instances'),
 #         # ... commands for the test ...
 #     ],
-#     f'sky down -y mytest-cluster && {down_cluster_for_cloud_cmd('mytest-cluster')}',
+#     chain_teardown('sky down -y mytest-cluster',
+#                    down_cluster_for_cloud_cmd('mytest-cluster')),
 # )
 def launch_cluster_for_cloud_cmd(cloud: str,
                                  test_cluster_name: str,
@@ -1147,6 +1167,24 @@ def down_cluster_for_cloud_cmd(test_cluster_name: str,
         return 'true'
     else:
         return f'sky down -y {cluster_name}'
+
+
+def chain_teardown(*cmds: str) -> str:
+    """Chains teardown steps so a failing one does not skip the others.
+
+    Chaining with `&&` stops at the first failure and leaks whatever the later
+    steps would have cleaned up (typically the cloud-cmd helper cluster);
+    chaining with `;` hides failures because only the last exit code survives.
+    Here every step runs and the chain still exits non-zero if any failed.
+    """
+    parts = ['__teardown_rc=0']
+    for cmd in cmds:
+        # Strip trailing semicolons: `{ cmd; ; }` is a bash syntax error.
+        parts.append(f'{{ {cmd.strip().rstrip(";")}; }} || __teardown_rc=1')
+    parts.append('exit $__teardown_rc')
+    # Run in a subshell so the final `exit` cannot terminate an outer shell,
+    # e.g. when a chain is used as a step of another chain.
+    return f'( {"; ".join(parts)} )'
 
 
 def extract_default_aws_credentials():

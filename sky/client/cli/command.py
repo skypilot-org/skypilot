@@ -7897,14 +7897,24 @@ def api():
               default=False,
               required=False,
               help='Enable basic authentication in the SkyPilot API server.')
+@click.option('--port',
+              default=None,
+              type=int,
+              required=False,
+              help=('The port to bind the SkyPilot API server to. Defaults '
+                    'to the SKYPILOT_API_SERVER_LOCAL_PORT environment '
+                    'variable, or 46580. Other client commands only find a '
+                    'server on a non-default port if the same environment '
+                    'variable is exported.'))
 @usage_lib.entrypoint
 def api_start(deploy: bool, host: str, foreground: bool,
-              enable_basic_auth: bool):
+              enable_basic_auth: bool, port: Optional[int]):
     """Starts the SkyPilot API server locally."""
     sdk.api_start(deploy=deploy,
                   host=host,
                   foreground=foreground,
-                  enable_basic_auth=enable_basic_auth)
+                  enable_basic_auth=enable_basic_auth,
+                  port=port)
     api_server_url = server_common.get_server_url(host)
     # Dial via a reachable loopback URL: wildcard bind hosts (0.0.0.0 / ::) are
     # not valid connect targets on all platforms.
@@ -8332,9 +8342,13 @@ def workspace_info(output_format: str):
     source_str = info.get('source') or '-'
     preferred = info.get('preferred')
     preferred_str = (f'{preferred!r}' if preferred is not None else '(not set)')
-    accessible = info.get('accessible') or []
-    accessible_str = (', '.join(
-        repr(w) for w in accessible) if accessible else '(none)')
+    # `accessible` is the writable set (where a launch can land);
+    # `read_only` is listed separately.
+    writable = info.get('accessible') or []
+    read_only = info.get('read_only') or []
+    writable_str = ', '.join(
+        repr(w) for w in writable) if writable else '(none)'
+    read_only_str = ', '.join(repr(w) for w in read_only)
     note = info.get('note')
     lines = [
         f'Workspace: {workspace_str}',
@@ -8342,10 +8356,14 @@ def workspace_info(output_format: str):
     ]
     if note:
         lines.append(f'{ux_utils.INDENT_SYMBOL}Note: {note}')
-    lines.extend([
-        f'{ux_utils.INDENT_SYMBOL}Preferred: {preferred_str}',
-        f'{ux_utils.INDENT_LAST_SYMBOL}Accessible: {accessible_str}',
-    ])
+    lines.append(f'{ux_utils.INDENT_SYMBOL}Preferred: {preferred_str}')
+    if read_only:
+        lines.extend([
+            f'{ux_utils.INDENT_SYMBOL}Writable: {writable_str}',
+            f'{ux_utils.INDENT_LAST_SYMBOL}Read-only: {read_only_str}',
+        ])
+    else:
+        lines.append(f'{ux_utils.INDENT_LAST_SYMBOL}Writable: {writable_str}')
     click.echo('\n'.join(lines))
 
     # AMBIGUOUS is the only state whose recovery message is multi-line

@@ -15,6 +15,7 @@ import json
 import logging
 import os
 import platform
+import re
 import subprocess
 import sys
 import typing
@@ -46,6 +47,7 @@ from sky.server.requests import request_names
 from sky.server.requests import requests as requests_lib
 from sky.skylet import autostop_lib
 from sky.skylet import constants
+from sky.skylet import runtime_utils
 from sky.ssh_node_pools import utils as ssh_utils
 from sky.usage import usage_lib
 from sky.utils import admin_policy_utils
@@ -490,7 +492,9 @@ def set_preferred_workspace(preferred: Optional[str]) -> Dict[str, Any]:
     """
     response = server_common.make_authenticated_request(
         'POST', '/users/me/workspace', json={'preferred': preferred})
-    response.raise_for_status()
+    # Render a permission denial (setting a workspace the user cannot access)
+    # as a clean message rather than a raw HTTPError traceback.
+    server_common.handle_request_error(response)
     return response.json()
 
 
@@ -545,7 +549,9 @@ def get_user_workspace(requested: Optional[str] = None) -> Dict[str, Any]:
     if requested is not None:
         url += f'?requested={urlparse.quote(requested)}'
     response = server_common.make_authenticated_request('GET', url)
-    response.raise_for_status()
+    # Render a permission denial (querying a workspace the user cannot access)
+    # as a clean message rather than a raw HTTPError traceback.
+    server_common.handle_request_error(response)
     return response.json()
 
 
@@ -794,6 +800,9 @@ def launch(
 
     Other exceptions may be raised depending on the backend.
     """
+    if (dryrun or _is_launched_by_jobs_controller or
+            _is_launched_by_sky_serve_controller):
+        usage_lib.skip_scarf_ping_for_current_operation()
     if resize and cluster_name is None:
         with ux_utils.print_exception_no_traceback():
             raise ValueError(
@@ -1117,6 +1126,8 @@ def exec(  # pylint: disable=redefined-builtin
         sky.exceptions.NotSupportedError: if the specified cluster is a
           controller that does not support this operation.
     """
+    if dryrun:
+        usage_lib.skip_scarf_ping_for_current_operation()
     dag = dag_utils.convert_entrypoint_to_dag(task)
     validate(dag, workdir_only=True)
     dag, file_mounts_blob_id = client_common.upload_mounts_to_api_server(
@@ -2510,7 +2521,19 @@ def stream_and_get(
                  None),
         stream=True)
     if response.status_code in [404, 400]:
-        detail = response.json().get('detail')
+        # ``response`` is a streaming request; on some pooled connections the
+        # small error body cannot be read back and raises a
+        # ChunkedEncodingError. Read the detail defensively and fall back to a
+        # status-based message so the user gets a clean error, not a traceback.
+        detail = None
+        try:
+            detail = response.json().get('detail')
+        except Exception:  # pylint: disable=broad-except
+            pass
+        if not detail:
+            detail = ('the request or log path was not found or is not '
+                      'accessible' if response.status_code == 404 else
+                      'the request was invalid')
         with ux_utils.print_exception_no_traceback():
             raise exceptions.ClientError(f'Failed to stream logs: {detail}')
     stream_request_id: Optional[server_common.RequestId[
@@ -2587,16 +2610,41 @@ def api_cancel(request_ids: Optional[Union[server_common.RequestId[T],
     return server_common.get_request_id(response)
 
 
+def _cmdline_api_server_port(cmdline: List[str]) -> int:
+    """Parses the port of an API server process from its command line.
+
+    Falls back to the default port for servers started without an explicit
+    --port argument (e.g., by an older SkyPilot version). Operates on the
+    joined command line because some platforms (e.g., macOS) report the
+    whole command line as a single element.
+    """
+    match = re.search(r'--port[= ](\d+)', ' '.join(cmdline))
+    if match is not None:
+        return int(match.group(1))
+    return server_common.DEFAULT_SERVER_PORT
+
+
 def _local_api_server_running(kill: bool = False) -> bool:
-    """Checks if the local api server is running."""
+    """Checks if the local api server on the current port is running.
+
+    Only considers server processes bound to the port this client is
+    configured for, so that multiple API servers on one machine (e.g., dev
+    servers on different ports) do not interfere with each other.
+    """
+    target_port = server_common.get_local_api_server_port()
+    found = False
     for process in psutil.process_iter(attrs=['pid', 'cmdline']):
         cmdline = process.info['cmdline']
         if cmdline and server_common.API_SERVER_CMD in ' '.join(cmdline):
+            if _cmdline_api_server_port(cmdline) != target_port:
+                continue
+            found = True
             if kill:
                 subprocess_utils.kill_children_processes(
                     parent_pids=[process.pid], force=True)
-            return True
-    return False
+            else:
+                return True
+    return found
 
 
 @usage_lib.entrypoint
@@ -2694,6 +2742,7 @@ def api_start(
     metrics: bool = False,
     metrics_port: Optional[int] = None,
     enable_basic_auth: bool = False,
+    port: Optional[int] = None,
 ) -> None:
     """Starts the API server.
 
@@ -2713,9 +2762,25 @@ def api_start(
         metrics_port: The port to export metrics of the API server.
         enable_basic_auth: Whether to enable basic authentication
             in the API server.
+        port: The port to bind the API server to. Defaults to the
+            SKYPILOT_API_SERVER_LOCAL_PORT environment variable, or 46580.
+            Other client commands only find a server on a non-default port
+            if the same environment variable is exported.
     Returns:
         None
     """
+    if port is not None:
+        env_port = os.environ.get(constants.SKY_API_SERVER_LOCAL_PORT_ENV_VAR)
+        if env_port is not None and env_port != str(port):
+            logger.warning(
+                f'--port={port} overrides '
+                f'{constants.SKY_API_SERVER_LOCAL_PORT_ENV_VAR}={env_port} '
+                'for this command only.')
+        os.environ[constants.SKY_API_SERVER_LOCAL_PORT_ENV_VAR] = str(port)
+        # These caches may have been populated with URLs built from the old
+        # port; clear them so the override takes effect.
+        server_common.get_server_url.cache_clear()  # type: ignore
+        server_common.is_api_server_local.cache_clear()  # type: ignore
     if deploy:
         # Deploy mode is for remote access, so always bind a wildcard of the
         # requested host's address family.
@@ -2744,6 +2809,12 @@ def api_start(
                 f'{api_server_url}\n'
                 f'{ux_utils.INDENT_LAST_SYMBOL}'
                 f'View API server logs at: {constants.API_SERVER_LOGS}')
+    local_port = server_common.get_local_api_server_port()
+    if local_port != server_common.DEFAULT_SERVER_PORT:
+        logger.info(
+            'Server is on a non-default port. For other commands and '
+            'terminals to reach it, run: export '
+            f'{constants.SKY_API_SERVER_LOCAL_PORT_ENV_VAR}={local_port}')
 
 
 @usage_lib.entrypoint
@@ -2766,8 +2837,10 @@ def api_stop() -> None:
 
     # Acquire the api server creation lock to prevent multiple processes from
     # stopping and starting the API server at the same time.
-    with filelock.FileLock(
-            os.path.expanduser(constants.API_SERVER_CREATION_LOCK_PATH)):
+    creation_lock_path = runtime_utils.expanduser(
+        constants.API_SERVER_CREATION_LOCK_PATH)
+    os.makedirs(os.path.dirname(creation_lock_path), exist_ok=True)
+    with filelock.FileLock(creation_lock_path):
         try:
             records = scheduler.get_controller_process_records()
             if records is not None:
@@ -2818,7 +2891,7 @@ def api_server_logs(follow: bool = True, tail: Optional[int] = None) -> None:
             tail_args.extend(['-n', '+1'])
         else:
             tail_args.extend(['-n', f'{tail}'])
-        log_path = os.path.expanduser(constants.API_SERVER_LOGS)
+        log_path = runtime_utils.expanduser(constants.API_SERVER_LOGS)
         subprocess.run(['tail', *tail_args, f'{log_path}'], check=False)
     else:
         stream_and_get(log_path=constants.API_SERVER_LOGS, tail=tail)

@@ -44,6 +44,7 @@ name: trainer
 resources:
   infra: kubernetes          # SAME context as the engines — jobs co-schedule on one cluster
   accelerators: H100:4
+  memory: 256+   # host RAM for offloaded optimizer state (see run-slime.sh OPTIMIZER_OFFLOAD)
   image_id: docker:slimerl/slime:nightly-dev-20260707a
 workdir: .
 volumes:

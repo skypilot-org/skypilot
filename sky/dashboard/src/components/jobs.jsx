@@ -93,6 +93,14 @@ import { trackJobAction, trackFilterUsed } from '@/lib/analytics';
 const JOBS_PAGE_SIZE_OPTIONS = [10, 30, 50, 100, 200];
 const JOBS_PAGE_SIZE_STORAGE_KEY = 'skypilot-jobs-page-size';
 
+// Same for the per-cluster jobs table and the pools table. Both keep their own
+// option lists (smaller tables, so smaller steps) and their own storage key, so
+// changing rows-per-page on one table never moves another.
+const CLUSTER_JOBS_PAGE_SIZE_OPTIONS = [5, 10, 20, 50];
+const CLUSTER_JOBS_PAGE_SIZE_STORAGE_KEY = 'skypilot-cluster-jobs-page-size';
+const POOLS_PAGE_SIZE_OPTIONS = [5, 10, 25, 50];
+const POOLS_PAGE_SIZE_STORAGE_KEY = 'skypilot-pools-page-size';
+
 // Define status groups for active and finished jobs
 export const statusGroups = {
   active: [
@@ -2702,7 +2710,15 @@ export function ClusterJobs({
     direction: 'ascending',
   });
   const [currentPage, setCurrentPage] = useState(1);
-  const [pageSize, setPageSize] = useState(10);
+  // Restore the last "rows per page" choice from localStorage so it survives
+  // reloads. Lazy initializer keeps the read out of the render path.
+  const [pageSize, setPageSize] = useState(() =>
+    getPersistedPageSize(
+      CLUSTER_JOBS_PAGE_SIZE_STORAGE_KEY,
+      CLUSTER_JOBS_PAGE_SIZE_OPTIONS,
+      10
+    )
+  );
   const expandedRowRef = useRef(null);
   const [prevClusterJobData, setPrevClusterJobData] = useState(null);
 
@@ -2794,6 +2810,8 @@ export function ClusterJobs({
     const newSize = parseInt(e.target.value, 10);
     setPageSize(newSize);
     setCurrentPage(1); // Reset to first page when changing page size
+    // Remember the choice so it sticks across reloads.
+    persistPageSize(CLUSTER_JOBS_PAGE_SIZE_STORAGE_KEY, newSize);
   };
 
   return (
@@ -2960,7 +2978,7 @@ export function ClusterJobs({
           isNextDisabled={currentPage === totalPages || totalPages === 0}
           pageSize={pageSize}
           onPageSizeChange={handlePageSizeChange}
-          pageSizeOptions={[5, 10, 20, 50]}
+          pageSizeOptions={CLUSTER_JOBS_PAGE_SIZE_OPTIONS}
         />
       )}
     </div>
@@ -3033,7 +3051,15 @@ function PoolsTable({ refreshInterval, setLoading, refreshDataRef }) {
   const [loading, setLocalLoading] = useState(false);
   const [isInitialLoad, setIsInitialLoad] = useState(true);
   const [currentPage, setCurrentPage] = useState(1);
-  const [pageSize, setPageSize] = useState(10);
+  // Restore the last "rows per page" choice from localStorage so it survives
+  // reloads. Lazy initializer keeps the read out of the render path.
+  const [pageSize, setPageSize] = useState(() =>
+    getPersistedPageSize(
+      POOLS_PAGE_SIZE_STORAGE_KEY,
+      POOLS_PAGE_SIZE_OPTIONS,
+      10
+    )
+  );
 
   const fetchData = React.useCallback(async () => {
     setLocalLoading(true);
@@ -3127,6 +3153,8 @@ function PoolsTable({ refreshInterval, setLoading, refreshDataRef }) {
     const newSize = parseInt(e.target.value, 10);
     setPageSize(newSize);
     setCurrentPage(1);
+    // Remember the choice so it sticks across reloads.
+    persistPageSize(POOLS_PAGE_SIZE_STORAGE_KEY, newSize);
   };
 
   const getWorkersCount = (pool) => {
@@ -3244,8 +3272,10 @@ function PoolsTable({ refreshInterval, setLoading, refreshDataRef }) {
         </Table>
       </div>
 
-      {/* Pagination */}
-      {paginatedData.length > 0 && totalPages > 1 && (
+      {/* Pagination. Shown whenever there is at least one row — matching the
+          other tables — so the rows-per-page selector stays reachable even when
+          everything fits on a single page. */}
+      {paginatedData.length > 0 && (
         <PaginationControls
           currentPage={currentPage}
           totalPages={totalPages}
@@ -3259,7 +3289,7 @@ function PoolsTable({ refreshInterval, setLoading, refreshDataRef }) {
           isNextDisabled={currentPage === totalPages}
           pageSize={pageSize}
           onPageSizeChange={handlePageSizeChange}
-          pageSizeOptions={[5, 10, 25, 50]}
+          pageSizeOptions={POOLS_PAGE_SIZE_OPTIONS}
         />
       )}
     </Card>

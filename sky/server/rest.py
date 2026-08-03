@@ -178,6 +178,11 @@ def retry_transient_errors(max_retries: int = 3,
                     # new replica.
                     except exceptions.RequestInterruptedError:
                         _handle_exception()
+                        if consecutive_failed_count >= max_retries:
+                            # Retries exhausted: surface the interruption
+                            # instead of falling out of the loop and
+                            # silently returning None to the caller.
+                            raise
                         logger.debug('Request interrupted. Retry immediately.')
                         continue
                     except Exception as e:  # pylint: disable=broad-except

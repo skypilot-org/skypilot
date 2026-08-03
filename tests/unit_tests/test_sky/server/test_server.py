@@ -845,6 +845,105 @@ def test_api_get_endpoint_serializes_request_payload(monkeypatch):
     assert data['user_id'] == 'user-123'
 
 
+def _make_interrupted_request(with_error: bool):
+    from sky import exceptions
+    from sky.server.requests import payloads
+    from sky.server.requests import requests as requests_lib
+
+    request = requests_lib.Request(
+        request_id='interrupted-req',
+        name='test-request',
+        entrypoint=_api_get_dummy_entrypoint,
+        request_body=payloads.RequestBody(),
+        status=requests_lib.RequestStatus.CANCELLED,
+        created_at=1234567890.0,
+        user_id='user-123',
+        should_retry=True,
+    )
+    if with_error:
+        request.set_error(
+            exceptions.RequestInterruptedError(
+                'Request was interrupted by an API server restart.'))
+    return request
+
+
+def _mount_api_get_request(monkeypatch, request):
+    from sky.server.requests import requests as requests_lib
+
+    async def fake_expand(request_id):
+        return request_id
+
+    async def fake_status(request_id, include_msg=False):
+        return requests_lib.StatusWithMsg(
+            status=requests_lib.RequestStatus.CANCELLED)
+
+    async def fake_get_request(request_id):
+        return request
+
+    monkeypatch.setattr(server, 'get_expanded_request_id', fake_expand)
+    monkeypatch.setattr(requests_lib, 'get_request_status_async', fake_status)
+    monkeypatch.setattr(requests_lib, 'get_request_async', fake_get_request)
+
+
+def test_api_get_interrupted_request_returns_terminal_error(monkeypatch):
+    """/api/get surfaces the stored error of an interrupted request.
+
+    Interrupted requests are terminal (the server does not re-execute them
+    after a restart), so /api/get must return the stored error instead of a
+    retryable 503 -- otherwise clients keep polling /api/get forever while
+    the request will never produce a result.
+    """
+    from fastapi.testclient import TestClient
+
+    from sky import exceptions
+    from sky.server.requests import payloads
+    from sky.server.requests import requests as requests_lib
+
+    request = _make_interrupted_request(with_error=True)
+    _mount_api_get_request(monkeypatch, request)
+
+    client = TestClient(server.app)
+    response = client.get('/api/get', params={'request_id': 'interrupted-req'})
+
+    assert response.status_code == 500
+    # The client SDK decodes the detail payload and raises the error object;
+    # verify it round-trips to RequestInterruptedError.
+    payload = payloads.RequestPayload(**response.json()['detail'])
+    decoded = requests_lib.Request.decode(payload)
+    error = decoded.get_error()
+    assert error is not None
+    assert isinstance(error['object'], exceptions.RequestInterruptedError)
+
+
+def test_api_get_interrupted_request_without_error_synthesizes_error(
+        monkeypatch):
+    """Interrupted rows without a stored error get a synthesized one.
+
+    Rows written by servers that predate the stored-error behavior —
+    including the draining side of the rolling update that ships it — carry
+    bare should_retry. /api/get synthesizes the same terminal error at read
+    time so those rows stop 503ing immediately on deploy.
+    """
+    from fastapi.testclient import TestClient
+
+    from sky import exceptions
+    from sky.server.requests import payloads
+    from sky.server.requests import requests as requests_lib
+
+    request = _make_interrupted_request(with_error=False)
+    _mount_api_get_request(monkeypatch, request)
+
+    client = TestClient(server.app)
+    response = client.get('/api/get', params={'request_id': 'interrupted-req'})
+
+    assert response.status_code == 500
+    payload = payloads.RequestPayload(**response.json()['detail'])
+    decoded = requests_lib.Request.decode(payload)
+    error = decoded.get_error()
+    assert error is not None
+    assert isinstance(error['object'], exceptions.RequestInterruptedError)
+
+
 def test_dashboard_config_endpoint_serializes_external_links(monkeypatch):
     """/dashboard_config returns JSON-serialized dashboard settings.
 

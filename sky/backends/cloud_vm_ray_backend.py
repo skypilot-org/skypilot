@@ -3139,6 +3139,21 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         # a job (detach_setup, default).
         self._setup_cmd = None
 
+    @staticmethod
+    def _inline_command_quote_levels(handle: CloudVmRayResourceHandle) -> int:
+        # SSHCommandRunner quotes for the remote login shell and local shell.
+        quote_levels = 2
+        if isinstance(handle.launched_resources.cloud, clouds.Slurm):
+            # SlurmCommandRunner adds an srun bash -c shell.
+            quote_levels += 1
+            cluster_info = handle.cached_cluster_info
+            if (cluster_info is not None and
+                    cluster_info.provider_config is not None and
+                    cluster_info.provider_config.get('slurm_user') is not None):
+                # SlurmLoginNodeCommandRunner adds the su --command shell.
+                quote_levels += 1
+        return quote_levels
+
     # --- Implementation of Backend APIs ---
 
     def register_info(self, **kwargs) -> None:
@@ -3344,11 +3359,39 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 # resume, release the worker instead of holding it blocked on
                 # the cluster lock: raising ExecutionPausedError marks the
                 # request WAITING and re-enqueues it once the attached
-                # condition observes the lock to be acquirable. Launches issued
-                # by the jobs controller in-process do not go through the
-                # request scheduler, so they keep the blocking behavior.
-                if (common_utils.is_in_request_context() and
-                        not self._is_launched_by_jobs_controller):
+                # condition observes the lock to be acquirable.
+                #
+                # The request context is the sole gate on purpose: it is
+                # exactly "a scheduler manages this request and can park and
+                # resume it". Launches issued by the jobs controller park too.
+                # The controller always launches through the SDK
+                # (recovery_strategy), so its launches run as scheduler-managed
+                # requests on whichever API server serves them: under
+                # consolidation that is the shared API server, where blocking
+                # on the lock pins one executor worker per contender (e.g.
+                # duplicate launch requests for the same cluster after
+                # controller retries) and starves the worker pool at scale;
+                # on a dedicated controller, it is the controller's local API
+                # server, where parking is equally safe -- the controller
+                # explicitly supports parked launch requests (see
+                # _wait_for_parked_request in recovery_strategy), since
+                # admission-wait pauses already park its launches via this
+                # same mechanism. Only callers with no request context (no
+                # scheduler to hand the pause to) keep the blocking behavior
+                # below.
+                #
+                # Note on expected impact: in a healthy system controller
+                # launches should rarely contend on their own cluster lock at
+                # all -- the controller runs one launch attempt per job and
+                # reattaches to an in-flight or parked request on restart
+                # rather than submitting a duplicate, and a holder whose
+                # process died releases the lock (advisory locks are
+                # session-scoped). Parking here is consistency and defense in
+                # depth: when a bug does produce concurrent launches for one
+                # cluster (observed in practice), the losers release their
+                # workers instead of blocking one worker each for the
+                # duration of the holder's operation.
+                if common_utils.is_in_request_context():
                     raise exceptions.ExecutionPausedError(
                         f'Cluster {cluster_name!r} is locked by another '
                         'operation (e.g. launch, start, stop, autostop or '
@@ -4033,8 +4076,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 _dump_final_script(setup_script,
                                    constants.PERSISTENT_SETUP_SCRIPT_PATH)
 
-            if (detach_setup or
-                    backend_utils.is_command_length_over_limit(encoded_script)):
+            if (detach_setup or backend_utils.is_command_length_over_limit(
+                    encoded_script,
+                    quote_levels=self._inline_command_quote_levels(handle))):
                 _dump_final_script(setup_script)
                 create_script_code = 'true'
             else:
@@ -4253,7 +4297,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                         user_id=managed_job_user_id,
                         execution=execution)
 
-                if backend_utils.is_command_length_over_limit(codegen):
+                if backend_utils.is_command_length_over_limit(
+                        codegen,
+                        quote_levels=self._inline_command_quote_levels(handle)):
                     _dump_code_to_file(codegen)
                     queue_job_request = jobsv1_pb2.QueueJobRequest(
                         job_id=job_id,
@@ -4276,7 +4322,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 use_legacy = True
 
         if use_legacy:
-            if backend_utils.is_command_length_over_limit(job_submit_cmd):
+            if backend_utils.is_command_length_over_limit(
+                    job_submit_cmd,
+                    quote_levels=self._inline_command_quote_levels(handle)):
                 _dump_code_to_file(codegen)
                 job_submit_cmd = f'{mkdir_code} && {code}'
 

@@ -2,6 +2,7 @@
 import copy
 from typing import Any, Dict, List, Optional, Tuple
 
+from sky import exceptions
 from sky import sky_logging
 
 logger = sky_logging.init_logger(__name__)
@@ -15,8 +16,6 @@ _REGION_CONFIG_CLOUDS = ['nebius', 'oci']
 # - If the value is None, the list is replaced atomically (e.g., args, command)
 # Ref: https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.27/
 #      #podspec-v1-core
-# NOTE: field imagePullSecrets are not included deliberately for backward
-# compatibility
 _PATCH_MERGE_KEYS = {
     'containers': 'name',
     'initContainers': 'name',
@@ -35,6 +34,11 @@ _PATCH_MERGE_KEYS = {
     # Atomic list fields - replaced entirely, not merged item-by-item
     'args': None,
     'command': None,
+    # Kubernetes patch-merges imagePullSecrets by 'name', but these items are
+    # credentials: unioning an admin-provided secret with a task's own would
+    # keep pulling with a credential the task meant to drop. Replace instead,
+    # which also lets an empty list clear inherited secrets.
+    'imagePullSecrets': None,
 }
 
 
@@ -205,6 +209,43 @@ def _get_nested(configs: Optional[Dict[str, Any]],
     return curr
 
 
+def _validate_mergeable_types(key: Any, base_value: Any,
+                              override_value: Any) -> None:
+    """Rejects an override whose shape cannot be merged into the base value.
+
+    Nested `pod_config` content is not type-checked by the config schema, so a
+    dict/list/scalar mismatch is user input rather than a bug. Without this the
+    merge below would raise a bare AssertionError or TypeError, or silently
+    replace a whole dict/list with a scalar (which the post-merge pod
+    validation does not reliably catch either).
+
+    Only checked where the merge actually reads the base value: an override
+    that replaces the base outright works whatever shape the base has.
+    """
+    if override_value is None:
+        # An explicit null replaces the value; Kubernetes reads a null field as
+        # absent, so this is how a config clears an inherited subtree.
+        return
+    if isinstance(override_value, dict):
+        # Always merged key by key, so the base has to be a dict to recurse
+        # into. The atomic exemption below deliberately does not apply here:
+        # _PATCH_MERGE_KEYS is only consulted for list overrides, so a dict
+        # override recurses even for an atomic field.
+        mergeable = isinstance(base_value, dict)
+    elif isinstance(override_value, list):
+        # Atomic list fields replace the base wholesale; the rest are merged by
+        # patch merge key or appended, both of which read the base list.
+        atomic = key in _PATCH_MERGE_KEYS and _PATCH_MERGE_KEYS[key] is None
+        mergeable = atomic or isinstance(base_value, list)
+    else:
+        mergeable = not isinstance(base_value, (dict, list))
+    if not mergeable:
+        raise exceptions.InvalidSkyPilotConfigError(
+            f'Cannot override config field {key!r} of type '
+            f'{type(base_value).__name__} with a value of type '
+            f'{type(override_value).__name__}: {override_value!r}.')
+
+
 def merge_k8s_configs(
         base_config: Dict[Any, Any],
         override_config: Dict[Any, Any],
@@ -230,24 +271,16 @@ def merge_k8s_configs(
         (next_allowed_override_keys, next_disallowed_override_keys
         ) = _check_allowed_and_disallowed_override_keys(
             key, allowed_override_keys, disallowed_override_keys)
+        if key in base_config:
+            _validate_mergeable_types(key, base_config[key], value)
         if isinstance(value, dict) and key in base_config:
             merge_k8s_configs(base_config[key], value,
                               next_allowed_override_keys,
                               next_disallowed_override_keys)
         elif isinstance(value, list) and key in base_config:
-            assert isinstance(base_config[key], list), \
-                f'Expected {key} to be a list, found {base_config[key]}'
-            if key == 'imagePullSecrets':
-                # For imagePullSecrets, merge the first item from override
-                # into the first item in base (legacy behavior).
-                assert len(value) == 1, \
-                    f'Expected only one imagePullSecret, found {value}'
-                merge_k8s_configs(base_config[key][0], value[0],
-                                  next_allowed_override_keys,
-                                  next_disallowed_override_keys)
             # For list fields with patch strategy "merge", we merge the list
             # by the patch merge key.
-            elif key in _PATCH_MERGE_KEYS:
+            if key in _PATCH_MERGE_KEYS:
                 patch_merge_key = _PATCH_MERGE_KEYS[key]
                 if patch_merge_key is None:
                     # Atomic list field (e.g., args, command) - replace entirely

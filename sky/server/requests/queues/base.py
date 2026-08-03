@@ -131,10 +131,10 @@ class LocalQueueBackend(QueueBackend):
 class MultiprocessingQueueBackend(QueueBackend):
     """Queue backed by a multiprocessing.Queue via a manager."""
 
-    def __init__(self,
-                 queue_name: str,
-                 port: int = mp_queue.DEFAULT_QUEUE_MANAGER_PORT):
+    def __init__(self, queue_name: str, port: Optional[int] = None):
         super().__init__()
+        if port is None:
+            port = mp_queue.get_queue_manager_port()
         # queue_name is the schedule type ('long' / 'short'); used as the
         # metric label when reporting queue wait.
         self._schedule_type = queue_name
@@ -169,7 +169,7 @@ class MultiprocessingQueueFactory(QueueBackendFactory):
     def __init__(self, port: Optional[int] = None):
         super().__init__()
         self._port = (port if port is not None else
-                      mp_queue.DEFAULT_QUEUE_MANAGER_PORT)
+                      mp_queue.get_queue_manager_port())
 
     def create_queue(self, schedule_type: str) -> QueueBackend:
         return MultiprocessingQueueBackend(schedule_type, self._port)
