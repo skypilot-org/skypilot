@@ -314,6 +314,34 @@ def test_merge_k8s_configs_null_override_clears(base_value):
     assert base_config == {'securityContext': None}
 
 
+@pytest.mark.parametrize('key,override_value', [
+    ('securityContext', {
+        'runAsUser': 0
+    }),
+    ('containers', [{
+        'name': 'x'
+    }]),
+    ('tolerations', [{
+        'key': 'a'
+    }]),
+    ('imagePullSecrets', [{
+        'name': 'regcred'
+    }]),
+    ('runtimeClassName', 'nvidia'),
+    ('securityContext', None),
+])
+def test_merge_k8s_configs_adds_key_missing_from_base(key, override_value):
+    """A key the base does not have is added as-is, whatever its shape.
+
+    The shape check only applies to keys present on both sides, so it must not
+    reject a field that only the higher-priority config sets.
+    """
+    base_config = {'unrelated': 1}
+
+    config_utils.merge_k8s_configs(base_config, {key: override_value})
+    assert base_config == {'unrelated': 1, key: override_value}
+
+
 def test_merge_k8s_configs_allows_scalar_override():
     """Only container/scalar mismatches are rejected, not scalar retyping."""
     base_config = {'runtimeClassName': 'nvidia', 'replicas': 1}
