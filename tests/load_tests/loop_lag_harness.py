@@ -143,7 +143,9 @@ class HarnessConfig:
     baseline_lag_threshold_seconds: float = 0.05
     # Also the threshold the per-trial lag observation count is taken above.
     lag_threshold_seconds: float = 0.25
-    min_achieved_qps_ratio: float = 0.95
+    # A trial whose p99 send lateness exceeds this was starved on the client
+    # side, so its numbers describe the load generator, not the server.
+    max_send_lateness_seconds: float = 0.2
     request_timeout_seconds: float = 30.0
     max_connections: int = 512
     verify_tls: bool = True
@@ -162,6 +164,7 @@ class TrialResult:
     achieved_qps: float
     status_counts: Dict[str, int]
     failure_count: int
+    send_lateness_p99: Optional[float]
     latency_p50: Optional[float]
     latency_p90: Optional[float]
     latency_p99: Optional[float]
@@ -273,27 +276,28 @@ def percentile(samples: Sequence[float], q: float) -> float:
     return ordered[lower] * (1.0 - weight) + ordered[upper] * weight
 
 
-def classify_trial(offered_qps: float, achieved_qps: float,
-                   min_ratio: float) -> Tuple[Status, Optional[str]]:
+def classify_trial(completed_requests: int, send_lateness_p99: Optional[float],
+                   max_send_lateness: float) -> Tuple[Status, Optional[str]]:
     """Decide whether a trial's numbers are usable.
 
-    The comparison is between the offered and the achieved *rate*, not between
-    request counts: every scheduled request is awaited to completion, so the
-    counts always match and only the rate reveals that the interval ran long.
-    A trial that could not sustain the offered rate has measured the client or
-    the network as much as the server, so it is INVALID rather than failed --
-    a distinction the caller needs, because a failed run means the change under
-    test regressed and an invalid one means nothing at all.
+    The gate is *send lateness* -- how far behind schedule requests actually
+    went on the wire -- because it separates the two causes of a slow trial. A
+    starved load generator issues requests late, so lateness grows and the
+    trial has measured the client, not the server: INVALID. A slow server
+    leaves the schedule intact (requests still depart on time) and shows up in
+    response latency instead, which is a real measurement the caller should
+    judge as pass or fail. A completion-rate gate cannot tell these apart: a
+    server stall stretches the interval and reads as the client falling
+    behind.
     """
-    if offered_qps <= 0:
-        return Status.INVALID, 'no requests were scheduled'
-    if achieved_qps <= 0:
+    if completed_requests <= 0:
         return Status.INVALID, 'no requests completed'
-    ratio = achieved_qps / offered_qps
-    if ratio < min_ratio:
+    if send_lateness_p99 is not None and send_lateness_p99 > max_send_lateness:
         return (Status.INVALID,
-                f'achieved only {achieved_qps:.1f} of {offered_qps:.1f} '
-                f'requests/s ({ratio:.1%} of offered, minimum {min_ratio:.1%})')
+                f'load generator fell behind schedule: p99 send lateness '
+                f'{send_lateness_p99:.3f}s exceeds {max_send_lateness}s; the '
+                'client was starved, so the numbers do not describe the '
+                'server')
     return Status.OK, None
 
 
@@ -409,6 +413,9 @@ def summarize(trials: Sequence[TrialResult]) -> Dict[str, Dict[str, float]]:
 class _Samples:
     """Raw per-request observations collected during one interval."""
     latencies: List[float] = dataclasses.field(default_factory=list)
+    # How far past its scheduled instant each request actually departed.
+    # Client-side health only: server slowness cannot move it.
+    send_lateness: List[float] = dataclasses.field(default_factory=list)
     status_counts: Dict[str, int] = dataclasses.field(default_factory=dict)
     failures: int = 0
 
@@ -438,6 +445,7 @@ async def _issue(client: httpx.AsyncClient, spec: RequestSpec, url: str,
     delay = due_at - loop.time()
     if delay > 0:
         await asyncio.sleep(delay)
+    samples.send_lateness.append(max(0.0, loop.time() - due_at))
     try:
         response = await client.request(spec.method,
                                         url,
@@ -591,8 +599,10 @@ async def _run_trial(load_client: httpx.AsyncClient,
     offered = len(schedule_offsets(config.target_qps, config.trial_seconds))
     completed = len(samples.latencies)
     achieved_qps = completed / elapsed if elapsed > 0 else 0.0
-    status, reason = classify_trial(config.target_qps, achieved_qps,
-                                    config.min_achieved_qps_ratio)
+    lateness_p99 = (percentile(samples.send_lateness, 99)
+                    if samples.send_lateness else None)
+    status, reason = classify_trial(completed, lateness_p99,
+                                    config.max_send_lateness_seconds)
 
     latencies = samples.latencies
     return TrialResult(
@@ -606,6 +616,7 @@ async def _run_trial(load_client: httpx.AsyncClient,
         achieved_qps=achieved_qps,
         status_counts=dict(samples.status_counts),
         failure_count=samples.failures,
+        send_lateness_p99=lateness_p99,
         latency_p50=percentile(latencies, 50) if latencies else None,
         latency_p90=percentile(latencies, 90) if latencies else None,
         latency_p99=percentile(latencies, 99) if latencies else None,
@@ -687,6 +698,30 @@ def run(config: HarnessConfig, auth: Auth) -> RunResult:
 # --------------------------------------------------------------------------
 # Comparison
 # --------------------------------------------------------------------------
+
+# Config fields that define the load shape. Two artifacts whose configs differ
+# on any of these measured different workloads, so their numbers must not be
+# read as an A/B result.
+CONFIG_COMPARE_KEYS = (
+    'requests',
+    'streams',
+    'target_qps',
+    'trial_seconds',
+    'num_trials',
+    'warmup_seconds',
+    'lag_threshold_seconds',
+)
+
+
+def config_mismatches(baseline: Mapping[str, Any],
+                      candidate: Mapping[str, Any]) -> List[str]:
+    """Load-shape config keys on which two artifacts disagree."""
+    base_config = baseline.get('config', {})
+    cand_config = candidate.get('config', {})
+    return [
+        key for key in CONFIG_COMPARE_KEYS
+        if base_config.get(key) != cand_config.get(key)
+    ]
 
 
 @dataclasses.dataclass
@@ -805,6 +840,15 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         if artifact.get('status') != Status.OK.value:
             print(f'WARNING: {name} run is {artifact.get("status")}: '
                   f'{artifact.get("invalid_reason")}')
+    for name, artifact in (('candidate', candidate), ('noise floor',
+                                                      noise_floor)):
+        if artifact is None:
+            continue
+        mismatched = config_mismatches(baseline, artifact)
+        if mismatched:
+            print(f'WARNING: baseline and {name} ran different workloads '
+                  f'(config differs on: {", ".join(mismatched)}); the '
+                  'comparison below is not an A/B result')
 
     comparisons = compare(baseline, candidate, noise_floor)
     if not comparisons:

@@ -143,20 +143,20 @@ def test_percentile_rejects_an_empty_sample_set():
 # ---------------------------------------------------------------------------
 
 
-def test_trial_is_valid_when_the_client_sustained_the_offered_rate():
-    status, reason = harness.classify_trial(100.0, 99.0, 0.95)
+def test_trial_is_valid_when_requests_departed_on_schedule():
+    status, reason = harness.classify_trial(100, 0.01, 0.2)
     assert status is harness.Status.OK
     assert reason is None
 
 
-def test_trial_is_invalid_when_the_offered_rate_was_not_sustained():
-    status, reason = harness.classify_trial(100.0, 80.0, 0.95)
+def test_trial_is_invalid_when_the_client_fell_behind_schedule():
+    status, reason = harness.classify_trial(100, 0.5, 0.2)
     assert status is harness.Status.INVALID
-    assert '80.0%' in reason
+    assert 'fell behind schedule' in reason
 
 
 def test_trial_is_invalid_when_nothing_completed():
-    status, _ = harness.classify_trial(100.0, 0.0, 0.95)
+    status, _ = harness.classify_trial(0, None, 0.2)
     assert status is harness.Status.INVALID
 
 
@@ -173,6 +173,7 @@ def test_summary_ignores_invalid_trials():
                                    achieved_qps=10.0,
                                    status_counts={'200': 10},
                                    failure_count=0,
+                                   send_lateness_p99=0.001,
                                    latency_p50=0.001,
                                    latency_p90=0.002,
                                    latency_p99=p99,
@@ -357,6 +358,32 @@ def test_compare_cli_prints_a_table(tmp_path, capsys):
     assert 'worse' in out
 
 
+def test_config_mismatches_reports_only_load_shape_keys():
+    base = _artifact('a', 0.01)
+    cand = _artifact('b', 0.01)
+    base['config'] = {'target_qps': 100.0, 'trial_seconds': 60.0}
+    cand['config'] = {'target_qps': 50.0, 'trial_seconds': 60.0}
+    assert harness.config_mismatches(base, cand) == ['target_qps']
+    cand['config'] = dict(base['config'])
+    assert not harness.config_mismatches(base, cand)
+
+
+def test_compare_cli_warns_when_the_workloads_differ(tmp_path, capsys):
+    base = _artifact('master', 0.010)
+    cand = _artifact('branch', 0.030)
+    base['config'] = {'target_qps': 100.0}
+    cand['config'] = {'target_qps': 50.0}
+    base_path = tmp_path / 'master.json'
+    cand_path = tmp_path / 'branch.json'
+    base_path.write_text(json.dumps(base))
+    cand_path.write_text(json.dumps(cand))
+
+    assert harness.main(['compare', str(base_path), str(cand_path)]) == 0
+    out = capsys.readouterr().out
+    assert 'different workloads' in out
+    assert 'target_qps' in out
+
+
 def test_compare_cli_rejects_an_artifact_from_another_version(tmp_path):
     stale = _artifact('old', 0.01)
     stale['artifact_version'] = harness.ARTIFACT_VERSION + 1
@@ -488,10 +515,10 @@ def _config(app_url, **overrides):
         baseline_seconds=0.02,
         warmup_seconds=0.01,
         inter_trial_seconds=0.0,
-        # Trials this short are a handful of requests, so the achieved rate is
-        # dominated by the tail request's latency. Cases that exercise the rate
-        # gate set a real ratio themselves.
-        min_achieved_qps_ratio=0.0,
+        # Millisecond-scale trials see scheduler jitter comparable to their
+        # own length. Cases that exercise the lateness gate set a real
+        # threshold themselves.
+        max_send_lateness_seconds=60.0,
     )
     defaults.update(overrides)
     return harness.HarnessConfig(**defaults)
@@ -569,10 +596,16 @@ async def test_run_aborts_as_invalid_when_the_baseline_is_already_lagging():
 
 
 @pytest.mark.asyncio
-async def test_a_server_that_cannot_keep_up_makes_the_trial_invalid():
+async def test_a_slow_server_stays_a_valid_trial_and_shows_up_in_latency():
+    """Server slowness is the measurement, not a reason to discard it.
+
+    Requests still depart on schedule when the server is the bottleneck, so
+    the trial must classify OK and carry the damage in latency/timeouts --
+    only a client that cannot keep its own schedule invalidates a trial.
+    """
     app = _StubApp()
     # Far slower than the trial is long, and slower than the client timeout, so
-    # most requests never complete inside the trial.
+    # most requests time out rather than complete.
     app.slow_seconds = 5.0
     app.metrics_pages = [_quiet_metrics(10)]
     with _StubServer(app) as server:
@@ -583,13 +616,48 @@ async def test_a_server_that_cannot_keep_up_makes_the_trial_invalid():
                     trial_seconds=0.1,
                     num_trials=1,
                     warmup_seconds=0.0,
-                    max_connections=2,
-                    min_achieved_qps_ratio=0.95,
                     request_timeout_seconds=0.2), harness.Auth())
 
     trial = result.trials[0]
+    assert trial['status'] == harness.Status.OK.value
+    assert trial['failure_count'] > 0
+    assert trial['latency_p99'] >= 0.2
+
+
+@pytest.mark.asyncio
+async def test_a_starved_load_generator_makes_the_trial_invalid():
+    """Blocking the client's own loop mid-trial must invalidate the trial.
+
+    A blocked client loop delays every pending request timer, so requests
+    depart late; that lateness is the client's fault and the trial's numbers
+    describe the load generator, not the server.
+    """
+    app = _StubApp()
+    app.metrics_pages = [_quiet_metrics(10)]
+
+    async def _block_client_loop():
+        # Past baseline + warmup and into the trial window, then a synchronous
+        # sleep on this loop -- exactly what a starved/oversubscribed load
+        # generator looks like to the scheduler.
+        await asyncio.sleep(0.15)
+        time.sleep(0.3)
+
+    with _StubServer(app) as server:
+        result, _ = await asyncio.gather(
+            harness.run_async(
+                _config(server.url,
+                        target_qps=100.0,
+                        trial_seconds=0.4,
+                        baseline_seconds=0.05,
+                        warmup_seconds=0.05,
+                        num_trials=1,
+                        max_send_lateness_seconds=0.1), harness.Auth()),
+            _block_client_loop())
+
+    trial = result.trials[0]
     assert trial['status'] == harness.Status.INVALID.value
-    assert 'of offered' in trial['invalid_reason']
+    assert 'fell behind schedule' in trial['invalid_reason']
+    assert trial['send_lateness_p99'] > 0.1
 
 
 @pytest.mark.asyncio

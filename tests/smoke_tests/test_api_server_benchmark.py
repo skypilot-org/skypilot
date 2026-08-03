@@ -167,6 +167,8 @@ def _mint_service_account_token(api_url: str) -> str:
 
 def _publish(result: loop_lag_harness.RunResult, name: str) -> pathlib.Path:
     """Write the run artifact and hand it to Buildkite when running under it."""
+    # TODO(kevin): move to a pipeline-level artifact_paths declaration if that
+    # turns out simpler than shelling out per test.
     path = result.write(_ARTIFACT_DIR / f'{name}.json')
     if shutil.which('buildkite-agent') is not None:
         upload = subprocess.run(
