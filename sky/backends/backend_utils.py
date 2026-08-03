@@ -764,12 +764,15 @@ def _get_credential_provider_allowlist(
             for resources in workload_task.resources:
                 if resources.cloud is not None:
                     allowed_clouds.add(resources.cloud)
+            if (workload_task.best_resources is not None and
+                    workload_task.best_resources.cloud is not None):
+                allowed_clouds.add(workload_task.best_resources.cloud)
 
     storage_only_cloud_names = {
         cloud_name.lower() for cloud_name in sky_check.STORAGE_ONLY_CLOUDS
     }
     for task_with_dependencies in tasks_with_provider_dependencies:
-        store_types = set()
+        store_types: Set[storage_lib.StoreType] = set()
         for storage in task_with_dependencies.storage_mounts.values():
             store_types.update(storage.stores)
             if isinstance(storage.source, str):
@@ -932,7 +935,7 @@ def write_cluster_config(
                 break
     credential_remote_identity = remote_identity
     config_dict['teardown_execution_strategy'] = (
-        cloud.get_teardown_execution_strategy(credential_remote_identity))
+        cloud.get_teardown_execution_strategy(credential_remote_identity).value)
     if remote_identity != schemas.RemoteIdentityOptions.LOCAL_CREDENTIALS.value:
         # Non-local identities must still be validated against the selected
         # compute cloud before its local credentials are excluded from mounts.

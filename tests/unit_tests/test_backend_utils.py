@@ -339,6 +339,32 @@ def test_controller_task_mounts_workload_provider_credentials(monkeypatch):
     }
 
 
+def test_controller_task_mounts_optimized_workload_provider_credentials(
+        monkeypatch):
+    credential_clouds = _mock_credential_file_mounts(monkeypatch)
+    controller_task = task_lib.Task()
+    aws_workload_task = task_lib.Task()
+    aws_workload_task.best_resources = Resources(cloud=credential_clouds['aws'])
+    vast_workload_task = task_lib.Task()
+    vast_workload_task.best_resources = Resources(
+        cloud=credential_clouds['vast'])
+    controller_task.managed_job_dag = dag_lib.Dag()
+    controller_task.managed_job_dag.add(aws_workload_task)
+    controller_task.managed_job_dag.add(vast_workload_task)
+
+    allowed_clouds = backend_utils._get_credential_provider_allowlist(
+        task=controller_task,
+        compute_cloud=credential_clouds['runpod'],
+        remote_identity=schemas.RemoteIdentityOptions.NO_UPLOAD.value)
+    credentials = sky_check.get_cloud_credential_file_mounts(
+        excluded_clouds=None, allowed_clouds=allowed_clouds)
+
+    assert credentials == {
+        '~/.aws/credentials': '/credentials/aws',
+        '~/.config/vastai/vast_api_key': '/credentials/vast',
+    }
+
+
 def test_empty_credential_allowlist_fails_closed(monkeypatch):
     _mock_credential_file_mounts(monkeypatch)
 
@@ -546,13 +572,10 @@ def test_write_cluster_config_scopes_storage_credentials(monkeypatch, tmp_path):
 
 @mock.patch.object(skypilot_config, '_global_config_context',
                    skypilot_config.ConfigContext())
-def test_write_cluster_config_captures_teardown_strategy_before_normalization(
+def test_write_cluster_config_defaults_runpod_to_server_backed_teardown(
         monkeypatch, tmp_path):
     cloud = clouds.RunPod()
     resource = Resources(cloud=cloud, instance_type='fake-type')
-    monkeypatch.setattr(
-        skypilot_config, 'get_effective_workspace_region_config',
-        lambda *args, **kwargs: schemas.RemoteIdentityOptions.NO_UPLOAD.value)
     monkeypatch.setattr(
         resource, 'make_deploy_variables', lambda *args, **kwargs: {
             'instance_type': 'fake-type',
@@ -561,8 +584,9 @@ def test_write_cluster_config_captures_teardown_strategy_before_normalization(
             'zones': None,
             'image_id': 'fake-image',
         })
+    credential_file_mounts = mock.Mock(return_value={})
     monkeypatch.setattr(backend_utils, '_get_credential_file_mounts',
-                        lambda *args, **kwargs: {})
+                        credential_file_mounts)
     monkeypatch.setattr(backend_utils.auth_utils, 'get_or_generate_keys',
                         lambda: ('/tmp/fake-key', '/tmp/fake-key.pub'))
     yaml_path = tmp_path / 'fake-path'
@@ -583,8 +607,10 @@ def test_write_cluster_config_captures_teardown_strategy_before_normalization(
         region=clouds.Region(name='fake-region'),
         dryrun=True)
 
-    assert config['teardown_execution_strategy'] is (
-        TeardownExecutionStrategy.HEAD_WITH_SERVER_FALLBACK)
+    assert config['teardown_execution_strategy'] == (
+        TeardownExecutionStrategy.HEAD_WITH_SERVER_FALLBACK.value)
+    assert credential_file_mounts.call_args.args[2] == (
+        schemas.RemoteIdentityOptions.NO_UPLOAD.value)
 
 
 @mock.patch.object(skypilot_config, '_global_config_context',
