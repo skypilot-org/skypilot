@@ -1843,6 +1843,22 @@ class JobController:
             own_failures = [f for f in failed_nodes if f[0] == task.name]
             failed_desc = '; '.join(
                 f'{label}: {reason}' for _, label, reason in failed_nodes)
+            if own_failures and (job_group_networking.dns_addresses_for_task(
+                    task, self._job_id) is not None):
+                # The recovered task delivers its own networking: its
+                # relaunched task.run prelude starts the updater and its
+                # networking wait enforces the outcome. The controller
+                # push is a best-effort top-up for such tasks in every
+                # phase (Phase 3 skips them entirely), so its failure
+                # must not be fatal here either -- the prelude may well
+                # have succeeded.
+                logger.error(
+                    'Controller networking push after recovery of '
+                    f'self-delivering task {task.name!r} failed on node(s): '
+                    f'[{failed_desc}]. Not failing the task: its run '
+                    'prelude starts the updater and its networking wait '
+                    'enforces the outcome.')
+                return
             if not own_failures:
                 logger.error(
                     'Networking re-setup after recovery of task '

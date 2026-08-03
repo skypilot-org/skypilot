@@ -1877,7 +1877,8 @@ class TestJobGroupOnRecoveryNetworking:
 
     async def _captured_on_recovery(self,
                                     setup_failures,
-                                    inter_connection_enabled=True):
+                                    inter_connection_enabled=True,
+                                    self_delivering=False):
         """Run _monitor_job_group_task with a fake executor, return the
         captured on_recovery callback invoked under patches."""
         controller = MagicMock(spec=JobController)
@@ -1904,6 +1905,10 @@ class TestJobGroupOnRecoveryNetworking:
              patch('sky.jobs.controller.global_user_state') as gus:
             net.setup_job_group_networking = AsyncMock(
                 return_value=setup_failures)
+            # Non-None marks the recovered task as self-delivering
+            # (inline task.run prelude owns its updater delivery).
+            net.dns_addresses_for_task.return_value = (
+                ['inline-addr'] if self_delivering else None)
             utils.generate_managed_job_cluster_name.side_effect = (
                 lambda name, job_id: f'{name}-{job_id}')
             gus.get_handle_from_cluster_name.return_value = MagicMock()
@@ -1952,6 +1957,19 @@ class TestJobGroupOnRecoveryNetworking:
         assert isinstance(error, exceptions.ClusterSetUpError)
 
     @pytest.mark.asyncio
+    async def test_self_delivering_own_failure_does_not_raise(self):
+        # An inline (self-delivering) task's relaunched run prelude
+        # starts its own updater; the controller push is a best-effort
+        # top-up in every phase (Phase 3 skips such tasks entirely), so
+        # a push failure on its own nodes must not be fatal either --
+        # the prelude may well have succeeded.
+        _, error = await self._captured_on_recovery(setup_failures=[
+            ('job-a', 'job-a-0', 'exec transport broken')
+        ],
+                                                    self_delivering=True)
+        assert error is None
+
+    @pytest.mark.asyncio
     async def test_disabled_inter_connection_skips_setup(self):
         net, error = await self._captured_on_recovery(
             setup_failures=[], inter_connection_enabled=False)
@@ -1997,8 +2015,9 @@ class TestOnRecoveryIncludesInlineTasks:
              patch('sky.jobs.controller.global_user_state') as gus:
             net.setup_job_group_networking = AsyncMock(return_value=[])
             # Even if the peer inlines its DNS delivery, on_recovery must
-            # not consult dns_addresses_for_task -- assert it is never
-            # used as a filter.
+            # not use dns_addresses_for_task to filter the push list (it
+            # is only consulted for fatality classification, and only
+            # when the recovered task's own nodes failed).
             net.dns_addresses_for_task.return_value = ['inline-addr']
             utils.generate_managed_job_cluster_name.side_effect = (
                 lambda name, job_id: f'{name}-{job_id}')
