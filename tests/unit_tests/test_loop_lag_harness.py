@@ -622,6 +622,8 @@ def _artifact(name, p99, lag_above=0.0, status=harness.Status.OK):
         },
         'streams_opened': 0,
         'streams_live_at_end': 0,
+        'stream_end_reasons': {},
+        'stream_end_samples': [],
         'streams_failed': 0,
     }
 
@@ -1159,6 +1161,8 @@ def test_artifact_round_trips_through_json(tmp_path):
         streams_opened=0,
         streams_failed=0,
         streams_live_at_end=0,
+        stream_end_reasons={},
+        stream_end_samples=[],
     )
     path = app_summary.write(tmp_path / 'nested' / 'run.json')
     reloaded = json.loads(pathlib.Path(path).read_text())

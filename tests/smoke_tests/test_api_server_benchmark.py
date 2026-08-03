@@ -370,7 +370,9 @@ def test_api_server_event_loop_lag(generic_cloud: str):
     assert starvation_result.streams_live_at_end == _HELD_STREAMS, (
         f'{_HELD_STREAMS - starvation_result.streams_live_at_end} of '
         f'{_HELD_STREAMS} streams closed before the run ended; the server was '
-        'not held at the concurrency this scenario measures')
+        'not held at the concurrency this scenario measures. They ended '
+        f'with: {starvation_result.stream_end_reasons}; the server had sent '
+        f'them: {starvation_result.stream_end_samples}')
 
     for trial in _valid_trials(starvation_result):
         assert set(trial['status_counts']) == {

@@ -243,6 +243,9 @@ class RunResult:
     # that were still open when the run ended, which is what the scenario
     # actually depends on.
     streams_live_at_end: int
+    # Why held streams stopped, and what the server had sent them.
+    stream_end_reasons: Dict[str, int]
+    stream_end_samples: List[str]
     streams_failed: int
 
     def to_dict(self) -> Dict[str, Any]:
@@ -582,6 +585,17 @@ class _HeldStreams:
     opened: int = 0
     failed: int = 0
     readers: List['asyncio.Task'] = dataclasses.field(default_factory=list)
+    # Why readers stopped, counted by reason, with a sample of what the
+    # server had sent. Carried into the artifact so an early close is
+    # diagnosable from the run rather than needing another one.
+    end_reasons: Dict[str, int] = dataclasses.field(default_factory=dict)
+    end_samples: List[str] = dataclasses.field(default_factory=list)
+
+    def record_end(self, reason: str, head: bytes) -> None:
+        self.end_reasons[reason] = self.end_reasons.get(reason, 0) + 1
+        if len(self.end_samples) < 3:
+            self.end_samples.append(
+                head.decode('utf-8', 'replace').strip()[:200])
 
     def live(self) -> int:
         return sum(1 for reader in self.readers if not reader.done())
@@ -624,7 +638,7 @@ async def _held_streams(auth: Auth,
                     held.failed += 1
                     continue
                 held.readers.append(
-                    asyncio.ensure_future(_consume_stream(response)))
+                    asyncio.ensure_future(_consume_stream(response, held)))
                 held.opened += 1
             except Exception:  # pylint: disable=broad-except
                 held.failed += 1
@@ -636,11 +650,26 @@ async def _held_streams(auth: Auth,
         await stack.aclose()
 
 
-async def _consume_stream(response: httpx.Response) -> None:
-    """Drain a held-open response so the server is not blocked on the socket."""
-    with contextlib.suppress(Exception):
-        async for _ in response.aiter_bytes():
-            pass
+async def _consume_stream(response: httpx.Response,
+                          held: '_HeldStreams') -> None:
+    """Drain a held-open response, recording why it ended.
+
+    A stream that ends early invalidates the trial, so the reason it ended is
+    the first thing anyone will want; swallowing it leaves only the fact that
+    the concurrency vanished. The opening bytes are kept too, since a server
+    that answers 200 and then says something terminal in the body explains
+    itself there.
+    """
+    head = b''
+    try:
+        async for chunk in response.aiter_bytes():
+            if len(head) < 200:
+                head += chunk[:200 - len(head)]
+        held.record_end('clean EOF', head)
+    except asyncio.CancelledError:
+        raise
+    except Exception as error:  # pylint: disable=broad-except
+        held.record_end(f'{type(error).__name__}: {error}', head)
 
 
 async def _scrape(client: httpx.AsyncClient, metrics_url: str) -> str:
@@ -804,7 +833,9 @@ async def run_async(config: HarnessConfig, auth: Auth) -> RunResult:
                              summary={},
                              streams_opened=0,
                              streams_failed=0,
-                             streams_live_at_end=0)
+                             streams_live_at_end=0,
+                             stream_end_reasons={},
+                             stream_end_samples=[])
 
         async with _held_streams(auth, config) as held:
             async with httpx.AsyncClient(
@@ -840,6 +871,8 @@ async def run_async(config: HarnessConfig, auth: Auth) -> RunResult:
         streams_opened=held.opened,
         streams_failed=held.failed,
         streams_live_at_end=streams_live_at_end,
+        stream_end_reasons=dict(held.end_reasons),
+        stream_end_samples=list(held.end_samples),
     )
 
 
