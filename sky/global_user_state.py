@@ -7,6 +7,7 @@ Concepts:
   interact with a cluster.
 """
 import asyncio
+import dataclasses
 import enum
 import json
 import os
@@ -62,6 +63,56 @@ _UNIQUE_CONSTRAINT_FAILED_ERROR_MSGS = [
     # postgres
     'duplicate key value violates unique constraint',
 ]
+
+_AUTODOWN_LAST_ERROR_MAX_LENGTH = 1024
+
+
+class AutodownIntentState(str, enum.Enum):
+    """Durable states for server-reconciled cluster autodown.
+
+    Callers own the allowed transition graph; the persistence API enforces the
+    caller-supplied expected states plus incarnation and generation fences.
+    """
+
+    CONFIGURING = 'CONFIGURING'
+    ARMED = 'ARMED'
+    PREPARING = 'PREPARING'
+    READY = 'READY'
+    EXECUTING = 'EXECUTING'
+    RETRY_WAIT = 'RETRY_WAIT'
+    SUCCEEDED = 'SUCCEEDED'
+    CANCELLED = 'CANCELLED'
+
+
+_AUTODOWN_INTENT_STATE_SQL_VALUES = ', '.join(
+    repr(state.value) for state in AutodownIntentState)
+_ACTIONABLE_AUTODOWN_INTENT_STATES = (
+    AutodownIntentState.PREPARING,
+    AutodownIntentState.READY,
+    AutodownIntentState.EXECUTING,
+    AutodownIntentState.RETRY_WAIT,
+)
+
+
+@dataclasses.dataclass(frozen=True)
+class AutodownIntent:
+    """A generation-fenced durable autodown request."""
+
+    cluster_name: str
+    cluster_hash: str
+    generation: int
+    state: AutodownIntentState
+    idle_minutes: int
+    to_down: bool
+    execution_strategy: str
+    user_hash: Optional[str]
+    workspace: Optional[str]
+    attempt_count: int
+    next_retry_at: Optional[int]
+    last_error: Optional[str]
+    created_at: int
+    updated_at: int
+
 
 Base = declarative.declarative_base()
 
@@ -137,6 +188,33 @@ cluster_table = sqlalchemy.Table(
     # console URLs generated at launch time. Same shape as the `links` field
     # on managed-job rows: a JSON object mapping {label: url}.
     sqlalchemy.Column('links', sqlalchemy.JSON, server_default=None),
+)
+
+autodown_intent_table = sqlalchemy.Table(
+    'autodown_intents',
+    Base.metadata,
+    sqlalchemy.Column('cluster_name', sqlalchemy.Text, primary_key=True),
+    sqlalchemy.Column('cluster_hash', sqlalchemy.Text, nullable=False),
+    sqlalchemy.Column('generation', sqlalchemy.Integer, nullable=False),
+    sqlalchemy.Column('state', sqlalchemy.Text, nullable=False),
+    sqlalchemy.Column('idle_minutes', sqlalchemy.Integer, nullable=False),
+    sqlalchemy.Column('to_down', sqlalchemy.Integer, nullable=False),
+    sqlalchemy.Column('execution_strategy', sqlalchemy.Text, nullable=False),
+    sqlalchemy.Column('user_hash', sqlalchemy.Text, server_default=None),
+    sqlalchemy.Column('workspace', sqlalchemy.Text, server_default=None),
+    sqlalchemy.Column('attempt_count',
+                      sqlalchemy.Integer,
+                      nullable=False,
+                      server_default='0'),
+    sqlalchemy.Column('next_retry_at', sqlalchemy.Integer, server_default=None),
+    sqlalchemy.Column('last_error', sqlalchemy.Text, server_default=None),
+    sqlalchemy.Column('created_at', sqlalchemy.Integer, nullable=False),
+    sqlalchemy.Column('updated_at', sqlalchemy.Integer, nullable=False),
+    sqlalchemy.CheckConstraint(
+        f'state IN ({_AUTODOWN_INTENT_STATE_SQL_VALUES})',
+        name='ck_autodown_intents_state'),
+    sqlalchemy.Index('idx_autodown_intents_due', 'state', 'next_retry_at',
+                     'cluster_name'),
 )
 
 storage_table = sqlalchemy.Table(
@@ -405,6 +483,224 @@ def _sqlite_supports_returning() -> bool:
 _db_manager = db_utils.DatabaseManager(
     'state', create_table, post_init_fn=lambda _: _sqlite_supports_returning())
 initialize_and_get_db = _db_manager.get_engine
+
+
+def _autodown_intent_from_row(row: Any) -> AutodownIntent:
+    return AutodownIntent(
+        cluster_name=row.cluster_name,
+        cluster_hash=row.cluster_hash,
+        generation=row.generation,
+        state=AutodownIntentState(row.state),
+        idle_minutes=row.idle_minutes,
+        to_down=bool(row.to_down),
+        execution_strategy=row.execution_strategy,
+        user_hash=row.user_hash,
+        workspace=row.workspace,
+        attempt_count=row.attempt_count,
+        next_retry_at=row.next_retry_at,
+        last_error=row.last_error,
+        created_at=row.created_at,
+        updated_at=row.updated_at,
+    )
+
+
+def _autodown_intent_fence(cluster_name: str, cluster_hash: str,
+                           generation: int,
+                           expected_states: Set[AutodownIntentState]) -> Any:
+    state_values = [
+        AutodownIntentState(state).value for state in expected_states
+    ]
+    return sqlalchemy.and_(
+        autodown_intent_table.c.cluster_name == cluster_name,
+        autodown_intent_table.c.cluster_hash == cluster_hash,
+        autodown_intent_table.c.generation == generation,
+        autodown_intent_table.c.state.in_(state_values),
+    )
+
+
+@metrics_lib.time_me
+def create_or_replace_autodown_intent(
+        cluster_name: str, cluster_hash: str, idle_minutes: int, to_down: bool,
+        execution_strategy: str, user_hash: Optional[str],
+        workspace: Optional[str]) -> AutodownIntent:
+    """Create a new intent generation with one atomic database upsert.
+
+    The conflict update increments the stored generation in the database, so
+    concurrent writers cannot allocate the same generation. This operation is
+    intentionally not wrapped in automatic DB retries: blindly replaying after
+    an ambiguous commit acknowledgement could increment the generation twice.
+    """
+    engine = _db_manager.get_engine()
+    if engine.dialect.name == db_utils.SQLAlchemyDialect.SQLITE.value:
+        insert_func = sqlite.insert
+    elif engine.dialect.name == db_utils.SQLAlchemyDialect.POSTGRESQL.value:
+        insert_func = postgresql.insert
+    else:
+        raise ValueError('Unsupported database dialect')
+
+    now = int(time.time())
+    insert_statement = insert_func(autodown_intent_table).values(
+        cluster_name=cluster_name,
+        cluster_hash=cluster_hash,
+        generation=1,
+        state=AutodownIntentState.CONFIGURING.value,
+        idle_minutes=idle_minutes,
+        to_down=int(to_down),
+        execution_strategy=execution_strategy,
+        user_hash=user_hash,
+        workspace=workspace,
+        attempt_count=0,
+        next_retry_at=None,
+        last_error=None,
+        created_at=now,
+        updated_at=now,
+    )
+    upsert_statement = insert_statement.on_conflict_do_update(
+        index_elements=[autodown_intent_table.c.cluster_name],
+        set_={
+            autodown_intent_table.c.cluster_hash: cluster_hash,
+            autodown_intent_table.c.generation:
+                autodown_intent_table.c.generation + 1,
+            autodown_intent_table.c.state:
+                AutodownIntentState.CONFIGURING.value,
+            autodown_intent_table.c.idle_minutes: idle_minutes,
+            autodown_intent_table.c.to_down: int(to_down),
+            autodown_intent_table.c.execution_strategy: execution_strategy,
+            autodown_intent_table.c.user_hash: user_hash,
+            autodown_intent_table.c.workspace: workspace,
+            autodown_intent_table.c.attempt_count: 0,
+            autodown_intent_table.c.next_retry_at: None,
+            autodown_intent_table.c.last_error: None,
+            autodown_intent_table.c.created_at: now,
+            autodown_intent_table.c.updated_at: now,
+        })
+    with orm.Session(engine) as session:
+        session.execute(upsert_statement)
+        row = session.query(autodown_intent_table).filter_by(
+            cluster_name=cluster_name).one()
+        intent = _autodown_intent_from_row(row)
+        session.commit()
+    return intent
+
+
+@metrics_lib.time_me
+def get_autodown_intent(cluster_name: str) -> Optional[AutodownIntent]:
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
+        row = session.query(autodown_intent_table).filter_by(
+            cluster_name=cluster_name).first()
+    if row is None:
+        return None
+    return _autodown_intent_from_row(row)
+
+
+@metrics_lib.time_me
+def list_due_autodown_intents(
+        now: Optional[int] = None,
+        limit: Optional[int] = None) -> List[AutodownIntent]:
+    """List due reconciliation work in retry time then cluster-name order.
+
+    PREPARING, READY, and EXECUTING rows are immediately due. RETRY_WAIT rows
+    become due at ``next_retry_at``. Configuration, armed, and terminal rows
+    are intentionally excluded.
+    """
+    if now is None:
+        now = int(time.time())
+    actionable_state_values = [
+        state.value for state in _ACTIONABLE_AUTODOWN_INTENT_STATES
+    ]
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
+        query = session.query(autodown_intent_table).filter(
+            autodown_intent_table.c.state.in_(actionable_state_values),
+            sqlalchemy.or_(
+                autodown_intent_table.c.next_retry_at.is_(None),
+                autodown_intent_table.c.next_retry_at <= now,
+            ),
+        ).order_by(
+            sqlalchemy.func.coalesce(autodown_intent_table.c.next_retry_at, 0),
+            autodown_intent_table.c.cluster_name,
+        )
+        if limit is not None:
+            query = query.limit(limit)
+        rows = query.all()
+    return [_autodown_intent_from_row(row) for row in rows]
+
+
+@metrics_lib.time_me
+def compare_and_swap_autodown_intent(cluster_name: str, cluster_hash: str,
+                                     generation: int,
+                                     expected_states: Set[AutodownIntentState],
+                                     new_state: AutodownIntentState) -> bool:
+    """Transition exactly the matching incarnation and generation.
+
+    Returns False for a stale hash, generation, or state. Like generation
+    allocation, this fenced write is not automatically replayed after an
+    ambiguous commit acknowledgement; callers can safely resolve ambiguity by
+    reading the current intent.
+    """
+    new_state = AutodownIntentState(new_state)
+    if not expected_states:
+        return False
+    fence = _autodown_intent_fence(cluster_name, cluster_hash, generation,
+                                   expected_states)
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
+        result = session.execute(
+            sqlalchemy.update(autodown_intent_table).where(
+                fence,
+                autodown_intent_table.c.state != new_state.value,
+            ).values(
+                state=new_state.value,
+                updated_at=int(time.time()),
+            ))
+        session.commit()
+        return result.rowcount == 1
+
+
+def cancel_autodown_intent(cluster_name: str, cluster_hash: str,
+                           generation: int) -> bool:
+    """Persist a terminal cancellation tombstone for a matching live intent."""
+    live_states = set(AutodownIntentState) - {
+        AutodownIntentState.SUCCEEDED,
+        AutodownIntentState.CANCELLED,
+    }
+    return compare_and_swap_autodown_intent(
+        cluster_name=cluster_name,
+        cluster_hash=cluster_hash,
+        generation=generation,
+        expected_states=live_states,
+        new_state=AutodownIntentState.CANCELLED,
+    )
+
+
+@metrics_lib.time_me
+def record_autodown_intent_retry(cluster_name: str, cluster_hash: str,
+                                 generation: int,
+                                 expected_states: Set[AutodownIntentState],
+                                 next_retry_at: int,
+                                 error: BaseException) -> bool:
+    """Record a fenced retry with a bounded, single-line error summary.
+
+    The persisted summary is limited to 1024 characters.
+    """
+    if not expected_states:
+        return False
+    fence = _autodown_intent_fence(cluster_name, cluster_hash, generation,
+                                   expected_states)
+    last_error = db_retries.summarize(error)[:_AUTODOWN_LAST_ERROR_MAX_LENGTH]
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
+        result = session.execute(
+            sqlalchemy.update(autodown_intent_table).where(fence).values(
+                state=AutodownIntentState.RETRY_WAIT.value,
+                attempt_count=autodown_intent_table.c.attempt_count + 1,
+                next_retry_at=next_retry_at,
+                last_error=last_error,
+                updated_at=int(time.time()),
+            ))
+        session.commit()
+        return result.rowcount == 1
 
 
 @metrics_lib.time_me
