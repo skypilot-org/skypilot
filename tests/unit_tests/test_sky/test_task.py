@@ -769,6 +769,7 @@ def test_redact_task_yaml_dict_recursively_redacts_without_mutation():
         },
         'secrets': {
             'INLINE_SECRET': 'inline-secret',
+            'PASSWORD': 'secrets:literal-secret',
             'secrets:workspace.REFERENCED_SECRET': None,
             'NULL_SECRET': None,
         },
@@ -816,6 +817,7 @@ def test_redact_task_yaml_dict_recursively_redacts_without_mutation():
     }
     assert redacted_yaml['secrets'] == {
         'INLINE_SECRET': '<redacted>',
+        'PASSWORD': '<redacted>',
         'secrets:workspace.REFERENCED_SECRET': None,
         'NULL_SECRET': None,
     }
@@ -849,8 +851,8 @@ def test_redact_task_yaml_dict_redacts_nested_sensitive_values_as_a_whole():
     assert task_yaml == original_yaml
     assert redacted_yaml['authorization'] == '<redacted>'
     assert redacted_yaml['secrets']['MY_SECRET'] == '<redacted>'
-    assert (redacted_yaml['secrets']['secrets:workspace.REFERENCED_SECRET']
-            is None)
+    assert (redacted_yaml['secrets']['secrets:workspace.REFERENCED_SECRET'] is
+            None)
     assert redacted_yaml['managed_secrets'] == original_yaml['managed_secrets']
 
 

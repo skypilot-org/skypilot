@@ -337,12 +337,10 @@ def _redact_secrets(value: Any) -> Any:
         return _redact_sensitive_value(value)
     redacted_secrets: Dict[Any, Any] = {}
     for secret_name, secret_value in value.items():
-        if (isinstance(secret_name, str) and
-                secret_name.startswith('secrets:') and secret_value is None):
+        if secret_value is None:
             redacted_secrets[secret_name] = None
         else:
-            redacted_secrets[secret_name] = _redact_sensitive_value(
-                secret_value)
+            redacted_secrets[secret_name] = _REDACTED_VALUE
     return redacted_secrets
 
 
