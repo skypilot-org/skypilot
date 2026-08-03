@@ -37,6 +37,8 @@ _RUNPOD_HEAD_TEARDOWN_ERROR = (
     'RunPod head teardown failed; server teardown required.')
 _PROVIDER_HEAD_TEARDOWN_ERROR = (
     'Head-side provider teardown failed; server teardown required.')
+_HEAD_PREPARATION_ERROR = (
+    'Head-side teardown preparation failed; server teardown required.')
 
 
 def _get_durable_autodown_identity(
@@ -376,6 +378,24 @@ class StopEvent(SkyletEvent):
             hook_executor.run(event, hooks)
 
     def _stop_cluster(self, autostop_config):
+        try:
+            self._stop_cluster_impl(autostop_config)
+        except Exception:  # pylint: disable=broad-except
+            durable_identity = _get_durable_autodown_identity(autostop_config)
+            if durable_identity is not None:
+                current = autostop_lib.get_autostop_config()
+                if (current.cluster_hash == durable_identity[0] and
+                        current.generation == durable_identity[1] and
+                        current.durable_execution_state == autostop_lib.
+                        DurableAutodownState.HEAD_TEARDOWN_STARTED):
+                    autostop_lib.mark_server_teardown_required(
+                        *durable_identity, _HEAD_PREPARATION_ERROR)
+                    logger.warning('Head-side teardown preparation failed; '
+                                   'server teardown requested.')
+                    return
+            raise
+
+    def _stop_cluster_impl(self, autostop_config):
         if (autostop_config.backend ==
                 cloud_vm_ray_backend.CloudVmRayBackend.NAME):
             execution_strategy = autostop_config.execution_strategy
