@@ -216,12 +216,24 @@ def _validate_mergeable_types(key: Any, base_value: Any,
     Nested `pod_config` content is not type-checked by the config schema, so a
     dict/list/scalar mismatch is user input rather than a bug. Without this the
     merge below would raise a bare AssertionError or TypeError, or silently
-    replace a whole dict/list with a scalar.
+    replace a whole dict/list with a scalar (which the post-merge pod
+    validation does not reliably catch either).
+
+    Only checked where the merge actually reads the base value: an override
+    that replaces the base outright works whatever shape the base has.
     """
+    if override_value is None:
+        # An explicit null replaces the value; Kubernetes reads a null field as
+        # absent, so this is how a config clears an inherited subtree.
+        return
     if isinstance(override_value, dict):
+        # Merged key by key, so the base has to be a dict to recurse into.
         mergeable = isinstance(base_value, dict)
     elif isinstance(override_value, list):
-        mergeable = isinstance(base_value, list)
+        # Atomic list fields replace the base wholesale; the rest are merged by
+        # patch merge key or appended, both of which read the base list.
+        atomic = key in _PATCH_MERGE_KEYS and _PATCH_MERGE_KEYS[key] is None
+        mergeable = atomic or isinstance(base_value, list)
     else:
         mergeable = not isinstance(base_value, (dict, list))
     if not mergeable:

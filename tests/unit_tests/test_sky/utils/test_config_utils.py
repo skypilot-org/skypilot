@@ -258,34 +258,60 @@ def test_merge_k8s_configs_image_pull_secrets_empty_base():
     assert base_config['imagePullSecrets'] == [{'name': 'regcred'}]
 
 
-@pytest.mark.parametrize('base_value,override_value', [
-    ({
-        'name': 'regcred'
+@pytest.mark.parametrize('key,base_value,override_value', [
+    ('containers', {
+        'name': 'ray-node'
     }, [{
         'name': 'other'
     }]),
-    ([{
+    ('tolerations', 'oops', [{
+        'key': 'a'
+    }]),
+    ('imagePullSecrets', [{
         'name': 'regcred'
     }], {
         'name': 'other'
     }),
-    ([{
+    ('imagePullSecrets', [{
         'name': 'regcred'
-    }], 'other'),
+    }], 'oops'),
 ])
-def test_merge_k8s_configs_rejects_shape_mismatch(base_value, override_value):
+def test_merge_k8s_configs_rejects_shape_mismatch(key, base_value,
+                                                  override_value):
     """A dict/list/scalar mismatch is user input, not an internal error.
 
     Nested pod_config content is not type-checked by the schema, so these
     shapes reach the merge and used to raise a bare AssertionError/TypeError
     or silently replace the whole field.
     """
-    base_config = {'imagePullSecrets': base_value}
+    base_config = {key: base_value}
 
-    with pytest.raises(exceptions.InvalidSkyPilotConfigError,
-                       match='imagePullSecrets'):
-        config_utils.merge_k8s_configs(base_config,
-                                       {'imagePullSecrets': override_value})
+    with pytest.raises(exceptions.InvalidSkyPilotConfigError, match=key):
+        config_utils.merge_k8s_configs(base_config, {key: override_value})
+
+
+def test_merge_k8s_configs_atomic_list_ignores_base_shape():
+    """An atomic list replaces the base, so its shape is irrelevant."""
+    base_config = {'imagePullSecrets': {'name': 'regcred'}}
+
+    config_utils.merge_k8s_configs(base_config,
+                                   {'imagePullSecrets': [{
+                                       'name': 'other'
+                                   }]})
+    assert base_config['imagePullSecrets'] == [{'name': 'other'}]
+
+
+@pytest.mark.parametrize('base_value', [{'runAsUser': 0}, [{'key': 'a'}], 'x'])
+def test_merge_k8s_configs_null_override_clears(base_value):
+    """An explicit null replaces the value, whatever shape the base has.
+
+    Kubernetes reads a null field as absent, so this is how a config clears a
+    subtree inherited from a lower-priority source.
+    """
+    base_config = {'securityContext': base_value}
+
+    config_utils.merge_k8s_configs(base_config, {'securityContext': None})
+    assert base_config == {'securityContext': None}
 
 
 def test_merge_k8s_configs_allows_scalar_override():
