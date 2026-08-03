@@ -308,6 +308,18 @@ class BasePlugin(abc.ABC):
         the strictly-read-only `viewer` role.  Endpoints NOT declared
         here are denied for viewers by default.
 
+        IMPORTANT -- dual contract: this list also classifies an endpoint as
+        read-only for *workspace access* (see
+        `sky.server.requests.workspace_access` /
+        `rbac.get_read_only_endpoints`). An endpoint declared here therefore
+        (a) becomes callable by the viewer role AND (b) needs only *read* on
+        the caller's active workspace, which lets a non-member of a read-only
+        workspace call it. Only declare endpoints that genuinely read; never
+        list one that creates or mutates a workspace-scoped resource, or a
+        non-member could reach it. Endpoints omitted here default to requiring
+        active-workspace *write* (the fail-safe direction), so a plugin's
+        mutating endpoints need no extra declaration to be gated.
+
         Path patterns use the same Casbin `keyMatch2` syntax as
         `rbac_rules` (e.g. `/plugins/api/foo/*`, `/plugins/api/foo/:id`).
 

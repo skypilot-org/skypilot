@@ -733,3 +733,50 @@ run: echo "hello world"
     # Verify the dag was created successfully
     assert dag is not None
     assert len(dag.tasks) == 1
+
+
+def _fake_response(status_code, json_body=None, json_raises=False):
+    """Build a fake requests.Response for handle_request_error tests."""
+    resp = mock.Mock(spec=requests.Response)
+    resp.status_code = status_code
+    resp.url = 'http://api/test'
+    resp.text = 'body-text'
+    if json_raises:
+        resp.json.side_effect = ValueError('no json')
+    else:
+        resp.json.return_value = json_body
+
+    def _raise_for_status():
+        if status_code >= 400:
+            raise requests.exceptions.HTTPError(str(status_code), response=resp)
+
+    resp.raise_for_status.side_effect = _raise_for_status
+    return resp
+
+
+def test_handle_request_error_403_detail_clean_message():
+    """A 403 with a server `detail` is surfaced as a clean, typed
+    PermissionDeniedError (no raw HTTPError traceback) so permission denials
+    read as one line and callers can distinguish authz failures."""
+    resp = _fake_response(403,
+                          {'detail': 'You are not a member of workspace X.'})
+    with pytest.raises(exceptions.PermissionDeniedError) as exc_info:
+        common.handle_request_error(resp)
+    assert 'not a member of workspace X' in str(exc_info.value)
+    # Must be the clean typed error, not the raw HTTPError.
+    assert not isinstance(exc_info.value, requests.exceptions.HTTPError)
+
+
+def test_handle_request_error_403_no_detail_falls_through():
+    """A 403 without a usable `detail` keeps the original HTTPError."""
+    resp = _fake_response(403, {})
+    with pytest.raises(requests.exceptions.HTTPError):
+        common.handle_request_error(resp)
+
+
+def test_handle_request_error_5xx_stays_httperror():
+    """5xx must remain an HTTPError (retryable by retry_transient_errors),
+    i.e. the 403 handling must not broaden to all >=400 statuses."""
+    resp = _fake_response(500, {'detail': 'server boom'})
+    with pytest.raises(requests.exceptions.HTTPError):
+        common.handle_request_error(resp)

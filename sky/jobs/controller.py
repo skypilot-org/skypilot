@@ -126,24 +126,27 @@ def _add_k8s_annotations(task: 'sky.Task', job_id: int) -> None:
     the kubernetes specific config is not used when launching
     a cluster on other clouds.
     """
-    original_resources = task.resources
-    new_resources_list: List['sky.Resources'] = []
-    for original_resource in original_resources:
-        # Get existing config overrides or create new dict
-        config_overrides = original_resource.cluster_config_overrides.copy()
-
-        # Initialize nested structure and add annotations
-        pod_annotations = config_overrides.setdefault(
-            'kubernetes',
-            {}).setdefault('pod_config',
-                           {}).setdefault('metadata',
-                                          {}).setdefault('annotations', {})
-        pod_annotations['skypilot-managed-job-id'] = str(job_id)
-        pod_annotations['skypilot-managed-job-name'] = str(task.name)
-        # Create new resource with updated config
-        new_resource = original_resource.copy(
-            _cluster_config_overrides=config_overrides)
-        new_resources_list.append(new_resource)
+    # Pass only the annotations we are adding: Resources.copy() overlays this
+    # on top of the resource's existing overrides, so passing the whole config
+    # would merge it with itself. That is not a no-op -- it duplicates every
+    # list without a patch merge key (e.g. tolerations) and trips the
+    # imagePullSecrets merge branch.
+    annotations_override = {
+        'kubernetes': {
+            'pod_config': {
+                'metadata': {
+                    'annotations': {
+                        'skypilot-managed-job-id': str(job_id),
+                        'skypilot-managed-job-name': str(task.name),
+                    }
+                }
+            }
+        }
+    }
+    new_resources_list: List['sky.Resources'] = [
+        original_resource.copy(_cluster_config_overrides=annotations_override)
+        for original_resource in task.resources
+    ]
 
     # Set the new resources back to the task
     task.set_resources(new_resources_list)
@@ -544,6 +547,8 @@ class JobController:
                 1. The optimizer cannot find a feasible solution.
                 2. Precheck errors: invalid cluster name, failure in getting
                 cloud user identity, or unsupported feature.
+                It is also raised when preparing the task spec fails, which is
+                deterministic and so must not be retried.
             exceptions.ManagedJobReachedMaxRetriesError: This will be raised
                 when all prechecks passed but the maximum number of retries is
                 reached for `sky.launch`. The failure of `sky.launch` can be
@@ -559,7 +564,16 @@ class JobController:
                 unrecoverable for the job.
         Other exceptions may be raised depending on the backend.
         """
-        _add_k8s_annotations(task, self._job_id)
+        try:
+            _add_k8s_annotations(task, self._job_id)
+        except Exception as e:
+            # Preparing the task spec reads only the task and the job id, so a
+            # failure here is deterministic and retrying cannot fix it. Report
+            # it as a precheck failure instead of letting the job loop's
+            # catch-all spend the emergency-recovery budget on it. This runs
+            # before the resume classification below, so a resumed task lands
+            # here too; its cluster is still torn down by the caller.
+            raise exceptions.ProvisionPrechecksError(reasons=[e]) from e
         logger.info(
             f'Starting task {task_id} ({task.name}) for job {self._job_id}')
 
@@ -1185,6 +1199,10 @@ class JobController:
 
             external_failures: Optional[List[ExternalClusterFailure]] = None
             cluster_event_reason = None
+            # Set when recovery is triggered by the user job exiting non-zero
+            # (cluster still UP), so the RECOVERING job event can say what
+            # actually happened instead of the generic preemption copy.
+            user_job_failure_reason: Optional[str] = None
             if cluster_status != status_lib.ClusterStatus.UP:
                 # The cluster is (partially) preempted or failed. It can be
                 # down, INIT or STOPPED, based on the interruption behavior of
@@ -1302,6 +1320,18 @@ class JobController:
                     exit_codes = await self._get_cluster_job_exit_codes(
                         job_id_on_pool_cluster, handle)
 
+                    # Human-readable description of the non-zero exit, used
+                    # in the RECOVERING event when the job is restarted and
+                    # in failure_reason when it is not.
+                    exit_code_desc: Optional[str] = None
+                    if exit_codes:
+                        if len(exit_codes) == 1:
+                            exit_code_desc = ('Job exited with exit code '
+                                              f'{exit_codes[0]}')
+                        else:
+                            exit_code_desc = ('Job exited with exit codes '
+                                              f'{exit_codes}')
+
                     should_restart_on_failure = (
                         executor.should_restart_on_failure(
                             exit_codes=exit_codes))
@@ -1312,6 +1342,9 @@ class JobController:
                             f'max_restarts_on_errors is set to {max_restarts}. '
                             f'[{executor.restart_cnt_on_failure}'
                             f'/{max_restarts}])')
+                        restart_detail = (
+                            f'restart {executor.restart_cnt_on_failure} of '
+                            f'{max_restarts} on errors')
                         if exit_codes and executor.recover_on_exit_codes:
                             recover_codes = executor.recover_on_exit_codes
                             matching_codes = [
@@ -1322,11 +1355,45 @@ class JobController:
                                     f'(Exit code(s) {matching_codes} matched '
                                     'recover_on_exit_codes '
                                     f'[{recover_codes}])')
+                                restart_detail = (
+                                    f'exit code(s) {matching_codes} matched '
+                                    f'recover_on_exit_codes {recover_codes}')
                         logger.info(
                             'User program crashed '
                             f'({managed_job_status.value}). {exit_code_msg}')
+                        # The cluster is UP; recovery is happening because
+                        # the user job exited non-zero. Record that on the
+                        # RECOVERING event (with the exit code and a log
+                        # pointer) instead of the generic "Cluster preempted
+                        # or failed" copy, which would be misleading here.
+                        if exit_code_desc is not None:
+                            failure_desc = exit_code_desc
+                        else:
+                            # job_status is non-None here: this branch is
+                            # only entered for user-code-failure statuses.
+                            assert job_status is not None
+                            failure_desc = f'Job failed ({job_status.value})'
+                        user_job_failure_reason = (
+                            f'{failure_desc}. Restarting the job '
+                            f'({restart_detail}). To see the job error '
+                            'output, run: sky jobs logs '
+                            f'--controller {self._job_id}')
                         # Fall through to recovery
                     else:
+                        # failure_reason feeds the dashboard details column,
+                        # the CLI queue, and the FAILED job event; state that
+                        # the user program failed (with the exit code when
+                        # the fetch above succeeded), not just where the
+                        # logs are.
+                        terminal_desc = exit_code_desc
+                        if terminal_desc is None:
+                            # job_status is non-None here: this branch is
+                            # only entered for user-code-failure statuses.
+                            assert job_status is not None
+                            terminal_desc = f'Job failed ({job_status.value})'
+                        failure_reason = (
+                            f'{terminal_desc} (user program failure). '
+                            f'{failure_reason}')
                         logger.info(
                             f'Task {task_id} failed and will not be retried')
                         await managed_job_state.set_failed_async(
@@ -1463,6 +1530,7 @@ class JobController:
                         callback_func=callback_func,
                         external_failures=external_failures,
                         cluster_event_reason=cluster_event_reason,
+                        user_job_failure_reason=user_job_failure_reason,
                         recovery_source=managed_job_state.RecoverySource.
                         RESTART,
                     )
@@ -1474,6 +1542,7 @@ class JobController:
                     callback_func=callback_func,
                     external_failures=external_failures,
                     cluster_event_reason=cluster_event_reason,
+                    user_job_failure_reason=user_job_failure_reason,
                     recovery_source=managed_job_state.RecoverySource.FAILURE,
                 )
 

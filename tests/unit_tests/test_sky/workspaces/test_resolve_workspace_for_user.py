@@ -676,8 +676,8 @@ class TestResyncEdgeCases(unittest.TestCase):
         denied -> re-sync -> re-check passes."""
         check_calls = []
 
-        def _check(user, workspace):
-            del user  # Signature mirrors check_workspace_permission.
+        def _check(user, workspace, action='write'):
+            del user, action  # Signature mirrors check_workspace_permission.
             check_calls.append(workspace)
             if len(check_calls) == 1:
                 raise exceptions.PermissionDeniedError('no access')
@@ -723,6 +723,166 @@ class TestNoWorkspaceAccessError(unittest.TestCase):
         self.assertTrue(
             issubclass(exceptions.NoWorkspaceAccessError,
                        exceptions.PermissionDeniedError))
+
+
+class TestReadOnlyOnlyUser(unittest.TestCase):
+    """A user with no writable workspace, only read-only visibility.
+
+    Reproduces the common locked-down-`default` case: the user is not a member
+    of any writable workspace but can read a read-only one. Read requests must
+    resolve an active workspace (so listing works); write requests must not.
+    """
+
+    def setUp(self):
+        self.user = models.User(id='bob', name='bob')
+
+    def _patches(self, read_only=('ws-ro',)):
+        # write -> nothing accessible; read -> the read-only workspace(s).
+        def _acc(user_id, names, action='read'):
+            del user_id, names
+            return set(read_only) if action == 'read' else set()
+
+        return [
+            mock.patch.object(
+                workspaces_core,
+                '_load_workspaces',
+                return_value={ws: {
+                    'private': True
+                } for ws in read_only}),
+            mock.patch.object(workspaces_core,
+                              '_accessible_workspace_names_for_user',
+                              side_effect=_acc),
+            mock.patch.object(workspaces_core.permission.permission_service,
+                              'resync_workspace_policies_for_new_user'),
+        ]
+
+    def test_read_resolves_the_read_only_workspace(self):
+        with _Patcher(self._patches()):
+            res = workspaces_core.resolve_workspace_for_user(self.user,
+                                                             action='read')
+        self.assertEqual(res.workspace, 'ws-ro')
+
+    def test_write_is_denied(self):
+        with _Patcher(self._patches()):
+            with self.assertRaises(exceptions.NoWorkspaceAccessError):
+                workspaces_core.resolve_workspace_for_user(self.user,
+                                                           action='write')
+
+    def test_several_read_only_workspaces_pick_deterministically(self):
+        """No writable workspace + several readable ones -> pick, don't raise.
+
+        AMBIGUOUS is a *write* problem (a new resource lands in exactly one
+        workspace and only the user can choose). Raising it here left such a
+        user unable to read anything at all — every request resolves the active
+        workspace first — and its recovery hint ("set a preferred workspace") is
+        a dead end for them, because `set_user_preferred_workspace` requires
+        write access. `default` is deliberately absent so the default-fallback
+        branch cannot mask this.
+        """
+        with _Patcher(self._patches(read_only=('zeta', 'pub', 'team'))):
+            res = workspaces_core.resolve_workspace_for_user(self.user,
+                                                             action='read')
+        # Sorted-first, so the pick is stable across processes and restarts.
+        self.assertEqual(res.workspace, 'pub')
+        self.assertEqual(res.source,
+                         workspace_constants.WORKSPACE_SOURCE_READ_ONLY)
+
+    def test_several_read_only_workspaces_write_still_denied(self):
+        with _Patcher(self._patches(read_only=('zeta', 'pub', 'team'))):
+            with self.assertRaises(exceptions.NoWorkspaceAccessError):
+                workspaces_core.resolve_workspace_for_user(self.user,
+                                                           action='write')
+
+    def test_read_with_several_writable_workspaces_still_ambiguous(self):
+        """Scope guard: the pick applies ONLY to the read-only-only case.
+
+        A member of several writable workspaces who has not chosen one still
+        gets AMBIGUOUS on a read, exactly as before — that user *can* act on
+        the recovery hint, and silently picking for them would hide which
+        workspace their next launch lands in.
+        """
+
+        def _acc(user_id, names, action='read'):
+            del user_id, names, action
+            return {'team-a', 'team-b'}
+
+        patches = [
+            mock.patch.object(workspaces_core,
+                              '_load_workspaces',
+                              return_value={
+                                  'team-a': {},
+                                  'team-b': {}
+                              }),
+            mock.patch.object(workspaces_core,
+                              '_accessible_workspace_names_for_user',
+                              side_effect=_acc),
+            mock.patch.object(workspaces_core.permission.permission_service,
+                              'resync_workspace_policies_for_new_user'),
+        ]
+        with _Patcher(patches):
+            with self.assertRaises(exceptions.WorkspaceAmbiguousError):
+                workspaces_core.resolve_workspace_for_user(self.user,
+                                                           action='read')
+
+
+class TestReadOnlyExcludedFromActiveSelection(unittest.TestCase):
+    """Auto-selecting the active workspace considers only WRITABLE workspaces.
+
+    A read-only workspace (a non-member's read-only visibility) is visible but
+    can never be a user's active workspace, so it must not count toward
+    auto-select or cause a spurious WorkspaceAmbiguousError when the user has
+    exactly one writable workspace. Regression test for a read command failing
+    with "You belong to multiple workspaces" when one of them is only
+    read-only.
+    """
+
+    def setUp(self):
+        self.user = models.User(id='alice', name='alice')
+
+    def _patches(self, writable, readable):
+        workspaces = {ws: {'private': True} for ws in readable}
+
+        def _acc(user_id, names, action='write'):
+            del user_id, names
+            return set(readable) if action == 'read' else set(writable)
+
+        return [
+            mock.patch.object(workspaces_core,
+                              '_load_workspaces',
+                              return_value=workspaces),
+            mock.patch.object(workspaces_core,
+                              '_accessible_workspace_names_for_user',
+                              side_effect=_acc),
+            mock.patch.object(workspaces_core.permission.permission_service,
+                              'resync_workspace_policies_for_new_user'),
+        ]
+
+    def test_read_only_not_counted_in_ambiguity(self):
+        # One writable ('pub') + one read-only ('pub1'). A read request must
+        # auto-select the single writable, NOT raise ambiguity over both.
+        with _Patcher(self._patches(writable=['pub'], readable=['pub',
+                                                                'pub1'])):
+            res = workspaces_core.resolve_workspace_for_user(self.user,
+                                                             action='read')
+        self.assertEqual(res.workspace, 'pub')
+
+    def test_multiple_writable_still_ambiguous(self):
+        # Two genuinely writable workspaces still can't be auto-picked.
+        with _Patcher(
+                self._patches(writable=['pub', 'pub1'],
+                              readable=['pub', 'pub1'])):
+            with self.assertRaises(exceptions.WorkspaceAmbiguousError):
+                workspaces_core.resolve_workspace_for_user(self.user,
+                                                           action='read')
+
+    def test_write_request_ignores_read_only(self):
+        # A write request with one writable + one read-only resolves to the
+        # writable and never the read-only.
+        with _Patcher(self._patches(writable=['pub'], readable=['pub',
+                                                                'pub1'])):
+            res = workspaces_core.resolve_workspace_for_user(self.user,
+                                                             action='write')
+        self.assertEqual(res.workspace, 'pub')
 
 
 if __name__ == '__main__':

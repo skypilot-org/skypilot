@@ -5,7 +5,7 @@ import logging
 import os
 import threading
 import time
-from typing import Generator, List, Optional, Set
+from typing import Dict, Generator, List, Optional, Set, Tuple
 
 import casbin
 from casbin import util as casbin_util
@@ -22,6 +22,8 @@ from sky.utils import common_utils
 from sky.utils import locks
 from sky.utils.db import db_utils
 from sky.utils.db import kv_cache
+from sky.workspaces import constants as workspace_constants
+from sky.workspaces import utils as workspaces_utils
 
 logging.getLogger('casbin.policy').setLevel(sky_logging.ERROR)
 logging.getLogger('casbin.role').setLevel(sky_logging.ERROR)
@@ -37,6 +39,14 @@ POLICY_UPDATE_LOCK_TIMEOUT_SECONDS = 20
 # reconcile calls update_role / workspace policy writes) doesn't sleep up to ~1s
 # after the holder releases. See sky/utils/locks.py PostgresLock.acquire.
 POLICY_UPDATE_LOCK_POLL_INTERVAL_SECONDS = 0.1
+
+# Upper bound for `_read_only_endpoint_cache`. The key is the real request path,
+# which can carry user-supplied dynamic segments (e.g. `/ssh_node_pools/{name}/
+# down`, plugin `:id` routes), so the key space grows with traffic and the cache
+# is otherwise only cleared on allowlist rebuild (boot / config reload). Reset
+# the whole cache once it exceeds this, trading a rare cold miss (58 regexes)
+# for a hard memory bound in a long-lived server process.
+_READ_ONLY_ENDPOINT_CACHE_MAX = 4096
 
 _enforcer_instance: Optional['PermissionService'] = None
 
@@ -55,6 +65,14 @@ class PermissionService:
         self._lock = threading.Lock()
         # Viewer role's endpoint allowlist, materialised at boot.
         self._viewer_allowlist: List[tuple] = []
+        # Endpoints that only read, for workspace-access purposes: the viewer
+        # allowlist plus the entries the viewer role cannot express. Also
+        # materialised at boot. See `rbac.get_read_only_endpoints`.
+        self._read_only_endpoints: List[tuple] = []
+        # Per-(path, method) memo for `is_read_only_endpoint`, which runs on
+        # every request in the main event loop. Cleared whenever the allowlist
+        # is rebuilt (`_build_viewer_allowlist_no_lock`).
+        self._read_only_endpoint_cache: Dict[Tuple[str, str], bool] = {}
 
     def initialize(self):
         self._lazy_initialize(full_initialize=True)
@@ -168,7 +186,11 @@ class PermissionService:
             return []
 
     def _build_viewer_allowlist_no_lock(self) -> None:
-        """Build `self._viewer_allowlist` from defaults + plugin entries.
+        """Build the endpoint allowlists from defaults + plugin entries.
+
+        Populates both `self._viewer_allowlist` (viewer role) and
+        `self._read_only_endpoints` (workspace-access classification), which
+        share the same plugin lookup.
 
         Read-only with respect to casbin/DB state — no policy lock
         required. Safe to call from any process (main server or uvicorn
@@ -178,8 +200,13 @@ class PermissionService:
         self._viewer_allowlist = [(rule['path'], rule['method'])
                                   for rule in rbac.get_viewer_allowlist(
                                       plugin_allowlist=plugin_viewer_allow)]
+        self._read_only_endpoints = [(rule['path'], rule['method'])
+                                     for rule in rbac.get_read_only_endpoints(
+                                         plugin_allowlist=plugin_viewer_allow)]
+        self._read_only_endpoint_cache = {}
         logger.debug(f'Viewer allowlist has {len(self._viewer_allowlist)} '
-                     'entries')
+                     f'entries, read-only endpoints '
+                     f'{len(self._read_only_endpoints)}')
 
     def _maybe_initialize_basic_auth_user(self) -> None:
         """Initialize basic auth user if it is enabled."""
@@ -392,33 +419,94 @@ class PermissionService:
         enforcer = self._ensure_enforcer()
         return enforcer.get_users_for_role(role)
 
-    def get_accessible_workspace_names(self, user_id: str,
-                                       workspace_names: Set[str]) -> Set[str]:
+    def get_accessible_workspace_names(
+            self,
+            user_id: str,
+            workspace_names: Set[str],
+            action: str = workspace_constants.WORKSPACE_ACTION_WRITE
+    ) -> Set[str]:
         """Return workspace names the user can access (batch, O(1) enforcer).
 
         Use instead of check_workspace_permission in a loop when filtering
         many workspaces, to avoid N enforcer calls.
+
+        Args:
+            action: 'write' (default) returns only workspaces the user can
+                mutate (the member '*' grants) -- the historical meaning of
+                "accessible", and the right answer for any caller that offers
+                the list as a place to act. 'read' additionally includes
+                workspaces that are read-only-visible to non-members (evaluated
+                live from config, not a materialized grant); pass it explicitly
+                for visibility-only uses such as resource listings and
+                ``GET /workspaces``.
+        """
+        writable = self._writable_workspace_names(user_id, workspace_names)
+        if writable is None:
+            # Server-off or admin: full access to everything requested.
+            return workspace_names
+        if action == workspace_constants.WORKSPACE_ACTION_READ:
+            return writable | self._read_only_visible(workspace_names)
+        return writable
+
+    def get_workspace_access_sets(
+            self, user_id: str,
+            workspace_names: Set[str]) -> Tuple[Set[str], Set[str]]:
+        """Return ``(readable, writable)`` workspace names in one policy scan.
+
+        Equivalent to calling `get_accessible_workspace_names` with
+        ``action='read'`` and ``action='write'``, but scans the casbin policy
+        once instead of twice. Used by callers that need both sets: the hot
+        ``GET /workspaces`` path (dashboard polling, what-to-show vs what-is-
+        writable) and ``GET /users/me/workspace`` (accessible vs read-only).
+        """
+        writable = self._writable_workspace_names(user_id, workspace_names)
+        if writable is None:
+            # Server-off or admin: everything requested is both readable and
+            # writable. Same object twice is fine -- callers only test
+            # membership / iterate, never mutate.
+            return workspace_names, workspace_names
+        readable = writable | self._read_only_visible(workspace_names)
+        return readable, writable
+
+    def _writable_workspace_names(
+            self, user_id: str,
+            workspace_names: Set[str]) -> Optional[Set[str]]:
+        """Workspace names the user can mutate (member '*' grants), one scan.
+
+        Returns None to mean "all of ``workspace_names``" (server-off or admin),
+        so callers short-circuit without materializing the set.
+
+        NOTE: this only matches direct (user_id, workspace, '*') and wildcard
+        ('*', workspace, '*') policies. It does NOT traverse casbin role
+        hierarchies (the g() function in the model matcher). If role-based
+        workspace grants are ever added, this method must be updated to use
+        enforcer.enforce() per workspace or expand roles via
+        enforcer.get_implicit_permissions_for_user().
         """
         if os.getenv(constants.ENV_VAR_IS_SKYPILOT_SERVER) is None:
-            return workspace_names
+            return None
         roles = self.get_user_roles(user_id)
         if rbac.RoleName.ADMIN.value in roles:
-            return workspace_names
+            return None
         enforcer = self._ensure_enforcer()
-        # Scan policy rules directly for workspace access.
-        # NOTE: this only matches direct (user_id, workspace, '*') and wildcard
-        # ('*', workspace, '*') policies.  It does NOT traverse casbin role
-        # hierarchies (the g() function in the model matcher).  If role-based
-        # workspace grants are ever added, this method must be updated to use
-        # enforcer.enforce() per workspace or expand roles via
-        # enforcer.get_implicit_permissions_for_user().
-        accessible = set()
+        writable = set()
         for rule in enforcer.get_policy():
             if len(rule) >= 3 and rule[2] == '*' and (rule[0] == user_id or
                                                       rule[0] == '*'):
                 if rule[1] in workspace_names:
-                    accessible.add(rule[1])
-        return accessible
+                    writable.add(rule[1])
+        return writable
+
+    @staticmethod
+    def _read_only_visible(workspace_names: Set[str]) -> Set[str]:
+        """Requested workspaces that are read-only-visible to non-members.
+
+        Evaluated live from config (not a materialized casbin grant) so changes
+        take effect immediately. Mirrors the read branch of
+        check_workspace_permission.
+        """
+        return (workspaces_utils.get_read_only_workspace_names() &
+                workspace_names)
 
     def check_endpoint_permission(self, user_id: str, path: str,
                                   method: str) -> bool:
@@ -455,7 +543,52 @@ class PermissionService:
 
     def _is_viewer_allowed(self, path: str, method: str) -> bool:
         """Test (path, method) against the viewer allowlist."""
-        for allow_path, allow_method in self._viewer_allowlist:
+        return self._matches_endpoint(self._viewer_allowlist, path, method)
+
+    def is_read_only_endpoint(self, path: str, method: str) -> bool:
+        """Whether this endpoint only reads, for workspace-access purposes.
+
+        Consumed by `sky.server.requests.workspace_access` to decide whether a
+        request needs read or write access to the caller's active workspace.
+        Derived from `rbac.get_read_only_endpoints`, so plugin endpoints are
+        classified by the declaration plugins already maintain for the viewer
+        role.
+
+        First checks `rbac.is_always_write_endpoint`: an always-write (create)
+        endpoint returns False here regardless of the read-only declaration —
+        this is what makes a wildcard viewer entry unable to relax a create
+        endpoint to read.
+
+        Returns False for anything not declared read-only — the caller treats
+        that as "needs write", which is the fail-safe direction.
+        """
+        # Ensures the allowlists are materialised in this process; a no-op
+        # after the first call.
+        self._lazy_initialize()
+        key = (path, method)
+        cached = self._read_only_endpoint_cache.get(key)
+        if cached is not None:
+            return cached
+        # Always-write (create) endpoints can never be read, regardless of the
+        # viewer allowlist -- this also overrides a wildcard viewer entry that
+        # happens to match one (see `rbac._ALWAYS_WRITE_ENDPOINTS`).
+        if rbac.is_always_write_endpoint(path, method):
+            result = False
+        else:
+            result = self._matches_endpoint(self._read_only_endpoints, path,
+                                            method)
+        # Bound the cache: the key includes dynamic path segments, so drop the
+        # whole cache (rather than grow unbounded) once it gets too large. The
+        # replacement is atomic under the GIL, so concurrent readers are safe.
+        if len(self._read_only_endpoint_cache) >= _READ_ONLY_ENDPOINT_CACHE_MAX:
+            self._read_only_endpoint_cache = {}
+        self._read_only_endpoint_cache[key] = result
+        return result
+
+    @staticmethod
+    def _matches_endpoint(entries: List[tuple], path: str, method: str) -> bool:
+        """Test (path, method) against a list of (path pattern, method)."""
+        for allow_path, allow_method in entries:
             if allow_method != method:
                 continue
             # casbin_util.key_match2: arg1 is the request key, arg2 is
@@ -497,45 +630,74 @@ class PermissionService:
             prefix=_WORKSPACE_PERM_CACHE_PREFIX,
             suffix=f'{_WORKSPACE_PERM_CACHE_KEY_SEP}{user_id}')
 
-    def check_workspace_permission(self, user_id: str,
-                                   workspace_name: str) -> bool:
+    def check_workspace_permission(
+            self,
+            user_id: str,
+            workspace_name: str,
+            action: str = workspace_constants.WORKSPACE_ACTION_WRITE) -> bool:
         """Check workspace permission.
 
         This method checks if a user has permission to access a specific
-        workspace.  Results are cached in a DB-backed KV cache so that all
-        server/executor processes share the same view.
+        workspace. Membership (write) is granted by the member '*' policy
+        (a direct grant for private workspaces, the ('*', ws, '*') wildcard for
+        public ones) and its result is cached in a DB-backed KV cache so all
+        server/executor processes share one view. Read-only visibility is not
+        cached -- see the 'read' branch below.
 
-        For private workspaces, the user must have explicit permission.
-
-        For public workspaces, the permission is granted via a wildcard policy
-        ('*').
+        Args:
+            action: 'write' (default) checks membership -- write and read are
+                both granted by the member '*' policy. 'read' additionally
+                passes if the workspace is read-only-visible to non-members
+                (evaluated live from config), so a non-member can read (but not
+                mutate) a read-only workspace. Write implies read.
         """
         if os.getenv(constants.ENV_VAR_IS_SKYPILOT_SERVER) is None:
             # When it is not on API server, we allow all users to access all
             # workspaces, as the workspace check has been done on API server.
             return True
 
-        # Check DB-backed KV cache (covers both admin and non-admin results).
+        # Member/write access (admin or the member '*' grant). This is the
+        # cached, casbin-backed part; it is action-agnostic (the '*' grant
+        # covers both read and write).
+        if self._check_member_permission(user_id, workspace_name):
+            return True
+
+        # Read-only visibility is evaluated live from the current config
+        # (per-workspace read_access, falling back to the org-wide
+        # workspace_config.read_access) rather than a materialized casbin
+        # grant, so a change takes effect on the next request without a policy
+        # re-sync or cache invalidation. Never cached.
+        if (action == workspace_constants.WORKSPACE_ACTION_READ and
+                workspaces_utils.is_read_only_workspace(workspace_name)):
+            return True
+
+        return False
+
+    def _check_member_permission(self, user_id: str,
+                                 workspace_name: str) -> bool:
+        """Whether the user is a member of (can write) the workspace.
+
+        Admin, or the casbin member '*' grant (which also covers public
+        workspaces via the ('*', ws, '*') policy). Result is cached in the
+        DB-backed KV cache so all server/executor processes share one view and
+        the casbin enforce is off the hot path.
+        """
         cache_key = self._workspace_perm_cache_key(workspace_name, user_id)
         cached = kv_cache.get_cache_entry(cache_key)
         if cached is not None:
             return cached == '1'
 
-        # Cache miss — compute the permission.
-        # Admin users have access to all workspaces.
         role = self.get_user_roles(user_id)
         if rbac.RoleName.ADMIN.value in role:
             result = True
         else:
-            # The Casbin model matcher already handles the wildcard '*' case:
-            # m = (g(r.sub, p.sub)|| p.sub == '*') && r.obj == p.obj &&
-            # r.act == p.act
-            # This means if there's a policy ('*', workspace_name, '*'), it
-            # will match any user
+            # Actions are matched exactly by the casbin model (r.act == p.act,
+            # no wildcard). The member policies use the '*' action, which grants
+            # write (and, implicitly, read).
             enforcer = self._ensure_enforcer()
             result = enforcer.enforce(user_id, workspace_name, '*')
 
-        logger.debug(f'Workspace permission check: user={user_id}, '
+        logger.debug(f'Workspace member check: user={user_id}, '
                      f'workspace={workspace_name}, result={result}')
 
         # Cache the result; failures are non-critical.
@@ -594,6 +756,12 @@ class PermissionService:
                    For private workspaces, this should be specific user IDs.
         """
         with _policy_lock():
+            # Reload from the DB inside the lock before mutating: save_policy()
+            # rewrites the whole casbin_rule table from this enforcer's
+            # in-memory view, so a stale view (e.g. missing another workspace's
+            # policies added by a different worker) would clobber those rows on
+            # save. update_workspace_policy already does this; mirror it here.
+            self._load_policy_no_lock()
             enforcer = self._ensure_enforcer()
             for user in users:
                 logger.debug(f'Adding workspace policy: user={user}, '

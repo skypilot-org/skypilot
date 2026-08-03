@@ -36,12 +36,63 @@ logger = sky_logging.init_logger(__name__)
 
 _MAX_RETRY = 6
 
+# The open files (nofile) limit we want for ray. Ray recommends at least
+# 65535; 1048576 is the higher value SkyPilot's templates apply everywhere
+# else (e.g. the limits.conf entries in the *-ray.yml.j2 templates).
+# https://docs.ray.io/en/latest/cluster/vms/user-guides/large-cluster-best-practices.html#system-configuration
+# TODO(kevin): ray only asks for 65535 (its own tooling uses `ulimit -n
+# 65536`); consider lowering this to 65536.
+_TARGET_NOFILE = 1048576
+
 # Increase the limit of the number of open files for the raylet process,
 # as the `ulimit` may not take effect at this point, because it requires
 # all the sessions to be reloaded. This is a workaround.
-_RAY_PRLIMIT = (
-    'which prlimit && for id in $(pgrep -f raylet/raylet); '
-    'do sudo prlimit --nofile=1048576:1048576 --pid=$id || true; done;')
+#
+# Raising a process' *hard* limit requires CAP_SYS_RESOURCE, which containers
+# usually do not have. Setting both limits to _TARGET_NOFILE therefore fails
+# outright whenever the container's hard limit is lower (1024:524288 -- the
+# systemd default, which containerd 2.0+, Docker and CRI-O deliberately
+# inherit -- is common), leaving the raylet with the low default soft limit and
+# running it out of file descriptors once many workers start. Fall back to
+# raising the *soft* limit only, up to the raylet's own hard limit (the
+# `<hard>:` form), which needs no capability. The hard limit is read from
+# /proc/<pid>/limits (field 5 of the "Max open files" row) so that it is the
+# raylet's own limit rather than this shell's.
+#
+# Probe with `command -v`, not `which`: minimal non-Debian images
+# (RHEL/UBI/Rocky) ship no `which` binary, so `which prlimit` exits 127 there.
+# That matters because this string is appended LAST to the Ray *worker* start
+# command, so on Kubernetes its exit status becomes the worker's entire
+# runtime-setup step status: a 127 writes runtime-setup.failed and kills the
+# worker pod, failing every multi-node launch on such an image. Reproduced on
+# 2-node rockylinux:9, where Ray itself had started fine. The head is
+# unaffected -- its command ends in RAY_HEAD_WAIT_INITIALIZED_COMMAND, a
+# `while` loop that always returns 0.
+#
+# Trailing `true` for the same reason: this tuning is best-effort and must
+# never decide the exit status of what it is appended to, whichever part fails.
+# `pgrep` is absent on those images too (no procps), which would otherwise
+# poison the status even with the probe fixed.
+#
+# Inlined into ibm-ray.yml.j2 as `ray_prlimit_command`.
+RAY_PRLIMIT = (
+    'command -v prlimit >/dev/null 2>&1 && '
+    'for id in $(pgrep -f raylet/raylet); do '
+    'hard=$(awk \'/Max open files/ {print $5}\' /proc/$id/limits); '
+    f'sudo prlimit --nofile={_TARGET_NOFILE}:{_TARGET_NOFILE} --pid=$id '
+    '2>/dev/null || sudo prlimit --nofile="$hard:" --pid=$id || '
+    'echo "Failed to raise the open files limit of raylet $id." >&2; done; '
+    'true;')
+
+# Raise the *soft* open files limit of the current shell to _TARGET_NOFILE,
+# falling back to the hard limit when that is lower (see RAY_PRLIMIT above for
+# why the hard limit cannot simply be raised). `-Sn` rather than plain `-n` is
+# deliberate: `-n` sets both limits, which would *lower* a hard limit that is
+# already higher than (or unlimited compared to) _TARGET_NOFILE.
+#
+# Inlined into kubernetes-ray.yml.j2 as `raise_nofile_limit_command`.
+RAISE_NOFILE_LIMIT_CMD = (f'ulimit -Sn {_TARGET_NOFILE} 2>/dev/null || '
+                          'ulimit -Sn "$(ulimit -Hn)" || true')
 
 DUMP_RAY_PORTS = (f'{constants.SKY_PYTHON_CMD} -c \'import json, os; '
                   f'runtime_dir = os.path.expanduser(os.environ.get('
@@ -438,7 +489,7 @@ def ray_head_start_command(custom_resource: Optional[str],
         # the warning when the worker count is >12x CPUs.
         'RAY_worker_maximum_startup_concurrency=$(( 3 * $(nproc --all) )) '
         f'{constants.SKY_RAY_CMD} start --head {ray_options} || exit 1;' +
-        _RAY_PRLIMIT + DUMP_RAY_PORTS + RAY_HEAD_WAIT_INITIALIZED_COMMAND)
+        RAY_PRLIMIT + DUMP_RAY_PORTS + RAY_HEAD_WAIT_INITIALIZED_COMMAND)
     return cmd
 
 
@@ -463,7 +514,7 @@ def ray_worker_start_command(custom_resource: Optional[str],
     cmd = (
         'RAY_SCHEDULER_EVENTS=0 RAY_DEDUP_LOGS=0 '
         f'{constants.SKY_RAY_CMD} start --disable-usage-stats {ray_options} || '
-        'exit 1;' + _RAY_PRLIMIT)
+        'exit 1;' + RAY_PRLIMIT)
     if no_restart:
         # We do not use ray status to check whether ray is running, because
         # on worker node, if the user started their own ray cluster, ray status

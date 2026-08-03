@@ -1006,7 +1006,7 @@ def test_managed_jobs_pipeline_recovery_aws(aws_config_region):
             f'diff /tmp/{name}-run-ids /tmp/{name}-run-ids-new',
             f'cat /tmp/{name}-run-ids | sed -n 2p | grep `cat /tmp/{name}-run-id`',
         ],
-        f'sky jobs cancel -y -n {name} && {smoke_tests_utils.down_cluster_for_cloud_cmd(name)}',
+        f'sky jobs cancel -y -n {name}; {smoke_tests_utils.down_cluster_for_cloud_cmd(name)}',
         env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
         timeout=25 * 60,
     )
@@ -1998,6 +1998,82 @@ def test_managed_jobs_pod_config_ray_node_container(generic_cloud: str):
         f'sky jobs cancel -y -n {name}',
         env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
         timeout=20 * 60)
+    smoke_tests_utils.run_one_test(test)
+
+
+# Only run this test on Kubernetes since this test relies on
+# kubernetes.pod_config
+@pytest.mark.kubernetes
+@pytest.mark.managed_jobs
+def test_managed_jobs_task_pod_config_not_self_merged(generic_cloud: str):
+    """The controller must not overlay the task's pod_config onto itself.
+
+    Before launching, the controller adds two pod annotations to the task's
+    resources. It used to do so by passing the task's whole config as the
+    override, merging the config with itself: that duplicated every list
+    without a patch merge key and failed outright on an empty
+    imagePullSecrets. The task config
+    (tests/test_yamls/test_k8s_pod_config_image_pull_secrets.yaml) carries
+    both, and the server config sets an imagePullSecrets entry so the
+    task-level empty list has something to clear.
+    """
+    name = smoke_tests_utils.get_cluster_name()
+    task_yaml = 'tests/test_yamls/test_k8s_pod_config_image_pull_secrets.yaml'
+    # Look the pod up by the annotation the controller stamps, so a lost
+    # annotation fails this step too. The cloud-cmd helper pod carries no such
+    # annotation, so it can never match.
+    check_pod_spec_cmd = (
+        f"pod=$(kubectl get pods -o custom-columns=NAME:.metadata.name,ANN:.metadata.annotations.skypilot-managed-job-name --no-headers | awk -v n=\"{name}\" '$NF==n{{print $1}}' | sed -n 1p) && "
+        'echo "pod=$pod" && test -n "$pod" && '
+        # Appended by the merge, so a self-merge would list it twice.
+        'tolerations=$(kubectl get pod $pod -o jsonpath="{.spec.tolerations[*].key}") && '
+        'echo "tolerations=$tolerations" && '
+        'test "$(echo "$tolerations" | tr " " "\\n" | '
+        'grep -c skypilot-smoke-image-pull-secrets)" = "1" && '
+        # The task's empty list must win over the server config.
+        'secrets=$(kubectl get pod $pod -o jsonpath="{.spec.imagePullSecrets}") && '
+        'echo "imagePullSecrets=$secrets" && '
+        '! echo "$secrets" | grep -q absent-regcred')
+    test = smoke_tests_utils.Test(
+        'managed_jobs_task_pod_config_not_self_merged',
+        [
+            smoke_tests_utils.launch_cluster_for_cloud_cmd(generic_cloud, name),
+            # The task sleeps 60 so the job is still RUNNING when we look at
+            # its pod (same workaround as test_managed_jobs_env_isolation).
+            f'sky jobs launch -n {name} --infra {generic_cloud} '
+            f'{smoke_tests_utils.LOW_RESOURCE_ARG} -y -d {task_yaml}',
+            smoke_tests_utils.
+            get_cmd_wait_until_managed_job_status_contains_matching_job_name(
+                job_name=f'{name}',
+                job_status=[sky.ManagedJobStatus.RUNNING],
+                timeout=600
+                if smoke_tests_utils.is_remote_server_test() else 120),
+            f'sky jobs logs -n {name} --no-follow | '
+            'grep "image_pull_secrets_check: ok"',
+            smoke_tests_utils.run_cloud_cmd_on_cluster(name,
+                                                       cmd=check_pod_spec_cmd),
+            smoke_tests_utils.
+            get_cmd_wait_until_managed_job_status_contains_matching_job_name(
+                job_name=f'{name}',
+                job_status=[sky.ManagedJobStatus.SUCCEEDED],
+                timeout=600
+                if smoke_tests_utils.is_remote_server_test() else 120),
+        ],
+        f'sky jobs cancel -y -n {name}; '
+        f'{smoke_tests_utils.down_cluster_for_cloud_cmd(name)}',
+        env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
+        timeout=25 * 60,
+        config_dict={
+            'kubernetes': {
+                'pod_config': {
+                    'spec': {
+                        'imagePullSecrets': [{
+                            'name': f'{name}-absent-regcred'
+                        }]
+                    }
+                }
+            }
+        })
     smoke_tests_utils.run_one_test(test)
 
 

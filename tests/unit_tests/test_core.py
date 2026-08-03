@@ -13,6 +13,7 @@ from sky.skylet import job_lib
 from sky.utils import common
 from sky.utils import common_utils
 from sky.utils import status_lib
+from sky.workspaces import constants as workspace_constants
 
 
 @mock.patch('sky.backends.backend_utils.check_cluster_available')
@@ -104,7 +105,28 @@ class TestEnabledCloudsWorkspacePermission:
             with pytest.raises(exceptions.PermissionDeniedError,
                                match='no access'):
                 core.enabled_clouds(workspace='restricted')
-        mock_check.assert_called_once_with(mock_user, 'restricted')
+        mock_check.assert_called_once_with(
+            mock_user,
+            'restricted',
+            action=workspace_constants.WORKSPACE_ACTION_READ)
+
+    @mock.patch('sky.core.global_user_state.get_cached_enabled_clouds',
+                return_value=[])
+    @mock.patch('sky.core.workspaces_core.check_workspace_permission')
+    def test_checks_at_read_level(self, mock_check, _):
+        """Reporting a workspace's enabled clouds is a read.
+
+        Checking at write level would deny a workspace the caller can
+        legitimately see (read-only visibility for non-members) and, via
+        `enabled_clouds_batch`, fail the whole fan-out.
+        """
+        mock_user = models.User(id='user-1', name='User1')
+        with mock.patch('sky.core.common_utils.get_current_user',
+                        return_value=mock_user), \
+             mock.patch('sky.core.skypilot_config.local_active_workspace_ctx'):
+            core.enabled_clouds(workspace='read-only-ws')
+        assert mock_check.call_args.kwargs['action'] == (
+            workspace_constants.WORKSPACE_ACTION_READ)
 
     @mock.patch('sky.core.global_user_state.get_cached_enabled_clouds',
                 return_value=[])

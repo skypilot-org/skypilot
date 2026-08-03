@@ -22,6 +22,7 @@
 import json
 import os
 import pathlib
+import shlex
 import subprocess
 import tempfile
 import textwrap
@@ -34,6 +35,7 @@ from smoke_tests import smoke_tests_utils
 
 import sky
 from sky import skypilot_config
+from sky.provision.slurm import utils as slurm_utils
 from sky.skylet import constants
 from sky.skylet import events
 from sky.utils import common_utils
@@ -59,9 +61,12 @@ def test_minimal(generic_cloud: str):
     disk_size_param, validate_launch_output = smoke_tests_utils.get_disk_size_and_validate_launch_output(
         generic_cloud)
     name = smoke_tests_utils.get_cluster_name()
-    check_raylet_cmd = '"prlimit -n --pid=\$(pgrep -f \'raylet/raylet --raylet_socket_name\') | grep \'"\'1048576 1048576\'"\'"'
+    # Ensure the raylet process has the correct file descriptor limit.
+    check_raylet_cmd = smoke_tests_utils.get_check_raylet_nofile_limit_cmd(name)
     if generic_cloud == 'slurm':
-        check_raylet_cmd = 'true'
+        # No raylet on Slurm, but keep the `sky exec` so this step still
+        # creates a job and the job IDs asserted below stay in sync.
+        check_raylet_cmd = f'sky exec {name} true'
     test = smoke_tests_utils.Test(
         'minimal',
         [
@@ -79,8 +84,7 @@ def test_minimal(generic_cloud: str):
             # expand it when having it in a variable.
             '  && expanded_log_path=$(eval echo "$log_path") && echo "$expanded_log_path" '
             '  && test -f $expanded_log_path/run.log',
-            # Ensure the raylet process has the correct file descriptor limit.
-            f'sky exec {name} {check_raylet_cmd}',
+            check_raylet_cmd,
             f'sky logs {name} 3 --status',  # Ensure the job succeeded.
             # Install jq for the next test.
             f'sky exec {name} \'sudo apt-get update && sudo apt-get install -y jq\'',
@@ -156,7 +160,7 @@ def test_minimal_arm64(generic_cloud: str):
             '  && expanded_log_path=$(eval echo "$log_path") && echo "$expanded_log_path" '
             '  && test -f $expanded_log_path/run.log',
             # Ensure the raylet process has the correct file descriptor limit.
-            f'sky exec {name} "prlimit -n --pid=\$(pgrep -f \'raylet/raylet --raylet_socket_name\') | grep \'"\'1048576 1048576\'"\'"',
+            smoke_tests_utils.get_check_raylet_nofile_limit_cmd(name),
             f'sky logs {name} 3 --status',  # Ensure the job succeeded.
             # Install jq for the next test.
             f'sky exec {name} \'sudo apt-get update && sudo apt-get install -y jq\'',
@@ -179,6 +183,64 @@ def test_minimal_arm64(generic_cloud: str):
         smoke_tests_utils.get_timeout(generic_cloud),
     )
     smoke_tests_utils.run_one_test(test)
+
+
+# ---------- Clamp the nofile limit on low-soft-limit containers ----------
+@pytest.mark.kubernetes
+def test_kubernetes_nofile_limit_clamp():
+    """The raylet must not be left with a low soft nofile limit.
+
+    Kubernetes containers commonly start with 1024:524288 nofile limits
+    (systemd's default, which containerd 2.0+ inherits), and the hard limit
+    cannot be raised inside the container (no CAP_SYS_RESOURCE). On such
+    clusters an unclamped raise fails and the raylet runs out of file
+    descriptors while starting many workers at once.
+
+    Test clusters' containers start with a high soft limit, so the shape is
+    recreated with `kubernetes.post_provision_runcmd`, which runs at the top
+    of the pod entrypoint before SkyPilot raises the limit: lower the limits
+    to 1024:4096, then assert the raylet ends up at exactly 4096:4096.
+    Asserting the hard limit proves the runcmd applied, so the test cannot
+    pass vacuously on a cluster whose native soft limit is already high.
+    """
+    name = smoke_tests_utils.get_cluster_name()
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml') as config:
+        config.write(
+            textwrap.dedent("""\
+                kubernetes:
+                  post_provision_runcmd:
+                    - ulimit -Sn 1024 && ulimit -Hn 4096
+                """))
+        config.flush()
+        check_raylet_clamped = shlex.quote(
+            'pid=$(pgrep -f "raylet/raylet --raylet_socket_name"); '
+            'soft=$(prlimit --nofile --pid=$pid --noheadings --output=SOFT); '
+            'hard=$(prlimit --nofile --pid=$pid --noheadings --output=HARD); '
+            'echo "raylet nofile: soft=$soft hard=$hard (want 4096 4096)"; '
+            '[ "$soft" = 4096 ] && [ "$hard" = 4096 ]')
+        # What actually breaks without the clamp: a job process (forked by the
+        # raylet, inheriting its limits) needing more fds than the container's
+        # 1024 default soft limit.
+        open_2000_fds = shlex.quote(
+            'python3 -c "import os; '
+            'fds = [os.open(os.devnull, os.O_RDONLY) for _ in range(2000)]; '
+            'print(\'opened\', len(fds), \'fds\')"')
+        test = smoke_tests_utils.Test(
+            'kubernetes_nofile_limit_clamp',
+            [
+                f'sky launch -y -c {name} --infra kubernetes '
+                f'{smoke_tests_utils.LOW_RESOURCE_ARG} --config {config.name} '
+                'tests/test_yamls/minimal.yaml',
+                f'sky logs {name} 1 --status',
+                f'sky exec {name} {check_raylet_clamped}',
+                f'sky logs {name} 2 --status',
+                f'sky exec {name} {open_2000_fds}',
+                f'sky logs {name} 3 --status',
+            ],
+            f'sky down -y {name}',
+            smoke_tests_utils.get_timeout('kubernetes'),
+        )
+        smoke_tests_utils.run_one_test(test)
 
 
 # ---------- A minimal task with git repository workdir ----------
@@ -1006,7 +1068,9 @@ def test_aws_stale_job_manual_restart():
                 job_status=[sky.JobStatus.FAILED_DRIVER],
                 timeout=events.JobSchedulerEvent.EVENT_INTERVAL_SECONDS),
         ],
-        f'sky down -y {name} && {smoke_tests_utils.down_cluster_for_cloud_cmd(name)}',
+        smoke_tests_utils.chain_teardown(
+            f'sky down -y {name}',
+            smoke_tests_utils.down_cluster_for_cloud_cmd(name)),
     )
     smoke_tests_utils.run_one_test(test)
 
@@ -1076,7 +1140,10 @@ def test_aws_manual_restart_recovery():
                 cluster_status=[sky.ClusterStatus.UP],
                 timeout=300),
         ],
-        f'sky down -y {name} && {smoke_tests_utils.down_cluster_for_cloud_cmd(name, skip_remote_server_check=True)}',
+        smoke_tests_utils.chain_teardown(
+            f'sky down -y {name}',
+            smoke_tests_utils.down_cluster_for_cloud_cmd(
+                name, skip_remote_server_check=True)),
     )
     smoke_tests_utils.run_one_test(test)
 
@@ -1113,7 +1180,9 @@ def test_gcp_stale_job_manual_restart():
                 job_status=[sky.JobStatus.FAILED_DRIVER],
                 timeout=events.JobSchedulerEvent.EVENT_INTERVAL_SECONDS)
         ],
-        f'sky down -y {name} && {smoke_tests_utils.down_cluster_for_cloud_cmd(name)}',
+        smoke_tests_utils.chain_teardown(
+            f'sky down -y {name}',
+            smoke_tests_utils.down_cluster_for_cloud_cmd(name)),
     )
     smoke_tests_utils.run_one_test(test)
 
@@ -3270,6 +3339,89 @@ def test_kubernetes_slurm_ssh_proxy_connection(generic_cloud: str,
         ],
         f'sky down -y {cluster_name}',
         timeout=15 * 60,  # 15 minutes timeout
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.slurm
+@pytest.mark.no_remote_server
+@pytest.mark.no_dependency
+def test_slurm_submit_as_authenticated_user():
+    """Submit a Slurm allocation as the authenticated user's Unix account."""
+    configured_cluster = os.environ.get('SLURM_CLUSTER')
+    cluster_names = slurm_utils.get_all_slurm_cluster_names()
+    if configured_cluster is None:
+        if len(cluster_names) != 1:
+            pytest.skip('Set SLURM_CLUSTER when multiple Slurm clusters are '
+                        'configured.')
+        slurm_cluster = cluster_names[0]
+    else:
+        matching_clusters = [
+            cluster for cluster in cluster_names
+            if cluster == configured_cluster or
+            cluster.endswith(f'-{configured_cluster}')
+        ]
+        if not matching_clusters:
+            pytest.skip(f'Slurm cluster {configured_cluster!r} is not '
+                        'configured in ~/.slurm/config.')
+        assert len(matching_clusters) == 1, matching_clusters
+        slurm_cluster = matching_clusters[0]
+
+    ssh_config = slurm_utils.get_slurm_ssh_config()
+    transport_user = ssh_config.lookup(slurm_cluster)['user']
+    assert transport_user != 'ci', (
+        'The test must use a distinct SSH transport user, but the configured '
+        f'user for {slurm_cluster!r} is already ci.')
+
+    slurm_config_path = os.path.expanduser(slurm_utils.DEFAULT_SLURM_PATH)
+    user_check = subprocess.run(
+        ['ssh', '-F', slurm_config_path, slurm_cluster, 'getent passwd ci'],
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+    if user_check.returncode != 0:
+        pytest.skip(f'Unix user ci is not configured on {slurm_cluster!r}.')
+    print(f'Using Slurm cluster {slurm_cluster!r}: '
+          f'transport user={transport_user!r}, submit user=\'ci\'')
+
+    name = smoke_tests_utils.get_cluster_name()
+    user_id = 'ci-smoke-test'
+    name_on_cloud = f'{name}-{user_id}'
+    ssh_squeue = shlex.join([
+        'ssh', '-F', slurm_config_path, slurm_cluster,
+        f'squeue --noheader --name={name_on_cloud} --format=%u'
+    ])
+    test = smoke_tests_utils.Test(
+        'slurm_submit_as_authenticated_user',
+        [
+            smoke_tests_utils.SKY_API_RESTART,
+            'sky check slurm',
+            f'sky launch -y -c {name} --infra slurm/{slurm_cluster} '
+            f'{smoke_tests_utils.LOW_RESOURCE_ARG} -- '
+            "'test \"$(id -un)\" = ci && echo SLURM_SUBMIT_USER_OK'",
+            f'owner=$({ssh_squeue}); '
+            'echo "Slurm allocation owner: $owner"; test "$owner" = ci',
+            f'logs="$(sky logs {name} 1)"; printf "%s\\n" "$logs"; '
+            '[[ "$logs" == *SLURM_SUBMIT_USER_OK* ]]',
+        ],
+        teardown=(f'sky down -y {name} || true; '
+                  f'unset {constants.USER_ENV_VAR} '
+                  f'{constants.USER_ID_ENV_VAR}; '
+                  f'export {skypilot_config.ENV_VAR_GLOBAL_CONFIG}= && '
+                  f'{smoke_tests_utils.SKY_API_RESTART}'),
+        timeout=smoke_tests_utils.get_timeout('slurm'),
+        env={
+            constants.USER_ENV_VAR: 'ci@example.com',
+            constants.USER_ID_ENV_VAR: user_id,
+        },
+        config_dict={
+            'slurm': {
+                'allowed_clusters': [slurm_cluster],
+                'submit_as_user': True,
+            },
+        },
     )
     smoke_tests_utils.run_one_test(test)
 

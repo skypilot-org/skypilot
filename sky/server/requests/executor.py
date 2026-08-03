@@ -54,6 +54,7 @@ from sky.server.requests import process
 from sky.server.requests import request_names
 from sky.server.requests import requests as api_requests
 from sky.server.requests import threads
+from sky.server.requests import workspace_access
 from sky.server.requests.queues import base as queue_base
 from sky.skylet import constants
 from sky.utils import annotations
@@ -129,6 +130,15 @@ def _get_executor_mp_context() -> multiprocessing.context.BaseContext:
 # server process become overloaded.
 _REQUEST_THREADS_LIMIT = 128
 
+# Limit for the auth executor. Sized against the sync DB connection pool, not
+# against a request rate: these threads do DB lookups, so a worker cannot have
+# more of them doing useful work than it has connections, and the rest would
+# just queue inside the pool. The ceiling is single-digit per worker today, so
+# this leaves several times the headroom needed while staying far below the
+# point where the sheer number of threads in one process starts slowing its
+# request handling down.
+_AUTH_THREADS_LIMIT = 32
+
 # Max length of the retry reason in a request's backoff status message; the
 # reason comes from the exception message, so truncate to keep it readable.
 _RETRY_STATUS_MSG_REASON_MAX_LEN = 200
@@ -152,6 +162,37 @@ def get_request_thread_executor() -> threads.OnDemandThreadExecutor:
                 name='request_thread_executor',
                 max_workers=_REQUEST_THREADS_LIMIT)
         return _REQUEST_THREAD_EXECUTOR
+
+
+_AUTH_THREAD_EXECUTOR_LOCK = threading.Lock()
+# A separate pool for the short DB lookups that authentication middleware runs
+# on every request. Kept apart from _REQUEST_THREAD_EXECUTOR because the two
+# have very different lifetimes: a worker in the request executor can be held
+# for the whole life of a streaming request (e.g. `sky jobs logs` on a queued
+# job runs for as long as the job does), while these lookups take under a
+# millisecond. Sharing one pool means enough concurrent streams starve
+# authentication, and every request fails with 503 -- including requests that
+# have nothing to do with streaming. Separate pools keep that failure confined
+# to the streaming endpoints.
+_AUTH_THREAD_EXECUTOR: Optional[threads.OnDemandThreadExecutor] = None
+
+
+def get_auth_thread_executor() -> threads.OnDemandThreadExecutor:
+    """Lazy init and return the auth thread executor for current process.
+
+    For short, latency-sensitive work on the request hot path -- primarily the
+    DB lookups done by authentication middleware. Do not submit long-running or
+    streaming work here; that belongs in ``get_request_thread_executor()``,
+    whose exhaustion must not be able to lock users out.
+    """
+    global _AUTH_THREAD_EXECUTOR
+    if _AUTH_THREAD_EXECUTOR is not None:
+        return _AUTH_THREAD_EXECUTOR
+    with _AUTH_THREAD_EXECUTOR_LOCK:
+        if _AUTH_THREAD_EXECUTOR is None:
+            _AUTH_THREAD_EXECUTOR = threads.OnDemandThreadExecutor(
+                name='auth_thread_executor', max_workers=_AUTH_THREADS_LIMIT)
+        return _AUTH_THREAD_EXECUTOR
 
 
 class RequestQueue:
@@ -304,9 +345,16 @@ class RequestWorker:
                 elif self.schedule_type == api_requests.ScheduleType.SHORT:
                     metrics_utils.SKY_APISERVER_SHORT_EXECUTORS.dec()
             # Monitor the result of the request execution.
-            threading.Thread(target=self.handle_task_result,
-                             args=(fut, request_element),
-                             daemon=True).start()
+            try:
+                threading.Thread(target=self.handle_task_result,
+                                 args=(fut, request_element),
+                                 daemon=True).start()
+            except Exception:  # pylint: disable=broad-except
+                # handle_task_result owns the matching increment, so a thread
+                # that never starts would leak the slot for the lifetime of
+                # the process.
+                self._mark_executor_free()
+                raise
 
             logger.info(f'[{self}] Submitted request: {request_id}')
         except (Exception, SystemExit) as e:  # pylint: disable=broad-except
@@ -616,10 +664,21 @@ def override_request_env_and_config(
                 # processes (BurstableExecutor = ProcessPoolExecutor).
                 client_api_version = getattr(request_body, 'client_api_version',
                                              None)
+                # The access level this request needs on the active workspace,
+                # classified at the API boundary from the dispatched endpoint
+                # and stamped onto the body (see
+                # sky.server.requests.workspace_access). Reads only need
+                # 'read', which lets a user whose only accessible workspaces
+                # are read-only still list/view them; anything not declared
+                # read-only needs 'write'. An unstamped body (internal daemon
+                # tick, or a body persisted by an older server) falls back to
+                # 'write'.
+                ws_action = (getattr(request_body, 'workspace_access', None) or
+                             workspace_constants.WORKSPACE_ACTION_WRITE)
                 if _should_apply_workspace_resolver(is_daemon,
                                                     client_api_version):
                     resolution = workspaces_core.resolve_workspace_for_user(
-                        user)
+                        user, action=ws_action)
                     workspace_ctx = (skypilot_config.local_active_workspace_ctx(
                         resolution.workspace))
                     logger.debug(f'{request_id} resolved workspace '
@@ -646,7 +705,7 @@ def override_request_env_and_config(
                         # Reject requests that the user does not have
                         # permission to access.
                         workspaces_core.reject_request_for_unauthorized_workspace(  # pylint: disable=line-too-long
-                            user)
+                            user, ws_action)
                     except exceptions.PermissionDeniedError as e:
                         logger.debug(
                             f'{request_id} permission denied to workspace: '
@@ -1065,6 +1124,11 @@ async def prepare_request_async(
     # clients (no header) yield None, which the worker-side gate treats
     # as "skip the workspace resolver".
     request_body.client_api_version = versions.get_remote_api_version()
+    # Same reason as above: classify the access level this request needs on the
+    # caller's active workspace here, while the dispatched endpoint is still
+    # visible, and stamp it so the worker can enforce it. Overwrite
+    # unconditionally — a client-supplied value must never be trusted.
+    request_body.workspace_access = workspace_access.for_current_request()
     request = api_requests.Request(
         request_id=request_id,
         name=server_constants.REQUEST_NAME_PREFIX + request_name,
