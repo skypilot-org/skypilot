@@ -744,6 +744,11 @@ class TestTaskCleanup:
                 'sky.jobs.utils.generate_managed_job_cluster_name',
                 return_value='test-cluster'),
             'status': patch('sky.core.status', return_value=[]),
+            # File-mount cleanup is gated on NOT consolidation mode; pin
+            # it so the test does not depend on the local ~/.sky config
+            # (a configured API server endpoint flips it to True).
+            'consolidation': patch('sky.jobs.utils.is_consolidation_mode',
+                                   return_value=False),
             'backend': patch('sky.backends.cloud_vm_ray_backend.'
                              'CloudVmRayBackend'),
         }

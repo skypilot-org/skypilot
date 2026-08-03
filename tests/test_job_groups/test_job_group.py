@@ -953,7 +953,7 @@ class TestControllerAsyncPatterns:
     """
 
     def test_download_log_uses_to_thread_in_monitor_job_group_task(self):
-        """Verify _download_log_and_stream is called via to_thread.
+        """Verify download_log_and_stream is called via to_thread.
 
         This test ensures the async blocking bug fix is in place by
         checking that the code structure properly awaits to_thread.
@@ -968,26 +968,26 @@ class TestControllerAsyncPatterns:
 
         # Parse the source to check for the pattern
         # We're looking for:
-        #   await context_utils.to_thread(..._download_log_and_stream...)
+        #   await context_utils.to_thread(...download_log_and_stream...)
         tree = ast.parse(source)
 
         # Find all function definitions
         async_methods_with_download = []
         for node in ast.walk(tree):
             if isinstance(node, ast.AsyncFunctionDef):
-                # Check if this async method contains _download_log_and_stream
+                # Check if this async method contains download_log_and_stream
                 method_source = ast.unparse(node)
-                if '_download_log_and_stream' in method_source:
+                if 'download_log_and_stream' in method_source:
                     async_methods_with_download.append(node.name)
                     # Verify it's called via to_thread
                     assert 'to_thread' in method_source, (
                         f'Async method {node.name} calls '
-                        f'_download_log_and_stream but does not use '
+                        f'download_log_and_stream but does not use '
                         f'to_thread - this will block the event loop!')
 
         # Ensure we found the relevant methods
         assert len(async_methods_with_download) > 0, (
-            'No async methods found that call _download_log_and_stream')
+            'No async methods found that call download_log_and_stream')
 
 
 class TestDocstringQuality:
