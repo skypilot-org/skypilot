@@ -7,6 +7,7 @@ from typing import Dict, Iterator, List, Optional, Tuple, Union
 
 from sky import catalog
 from sky import clouds
+from sky.adaptors import runpod as runpod_sdk_adaptor
 from sky.utils import common_utils
 from sky.utils import registry
 from sky.utils import resources_utils
@@ -32,8 +33,6 @@ class RunPod(clouds.Cloud):
              'are non-trivial on RunPod.'),
         clouds.CloudImplementationFeatures.CUSTOM_DISK_TIER:
             ('Customizing disk tier is not supported yet on RunPod.'),
-        clouds.CloudImplementationFeatures.CUSTOM_NETWORK_TIER:
-            ('Custom network tier is not supported yet on RunPod.'),
         clouds.CloudImplementationFeatures.STORAGE_MOUNTING:
             ('Mounting object stores is not supported on RunPod. To read data '
              'from object stores on RunPod, use `mode: COPY` to copy the data '
@@ -221,6 +220,8 @@ class RunPod(clouds.Cloud):
         use_spot = resources.use_spot
         hourly_cost = self.instance_type_to_hourly_cost(
             instance_type=instance_type, use_spot=use_spot)
+        network_tier = (resources.network_tier or
+                        resources_utils.NetworkTier.STANDARD)
 
         gpu_count = list(acc_dict.values())[0] if acc_dict is not None else 1
 
@@ -238,6 +239,7 @@ class RunPod(clouds.Cloud):
             'use_spot': use_spot,
             'bid_per_gpu': str(hourly_cost / gpu_count),
             'docker_username_for_runpod': docker_username_for_runpod,
+            'network_tier': network_tier.value,
         }
 
     def _get_feasible_launchable_resources(
@@ -330,6 +332,10 @@ class RunPod(clouds.Cloud):
             # If that happens to be set to None, then ValueError is raised.
             return False, dependency_error_msg
 
+        sdk_version_error = runpod_sdk_adaptor.get_sdk_version_error()
+        if sdk_version_error is not None:
+            return False, sdk_version_error
+
         hint_msg = (
             'Credentials can be set up by running: \n'
             '        $ pip install runpod \n'
@@ -359,9 +365,8 @@ class RunPod(clouds.Cloud):
             runpod_utils.list_instances()
             return True, None
         except Exception as e:  # pylint: disable=broad-except
-            from sky.adaptors import runpod
             error_msg = common_utils.format_exception(e, use_bracket=True)
-            if isinstance(e, runpod.runpod.error.QueryError):
+            if isinstance(e, runpod_sdk_adaptor.runpod.error.QueryError):
                 error_msg_lower = str(e).lower()
                 auth_keywords = ['unauthorized', 'forbidden', '401', '403']
                 if any(keyword in error_msg_lower for keyword in auth_keywords):
@@ -413,9 +418,7 @@ class RunPod(clouds.Cloud):
             # The RunPod SDK does not reliably load its credential file in
             # every API-server subprocess. Set the key on the actual imported
             # module so provisioning calls use the profile validated here.
-            # pylint: disable=import-outside-toplevel
-            from sky.adaptors import runpod as runpod_adaptor
-            runpod_adaptor.runpod.load_module(
+            runpod_sdk_adaptor.runpod.load_module(
             ).api_key = config[profile]['api_key']
 
         except (TypeError, ValueError):

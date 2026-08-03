@@ -81,6 +81,8 @@ def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
             created_instance_ids=[])
 
     created_instance_ids = []
+    network_tier = resources_utils.NetworkTier(
+        config.provider_config.get('network_tier', 'standard'))
     volume_mounts = config.node_config.get('VolumeMounts', [])
     network_volume_id = None
     volume_mount_path = None
@@ -115,6 +117,7 @@ def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
                     'docker_login_config'),
                 network_volume_id=network_volume_id,
                 volume_mount_path=volume_mount_path,
+                network_tier=network_tier,
             )
         except Exception as e:  # pylint: disable=broad-except
             logger.warning(f'run_instances error: {e}\n'

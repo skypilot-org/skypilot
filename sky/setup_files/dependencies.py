@@ -232,12 +232,11 @@ cloud_dependencies: Dict[str, List[str]] = {
     'oci': ['oci'],
     'kubernetes': kubernetes_dependencies,
     'ssh': kubernetes_dependencies,
-    # For the container registry auth api. Reference:
-    # https://github.com/runpod/runpod-python/releases/tag/1.6.1
     'runpod': [
-        # For the container registry auth api. Reference:
-        # https://github.com/runpod/runpod-python/releases/tag/1.6.1
-        'runpod>=1.6.1',
+        # 1.7.10 is the minimum release verified for the create_pod()
+        # min_download/min_upload arguments used by network_tier=best.
+        # See: https://github.com/runpod/runpod-python/blob/1.7.10/runpod/api/ctl_commands.py#L89-L182  # pylint: disable=line-too-long
+        'runpod>=1.7.10',
         # RunPod needs a TOML parser to read ~/.runpod/config.toml. On Python
         # 3.11+ stdlib provides tomllib; on lower versions we depend on tomli
         # explicitly. Instead of installing tomli conditionally, we install it
