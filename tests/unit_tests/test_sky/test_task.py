@@ -824,10 +824,34 @@ def test_redact_task_yaml_dict_recursively_redacts_without_mutation():
         'registry']['auth']
     assert redacted_yaml['resources']['any_of'][0]['_docker_login_config'][
         'username'] == 'registry-user'
-    for value in registry_auth.values():
-        assert value == '<redacted>'
+    assert registry_auth == '<redacted>'
     assert (redacted_yaml['resources']['any_of'][0]['_docker_login_config']
             ['password'] == '<redacted>')
+
+
+def test_redact_task_yaml_dict_redacts_nested_sensitive_values_as_a_whole():
+    task_yaml = {
+        'authorization': {
+            'value': 'Bearer raw-secret',
+        },
+        'secrets': {
+            'MY_SECRET': {
+                'value': 'raw-secret',
+            },
+            'secrets:workspace.REFERENCED_SECRET': None,
+        },
+        'managed_secrets': ['secrets:workspace.MANAGED_SECRET'],
+    }
+    original_yaml = copy.deepcopy(task_yaml)
+
+    redacted_yaml = task.redact_task_yaml_dict(task_yaml)
+
+    assert task_yaml == original_yaml
+    assert redacted_yaml['authorization'] == '<redacted>'
+    assert redacted_yaml['secrets']['MY_SECRET'] == '<redacted>'
+    assert (redacted_yaml['secrets']['secrets:workspace.REFERENCED_SECRET']
+            is None)
+    assert redacted_yaml['managed_secrets'] == original_yaml['managed_secrets']
 
 
 def test_redact_task_yaml_dict_keeps_non_sensitive_fields():

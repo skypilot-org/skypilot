@@ -324,6 +324,7 @@ def _get_yaml_path_from_cluster_name(cluster_name: str,
 def _persist_redacted_debug_yaml(tmp_yaml_path: str,
                                  debug_yaml_path: str) -> None:
     """Persist a private redacted debug YAML and delete its raw source."""
+    debug_yaml_written = False
     try:
         with open(tmp_yaml_path, 'r', encoding='utf-8') as raw_yaml_file:
             redacted_yaml = debug_dump_helpers.redact_task_yaml(
@@ -335,8 +336,21 @@ def _persist_redacted_debug_yaml(tmp_yaml_path: str,
             # descriptor mode before writing to never persist debug YAML openly.
             os.fchmod(debug_file.fileno(), 0o600)
             debug_file.write(redacted_yaml)
+        debug_yaml_written = True
     finally:
-        os.remove(tmp_yaml_path)
+        try:
+            os.remove(tmp_yaml_path)
+        finally:
+            if not debug_yaml_written:
+                _remove_legacy_debug_yaml(debug_yaml_path)
+
+
+def _remove_legacy_debug_yaml(debug_yaml_path: str) -> None:
+    """Remove a pre-redaction debug YAML artifact if it exists."""
+    try:
+        pathlib.Path(debug_yaml_path).unlink()
+    except FileNotFoundError:
+        pass
 
 
 # Add retry for the file mounts optimization, as the underlying cp command may
@@ -1409,11 +1423,14 @@ def write_cluster_config(
 
     usage_lib.messages.usage.update_ray_yaml(tmp_yaml_path)
 
+    debug_yaml_path = f'{yaml_path}.debug'
     if sky_logging.logging_enabled(logger, sky_logging.DEBUG):
-        debug_yaml_path = yaml_path + '.debug'
         _persist_redacted_debug_yaml(tmp_yaml_path, debug_yaml_path)
     else:
-        os.remove(tmp_yaml_path)
+        try:
+            os.remove(tmp_yaml_path)
+        finally:
+            _remove_legacy_debug_yaml(debug_yaml_path)
 
     return config_dict
 
