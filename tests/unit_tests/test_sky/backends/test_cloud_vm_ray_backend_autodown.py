@@ -1,8 +1,10 @@
 """Tests for backend-produced generation-fenced durable autodown."""
 
 import concurrent.futures
+import dataclasses
 import pickle
 import threading
+from typing import Optional
 from unittest import mock
 
 import grpc
@@ -20,6 +22,7 @@ from sky.schemas.generated import autostopv1_pb2
 from sky.skylet import autostop_lib
 from sky.skylet import constants
 from sky.utils import locks
+from sky.utils import status_lib
 from sky.utils.db import db_utils
 
 
@@ -41,16 +44,19 @@ def fresh_state_db(tmp_path, monkeypatch):
 
 
 def _make_handle(
-    strategy: TeardownExecutionStrategy = (
-        TeardownExecutionStrategy.HEAD_WITH_SERVER_FALLBACK),
+    strategy: TeardownExecutionStrategy = (TeardownExecutionStrategy.
+                                           HEAD_WITH_SERVER_FALLBACK),
     cluster_name: str = 'cluster',
+    cloud: Optional[clouds.Cloud] = None,
 ):
+    if cloud is None:
+        cloud = clouds.AWS()
     handle = cloud_vm_ray_backend.CloudVmRayResourceHandle(
         cluster_name=cluster_name,
         cluster_name_on_cloud=f'{cluster_name}-cloud',
         cluster_yaml=None,
         launched_nodes=1,
-        launched_resources=resources_lib.Resources(cloud=clouds.AWS(),
+        launched_resources=resources_lib.Resources(cloud=cloud,
                                                    instance_type='m5.large'),
         teardown_execution_strategy=strategy,
     )
@@ -113,10 +119,14 @@ def _patch_skylet(monkeypatch,
 def test_handle_persists_deployment_strategy_across_config_drift():
     handle = _make_handle(TeardownExecutionStrategy.SERVER_ONLY)
 
-    restored_pickle = pickle.loads(pickle.dumps(handle))
+    serialized_state = handle.__getstate__()
+    pickle_payload = pickle.dumps(handle)
+    restored_pickle = pickle.loads(pickle_payload)
     restored_dict = cloud_vm_ray_backend.CloudVmRayResourceHandle.from_dict(
         handle.to_dict())
 
+    assert serialized_state['teardown_execution_strategy'] == 'server_only'
+    assert b'TeardownExecutionStrategy' not in pickle_payload
     assert restored_pickle.teardown_execution_strategy is (
         TeardownExecutionStrategy.SERVER_ONLY)
     assert restored_dict.teardown_execution_strategy is (
@@ -478,6 +488,72 @@ def test_rejected_post_claim_update_preserves_irreversible_teardown(
 
 
 @pytest.mark.usefixtures('fresh_state_db')
+def test_rejected_replacement_restores_predecessor_when_status_read_fails(
+        monkeypatch):
+    handle = _make_handle()
+    _add_cluster(handle)
+    get_status, apply_autodown_intent, _ = _patch_skylet(monkeypatch)
+    backend = cloud_vm_ray_backend.CloudVmRayBackend()
+    backend.set_autostop(handle,
+                         15,
+                         autostop_lib.DEFAULT_AUTOSTOP_WAIT_FOR,
+                         down=True)
+    predecessor = global_user_state.get_autodown_intent('cluster')
+    assert predecessor is not None
+
+    get_status.side_effect = [
+        _durable_status(),
+        RuntimeError('status unavailable'),
+    ]
+    apply_autodown_intent.side_effect = exceptions.SkyletInternalError(
+        'update rejected')
+
+    with pytest.raises(exceptions.SkyletInternalError, match='update rejected'):
+        backend.set_autostop(handle,
+                             30,
+                             autostop_lib.DEFAULT_AUTOSTOP_WAIT_FOR,
+                             down=True)
+
+    assert global_user_state.get_autodown_intent('cluster') == predecessor
+
+
+@pytest.mark.usefixtures('fresh_state_db')
+def test_ambiguous_apply_ack_keeps_replacement_when_status_read_fails(
+        monkeypatch):
+    handle = _make_handle()
+    _add_cluster(handle)
+    get_status, apply_autodown_intent, _ = _patch_skylet(monkeypatch)
+    backend = cloud_vm_ray_backend.CloudVmRayBackend()
+    backend.set_autostop(handle,
+                         15,
+                         autostop_lib.DEFAULT_AUTOSTOP_WAIT_FOR,
+                         down=True)
+    predecessor = global_user_state.get_autodown_intent('cluster')
+    assert predecessor is not None
+
+    get_status.side_effect = [
+        _durable_status(),
+        RuntimeError('status unavailable'),
+    ]
+    apply_autodown_intent.side_effect = exceptions.SkyletUnavailableError(
+        'commit acknowledgement lost')
+
+    with pytest.raises(exceptions.SkyletUnavailableError,
+                       match='commit acknowledgement lost'):
+        backend.set_autostop(handle,
+                             30,
+                             autostop_lib.DEFAULT_AUTOSTOP_WAIT_FOR,
+                             down=True)
+
+    current = global_user_state.get_autodown_intent('cluster')
+    assert current is not None
+    assert current.cluster_hash == predecessor.cluster_hash
+    assert current.generation == predecessor.generation + 1
+    assert current.state is global_user_state.AutodownIntentState.CONFIGURING
+    assert current.idle_minutes == 30
+
+
+@pytest.mark.usefixtures('fresh_state_db')
 def test_lost_finalization_ack_for_exact_terminal_state_is_success(monkeypatch):
     handle = _make_handle()
     _add_cluster(handle)
@@ -503,6 +579,67 @@ def test_lost_finalization_ack_for_exact_terminal_state_is_success(monkeypatch):
     record = global_user_state.get_cluster_from_name('cluster')
     assert record is not None
     assert (record['autostop'], record['to_down']) == (15, True)
+
+
+@pytest.mark.usefixtures('fresh_state_db')
+def test_lost_finalization_commit_ack_is_resolved_by_exact_read(monkeypatch):
+    handle = _make_handle()
+    _add_cluster(handle)
+    _patch_skylet(monkeypatch)
+    backend = cloud_vm_ray_backend.CloudVmRayBackend()
+    real_cas = global_user_state.compare_and_swap_autodown_intent
+
+    def transition_then_lose_commit_ack(**kwargs):
+        assert real_cas(**kwargs)
+        raise RuntimeError('commit acknowledgement lost')
+
+    monkeypatch.setattr(global_user_state, 'compare_and_swap_autodown_intent',
+                        transition_then_lose_commit_ack)
+
+    backend.set_autostop(handle,
+                         15,
+                         autostop_lib.DEFAULT_AUTOSTOP_WAIT_FOR,
+                         down=True)
+
+    intent = global_user_state.get_autodown_intent('cluster')
+    assert intent is not None
+    assert intent.state is global_user_state.AutodownIntentState.ARMED
+    record = global_user_state.get_cluster_from_name('cluster')
+    assert record is not None
+    assert (record['autostop'], record['to_down']) == (15, True)
+
+
+@pytest.mark.usefixtures('fresh_state_db')
+def test_lost_finalization_ack_rejects_changed_attempt_fence(monkeypatch):
+    handle = _make_handle()
+    _add_cluster(handle)
+    _patch_skylet(monkeypatch)
+    backend = cloud_vm_ray_backend.CloudVmRayBackend()
+    real_cas = global_user_state.compare_and_swap_autodown_intent
+    real_get_intent = global_user_state.get_autodown_intent
+
+    def transition_then_lose_commit_ack(**kwargs):
+        assert real_cas(**kwargs)
+        raise RuntimeError('commit acknowledgement lost')
+
+    def get_changed_attempt(cluster_name):
+        current = real_get_intent(cluster_name)
+        if (current is not None and
+                current.state is global_user_state.AutodownIntentState.ARMED):
+            return dataclasses.replace(current,
+                                       attempt_count=current.attempt_count + 1)
+        return current
+
+    monkeypatch.setattr(global_user_state, 'compare_and_swap_autodown_intent',
+                        transition_then_lose_commit_ack)
+    monkeypatch.setattr(global_user_state, 'get_autodown_intent',
+                        get_changed_attempt)
+
+    with pytest.raises(RuntimeError, match='commit acknowledgement lost'):
+        backend.set_autostop(handle,
+                             15,
+                             autostop_lib.DEFAULT_AUTOSTOP_WAIT_FOR,
+                             down=True)
 
 
 @pytest.mark.usefixtures('fresh_state_db')
@@ -533,6 +670,197 @@ def test_manual_teardown_applies_newer_skylet_cancellation(
     teardown.assert_called_once()
     assert apply_autodown_intent.call_count == 2
     set_autostop.assert_not_called()
+
+
+@pytest.mark.usefixtures('fresh_state_db')
+def test_runpod_expected_hash_is_revalidated_before_provider_teardown(
+        monkeypatch):
+    stale_handle = _make_handle(cloud=clouds.RunPod())
+    stale_handle.cluster_yaml = '/tmp/stale.yaml'
+    stale_record = _add_cluster(stale_handle)
+    replacement_handle = _make_handle(cloud=clouds.RunPod())
+    replacement_handle.cluster_yaml = '/tmp/replacement.yaml'
+    replacement_handle.provision_runtime_metadata = (
+        provision_common.ProvisionRuntimeMetadata(has_ray=False))
+    replacement_record = {}
+    provider_teardown = mock.Mock()
+    post_teardown_cleanup = mock.Mock()
+    backend = cloud_vm_ray_backend.CloudVmRayBackend()
+
+    def refresh_stale_incarnation(cluster_name, **kwargs):
+        assert cluster_name == stale_handle.cluster_name
+        assert kwargs['cluster_lock_already_held'] is True
+        return status_lib.ClusterStatus.UP, stale_handle
+
+    def replace_after_first_fence(*_args, **_kwargs):
+        global_user_state.remove_cluster(stale_handle.cluster_name,
+                                         terminate=True)
+        replacement_record.update(_add_cluster(replacement_handle))
+
+    monkeypatch.setattr(cloud_vm_ray_backend.requests_lib,
+                        'kill_cluster_requests', mock.Mock())
+    monkeypatch.setattr(backend_utils, 'refresh_cluster_status_handle',
+                        refresh_stale_incarnation)
+    monkeypatch.setattr(global_user_state, 'get_cluster_yaml_dict',
+                        lambda _: {'provider': {}})
+    monkeypatch.setattr(cloud_vm_ray_backend.provisioner, 'teardown_cluster',
+                        provider_teardown)
+    monkeypatch.setattr(backend, 'post_teardown_cleanup', post_teardown_cleanup)
+    run_on_head = mock.Mock(side_effect=replace_after_first_fence)
+    monkeypatch.setattr(backend, 'run_on_head', run_on_head)
+
+    backend.teardown_no_lock(stale_handle,
+                             terminate=True,
+                             expected_cluster_hash=stale_record['cluster_hash'])
+
+    current = global_user_state.get_cluster_from_name(stale_handle.cluster_name,
+                                                      include_user_info=False,
+                                                      summary_response=True)
+    assert current is not None
+    assert current['cluster_hash'] == replacement_record['cluster_hash']
+    assert current['handle'].cluster_yaml == replacement_handle.cluster_yaml
+    run_on_head.assert_called_once()
+    provider_teardown.assert_not_called()
+    post_teardown_cleanup.assert_not_called()
+
+
+@pytest.mark.usefixtures('fresh_state_db')
+def test_runpod_expected_hash_is_revalidated_after_provider_teardown(
+        monkeypatch):
+    stale_handle = _make_handle(cloud=clouds.RunPod())
+    stale_handle.cluster_yaml = '/tmp/stale.yaml'
+    stale_handle.provision_runtime_metadata = (
+        provision_common.ProvisionRuntimeMetadata(has_ray=False))
+    stale_record = _add_cluster(stale_handle)
+    replacement_handle = _make_handle(cloud=clouds.RunPod())
+    replacement_handle.cluster_yaml = '/tmp/replacement.yaml'
+    replacement_record = {}
+    post_teardown_cleanup = mock.Mock()
+    backend = cloud_vm_ray_backend.CloudVmRayBackend()
+
+    def refresh_stale_incarnation(cluster_name, **kwargs):
+        assert cluster_name == stale_handle.cluster_name
+        return status_lib.ClusterStatus.UP, stale_handle
+
+    def teardown_then_replace(*_args, **_kwargs):
+        global_user_state.remove_cluster(stale_handle.cluster_name,
+                                         terminate=True)
+        replacement_record.update(_add_cluster(replacement_handle))
+
+    monkeypatch.setattr(cloud_vm_ray_backend.requests_lib,
+                        'kill_cluster_requests', mock.Mock())
+    monkeypatch.setattr(backend_utils, 'refresh_cluster_status_handle',
+                        refresh_stale_incarnation)
+    monkeypatch.setattr(global_user_state, 'get_cluster_yaml_dict',
+                        lambda _: {'provider': {}})
+    monkeypatch.setattr(cloud_vm_ray_backend.provisioner, 'teardown_cluster',
+                        teardown_then_replace)
+    monkeypatch.setattr(backend, 'post_teardown_cleanup', post_teardown_cleanup)
+
+    backend.teardown_no_lock(stale_handle,
+                             terminate=True,
+                             expected_cluster_hash=stale_record['cluster_hash'])
+
+    current = global_user_state.get_cluster_from_name(stale_handle.cluster_name,
+                                                      include_user_info=False,
+                                                      summary_response=True)
+    assert current is not None
+    assert current['cluster_hash'] == replacement_record['cluster_hash']
+    post_teardown_cleanup.assert_not_called()
+
+
+@pytest.mark.usefixtures('fresh_state_db')
+def test_legacy_expected_hash_is_revalidated_before_teardown_command(
+        monkeypatch):
+    stale_handle = _make_handle(cloud=clouds.IBM())
+    stale_handle.cluster_yaml = '/tmp/stale.yaml'
+    stale_record = _add_cluster(stale_handle)
+    replacement_handle = _make_handle(cloud=clouds.IBM())
+    replacement_handle.cluster_yaml = '/tmp/replacement.yaml'
+    replacement_record = {}
+    teardown_command = mock.Mock(return_value=(0, '', ''))
+    post_teardown_cleanup = mock.Mock()
+    backend = cloud_vm_ray_backend.CloudVmRayBackend()
+
+    def refresh_stale_incarnation(cluster_name, **kwargs):
+        assert cluster_name == stale_handle.cluster_name
+        assert kwargs['cluster_lock_already_held'] is True
+        return status_lib.ClusterStatus.UP, stale_handle
+
+    def replace_after_first_fence(*_args, **_kwargs):
+        global_user_state.remove_cluster(stale_handle.cluster_name,
+                                         terminate=True)
+        replacement_record.update(_add_cluster(replacement_handle))
+
+    monkeypatch.setattr(cloud_vm_ray_backend.requests_lib,
+                        'kill_cluster_requests', mock.Mock())
+    monkeypatch.setattr(backend_utils, 'refresh_cluster_status_handle',
+                        refresh_stale_incarnation)
+    monkeypatch.setattr(global_user_state, 'get_cluster_yaml_dict',
+                        lambda _: {'provider': {}})
+    monkeypatch.setattr(cloud_vm_ray_backend.yaml_utils, 'dump_yaml',
+                        replace_after_first_fence)
+    monkeypatch.setattr(cloud_vm_ray_backend.log_lib, 'run_with_log',
+                        teardown_command)
+    monkeypatch.setattr(backend, 'post_teardown_cleanup', post_teardown_cleanup)
+
+    backend.teardown_no_lock(stale_handle,
+                             terminate=True,
+                             expected_cluster_hash=stale_record['cluster_hash'])
+
+    current = global_user_state.get_cluster_from_name(stale_handle.cluster_name,
+                                                      include_user_info=False,
+                                                      summary_response=True)
+    assert current is not None
+    assert current['cluster_hash'] == replacement_record['cluster_hash']
+    teardown_command.assert_not_called()
+    post_teardown_cleanup.assert_not_called()
+
+
+@pytest.mark.usefixtures('fresh_state_db')
+def test_legacy_expected_hash_is_revalidated_after_teardown_command(
+        monkeypatch):
+    stale_handle = _make_handle(cloud=clouds.IBM())
+    stale_handle.cluster_yaml = '/tmp/stale.yaml'
+    stale_record = _add_cluster(stale_handle)
+    replacement_handle = _make_handle(cloud=clouds.IBM())
+    replacement_handle.cluster_yaml = '/tmp/replacement.yaml'
+    replacement_record = {}
+    post_teardown_cleanup = mock.Mock()
+    backend = cloud_vm_ray_backend.CloudVmRayBackend()
+
+    def refresh_stale_incarnation(cluster_name, **kwargs):
+        assert cluster_name == stale_handle.cluster_name
+        return status_lib.ClusterStatus.UP, stale_handle
+
+    def teardown_then_replace(*_args, **_kwargs):
+        global_user_state.remove_cluster(stale_handle.cluster_name,
+                                         terminate=True)
+        replacement_record.update(_add_cluster(replacement_handle))
+        return 0, '', ''
+
+    monkeypatch.setattr(cloud_vm_ray_backend.requests_lib,
+                        'kill_cluster_requests', mock.Mock())
+    monkeypatch.setattr(backend_utils, 'refresh_cluster_status_handle',
+                        refresh_stale_incarnation)
+    monkeypatch.setattr(global_user_state, 'get_cluster_yaml_dict',
+                        lambda _: {'provider': {}})
+    monkeypatch.setattr(cloud_vm_ray_backend.yaml_utils, 'dump_yaml',
+                        mock.Mock())
+    monkeypatch.setattr(cloud_vm_ray_backend.log_lib, 'run_with_log',
+                        teardown_then_replace)
+    monkeypatch.setattr(backend, 'post_teardown_cleanup', post_teardown_cleanup)
+
+    backend.teardown_no_lock(stale_handle,
+                             terminate=True,
+                             expected_cluster_hash=stale_record['cluster_hash'])
+
+    current = global_user_state.get_cluster_from_name(stale_handle.cluster_name,
+                                                      include_user_info=False,
+                                                      summary_response=True)
+    assert current is not None
+    assert current['cluster_hash'] == replacement_record['cluster_hash']
+    post_teardown_cleanup.assert_not_called()
 
 
 @pytest.mark.usefixtures('fresh_state_db')
@@ -717,6 +1045,92 @@ def test_name_reuse_hash_mismatch_blocks_delayed_finalization(monkeypatch):
     assert intent is not None
     assert intent.cluster_hash == old_record['cluster_hash']
     assert intent.state is global_user_state.AutodownIntentState.CONFIGURING
+
+
+@pytest.mark.usefixtures('fresh_state_db')
+@pytest.mark.parametrize('old_state', [
+    global_user_state.AutodownIntentState.PREPARING,
+    global_user_state.AutodownIntentState.READY,
+    global_user_state.AutodownIntentState.EXECUTING,
+    global_user_state.AutodownIntentState.RETRY_WAIT,
+])
+def test_old_incarnation_irreversible_intent_does_not_block_new_arm(
+        monkeypatch, old_state):
+    old_handle = _make_handle()
+    old_record = _add_cluster(old_handle)
+    _patch_skylet(monkeypatch)
+    backend = cloud_vm_ray_backend.CloudVmRayBackend()
+    backend.set_autostop(old_handle,
+                         15,
+                         autostop_lib.DEFAULT_AUTOSTOP_WAIT_FOR,
+                         down=True)
+    old_intent = global_user_state.get_autodown_intent('cluster')
+    assert old_intent is not None
+    assert global_user_state.compare_and_swap_autodown_intent(
+        cluster_name=old_intent.cluster_name,
+        cluster_hash=old_intent.cluster_hash,
+        generation=old_intent.generation,
+        expected_states={old_intent.state},
+        expected_attempt_count=old_intent.attempt_count,
+        new_state=old_state,
+    )
+
+    global_user_state.remove_cluster('cluster', terminate=True)
+    new_handle = _make_handle(TeardownExecutionStrategy.SERVER_ONLY)
+    new_record = _add_cluster(new_handle)
+    assert new_record['cluster_hash'] != old_record['cluster_hash']
+
+    backend.set_autostop(new_handle,
+                         30,
+                         autostop_lib.DEFAULT_AUTOSTOP_WAIT_FOR,
+                         down=True)
+
+    new_intent = global_user_state.get_autodown_intent('cluster')
+    assert new_intent is not None
+    assert new_intent.cluster_hash == new_record['cluster_hash']
+    assert new_intent.generation == old_intent.generation + 1
+    assert new_intent.state is global_user_state.AutodownIntentState.ARMED
+    assert new_intent.execution_strategy == 'server_only'
+
+
+@pytest.mark.usefixtures('fresh_state_db')
+def test_old_incarnation_strict_intent_does_not_change_new_legacy_path(
+        monkeypatch):
+    old_handle = _make_handle()
+    _add_cluster(old_handle)
+    _, apply_autodown_intent, set_autostop = _patch_skylet(monkeypatch)
+    backend = cloud_vm_ray_backend.CloudVmRayBackend()
+    backend.set_autostop(old_handle,
+                         15,
+                         autostop_lib.DEFAULT_AUTOSTOP_WAIT_FOR,
+                         down=True)
+    old_intent = global_user_state.get_autodown_intent('cluster')
+    assert old_intent is not None
+    assert global_user_state.compare_and_swap_autodown_intent(
+        cluster_name=old_intent.cluster_name,
+        cluster_hash=old_intent.cluster_hash,
+        generation=old_intent.generation,
+        expected_states={old_intent.state},
+        expected_attempt_count=old_intent.attempt_count,
+        new_state=global_user_state.AutodownIntentState.PREPARING,
+    )
+
+    global_user_state.remove_cluster('cluster', terminate=True)
+    new_handle = _make_handle(TeardownExecutionStrategy.LEGACY_HEAD_CREDENTIALS)
+    new_record = _add_cluster(new_handle)
+    assert new_record['cluster_hash'] != old_intent.cluster_hash
+
+    backend.set_autostop(new_handle,
+                         20,
+                         autostop_lib.DEFAULT_AUTOSTOP_WAIT_FOR,
+                         down=True)
+
+    assert apply_autodown_intent.call_count == 1
+    set_autostop.assert_called_once()
+    current_record = global_user_state.get_cluster_from_name('cluster')
+    assert current_record is not None
+    assert current_record['cluster_hash'] == new_record['cluster_hash']
+    assert (current_record['autostop'], current_record['to_down']) == (20, True)
 
 
 @pytest.mark.usefixtures('fresh_state_db')

@@ -49,7 +49,8 @@ class _ReconciliationBackend(Protocol):
 
     def teardown_no_lock(self,
                          handle: cloud_vm_ray_backend.CloudVmRayResourceHandle,
-                         terminate: bool) -> None:
+                         terminate: bool,
+                         expected_cluster_hash: Optional[str] = None) -> None:
         ...
 
 
@@ -257,10 +258,22 @@ def _reconcile_under_lock(intent: global_user_state.AutodownIntent,
     if current.state is not global_user_state.AutodownIntentState.EXECUTING:
         return
 
+    # The state claim and exact-intent read above can race with name reuse by a
+    # writer outside the cluster lock. Re-read the incarnation at the provider
+    # mutation boundary and use only that freshly fenced handle.
+    cluster_record = _get_cluster_record(current)
+    if cluster_record is None:
+        _transition(current, global_user_state.AutodownIntentState.SUCCEEDED)
+        return
+    if cluster_record['cluster_hash'] != current.cluster_hash:
+        _transition(current, global_user_state.AutodownIntentState.CANCELLED)
+        return
     handle = cast(cloud_vm_ray_backend.CloudVmRayResourceHandle,
                   cluster_record['handle'])
     try:
-        backend.teardown_no_lock(handle, terminate=True)
+        backend.teardown_no_lock(handle,
+                                 terminate=True,
+                                 expected_cluster_hash=current.cluster_hash)
     except Exception:  # pylint: disable=broad-except
         # Teardown may have removed the durable cluster row before a later
         # cleanup step failed. Resolve that crash boundary before retrying.

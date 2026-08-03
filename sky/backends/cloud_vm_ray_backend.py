@@ -1250,8 +1250,9 @@ class RetryingVmProvisioner(object):
                     stable_internal_external_ips=prev_cluster_ips,
                     stable_ssh_ports=prev_ssh_ports,
                     cluster_info=prev_cluster_info,
-                    teardown_execution_strategy=config_dict[
-                        'teardown_execution_strategy'],
+                    teardown_execution_strategy=(
+                        sky_cloud.TeardownExecutionStrategy(
+                            config_dict['teardown_execution_strategy'])),
                 )
                 usage_lib.messages.usage.update_final_cluster_status(
                     status_lib.ClusterStatus.INIT)
@@ -2749,6 +2750,9 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
                       provision_common.ProvisionRuntimeMetadata):
             state['provision_runtime_metadata'] = dataclasses.asdict(
                 runtime_metadata)
+        execution_strategy = state.get('teardown_execution_strategy')
+        if isinstance(execution_strategy, sky_cloud.TeardownExecutionStrategy):
+            state['teardown_execution_strategy'] = execution_strategy.value
         return state
 
     def __setstate__(self, state):
@@ -5486,7 +5490,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                          purge: bool = False,
                          post_teardown_cleanup: bool = True,
                          refresh_cluster_status: bool = True,
-                         remove_from_db: bool = True) -> None:
+                         remove_from_db: bool = True,
+                         expected_cluster_hash: Optional[str] = None) -> None:
         """Teardown the cluster without acquiring the cluster status lock.
 
         NOTE: This method should not be called without holding the cluster
@@ -5495,9 +5500,25 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         refresh_cluster_status is only used internally in the status refresh
         process, and should not be set to False in other cases.
 
+        expected_cluster_hash prevents a name-based status refresh from
+        adopting a different incarnation before provider teardown.
+
         Raises:
             RuntimeError: If the cluster fails to be terminated/stopped.
         """
+
+        def get_fenced_handle() -> Optional[CloudVmRayResourceHandle]:
+            if expected_cluster_hash is None:
+                return handle
+            record = global_user_state.get_cluster_from_name(
+                handle.cluster_name,
+                include_user_info=False,
+                summary_response=True)
+            if (record is None or
+                    record['cluster_hash'] != expected_cluster_hash):
+                return None
+            return typing.cast(CloudVmRayResourceHandle, record['handle'])
+
         try:
             handle.close_skylet_ssh_tunnel()
         except Exception as e:  # pylint: disable=broad-except
@@ -5545,7 +5566,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                         force_refresh_statuses={status_lib.ClusterStatus.INIT},
                         cluster_lock_already_held=True,
                         retry_if_missing=False))
-                if refreshed_handle is not None:
+                if (refreshed_handle is not None and
+                        expected_cluster_hash is None):
                     # Use the latest handle from status refresh to avoid acting
                     # on stale runtime metadata persisted earlier in launch.
                     handle = refreshed_handle
@@ -5555,6 +5577,10 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     'Failed to fetch cluster status for '
                     f'{handle.cluster_name!r}. Assuming the cluster is still '
                     'up.')
+        fenced_handle = get_fenced_handle()
+        if fenced_handle is None:
+            return
+        handle = fenced_handle
         if not cluster_status_fetched:
             status = global_user_state.get_status_from_cluster_name(
                 handle.cluster_name)
@@ -5615,6 +5641,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                             'node has already been terminated. It is fine to '
                             'skip this.')
 
+            if get_fenced_handle() is None:
+                return
             try:
                 provisioner.teardown_cluster(repr(cloud),
                                              resources_utils.ClusterName(
@@ -5633,6 +5661,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     raise
 
             if post_teardown_cleanup:
+                if get_fenced_handle() is None:
+                    return
                 self.post_teardown_cleanup(handle, terminate, purge,
                                            remove_from_db)
             return
@@ -5668,6 +5698,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 vpc_provider = IBMVPCProvider(
                     config_provider['resource_group_id'], region,
                     cluster_name_on_cloud)
+                if get_fenced_handle() is None:
+                    return
                 vpc_provider.delete_vpc(vpc_id, region)
                 # successfully removed cluster as no exception was raised
                 returncode = 0
@@ -5688,6 +5720,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     # FIXME(zongheng): support retries. This call can fail for
                     # example due to GCP returning list requests per limit
                     # exceeded.
+                    if get_fenced_handle() is None:
+                        return
                     returncode, stdout, stderr = log_lib.run_with_log(
                         ['ray', 'down', '-y', f.name],
                         log_abs_path,
@@ -5727,6 +5761,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         # (i.e., prev_status is None), as the cleanup has already been done
         # if the cluster is removed from the status table.
         if post_teardown_cleanup:
+            if get_fenced_handle() is None:
+                return
             self.post_teardown_cleanup(handle, terminate, purge)
 
     def post_teardown_cleanup(self,
@@ -5971,7 +6007,12 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
     def _has_strict_autodown_intent(self, cluster_name: str) -> bool:
         intent = global_user_state.get_autodown_intent(cluster_name)
-        return (intent is not None and
+        if intent is None:
+            return False
+        record = global_user_state.get_cluster_from_name(
+            cluster_name, include_user_info=False, summary_response=True)
+        return (record is not None and
+                intent.cluster_hash == record['cluster_hash'] and
                 self._is_strict_autodown_strategy(intent.execution_strategy))
 
     @staticmethod
@@ -5994,12 +6035,11 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             request.hook_timeout = hook_timeout
         # None preserves stored hooks; an empty list clears them; otherwise the
         # supplied list replaces them.
-        if hooks is None:
-            pass
-        elif not hooks:
-            request.clear_hooks = True
-        else:
-            request.hooks.extend(autostop_lib.hooks_to_protobuf(hooks))
+        if hooks is not None:
+            if hooks:
+                request.hooks.extend(autostop_lib.hooks_to_protobuf(hooks))
+            else:
+                request.clear_hooks = True
         return request
 
     @staticmethod
@@ -6063,19 +6103,23 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 f'Cluster {cluster_name!r} incarnation changed after the '
                 'durable autodown capability probe; retry the request.')
         current_intent = global_user_state.get_autodown_intent(cluster_name)
-        if (current_intent is not None and
-                current_intent.state in _IRREVERSIBLE_DURABLE_AUTODOWN_STATES):
+        matching_intent = current_intent
+        if (matching_intent is not None and
+                matching_intent.cluster_hash != record['cluster_hash']):
+            matching_intent = None
+        if (matching_intent is not None and
+                matching_intent.state in _IRREVERSIBLE_DURABLE_AUTODOWN_STATES):
             raise _DurableAutodownAlreadyClaimedError(
                 f'Durable autodown teardown has already begun for '
                 f'{cluster_name!r} and cannot be cancelled or reconfigured.')
         strategy = current_handle.teardown_execution_strategy
         if (strategy is
                 sky_cloud.TeardownExecutionStrategy.LEGACY_HEAD_CREDENTIALS and
-                current_intent is not None and
+                matching_intent is not None and
                 self._is_strict_autodown_strategy(
-                    current_intent.execution_strategy)):
+                    matching_intent.execution_strategy)):
             strategy = sky_cloud.TeardownExecutionStrategy(
-                current_intent.execution_strategy)
+                matching_intent.execution_strategy)
         if not self._is_strict_autodown_strategy(strategy.value):
             raise RuntimeError(
                 f'Cluster {cluster_name!r} teardown strategy changed before '
@@ -6108,29 +6152,42 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
     def _finalize_durable_autodown_intent(
             intent: global_user_state.AutodownIntent,
             terminal_state: global_user_state.AutodownIntentState) -> None:
+
+        def is_exact_terminal_state(
+                current: Optional[global_user_state.AutodownIntent]) -> bool:
+            return (current is not None and
+                    current.cluster_hash == intent.cluster_hash and
+                    current.generation == intent.generation and
+                    current.state is terminal_state and
+                    current.attempt_count == intent.attempt_count)
+
         record = global_user_state.get_cluster_from_name(
             intent.cluster_name, include_user_info=False, summary_response=True)
         if record is None or record['cluster_hash'] != intent.cluster_hash:
             raise RuntimeError(
                 f'Cluster {intent.cluster_name!r} incarnation changed while '
                 'applying durable autodown intent.')
-        transitioned = global_user_state.compare_and_swap_autodown_intent(
-            cluster_name=intent.cluster_name,
-            cluster_hash=intent.cluster_hash,
-            generation=intent.generation,
-            expected_states={global_user_state.AutodownIntentState.CONFIGURING},
-            expected_attempt_count=intent.attempt_count,
-            new_state=terminal_state,
-        )
+        try:
+            transitioned = global_user_state.compare_and_swap_autodown_intent(
+                cluster_name=intent.cluster_name,
+                cluster_hash=intent.cluster_hash,
+                generation=intent.generation,
+                expected_states={
+                    global_user_state.AutodownIntentState.CONFIGURING
+                },
+                expected_attempt_count=intent.attempt_count,
+                new_state=terminal_state,
+            )
+        except Exception:  # pylint: disable=broad-except
+            current_intent = global_user_state.get_autodown_intent(
+                intent.cluster_name)
+            if not is_exact_terminal_state(current_intent):
+                raise
+            transitioned = True
         if not transitioned:
             current_intent = global_user_state.get_autodown_intent(
                 intent.cluster_name)
-            exact_terminal_state = (
-                current_intent is not None and
-                current_intent.cluster_hash == intent.cluster_hash and
-                current_intent.generation == intent.generation and
-                current_intent.state is terminal_state)
-            if not exact_terminal_state:
+            if not is_exact_terminal_state(current_intent):
                 raise RuntimeError(
                     f'Durable autodown generation {intent.generation} for '
                     f'{intent.cluster_name!r} was superseded before '
@@ -6198,58 +6255,72 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             self, handle: CloudVmRayResourceHandle,
             intent: global_user_state.AutodownIntent,
             predecessor: Optional[global_user_state.AutodownIntent], *,
-            cluster_lock_already_held: bool) -> bool:
+            cluster_lock_already_held: bool,
+            restore_predecessor_on_status_failure: bool) -> bool:
+        predecessor_can_be_claimed = (
+            predecessor is not None and
+            predecessor.cluster_hash == intent.cluster_hash and
+            predecessor.state in {
+                global_user_state.AutodownIntentState.CONFIGURING,
+                global_user_state.AutodownIntentState.ARMED,
+            } and predecessor.idle_minutes >= 0 and predecessor.to_down and
+            self._is_strict_autodown_strategy(predecessor.execution_strategy))
+
+        def restore_predecessor(
+                new_state: global_user_state.AutodownIntentState) -> bool:
+            assert predecessor is not None
+            record = global_user_state.get_cluster_from_name(
+                intent.cluster_name,
+                include_user_info=False,
+                summary_response=True)
+            if (record is None or
+                    record['cluster_hash'] != intent.cluster_hash):
+                return False
+            restored = global_user_state.restore_predecessor_autodown_intent(
+                intent, predecessor, new_state)
+            if restored:
+                return True
+            current = global_user_state.get_autodown_intent(intent.cluster_name)
+            return (current is not None and
+                    current.cluster_hash == predecessor.cluster_hash and
+                    current.generation == predecessor.generation and
+                    current.state is new_state)
+
+        def run_under_lock(action: Callable[[], bool]) -> bool:
+            if cluster_lock_already_held:
+                return action()
+            lock = locks.get_lock(
+                backend_utils.cluster_status_lock_id(intent.cluster_name))
+            with lock:
+                return action()
+
         try:
             response = self.get_durable_autodown_status(handle)
         except Exception:  # pylint: disable=broad-except
+            if (predecessor_can_be_claimed and
+                    restore_predecessor_on_status_failure):
+                assert predecessor is not None
+                run_under_lock(lambda: restore_predecessor(predecessor.state))
             return False
         observed_intent = intent
         new_state = self._get_irreversible_teardown_state(
             observed_intent, response)
-        restore_predecessor = False
-        predecessor_can_be_claimed = (predecessor is not None and
-                                      predecessor.idle_minutes >= 0 and
-                                      predecessor.to_down and
-                                      self._is_strict_autodown_strategy(
-                                          predecessor.execution_strategy))
+        should_restore_predecessor = False
         if new_state is None and predecessor_can_be_claimed:
             assert predecessor is not None
             observed_intent = predecessor
             new_state = self._get_irreversible_teardown_state(
                 observed_intent, response)
-            restore_predecessor = new_state is not None
+            should_restore_predecessor = new_state is not None
         if new_state is None:
             return False
 
         def mark_irreversible() -> bool:
-            if restore_predecessor:
-                assert predecessor is not None
-                record = global_user_state.get_cluster_from_name(
-                    intent.cluster_name,
-                    include_user_info=False,
-                    summary_response=True)
-                if (record is None or
-                        record['cluster_hash'] != intent.cluster_hash):
-                    return False
-                restored = (
-                    global_user_state.restore_predecessor_autodown_intent(
-                        intent, predecessor, new_state))
-                if restored:
-                    return True
-                current = global_user_state.get_autodown_intent(
-                    intent.cluster_name)
-                return (current is not None and
-                        current.cluster_hash == predecessor.cluster_hash and
-                        current.generation == predecessor.generation and
-                        current.state is new_state)
+            if should_restore_predecessor:
+                return restore_predecessor(new_state)
             return self._mark_irreversible_teardown(intent, new_state)
 
-        if cluster_lock_already_held:
-            return mark_irreversible()
-        lock = locks.get_lock(
-            backend_utils.cluster_status_lock_id(intent.cluster_name))
-        with lock:
-            return mark_irreversible()
+        return run_under_lock(mark_irreversible)
 
     def _apply_durable_autodown_intent(self, handle: CloudVmRayResourceHandle,
                                        idle_minutes_to_autostop: int,
@@ -6299,7 +6370,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     current_handle,
                     intent,
                     predecessor,
-                    cluster_lock_already_held=cluster_lock_already_held):
+                    cluster_lock_already_held=cluster_lock_already_held,
+                    restore_predecessor_on_status_failure=isinstance(
+                        e, exceptions.SkyletInternalError)):
                 raise _DurableAutodownAlreadyClaimedError(
                     f'Durable autodown teardown has already begun for '
                     f'{intent.cluster_name!r} and cannot be cancelled or '

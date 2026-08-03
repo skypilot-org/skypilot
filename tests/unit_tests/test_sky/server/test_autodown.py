@@ -63,6 +63,7 @@ class _Backend:
         self.status_results: Dict[str, StatusResult] = {}
         self.status_calls: List[str] = []
         self.teardown_calls: List[str] = []
+        self.teardown_expected_hashes: List[Optional[str]] = []
         self.teardown_effect: Optional[TeardownEffect] = None
 
     def get_durable_autodown_status(
@@ -73,9 +74,13 @@ class _Backend:
             raise result
         return result
 
-    def teardown_no_lock(self, handle: _Handle, terminate: bool) -> None:
+    def teardown_no_lock(self,
+                         handle: _Handle,
+                         terminate: bool,
+                         expected_cluster_hash: Optional[str] = None) -> None:
         assert terminate is True
         self.teardown_calls.append(handle.cluster_name)
+        self.teardown_expected_hashes.append(expected_cluster_hash)
         if self.teardown_effect is not None:
             self.teardown_effect(handle)
 
@@ -654,6 +659,59 @@ def test_stale_generation_snapshot_cannot_teardown_replacement(
     assert global_user_state.get_autodown_intent(
         stale.cluster_name) == (replacement)
     assert backend.teardown_calls == []
+
+
+def test_cluster_hash_is_revalidated_after_teardown_claim(
+        reconciler, monkeypatch):
+    engine, backend, _ = reconciler
+    intent = _create_intent(engine,
+                            state=global_user_state.AutodownIntentState.READY)
+    real_cas = global_user_state.compare_and_swap_autodown_intent
+
+    def claim_then_replace_cluster(**kwargs):
+        transitioned = real_cas(**kwargs)
+        if (transitioned and kwargs['new_state'] is
+                global_user_state.AutodownIntentState.EXECUTING):
+            _delete_cluster(engine, intent.cluster_name)
+            _insert_cluster(engine, intent.cluster_name, 'replacement-hash')
+        return transitioned
+
+    monkeypatch.setattr(global_user_state, 'compare_and_swap_autodown_intent',
+                        claim_then_replace_cluster)
+
+    autodown.reconcile_autodown_intents(now=100)
+
+    current = global_user_state.get_autodown_intent(intent.cluster_name)
+    assert current is not None
+    assert current.state is global_user_state.AutodownIntentState.CANCELLED
+    replacement = global_user_state.get_cluster_from_name(
+        intent.cluster_name, include_user_info=False, summary_response=True)
+    assert replacement is not None
+    assert replacement['cluster_hash'] == 'replacement-hash'
+    assert backend.teardown_calls == []
+
+
+def test_replacement_during_teardown_refresh_cancels_stale_intent(reconciler):
+    engine, backend, _ = reconciler
+    intent = _create_intent(engine,
+                            state=global_user_state.AutodownIntentState.READY)
+
+    def replace_during_internal_refresh(handle):
+        _delete_cluster(engine, handle.cluster_name)
+        _insert_cluster(engine, handle.cluster_name, 'replacement-hash')
+
+    backend.teardown_effect = replace_during_internal_refresh
+
+    autodown.reconcile_autodown_intents(now=100)
+
+    current = global_user_state.get_autodown_intent(intent.cluster_name)
+    assert current is not None
+    assert current.state is global_user_state.AutodownIntentState.CANCELLED
+    replacement = global_user_state.get_cluster_from_name(
+        intent.cluster_name, include_user_info=False, summary_response=True)
+    assert replacement is not None
+    assert replacement['cluster_hash'] == 'replacement-hash'
+    assert backend.teardown_expected_hashes == [intent.cluster_hash]
 
 
 def test_duplicate_sweeps_call_teardown_at_most_once(reconciler):
