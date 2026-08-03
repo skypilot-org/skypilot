@@ -2688,10 +2688,16 @@ class Resources:
             # schema here: on the server (plugins loaded) this is the strict,
             # plugin-aware schema, so keys and value shapes a lenient client
             # passed through are enforced at deserialization.
+            # skip_none=False: the default strips top-level None-valued
+            # keys before validating, which would let an unknown section
+            # through as long as its value is null (it survives into the
+            # overrides regardless). Nested nulls are untouched either
+            # way, so `--config gcp.vpc_name=null` still validates.
             common_utils.validate_schema(
                 cluster_config_overrides,
                 schemas.get_task_schema()['properties']['config'],
-                'Invalid resources.config override: ')
+                'Invalid resources.config override: ',
+                skip_none=False)
         resources_fields['_cluster_config_overrides'] = (
             cluster_config_overrides)
 

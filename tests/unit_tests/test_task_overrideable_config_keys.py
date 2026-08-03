@@ -166,6 +166,33 @@ def test_from_yaml_config_revalidates_overrides_when_strict(
                 }
             }
         })
+    # ... including when the value is null. validate_schema's default
+    # strips top-level None-valued keys before validating, which would
+    # wave an unknown section through while it still survives into the
+    # overrides.
+    with pytest.raises(ValueError, match='Invalid resources.config override'):
+        Resources.from_yaml_config(
+            {'_cluster_config_overrides': {
+                'unknown_section': None
+            }})
+
+
+def test_from_yaml_config_keeps_nested_null_overrides(monkeypatch):
+    """Strict validation must not break `--config <key>=null`.
+
+    Only top-level nulls are the smuggling vector; a null *leaf* under a
+    known section is how an override is cleared, and has to keep passing.
+    """
+    monkeypatch.setattr(schemas, '_allow_additional_properties', lambda: False)
+    resources = next(
+        iter(
+            Resources.from_yaml_config(
+                {'_cluster_config_overrides': {
+                    'gcp': {
+                        'vpc_name': None
+                    }
+                }})))
+    assert resources.cluster_config_overrides['gcp']['vpc_name'] is None
 
 
 def test_from_yaml_config_passes_unknown_overrides_on_client():
