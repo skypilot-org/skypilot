@@ -2,6 +2,7 @@
 
 from importlib import metadata as import_lib_metadata
 import os
+import re
 import time
 from typing import Any, Dict, Optional
 
@@ -22,6 +23,7 @@ requests = common.LazyImport('requests')
 _REST_BASE = 'https://rest.runpod.io/v1'
 _MAX_RETRIES = 3
 _TIMEOUT = 10
+_POD_ID_PATTERN = re.compile(r'^[a-z0-9]{14}$')
 
 
 def get_sdk_version_error() -> Optional[str]:
@@ -67,6 +69,9 @@ def terminate_current_pod() -> None:
     if not pod_id:
         raise RuntimeError(
             'RunPod self-termination requires RUNPOD_POD_ID to be set.')
+    if _POD_ID_PATTERN.fullmatch(pod_id) is None:
+        raise RuntimeError(
+            'RunPod self-termination requires a valid RUNPOD_POD_ID.')
     api_key = os.environ.get('RUNPOD_API_KEY')
     if not api_key:
         raise RuntimeError(
@@ -80,18 +85,22 @@ def terminate_current_pod() -> None:
                                         url,
                                         headers=headers,
                                         timeout=_TIMEOUT)
-        except requests.RequestException:
+        except (requests.ConnectionError, requests.Timeout):
             if attempt == _MAX_RETRIES - 1:
                 raise RuntimeError(
                     'RunPod self-termination failed due to a network error.'
                 ) from None
             time.sleep(1)
             continue
+        except requests.RequestException:
+            raise RuntimeError(
+                'RunPod self-termination failed due to a request error.'
+            ) from None
 
         status_code = response.status_code
         if 200 <= status_code < 300 or status_code in (404, 410):
             return None
-        if status_code == 429 or status_code >= 500:
+        if status_code == 429 or 500 <= status_code < 600:
             if attempt == _MAX_RETRIES - 1:
                 raise RuntimeError('RunPod self-termination failed with status '
                                    f'{status_code}.')
