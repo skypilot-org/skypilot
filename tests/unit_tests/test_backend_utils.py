@@ -12,6 +12,7 @@ from sky import exceptions
 from sky import skypilot_config
 from sky import task as task_lib
 from sky.backends import backend_utils
+from sky.clouds.cloud import TeardownExecutionStrategy
 from sky.data import storage as storage_lib
 from sky.exceptions import ClusterNotUpError
 from sky.resources import Resources
@@ -541,6 +542,49 @@ def test_write_cluster_config_scopes_storage_credentials(monkeypatch, tmp_path):
     assert len(allowed_clouds) == 2
     assert ((yaml_path.with_name(yaml_path.name + '.tmp').stat().st_mode &
              0o777) == 0o600)
+
+
+@mock.patch.object(skypilot_config, '_global_config_context',
+                   skypilot_config.ConfigContext())
+def test_write_cluster_config_captures_teardown_strategy_before_normalization(
+        monkeypatch, tmp_path):
+    cloud = clouds.RunPod()
+    resource = Resources(cloud=cloud, instance_type='fake-type')
+    monkeypatch.setattr(
+        skypilot_config, 'get_effective_workspace_region_config',
+        lambda *args, **kwargs: schemas.RemoteIdentityOptions.NO_UPLOAD.value)
+    monkeypatch.setattr(
+        resource, 'make_deploy_variables', lambda *args, **kwargs: {
+            'instance_type': 'fake-type',
+            'custom_resources': '{}',
+            'region': 'fake-region',
+            'zones': None,
+            'image_id': 'fake-image',
+        })
+    monkeypatch.setattr(backend_utils, '_get_credential_file_mounts',
+                        lambda *args, **kwargs: {})
+    monkeypatch.setattr(backend_utils.auth_utils, 'get_or_generate_keys',
+                        lambda: ('/tmp/fake-key', '/tmp/fake-key.pub'))
+    yaml_path = tmp_path / 'fake-path'
+    monkeypatch.setattr(backend_utils, '_get_yaml_path_from_cluster_name',
+                        lambda _: str(yaml_path))
+    monkeypatch.setattr(backend_utils, '_deterministic_cluster_yaml_hash',
+                        lambda _: 'fake-hash')
+    monkeypatch.setattr(common_utils, 'fill_template',
+                        _write_minimal_cluster_yaml)
+
+    config = backend_utils.write_cluster_config(
+        to_provision=resource,
+        num_nodes=1,
+        cluster_config_template='runpod-ray.yml.j2',
+        cluster_name='strategy-capture',
+        local_wheel_path=pathlib.Path('/tmp/fake'),
+        wheel_hash='fake-hash',
+        region=clouds.Region(name='fake-region'),
+        dryrun=True)
+
+    assert config['teardown_execution_strategy'] is (
+        TeardownExecutionStrategy.HEAD_WITH_SERVER_FALLBACK)
 
 
 @mock.patch.object(skypilot_config, '_global_config_context',

@@ -787,6 +787,61 @@ def cancel_autodown_intent(cluster_name: str, cluster_hash: str,
 
 
 @metrics_lib.time_me
+def restore_predecessor_autodown_intent(replacement: AutodownIntent,
+                                        predecessor: AutodownIntent,
+                                        new_state: AutodownIntentState) -> bool:
+    """Restore an irreversibly claimed predecessor over its replacement.
+
+    A skylet may claim generation N while the server is applying generation
+    N+1. If the skylet rejects N+1, its status and the reconciler must continue
+    using exact generation N. The complete N+1 CONFIGURING fence below makes
+    this exceptional restoration safe against delayed or concurrent writers.
+    """
+    new_state = AutodownIntentState(new_state)
+    if new_state not in {
+            AutodownIntentState.PREPARING,
+            AutodownIntentState.READY,
+    }:
+        raise ValueError('A claimed predecessor must be actionable.')
+    if (replacement.cluster_name != predecessor.cluster_name or
+            replacement.cluster_hash != predecessor.cluster_hash or
+            replacement.generation != predecessor.generation + 1 or
+            replacement.state is not AutodownIntentState.CONFIGURING):
+        return False
+
+    fence = _autodown_intent_fence(
+        replacement.cluster_name,
+        replacement.cluster_hash,
+        replacement.generation,
+        {AutodownIntentState.CONFIGURING},
+    )
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
+        result = session.execute(
+            sqlalchemy.update(autodown_intent_table).where(
+                fence,
+                autodown_intent_table.c.attempt_count ==
+                replacement.attempt_count,
+            ).values(
+                cluster_hash=predecessor.cluster_hash,
+                generation=predecessor.generation,
+                state=new_state.value,
+                idle_minutes=predecessor.idle_minutes,
+                to_down=int(predecessor.to_down),
+                execution_strategy=predecessor.execution_strategy,
+                user_hash=predecessor.user_hash,
+                workspace=predecessor.workspace,
+                attempt_count=predecessor.attempt_count,
+                next_retry_at=None,
+                last_error=None,
+                created_at=predecessor.created_at,
+                updated_at=int(time.time()),
+            ))
+        session.commit()
+    return result.rowcount == 1
+
+
+@metrics_lib.time_me
 def record_autodown_intent_retry(cluster_name: str, cluster_hash: str,
                                  generation: int,
                                  expected_states: Set[AutodownIntentState],
@@ -2097,6 +2152,24 @@ def set_cluster_autostop_value(cluster_name: str, idle_minutes: int,
     assert count <= 1, count
     if count == 0:
         raise ValueError(f'Cluster {cluster_name} not found.')
+
+
+@metrics_lib.time_me
+def set_cluster_autostop_value_if_hash_matches(cluster_name: str,
+                                               cluster_hash: str,
+                                               idle_minutes: int,
+                                               to_down: bool) -> bool:
+    """Update autostop metadata only for the expected cluster incarnation."""
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
+        count = session.query(cluster_table).filter_by(
+            name=cluster_name, cluster_hash=cluster_hash).update({
+                cluster_table.c.autostop: idle_minutes,
+                cluster_table.c.to_down: int(to_down)
+            })
+        session.commit()
+    assert count <= 1, count
+    return count == 1
 
 
 @metrics_lib.time_me

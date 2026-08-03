@@ -931,6 +931,8 @@ def write_cluster_config(
                 remote_identity = list(profile.values())[0]
                 break
     credential_remote_identity = remote_identity
+    config_dict['teardown_execution_strategy'] = (
+        cloud.get_teardown_execution_strategy(credential_remote_identity))
     if remote_identity != schemas.RemoteIdentityOptions.LOCAL_CREDENTIALS.value:
         # Non-local identities must still be validated against the selected
         # compute cloud before its local credentials are excluded from mounts.
@@ -3153,12 +3155,16 @@ def _update_cluster_status(
                     # leakages from the assumption that the cluster will autostop.
                     success = True
                     reset_local_autostop = True
+                    strict_durable_reset = (
+                        backend._has_strict_autodown_intent(  # pylint: disable=protected-access
+                            handle.cluster_name))
                     try:
-                        backend.set_autostop(
+                        backend._set_autostop(  # pylint: disable=protected-access
                             handle,
                             -1,
                             autostop_lib.DEFAULT_AUTOSTOP_WAIT_FOR,
-                            stream_logs=False)
+                            stream_logs=False,
+                            cluster_lock_already_held=True)
                     except (exceptions.CommandError,
                             grpc.FutureTimeoutError) as e:
                         success = False
@@ -3172,6 +3178,12 @@ def _update_cluster_status(
                         success = False
                         logger.debug(f'Failed to reset autostop. Due to '
                                      f'{common_utils.format_exception(e)}')
+                    if strict_durable_reset:
+                        # The strict path owns its hash-fenced local update on
+                        # success and intentionally leaves CONFIGURING intact
+                        # on RPC failure. Never apply the legacy unfenced
+                        # best-effort reset in either case.
+                        reset_local_autostop = False
                     if reset_local_autostop:
                         global_user_state.set_cluster_autostop_value(
                             handle.cluster_name, -1, to_down=False)

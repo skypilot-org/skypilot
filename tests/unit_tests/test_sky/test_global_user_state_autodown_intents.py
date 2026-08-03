@@ -274,6 +274,45 @@ def test_delayed_replacement_cannot_overwrite_newer_or_cancelled_intent(
     assert global_user_state.get_autodown_intent('cluster') == cancelled
 
 
+def test_restore_claimed_predecessor_replaces_only_its_configuring_successor(
+        tmp_path, monkeypatch):
+    _fresh_db(tmp_path, monkeypatch)
+    configuring = _create_intent(cluster_hash='cluster-hash')
+    assert configuring is not None
+    assert _transition(
+        configuring,
+        {global_user_state.AutodownIntentState.CONFIGURING},
+        global_user_state.AutodownIntentState.ARMED,
+    )
+    predecessor = global_user_state.get_autodown_intent('cluster')
+    assert predecessor is not None
+    replacement = _replace_intent(predecessor,
+                                  cluster_hash='cluster-hash',
+                                  idle_minutes=-1,
+                                  to_down=False)
+    assert replacement is not None
+
+    assert global_user_state.restore_predecessor_autodown_intent(
+        replacement,
+        predecessor,
+        global_user_state.AutodownIntentState.PREPARING,
+    )
+
+    restored = global_user_state.get_autodown_intent('cluster')
+    assert restored is not None
+    assert restored.generation == predecessor.generation
+    assert restored.state is global_user_state.AutodownIntentState.PREPARING
+    assert restored.idle_minutes == predecessor.idle_minutes
+    assert restored.to_down is predecessor.to_down
+    assert restored.execution_strategy == predecessor.execution_strategy
+    assert not global_user_state.restore_predecessor_autodown_intent(
+        replacement,
+        predecessor,
+        global_user_state.AutodownIntentState.PREPARING,
+    )
+    assert global_user_state.get_autodown_intent('cluster') == restored
+
+
 def test_compare_and_swap_rejects_old_cluster_hash(tmp_path, monkeypatch):
     _fresh_db(tmp_path, monkeypatch)
     old_intent = _create_intent(cluster_hash='old-hash')
@@ -471,6 +510,36 @@ def test_cancellation_tombstone_survives_cluster_row_removal(
     assert tombstone.state is global_user_state.AutodownIntentState.CANCELLED
     assert _row_count(engine, global_user_state.cluster_table) == 0
     assert _row_count(engine, global_user_state.autodown_intent_table) == 1
+
+
+def test_cluster_autostop_update_requires_matching_hash(tmp_path, monkeypatch):
+    engine = _fresh_db(tmp_path, monkeypatch)
+    with engine.begin() as connection:
+        connection.execute(global_user_state.cluster_table.insert().values(
+            name='cluster',
+            cluster_hash='current-hash',
+            handle=b'',
+            status='INIT',
+            metadata='{}',
+            autostop=-1,
+            to_down=0,
+        ))
+
+    assert not global_user_state.set_cluster_autostop_value_if_hash_matches(
+        'cluster', 'stale-hash', 15, True)
+    with engine.connect() as connection:
+        row = connection.execute(
+            sqlalchemy.select(global_user_state.cluster_table).where(
+                global_user_state.cluster_table.c.name == 'cluster')).one()
+    assert (row.autostop, row.to_down) == (-1, 0)
+
+    assert global_user_state.set_cluster_autostop_value_if_hash_matches(
+        'cluster', 'current-hash', 15, True)
+    with engine.connect() as connection:
+        row = connection.execute(
+            sqlalchemy.select(global_user_state.cluster_table).where(
+                global_user_state.cluster_table.c.name == 'cluster')).one()
+    assert (row.autostop, row.to_down) == (15, 1)
 
 
 def test_retry_metadata_is_fenced_incremented_and_bounded(
