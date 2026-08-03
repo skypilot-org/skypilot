@@ -100,6 +100,7 @@ class RequestName(str, enum.Enum):
     REQUEST_DAEMON_POOL_STATUS_REFRESH = 'pool-status-refresh'
     REQUEST_DAEMON_SERVER_HEARTBEAT = 'server-heartbeat'
     REQUEST_DAEMON_EXPIRED_TOKEN_CLEANUP = 'expired-token-cleanup'
+    REQUEST_DAEMON_AUTODOWN = 'autodown-reconciler'
 
     def __repr__(self):
         return self.value

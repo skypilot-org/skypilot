@@ -6,6 +6,7 @@ import jwt as pyjwt
 import pytest
 
 from sky.server import config
+from sky.server import daemons
 
 
 @mock.patch('sky.utils.common_utils.get_mem_size_gb', return_value=8)
@@ -73,7 +74,7 @@ def test_compute_server_config_low_resources(cpu_count, mem_size_gb):
     assert c.num_server_workers == 1
     assert c.long_worker_config.garanteed_parallelism == 1
     assert c.long_worker_config.burstable_parallelism == 0
-    assert c.short_worker_config.garanteed_parallelism == 5
+    assert c.short_worker_config.garanteed_parallelism == 6
     assert c.short_worker_config.burstable_parallelism == 0
     assert c.queue_backend == config.QueueBackend.MULTIPROCESSING
 
@@ -125,7 +126,7 @@ def test_parallel_size_short():
     # Test with insufficient memory
     blocking_size = 1
     mem_size_gb = 2
-    expected = 5
+    expected = 6
     assert config._max_short_worker_parallism(mem_size_gb,
                                               blocking_size) == expected
 
@@ -139,9 +140,16 @@ def test_parallel_size_short():
     # Test with limited memory
     blocking_size = 1
     mem_size_gb = 3
-    expected = 5
+    expected = 6
     assert config._max_short_worker_parallism(mem_size_gb,
                                               blocking_size) == expected
+
+
+def test_short_worker_minimum_reserves_every_internal_daemon():
+    active_daemon_count = sum(
+        not daemon.should_skip() for daemon in daemons.INTERNAL_REQUEST_DAEMONS)
+
+    assert config._get_min_short_workers() == active_daemon_count + 1
 
 
 class TestExternalProxyConfig:
