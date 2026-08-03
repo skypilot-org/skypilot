@@ -138,9 +138,12 @@ class HarnessConfig:
     inter_trial_seconds: float = 5.0
     streams: Optional[StreamSpec] = None
     # Lag above this is already present with no load, so the run tells us
-    # nothing about the change under test. 0.05 is a bucket boundary of the
+    # nothing about the change under test. Same boundary as
+    # lag_threshold_seconds: an idle server's background daemons produce
+    # 50-100ms ticks (observed in CI), so gating tighter than the load
+    # assertions rejects healthy servers. Must be a bucket boundary of the
     # server's lag histogram, which is what makes the check exact.
-    baseline_lag_threshold_seconds: float = 0.05
+    baseline_lag_threshold_seconds: float = 0.25
     # Also the threshold the per-trial lag observation count is taken above.
     lag_threshold_seconds: float = 0.25
     # A trial whose p99 send lateness exceeds this was starved on the client
