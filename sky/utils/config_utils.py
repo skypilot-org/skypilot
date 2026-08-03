@@ -227,7 +227,10 @@ def _validate_mergeable_types(key: Any, base_value: Any,
         # absent, so this is how a config clears an inherited subtree.
         return
     if isinstance(override_value, dict):
-        # Merged key by key, so the base has to be a dict to recurse into.
+        # Always merged key by key, so the base has to be a dict to recurse
+        # into. The atomic exemption below deliberately does not apply here:
+        # _PATCH_MERGE_KEYS is only consulted for list overrides, so a dict
+        # override recurses even for an atomic field.
         mergeable = isinstance(base_value, dict)
     elif isinstance(override_value, list):
         # Atomic list fields replace the base wholesale; the rest are merged by

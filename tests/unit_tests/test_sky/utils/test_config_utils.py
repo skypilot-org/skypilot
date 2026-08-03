@@ -258,24 +258,34 @@ def test_merge_k8s_configs_image_pull_secrets_empty_base():
     assert base_config['imagePullSecrets'] == [{'name': 'regcred'}]
 
 
-@pytest.mark.parametrize('key,base_value,override_value', [
-    ('containers', {
-        'name': 'ray-node'
-    }, [{
-        'name': 'other'
-    }]),
-    ('tolerations', 'oops', [{
-        'key': 'a'
-    }]),
-    ('imagePullSecrets', [{
-        'name': 'regcred'
-    }], {
-        'name': 'other'
-    }),
-    ('imagePullSecrets', [{
-        'name': 'regcred'
-    }], 'oops'),
-])
+@pytest.mark.parametrize(
+    'key,base_value,override_value',
+    [
+        ('containers', {
+            'name': 'ray-node'
+        }, [{
+            'name': 'other'
+        }]),
+        ('tolerations', 'oops', [{
+            'key': 'a'
+        }]),
+        # An atomic field is exempt only for a list override: a dict override
+        # recurses into the base, so it still needs a dict there.
+        ('imagePullSecrets', [{
+            'name': 'regcred'
+        }], {
+            'name': 'other'
+        }),
+        ('imagePullSecrets', [{
+            'name': 'regcred'
+        }], 'oops'),
+    ],
+    ids=[
+        'keyed-list-over-dict-base',
+        'appended-list-over-scalar-base',
+        'dict-over-atomic-list-base',
+        'scalar-over-list-base',
+    ])
 def test_merge_k8s_configs_rejects_shape_mismatch(key, base_value,
                                                   override_value):
     """A dict/list/scalar mismatch is user input, not an internal error.
