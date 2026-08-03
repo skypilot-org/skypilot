@@ -23,6 +23,7 @@ import pytest
 import sky
 from sky import task as task_lib
 from sky.jobs import controller as controller_module
+from sky.jobs import job_group_networking
 from sky.jobs import state as managed_job_state
 from sky.jobs import utils as managed_job_utils
 from sky.jobs.controller import ControllerManager
@@ -1938,8 +1939,10 @@ class TestJobGroupOnRecoveryNetworking:
     @pytest.mark.asyncio
     async def test_own_node_failure_raises_cluster_setup_error(self):
         from sky import exceptions
-        _, error = await self._captured_on_recovery(
-            setup_failures=[('job-a', 'job-a-0', 'K8s DNS updater failed')])
+        _, error = await self._captured_on_recovery(setup_failures=[
+            job_group_networking.SetupFailure('job-a', 'job-a-0',
+                                              'K8s DNS updater failed')
+        ])
         assert isinstance(error, exceptions.ClusterSetUpError)
         assert 'job-a' in str(error)
         assert 'K8s DNS updater failed' in str(error)
@@ -1949,16 +1952,19 @@ class TestJobGroupOnRecoveryNetworking:
         # Simultaneous preemption: the peer is down awaiting its own
         # recovery; failing this task for it would turn every
         # multi-task preemption into a group failure.
-        _, error = await self._captured_on_recovery(
-            setup_failures=[('job-b', 'job-b-0', 'K8s DNS updater failed')])
+        _, error = await self._captured_on_recovery(setup_failures=[
+            job_group_networking.SetupFailure('job-b', 'job-b-0',
+                                              'K8s DNS updater failed')
+        ])
         assert error is None
 
     @pytest.mark.asyncio
     async def test_mixed_failures_raise(self):
         from sky import exceptions
-        _, error = await self._captured_on_recovery(
-            setup_failures=[('job-b', 'job-b-0',
-                             'peer down'), ('job-a', 'job-a-1', 'timeout')])
+        _, error = await self._captured_on_recovery(setup_failures=[
+            job_group_networking.SetupFailure('job-b', 'job-b-0', 'peer down'),
+            job_group_networking.SetupFailure('job-a', 'job-a-1', 'timeout')
+        ])
         assert isinstance(error, exceptions.ClusterSetUpError)
 
     @pytest.mark.asyncio
@@ -1969,7 +1975,8 @@ class TestJobGroupOnRecoveryNetworking:
         # a push failure on its own nodes must not be fatal either --
         # the prelude may well have succeeded.
         _, error = await self._captured_on_recovery(setup_failures=[
-            ('job-a', 'job-a-0', 'exec transport broken')
+            job_group_networking.SetupFailure('job-a', 'job-a-0',
+                                              'exec transport broken')
         ],
                                                     self_delivering=True)
         assert error is None

@@ -1840,9 +1840,9 @@ class JobController:
             # failure means the peer is unreachable -- typically because
             # it was preempted at the same time and its own recovery,
             # which re-runs this setup, owns fixing it.
-            own_failures = [f for f in failed_nodes if f[0] == task.name]
+            own_failures = [f for f in failed_nodes if f.task_name == task.name]
             failed_desc = '; '.join(
-                f'{label}: {reason}' for _, label, reason in failed_nodes)
+                f'{f.node_label}: {f.reason}' for f in failed_nodes)
             if own_failures and (job_group_networking.dns_addresses_for_task(
                     task, self._job_id) is not None):
                 # The recovered task delivers its own networking: its
@@ -2156,8 +2156,7 @@ class JobController:
                                  'job group.')
                     await self._cleanup_job_group_clusters(cluster_names)
                     failed_desc = '; '.join(
-                        f'{label}: {reason}'
-                        for _, label, reason in failed_nodes)
+                        f'{f.node_label}: {f.reason}' for f in failed_nodes)
                     raise exceptions.ClusterSetUpError(
                         f'Failed to set up in-group networking for Job Group '
                         f'{job_group_name!r} on node(s): [{failed_desc}]. '

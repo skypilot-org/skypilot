@@ -290,7 +290,10 @@ class TestInjectEtcHosts:
                 'group',
                 [(self._mk_task('job-a'), self._mk_handle([ok_runner])),
                  (self._mk_task('job-b'), self._mk_handle([bad_runner]))]))
-        assert failures == [('job-b', 'job-b-0', 'K8s DNS updater failed')]
+        assert failures == [
+            job_group_networking.SetupFailure('job-b', 'job-b-0',
+                                              'K8s DNS updater failed')
+        ]
 
     @pytest.mark.asyncio
     async def test_all_success_returns_empty(self, monkeypatch):
@@ -321,5 +324,5 @@ class TestInjectEtcHosts:
             job_group_networking.NetworkConfigurator._inject_etc_hosts(
                 'group', [(self._mk_task('job-a'), handle)]))
         assert len(failures) == 1
-        assert failures[0][0] == 'job-a'
-        assert 'command runners' in failures[0][2]
+        assert failures[0].task_name == 'job-a'
+        assert 'command runners' in failures[0].reason

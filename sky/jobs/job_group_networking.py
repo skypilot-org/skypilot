@@ -20,6 +20,7 @@ Design Goals:
 """
 import asyncio
 import base64
+import dataclasses
 import functools
 import os
 import tempfile
@@ -46,11 +47,31 @@ _SETUP_MAX_ATTEMPTS = 3
 _SETUP_ATTEMPT_TIMEOUT_SECONDS = 60.0
 _SETUP_RETRY_INITIAL_BACKOFF_SECONDS = 5.0
 
-# One entry per node whose networking setup failed after its retry
-# budget: (task_name, node_label, reason). task_name is carried
-# separately so callers can tell failures on a specific task's own nodes
-# from failures on its peers.
-SetupFailure = Tuple[str, str, str]
+
+@dataclasses.dataclass(frozen=True)
+class SetupFailure:
+    """A node whose networking setup failed after its retry budget.
+
+    task_name is carried separately from node_label so callers can tell
+    failures on a specific task's own nodes from failures on its peers.
+    """
+    task_name: str
+    node_label: str
+    reason: str
+
+
+@dataclasses.dataclass(frozen=True)
+class _NodeSetupSpec:
+    """One node's networking setup work.
+
+    make_attempt is a factory rather than a coroutine, so each retry can
+    build a fresh attempt (a coroutine cannot be awaited twice).
+    """
+    make_attempt: Callable[[], Awaitable[bool]]
+    task_name: str
+    node_label: str
+    setup_type: str
+
 
 # ============================================================================
 # Layer 2: JobAddressResolver - Address resolution abstraction
@@ -648,11 +669,7 @@ class NetworkConfigurator:
         k8s_dns_mappings = _generate_k8s_dns_mappings(job_group_name,
                                                       tasks_handles)
 
-        # Each entry: (make_attempt, task_name, node_label, setup_type).
-        # A factory rather than a coroutine, so each retry can build a
-        # fresh attempt.
-        setup_specs: List[Tuple[Callable[[], Awaitable[bool]], str, str,
-                                str]] = []
+        setup_specs: List[_NodeSetupSpec] = []
         failures: List[SetupFailure] = []
         for task, handle in tasks_handles:
             if handle is None:
@@ -670,25 +687,32 @@ class NetworkConfigurator:
             except Exception as e:  # pylint: disable=broad-except
                 logger.warning(
                     f'Failed to get command runners for {task_name}: {e}')
-                failures.append((task_name, task_name,
-                                 f'failed to get command runners: {e}'))
+                failures.append(
+                    SetupFailure(task_name=task_name,
+                                 node_label=task_name,
+                                 reason=f'failed to get command runners: {e}'))
                 continue
 
             for node_idx, runner in enumerate(runners):
                 node_label = f'{task_name}-{node_idx}'
                 if is_k8s:
                     setup_specs.append(
-                        (functools.partial(_start_k8s_dns_updater_on_node,
-                                           runner, k8s_dns_mappings,
-                                           job_group_name), task_name,
-                         node_label, 'K8s DNS updater'))
+                        _NodeSetupSpec(make_attempt=functools.partial(
+                            _start_k8s_dns_updater_on_node, runner,
+                            k8s_dns_mappings, job_group_name),
+                                       task_name=task_name,
+                                       node_label=node_label,
+                                       setup_type='K8s DNS updater'))
                 else:
                     # ssh_hosts_content is always truthy (has header comment)
                     assert ssh_hosts_content, 'unreachable'
                     setup_specs.append(
-                        (functools.partial(_inject_hosts_on_node, runner,
-                                           ssh_hosts_content, job_group_name),
-                         task_name, node_label, '/etc/hosts'))
+                        _NodeSetupSpec(make_attempt=functools.partial(
+                            _inject_hosts_on_node, runner, ssh_hosts_content,
+                            job_group_name),
+                                       task_name=task_name,
+                                       node_label=node_label,
+                                       setup_type='/etc/hosts'))
                 logger.debug(f'Queued networking setup for {node_label}')
 
         if not setup_specs and not failures:
@@ -698,11 +722,13 @@ class NetworkConfigurator:
         logger.info(f'Setting up networking on {len(setup_specs)} nodes...')
         # _setup_node_with_retries never raises, so a plain gather is safe.
         results = await asyncio.gather(*[
-            _setup_node_with_retries(make_attempt, node_label, setup_type)
-            for make_attempt, _, node_label, setup_type in setup_specs
+            _setup_node_with_retries(spec.make_attempt, spec.node_label,
+                                     spec.setup_type) for spec in setup_specs
         ])
         node_failures: List[SetupFailure] = [
-            (spec[1], spec[2], reason)
+            SetupFailure(task_name=spec.task_name,
+                         node_label=spec.node_label,
+                         reason=reason)
             for spec, reason in zip(setup_specs, results)
             if reason is not None
         ]
