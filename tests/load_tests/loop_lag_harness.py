@@ -40,8 +40,8 @@ import math
 import pathlib
 import statistics
 import time
-from typing import (Any, AsyncIterator, Dict, List, Mapping, Optional, Sequence,
-                    Tuple, Union)
+from typing import (Any, AsyncIterator, Dict, Iterator, List, Mapping, Optional,
+                    Sequence, Tuple, Union)
 
 import httpx
 from prometheus_client import parser as prom_parser
@@ -352,15 +352,23 @@ def classify_trial(completed_requests: int, send_lateness_p99: Optional[float],
     return Status.OK, None
 
 
+def _samples(metrics_text: str, metric: str) -> Iterator[Any]:
+    """Every sample of one metric family in a scrape.
+
+    The server exports each metric per worker process, so a family carries one
+    sample per pid (and per bucket, for a histogram); what differs between the
+    metrics below is only how those samples combine.
+    """
+    for family in prom_parser.text_string_to_metric_families(metrics_text):
+        if family.name == metric:
+            yield from family.samples
+
+
 def parse_lag_buckets(metrics_text: str) -> Dict[float, float]:
     """Cumulative lag-histogram counts keyed by bucket upper bound."""
     buckets: Dict[float, float] = {}
-    for family in prom_parser.text_string_to_metric_families(metrics_text):
-        if family.name != LAG_HISTOGRAM_METRIC:
-            continue
-        for sample in family.samples:
-            if not sample.name.endswith('_bucket'):
-                continue
+    for sample in _samples(metrics_text, LAG_HISTOGRAM_METRIC):
+        if sample.name.endswith('_bucket'):
             upper_bound = float(sample.labels['le'])
             buckets[upper_bound] = buckets.get(upper_bound, 0.0) + sample.value
     return buckets
@@ -368,24 +376,15 @@ def parse_lag_buckets(metrics_text: str) -> Dict[float, float]:
 
 def parse_lag_max(metrics_text: str) -> float:
     """Peak lag across processes, from the per-pid gauge."""
-    peak = 0.0
-    for family in prom_parser.text_string_to_metric_families(metrics_text):
-        if family.name != LAG_MAX_GAUGE_METRIC:
-            continue
-        for sample in family.samples:
-            peak = max(peak, sample.value)
-    return peak
+    return max((sample.value
+                for sample in _samples(metrics_text, LAG_MAX_GAUGE_METRIC)),
+               default=0.0)
 
 
 def parse_cpu_total(metrics_text: str) -> float:
     """Total CPU seconds burned across every process the server reports."""
-    total = 0.0
-    for family in prom_parser.text_string_to_metric_families(metrics_text):
-        if family.name != CPU_TOTAL_METRIC:
-            continue
-        for sample in family.samples:
-            total += sample.value
-    return total
+    return sum(
+        sample.value for sample in _samples(metrics_text, CPU_TOTAL_METRIC))
 
 
 def bucket_deltas(before: Mapping[float, float],
