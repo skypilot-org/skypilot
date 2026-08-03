@@ -1957,3 +1957,60 @@ class TestJobGroupOnRecoveryNetworking:
             setup_failures=[], inter_connection_enabled=False)
         assert error is None
         net.setup_job_group_networking.assert_not_awaited()
+
+
+class TestOnRecoveryIncludesInlineTasks:
+    """on_recovery must refresh ALL group tasks, including tasks that
+    inline their DNS delivery in task.run.
+
+    The inline/push split exists only in Phase 3 (initial delivery,
+    where the inline prelude will do the job itself). Post-recovery,
+    inline tasks go through the same push path as everyone else -- same
+    retries, same own-vs-peer classification -- and the PID-file-guarded
+    start makes the controller push race-safe against the recovered
+    task's own prelude. Guard against anyone 'harmonizing' on_recovery
+    with Phase 3's inline skip.
+    """
+
+    @pytest.mark.asyncio
+    async def test_setup_receives_every_group_task(self):
+        controller = MagicMock(spec=JobController)
+        controller._job_id = 1
+        controller._dag = MagicMock()
+        controller._dag.inter_connection_enabled = MagicMock(return_value=True)
+        task = MagicMock()
+        task.name = 'job-a'
+        inline_peer = MagicMock()
+        inline_peer.name = 'job-inline'
+
+        captured = {}
+
+        async def fake_monitor_task(**kwargs):
+            captured['on_recovery'] = kwargs['on_recovery']
+            return True
+
+        executor = MagicMock()
+        executor.monitor_task = fake_monitor_task
+
+        with patch('sky.jobs.controller.job_group_networking') as net, \
+             patch('sky.jobs.controller.managed_job_utils') as utils, \
+             patch('sky.jobs.controller.global_user_state') as gus:
+            net.setup_job_group_networking = AsyncMock(return_value=[])
+            # Even if the peer inlines its DNS delivery, on_recovery must
+            # not consult dns_addresses_for_task -- assert it is never
+            # used as a filter.
+            net.dns_addresses_for_task.return_value = ['inline-addr']
+            utils.generate_managed_job_cluster_name.side_effect = (
+                lambda name, job_id: f'{name}-{job_id}')
+            gus.get_handle_from_cluster_name.return_value = MagicMock()
+
+            await JobController._monitor_job_group_task(
+                controller, 0, task, 'cluster-a', executor, 'group',
+                [(task, MagicMock()), (inline_peer, MagicMock())])
+            await captured['on_recovery']()
+
+            net.setup_job_group_networking.assert_awaited_once()
+            _, passed_handles = (net.setup_job_group_networking.await_args.args)
+            passed_tasks = [t for t, _ in passed_handles]
+            assert passed_tasks == [task, inline_peer]
+            net.dns_addresses_for_task.assert_not_called()
