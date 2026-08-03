@@ -271,6 +271,42 @@ SKY_APISERVER_SHORT_EXECUTORS = prom.Gauge(
     'Total number of short-running request executors in the API server',
 )
 
+# Active threads in on-demand thread executors. Each process has its own
+# executor with a per-process max_workers limit, so per-pid series are kept:
+# exhaustion is a per-process condition and a fleet-wide sum can exceed the
+# limit while no single executor is full. Compare against
+# sky_apiserver_threads_max with the same labels.
+#
+# multiprocess_mode must be 'liveall': for the aggregating modes (livesum
+# etc.) the multiprocess collector strips any label named 'pid' — including
+# this user-defined one — and merges all processes into a single series,
+# which hides per-process exhaustion.
+SKY_APISERVER_THREADS_ACTIVE = prom.Gauge(
+    'sky_apiserver_threads_active',
+    'Number of active threads in on-demand thread executors, per process',
+    ['pid', 'name'],
+    multiprocess_mode='liveall',
+)
+
+# The max_workers limit of each on-demand thread executor, exported so
+# dashboards and alerts can compute utilization without hardcoding the limit.
+# 'liveall' for the same reason as sky_apiserver_threads_active: any other
+# mode would sum the limits across processes.
+SKY_APISERVER_THREADS_MAX = prom.Gauge(
+    'sky_apiserver_threads_max',
+    'Max workers of on-demand thread executors, per process',
+    ['pid', 'name'],
+    multiprocess_mode='liveall',
+)
+
+# A gauge scraped every N seconds can miss short bursts that hit the limit;
+# this counter is the reliable signal that exhaustion actually happened.
+SKY_APISERVER_THREADS_EXHAUSTED_TOTAL = prom.Counter(
+    'sky_apiserver_threads_exhausted_total',
+    'Number of tasks rejected because an on-demand thread executor was full',
+    ['name'],
+)
+
 # Time a request spends waiting in the task queue (from creation to dequeue).
 SKY_APISERVER_QUEUE_WAIT_SECONDS = prom.Histogram(
     'sky_apiserver_queue_wait_seconds',

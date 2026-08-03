@@ -49,10 +49,13 @@ from sky.schemas.api import responses
 from sky.skylet import constants
 from sky.skylet import job_lib
 from sky.skylet import log_lib
+from sky.skylet import runtime_utils
 from sky.usage import usage_lib
 from sky.utils import annotations
 from sky.utils import common as common_lib
 from sky.utils import common_utils
+from sky.utils import context as context_lib
+from sky.utils import context_utils
 from sky.utils import controller_utils
 from sky.utils import debug_dump_helpers
 from sky.utils import infra_utils
@@ -439,14 +442,99 @@ def ha_recovery_for_consolidation_mode() -> None:
         f.write(f'Total recovery time: {time.time() - start} seconds\n')
 
 
+class JobStatusLogger:
+    """Logs job-status poll results, collapsing consecutive identical ones.
+
+    The controller polls the status of its job every
+    JOB_STATUS_CHECK_GAP_SECONDS and logs the result, which for a long-running
+    job is the same on almost every poll. Logging every one of them dominates
+    the controller log and pushes the loglines that are actually useful for
+    debugging the job (recovery reasons, transient cloud API errors,
+    cluster-fetch failures, user-job exit codes) far out of the visible window
+    of the log viewer. So for each run of identical results we keep:
+
+    - the first occurrence, logged as-is;
+    - the last occurrence, logged when the run ends, carrying how long the
+      status was unchanged and over how many checks, so that the time the
+      status was last observed stays recoverable from the log. A run ends when
+      the status changes, when the caller is about to log something interesting
+      (``reset``), or when the polling loop exits (``flush``);
+    - nothing in between. A periodic reminder that the status is still the
+      same would add lines without adding information; the two kept lines
+      already bound the run at both ends.
+
+    One instance tracks one polling loop; it is not thread-safe.
+    """
+
+    def __init__(self) -> None:
+        # Message of the current run of identical results, None if no run is
+        # in progress.
+        self._message: Optional[str] = None
+        self._first_seen = 0.
+        self._last_seen = 0.
+        self._count = 0
+        # Whether the tail of the current run has already been logged, so that
+        # flushing twice (e.g. reset() and then the polling loop exiting) does
+        # not repeat it.
+        self._tail_logged = False
+
+    def log(self, message: str) -> None:
+        """Logs a poll result, collapsing it if it repeats the previous one."""
+        now = time.time()
+        if message != self._message:
+            self.flush()
+            self._message = message
+            self._first_seen = now
+            self._last_seen = now
+            self._count = 1
+            self._tail_logged = False
+            logger.info(message)
+            return
+        self._count += 1
+        self._last_seen = now
+        self._tail_logged = False
+
+    def flush(self) -> None:
+        """Logs the last observation of the current run, if not logged yet."""
+        if self._message is None or self._tail_logged:
+            return
+        if self._count == 1:
+            # The run's only observation was already logged in full.
+            return
+        duration = log_utils.readable_time_duration(self._first_seen,
+                                                    self._last_seen,
+                                                    absolute=True)
+        logger.info(f'{self._message} (unchanged for {duration}, '
+                    f'{self._count} checks)')
+        self._tail_logged = True
+
+    def reset(self) -> None:
+        """Flushes and forgets the current run.
+
+        The next poll result is then logged in full even if it is identical to
+        the last one. Callers use this after something noteworthy happened
+        (e.g. a recovery), so that the status observed afterwards is visible in
+        the log instead of being collapsed into the previous run.
+        """
+        self.flush()
+        self._message = None
+
+
 async def get_job_status(
-    backend: 'backends.CloudVmRayBackend', cluster_name: str,
-    job_id: Optional[int]
+    backend: 'backends.CloudVmRayBackend',
+    cluster_name: str,
+    job_id: Optional[int],
+    status_logger: Optional[JobStatusLogger] = None,
 ) -> Tuple[Optional['job_lib.JobStatus'], Optional[str]]:
     """Check the status of the job running on a managed job cluster.
 
     It can be None, INIT, RUNNING, SUCCEEDED, FAILED, FAILED_DRIVER,
     FAILED_SETUP or CANCELLED.
+
+    Args:
+        status_logger: If provided, the result is logged through it, so that
+            consecutive identical results are collapsed into one logline. If
+            None, every result is logged.
 
     Returns:
         job_status: The status of the job.
@@ -459,14 +547,14 @@ async def get_job_status(
     handle = await asyncio.to_thread(
         global_user_state.get_handle_from_cluster_name, cluster_name)
 
-    def _log_job_status(status: Optional['job_lib.JobStatus']) -> None:
-        if status is None:
-            logger.info('No job found.')
+    def _log(message: str) -> None:
+        if status_logger is not None:
+            status_logger.log(message)
         else:
-            logger.info(f'Job status: {status}')
-        logger.info('=' * 34)
+            logger.info(message)
 
-    logger.info('=== Checking the job status... ===')
+    def _log_job_status(status: Optional['job_lib.JobStatus']) -> None:
+        _log('No job found.' if status is None else f'Job status: {status}')
 
     if managed_job_runtime.is_registered():
         result = await asyncio.to_thread(managed_job_runtime.get_job_status,
@@ -479,7 +567,7 @@ async def get_job_status(
     if handle is None:
         # This can happen if the cluster was preempted and background status
         # refresh already noticed and cleaned it up.
-        logger.info(f'Cluster {cluster_name} not found.')
+        _log(f'Cluster {cluster_name} not found.')
         return None, None
     assert isinstance(handle, backends.CloudVmRayResourceHandle), handle
     job_ids = None if job_id is None else [job_id]
@@ -1036,8 +1124,8 @@ def _collect_job_debug_manifest(
     # shared controller_system/*.log set to only the controllers that
     # actually ran this job.
     with _catch_to_errors(errors, 'managed_jobs', f'{job_id}/controller_log'):
-        controller_logs_dir = pathlib.Path(
-            managed_job_constants.JOBS_CONTROLLER_LOGS_DIR).expanduser()
+        controller_logs_dir = runtime_utils.expanduser_path(
+            pathlib.Path(managed_job_constants.JOBS_CONTROLLER_LOGS_DIR))
         log_file = controller_logs_dir / f'{job_id}.log'
         if log_file.is_file():
             file_paths.append({
@@ -1182,8 +1270,8 @@ def _collect_controller_system_log_paths(file_paths: List[Dict[str, str]],
     if not relevant_uuids:
         return
     with _catch_to_errors(errors, 'managed_jobs', 'controller_system/logs'):
-        controller_logs_dir = pathlib.Path(
-            managed_job_constants.JOBS_CONTROLLER_LOGS_DIR).expanduser()
+        controller_logs_dir = runtime_utils.expanduser_path(
+            pathlib.Path(managed_job_constants.JOBS_CONTROLLER_LOGS_DIR))
         if not controller_logs_dir.exists():
             return
         for uuid_str in relevant_uuids:
@@ -1333,7 +1421,19 @@ def cancel_jobs_by_id(job_ids: Optional[List[int]],
         if job_status is None:
             logger.info(f'Job {job_id} not found. Skipped.')
             continue
-        elif job_status.is_terminal():
+
+        # Workspace isolation is a permission check and is independent of job
+        # status: a job outside the caller's active workspace must not be acted
+        # on (or have its state revealed) whether it is pending, running, or
+        # already terminal. Enforce it first, before any status-based handling
+        # (terminal skip / PENDING short-circuit / signal) below. Kept after the
+        # existence check above because a missing job has no workspace to check.
+        job_workspace = managed_job_state.get_workspace(job_id)
+        if current_workspace is not None and job_workspace != current_workspace:
+            wrong_workspace_job_ids.append(job_id)
+            continue
+
+        if job_status.is_terminal():
             logger.info(f'Job {job_id} is already in terminal state '
                         f'{job_status.value}. Skipped.')
             continue
@@ -1345,11 +1445,6 @@ def cancel_jobs_by_id(job_ids: Optional[List[int]],
                 continue
 
         update_managed_jobs_statuses(job_id)
-
-        job_workspace = managed_job_state.get_workspace(job_id)
-        if current_workspace is not None and job_workspace != current_workspace:
-            wrong_workspace_job_ids.append(job_id)
-            continue
 
         if managed_job_state.is_legacy_controller_process(job_id):
             # The job is running on a legacy single-job controller process.
@@ -1489,7 +1584,8 @@ def cancel_managed_jobs(
 
 def controller_log_file_for_job(job_id: int,
                                 create_if_not_exists: bool = False) -> str:
-    log_dir = os.path.expanduser(managed_job_constants.JOBS_CONTROLLER_LOGS_DIR)
+    log_dir = runtime_utils.expanduser(
+        managed_job_constants.JOBS_CONTROLLER_LOGS_DIR)
     if create_if_not_exists:
         os.makedirs(log_dir, exist_ok=True)
     return os.path.join(log_dir, f'{job_id}.log')
@@ -1704,8 +1800,14 @@ def stream_logs_by_id(
                 os.kill(os.getpid(), signal.SIGTERM)
                 return
 
-    watchdog = threading.Thread(target=_orphan_watchdog, daemon=True)
-    watchdog.start()
+    # The watchdog detects a dropped `kubectl exec` connection, which only
+    # happens when this runs as a subprocess on the controller. Inside a
+    # context we are in the API server, where a client disconnect arrives as
+    # ctx.cancel() instead, and this thread's own loop has no exit condition:
+    # it would outlive the request and accumulate one thread per tail call.
+    if context_lib.get() is None:
+        watchdog = threading.Thread(target=_orphan_watchdog, daemon=True)
+        watchdog.start()
 
     def should_keep_logging(status: managed_job_state.ManagedJobStatus) -> bool:
         # If we see CANCELLING, just exit - we could miss some job logs but the
@@ -1772,6 +1874,7 @@ def stream_logs_by_id(
         prev_msg = msg
         while (managed_job_status :=
                managed_job_state.get_status(job_id)) is None:
+            context_utils.raise_if_canceled()
             time.sleep(1)
 
         # Show hint about per-task filtering when there are multiple tasks
@@ -1981,6 +2084,7 @@ def stream_logs_by_id(
         task_id = latest_task_id
 
         while should_keep_logging(managed_job_status):
+            context_utils.raise_if_canceled()
             handle = None
             job_id_to_tail = None
             if task_id is not None:
@@ -2014,6 +2118,7 @@ def stream_logs_by_id(
                 # status every JOB_STATUS_CHECK_GAP_SECONDS.
                 waited = 0.0
                 while True:
+                    context_utils.raise_if_canceled()
                     # Keep the "Waiting for task to start" context and append
                     # the live cluster-launch status, so it's clear the job is
                     # waiting on its cluster to be provisioned.
@@ -2132,6 +2237,7 @@ def stream_logs_by_id(
                         while not is_managed_job_status_updated(
                                 managed_job_status :=
                                 managed_job_state.get_status(job_id)):
+                            context_utils.raise_if_canceled()
                             time.sleep(JOB_STATUS_CHECK_GAP_SECONDS)
                         assert managed_job_status is not None, (
                             job_id, managed_job_status)
@@ -2160,6 +2266,7 @@ def stream_logs_by_id(
                     status_display.start()
                     original_task_id = task_id
                     while True:
+                        context_utils.raise_if_canceled()
                         latest_task_id, managed_job_status = (
                             managed_job_state.get_latest_task_id_status(job_id))
                         if original_task_id != latest_task_id:
@@ -2198,6 +2305,7 @@ def stream_logs_by_id(
             # controller, and check the managed job queue again.
             # Wait a bit longer than the controller, so as to make sure the
             # managed job state is updated.
+            context_utils.raise_if_canceled()
             time.sleep(3 * JOB_STATUS_CHECK_GAP_SECONDS)
             managed_job_status = managed_job_state.get_status(job_id)
             assert managed_job_status is not None, (job_id, managed_job_status)
@@ -2210,6 +2318,7 @@ def stream_logs_by_id(
     assert managed_job_status is not None, job_id
     while (should_keep_logging(managed_job_status) and follow and
            wait_seconds < _FINAL_JOB_STATUS_WAIT_TIMEOUT_SECONDS):
+        context_utils.raise_if_canceled()
         time.sleep(1)
         wait_seconds += 1
         managed_job_status = managed_job_state.get_status(job_id)
@@ -2287,6 +2396,7 @@ def stream_logs(job_id: Optional[int],
 
         # Wait for the log file to be written
         while not os.path.exists(controller_log_path):
+            context_utils.raise_if_canceled()
             if not follow:
                 # Assume that the log file hasn't been written yet. Since we
                 # aren't following, just return.
@@ -2343,6 +2453,7 @@ def stream_logs(job_id: Optional[int],
                       encoding='utf-8') as f:
                 f.seek(end_pos)
                 while True:
+                    context_utils.raise_if_canceled()
                     # Print all new lines, if there are any.
                     line = f.readline()
                     while line is not None and line != '':

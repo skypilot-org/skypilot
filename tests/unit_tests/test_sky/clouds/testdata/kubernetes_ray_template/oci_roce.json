@@ -79,6 +79,14 @@
               "command": "<omitted>",
               "env": [
                 {
+                  "name": "SKYPILOT_RAY_NODE_IP",
+                  "valueFrom": {
+                    "fieldRef": {
+                      "fieldPath": "status.podIP"
+                    }
+                  }
+                },
+                {
                   "name": "SKYPILOT_POD_NODE_TYPE",
                   "valueFrom": {
                     "fieldRef": {

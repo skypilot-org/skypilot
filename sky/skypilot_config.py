@@ -583,8 +583,27 @@ def set_nested(keys: Tuple[str, ...], value: Any) -> Dict[str, Any]:
 
 
 def to_dict() -> config_utils.Config:
-    """Returns a deep-copied version of the current config."""
+    """Returns a deep-copied version of the current config.
+
+    `active_workspace` here is only what the config itself sets; use
+    `resolved_config()` for the workspace the request actually runs in.
+    """
     return copy.deepcopy(_get_loaded_config())
+
+
+def resolved_config() -> config_utils.Config:
+    """Returns the config with the effective `active_workspace` filled in.
+
+    The active workspace can be resolved into a thread-local context instead
+    of the config (the server-side resolver in
+    `executor.override_request_env_and_config` sets it there), so
+    `active_workspace` is taken from `get_active_workspace()`. Callers that
+    need the workspace a request actually runs in — e.g. admin policies —
+    should use this rather than `to_dict()`.
+    """
+    config = to_dict()
+    config['active_workspace'] = get_active_workspace()
+    return config
 
 
 def _get_config_file_path(envvar: str) -> Optional[str]:
@@ -1048,6 +1067,39 @@ def register_config_update_hook(fn: Callable[[], None]) -> None:
     """
     if fn not in _CONFIG_UPDATE_HOOKS:
         _CONFIG_UPDATE_HOOKS.append(fn)
+
+
+def register_task_overrideable_config_key(key: Tuple[str, ...]) -> None:
+    """Register a config key that may be overridden via a task YAML.
+
+    Extends ``constants.OVERRIDEABLE_CONFIG_KEYS_IN_TASK`` so the key is
+    accepted in a task's ``config`` field, survives ``Resources.copy()``,
+    and may be passed to ``get_nested`` via ``override_configs``. This
+    lets plugins make their config keys tunable per task instead of only
+    server-wide.
+
+    The key must already exist in the global config schema (e.g. added
+    via ``schemas.register_jobs_property``) before this is called, since
+    the task-level config schema is derived from the global one.
+
+    Called at server startup during plugin loading (single-threaded), so
+    no lock is needed.
+    """
+    # Fail fast at registration time if the key is not part of the
+    # config schema — otherwise the first task-schema build would fail
+    # with an opaque assertion inside schema filtering.
+    node: Dict[str, Any] = schemas.get_config_schema()
+    for part in key:
+        properties = node.get('properties', {})
+        if part not in properties:
+            raise ValueError(
+                f'Cannot register task-overrideable config key {key!r}: '
+                f'{".".join(key)} is not present in the config schema. '
+                'Register the schema property first (e.g. via '
+                'schemas.register_jobs_property).')
+        node = properties[part]
+    if key not in constants.OVERRIDEABLE_CONFIG_KEYS_IN_TASK:
+        constants.OVERRIDEABLE_CONFIG_KEYS_IN_TASK.append(key)
 
 
 # Validators invoked at the start of `update_api_server_config_no_lock`,

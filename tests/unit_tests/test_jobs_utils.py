@@ -9,6 +9,7 @@ import pytest
 from sky.backends import cloud_vm_ray_backend
 from sky.exceptions import ClusterDoesNotExist
 from sky.jobs import utils
+from sky.skylet import job_lib
 
 # String path for mock.patch — can't use the constant directly because
 # mock.patch needs the dotted path to the attribute being patched.
@@ -104,9 +105,9 @@ async def test_get_job_status_timeout(mock_get_handle, mock_logger):
         f'Expected timeout around {timeout_override}s, '
         f'but took {elapsed_time}s')
 
-    # Verify only one attempt was made (no retry in get_job_status)
-    # === Checking the job status... ===
-    assert mock_logger.info.call_count == 1
+    # No status logline is emitted when the fetch fails - the caller logs the
+    # transient error reason instead.
+    assert mock_logger.info.call_count == 0
 
 
 @pytest.mark.asyncio
@@ -135,8 +136,166 @@ async def test_get_job_status_returns_error_reason_on_failure(
     assert error_reason is not None, 'Expected error reason on failure'
     assert 'timed out' in error_reason
 
-    # Verify only one attempt was made (no retry in get_job_status)
-    assert mock_logger.info.call_count == 1
+    # No status logline is emitted when the fetch fails - the caller logs the
+    # transient error reason instead.
+    assert mock_logger.info.call_count == 0
+
+
+def _info_messages(mock_logger):
+    """The messages passed to logger.info(), in order."""
+    return [call.args[0] for call in mock_logger.info.call_args_list]
+
+
+@mock.patch('sky.jobs.utils.logger')
+def test_job_status_logger_collapses_repeats(mock_logger):
+    """Repeated statuses are logged once, then flushed with a count."""
+    status_logger = utils.JobStatusLogger()
+    for _ in range(5):
+        status_logger.log('Job status: JobStatus.RUNNING')
+
+    assert _info_messages(mock_logger) == ['Job status: JobStatus.RUNNING']
+
+    # The last occurrence of the run is kept, so the time the status was last
+    # observed is still recoverable from the log.
+    status_logger.flush()
+    messages = _info_messages(mock_logger)
+    assert len(messages) == 2
+    assert messages[1].startswith('Job status: JobStatus.RUNNING (unchanged '
+                                  'for ')
+    assert '5 checks' in messages[1]
+
+    # Nothing left to flush.
+    status_logger.flush()
+    assert len(_info_messages(mock_logger)) == 2
+
+
+@mock.patch('sky.jobs.utils.logger')
+def test_job_status_logger_flushes_on_status_change(mock_logger):
+    """A new status flushes the previous run before being logged."""
+    status_logger = utils.JobStatusLogger()
+    status_logger.log('Job status: JobStatus.SETTING_UP')
+    for _ in range(3):
+        status_logger.log('Job status: JobStatus.RUNNING')
+    status_logger.log('Job status: JobStatus.FAILED')
+
+    messages = _info_messages(mock_logger)
+    assert messages[0] == 'Job status: JobStatus.SETTING_UP'
+    assert messages[1] == 'Job status: JobStatus.RUNNING'
+    assert '3 checks' in messages[2]
+    assert messages[3] == 'Job status: JobStatus.FAILED'
+    assert len(messages) == 4
+
+
+@mock.patch('sky.jobs.utils.logger')
+def test_job_status_logger_logs_nothing_mid_run(mock_logger):
+    """An unchanged status is never re-emitted while the run is open."""
+    status_logger = utils.JobStatusLogger()
+    for _ in range(500):
+        status_logger.log('Job status: JobStatus.RUNNING')
+
+    assert _info_messages(mock_logger) == ['Job status: JobStatus.RUNNING']
+
+
+@mock.patch('sky.jobs.utils.logger')
+def test_job_status_logger_flush_is_idempotent(mock_logger):
+    """Flushing an already-flushed run does not repeat the tail line."""
+    status_logger = utils.JobStatusLogger()
+    for _ in range(3):
+        status_logger.log('Job status: JobStatus.RUNNING')
+
+    # reset() flushes; the polling loop exiting then flushes again.
+    status_logger.reset()
+    status_logger.flush()
+
+    messages = _info_messages(mock_logger)
+    assert len(messages) == 2
+    assert '3 checks' in messages[1]
+
+
+@mock.patch('sky.jobs.utils.logger')
+def test_job_status_logger_single_observation_not_repeated(mock_logger):
+    """A run seen exactly once is not followed by a redundant tail line."""
+    status_logger = utils.JobStatusLogger()
+    status_logger.log('Job status: JobStatus.RUNNING')
+    status_logger.flush()
+
+    assert _info_messages(mock_logger) == ['Job status: JobStatus.RUNNING']
+
+
+@mock.patch('sky.jobs.utils.logger')
+def test_job_status_logger_reset(mock_logger):
+    """After a reset, an identical status is logged in full again."""
+    status_logger = utils.JobStatusLogger()
+    status_logger.log('Job status: JobStatus.RUNNING')
+    status_logger.log('Job status: JobStatus.RUNNING')
+    status_logger.reset()
+    status_logger.log('Job status: JobStatus.RUNNING')
+
+    messages = _info_messages(mock_logger)
+    assert messages[0] == 'Job status: JobStatus.RUNNING'
+    assert '2 checks' in messages[1]
+    assert messages[2] == 'Job status: JobStatus.RUNNING'
+    assert len(messages) == 3
+
+
+@pytest.mark.asyncio
+@mock.patch('sky.jobs.utils.logger')
+@mock.patch('sky.global_user_state.get_handle_from_cluster_name')
+async def test_get_job_status_collapses_repeats(mock_get_handle, mock_logger):
+    """get_job_status routes its result through the status logger."""
+    mock_handle = mock.MagicMock(
+        spec=cloud_vm_ray_backend.CloudVmRayResourceHandle)
+    mock_get_handle.return_value = mock_handle
+
+    mock_backend = mock.MagicMock(spec=cloud_vm_ray_backend.CloudVmRayBackend)
+    mock_backend.get_job_status.return_value = {1: job_lib.JobStatus.RUNNING}
+
+    status_logger = utils.JobStatusLogger()
+    for _ in range(4):
+        job_status, error_reason = await utils.get_job_status(
+            backend=mock_backend,
+            cluster_name='test-cluster',
+            job_id=1,
+            status_logger=status_logger)
+        assert job_status == job_lib.JobStatus.RUNNING
+        assert error_reason is None
+
+    assert _info_messages(mock_logger) == [
+        f'Job status: {job_lib.JobStatus.RUNNING}'
+    ]
+
+    mock_backend.get_job_status.return_value = {1: job_lib.JobStatus.SUCCEEDED}
+    await utils.get_job_status(backend=mock_backend,
+                               cluster_name='test-cluster',
+                               job_id=1,
+                               status_logger=status_logger)
+
+    messages = _info_messages(mock_logger)
+    assert len(messages) == 3
+    assert '4 checks' in messages[1]
+    assert messages[2] == f'Job status: {job_lib.JobStatus.SUCCEEDED}'
+
+
+@pytest.mark.asyncio
+@mock.patch('sky.jobs.utils.logger')
+@mock.patch('sky.global_user_state.get_handle_from_cluster_name')
+async def test_get_job_status_logs_every_poll_without_logger(
+        mock_get_handle, mock_logger):
+    """Without a status logger, every poll result is logged."""
+    mock_handle = mock.MagicMock(
+        spec=cloud_vm_ray_backend.CloudVmRayResourceHandle)
+    mock_get_handle.return_value = mock_handle
+
+    mock_backend = mock.MagicMock(spec=cloud_vm_ray_backend.CloudVmRayBackend)
+    mock_backend.get_job_status.return_value = {1: job_lib.JobStatus.RUNNING}
+
+    for _ in range(3):
+        await utils.get_job_status(backend=mock_backend,
+                                   cluster_name='test-cluster',
+                                   job_id=1)
+
+    assert _info_messages(mock_logger) == (
+        [f'Job status: {job_lib.JobStatus.RUNNING}'] * 3)
 
 
 @mock.patch('sky.utils.controller_utils.warn_jobs_consolidation_mode_intent')

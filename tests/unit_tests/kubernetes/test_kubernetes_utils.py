@@ -5475,3 +5475,77 @@ class TestOCINetworkEnvVars:
         coreweave = utils.KubernetesHighPerformanceNetworkType.COREWEAVE
         assert (coreweave.get_network_env_vars('GB200') ==
                 coreweave.get_network_env_vars(None))
+
+
+class TestGetNodeAffinity:
+    """Tests for utils.get_node_affinity."""
+
+    def test_none_when_no_terms(self):
+        """No accelerator key and no avoid keys -> no affinity."""
+        assert utils.get_node_affinity(None, None, None) is None
+
+    def test_none_when_key_without_values(self):
+        """A key with None values does not produce a required term."""
+        assert utils.get_node_affinity('skypilot.co/accelerator', None,
+                                       None) is None
+
+    def test_required_term_single_value(self):
+        affinity = utils.get_node_affinity('skypilot.co/accelerator', ['H100'],
+                                           None)
+        assert affinity == {
+            'requiredDuringSchedulingIgnoredDuringExecution': {
+                'nodeSelectorTerms': [{
+                    'matchExpressions': [{
+                        'key': 'skypilot.co/accelerator',
+                        'operator': 'In',
+                        'values': ['H100'],
+                    }],
+                }],
+            },
+        }
+
+    def test_required_term_multiple_values(self):
+        affinity = utils.get_node_affinity('skypilot.co/accelerator',
+                                           ['A100', 'A100-80GB'], None)
+        assert affinity == {
+            'requiredDuringSchedulingIgnoredDuringExecution': {
+                'nodeSelectorTerms': [{
+                    'matchExpressions': [{
+                        'key': 'skypilot.co/accelerator',
+                        'operator': 'In',
+                        'values': ['A100', 'A100-80GB'],
+                    }],
+                }],
+            },
+        }
+
+    def test_preferred_term_only(self):
+        """CPU-only: avoid keys steer away from accelerator nodes."""
+        affinity = utils.get_node_affinity(
+            None, None, ['nvidia.com/gpu.present', 'gke-tpu-accelerator'])
+        assert affinity == {
+            'preferredDuringSchedulingIgnoredDuringExecution': [{
+                'weight': 1,
+                'preference': {
+                    'matchExpressions': [
+                        {
+                            'key': 'nvidia.com/gpu.present',
+                            'operator': 'DoesNotExist',
+                        },
+                        {
+                            'key': 'gke-tpu-accelerator',
+                            'operator': 'DoesNotExist',
+                        },
+                    ],
+                },
+            }],
+        }
+
+    def test_both_terms(self):
+        affinity = utils.get_node_affinity('skypilot.co/accelerator', ['H100'],
+                                           ['some-other-key'])
+        assert affinity is not None
+        assert set(affinity.keys()) == {
+            'requiredDuringSchedulingIgnoredDuringExecution',
+            'preferredDuringSchedulingIgnoredDuringExecution',
+        }

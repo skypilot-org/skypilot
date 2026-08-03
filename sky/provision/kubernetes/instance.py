@@ -61,6 +61,33 @@ _AUTOSCALE_DETECTED_TIMEOUT_SECONDS = 900  # 15 minutes
 # short user-configured provision_timeout (e.g. the default 10s) would exit
 # the wait loop before any event is emitted, defeating the detection logic.
 _AUTOSCALE_INITIAL_MIN_TIMEOUT_SECONDS = 60
+# A pod held by a scheduling gate (e.g. Kueue's kueue.x-k8s.io/admission) is
+# waiting for an external admission controller to admit it — a quota wait,
+# not a provisioning delay. provision_timeout is tuned for scheduling
+# latency and must not count this phase: an explicitly configured
+# provision_timeout would otherwise silently cap queue waits (e.g. a 30s
+# value kills every queue wait), defeating the point of queueing. While any
+# expected pod is gated, the provisioning clock is paused and the gated wait
+# is bounded separately, by kubernetes.kueue.admission_timeout. This is that
+# knob's default (matching the default provision_timeout applied when a
+# Kueue local queue is configured); -1 waits indefinitely.
+_QUEUE_ADMISSION_TIMEOUT_SECONDS = 24 * 60 * 60  # 24 hours
+# Request timeout for the pod polling loops (_wait_for_pods_to_schedule /
+# _wait_for_pods_to_run): (connect, read) seconds. Without a request timeout,
+# a connection that stops receiving data without being closed (e.g. silently
+# dropped by a NAT/LB after an idle or lifetime limit) blocks the poll
+# forever: the loop stops iterating and the launch hangs until
+# provision_timeout, which can be hours in autoscaling/queueing setups. The
+# read timeout bounds each socket read (idle time), not the whole response,
+# so large pod lists that stream slowly are unaffected.
+_POD_POLL_REQUEST_TIMEOUT = (5, 30)
+# How long a continuous streak of pod-poll transport errors may last before
+# it surfaces as an error. A transient failure (timeout, dropped connection)
+# is treated as a missed poll and retried, but a persistently unreachable API
+# server should still surface instead of retrying silently forever. The
+# budget is wall-clock rather than attempt-based so that fast-failing errors
+# (e.g. connection refused) get the same tolerance as slow read timeouts.
+_POD_POLL_TRANSPORT_ERROR_GRACE_SECONDS = 180
 _NUM_THREADS = subprocess_utils.get_parallel_threads('kubernetes')
 
 # Normal-type pod events that represent slow, legitimately-in-flight steps
@@ -328,7 +355,9 @@ def _raise_pod_scheduling_errors(namespace, context, new_nodes):
                        'may be too slow to autoscale.')
     for new_node in new_nodes:
         pod = kubernetes.core_api(context).read_namespaced_pod(
-            new_node.metadata.name, namespace)
+            new_node.metadata.name,
+            namespace,
+            _request_timeout=_POD_POLL_REQUEST_TIMEOUT)
         pod_status = pod.status.phase
         # When there are multiple pods involved while launching instance,
         # there may be a single pod causing issue while others are
@@ -340,7 +369,8 @@ def _raise_pod_scheduling_errors(namespace, context, new_nodes):
         events = kubernetes.core_api(context).list_namespaced_event(
             namespace,
             field_selector=(f'involvedObject.name={pod_name},'
-                            'involvedObject.kind=Pod'))
+                            'involvedObject.kind=Pod'),
+            _request_timeout=_POD_POLL_REQUEST_TIMEOUT)
         # Events created in the past hours are kept by
         # Kubernetes python client and we want to surface
         # the latest event message
@@ -494,7 +524,9 @@ def _detect_cluster_event_reason_occurred(namespace, context, search_start,
         return None
 
     events = kubernetes.core_api(context).list_namespaced_event(
-        namespace=namespace, field_selector=f'reason={reason}')
+        namespace=namespace,
+        field_selector=f'reason={reason}',
+        _request_timeout=_POD_POLL_REQUEST_TIMEOUT)
     for event in events.items:
         ts = _get_event_timestamp(event)
         if ts and _convert_to_utc(ts) > search_start:
@@ -567,6 +599,44 @@ def _update_spinner_message(*, iteration: int, pods: List[Any],
 
 
 @timeline.event
+def _is_transport_error(e: Exception) -> bool:
+    """Whether ``e`` is a failure of the HTTP transport to the API server.
+
+    urllib3 transport errors propagate raw out of the kubernetes client,
+    with one exception: the client wraps ``urllib3.exceptions.SSLError``
+    into an ``ApiException`` with ``status=0`` (no HTTP response was
+    received). An ``ApiException`` with a real HTTP status is an API error
+    response, not a transport failure.
+    """
+    if isinstance(e, kubernetes.api_exception()):
+        return e.status == 0
+    return isinstance(e, kubernetes.urllib3_http_error())
+
+
+def _count_transport_error(e: Exception, first_error_time: Optional[float],
+                           cluster_name: str) -> float:
+    """Account a pod-poll transport error; raise once the streak persists.
+
+    Treats the error as a missed poll: debug-log, sleep out the tick, and
+    return the start time of the current failure streak (callers pass the
+    returned value back in, and reset it to None on the next success). Once
+    a streak lasts _POD_POLL_TRANSPORT_ERROR_GRACE_SECONDS, raise
+    KubernetesError instead.
+    """
+    now = time.time()
+    if first_error_time is None:
+        first_error_time = now
+    if now - first_error_time >= _POD_POLL_TRANSPORT_ERROR_GRACE_SECONDS:
+        raise config_lib.KubernetesError(
+            'Lost connectivity to the Kubernetes API server while waiting '
+            f'for the pods of {cluster_name}: '
+            f'{common_utils.format_exception(e)}') from e
+    logger.debug(f'Transient error polling the pods of {cluster_name}: '
+                 f'{common_utils.format_exception(e)}. Retrying.')
+    time.sleep(1)
+    return first_error_time
+
+
 def _wait_for_pods_to_schedule(namespace, context, new_nodes, timeout: int,
                                cluster_name: str,
                                create_pods_start: datetime.datetime):
@@ -622,12 +692,35 @@ def _wait_for_pods_to_schedule(namespace, context, new_nodes, timeout: int,
             f'{_AUTOSCALE_INITIAL_MIN_TIMEOUT_SECONDS}s.')
         timeout = _AUTOSCALE_INITIAL_MIN_TIMEOUT_SECONDS
 
-    original_deadline = start_time + timeout
+    # Queue-admission gating (e.g. Kueue): a pod held by a scheduling gate is
+    # waiting for an external admission controller to admit it (a quota
+    # wait), not failing to provision. While any expected pod is gated, the
+    # provisioning clock is paused: provision_timeout starts counting from
+    # the moment all expected pods are ungated (admitted). The gated wait
+    # itself is bounded by kubernetes.kueue.admission_timeout (default
+    # _QUEUE_ADMISSION_TIMEOUT_SECONDS; -1 waits indefinitely).
+    admission_timeout = skypilot_config.get_effective_region_config(
+        cloud='ssh' if is_ssh_node_pool else 'kubernetes',
+        region=context,
+        keys=('kueue', 'admission_timeout'),
+        default_value=_QUEUE_ADMISSION_TIMEOUT_SECONDS)
+    pods_are_gated = False
+    last_gated_pod_names: List[str] = []
+    # Start of the provisioning clock; slides to the admission moment when
+    # pods leave the gated state.
+    provision_clock_start = start_time
 
     def _evaluate_timeout() -> bool:
         # If timeout is negative, retry indefinitely.
         if timeout < 0:
             return True
+        # While pods are held by scheduling gates, provision_timeout does
+        # not apply; the admission wait is bounded separately.
+        if pods_are_gated:
+            if admission_timeout < 0:
+                return True
+            return time.time() < start_time + admission_timeout
+        original_deadline = provision_clock_start + timeout
         # If autoscaling has been detected, extend the deadline from the
         # detection moment. Use max(...) so an explicitly long user timeout
         # is never shortened by this extension.
@@ -640,16 +733,29 @@ def _wait_for_pods_to_schedule(namespace, context, new_nodes, timeout: int,
         return time.time() < deadline
 
     iteration = 0
+    transport_error_since: Optional[float] = None
     while _evaluate_timeout():
         # Get all pods in a single API call using the cluster name label
         # which all pods in new_nodes should share
         cluster_name_on_cloud = new_nodes[0].metadata.labels[
             constants.TAG_SKYPILOT_CLUSTER_NAME]
-        pods = kubernetes.core_api(context).list_namespaced_pod(
-            namespace,
-            label_selector=
-            f'{constants.TAG_SKYPILOT_CLUSTER_NAME}={cluster_name_on_cloud}'
-        ).items
+        try:
+            pods = kubernetes.core_api(context).list_namespaced_pod(
+                namespace,
+                label_selector=(f'{constants.TAG_SKYPILOT_CLUSTER_NAME}='
+                                f'{cluster_name_on_cloud}'),
+                _request_timeout=_POD_POLL_REQUEST_TIMEOUT).items
+            transport_error_since = None
+        except (kubernetes.api_exception(),
+                kubernetes.urllib3_http_error()) as e:
+            # Treat a transport failure as a missed poll and retry within
+            # the deadline above; see _POD_POLL_REQUEST_TIMEOUT for why the
+            # call must be bounded rather than left to block indefinitely.
+            if not _is_transport_error(e):
+                raise
+            transport_error_since = _count_transport_error(
+                e, transport_error_since, cluster_name)
+            continue
 
         # Get the set of found pod names and check if we have all expected pods
         found_pod_names = {pod.metadata.name for pod in pods}
@@ -659,6 +765,60 @@ def _wait_for_pods_to_schedule(namespace, context, new_nodes, timeout: int,
                         f'Missing pods: {missing_pods}')
             time.sleep(0.5)
             continue
+
+        # A pod with scheduling gates is invisible to the kube-scheduler
+        # until an external controller (e.g. Kueue on admission) removes the
+        # gates. Pause the provisioning clock while any expected pod is
+        # gated — this is a quota/queue wait, not a scheduling delay — and
+        # skip scheduling checks and autoscaler detection, which are
+        # meaningless for gated pods.
+        gated_pod_names = [
+            pod.metadata.name
+            for pod in pods
+            if pod.metadata.name in expected_pod_names and
+            pod.spec.scheduling_gates
+        ]
+        if gated_pod_names:
+            if not pods_are_gated:
+                pods_are_gated = True
+                logger.info(f'Pod(s) {sorted(gated_pod_names)} are held by '
+                            'scheduling gates, waiting for queue admission; '
+                            'provision_timeout will apply after admission.')
+                rich_utils.force_update_status(
+                    ux_utils.spinner_message(
+                        'Launching (waiting for queue admission)',
+                        cluster_name=cluster_name))
+                global_user_state.add_cluster_event(
+                    cluster_name,
+                    new_status=None,
+                    reason='Launching (waiting for queue admission)',
+                    event_type=global_user_state.ClusterEventType.
+                    LAUNCH_PROGRESS,
+                    nop_if_duplicate=True,
+                )
+            last_gated_pod_names = gated_pod_names
+            # Keep refreshing the spinner while gated. The message set above
+            # is written once, on entering the gated state; the admission
+            # wait that follows can last hours, and it is exactly the phase
+            # where live feedback (e.g. the workload's position in the
+            # queue) is most useful. Skipping the per-poll update would
+            # freeze the spinner on that static message for the whole wait.
+            _update_spinner_message(iteration=iteration,
+                                    pods=pods,
+                                    context=context,
+                                    namespace=namespace,
+                                    cluster_name_on_cloud=cluster_name_on_cloud,
+                                    cluster_name=cluster_name)
+            iteration += 1
+            time.sleep(1)
+            continue
+        if pods_are_gated:
+            # All expected pods were just admitted (gates removed) — start
+            # the provisioning clock now.
+            pods_are_gated = False
+            provision_clock_start = time.time()
+            logger.info('All pods admitted (scheduling gates removed); '
+                        f'waiting up to {timeout}s for scheduling.')
 
         # A pod is considered scheduled once the kube-scheduler has bound it
         # to a node (capacity found). We deliberately do not wait for the
@@ -717,6 +877,17 @@ def _wait_for_pods_to_schedule(namespace, context, new_nodes, timeout: int,
 
         iteration += 1
         time.sleep(1)
+
+    # Pods still gated at the admission deadline: the queue never admitted
+    # them. _raise_pod_scheduling_errors inspects scheduler events, which
+    # gated pods do not have — raise a queue-specific error instead.
+    if pods_are_gated:
+        raise config_lib.KubernetesError(
+            f'Pod(s) {sorted(last_gated_pod_names)} were still held by '
+            f'scheduling gates after waiting {admission_timeout} seconds '
+            'for queue admission. Check the queue status and quotas (e.g. '
+            '`kubectl describe workload` for Kueue), adjust the requested '
+            'resources, or raise kubernetes.kueue.admission_timeout.')
 
     # Handle pod scheduling errors
     try:
@@ -896,16 +1067,30 @@ def _wait_for_pods_to_run(namespace, context, cluster_name, new_pods):
             f'{reason}{detail}')
 
     missing_pods_retry = 0
+    transport_error_since: Optional[float] = None
     last_status_msg: Optional[str] = None
     while True:
         # Get all pods in a single API call
         cluster_name_on_cloud = new_pods[0].metadata.labels[
             constants.TAG_SKYPILOT_CLUSTER_NAME]
-        all_pods = kubernetes.core_api(context).list_namespaced_pod(
-            namespace,
-            label_selector=
-            f'{constants.TAG_SKYPILOT_CLUSTER_NAME}={cluster_name_on_cloud}'
-        ).items
+        try:
+            all_pods = kubernetes.core_api(context).list_namespaced_pod(
+                namespace,
+                label_selector=(f'{constants.TAG_SKYPILOT_CLUSTER_NAME}='
+                                f'{cluster_name_on_cloud}'),
+                _request_timeout=_POD_POLL_REQUEST_TIMEOUT).items
+            transport_error_since = None
+        except (kubernetes.api_exception(),
+                kubernetes.urllib3_http_error()) as e:
+            # Same missed-poll treatment as in _wait_for_pods_to_schedule.
+            # This loop has no deadline, so the transport-error grace window
+            # is what keeps a persistently unreachable API server from
+            # turning into an endless silent retry loop.
+            if not _is_transport_error(e):
+                raise
+            transport_error_since = _count_transport_error(
+                e, transport_error_since, cluster_name)
+            continue
 
         # Get the set of found pod names and check if we have all expected pods
         found_pod_names = {pod.metadata.name for pod in all_pods}

@@ -212,3 +212,5 @@ For general discussions, join us on the [SkyPilot Slack](http://slack.skypilot.c
 
 ## Contributing
 We welcome all contributions to the project! See [CONTRIBUTING](CONTRIBUTING.md) for how to get involved.
+
+<img referrerpolicy="no-referrer-when-downgrade" src="https://static.scarf.sh/a.png?x-pxid=76c302d0-bd8d-4233-b7df-237d353375cd" />

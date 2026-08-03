@@ -1,9 +1,11 @@
 """Tests for Kubernetes provision."""
 
+import datetime
 import re
 from unittest import mock
 
 import pytest
+import urllib3
 
 from sky import clouds
 from sky import exceptions as sky_exceptions
@@ -1446,8 +1448,11 @@ class TestWaitForPodsToScheduleAutoscaleTimeout:
         # The scheduler has not bound this pod: no node assignment and no
         # PodScheduled=True condition. Set explicitly so the MagicMock does
         # not auto-create truthy attributes that _pod_is_scheduled would
-        # misread as "bound".
+        # misread as "bound". Similarly, no scheduling gates — an
+        # auto-created truthy attribute would make the wait loop treat the
+        # pod as queue-gated.
         pod.spec.node_name = None
+        pod.spec.scheduling_gates = None
         pod.status.conditions = []
         return pod
 
@@ -1716,6 +1721,347 @@ class TestWaitForPodsToScheduleAutoscaleTimeout:
         assert kwargs['nop_if_duplicate'] is True
 
 
+class TestWaitForPodsToScheduleQueueGating:
+    """Tests for scheduling-gate (queue admission, e.g. Kueue) handling in
+    _wait_for_pods_to_schedule.
+
+    The production bug: provision_timeout applied to the whole wait,
+    including time pods spent held by Kueue's admission scheduling gate. Any
+    explicitly configured provision_timeout (e.g. 30s) therefore silently
+    capped queue waits, tearing down every job whose quota was not free
+    within the timeout — defeating the point of queueing. The fix pauses
+    the provisioning clock while pods are gated: provision_timeout starts
+    at admission, and the gated wait is bounded by
+    _QUEUE_ADMISSION_TIMEOUT_SECONDS instead.
+    """
+
+    _FakeClock = TestWaitForPodsToScheduleAutoscaleTimeout._FakeClock
+    _make_node = staticmethod(
+        TestWaitForPodsToScheduleAutoscaleTimeout._make_node)
+    _make_pending_pod = staticmethod(
+        TestWaitForPodsToScheduleAutoscaleTimeout._make_pending_pod)
+
+    @staticmethod
+    def _add_gate(pod):
+        """Mark a pod as held by Kueue's admission scheduling gate."""
+        gate = mock.MagicMock()
+        gate.name = 'kueue.x-k8s.io/admission'
+        pod.spec.scheduling_gates = [gate]
+        return pod
+
+    def _setup(self, monkeypatch, pod_timeline, admission_timeout=None):
+        """Wire up mocks; pods are served according to *pod_timeline*, a
+        list of (since_simulated_time, pod) — the pod with the largest
+        `since` <= now is returned by the k8s API mock. If
+        *admission_timeout* is given, it is served as the
+        kubernetes.kueue.admission_timeout config value."""
+
+        def mock_config(cloud, region, keys, default_value=None, **kwargs):
+            del cloud, region, kwargs  # unused; no autoscaler
+            if (keys == ('kueue', 'admission_timeout') and
+                    admission_timeout is not None):
+                return admission_timeout
+            return default_value
+
+        monkeypatch.setattr('sky.skypilot_config.get_effective_region_config',
+                            mock_config)
+
+        clock = self._FakeClock()
+        monkeypatch.setattr(instance.time, 'time', clock.time)
+        monkeypatch.setattr(instance.time, 'sleep', clock.sleep)
+
+        def list_pods(namespace, label_selector=None, **kwargs):
+            del namespace, label_selector, kwargs  # unused
+            current = pod_timeline[0][1]
+            for since, pod in pod_timeline:
+                if clock.now >= since:
+                    current = pod
+            result = mock.MagicMock()
+            result.items = [current]
+            return result
+
+        core_api = mock.MagicMock()
+        core_api.list_namespaced_pod.side_effect = list_pods
+        monkeypatch.setattr('sky.adaptors.kubernetes.core_api',
+                            lambda *a, **kw: core_api)
+
+        raise_errors = mock.MagicMock(
+            side_effect=config_lib.KubernetesError('simulated-timeout'))
+        monkeypatch.setattr(instance, '_raise_pod_scheduling_errors',
+                            raise_errors)
+
+        monkeypatch.setattr('sky.utils.rich_utils.force_update_status',
+                            lambda *a, **kw: None)
+        add_event = mock.MagicMock()
+        monkeypatch.setattr(instance.global_user_state, 'add_cluster_event',
+                            add_event)
+        return clock, raise_errors, add_event
+
+    def test_gated_wait_does_not_burn_provision_timeout(self, monkeypatch):
+        """A pod held by a scheduling gate for far longer than
+        provision_timeout must not time out; once admitted and scheduled,
+        the launch succeeds. Exactly one LAUNCH_PROGRESS event is emitted
+        for the queue wait."""
+        cluster = 'my-cluster'
+        gated = self._add_gate(self._make_pending_pod('pod-0', cluster))
+        scheduled = self._make_pending_pod('pod-0', cluster)
+        scheduled.status.phase = 'Running'
+        clock, raise_errors, add_event = self._setup(monkeypatch,
+                                                     pod_timeline=[(0.0, gated),
+                                                                   (100.0,
+                                                                    scheduled)])
+
+        node = self._make_node('pod-0', cluster)
+        import datetime  # pylint: disable=import-outside-toplevel
+
+        # timeout=5 would have failed the launch at t=5 under the old
+        # behavior; with the gated wait excluded it must succeed.
+        instance._wait_for_pods_to_schedule(
+            namespace='ns',
+            context='test-context',
+            new_nodes=[node],
+            timeout=5,
+            cluster_name='cn',
+            create_pods_start=datetime.datetime.now(datetime.timezone.utc))
+
+        assert clock.now >= 100.0, (
+            f'Expected the loop to wait out the 100s gated phase, but it '
+            f'exited at {clock.now}s.')
+        assert not raise_errors.called
+        queue_events = [
+            call for call in add_event.call_args_list
+            if 'queue admission' in call.kwargs.get('reason', '')
+        ]
+        assert len(queue_events) == 1
+
+    def test_spinner_message_updates_while_gated(self, monkeypatch):
+        """The per-poll spinner update must keep running while pods are
+        gated. The gated branch sets a status message once, on entry; the
+        admission wait after it can last hours, so skipping the per-poll
+        update would freeze the spinner on that static message for the
+        whole queue wait."""
+        cluster = 'my-cluster'
+        gated = self._add_gate(self._make_pending_pod('pod-0', cluster))
+        scheduled = self._make_pending_pod('pod-0', cluster)
+        scheduled.status.phase = 'Running'
+        clock, _, _ = self._setup(monkeypatch,
+                                  pod_timeline=[(0.0, gated),
+                                                (30.0, scheduled)])
+        update_spinner = mock.MagicMock()
+        monkeypatch.setattr(instance, '_update_spinner_message', update_spinner)
+
+        node = self._make_node('pod-0', cluster)
+        import datetime  # pylint: disable=import-outside-toplevel
+
+        instance._wait_for_pods_to_schedule(
+            namespace='ns',
+            context='test-context',
+            new_nodes=[node],
+            timeout=5,
+            cluster_name='cn',
+            create_pods_start=datetime.datetime.now(datetime.timezone.utc))
+
+        assert clock.now >= 30.0
+        # Any call at all can only have come from the gated phase: the pod
+        # is Running (hence scheduled) from t=30 on, so the loop returns on
+        # that poll without reaching the post-gate spinner update.
+        assert update_spinner.call_count > 0, (
+            'Expected the spinner to keep updating during the 30s gated '
+            'phase, but _update_spinner_message was never called.')
+
+    def test_provision_clock_starts_at_admission(self, monkeypatch):
+        """Once pods are admitted (gates removed), provision_timeout applies
+        from the admission moment — an unschedulable pod then times out at
+        gated_time + timeout, not at timeout."""
+        cluster = 'my-cluster'
+        gated = self._add_gate(self._make_pending_pod('pod-0', cluster))
+        ungated = self._make_pending_pod('pod-0', cluster)
+        clock, raise_errors, _ = self._setup(monkeypatch,
+                                             pod_timeline=[(0.0, gated),
+                                                           (50.0, ungated)])
+
+        node = self._make_node('pod-0', cluster)
+        import datetime  # pylint: disable=import-outside-toplevel
+
+        with pytest.raises(config_lib.KubernetesError,
+                           match='simulated-timeout'):
+            instance._wait_for_pods_to_schedule(
+                namespace='ns',
+                context='test-context',
+                new_nodes=[node],
+                timeout=5,
+                cluster_name='cn',
+                create_pods_start=datetime.datetime.now(datetime.timezone.utc))
+
+        assert clock.now >= 55.0, (
+            f'provision_timeout must start at admission (t=50) and expire '
+            f'at t>=55, but the loop exited at {clock.now}s.')
+        assert raise_errors.called
+
+    def test_admission_wait_is_bounded(self, monkeypatch):
+        """A pod gated forever fails with a queue-admission error once the
+        admission timeout elapses — bounded, not infinite. The bound is the
+        kubernetes.kueue.admission_timeout config value (default
+        _QUEUE_ADMISSION_TIMEOUT_SECONDS)."""
+        cluster = 'my-cluster'
+        gated = self._add_gate(self._make_pending_pod('pod-0', cluster))
+        clock, raise_errors, _ = self._setup(monkeypatch,
+                                             pod_timeline=[(0.0, gated)],
+                                             admission_timeout=30)
+
+        node = self._make_node('pod-0', cluster)
+        import datetime  # pylint: disable=import-outside-toplevel
+
+        with pytest.raises(config_lib.KubernetesError,
+                           match='scheduling gates'):
+            instance._wait_for_pods_to_schedule(
+                namespace='ns',
+                context='test-context',
+                new_nodes=[node],
+                timeout=5,
+                cluster_name='cn',
+                create_pods_start=datetime.datetime.now(datetime.timezone.utc))
+
+        assert clock.now >= 30, (
+            f'Expected the gated wait to run until the admission bound '
+            f'(30s), but the loop exited at {clock.now}s.')
+        # The queue-specific error path is taken, not the generic
+        # scheduling-error path (gated pods have no scheduler events).
+        assert not raise_errors.called
+
+
+class TestWaitForPodsToScheduleTransportErrors:
+    """Transport failures of the pod poll must not wedge or kill the wait.
+
+    The production bug: the poll's list_namespaced_pod call had no request
+    timeout, so a connection silently dropped mid-response (e.g. by a NAT/LB
+    idle limit) blocked the call — and with it the whole launch — forever.
+    The poll is now bounded by _POD_POLL_REQUEST_TIMEOUT; a transport error
+    is treated as a missed tick and retried, and only a failure streak
+    lasting _POD_POLL_TRANSPORT_ERROR_GRACE_SECONDS surfaces as an error.
+    """
+
+    _FakeClock = TestWaitForPodsToScheduleAutoscaleTimeout._FakeClock
+    _make_node = staticmethod(
+        TestWaitForPodsToScheduleAutoscaleTimeout._make_node)
+    _make_pending_pod = staticmethod(
+        TestWaitForPodsToScheduleAutoscaleTimeout._make_pending_pod)
+
+    def _setup(self, monkeypatch, list_side_effect):
+
+        def mock_config(cloud, region, keys, default_value=None, **kwargs):
+            del cloud, region, keys, kwargs  # unused; no autoscaler
+            return default_value
+
+        monkeypatch.setattr('sky.skypilot_config.get_effective_region_config',
+                            mock_config)
+
+        clock = self._FakeClock()
+        monkeypatch.setattr(instance.time, 'time', clock.time)
+        monkeypatch.setattr(instance.time, 'sleep', clock.sleep)
+
+        core_api = mock.MagicMock()
+        core_api.list_namespaced_pod.side_effect = list_side_effect
+        monkeypatch.setattr('sky.adaptors.kubernetes.core_api',
+                            lambda *a, **kw: core_api)
+        monkeypatch.setattr(
+            instance, '_raise_pod_scheduling_errors',
+            mock.MagicMock(
+                side_effect=config_lib.KubernetesError('sched-errors')))
+        monkeypatch.setattr('sky.utils.rich_utils.force_update_status',
+                            lambda *a, **kw: None)
+        monkeypatch.setattr(instance.global_user_state, 'add_cluster_event',
+                            mock.MagicMock())
+        return clock, core_api
+
+    @staticmethod
+    def _read_timeout():
+        return urllib3.exceptions.ReadTimeoutError(None, 'url',
+                                                   'Read timed out.')
+
+    def _wait(self, timeout=60):
+        node = self._make_node('pod-0', 'my-cluster')
+        instance._wait_for_pods_to_schedule(
+            namespace='ns',
+            context='test-context',
+            new_nodes=[node],
+            timeout=timeout,
+            cluster_name='cn',
+            create_pods_start=datetime.datetime.now(datetime.timezone.utc))
+
+    def _scheduled_pod(self):
+        pod = self._make_pending_pod('pod-0', 'my-cluster')
+        pod.status.phase = 'Running'
+        return pod
+
+    def _flaky_list(self, failures, error_factory):
+        """A list mock failing ``failures`` times, then serving a scheduled
+        pod. Asserts every poll is bounded by _POD_POLL_REQUEST_TIMEOUT."""
+        scheduled = self._scheduled_pod()
+        state = {'n': 0}
+
+        def list_pods(namespace, label_selector=None, **kwargs):
+            del namespace, label_selector  # unused
+            assert kwargs.get('_request_timeout') == (
+                instance._POD_POLL_REQUEST_TIMEOUT)
+            state['n'] += 1
+            if state['n'] <= failures:
+                raise error_factory()
+            result = mock.MagicMock()
+            result.items = [scheduled]
+            return result
+
+        return list_pods
+
+    def test_transient_transport_error_is_retried(self, monkeypatch):
+        """A couple of timed-out polls are missed ticks, not a failure."""
+        _, core_api = self._setup(monkeypatch,
+                                  self._flaky_list(2, self._read_timeout))
+        self._wait()
+        assert core_api.list_namespaced_pod.call_count == 3
+
+    def test_wrapped_ssl_error_is_retried(self, monkeypatch):
+        """The kubernetes client wraps urllib3 SSLError into
+        ApiException(status=0); it must be retried like any other transport
+        error, while ApiExceptions with a real HTTP status still raise."""
+        _, core_api = self._setup(
+            monkeypatch,
+            self._flaky_list(
+                2, lambda: kubernetes.api_exception()
+                (status=0, reason='TLS blip')))
+        self._wait()
+        assert core_api.list_namespaced_pod.call_count == 3
+
+    def test_api_error_response_is_not_retried(self, monkeypatch):
+        """An HTTP error response (e.g. 403) is not a transport failure and
+        must fail fast, unchanged."""
+        self._setup(
+            monkeypatch,
+            self._flaky_list(
+                1, lambda: kubernetes.api_exception()
+                (status=403, reason='Forbidden')))
+        with pytest.raises(kubernetes.api_exception()):
+            self._wait()
+
+    def test_persistent_transport_errors_raise(self, monkeypatch):
+        """A persistently unreachable API server surfaces as an error once
+        the failure streak outlasts the grace window, instead of retrying
+        silently forever."""
+        clock, core_api = self._setup(
+            monkeypatch, self._flaky_list(10**9, self._read_timeout))
+
+        with pytest.raises(config_lib.KubernetesError,
+                           match='Lost connectivity'):
+            # Timeout far larger than the grace window, so the raise comes
+            # from the transport-error budget, not the deadline.
+            self._wait(timeout=10**6)
+
+        assert clock.now >= instance._POD_POLL_TRANSPORT_ERROR_GRACE_SECONDS
+        # Each missed poll costs ~1s of (fake) sleep, so the streak is
+        # roughly one attempt per second of the grace window.
+        assert core_api.list_namespaced_pod.call_count > 2
+
+
 class TestWaitForPodsToScheduleBoundPod:
     """Tests that _wait_for_pods_to_schedule treats a pod as scheduled once
     the kube-scheduler has bound it to a node, even before the kubelet has
@@ -1762,6 +2108,9 @@ class TestWaitForPodsToScheduleBoundPod:
         pod.status.container_statuses = None
         pod.status.host_ip = None
         pod.status.start_time = None
+        # No scheduling gates — an auto-created truthy MagicMock attribute
+        # would make the wait loop treat the pod as queue-gated.
+        pod.spec.scheduling_gates = None
         # The scheduler has bound the pod.
         pod.spec.node_name = node_name
         if pod_scheduled_condition:
@@ -1790,6 +2139,9 @@ class TestWaitForPodsToScheduleBoundPod:
         pod.status.host_ip = None
         pod.status.start_time = None
         pod.spec.node_name = None
+        # No scheduling gates — an auto-created truthy MagicMock attribute
+        # would make the wait loop treat the pod as queue-gated.
+        pod.spec.scheduling_gates = None
         pod.status.conditions = []
         return pod
 

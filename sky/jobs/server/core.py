@@ -55,6 +55,7 @@ from sky.utils import status_lib
 from sky.utils import subprocess_utils
 from sky.utils import timeline
 from sky.utils import ux_utils
+from sky.workspaces import constants as workspace_constants
 from sky.workspaces import core as workspaces_core
 
 if typing.TYPE_CHECKING:
@@ -1356,8 +1357,11 @@ def queue_v2(
             return [], 0, {}, 0
         user_hashes = [user.id for user in users]
 
+    # Visibility, not usability: read-only workspaces' jobs must be listed. See
+    # the same call in backend_utils for clusters.
     accessible_workspaces = list(
-        workspaces_core.get_accessible_workspace_names())
+        workspaces_core.get_accessible_workspace_names(
+            action=workspace_constants.WORKSPACE_ACTION_READ))
 
     if handle.is_grpc_enabled_with_flag:
         try:

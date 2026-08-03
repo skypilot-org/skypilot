@@ -593,8 +593,9 @@ def test_vllm_pool(generic_cloud: str, accelerator: Dict[str, str]):
                     f's=$(sky jobs launch --pool {pool_name} {job_yaml.name} -y); echo "$s"; echo; echo; echo "$s" | grep "Job finished (status: SUCCEEDED)."',
                 ],
                 timeout=smoke_tests_utils.get_timeout(generic_cloud),
-                teardown=(f'sky jobs pool down {pool_name} -y && '
-                          f'sky storage delete -y {bucket_name} || true'),
+                teardown=smoke_tests_utils.chain_teardown(
+                    f'sky jobs pool down {pool_name} -y || true',
+                    f'sky storage delete -y {bucket_name} || true'),
             )
 
             smoke_tests_utils.run_one_test(test)
@@ -830,9 +831,10 @@ def test_pool_preemption(generic_cloud: str):
                     check_for_recovery_message_on_controller(job_name),
                 ],
                 timeout=smoke_tests_utils.get_timeout(generic_cloud),
-                teardown=
-                f'{cancel_jobs_and_teardown_pool(pool_name, timeout=10)} && '
-                f'{smoke_tests_utils.down_cluster_for_cloud_cmd(name, skip_remote_server_check=True)}',
+                teardown=smoke_tests_utils.chain_teardown(
+                    cancel_jobs_and_teardown_pool(pool_name, timeout=10),
+                    smoke_tests_utils.down_cluster_for_cloud_cmd(
+                        name, skip_remote_server_check=True)),
             )
 
             smoke_tests_utils.run_one_test(test)
@@ -1019,9 +1021,10 @@ def test_pool_job_cancel_recovery(generic_cloud: str):
                         job_name, ['CANCELLED'], bad_statuses=[], timeout=15),
                 ],
                 timeout=smoke_tests_utils.get_timeout(generic_cloud),
-                teardown=
-                f'{cancel_jobs_and_teardown_pool(pool_name, timeout=10)} && '
-                f'{smoke_tests_utils.down_cluster_for_cloud_cmd(name, skip_remote_server_check=True)}',
+                teardown=smoke_tests_utils.chain_teardown(
+                    cancel_jobs_and_teardown_pool(pool_name, timeout=10),
+                    smoke_tests_utils.down_cluster_for_cloud_cmd(
+                        name, skip_remote_server_check=True)),
             )
 
             smoke_tests_utils.run_one_test(test)
@@ -1743,9 +1746,9 @@ def test_pool_down_all_with_running_jobs(generic_cloud: str):
                         check_pool_not_in_status(pool_name_2),
                     ],
                     timeout=timeout,
-                    teardown=cancel_jobs_and_teardown_pool(pool_name_1,
-                                                           timeout=5) +
-                    cancel_jobs_and_teardown_pool(pool_name_2, timeout=5),
+                    teardown=smoke_tests_utils.chain_teardown(
+                        cancel_jobs_and_teardown_pool(pool_name_1, timeout=5),
+                        cancel_jobs_and_teardown_pool(pool_name_2, timeout=5)),
                 )
                 smoke_tests_utils.run_one_test(test)
 

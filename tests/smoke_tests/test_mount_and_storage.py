@@ -139,8 +139,9 @@ def test_using_file_mounts_with_env_vars(generic_cloud: str):
     test = smoke_tests_utils.Test(
         'using_file_mounts_with_env_vars',
         test_commands,
-        (f'sky down -y {name} {name}-2',
-         f'sky storage delete -y {storage_name} {storage_name}-2'),
+        smoke_tests_utils.chain_teardown(
+            f'sky down -y {name} {name}-2',
+            f'sky storage delete -y {storage_name} {storage_name}-2'),
         timeout=20 * 60,  # 20 mins
     )
     smoke_tests_utils.run_one_test(test)
@@ -329,9 +330,9 @@ def _storage_mounts_commands_generator(
         test_commands.append(
             f'sky exec {cluster_name} -- "set -ex; '
             f'rclone ls {rclone_profile_name}:{storage_name}/hello.txt;"')
-    clean_command = (
-        f'sky down -y {cluster_name} && '
-        f'{smoke_tests_utils.down_cluster_for_cloud_cmd(cluster_name)} && '
+    clean_command = smoke_tests_utils.chain_teardown(
+        f'sky down -y {cluster_name}',
+        smoke_tests_utils.down_cluster_for_cloud_cmd(cluster_name),
         f'sky storage delete -y {storage_name} {empty_storage_name}')
     return test_commands, clean_command
 
@@ -378,9 +379,9 @@ def _storage_mount_cached_test_command_generator(f1: TextIO,
         f'sky launch -y -c {cluster_name} --infra {cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} {image_id_arg} {check_file_path}',
         f'sky logs {cluster_name} 1 --status',  # Ensure job succeeded.
     ]
-    clean_command = (
-        f'sky down -y {cluster_name} && '
-        f'{smoke_tests_utils.down_cluster_for_cloud_cmd(cluster_name)} && '
+    clean_command = smoke_tests_utils.chain_teardown(
+        f'sky down -y {cluster_name}',
+        smoke_tests_utils.down_cluster_for_cloud_cmd(cluster_name),
         f'sky storage delete -y {storage_name}')
     return test_commands, clean_command
 

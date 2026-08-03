@@ -1399,7 +1399,12 @@ function JobDetailsContent({
                   <StatusBadge
                     status={computedStatus}
                     statusTooltip={
-                      computedStatus === 'PENDING'
+                      // The connector only sets statusTooltip when it is
+                      // meaningful (PENDING reason, FAILED* attribution),
+                      // but only pass it through when the aggregated
+                      // status matches the connector's row status so a
+                      // tooltip computed for another state is not shown.
+                      computedStatus === jobData.status
                         ? jobData.statusTooltip
                         : null
                     }
