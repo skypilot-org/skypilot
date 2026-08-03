@@ -2,6 +2,7 @@ import copy
 
 import pytest
 
+from sky import exceptions
 from sky.utils import config_utils
 
 
@@ -255,6 +256,47 @@ def test_merge_k8s_configs_image_pull_secrets_empty_base():
                                        'name': 'regcred'
                                    }]})
     assert base_config['imagePullSecrets'] == [{'name': 'regcred'}]
+
+
+@pytest.mark.parametrize('base_value,override_value', [
+    ({
+        'name': 'regcred'
+    }, [{
+        'name': 'other'
+    }]),
+    ([{
+        'name': 'regcred'
+    }], {
+        'name': 'other'
+    }),
+    ([{
+        'name': 'regcred'
+    }], 'other'),
+])
+def test_merge_k8s_configs_rejects_shape_mismatch(base_value, override_value):
+    """A dict/list/scalar mismatch is user input, not an internal error.
+
+    Nested pod_config content is not type-checked by the schema, so these
+    shapes reach the merge and used to raise a bare AssertionError/TypeError
+    or silently replace the whole field.
+    """
+    base_config = {'imagePullSecrets': base_value}
+
+    with pytest.raises(exceptions.InvalidSkyPilotConfigError,
+                       match='imagePullSecrets'):
+        config_utils.merge_k8s_configs(base_config,
+                                       {'imagePullSecrets': override_value})
+
+
+def test_merge_k8s_configs_allows_scalar_override():
+    """Only container/scalar mismatches are rejected, not scalar retyping."""
+    base_config = {'runtimeClassName': 'nvidia', 'replicas': 1}
+
+    config_utils.merge_k8s_configs(base_config, {
+        'runtimeClassName': 'gvisor',
+        'replicas': '2'
+    })
+    assert base_config == {'runtimeClassName': 'gvisor', 'replicas': '2'}
 
 
 def test_merge_k8s_configs_self_merge_keyed_lists_are_idempotent():

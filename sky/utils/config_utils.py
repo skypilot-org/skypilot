@@ -2,6 +2,7 @@
 import copy
 from typing import Any, Dict, List, Optional, Tuple
 
+from sky import exceptions
 from sky import sky_logging
 
 logger = sky_logging.init_logger(__name__)
@@ -208,6 +209,28 @@ def _get_nested(configs: Optional[Dict[str, Any]],
     return curr
 
 
+def _validate_mergeable_types(key: Any, base_value: Any,
+                              override_value: Any) -> None:
+    """Rejects an override whose shape cannot be merged into the base value.
+
+    Nested `pod_config` content is not type-checked by the config schema, so a
+    dict/list/scalar mismatch is user input rather than a bug. Without this the
+    merge below would raise a bare AssertionError or TypeError, or silently
+    replace a whole dict/list with a scalar.
+    """
+    if isinstance(override_value, dict):
+        mergeable = isinstance(base_value, dict)
+    elif isinstance(override_value, list):
+        mergeable = isinstance(base_value, list)
+    else:
+        mergeable = not isinstance(base_value, (dict, list))
+    if not mergeable:
+        raise exceptions.InvalidSkyPilotConfigError(
+            f'Cannot override config field {key!r} of type '
+            f'{type(base_value).__name__} with a value of type '
+            f'{type(override_value).__name__}: {override_value!r}.')
+
+
 def merge_k8s_configs(
         base_config: Dict[Any, Any],
         override_config: Dict[Any, Any],
@@ -233,13 +256,13 @@ def merge_k8s_configs(
         (next_allowed_override_keys, next_disallowed_override_keys
         ) = _check_allowed_and_disallowed_override_keys(
             key, allowed_override_keys, disallowed_override_keys)
+        if key in base_config:
+            _validate_mergeable_types(key, base_config[key], value)
         if isinstance(value, dict) and key in base_config:
             merge_k8s_configs(base_config[key], value,
                               next_allowed_override_keys,
                               next_disallowed_override_keys)
         elif isinstance(value, list) and key in base_config:
-            assert isinstance(base_config[key], list), \
-                f'Expected {key} to be a list, found {base_config[key]}'
             # For list fields with patch strategy "merge", we merge the list
             # by the patch merge key.
             if key in _PATCH_MERGE_KEYS:

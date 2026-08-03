@@ -2606,7 +2606,7 @@ def test_kubernetes_task_clears_image_pull_secrets():
                 'echo "imagePullSecrets=$secrets" && '
                 '! echo "$secrets" | grep -q absent-regcred'),
         ],
-        f'sky down -y {name} && '
+        f'sky down -y {name}; '
         f'{smoke_tests_utils.down_cluster_for_cloud_cmd(name)}',
         timeout=25 * 60,
         config_dict={
