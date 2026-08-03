@@ -187,23 +187,43 @@ def test_trial_is_invalid_when_held_streams_closed_early():
     assert '1 of 32' in reason
 
 
-def test_held_streams_liveness_counts_only_running_readers():
-
-    async def _run():
-        held = harness._HeldStreams()  # pylint: disable=protected-access
-        forever = asyncio.ensure_future(asyncio.sleep(30))
-        finished = asyncio.ensure_future(asyncio.sleep(0))
-        held.readers = [forever, finished]
-        held.opened = 2
-        await asyncio.sleep(0.05)
-        live = held.live()
-        forever.cancel()
-        await asyncio.gather(forever, finished, return_exceptions=True)
-        return live
-
+@pytest.mark.asyncio
+async def test_held_streams_liveness_counts_only_running_readers():
+    held = harness._HeldStreams()  # pylint: disable=protected-access
+    forever = asyncio.ensure_future(asyncio.sleep(30))
+    finished = asyncio.ensure_future(asyncio.sleep(0))
+    held.readers = [forever, finished]
+    held.opened = 2
+    await asyncio.sleep(0.05)
     # A reader that returned (server closed the stream) is not holding
     # anything, which is the whole distinction opened/live draws.
-    assert asyncio.run(_run()) == 1
+    assert held.live() == 1
+    forever.cancel()
+    await asyncio.gather(forever, finished, return_exceptions=True)
+
+
+@pytest.mark.asyncio
+async def test_streams_that_never_opened_invalidate_the_trial():
+    """Zero opened streams must not read as "nothing to check".
+
+    The scenario's premise is N held streams; if every open failed, the run
+    measured a server under no concurrency at all, which is an invalid
+    environment rather than a passing one.
+    """
+    app = _StubApp()
+    app.metrics_pages = [_quiet_metrics(10)]
+    app.stream_status = 500
+    with _StubServer(app) as server:
+        result = await harness.run_async(
+            _config(server.url,
+                    num_trials=1,
+                    streams=harness.StreamSpec(path='/stream', count=3)),
+            harness.Auth())
+
+    assert result.streams_opened == 0
+    assert result.streams_failed == 3
+    assert result.status is harness.Status.INVALID
+    assert 'held streams closed' in result.trials[0]['invalid_reason']
 
 
 def test_summary_ignores_invalid_trials():
@@ -728,6 +748,7 @@ class _StubApp:
         self.request_counts = {}
         self.open_streams = 0
         self.slow_seconds = 0.0
+        self.stream_status = 200
 
     def _next_metrics(self) -> str:
         if len(self.metrics_pages) > 1:
@@ -742,6 +763,14 @@ class _StubApp:
         if path == '/metrics':
             body = self._next_metrics().encode()
         elif path == '/stream':
+            if self.stream_status != 200:
+                await send({
+                    'type': 'http.response.start',
+                    'status': self.stream_status,
+                    'headers': [(b'content-type', b'text/plain')],
+                })
+                await send({'type': 'http.response.body', 'body': b''})
+                return
             self.open_streams += 1
             await send({
                 'type': 'http.response.start',

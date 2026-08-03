@@ -220,7 +220,9 @@ def test_api_server_event_loop_lag():
 
     1. A steady flood, which surfaces any blocking call left on the loop.
     2. The same flood with long-lived streaming responses held open, which
-       surfaces starvation of the pools those lookups depend on.
+       puts the default thread executor (log streaming reads through
+       aiofiles) and the server's connection handling under pressure while
+       authenticated requests keep arriving.
     """
     if not smoke_tests_utils.is_docker_remote_api_server():
         pytest.skip('Skipping test in shared remote api server environment as '
@@ -278,7 +280,7 @@ def test_api_server_event_loop_lag():
             f'{_LAG_THRESHOLD_SECONDS}s')
 
     starvation = loop_lag_harness.HarnessConfig(
-        name='executor-starvation',
+        name='held-stream-pressure',
         base_url=api_url,
         metrics_url=metrics_url,
         requests=[loop_lag_harness.RequestSpec(path='/api/health')],
@@ -297,8 +299,8 @@ def test_api_server_event_loop_lag():
             }),
     )
     starvation_result = loop_lag_harness.run(starvation, auth)
-    _publish(starvation_result, 'executor-starvation')
-    _require_valid(starvation_result, 'executor-starvation')
+    _publish(starvation_result, 'held-stream-pressure')
+    _require_valid(starvation_result, 'held-stream-pressure')
 
     assert starvation_result.streams_opened == _HELD_STREAMS, (
         f'only {starvation_result.streams_opened}/{_HELD_STREAMS} streams '
@@ -314,6 +316,10 @@ def test_api_server_event_loop_lag():
         'not held at the concurrency this scenario measures')
 
     for trial in _valid_trials(starvation_result):
+        assert set(trial['status_counts']) == {
+            '200'
+        }, (f'trial {trial["index"]}: expected only 200s while streams were '
+            f'held open, got {trial["status_counts"]}')
         assert trial['failure_count'] == 0, (
             f'trial {trial["index"]}: {trial["failure_count"]} of '
             f'{trial["completed_requests"]} requests failed while '

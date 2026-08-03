@@ -696,10 +696,14 @@ async def _run_trial(load_client: httpx.AsyncClient,
     # Read liveness after the load, so a stream that died mid-trial counts
     # against the trial it actually affected.
     streams_live = held.live()
+    # Against the configured count, not the number that opened: if every
+    # stream failed to open, `opened` is 0 and a check against it would let a
+    # run with no concurrency at all call itself valid.
+    streams_expected = config.streams.count if config.streams else 0
     status, reason = classify_trial(completed,
                                     lateness_max,
                                     config.max_send_lateness_seconds,
-                                    streams_expected=held.opened,
+                                    streams_expected=streams_expected,
                                     streams_live=streams_live)
 
     latencies = samples.latencies
@@ -824,6 +828,9 @@ CONFIG_COMPARE_KEYS = (
     # timeout censors the tail into errors.
     'max_connections',
     'request_timeout_seconds',
+    # Decides which trials are excluded as INVALID, and therefore which ones
+    # the summaries are taken over.
+    'max_send_lateness_seconds',
 )
 
 
@@ -988,8 +995,13 @@ def format_histogram_chart(histogram: Mapping[str, float],
         marker = ' <' if bound == threshold else '  '
         lines.append(f'  {_format_bound(bound):>9}{marker} {bar:<{width}} '
                      f'{count:>7g} {count / total * 100:6.2f}%')
-    lines.append(f'  {"":>9}   over {threshold * 1000:g}ms: '
-                 f'{over:g} ({over / total * 100:.2f}%)')
+    # Counting whole buckets is exact only when the threshold IS a boundary;
+    # otherwise the first counted bucket also holds samples below it. Say
+    # which one this is rather than print an approximation as a fact -- the
+    # exact figure is slow_request_rate, taken from the raw samples.
+    tally = (f'{over:g} ({over / total * 100:.2f}%)' if threshold in bounds else
+             f'at most {over:g} ({over / total * 100:.2f}%), bucket-rounded')
+    lines.append(f'  {"":>9}   over {threshold * 1000:g}ms: {tally}')
     return '\n'.join(lines)
 
 
