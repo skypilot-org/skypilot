@@ -164,6 +164,20 @@ REQUEST_COLUMNS = [
 ]
 
 
+def _request_body_for_display(body: 'payloads.RequestBody', owner_user_id: str,
+                              caller_user_id: Optional[str]) -> str:
+    """Serialize a request body for a listing, scoped to the caller.
+
+    Returns the full body to the owner (and when ``caller_user_id`` is
+    ``None``); any other caller gets no body (``null``), so one user's body is
+    never exposed to another. The owner can still fetch the full body via
+    ``/api/get`` (``Request.encode()``).
+    """
+    if caller_user_id is None or owner_user_id == caller_user_id:
+        return body.model_dump_json()
+    return orjson.dumps(None).decode('utf-8')
+
+
 def validate_fields(fields: Optional[List[str]]) -> None:
     """Validates a caller-supplied column list for a request query.
 
@@ -299,7 +313,9 @@ class Request:
             row.append(getattr(payload, k))
         return tuple(row)
 
-    def readable_encode(self) -> payloads.RequestPayload:
+    def readable_encode(
+            self,
+            caller_user_id: Optional[str] = None) -> payloads.RequestPayload:
         """Serialize the SkyPilot API request for display purposes.
 
         This function should be called on the server side to serialize the
@@ -312,6 +328,9 @@ class Request:
         We do not use `encode` for display to avoid a large amount of data being
         sent to the client side, especially for the request table could include
         all the requests.
+
+        ``caller_user_id`` scopes the request body; see
+        ``_request_body_for_display``.
         """
         assert isinstance(self.request_body,
                           payloads.RequestBody), (self.name, self.request_body)
@@ -321,7 +340,9 @@ class Request:
             request_id=self.request_id,
             name=self.name,
             entrypoint=self.entrypoint.__name__,
-            request_body=self.request_body.model_dump_json(),
+            request_body=_request_body_for_display(self.request_body,
+                                                   self.user_id,
+                                                   caller_user_id),
             status=_status_value_for_client(self.status.value),
             return_value=orjson.dumps(None).decode('utf-8'),
             error=orjson.dumps(None).decode('utf-8'),
@@ -436,7 +457,9 @@ def get_new_request_id() -> str:
     return str(uuid.uuid4())
 
 
-def encode_requests(requests: List[Request]) -> List[payloads.RequestPayload]:
+def encode_requests(
+        requests: List[Request],
+        caller_user_id: Optional[str] = None) -> List[payloads.RequestPayload]:
     """Serialize the SkyPilot API request for display purposes.
 
         This function should be called on the server side to serialize the
@@ -464,7 +487,8 @@ def encode_requests(requests: List[Request]) -> List[payloads.RequestPayload]:
             name=request.name,
             entrypoint=request.entrypoint.__name__
             if request.entrypoint is not None else '',
-            request_body=request.request_body.model_dump_json()
+            request_body=_request_body_for_display(
+                request.request_body, request.user_id, caller_user_id)
             if request.request_body is not None else
             orjson.dumps(None).decode('utf-8'),
             status=_status_value_for_client(request.status.value),
