@@ -240,6 +240,7 @@ class AutostopConfig:
         else:
             self.durable_execution_state = DurableAutodownState.UNSPECIFIED
         self.error_summary: Optional[str] = None
+        self.durable_hooks: Optional[List[Dict[str, Any]]] = None
 
     def __setstate__(self, state: dict):
         state.setdefault('down', False)
@@ -255,6 +256,7 @@ class AutostopConfig:
             default_durable_state = DurableAutodownState.ARMED
         state.setdefault('durable_execution_state', default_durable_state)
         state.setdefault('error_summary', None)
+        state.setdefault('durable_hooks', None)
         self.__dict__.update(state)
 
 
@@ -307,7 +309,30 @@ def _same_desired_autostop_config(current: AutostopConfig,
             current.hook_timeout == requested.hook_timeout and
             current.cluster_hash == requested.cluster_hash and
             current.generation == requested.generation and
-            current.execution_strategy == requested.execution_strategy)
+            current.execution_strategy == requested.execution_strategy and
+            current.durable_hooks == requested.durable_hooks)
+
+
+def _requested_hooks_update(
+    hook: Optional[str],
+    hook_timeout: Optional[int],
+    hooks: Optional[List[Dict[str, Any]]],
+    clear_hooks: bool,
+    down: bool,
+) -> Optional[List[Dict[str, Any]]]:
+    """Return the effective hook replacement, or None to preserve hooks."""
+    if clear_hooks:
+        return []
+    if hooks:
+        return hooks
+    if hook:
+        legacy_event = 'down' if down else 'stop'
+        return [{
+            'run': hook,
+            'events': [legacy_event],
+            'timeout': hook_timeout or constants.DEFAULT_HOOK_TIMEOUT_SECONDS,
+        }]
+    return None
 
 
 def set_autostop(
@@ -356,6 +381,11 @@ def set_autostop(
                                      generation, execution_strategy)
     with _get_autostop_config_lock():
         current_config = _get_autostop_config_unlocked()
+        hooks_update = _requested_hooks_update(hook, hook_timeout, hooks,
+                                               clear_hooks, down)
+        if is_strict_request:
+            autostop_config.durable_hooks = (hooks_update if hooks_update
+                                             is not None else get_hooks())
         if _is_strict_config(current_config):
             if not is_strict_request:
                 return AutostopConfigUpdateResult.REJECTED
@@ -369,30 +399,18 @@ def set_autostop(
                             current_config, autostop_config)):
                     return AutostopConfigUpdateResult.REJECTED
                 return AutostopConfigUpdateResult.REPLAYED
+            if (current_config.durable_execution_state !=
+                    DurableAutodownState.ARMED):
+                return AutostopConfigUpdateResult.REJECTED
 
-        configs.set_config(_AUTOSTOP_CONFIG_KEY, pickle.dumps(autostop_config))
-        if clear_hooks:
-            set_hooks([])
-        elif hooks:
-            set_hooks(hooks)
-        elif hook:
-            # A pre-v7 client routes its hook via `hook` / `hook_timeout`;
-            # translate it into the generalized hooks list so hook_executor
-            # sees a single source of truth. Pre-v7 master had a single
-            # autostop hook that fired on idle-timer teardown regardless of
-            # autodown — route it to ``down`` for autodown and ``stop``
-            # otherwise so the new event taxonomy stays consistent.
-            # TODO(zpoint): drop the `hook` / `hook_timeout` parameters and
-            # this translation once SKYLET_LIB_VERSION's minimum supported
-            # client is ≥ 7.
-            legacy_event = 'down' if down else 'stop'
-            set_hooks([{
-                'run': hook,
-                'events': [legacy_event],
-                'timeout': (hook_timeout or
-                            constants.DEFAULT_HOOK_TIMEOUT_SECONDS),
-            }])
-        set_last_active_time_to_now()
+        values: Dict[str, Any] = {
+            _AUTOSTOP_CONFIG_KEY: pickle.dumps(autostop_config),
+            _AUTOSTOP_LAST_ACTIVE_TIME: str(time.time()),
+        }
+        if hooks_update is not None:
+            values[_HOOKS_CONFIG_KEY] = (json.dumps(hooks_update)
+                                         if hooks_update else '')
+        configs.set_configs(values)
 
     logger.debug(
         f'set_autostop(): idle_minutes {idle_minutes}, down {down}, '

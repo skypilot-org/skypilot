@@ -246,6 +246,55 @@ def test_provider_failure_requests_server_fallback_with_sanitized_error(
 
 
 @pytest.mark.usefixtures('isolated_autostop_storage')
+def test_post_claim_config_read_failure_requests_server_fallback(monkeypatch):
+    config = _store_config(
+        autostop_lib.AutodownExecutionStrategy.HEAD_WITH_SERVER_FALLBACK)
+    (stop_event, _, _, terminate_instances, _,
+     terminate_current_pod) = _configure_event(monkeypatch,
+                                               provider_name='runpod')
+    monkeypatch.setattr(events.yaml_utils, 'read_yaml',
+                        mock.Mock(side_effect=RuntimeError('secret config')))
+
+    stop_event._stop_cluster(config)
+
+    terminate_instances.assert_not_called()
+    terminate_current_pod.assert_not_called()
+    stored = autostop_lib.get_autostop_config()
+    assert (stored.durable_execution_state ==
+            autostop_lib.DurableAutodownState.SERVER_TEARDOWN_REQUIRED)
+    assert stored.error_summary == (
+        'Head-side teardown preparation failed; server teardown required.')
+    assert 'secret' not in stored.error_summary
+
+
+@pytest.mark.usefixtures('isolated_autostop_storage')
+def test_post_claim_new_provisioner_ray_failure_requests_server_fallback(
+        monkeypatch):
+    config = _store_config(
+        autostop_lib.AutodownExecutionStrategy.HEAD_WITH_SERVER_FALLBACK)
+    (stop_event, _, subprocess_run, terminate_instances, _,
+     terminate_current_pod) = _configure_event(
+         monkeypatch,
+         provider_name='runpod',
+         uses_ray=True,
+         provisioner_version=(
+             clouds.ProvisionerVersion.RAY_PROVISIONER_SKYPILOT_TERMINATOR),
+     )
+    subprocess_run.side_effect = RuntimeError('RUNPOD_API_KEY=secret')
+
+    stop_event._stop_cluster(config)
+
+    terminate_instances.assert_not_called()
+    terminate_current_pod.assert_not_called()
+    stored = autostop_lib.get_autostop_config()
+    assert (stored.durable_execution_state ==
+            autostop_lib.DurableAutodownState.SERVER_TEARDOWN_REQUIRED)
+    assert stored.error_summary == (
+        'Head-side teardown preparation failed; server teardown required.')
+    assert 'secret' not in stored.error_summary
+
+
+@pytest.mark.usefixtures('isolated_autostop_storage')
 def test_legacy_ray_provider_failure_requests_sanitized_server_fallback(
         monkeypatch):
     config = _store_config(

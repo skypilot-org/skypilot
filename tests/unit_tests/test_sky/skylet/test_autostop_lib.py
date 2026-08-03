@@ -86,10 +86,8 @@ def test_durable_state_transitions_are_generation_and_hash_fenced():
 
 
 @pytest.mark.usefixtures('isolated_autostop_storage')
-def test_new_setting_and_cancellation_reset_durable_execution_result():
+def test_new_setting_and_cancellation_reset_armed_durable_intent():
     _set_durable_autodown()
-    assert autostop_lib.mark_server_teardown_required('cluster-hash', 7,
-                                                      'failed')
 
     _set_durable_autodown(cluster_hash='replacement-hash', generation=8)
     replacement = autostop_lib.get_autostop_config()
@@ -110,6 +108,38 @@ def test_new_setting_and_cancellation_reset_durable_execution_result():
     assert (cancelled.durable_execution_state ==
             autostop_lib.DurableAutodownState.UNSPECIFIED)
     assert cancelled.error_summary is None
+
+
+@pytest.mark.usefixtures('isolated_autostop_storage')
+@pytest.mark.parametrize(
+    'claimed_state',
+    [
+        autostop_lib.DurableAutodownState.HEAD_TEARDOWN_STARTED,
+        autostop_lib.DurableAutodownState.SERVER_TEARDOWN_REQUIRED,
+    ],
+)
+def test_new_generation_cannot_cancel_irreversibly_claimed_teardown(
+        claimed_state):
+    _set_durable_autodown()
+    assert autostop_lib.mark_head_teardown_started('cluster-hash', 7)
+    if claimed_state == autostop_lib.DurableAutodownState.SERVER_TEARDOWN_REQUIRED:
+        assert autostop_lib.mark_server_teardown_required(
+            'cluster-hash', 7, 'head preparation failed')
+
+    result = autostop_lib.set_autostop(
+        idle_minutes=-1,
+        backend=None,
+        wait_for=autostop_lib.AutostopWaitFor.JOBS_AND_SSH,
+        down=True,
+        cluster_hash='cluster-hash',
+        generation=8,
+        execution_strategy=autostop_lib.AutodownExecutionStrategy.SERVER_ONLY,
+    )
+
+    assert result == autostop_lib.AutostopConfigUpdateResult.REJECTED
+    stored = autostop_lib.get_autostop_config()
+    assert stored.generation == 7
+    assert stored.durable_execution_state == claimed_state
 
 
 @pytest.mark.usefixtures('isolated_autostop_storage')
@@ -164,6 +194,46 @@ def test_strict_autostop_rejects_same_generation_different_hash():
 
     assert result == autostop_lib.AutostopConfigUpdateResult.REJECTED
     assert autostop_lib.get_autostop_config().cluster_hash == 'cluster-hash'
+
+
+@pytest.mark.usefixtures('isolated_autostop_storage')
+def test_strict_autostop_rejects_same_generation_conflicting_hooks():
+    hooks = [{
+        'run': 'echo first',
+        'events': ['down'],
+        'timeout': 60,
+    }]
+    _set_durable_autodown()
+    autostop_lib.set_autostop(
+        idle_minutes=10,
+        backend='cloud-vm-ray',
+        wait_for=autostop_lib.AutostopWaitFor.JOBS_AND_SSH,
+        down=True,
+        hooks=hooks,
+        cluster_hash='hooks-hash',
+        generation=8,
+        execution_strategy=(
+            autostop_lib.AutodownExecutionStrategy.HEAD_WITH_SERVER_FALLBACK),
+    )
+
+    result = autostop_lib.set_autostop(
+        idle_minutes=10,
+        backend='cloud-vm-ray',
+        wait_for=autostop_lib.AutostopWaitFor.JOBS_AND_SSH,
+        down=True,
+        hooks=[{
+            'run': 'echo conflicting',
+            'events': ['down'],
+            'timeout': 60,
+        }],
+        cluster_hash='hooks-hash',
+        generation=8,
+        execution_strategy=(
+            autostop_lib.AutodownExecutionStrategy.HEAD_WITH_SERVER_FALLBACK),
+    )
+
+    assert result == autostop_lib.AutostopConfigUpdateResult.REJECTED
+    assert autostop_lib.get_hooks() == hooks
 
 
 @pytest.mark.usefixtures('isolated_autostop_storage')
