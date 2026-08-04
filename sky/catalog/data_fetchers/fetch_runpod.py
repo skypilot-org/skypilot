@@ -19,6 +19,7 @@ import traceback
 from typing import Any, Dict, List, Optional, Union
 
 import pandas as pd
+import requests
 import runpod
 from runpod.api import graphql
 
@@ -300,6 +301,40 @@ REGION_ZONES = {
     ],
 }
 
+_REST_OPENAPI_URL = 'https://rest.runpod.io/v1/openapi.json'
+_launchable_region_zones: Optional[Dict[str, List[str]]] = None
+
+
+def get_launchable_region_zones() -> Dict[str, List[str]]:
+    """REGION_ZONES restricted to data centers the REST launch API accepts.
+
+    The hardcoded zone table drifts from RunPod's deployable set, and the
+    REST create-pod API rejects a request whose zone list contains even one
+    unknown id. Advertising only launchable zones keeps catalog entries
+    consistent with what provisioning can actually use.
+    """
+    global _launchable_region_zones
+    if _launchable_region_zones is not None:
+        return _launchable_region_zones
+    try:
+        response = requests.get(_REST_OPENAPI_URL, timeout=30)
+        response.raise_for_status()
+        properties = (response.json()['components']['schemas']['PodCreateInput']
+                      ['properties'])
+        launchable = set(properties['dataCenterIds']['items']['enum'])
+    except Exception as e:  # pylint: disable=broad-except
+        print('Could not fetch the RunPod REST data center list; '
+              f'keeping all zones: {e}')
+        return REGION_ZONES
+    filtered = {
+        region: [zone for zone in zones if zone in launchable
+                ] for region, zones in REGION_ZONES.items()
+    }
+    _launchable_region_zones = {
+        region: zones for region, zones in filtered.items() if zones
+    }
+    return _launchable_region_zones
+
 
 def get_gpu_details(gpu_id: str, gpu_count: int = 1) -> Dict[str, Any]:
     """Get detailed GPU information using GraphQL query.
@@ -459,16 +494,17 @@ def get_gpu_info(base_gpu_name: str, gpu_type: Dict[str, Any],
         memory = gpu_type.get('lowestPrice', {}).get('minMemory')
 
     # This is the VRAM memory per GPU (not scaled to count)
-    gpu_memory = gpu_type.get('memoryInGb', 0)
+    gpu_memory_gib = gpu_type.get('memoryInGb', 0)
+    gpu_memory_mib = gpu_memory_gib * 1024
 
     # Return None if memory or vcpus not valid
     if not isinstance(vcpus, (float, int)) or vcpus <= 0:
         print(f'Skipping GPU {base_gpu_name}:'
-              ' vCPUs must be a positive number, not {vcpus}')
+              f' vCPUs must be a positive number, not {vcpus}')
         return None
     if not isinstance(memory, (float, int)) or memory <= 0:
         print(f'Skipping GPU {base_gpu_name}:'
-              ' Memory must be a positive number, not {memory}')
+              f' Memory must be a positive number, not {memory}')
         return None
 
     gpu_info_dict = {
@@ -477,10 +513,10 @@ def get_gpu_info(base_gpu_name: str, gpu_type: Dict[str, Any],
             'Manufacturer': gpu_type['manufacturer'],
             'Count': gpu_count,
             'MemoryInfo': {
-                'SizeInMiB': gpu_memory
+                'SizeInMiB': gpu_memory_mib
             },
         }],
-        'TotalGpuMemoryInMiB': gpu_memory * gpu_count,
+        'TotalGpuMemoryInMiB': gpu_memory_mib * gpu_count,
     }
     gpu_info = json.dumps(gpu_info_dict).replace('"', '\'')
 
@@ -536,7 +572,7 @@ def get_cpu_instance_configurations(cpu_id: str) -> List[Dict[str, Any]]:
             cpu_spec_id = f'{cpu_id}-{vcpus}-{memory}'
 
             # Iterate over all regions and zones
-            for region, zones in REGION_ZONES.items():
+            for region, zones in get_launchable_region_zones().items():
                 for zone in zones:
                     for cpu_spec_output in query_cpu_specifics(
                             cpu_id, cpu_spec_id, zone):
@@ -613,7 +649,7 @@ def get_gpu_instance_configurations(gpu_id: str) -> List[Dict[str, Any]]:
         if detailed_gpu['securePrice'] is not None:
             base_price = format_price(detailed_gpu['securePrice'] * gpu_count)
 
-        for region, zones in REGION_ZONES.items():
+        for region, zones in get_launchable_region_zones().items():
             for zone in zones:
                 instances.append({
                     'InstanceType': f'{gpu_count}x_{base_gpu_name}_SECURE',

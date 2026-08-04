@@ -12,6 +12,12 @@ SkyPilot is a system to run, manage, and scale AI workloads on any AI infrastruc
 - **Multi-cloud and multi-Kubernetes**: Unified interface across 25+ clouds and multiple K8s clusters
 - Cost optimization and GPU availability maximization
 
+## Agent Command Execution
+
+Keep command examples portable: use their native form. Agents may prefix a
+command with `rtk` when it is installed to reduce terminal output, but it is
+not a project dependency and must not be required.
+
 ## Repository Structure
 
 ```
@@ -117,12 +123,23 @@ From `requirements-dev.txt`:
 ### Running Tests
 
 ```bash
+# Build the test image after changing Dockerfile or Python dependencies.
+docker compose -f compose.test.yml build test
+
 # Unit tests (fast, no cloud resources)
-pytest tests/unit_tests/
+docker compose -f compose.test.yml run --rm test tests/unit_tests/
 
 # Specific test file
-pytest tests/unit_tests/test_resources.py
+docker compose -f compose.test.yml run --rm test tests/unit_tests/test_resources.py
+
+# Run all discovered tests.  Smoke tests can launch cloud resources.
+docker compose -f compose.test.yml run --rm test
 ```
+
+`compose.test.yml` bind-mounts the checkout into the `test` service; the
+production image continues to exclude tests.  Do not add credential mounts to
+the default file.  Before running smoke tests, explicitly mount only the
+provider credentials and configuration required for that invocation.
 
 ### CI Tests via PR Comments
 

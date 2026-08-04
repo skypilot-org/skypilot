@@ -7,7 +7,11 @@ from unittest import mock
 import pytest
 
 from sky import skypilot_config
+from sky.server import constants as server_constants
 from sky.server import daemons
+from sky.server.requests import request_names
+from sky.server.requests import requests
+from sky.server.requests.requests import ScheduleType
 
 
 def _mock_get_nested(max_bytes):
@@ -20,6 +24,44 @@ def _mock_get_nested(max_bytes):
         return original(keys, default)
 
     return patched
+
+
+def test_autodown_reconciler_daemon_is_registered_hidden_and_short():
+    matching = [
+        daemon for daemon in daemons.INTERNAL_REQUEST_DAEMONS
+        if daemon.name is request_names.RequestName.REQUEST_DAEMON_AUTODOWN
+    ]
+
+    assert len(matching) == 1
+    daemon = matching[0]
+    assert daemon.id == 'autodown-reconciler-daemon'
+    assert daemon.id.endswith('-daemon')
+    assert daemon.name in daemons.HIDDEN_REQUEST_NAMES
+    assert requests.build_internal_daemon_request(
+        daemon).schedule_type is ScheduleType.SHORT
+
+
+def test_successful_autodown_reconciler_event_sleeps_configured_interval(
+        monkeypatch):
+    reconcile = mock.Mock()
+    sleep = mock.Mock()
+    monkeypatch.setattr('sky.server.autodown.reconcile_autodown_intents',
+                        reconcile)
+    monkeypatch.setattr(daemons.time, 'sleep', sleep)
+
+    def get_nested(keys, default=None):
+        assert keys == ('daemons', 'autodown-reconciler-daemon',
+                        'interval_seconds')
+        assert default == (
+            server_constants.AUTODOWN_RECONCILER_DAEMON_INTERVAL_SECONDS)
+        return 7
+
+    monkeypatch.setattr(skypilot_config, 'get_nested', get_nested)
+
+    daemons.autodown_reconciliation_event()
+
+    reconcile.assert_called_once_with()
+    sleep.assert_called_once_with(7)
 
 
 class TestDaemonLogRotation:

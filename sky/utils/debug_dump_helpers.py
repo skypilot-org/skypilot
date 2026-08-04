@@ -5,7 +5,6 @@ sky.jobs.utils (controller side) to serialize cluster records and events.
 Extracted to avoid a circular import:
   debug_utils -> jobs.server.core -> jobs.utils -> debug_utils
 """
-import copy
 import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -28,7 +27,9 @@ def redact_config(config: Dict[str, Any]) -> Dict[str, Any]:
     Used by both the client (sdk.py) and the server (debug_utils.py) when
     including SkyPilot config in debug dumps.
     """
-    config_copy = config_utils.Config(copy.deepcopy(config))
+    redacted_config = task_lib.redact_task_yaml_config(config)
+    assert isinstance(redacted_config, dict)
+    config_copy = config_utils.Config(redacted_config)
     for field_path in _SENSITIVE_CONFIG_KEYS:
         val = config_copy.get_nested(field_path, default_value=None)
         if val is not None:
@@ -56,10 +57,8 @@ def redact_task_yaml(yaml_str: str) -> str:
         docs = list(yaml_utils.safe_load_all(yaml_str))
     except Exception:  # pylint: disable=broad-except
         return '<parse error, redacted>'
-    for doc in docs:
-        if isinstance(doc, dict):
-            task_lib.redact_task_yaml_dict(doc)
-    return yaml_utils.dump_yaml_str(docs)
+    redacted_docs = [task_lib.redact_task_yaml_config(doc) for doc in docs]
+    return yaml_utils.dump_yaml_str(redacted_docs)
 
 
 def serialize_cluster_record(cluster_record: Dict[str, Any]) -> Dict[str, Any]:

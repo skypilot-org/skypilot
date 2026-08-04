@@ -27,6 +27,7 @@ from sky.utils import common
 from sky.utils import debug_dump_helpers
 from sky.utils import debug_utils
 from sky.utils import status_lib
+from sky.utils import yaml_utils
 
 
 class _StubReachability:
@@ -3045,6 +3046,48 @@ class TestRedactTaskYaml:
         result = debug_dump_helpers.redact_task_yaml(yaml_str)
         assert 'my_docker_pass' not in result
         assert '<redacted>' in result
+
+    def test_recursively_redacts_dag_resources_and_preserves_references(self):
+        yaml_str = ('name: task1\n'
+                    'envs:\n'
+                    '  SAFE_ENV: visible\n'
+                    '  API_TOKEN: environment-token\n'
+                    'secrets:\n'
+                    '  INLINE_SECRET: inline-secret\n'
+                    '  secrets:workspace.REFERENCED_SECRET: null\n'
+                    '  NULL_SECRET: null\n'
+                    'managed_secrets:\n'
+                    '  - secrets:personal.LIST_REFERENCE\n'
+                    'resources:\n'
+                    '  any_of:\n'
+                    '    - _docker_login_config:\n'
+                    '        password: registry-password\n'
+                    '      provider:\n'
+                    '        registry:\n'
+                    '          auth:\n'
+                    '            client_secret: provider-secret\n'
+                    '            headers:\n'
+                    '              Authorization: Bearer provider-token\n'
+                    '---\n'
+                    'name: task2\n'
+                    'docker:\n'
+                    '  registry:\n'
+                    '    api-key: second-api-key\n')
+
+        result = debug_dump_helpers.redact_task_yaml(yaml_str)
+
+        for secret in ('environment-token', 'inline-secret',
+                       'registry-password', 'provider-secret', 'provider-token',
+                       'second-api-key'):
+            assert secret not in result
+        redacted_docs = list(yaml_utils.safe_load_all(result))
+        assert redacted_docs[0]['envs']['SAFE_ENV'] == 'visible'
+        assert redacted_docs[0]['secrets'][
+            'secrets:workspace.REFERENCED_SECRET'] is None
+        assert redacted_docs[0]['secrets']['NULL_SECRET'] is None
+        assert (redacted_docs[0]['managed_secrets'] == [
+            'secrets:personal.LIST_REFERENCE'
+        ])
 
     def test_invalid_yaml_returns_error_string(self):
         """Invalid YAML should return a redacted error string."""

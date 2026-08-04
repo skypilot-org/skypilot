@@ -40,6 +40,7 @@ from sky import provision as provision_lib
 from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import common as adaptors_common
+from sky.data import storage as storage_lib
 from sky.jobs import utils as managed_job_utils
 from sky.provision import common as provision_common
 from sky.provision import instance_setup
@@ -59,6 +60,7 @@ from sky.utils import common_utils
 from sky.utils import context as context_lib
 from sky.utils import context_utils
 from sky.utils import controller_utils
+from sky.utils import debug_dump_helpers
 from sky.utils import env_options
 from sky.utils import locks
 from sky.utils import registry
@@ -200,6 +202,9 @@ _RAY_YAML_KEYS_TO_RESTORE_FOR_BACK_COMPATIBILITY = {
 # - docker_login_config: The docker_login_config field of the old yaml may be
 #   outdated or wrong. Users may want to fix the login config if a cluster fails
 #   to launch due to the login config.
+# - create_instance_kwargs: Provider launch overrides must be replaced as a
+#   unit. Retaining removed credentials from an old config can make a corrected
+#   cluster fail again on restart.
 # - UserData: The UserData field of the old yaml may be outdated, and we want to
 #   use the new yaml's UserData field, which contains the authorized key setup as
 #   well as the disabling of the auto-update with apt-get.
@@ -214,6 +219,7 @@ _RAY_YAML_KEYS_TO_RESTORE_EXCEPTIONS = [
     ('docker', 'run_options'),
     # Other clouds
     ('provider', 'docker_login_config'),
+    ('provider', 'create_instance_kwargs'),
     ('provider', 'firewall_rule'),
     # TPU node launched before #2943 does not have the `provider.tpu_node` set,
     # and our latest code need this field to be set to distinguish the node, so
@@ -313,6 +319,38 @@ def _get_yaml_path_from_cluster_name(cluster_name: str,
         pathlib.Path(prefix)).resolve() / f'{cluster_name}.yml'
     os.makedirs(output_path.parents[0], exist_ok=True)
     return str(output_path)
+
+
+def _persist_redacted_debug_yaml(tmp_yaml_path: str,
+                                 debug_yaml_path: str) -> None:
+    """Persist a private redacted debug YAML and delete its raw source."""
+    debug_yaml_written = False
+    try:
+        with open(tmp_yaml_path, 'r', encoding='utf-8') as raw_yaml_file:
+            redacted_yaml = debug_dump_helpers.redact_task_yaml(
+                raw_yaml_file.read())
+        file_descriptor = os.open(debug_yaml_path,
+                                  os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(file_descriptor, 'w', encoding='utf-8') as debug_file:
+            # An existing .debug path may retain prior permissions; set the
+            # descriptor mode before writing to never persist debug YAML openly.
+            os.fchmod(debug_file.fileno(), 0o600)
+            debug_file.write(redacted_yaml)
+        debug_yaml_written = True
+    finally:
+        try:
+            os.remove(tmp_yaml_path)
+        finally:
+            if not debug_yaml_written:
+                _remove_legacy_debug_yaml(debug_yaml_path)
+
+
+def _remove_legacy_debug_yaml(debug_yaml_path: str) -> None:
+    """Remove a pre-redaction debug YAML artifact if it exists."""
+    try:
+        pathlib.Path(debug_yaml_path).unlink()
+    except FileNotFoundError:
+        pass
 
 
 # Add retry for the file mounts optimization, as the underlying cp command may
@@ -709,6 +747,89 @@ def _get_volume_name(path: str, cluster_name_on_cloud: str) -> str:
     return f'{cluster_name_on_cloud}-{path_hash}'
 
 
+def _get_credential_provider_allowlist(
+    task: Optional['task_lib.Task'],
+    compute_cloud: clouds.Cloud,
+    remote_identity: str,
+) -> Set[Union[clouds.Cloud, str]]:
+    """Returns providers whose local credentials are required on a cluster."""
+    allowed_clouds: Set[Union[clouds.Cloud, str]] = set()
+    if remote_identity == schemas.RemoteIdentityOptions.LOCAL_CREDENTIALS.value:
+        allowed_clouds.add(compute_cloud)
+
+    tasks_with_provider_dependencies = [] if task is None else [task]
+    if task is not None and task.managed_job_dag is not None:
+        for workload_task in task.managed_job_dag.tasks:
+            tasks_with_provider_dependencies.append(workload_task)
+            for resources in workload_task.resources:
+                if resources.cloud is not None:
+                    allowed_clouds.add(resources.cloud)
+            if (workload_task.best_resources is not None and
+                    workload_task.best_resources.cloud is not None):
+                allowed_clouds.add(workload_task.best_resources.cloud)
+
+    storage_only_cloud_names = {
+        cloud_name.lower() for cloud_name in sky_check.STORAGE_ONLY_CLOUDS
+    }
+    for task_with_dependencies in tasks_with_provider_dependencies:
+        store_types: Set[storage_lib.StoreType] = set()
+        for storage in task_with_dependencies.storage_mounts.values():
+            store_types.update(storage.stores)
+            if isinstance(storage.source, str):
+                try:
+                    source_store_type, _, _, _, _ = (
+                        storage_lib.StoreType.get_fields_from_store_url(
+                            storage.source))
+                    store_types.add(source_store_type)
+                except ValueError:
+                    pass
+        remote_file_mounts = (
+            task_with_dependencies.get_cloud_to_remote_file_mounts())
+        if remote_file_mounts is not None:
+            for source in remote_file_mounts.values():
+                try:
+                    source_store_type, _, _, _, _ = (
+                        storage_lib.StoreType.get_fields_from_store_url(source))
+                    store_types.add(source_store_type)
+                except ValueError:
+                    pass
+        for store_type in store_types:
+            if not isinstance(store_type, storage_lib.StoreType):
+                continue
+            try:
+                storage_cloud_name = store_type.to_cloud()
+            except ValueError:
+                continue
+            storage_cloud = registry.CLOUD_REGISTRY.get(
+                storage_cloud_name.lower())
+            if storage_cloud is not None:
+                allowed_clouds.add(storage_cloud)
+            elif storage_cloud_name.lower() in storage_only_cloud_names:
+                allowed_clouds.add(storage_cloud_name)
+    return allowed_clouds
+
+
+def _get_credential_file_mounts(
+    task: Optional['task_lib.Task'],
+    compute_cloud: clouds.Cloud,
+    remote_identity: str,
+) -> Dict[str, str]:
+    """Returns scoped cloud credentials plus independent logging credentials."""
+    credentials = sky_check.get_cloud_credential_file_mounts(
+        excluded_clouds=None,
+        allowed_clouds=_get_credential_provider_allowlist(
+            task, compute_cloud, remote_identity))
+
+    logging_agent = logs.get_logging_agent()
+    if logging_agent:
+        for remote_path, local_path in logging_agent.get_credential_file_mounts(
+        ).items():
+            assert remote_path not in credentials, (
+                f'{remote_path} already in credentials')
+            credentials[remote_path] = local_path
+    return credentials
+
+
 # TODO: too many things happening here - leaky abstraction. Refactor.
 @timeline.event
 def write_cluster_config(
@@ -725,6 +846,7 @@ def write_cluster_config(
     volume_mounts: Optional[List['volume_utils.VolumeMount']] = None,
     cloud_specific_failover_overrides: Optional[Dict[str, Any]] = None,
     extra_template_variables: Optional[Dict[str, Any]] = None,
+    task: Optional['task_lib.Task'] = None,
 ) -> Dict[str, str]:
     """Fills in cluster configuration templates and writes them out.
 
@@ -790,10 +912,10 @@ def write_cluster_config(
     # 4. NO_UPLOAD: Do not upload any credentials
     #
     # We need to upload credentials only if LOCAL_CREDENTIALS is specified. In
-    # other cases, we exclude the cloud from credential file uploads after
-    # running required checks.
+    # other cases, the selected compute cloud's local credential files are not
+    # mounted. Required storage and controller-provider credentials are scoped
+    # separately below.
     assert cluster_name is not None
-    excluded_clouds: Set[clouds.Cloud] = set()
     remote_identity_config = skypilot_config.get_effective_workspace_region_config(
         cloud=str(cloud).lower(),
         region=region.name,
@@ -811,14 +933,16 @@ def write_cluster_config(
             if fnmatch.fnmatchcase(cluster_name, list(profile.keys())[0]):
                 remote_identity = list(profile.values())[0]
                 break
+    credential_remote_identity = remote_identity
+    config_dict['teardown_execution_strategy'] = (
+        cloud.get_teardown_execution_strategy(credential_remote_identity).value)
     if remote_identity != schemas.RemoteIdentityOptions.LOCAL_CREDENTIALS.value:
-        # If LOCAL_CREDENTIALS is not specified, we add the cloud to the
-        # excluded_clouds set, but we must also check if the cloud supports
-        # service accounts.
+        # Non-local identities must still be validated against the selected
+        # compute cloud before its local credentials are excluded from mounts.
         if remote_identity == schemas.RemoteIdentityOptions.NO_UPLOAD.value:
             # If NO_UPLOAD is specified, fall back to default remote identity
-            # for downstream logic but add it to excluded_clouds to skip
-            # credential file uploads.
+            # for downstream logic. Credential mounting uses the configured
+            # remote identity saved above.
             remote_identity = schemas.get_default_remote_identity(
                 str(cloud).lower())
         elif not cloud.supports_service_account_on_remote():
@@ -827,56 +951,8 @@ def write_cluster_config(
                 f'{skypilot_config.loaded_config_path!r} for {cloud}, but it '
                 'is not supported by this cloud. Remove the config or set: '
                 '`remote_identity: LOCAL_CREDENTIALS`.')
-        if isinstance(cloud, clouds.Kubernetes):
-            allowed_contexts = skypilot_config.get_workspace_cloud(
-                'kubernetes').get('allowed_contexts', None)
-            if allowed_contexts is None:
-                allowed_contexts = skypilot_config.get_effective_region_config(
-                    cloud='kubernetes',
-                    region=None,
-                    keys=('allowed_contexts',),
-                    default_value=None)
-            # Exclude both Kubernetes and SSH explicitly since:
-            # 1. isinstance(cloud, clouds.Kubernetes) matches both (SSH
-            #    inherits from Kubernetes)
-            # 2. Both share the same get_credential_file_mounts() which
-            #    returns the kubeconfig. So if we don't exclude both, the
-            #    unexcluded one will upload the kubeconfig.
-            # TODO(romilb): This is a workaround. The right long-term fix
-            # is to have SSH Node Pools use its own kubeconfig instead of
-            # sharing the global kubeconfig at ~/.kube/config. In the
-            # interim, SSH Node Pools' get_credential_file_mounts can filter
-            # contexts starting with ssh- and create a temp kubeconfig
-            # to upload.
-            # When allowed_contexts is not set, or when it is set for a
-            # non-controller cluster, we exclude kubeconfig upload. Controller
-            # clusters need kubeconfig to manage other K8s clusters.
-            is_controller = controller_utils.Controllers.from_name(
-                cluster_name, expect_exact_match=False) is not None
-            if allowed_contexts is None or not is_controller:
-                excluded_clouds.add(clouds.Kubernetes())
-                excluded_clouds.add(clouds.SSH())
-        else:
-            excluded_clouds.add(cloud)
-
-    for cloud_str, cloud_obj in registry.CLOUD_REGISTRY.items():
-        remote_identity_config = skypilot_config.get_effective_workspace_region_config(
-            cloud=cloud_str.lower(),
-            region=region.name,
-            keys=('remote_identity',),
-            default_value=None)
-        if remote_identity_config:
-            if (remote_identity_config ==
-                    schemas.RemoteIdentityOptions.NO_UPLOAD.value):
-                excluded_clouds.add(cloud_obj)
-
-    credentials = sky_check.get_cloud_credential_file_mounts(excluded_clouds)
-
-    logging_agent = logs.get_logging_agent()
-    if logging_agent:
-        for k, v in logging_agent.get_credential_file_mounts().items():
-            assert k not in credentials, f'{k} already in credentials'
-            credentials[k] = v
+    credentials = _get_credential_file_mounts(task, cloud,
+                                              credential_remote_identity)
 
     private_key_path, _ = auth_utils.get_or_generate_keys()
     auth_config = {'ssh_private_key': private_key_path}
@@ -1265,6 +1341,7 @@ def write_cluster_config(
     common_utils.fill_template(cluster_config_template,
                                variables,
                                output_path=tmp_yaml_path)
+    os.chmod(tmp_yaml_path, 0o600)
     config_dict['cluster_name'] = cluster_name
     config_dict['ray'] = yaml_path
 
@@ -1341,6 +1418,7 @@ def write_cluster_config(
     # Note that the ray yaml file will be copied into that special dir (i.e.,
     # uploaded as part of the file_mounts), so the restore for backward
     # compatibility should go before this call.
+    os.chmod(tmp_yaml_path, 0o600)
     _optimize_file_mounts(tmp_yaml_path)
 
     # commit the final yaml to the database
@@ -1350,12 +1428,14 @@ def write_cluster_config(
 
     usage_lib.messages.usage.update_ray_yaml(tmp_yaml_path)
 
-    # Remove the tmp file.
+    debug_yaml_path = f'{yaml_path}.debug'
     if sky_logging.logging_enabled(logger, sky_logging.DEBUG):
-        debug_yaml_path = yaml_path + '.debug'
-        os.rename(tmp_yaml_path, debug_yaml_path)
+        _persist_redacted_debug_yaml(tmp_yaml_path, debug_yaml_path)
     else:
-        os.remove(tmp_yaml_path)
+        try:
+            os.remove(tmp_yaml_path)
+        finally:
+            _remove_legacy_debug_yaml(debug_yaml_path)
 
     return config_dict
 
@@ -3078,12 +3158,16 @@ def _update_cluster_status(
                     # leakages from the assumption that the cluster will autostop.
                     success = True
                     reset_local_autostop = True
+                    strict_durable_reset = (
+                        backend._has_strict_autodown_intent(  # pylint: disable=protected-access
+                            handle.cluster_name))
                     try:
-                        backend.set_autostop(
+                        backend._set_autostop(  # pylint: disable=protected-access
                             handle,
                             -1,
                             autostop_lib.DEFAULT_AUTOSTOP_WAIT_FOR,
-                            stream_logs=False)
+                            stream_logs=False,
+                            cluster_lock_already_held=True)
                     except (exceptions.CommandError,
                             grpc.FutureTimeoutError) as e:
                         success = False
@@ -3097,6 +3181,12 @@ def _update_cluster_status(
                         success = False
                         logger.debug(f'Failed to reset autostop. Due to '
                                      f'{common_utils.format_exception(e)}')
+                    if strict_durable_reset:
+                        # The strict path owns its hash-fenced local update on
+                        # success and intentionally leaves CONFIGURING intact
+                        # on RPC failure. Never apply the legacy unfenced
+                        # best-effort reset in either case.
+                        reset_local_autostop = False
                     if reset_local_autostop:
                         global_user_state.set_cluster_autostop_value(
                             handle.cluster_name, -1, to_down=False)
@@ -3908,6 +3998,21 @@ def _update_records_with_handle_info(records_with_handle: List[Dict[str, Any]],
             record['cluster_name_on_cloud'] = handle.cluster_name_on_cloud
 
 
+def _update_records_with_autodown_intents(
+        records: List[Dict[str, Any]]) -> None:
+    """Add hash-fenced durable autodown recovery fields to cluster records."""
+    intents = global_user_state.get_autodown_intents(
+        [record['name'] for record in records])
+    for record in records:
+        intent = intents.get(record['name'])
+        if intent is None or intent.cluster_hash != record['cluster_hash']:
+            continue
+        record['autodown_recovery_state'] = intent.state.value
+        record['autodown_execution_strategy'] = intent.execution_strategy
+        record['autodown_generation'] = intent.generation
+        record['autodown_attempt_count'] = intent.attempt_count
+
+
 def get_clusters(
     refresh: common.StatusRefreshMode,
     cluster_names: Optional[Union[str, List[str]]] = None,
@@ -4081,6 +4186,7 @@ def get_clusters(
     if refresh == common.StatusRefreshMode.NONE:
         # Add resources to the records
         _update_records_with_resources(records)
+        _update_records_with_autodown_intents(records)
         return records
 
     plural = 's' if len(records) > 1 else ''
@@ -4189,6 +4295,7 @@ def get_clusters(
 
     # Add resources to the records
     _update_records_with_resources(kept_records)
+    _update_records_with_autodown_intents(kept_records)
     return kept_records
 
 

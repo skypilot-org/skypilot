@@ -1431,6 +1431,8 @@ def get_default_remote_identity(cloud: str) -> str:
     """Get the default remote identity for the specified cloud."""
     if cloud in ('kubernetes', 'ssh'):
         return RemoteIdentityOptions.SERVICE_ACCOUNT.value
+    if cloud == 'runpod':
+        return RemoteIdentityOptions.NO_UPLOAD.value
     return RemoteIdentityOptions.LOCAL_CREDENTIALS.value
 
 
@@ -2163,6 +2165,12 @@ def get_config_schema():
                 }
             },
         },
+        'runpod': {
+            'type': 'object',
+            'required': [],
+            'additionalProperties': False,
+            'properties': {}
+        },
         'vast': {
             'type': 'object',
             'required': [],
@@ -2170,6 +2178,13 @@ def get_config_schema():
             'properties': {
                 'datacenter_only': {
                     'type': 'boolean',
+                },
+                'reliable_hosts': {
+                    'type': 'boolean',
+                },
+                'provision_timeout': {
+                    'type': 'number',
+                    'exclusiveMinimum': 0,
                 },
                 'create_instance_kwargs': {
                     'type': 'object',

@@ -1,3 +1,4 @@
+import ast
 import os
 import tempfile
 import time
@@ -10,6 +11,7 @@ import pytest
 
 from sky import catalog
 from sky.catalog import common as catalog_common
+from sky.catalog.data_fetchers import fetch_runpod
 from sky.utils import annotations
 
 
@@ -18,6 +20,72 @@ def test_rtxpro6000_in_common_gpus():
     # list so that `sky show-gpus` surfaces it across clouds. Naming matches
     # the AWS and RunPod catalogs (no hyphens), not GCP's `nvidia-rtx-pro-6000`.
     assert 'RTXPRO6000' in catalog.get_common_gpus()
+
+
+def test_runpod_gpu_memory_uses_mib_catalog_contract():
+    gpu_info = fetch_runpod.get_gpu_info(
+        'H200-SXM',
+        {
+            'displayName': 'NVIDIA H200 SXM',
+            'manufacturer': 'NVIDIA',
+            'memoryInGb': 141,
+            'lowestPrice': {
+                'minVcpu': 12,
+                'minMemory': 188,
+            },
+        },
+        gpu_count=2,
+    )
+
+    assert gpu_info is not None
+    gpu_info_value = ast.literal_eval(gpu_info['GpuInfo'])
+    assert gpu_info_value['Gpus'][0]['MemoryInfo']['SizeInMiB'] == 144384
+    assert gpu_info_value['TotalGpuMemoryInMiB'] == 288768
+
+    runpod_catalog = pd.DataFrame([
+        {
+            'InstanceType': '2x_H200-SXM_SECURE',
+            'AcceleratorName': 'H200-SXM',
+            'AcceleratorCount': 2.0,
+            'vCPUs': 24.0,
+            'MemoryGiB': 376.0,
+            'Region': 'IN',
+            'SpotPrice': 7.98,
+            'Price': 8.78,
+            'AvailabilityZone': 'AP-IN-1',
+            'GpuInfo': gpu_info['GpuInfo'],
+        },
+    ])
+    accelerators = catalog_common.list_accelerators_impl(
+        'RunPod',
+        runpod_catalog,
+        gpus_only=True,
+        name_filter=None,
+        region_filter=None,
+        quantity_filter=None,
+    )
+
+    assert accelerators['H200-SXM'][0].device_memory == 141
+
+
+def test_runpod_invalid_gpu_warning_includes_vcpu_value(capsys):
+    gpu_info = fetch_runpod.get_gpu_info(
+        'B300',
+        {
+            'displayName': 'NVIDIA B300',
+            'manufacturer': 'NVIDIA',
+            'memoryInGb': 288,
+            'lowestPrice': {
+                'minVcpu': None,
+                'minMemory': 256,
+            },
+        },
+        gpu_count=1,
+    )
+
+    assert gpu_info is None
+    warning = capsys.readouterr().out
+    assert 'vCPUs must be a positive number, not None' in warning
 
 
 @mock.patch('sky.catalog.common.requests.get')
@@ -92,6 +160,69 @@ def test_read_catalog_triggers_update_on_stale_file(mock_get):
                                  '.meta', filename + '.lock')
         if os.path.exists(lock_path):
             os.remove(lock_path)
+
+
+@mock.patch('sky.catalog.common.requests.get')
+def test_fetch_catalog_text_uses_mirror_after_connection_error(mock_get):
+
+    class DummyResponse:
+
+        status_code = 200
+        text = 'InstanceType\nexample\n'
+
+        def raise_for_status(self):
+            return None
+
+    mock_get.side_effect = [
+        catalog_common.requests.exceptions.ConnectionError('reset'),
+        DummyResponse(),
+    ]
+
+    assert catalog_common.fetch_catalog_text('vast/vms.csv') == (
+        'InstanceType\nexample\n')
+    assert mock_get.call_count == 2
+    assert all(call.kwargs['timeout'] == 30 for call in mock_get.call_args_list)
+    assert mock_get.call_args_list[1].kwargs['url'].startswith(
+        catalog_common.constants.HOSTED_CATALOG_DIR_URL_S3_MIRROR)
+
+
+@mock.patch('sky.catalog.common.requests.get')
+def test_fetch_catalog_text_uses_mirror_after_rate_limit(mock_get):
+
+    class DummyResponse:
+
+        def __init__(self, status_code, text):
+            self.status_code = status_code
+            self.text = text
+
+        def raise_for_status(self):
+            if self.status_code == 429:
+                raise catalog_common.requests.exceptions.HTTPError(
+                    'rate limited')
+
+    mock_get.side_effect = [
+        DummyResponse(429, ''),
+        DummyResponse(200, 'InstanceType\nexample\n'),
+    ]
+
+    assert catalog_common.fetch_catalog_text('vast/vms.csv') == (
+        'InstanceType\nexample\n')
+    assert mock_get.call_count == 2
+    assert mock_get.call_args_list[1].kwargs['url'].startswith(
+        catalog_common.constants.HOSTED_CATALOG_DIR_URL_S3_MIRROR)
+
+
+@mock.patch('sky.catalog.common.requests.get')
+def test_fetch_catalog_text_raises_after_both_endpoints_fail(mock_get):
+    primary_error = catalog_common.requests.exceptions.ConnectionError('reset')
+    fallback_error = catalog_common.requests.exceptions.Timeout('timeout')
+    mock_get.side_effect = [primary_error, fallback_error]
+
+    with pytest.raises(catalog_common.CatalogFetchError) as exc_info:
+        catalog_common.fetch_catalog_text('vast/vms.csv')
+
+    assert exc_info.value.__cause__ is fallback_error
+    assert mock_get.call_count == 2
 
 
 @pytest.mark.parametrize(

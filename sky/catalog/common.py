@@ -32,6 +32,8 @@ else:
 
 logger = sky_logging.init_logger(__name__)
 
+_CATALOG_FETCH_TIMEOUT_SECONDS = 30
+
 # Catalogs are a regeneratable cache, downloaded from the hosted catalog
 # mirror on first read. Route them through SKY_RUNTIME_DIR (per the
 # pattern documented at sky/skylet/constants.py:9-22) so they live on
@@ -189,6 +191,35 @@ class LazyDataFrame:
     def __setitem__(self, key, value):
         # Delegate the set operation to the underlying DataFrame
         self._load_df()[key] = value
+
+
+class CatalogFetchError(RuntimeError):
+    """Raised when a hosted catalog cannot provide a valid current response."""
+
+
+def fetch_catalog_text(filename: str) -> str:
+    """Fetch one hosted catalog response without reading or updating local
+    cache."""
+    assert filename.endswith('.csv'), 'The catalog file must be a CSV file.'
+    url = f'{constants.HOSTED_CATALOG_DIR_URL}/{constants.CATALOG_SCHEMA_VERSION}/{filename}'  # pylint: disable=line-too-long
+    url_fallback = f'{constants.HOSTED_CATALOG_DIR_URL_S3_MIRROR}/{constants.CATALOG_SCHEMA_VERSION}/{filename}'  # pylint: disable=line-too-long
+    headers = {'User-Agent': 'SkyPilot/0.7'}
+    last_error = None
+    for catalog_url in (url, url_fallback):
+        try:
+            response = requests.get(
+                url=catalog_url,
+                headers=headers,
+                timeout=_CATALOG_FETCH_TIMEOUT_SECONDS,
+            )
+            response.raise_for_status()
+            return response.text
+        except requests.exceptions.RequestException as exc:
+            last_error = exc
+
+    assert last_error is not None
+    raise CatalogFetchError(
+        f'Failed to fetch current catalog {filename}.') from last_error
 
 
 def read_catalog(filename: str,

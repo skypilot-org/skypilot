@@ -75,9 +75,10 @@ RUN cd /skypilot && \
 
 
 # Stage 3: Main image
-FROM python:3.10.19-slim
+FROM python:3.10.19-slim AS runtime
 
 ARG INSTALL_FROM_SOURCE=true
+ARG SKYPILOT_INSTALL_EXTRAS=all-except-azure
 
 # Copy Google Cloud SDK from Stage 1
 COPY --from=gcloud-apt-install /usr/lib/google-cloud-sdk /opt/google-cloud-sdk
@@ -124,9 +125,6 @@ RUN ARCH=${TARGETARCH:-$(case "$(uname -m)" in \
 RUN curl -sSL https://storage.eu-north1.nebius.cloud/cli/install.sh | NEBIUS_INSTALL_FOLDER=/usr/local/bin bash
 # Install uv
 RUN curl -LsSf https://astral.sh/uv/install.sh | sh && \
-    # Cap azure-cli<2.87.0: 2.87.0 pulls the broken azure-mgmt-storage 25.0.0
-    # (see sky/setup_files/dependencies.py).
-    ~/.local/bin/uv pip install --prerelease allow "azure-cli<2.87.0" --system && \
     # Upgrade setuptools in base image to mitigate CVE-2024-6345
     ~/.local/bin/uv pip install --system --upgrade setuptools==78.1.1 && \
     ~/.local/bin/uv cache clean && \
@@ -141,7 +139,7 @@ COPY --from=process-source /skypilot /skypilot
 RUN cd /skypilot && \
     if [ "$INSTALL_FROM_SOURCE" = "true" ]; then \
         echo "Installing from source in editable mode" && \
-        ~/.local/bin/uv pip install -e ".[all]" --system; \
+        ~/.local/bin/uv pip install -e ".[${SKYPILOT_INSTALL_EXTRAS}]" --system; \
     else \
         echo "Installing from wheel file" && \
         WHEEL_FILE=$(ls dist/*skypilot*.whl 2>/dev/null | head -1) && \
@@ -150,7 +148,7 @@ RUN cd /skypilot && \
             ls -la /skypilot/dist/ && \
             exit 1; \
         fi && \
-        ~/.local/bin/uv pip install "${WHEEL_FILE}[all]" --system && \
+        ~/.local/bin/uv pip install "${WHEEL_FILE}[${SKYPILOT_INSTALL_EXTRAS}]" --system && \
         echo "Skipping dashboard build for wheel installation"; \
     fi && \
     # Cleanup all caches to reduce the image size
@@ -162,3 +160,16 @@ RUN cd /skypilot && \
     if [ "$INSTALL_FROM_SOURCE" != "true" ]; then \
         rm -rf /skypilot; \
     fi
+
+# Test-only target.  compose.test.yml bind-mounts the working tree so test
+# files remain excluded from the production image.
+FROM runtime AS test
+
+RUN cd /skypilot && \
+    ~/.local/bin/uv pip install --prerelease allow \
+        "azure-cli>=2.65.0,<2.87.0" --system && \
+    ~/.local/bin/uv pip install -e ".[all]" --system && \
+    ~/.local/bin/uv pip install -r requirements-dev.txt --system
+
+# Keep the existing production runtime as Docker's default final target.
+FROM runtime

@@ -6,13 +6,109 @@
 #
 """Vast library wrapper for SkyPilot."""
 from pathlib import Path
+import re
 import shlex
-from typing import Any, Dict, List, Optional
+import time
+from typing import Any, Dict, Iterable, List, Optional
 
+from sky import exceptions
 from sky import sky_logging
 from sky.adaptors import vast
+from sky.provision import constants as provision_constants
+from sky.utils import resources_utils
 
 logger = sky_logging.init_logger(__name__)
+
+_SHOW_INSTANCE_MAX_ATTEMPTS = 3
+_SHOW_INSTANCE_RETRY_SECONDS = 1
+_OFFER_UNAVAILABLE_ERROR_SNIPPETS = (
+    'unavailable',
+    'no longer rentable',
+    'already been rented',
+    'already rented',
+)
+_REGISTRY_LOGIN_OVERRIDE_KEYS = frozenset({'login', 'image_login'})
+
+
+def _validate_registry_login_kwargs(
+        create_instance_kwargs: Dict[str, Any]) -> None:
+    """Reject provider-specific registry credentials.
+
+    SkyPilot derives the credentials from the task's complete
+    SKYPILOT_DOCKER_* secret triplet, which works consistently across
+    providers and keeps precedence unambiguous.
+    """
+    override_keys = _REGISTRY_LOGIN_OVERRIDE_KEYS & set(create_instance_kwargs)
+    if override_keys:
+        raise ValueError(
+            'Vast registry credentials must be supplied through the complete '
+            'SKYPILOT_DOCKER_* task-secret trio; '
+            'vast.create_instance_kwargs.login and image_login are not '
+            'supported.')
+
+
+def _is_offer_unavailable_error(exc: Exception) -> bool:
+    """Return whether Vast rejected creation because this offer vanished."""
+    message = str(exc).lower()
+    return 'offer' in message and any(
+        snippet in message for snippet in _OFFER_UNAVAILABLE_ERROR_SNIPPETS)
+
+
+def _get_created_instance(contract_id: str) -> Dict[str, Any]:
+    """Read a newly created Vast contract without issuing another create.
+
+    Vast's create endpoint can succeed before its read path observes the new
+    contract. Retrying ``create_instance`` in that window risks a duplicate
+    paid instance, so only the read is retried.
+    """
+    for attempt in range(_SHOW_INSTANCE_MAX_ATTEMPTS):
+        try:
+            return vast.vast().show_instance(id=contract_id)
+        except Exception:  # pylint: disable=broad-except
+            if attempt + 1 == _SHOW_INSTANCE_MAX_ATTEMPTS:
+                raise
+            time.sleep(_SHOW_INSTANCE_RETRY_SECONDS)
+    raise RuntimeError('Failed to read the newly created Vast instance.')
+
+
+def normalize_env(user_env: Any) -> Dict[str, Any]:
+    """Convert supported create-instance environment formats to a mapping."""
+    env_dict: Dict[str, Any] = {'__SOURCE': 'skypilot'}
+    if user_env is None:
+        return env_dict
+    if isinstance(user_env, dict):
+        env_dict.update(user_env)
+        return env_dict
+    if isinstance(user_env, str):
+        for match in re.finditer(r'-e\s+(\w+)=([^\s]*)', user_env):
+            env_dict[match.group(1)] = match.group(2)
+        return env_dict
+    raise ValueError(
+        'Vast create_instance_kwargs[\'env\'] must be a mapping or string.')
+
+
+def redact_log_output(output: str, sensitive_values: Iterable[Any]) -> str:
+    """Redact known secret values before writing Vast diagnostics to logs."""
+    redacted_output = output
+    values = {str(value) for value in sensitive_values if value}
+    for value in sorted(values, key=len, reverse=True):
+        redacted_output = redacted_output.replace(value, '<redacted>')
+    return redacted_output
+
+
+def get_api_key() -> str:
+    """Returns the configured Vast API key for diagnostic-log redaction."""
+    return str(vast.vast().client.api_key)
+
+
+def get_instance_logs(instance_id: str,
+                      daemon_logs: bool,
+                      tail: int = 2000) -> str:
+    """Gets a bounded normal or daemon log tail for a Vast instance."""
+    output = vast.vast().logs(instance_id=int(instance_id),
+                              tail=str(tail),
+                              daemon_logs=daemon_logs)
+    return str(output)
 
 
 def list_instances() -> Dict[str, Dict[str, Any]]:
@@ -21,16 +117,21 @@ def list_instances() -> Dict[str, Dict[str, Any]]:
 
     instance_dict: Dict[str, Dict[str, Any]] = {}
     for instance in instances:
-        instance['id'] = str(instance['id'])
-        info = instance
+        info = dict(instance)
+        info['id'] = str(info['id'])
 
-        if isinstance(instance['actual_status'], str):
-            info['status'] = instance['actual_status'].upper()
+        actual_status = info.get('actual_status')
+        if isinstance(actual_status, str):
+            info['status'] = actual_status.upper()
+        elif actual_status is None:
+            # Vast reports null while a new contract is being provisioned.
+            # Treat it as a pending lifecycle state, not a host outage.
+            info['status'] = 'NULL'
         else:
             info['status'] = 'UNKNOWN'
-        info['name'] = instance['label']
+        info['name'] = info.get('label')
 
-        instance_dict[instance['id']] = info
+        instance_dict[info['id']] = info
 
     return instance_dict
 
@@ -43,6 +144,10 @@ def launch(name: str,
            ports: Optional[List[int]],
            preemptible: bool,
            secure_only: bool,
+           reliable_hosts: bool = False,
+           network_tier: resources_utils.NetworkTier = (
+               resources_utils.NetworkTier.STANDARD),
+           excluded_machine_ids: Optional[List[Any]] = None,
            private_docker_registry: Optional[bool] = None,
            login: Optional[str] = None,
            create_instance_kwargs: Optional[Dict[str, Any]] = None,
@@ -51,8 +156,8 @@ def launch(name: str,
 
     Converts the instance_type to the Vast GPU name, finds the specs for the
     GPU, and launches the instance. User-provided parameters in
-    create_instance_kwargs are passed through to the Vast API, allowing full
-    access to Vast's instance creation options.
+    create_instance_kwargs are passed through to the Vast API, except for
+    private-registry credentials, which SkyPilot derives from task secrets.
 
     Supported Vast API parameters (via create_instance_kwargs):
       - image: Docker image to use
@@ -63,7 +168,6 @@ def launch(name: str,
       - extra: Extra docker run arguments
       - onstart_cmd: Command to run on instance start
       - onstart: Path to a local script file to run on start
-      - login: Docker registry login (e.g., "-u user -p pass registry")
       - python_utf8: Enable Python UTF-8 mode
       - lang_utf8: Enable system UTF-8 locale
       - jupyter_lab: Use JupyterLab instead of Jupyter
@@ -111,14 +215,24 @@ def launch(name: str,
     # `ports` is currently unused. Keep it in the signature for caller
     # compatibility and future use (port-forwarding is handled separately).
     del ports
+    create_instance_kwargs = dict(create_instance_kwargs or {})
+    _validate_registry_login_kwargs(create_instance_kwargs)
+    if private_docker_registry and not login:
+        raise ValueError(
+            'Private Docker registry requested but no SkyPilot registry '
+            'credentials were provided.')
+
     cpu_ram = float(instance_type.split('-')[-1]) / 1024
     gpu_name = instance_type.split('-')[1].replace('_', ' ')
     num_gpus = int(instance_type.split('-')[0].replace('x', ''))
 
+    # The optimizer's catalog region is descriptive metadata, not a user
+    # placement requirement. Final selection searches the live marketplace
+    # without inheriting that stale catalog location.
+    del region
     query = [
         'chunked=true',
         'georegion=true',
-        f'geolocation="{region[-2:]}"',
         f'disk_space>={disk_size}',
         f'num_gpus={num_gpus}',
         f'gpu_name="{gpu_name}"',
@@ -127,19 +241,42 @@ def launch(name: str,
     if secure_only:
         query.append('datacenter=true')
         query.append('hosting_type>=1')
+    if reliable_hosts:
+        query.extend([
+            'reliability>=0.99',
+            'verified=true',
+            'datacenter=true',
+            'hosting_type>=1',
+        ])
+    minimum_bandwidth = (
+        provision_constants.MARKETPLACE_BEST_NETWORK_MIN_BANDWIDTH_MBPS)
+    if (reliable_hosts or network_tier is resources_utils.NetworkTier.BEST):
+        query.append(f'inet_down>={minimum_bandwidth}')
+    if network_tier is resources_utils.NetworkTier.BEST:
+        query.append(f'inet_up>={minimum_bandwidth}')
     query_str = ' '.join(query)
 
     instance_list = vast.vast().search_offers(query=query_str)
 
+    excluded_machine_id_strings = {
+        str(machine_id) for machine_id in excluded_machine_ids or []
+    }
+    if not isinstance(instance_list, int):
+        instance_list = [
+            offer for offer in instance_list
+            if str(offer.get('machine_id')) not in excluded_machine_id_strings
+        ]
+
     if isinstance(instance_list, int) or len(instance_list) == 0:
-        raise RuntimeError('Failed to create instances, could not find an '
-                           'offer that satisfies the requirements '
-                           f'"{query_str}".')
+        raise exceptions.VastOfferUnavailableError(
+            'Failed to create instances, could not find an '
+            'offer that satisfies the requirements '
+            f'"{query_str}".')
 
     instance_touse = instance_list[0]
 
     # Start with user-provided kwargs as the base
-    launch_params: Dict[str, Any] = dict(create_instance_kwargs or {})
+    launch_params: Dict[str, Any] = dict(create_instance_kwargs)
     # Remove None values to avoid overriding defaults
     launch_params = {k: v for k, v in launch_params.items() if v is not None}
 
@@ -167,13 +304,10 @@ def launch(name: str,
     if 'disk' not in launch_params and not use_template:
         launch_params['disk'] = disk_size
 
-    # Handle login - from function arg or user kwargs
-    if login and 'login' not in launch_params:
+    # The SkyPilot-derived login is the only supported registry credential
+    # source for Vast provisioning.
+    if login:
         launch_params['login'] = login
-    if private_docker_registry and 'login' not in launch_params:
-        raise RuntimeError(
-            'Private docker registry requested but no login credentials '
-            'were provided.')
 
     # Handle price/bid_price - user can override
     # Vast.ai SDK uses 'price' since SDK v6+; normalize bid_price for compat
@@ -225,21 +359,16 @@ def launch(name: str,
     # Handle env - Vast.ai SDK requires env as a dict, not a CLI-style string.
     # Merge user-provided env (dict or legacy string) with skypilot metadata.
     user_env = launch_params.pop('env', None)
-    env_dict: Dict[str, str] = {'__SOURCE': 'skypilot'}
-    if user_env is not None:
-        if isinstance(user_env, dict):
-            env_dict.update(user_env)
-        elif isinstance(user_env, str):
-            # Parse legacy "-e KEY=VAL" style strings for backwards compat
-            import re  # pylint: disable=import-outside-toplevel
-            for match in re.finditer(r'-e\s+(\w+)=([^\s]*)', user_env):
-                env_dict[match.group(1)] = match.group(2)
+    env_dict = normalize_env(user_env)
     launch_params['env'] = env_dict
 
-    new_instance_contract = vast.vast().create_instance(**launch_params)
-
-    new_instance = vast.vast().show_instance(
-        id=new_instance_contract['new_contract'])
+    try:
+        new_instance_contract = vast.vast().create_instance(**launch_params)
+    except Exception as exc:  # pylint: disable=broad-except
+        if _is_offer_unavailable_error(exc):
+            raise exceptions.VastOfferUnavailableError(str(exc)) from exc
+        raise
+    new_instance = _get_created_instance(new_instance_contract['new_contract'])
 
     return new_instance['id']
 

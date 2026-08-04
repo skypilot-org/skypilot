@@ -15,8 +15,12 @@ terminated.
 
 .. note::
 
-  The autostop/autodown logic is executed by the remote cluster.  Your local
-  machine does *not* need to stay up for them to take effect.
+  The remote cluster detects idleness. Provider teardown normally starts on
+  the cluster, but providers that use server-owned teardown also persist a
+  generation-fenced intent on the API server. The server can then execute or
+  retry teardown if the head node cannot complete it. Your local machine does
+  *not* need to stay up for autostop or autodown to take effect; server-owned
+  teardown requires the API server to remain available.
 
 Setting autostop
 ~~~~~~~~~~~~~~~~
@@ -77,6 +81,19 @@ Alternatively, pass the ``--down`` flag to either :code:`sky autostop` or ``sky 
    sky autostop mycluster2 -i 10 --down
 
 
+RunPod credential boundary
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Direct RunPod clusters default to ``NO_UPLOAD``. SkyPilot does not mount the
+local long-lived ``~/.runpod/config.toml`` credential on the head node. The
+head can use RunPod's `pod-scoped identity
+<https://docs.runpod.io/pods/templates/environment-variables>`__ for its first
+teardown attempt, while the API server retains a durable, generation-fenced
+fallback that uses the server's provider credential. An explicit
+``LOCAL_CREDENTIALS`` override opts back into mounting the local RunPod
+credential on the cluster.
+
+
 Canceling autostop/autodown
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -99,6 +116,8 @@ To view the status of the cluster, use ``sky dashboard`` or ``sky status``:
    mycluster2   AWS (us-east-1) 2x(cpus=8, m4.2xlarge, ...)   UP       10 min(down)   1 min ago
 
 Clusters that are autostopped/autodowned are automatically removed from the status table.
+For server-owned autodown, the dashboard also reports the persisted recovery
+state, execution strategy, generation, and retry count.
 
 .. _auto-stop-setting-idleness-behavior:
 

@@ -1,3 +1,6 @@
+# task runner
+poethepoet>=0.40.0
+
 # formatting
 # match the version with .pre-commit-config.yaml
 yapf==0.32.0
@@ -47,8 +50,9 @@ boto3-stubs[s3,ec2,sts,iam,service-quotas]
 # For postgres
 psycopg2-binary==2.9.10
 
-# For helm okta test
-selenium==4.33.0
+# For helm okta test; keeps Python 3.9 support and provides urllib3>=2.5,<3,
+# which intersects vastai-sdk==1.5.0's urllib3>=2.7,<3 requirement.
+selenium==4.36.0
 webdriver-manager==4.0.2
 
 # For grpcio/protobuf code generation

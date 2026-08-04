@@ -235,6 +235,12 @@ def add_column_to_table_alembic(
     """
     from alembic import op  # pylint: disable=import-outside-toplevel
 
+    bind = op.get_bind()
+    inspector = sqlalchemy.inspect(bind)
+    columns = inspector.get_columns(table_name)
+    if any(column['name'] == column_name for column in columns):
+        return
+
     try:
         # Create the column with server_default if provided
         column = sqlalchemy.Column(column_name,
@@ -251,7 +257,7 @@ def add_column_to_table_alembic(
 
         if value_to_replace_existing_entries is not None:
             # Use parameterized query for safety
-            op.get_bind().execute(
+            bind.execute(
                 sqlalchemy.text(f'UPDATE {table_name} '
                                 f'SET {column_name} = :replacement_value '
                                 f'WHERE {column_name} IS NULL'),

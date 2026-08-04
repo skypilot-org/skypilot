@@ -130,6 +130,18 @@ SKY_REMOTE_WORKDIR = constants.SKY_REMOTE_WORKDIR
 
 logger = sky_logging.init_logger(__name__)
 
+
+class _DurableAutodownAlreadyClaimedError(RuntimeError):
+    """The skylet or server already owns an irreversible teardown."""
+
+
+_IRREVERSIBLE_DURABLE_AUTODOWN_STATES = frozenset({
+    global_user_state.AutodownIntentState.PREPARING,
+    global_user_state.AutodownIntentState.READY,
+    global_user_state.AutodownIntentState.EXECUTING,
+    global_user_state.AutodownIntentState.RETRY_WAIT,
+})
+
 _PATH_SIZE_MEGABYTES_WARN_THRESHOLD = 256
 
 # Timeout (seconds) for provision progress: if in this duration no new nodes
@@ -1160,6 +1172,7 @@ class RetryingVmProvisioner(object):
                         volume_mounts=volume_mounts,
                         cloud_specific_failover_overrides=failover_overrides,
                         extra_template_variables=extra_vars,
+                        task=task,
                     )
                 except exceptions.ResourcesUnavailableError as e:
                     # Failed due to catalog issue, e.g. image not found, or
@@ -1237,6 +1250,9 @@ class RetryingVmProvisioner(object):
                     stable_internal_external_ips=prev_cluster_ips,
                     stable_ssh_ports=prev_ssh_ports,
                     cluster_info=prev_cluster_info,
+                    teardown_execution_strategy=(
+                        sky_cloud.TeardownExecutionStrategy(
+                            config_dict['teardown_execution_strategy'])),
                 )
                 usage_lib.messages.usage.update_final_cluster_status(
                     status_lib.ClusterStatus.INIT)
@@ -1988,24 +2004,26 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
     """
     # Bump if any fields get added/removed/changed, and add backward
     # compatibility logic in __setstate__ and/or __getstate__.
-    _VERSION = 13
+    _VERSION = 14
 
     # Set by from_dict() since cached_cluster_info is not available
     # when reconstructing from a dict.
     _ssh_user: Optional[str] = None
 
     def __init__(
-            self,
-            *,
-            cluster_name: str,
-            cluster_name_on_cloud: str,
-            cluster_yaml: Optional[str],
-            launched_nodes: int,
-            launched_resources: resources_lib.Resources,
-            stable_internal_external_ips: Optional[List[Tuple[str,
-                                                              str]]] = None,
-            stable_ssh_ports: Optional[List[int]] = None,
-            cluster_info: Optional[provision_common.ClusterInfo] = None
+        self,
+        *,
+        cluster_name: str,
+        cluster_name_on_cloud: str,
+        cluster_yaml: Optional[str],
+        launched_nodes: int,
+        launched_resources: resources_lib.Resources,
+        stable_internal_external_ips: Optional[List[Tuple[str, str]]] = None,
+        stable_ssh_ports: Optional[List[int]] = None,
+        cluster_info: Optional[provision_common.ClusterInfo] = None,
+        teardown_execution_strategy: sky_cloud.
+        TeardownExecutionStrategy = sky_cloud.TeardownExecutionStrategy.
+        LEGACY_HEAD_CREDENTIALS
     ) -> None:
         self._version = self._VERSION
         self.cluster_name = cluster_name
@@ -2024,6 +2042,7 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
         self.cached_cluster_info = cluster_info
         self.launched_nodes = launched_nodes
         self.launched_resources = launched_resources
+        self.teardown_execution_strategy = teardown_execution_strategy
         self.docker_user: Optional[str] = None
         self.is_grpc_enabled = True
         # A handle is created before provisioning runs, so nothing is set up
@@ -2459,6 +2478,13 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
                     wait_elapsed = time.perf_counter() - start_time
                     logger.debug(f'Acquired exclusive lock for {lock_id} after '
                                  f'{wait_elapsed:.2f}s')
+                    # Another process may have opened the tunnel after this
+                    # process read the metadata and before it acquired the
+                    # exclusive lock.
+                    tunnel = self._get_skylet_ssh_tunnel()
+                    if tunnel is not None and _is_tunnel_healthy(tunnel):
+                        return grpc.insecure_channel(f'localhost:{tunnel.port}',
+                                                     options=grpc_options)
                     try:
                         tunnel = self._open_and_update_skylet_tunnel()
                         return grpc.insecure_channel(f'localhost:{tunnel.port}',
@@ -2662,6 +2688,8 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
             'ssh_user': self.ssh_user,
             'provision_runtime_metadata': dataclasses.asdict(
                 self.provision_runtime_metadata),
+            'teardown_execution_strategy':
+                self.teardown_execution_strategy.value,
         }
 
     @classmethod
@@ -2690,6 +2718,11 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
         handle.is_grpc_enabled = d.get('is_grpc_enabled', True)
         handle.cached_cluster_info = None
         handle._ssh_user = d.get('ssh_user')
+        handle.teardown_execution_strategy = (
+            sky_cloud.TeardownExecutionStrategy(
+                d.get(
+                    'teardown_execution_strategy', sky_cloud.
+                    TeardownExecutionStrategy.LEGACY_HEAD_CREDENTIALS.value)))
         runtime_metadata = d.get('provision_runtime_metadata')
         if runtime_metadata is not None:
             known = {
@@ -2717,6 +2750,9 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
                       provision_common.ProvisionRuntimeMetadata):
             state['provision_runtime_metadata'] = dataclasses.asdict(
                 runtime_metadata)
+        execution_strategy = state.get('teardown_execution_strategy')
+        if isinstance(execution_strategy, sky_cloud.TeardownExecutionStrategy):
+            state['teardown_execution_strategy'] = execution_strategy.value
         return state
 
     def __setstate__(self, state):
@@ -2779,6 +2815,14 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
         if version >= 12:
             # DEPRECATED in favor of skylet_ssh_tunnel_metadata column in the DB
             state.pop('skylet_ssh_tunnel', None)
+
+        if version < 14:
+            state['teardown_execution_strategy'] = (
+                sky_cloud.TeardownExecutionStrategy.LEGACY_HEAD_CREDENTIALS)
+        elif isinstance(state.get('teardown_execution_strategy'), str):
+            state['teardown_execution_strategy'] = (
+                sky_cloud.TeardownExecutionStrategy(
+                    state['teardown_execution_strategy']))
 
         # provision_runtime_metadata is serialized as a plain dict (see
         # __getstate__). Reconstruct the dataclass here, defaulting if absent.
@@ -2921,12 +2965,26 @@ class SkyletClient:
     ) -> 'autostopv1_pb2.SetAutostopResponse':
         return self._autostop_stub.SetAutostop(request, timeout=timeout)
 
+    def apply_autodown_intent(
+        self,
+        request: 'autostopv1_pb2.SetAutostopRequest',
+        timeout: Optional[float] = constants.SKYLET_GRPC_TIMEOUT_SECONDS
+    ) -> 'autostopv1_pb2.SetAutostopResponse':
+        return self._autostop_stub.ApplyAutodownIntent(request, timeout=timeout)
+
     def is_autostopping(
         self,
         request: 'autostopv1_pb2.IsAutostoppingRequest',
         timeout: Optional[float] = constants.SKYLET_GRPC_TIMEOUT_SECONDS
     ) -> 'autostopv1_pb2.IsAutostoppingResponse':
         return self._autostop_stub.IsAutostopping(request, timeout=timeout)
+
+    def get_autodown_status(
+        self,
+        timeout: Optional[float] = constants.SKYLET_GRPC_TIMEOUT_SECONDS
+    ) -> 'autostopv1_pb2.IsAutostoppingResponse':
+        request = autostopv1_pb2.IsAutostoppingRequest()
+        return self.is_autostopping(request, timeout=timeout)
 
     def add_job(
         self,
@@ -4042,7 +4100,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
         def _setup_node(node_id: int) -> None:
             setup_envs = task_lib.get_plaintext_envs_and_secrets(
-                task.envs_and_secrets)
+                task.runtime_envs_and_secrets)
             setup_envs.update(self._skypilot_predefined_env_vars(handle))
             setup_envs['SKYPILOT_SETUP_NODE_IPS'] = '\n'.join(internal_ips)
             setup_envs['SKYPILOT_SETUP_NODE_RANK'] = str(node_id)
@@ -4613,6 +4671,51 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 if not storage.persistent:
                     storage.delete()
 
+    def _fence_durable_autodown_before_teardown(
+            self, handle: CloudVmRayResourceHandle,
+            terminate: bool) -> CloudVmRayResourceHandle:
+        """Linearize a manual teardown against a live durable autodown."""
+        record = global_user_state.get_cluster_from_name(
+            handle.cluster_name, include_user_info=False, summary_response=True)
+        if record is None:
+            return handle
+        current_handle = record['handle']
+        if isinstance(current_handle, CloudVmRayResourceHandle):
+            handle = current_handle
+
+        intent = global_user_state.get_autodown_intent(handle.cluster_name)
+        if (intent is None or intent.cluster_hash != record['cluster_hash'] or
+                not self._is_strict_autodown_strategy(intent.execution_strategy)
+                or intent.state in {
+                    global_user_state.AutodownIntentState.SUCCEEDED,
+                    global_user_state.AutodownIntentState.CANCELLED,
+                }):
+            return handle
+        if intent.state in _IRREVERSIBLE_DURABLE_AUTODOWN_STATES:
+            if terminate:
+                return handle
+            raise RuntimeError(
+                f'Cluster {handle.cluster_name!r} cannot be manually stopped '
+                'because durable autodown teardown has already begun.')
+        try:
+            self._set_autostop(
+                handle,
+                -1,
+                autostop_lib.DEFAULT_AUTOSTOP_WAIT_FOR,
+                down=False,
+                stream_logs=False,
+                cluster_lock_already_held=True,
+            )
+        except _DurableAutodownAlreadyClaimedError as e:
+            if terminate:
+                # Manual down is the same irreversible outcome. Keep the
+                # exact claimed generation actionable for reconciliation.
+                return handle
+            raise RuntimeError(
+                f'Cluster {handle.cluster_name!r} cannot be manually stopped '
+                'because durable autodown teardown has already begun.') from e
+        return handle
+
     def _teardown(self,
                   handle: CloudVmRayResourceHandle,
                   terminate: bool,
@@ -4682,6 +4785,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             lock.force_unlock()
             try:
                 with lock:
+                    handle = self._fence_durable_autodown_before_teardown(
+                        handle, terminate)
                     self.teardown_no_lock(
                         handle,
                         terminate,
@@ -5405,7 +5510,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                          purge: bool = False,
                          post_teardown_cleanup: bool = True,
                          refresh_cluster_status: bool = True,
-                         remove_from_db: bool = True) -> None:
+                         remove_from_db: bool = True,
+                         expected_cluster_hash: Optional[str] = None) -> None:
         """Teardown the cluster without acquiring the cluster status lock.
 
         NOTE: This method should not be called without holding the cluster
@@ -5414,9 +5520,25 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         refresh_cluster_status is only used internally in the status refresh
         process, and should not be set to False in other cases.
 
+        expected_cluster_hash prevents a name-based status refresh from
+        adopting a different incarnation before provider teardown.
+
         Raises:
             RuntimeError: If the cluster fails to be terminated/stopped.
         """
+
+        def get_fenced_handle() -> Optional[CloudVmRayResourceHandle]:
+            if expected_cluster_hash is None:
+                return handle
+            record = global_user_state.get_cluster_from_name(
+                handle.cluster_name,
+                include_user_info=False,
+                summary_response=True)
+            if (record is None or
+                    record['cluster_hash'] != expected_cluster_hash):
+                return None
+            return typing.cast(CloudVmRayResourceHandle, record['handle'])
+
         try:
             handle.close_skylet_ssh_tunnel()
         except Exception as e:  # pylint: disable=broad-except
@@ -5464,7 +5586,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                         force_refresh_statuses={status_lib.ClusterStatus.INIT},
                         cluster_lock_already_held=True,
                         retry_if_missing=False))
-                if refreshed_handle is not None:
+                if (refreshed_handle is not None and
+                        expected_cluster_hash is None):
                     # Use the latest handle from status refresh to avoid acting
                     # on stale runtime metadata persisted earlier in launch.
                     handle = refreshed_handle
@@ -5474,6 +5597,10 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     'Failed to fetch cluster status for '
                     f'{handle.cluster_name!r}. Assuming the cluster is still '
                     'up.')
+        fenced_handle = get_fenced_handle()
+        if fenced_handle is None:
+            return
+        handle = fenced_handle
         if not cluster_status_fetched:
             status = global_user_state.get_status_from_cluster_name(
                 handle.cluster_name)
@@ -5534,6 +5661,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                             'node has already been terminated. It is fine to '
                             'skip this.')
 
+            if get_fenced_handle() is None:
+                return
             try:
                 provisioner.teardown_cluster(repr(cloud),
                                              resources_utils.ClusterName(
@@ -5552,6 +5681,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     raise
 
             if post_teardown_cleanup:
+                if get_fenced_handle() is None:
+                    return
                 self.post_teardown_cleanup(handle, terminate, purge,
                                            remove_from_db)
             return
@@ -5587,6 +5718,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 vpc_provider = IBMVPCProvider(
                     config_provider['resource_group_id'], region,
                     cluster_name_on_cloud)
+                if get_fenced_handle() is None:
+                    return
                 vpc_provider.delete_vpc(vpc_id, region)
                 # successfully removed cluster as no exception was raised
                 returncode = 0
@@ -5607,6 +5740,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     # FIXME(zongheng): support retries. This call can fail for
                     # example due to GCP returning list requests per limit
                     # exceeded.
+                    if get_fenced_handle() is None:
+                        return
                     returncode, stdout, stderr = log_lib.run_with_log(
                         ['ray', 'down', '-y', f.name],
                         log_abs_path,
@@ -5646,6 +5781,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         # (i.e., prev_status is None), as the cleanup has already been done
         # if the cluster is removed from the status table.
         if post_teardown_cleanup:
+            if get_fenced_handle() is None:
+                return
             self.post_teardown_cleanup(handle, terminate, purge)
 
     def post_teardown_cleanup(self,
@@ -5871,7 +6008,432 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                      hook: Optional[str] = None,
                      hook_timeout: Optional[int] = None,
                      hooks: Optional[List[Dict[str, Any]]] = None) -> None:
+        self._set_autostop(handle,
+                           idle_minutes_to_autostop,
+                           wait_for,
+                           down=down,
+                           stream_logs=stream_logs,
+                           hook=hook,
+                           hook_timeout=hook_timeout,
+                           hooks=hooks,
+                           cluster_lock_already_held=False)
+
+    @staticmethod
+    def _is_strict_autodown_strategy(strategy: str) -> bool:
+        return strategy in {
+            sky_cloud.TeardownExecutionStrategy.SERVER_ONLY.value,
+            sky_cloud.TeardownExecutionStrategy.HEAD_WITH_SERVER_FALLBACK.value,
+        }
+
+    def _has_strict_autodown_intent(self, cluster_name: str) -> bool:
+        intent = global_user_state.get_autodown_intent(cluster_name)
+        if intent is None:
+            return False
+        record = global_user_state.get_cluster_from_name(
+            cluster_name, include_user_info=False, summary_response=True)
+        return (record is not None and
+                intent.cluster_hash == record['cluster_hash'] and
+                self._is_strict_autodown_strategy(intent.execution_strategy))
+
+    @staticmethod
+    def _make_autostop_request(
+        idle_minutes_to_autostop: int,
+        wait_for: Optional[autostop_lib.AutostopWaitFor], down: bool,
+        hook: Optional[str], hook_timeout: Optional[int],
+        hooks: Optional[List[Dict[str, Any]]]
+    ) -> 'autostopv1_pb2.SetAutostopRequest':
+        request = autostopv1_pb2.SetAutostopRequest(
+            idle_minutes=idle_minutes_to_autostop,
+            backend=CloudVmRayBackend.NAME,
+            wait_for=wait_for.to_protobuf() if wait_for is not None else
+            autostopv1_pb2.AUTOSTOP_WAIT_FOR_UNSPECIFIED,
+            down=down,
+        )
+        if hook:
+            request.hook = hook
+        if hook_timeout is not None:
+            request.hook_timeout = hook_timeout
+        # None preserves stored hooks; an empty list clears them; otherwise the
+        # supplied list replaces them.
+        if hooks is not None:
+            if hooks:
+                request.hooks.extend(autostop_lib.hooks_to_protobuf(hooks))
+            else:
+                request.clear_hooks = True
+        return request
+
+    @staticmethod
+    def _strategy_to_protobuf(
+        strategy: sky_cloud.TeardownExecutionStrategy
+    ) -> 'autostopv1_pb2.AutodownExecutionStrategy':
+        mapping = {
+            sky_cloud.TeardownExecutionStrategy.SERVER_ONLY:
+                autostopv1_pb2.AUTODOWN_EXECUTION_STRATEGY_SERVER_ONLY,
+            sky_cloud.TeardownExecutionStrategy.HEAD_WITH_SERVER_FALLBACK:
+                autostopv1_pb2.
+                AUTODOWN_EXECUTION_STRATEGY_HEAD_WITH_SERVER_FALLBACK,
+            sky_cloud.TeardownExecutionStrategy.LEGACY_HEAD_CREDENTIALS:
+                autostopv1_pb2.
+                AUTODOWN_EXECUTION_STRATEGY_LEGACY_HEAD_CREDENTIALS,
+        }
+        return mapping[strategy]
+
+    def _probe_durable_autodown(self, handle: CloudVmRayResourceHandle) -> None:
+        strategy = handle.teardown_execution_strategy.value
+        if not handle.is_grpc_enabled_with_flag:
+            raise exceptions.NotSupportedError(
+                'Strict durable autodown requires gRPC; the legacy SSH path '
+                f'is disabled for execution strategy {strategy!r}.')
+        try:
+            response = self.get_durable_autodown_status(handle)
+        except exceptions.SkyletMethodNotImplementedError as e:
+            raise exceptions.NotSupportedError(
+                'The cluster skylet does not implement durable autodown. '
+                'Restart the cluster to install a compatible skylet.') from e
+        if not response.supports_durable_autodown:
+            raise exceptions.NotSupportedError(
+                'The cluster skylet does not advertise durable autodown '
+                'support. Restart the cluster to install a compatible skylet.')
+
+    @staticmethod
+    def _get_durable_autodown_record(
+            cluster_name: str
+    ) -> Tuple[Dict[str, Any], CloudVmRayResourceHandle]:
+        record = global_user_state.get_cluster_from_name(cluster_name,
+                                                         include_user_info=True,
+                                                         summary_response=True)
+        if record is None:
+            raise RuntimeError(
+                f'Cluster {cluster_name!r} disappeared before autodown '
+                'configuration could be fenced.')
+        handle = record['handle']
+        if not isinstance(handle, CloudVmRayResourceHandle):
+            raise RuntimeError(
+                f'Cluster {cluster_name!r} no longer has a Cloud VM handle.')
+        return record, handle
+
+    def _prepare_durable_autodown_intent(
+        self, cluster_name: str, idle_minutes_to_autostop: int, down: bool,
+        probed_cluster_hash: str
+    ) -> Tuple[CloudVmRayResourceHandle, global_user_state.AutodownIntent,
+               Optional[global_user_state.AutodownIntent]]:
+        record, current_handle = self._get_durable_autodown_record(cluster_name)
+        if record['cluster_hash'] != probed_cluster_hash:
+            raise RuntimeError(
+                f'Cluster {cluster_name!r} incarnation changed after the '
+                'durable autodown capability probe; retry the request.')
+        current_intent = global_user_state.get_autodown_intent(cluster_name)
+        matching_intent = current_intent
+        if (matching_intent is not None and
+                matching_intent.cluster_hash != record['cluster_hash']):
+            matching_intent = None
+        if (matching_intent is not None and
+                matching_intent.state in _IRREVERSIBLE_DURABLE_AUTODOWN_STATES):
+            raise _DurableAutodownAlreadyClaimedError(
+                f'Durable autodown teardown has already begun for '
+                f'{cluster_name!r} and cannot be cancelled or reconfigured.')
+        strategy = current_handle.teardown_execution_strategy
+        if (strategy is
+                sky_cloud.TeardownExecutionStrategy.LEGACY_HEAD_CREDENTIALS and
+                matching_intent is not None and
+                self._is_strict_autodown_strategy(
+                    matching_intent.execution_strategy)):
+            strategy = sky_cloud.TeardownExecutionStrategy(
+                matching_intent.execution_strategy)
+        if not self._is_strict_autodown_strategy(strategy.value):
+            raise RuntimeError(
+                f'Cluster {cluster_name!r} teardown strategy changed before '
+                'the durable intent could be fenced.')
+
+        replace_kwargs: Dict[str, Any] = {}
+        if current_intent is not None:
+            replace_kwargs = {
+                'expected_cluster_hash': current_intent.cluster_hash,
+                'expected_generation': current_intent.generation,
+                'expected_states': {current_intent.state},
+            }
+        intent = global_user_state.create_or_replace_autodown_intent(
+            cluster_name=cluster_name,
+            cluster_hash=record['cluster_hash'],
+            idle_minutes=idle_minutes_to_autostop,
+            to_down=down,
+            execution_strategy=strategy.value,
+            user_hash=record.get('user_hash'),
+            workspace=record.get('workspace'),
+            **replace_kwargs,
+        )
+        if intent is None:
+            raise RuntimeError(
+                f'Durable autodown intent for {cluster_name!r} changed while '
+                'allocating a new generation; retry the request.')
+        return current_handle, intent, current_intent
+
+    @staticmethod
+    def _finalize_durable_autodown_intent(
+            intent: global_user_state.AutodownIntent,
+            terminal_state: global_user_state.AutodownIntentState) -> None:
+
+        def is_exact_terminal_state(
+                current: Optional[global_user_state.AutodownIntent]) -> bool:
+            return (current is not None and
+                    current.cluster_hash == intent.cluster_hash and
+                    current.generation == intent.generation and
+                    current.state is terminal_state and
+                    current.attempt_count == intent.attempt_count)
+
+        record = global_user_state.get_cluster_from_name(
+            intent.cluster_name, include_user_info=False, summary_response=True)
+        if record is None or record['cluster_hash'] != intent.cluster_hash:
+            raise RuntimeError(
+                f'Cluster {intent.cluster_name!r} incarnation changed while '
+                'applying durable autodown intent.')
+        try:
+            transitioned = global_user_state.compare_and_swap_autodown_intent(
+                cluster_name=intent.cluster_name,
+                cluster_hash=intent.cluster_hash,
+                generation=intent.generation,
+                expected_states={
+                    global_user_state.AutodownIntentState.CONFIGURING
+                },
+                expected_attempt_count=intent.attempt_count,
+                new_state=terminal_state,
+            )
+        except Exception:  # pylint: disable=broad-except
+            current_intent = global_user_state.get_autodown_intent(
+                intent.cluster_name)
+            if not is_exact_terminal_state(current_intent):
+                raise
+            transitioned = True
+        if not transitioned:
+            current_intent = global_user_state.get_autodown_intent(
+                intent.cluster_name)
+            if not is_exact_terminal_state(current_intent):
+                raise RuntimeError(
+                    f'Durable autodown generation {intent.generation} for '
+                    f'{intent.cluster_name!r} was superseded before '
+                    'finalization.')
+        if not global_user_state.set_cluster_autostop_value_if_hash_matches(
+                intent.cluster_name, intent.cluster_hash, intent.idle_minutes,
+                intent.to_down):
+            raise RuntimeError(
+                f'Cluster {intent.cluster_name!r} incarnation changed before '
+                'autostop metadata could be finalized.')
+
+    @staticmethod
+    def _get_irreversible_teardown_state(
+        intent: global_user_state.AutodownIntent,
+        response: 'autostopv1_pb2.IsAutostoppingResponse'
+    ) -> Optional[global_user_state.AutodownIntentState]:
+        if (not response.supports_durable_autodown or
+                not response.HasField('cluster_hash') or
+                not response.HasField('generation') or
+                response.cluster_hash != intent.cluster_hash or
+                response.generation != intent.generation):
+            return None
+        return {
+            autostopv1_pb2.DURABLE_AUTODOWN_STATE_HEAD_TEARDOWN_STARTED:
+                global_user_state.AutodownIntentState.PREPARING,
+            autostopv1_pb2.DURABLE_AUTODOWN_STATE_SERVER_TEARDOWN_REQUIRED:
+                global_user_state.AutodownIntentState.READY,
+        }.get(response.durable_execution_state)
+
+    @staticmethod
+    def _mark_irreversible_teardown(
+            intent: global_user_state.AutodownIntent,
+            new_state: global_user_state.AutodownIntentState) -> bool:
+        record = global_user_state.get_cluster_from_name(
+            intent.cluster_name, include_user_info=False, summary_response=True)
+        if record is None or record['cluster_hash'] != intent.cluster_hash:
+            return False
+        current = global_user_state.get_autodown_intent(intent.cluster_name)
+        if (current is None or current.cluster_hash != intent.cluster_hash or
+                current.generation != intent.generation):
+            return False
+        if current.state is new_state:
+            return True
+        if (current.state
+                is not global_user_state.AutodownIntentState.CONFIGURING or
+                current.attempt_count != intent.attempt_count):
+            return False
+        transitioned = global_user_state.compare_and_swap_autodown_intent(
+            cluster_name=intent.cluster_name,
+            cluster_hash=intent.cluster_hash,
+            generation=intent.generation,
+            expected_states={global_user_state.AutodownIntentState.CONFIGURING},
+            expected_attempt_count=intent.attempt_count,
+            new_state=new_state,
+        )
+        if transitioned:
+            return True
+        current = global_user_state.get_autodown_intent(intent.cluster_name)
+        return (current is not None and
+                current.cluster_hash == intent.cluster_hash and
+                current.generation == intent.generation and
+                current.state is new_state)
+
+    def _resolve_rejected_post_claim_update(
+            self, handle: CloudVmRayResourceHandle,
+            intent: global_user_state.AutodownIntent,
+            predecessor: Optional[global_user_state.AutodownIntent], *,
+            cluster_lock_already_held: bool,
+            restore_predecessor_on_status_failure: bool) -> bool:
+        predecessor_can_be_claimed = (
+            predecessor is not None and
+            predecessor.cluster_hash == intent.cluster_hash and
+            predecessor.state in {
+                global_user_state.AutodownIntentState.CONFIGURING,
+                global_user_state.AutodownIntentState.ARMED,
+            } and predecessor.idle_minutes >= 0 and predecessor.to_down and
+            self._is_strict_autodown_strategy(predecessor.execution_strategy))
+
+        def restore_predecessor(
+                new_state: global_user_state.AutodownIntentState) -> bool:
+            assert predecessor is not None
+            record = global_user_state.get_cluster_from_name(
+                intent.cluster_name,
+                include_user_info=False,
+                summary_response=True)
+            if (record is None or
+                    record['cluster_hash'] != intent.cluster_hash):
+                return False
+            restored = global_user_state.restore_predecessor_autodown_intent(
+                intent, predecessor, new_state)
+            if restored:
+                return True
+            current = global_user_state.get_autodown_intent(intent.cluster_name)
+            return (current is not None and
+                    current.cluster_hash == predecessor.cluster_hash and
+                    current.generation == predecessor.generation and
+                    current.state is new_state)
+
+        def run_under_lock(action: Callable[[], bool]) -> bool:
+            if cluster_lock_already_held:
+                return action()
+            lock = locks.get_lock(
+                backend_utils.cluster_status_lock_id(intent.cluster_name))
+            with lock:
+                return action()
+
+        try:
+            response = self.get_durable_autodown_status(handle)
+        except Exception:  # pylint: disable=broad-except
+            if (predecessor_can_be_claimed and
+                    restore_predecessor_on_status_failure):
+                assert predecessor is not None
+                run_under_lock(lambda: restore_predecessor(predecessor.state))
+            return False
+        observed_intent = intent
+        new_state = self._get_irreversible_teardown_state(
+            observed_intent, response)
+        should_restore_predecessor = False
+        if new_state is None and predecessor_can_be_claimed:
+            assert predecessor is not None
+            observed_intent = predecessor
+            new_state = self._get_irreversible_teardown_state(
+                observed_intent, response)
+            should_restore_predecessor = new_state is not None
+        if new_state is None:
+            return False
+
+        def mark_irreversible() -> bool:
+            if should_restore_predecessor:
+                return restore_predecessor(new_state)
+            return self._mark_irreversible_teardown(intent, new_state)
+
+        return run_under_lock(mark_irreversible)
+
+    def _apply_durable_autodown_intent(self, handle: CloudVmRayResourceHandle,
+                                       idle_minutes_to_autostop: int,
+                                       wait_for: Optional[
+                                           autostop_lib.AutostopWaitFor],
+                                       down: bool, hook: Optional[str],
+                                       hook_timeout: Optional[int],
+                                       hooks: Optional[List[Dict[str, Any]]], *,
+                                       cluster_lock_already_held: bool) -> None:
+        probe_record, probe_handle = self._get_durable_autodown_record(
+            handle.cluster_name)
+        self._probe_durable_autodown(probe_handle)
+        probed_cluster_hash = probe_record['cluster_hash']
+
+        if cluster_lock_already_held:
+            current_handle, intent, predecessor = (
+                self._prepare_durable_autodown_intent(handle.cluster_name,
+                                                      idle_minutes_to_autostop,
+                                                      down,
+                                                      probed_cluster_hash))
+        else:
+            lock = locks.get_lock(
+                backend_utils.cluster_status_lock_id(handle.cluster_name))
+            with lock:
+                current_handle, intent, predecessor = (
+                    self._prepare_durable_autodown_intent(
+                        handle.cluster_name, idle_minutes_to_autostop, down,
+                        probed_cluster_hash))
+
+        strategy = sky_cloud.TeardownExecutionStrategy(
+            intent.execution_strategy)
+        request = self._make_autostop_request(idle_minutes_to_autostop,
+                                              wait_for, down, hook,
+                                              hook_timeout, hooks)
+        request.cluster_hash = intent.cluster_hash
+        request.generation = intent.generation
+        request.execution_strategy = self._strategy_to_protobuf(strategy)
+        try:
+            response = backend_utils.invoke_skylet_with_retries(
+                lambda: SkyletClient(current_handle.get_grpc_channel()
+                                    ).apply_autodown_intent(request))
+            if not response.supports_durable_autodown:
+                raise RuntimeError(
+                    'Skylet did not acknowledge durable autodown application.')
+        except Exception as e:
+            if self._resolve_rejected_post_claim_update(
+                    current_handle,
+                    intent,
+                    predecessor,
+                    cluster_lock_already_held=cluster_lock_already_held,
+                    restore_predecessor_on_status_failure=isinstance(
+                        e, exceptions.SkyletInternalError)):
+                raise _DurableAutodownAlreadyClaimedError(
+                    f'Durable autodown teardown has already begun for '
+                    f'{intent.cluster_name!r} and cannot be cancelled or '
+                    'reconfigured.') from e
+            raise
+
+        terminal_state = (global_user_state.AutodownIntentState.ARMED
+                          if down and idle_minutes_to_autostop >= 0 else
+                          global_user_state.AutodownIntentState.CANCELLED)
+        if cluster_lock_already_held:
+            self._finalize_durable_autodown_intent(intent, terminal_state)
+        else:
+            lock = locks.get_lock(
+                backend_utils.cluster_status_lock_id(handle.cluster_name))
+            with lock:
+                self._finalize_durable_autodown_intent(intent, terminal_state)
+
+    def _set_autostop(self,
+                      handle: CloudVmRayResourceHandle,
+                      idle_minutes_to_autostop: Optional[int],
+                      wait_for: Optional[autostop_lib.AutostopWaitFor],
+                      down: bool = False,
+                      stream_logs: bool = True,
+                      hook: Optional[str] = None,
+                      hook_timeout: Optional[int] = None,
+                      hooks: Optional[List[Dict[str, Any]]] = None,
+                      *,
+                      cluster_lock_already_held: bool) -> None:
+        existing_strict_intent = self._has_strict_autodown_intent(
+            handle.cluster_name)
+        strategy = handle.teardown_execution_strategy
+        desired_strict_intent = (idle_minutes_to_autostop is not None and
+                                 idle_minutes_to_autostop >= 0 and down and
+                                 self._is_strict_autodown_strategy(
+                                     strategy.value))
+        use_durable_intent = existing_strict_intent or desired_strict_intent
         if not handle.provision_runtime_metadata.has_skylet:
+            if use_durable_intent:
+                raise exceptions.NotSupportedError(
+                    'Strict durable autodown requires a compatible gRPC '
+                    'skylet; this cluster does not have a skylet installed.')
             return
         # The core.autostop() function should have already checked that the
         # cloud and resources support requested autostop.
@@ -5879,7 +6441,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             # Skip auto-stop for Kubernetes and RunPod clusters.
             if (isinstance(handle.launched_resources.cloud,
                            (clouds.Kubernetes, clouds.RunPod)) and not down and
-                    idle_minutes_to_autostop >= 0):
+                    idle_minutes_to_autostop >= 0 and not use_durable_intent):
                 # We should hit this code path only for the controllers on
                 # Kubernetes and RunPod clusters, because autostop() will
                 # skip the supported feature check. Non-controller k8s/runpod
@@ -5925,44 +6487,40 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             # store misleading timeouts).
             if isinstance(handle.launched_resources.cloud, clouds.Kubernetes):
                 hooks = k8s_cloud.cap_preemption_hook_timeouts(hooks)
-            if handle.is_grpc_enabled_with_flag:
-                request = autostopv1_pb2.SetAutostopRequest(
-                    idle_minutes=idle_minutes_to_autostop,
-                    backend=self.NAME,
-                    wait_for=wait_for.to_protobuf() if wait_for is not None else
-                    autostopv1_pb2.AUTOSTOP_WAIT_FOR_UNSPECIFIED,
-                    down=down,
-                )
-                if hook:
-                    request.hook = hook
-                if hook_timeout is not None:
-                    request.hook_timeout = hook_timeout
-                # v7+: send the full hooks list inline on the same RPC.
-                # Three states for the `hooks` arg:
-                #   None  → legacy/no-hook-aware caller; don't touch stored
-                #   []    → caller explicitly clears stored hooks
-                #   [...] → replace stored hooks with this list
-                if hooks is None:
-                    pass  # leave stored hooks alone
-                elif not hooks:
-                    request.clear_hooks = True
-                else:
-                    request.hooks.extend(autostop_lib.hooks_to_protobuf(hooks))
-                backend_utils.invoke_skylet_with_retries(lambda: SkyletClient(
-                    handle.get_grpc_channel()).set_autostop(request))
+            if use_durable_intent:
+                self._apply_durable_autodown_intent(
+                    handle,
+                    idle_minutes_to_autostop,
+                    wait_for,
+                    down,
+                    hook,
+                    hook_timeout,
+                    hooks,
+                    cluster_lock_already_held=cluster_lock_already_held)
             else:
-                code = autostop_lib.AutostopCodeGen.set_autostop(
-                    idle_minutes_to_autostop, self.NAME, wait_for, down, hook,
-                    hook_timeout, hooks)
-                returncode, _, stderr = self.run_on_head(
-                    handle, code, require_outputs=True, stream_logs=stream_logs)
-                subprocess_utils.handle_returncode(returncode,
-                                                   code,
-                                                   'Failed to set autostop',
-                                                   stderr=stderr,
-                                                   stream_logs=stream_logs)
-            global_user_state.set_cluster_autostop_value(
-                handle.cluster_name, idle_minutes_to_autostop, down)
+                if handle.is_grpc_enabled_with_flag:
+                    request = self._make_autostop_request(
+                        idle_minutes_to_autostop, wait_for, down, hook,
+                        hook_timeout, hooks)
+                    backend_utils.invoke_skylet_with_retries(
+                        lambda: SkyletClient(handle.get_grpc_channel()
+                                            ).set_autostop(request))
+                else:
+                    code = autostop_lib.AutostopCodeGen.set_autostop(
+                        idle_minutes_to_autostop, self.NAME, wait_for, down,
+                        hook, hook_timeout, hooks)
+                    returncode, _, stderr = self.run_on_head(
+                        handle,
+                        code,
+                        require_outputs=True,
+                        stream_logs=stream_logs)
+                    subprocess_utils.handle_returncode(returncode,
+                                                       code,
+                                                       'Failed to set autostop',
+                                                       stderr=stderr,
+                                                       stream_logs=stream_logs)
+                global_user_state.set_cluster_autostop_value(
+                    handle.cluster_name, idle_minutes_to_autostop, down)
 
         # Add/Remove autodown annotations to/from Kubernetes pods.
         if isinstance(handle.launched_resources.cloud, clouds.Kubernetes):
@@ -5970,6 +6528,17 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 handle=handle,
                 idle_minutes_to_autostop=idle_minutes_to_autostop,
                 down=down)
+
+    def get_durable_autodown_status(
+        self, handle: CloudVmRayResourceHandle
+    ) -> 'autostopv1_pb2.IsAutostoppingResponse':
+        """Return the skylet's durable autodown status via retrying gRPC."""
+        if not handle.is_grpc_enabled_with_flag:
+            raise exceptions.NotSupportedError(
+                'Durable autodown status requires gRPC; the legacy SSH path '
+                'does not expose durable intent state.')
+        return backend_utils.invoke_skylet_with_retries(lambda: SkyletClient(
+            handle.get_grpc_channel()).get_autodown_status())
 
     def is_definitely_autostopping(self,
                                    handle: CloudVmRayResourceHandle,
@@ -5992,10 +6561,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
         if handle.is_grpc_enabled_with_flag:
             try:
-                request = autostopv1_pb2.IsAutostoppingRequest()
-                response = backend_utils.invoke_skylet_with_retries(
-                    lambda: SkyletClient(handle.get_grpc_channel()
-                                        ).is_autostopping(request))
+                response = self.get_durable_autodown_status(handle)
                 is_autostopping = response.is_autostopping
             except Exception as e:  # pylint: disable=broad-except
                 # The cluster may have been terminated, causing the gRPC call
@@ -6904,7 +7470,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                            handle: CloudVmRayResourceHandle) -> Dict[str, str]:
         """Returns the environment variables for the task."""
         env_vars = task_lib.get_plaintext_envs_and_secrets(
-            task.envs_and_secrets)
+            task.runtime_envs_and_secrets)
         # If it is a managed job, the TASK_ID_ENV_VAR will have been already set
         # by the controller.
         if constants.TASK_ID_ENV_VAR not in env_vars:

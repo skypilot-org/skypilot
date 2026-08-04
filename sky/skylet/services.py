@@ -2,7 +2,7 @@
 
 import json
 import os
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
 import grpc
 
@@ -56,34 +56,81 @@ class AutostopServiceImpl(autostopv1_pb2_grpc.AutostopServiceServicer):
         (request.hooks / request.clear_hooks). Renaming requires a
         parallel ``SetHooks`` RPC in a future PR; see the proto file.
         """
+        return self._apply_autostop_request(request,
+                                            context,
+                                            require_strict=False)
+
+    def ApplyAutodownIntent(  # type: ignore[return]
+            self, request: autostopv1_pb2.SetAutostopRequest,
+            context: grpc.ServicerContext
+    ) -> autostopv1_pb2.SetAutostopResponse:
+        """Atomically applies a strictly fenced durable autodown intent."""
+        return self._apply_autostop_request(request,
+                                            context,
+                                            require_strict=True)
+
+    def _apply_autostop_request(
+        self, request: autostopv1_pb2.SetAutostopRequest,
+        context: grpc.ServicerContext, require_strict: bool
+    ) -> autostopv1_pb2.SetAutostopResponse:  # type: ignore[return]
         try:
             wait_for = autostop_lib.AutostopWaitFor.from_protobuf(
                 request.wait_for)
             hook = request.hook if request.HasField('hook') else None
             hook_timeout = (request.hook_timeout
                             if request.HasField('hook_timeout') else None)
-            autostop_lib.set_autostop(
+            cluster_hash = (request.cluster_hash
+                            if request.HasField('cluster_hash') else None)
+            generation = (request.generation
+                          if request.HasField('generation') else None)
+            legacy_execution_strategy = (
+                autostop_lib.DEFAULT_AUTODOWN_EXECUTION_STRATEGY)
+            if request.HasField('execution_strategy'):
+                execution_strategy = (
+                    autostop_lib.AutodownExecutionStrategy.from_protobuf(
+                        request.execution_strategy))
+            else:
+                execution_strategy = legacy_execution_strategy
+            is_strict_request = (execution_strategy !=
+                                 legacy_execution_strategy)
+            if require_strict and not is_strict_request:
+                raise ValueError('ApplyAutodownIntent requires a strict '
+                                 'autodown execution strategy.')
+            if is_strict_request:
+                if not cluster_hash:
+                    raise ValueError(
+                        'Durable autodown requires a non-empty cluster hash.')
+                if generation is None or generation <= 0:
+                    raise ValueError(
+                        'Durable autodown requires a positive generation.')
+            set_autostop_kwargs: Dict[str, Any] = dict(
                 idle_minutes=request.idle_minutes,
                 backend=request.backend,
                 wait_for=wait_for if wait_for is not None else
                 autostop_lib.DEFAULT_AUTOSTOP_WAIT_FOR,
                 down=request.down,
                 hook=hook,
-                hook_timeout=hook_timeout)
-            # v7+: full hooks list carried inline on the same RPC.
-            # `clear_hooks=True` means "drop any stored hooks" — needed
-            # because proto3 `repeated` has no presence, so an empty
-            # list on the wire is otherwise indistinguishable from
-            # "field omitted". Without this, a re-launch with no
-            # hooks would leave stale stored hooks firing forever.
+                hook_timeout=hook_timeout,
+                cluster_hash=cluster_hash,
+                generation=generation,
+                execution_strategy=execution_strategy,
+            )
             if request.clear_hooks:
-                autostop_lib.set_hooks([])
+                set_autostop_kwargs['hooks'] = []
+                set_autostop_kwargs['clear_hooks'] = True
             elif request.hooks:
-                autostop_lib.set_hooks(
+                set_autostop_kwargs['hooks'] = (
                     autostop_lib.hooks_from_protobuf(request.hooks))
-            return autostopv1_pb2.SetAutostopResponse()
-        except Exception as e:  # pylint: disable=broad-except
-            context.abort(grpc.StatusCode.INTERNAL, str(e))
+            update_result = autostop_lib.set_autostop(**set_autostop_kwargs)
+            if (update_result ==
+                    autostop_lib.AutostopConfigUpdateResult.REJECTED):
+                raise ValueError('Autostop configuration was rejected.')
+            return autostopv1_pb2.SetAutostopResponse(
+                supports_durable_autodown=True)
+        except Exception as exc:  # pylint: disable=broad-except
+            context.abort(grpc.StatusCode.INTERNAL,
+                          'Failed to set autostop configuration.')
+            raise RuntimeError('context.abort() unexpectedly returned') from exc
 
     def IsAutostopping(  # type: ignore[return]
             self, request: autostopv1_pb2.IsAutostoppingRequest,
@@ -91,11 +138,25 @@ class AutostopServiceImpl(autostopv1_pb2_grpc.AutostopServiceServicer):
     ) -> autostopv1_pb2.IsAutostoppingResponse:
         """Checks if the cluster is currently autostopping."""
         try:
+            del request
             is_autostopping = autostop_lib.get_is_autostopping()
-            return autostopv1_pb2.IsAutostoppingResponse(
-                is_autostopping=is_autostopping)
-        except Exception as e:  # pylint: disable=broad-except
-            context.abort(grpc.StatusCode.INTERNAL, str(e))
+            config = autostop_lib.get_autostop_config()
+            response = autostopv1_pb2.IsAutostoppingResponse(
+                is_autostopping=is_autostopping,
+                supports_durable_autodown=True,
+                durable_execution_state=(
+                    config.durable_execution_state.to_protobuf()),
+            )
+            if config.cluster_hash is not None:
+                response.cluster_hash = config.cluster_hash
+            if config.generation is not None:
+                response.generation = config.generation
+            if config.error_summary is not None:
+                response.error_summary = config.error_summary
+            return response
+        except Exception:  # pylint: disable=broad-except
+            context.abort(grpc.StatusCode.INTERNAL,
+                          'Failed to query autostop status.')
 
 
 class ServeServiceImpl(servev1_pb2_grpc.ServeServiceServicer):
