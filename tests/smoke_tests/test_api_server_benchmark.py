@@ -15,6 +15,8 @@ from smoke_tests import metrics_utils
 from smoke_tests import smoke_tests_utils
 from smoke_tests.docker import docker_utils
 
+from sky.skylet import constants
+
 # Identity used to bootstrap the benchmark's own service-account token. The
 # server admits an external-proxy identity from this header whenever no
 # built-in auth scheme is configured, which is the case for the test image.
@@ -172,18 +174,28 @@ def _mint_service_account_token(api_url: str) -> str:
     return token
 
 
-def _launch_log_producer() -> str:
+def _launch_log_producer(api_url: str) -> str:
     """Start a job that keeps printing, so there is a real log to tail.
 
     The held streams are `sky jobs logs -f` against this job. Tailing a real
     job is the request a user actually makes; the server's own log is served
     by a special-cased path that never touches the request executor.
 
+    Launched against `api_url` -- the server under test -- rather than
+    whatever endpoint the CLI defaults to. Two reasons, and the first one is
+    correctness: a job submitted to a different server is invisible to this
+    one, so the tail returns "No running managed job found" while
+    `sky jobs queue` cheerfully reports it RUNNING elsewhere. The second is
+    that this server runs in deploy mode, which auto-enables jobs
+    consolidation, so the controller lives inside the server process instead
+    of on a separate provisioned cluster.
+
     Always on Kubernetes, whatever cloud the rest of the run uses: the job is
     scaffolding for the log stream, not part of what is being measured, and
     the lane's local kind cluster starts it in seconds for nothing. It is
     also what most deployments run.
     """
+    env = {**os.environ, constants.SKY_API_SERVER_URL_ENV_VAR: api_url}
     job_name = f'loop-lag-log-{int(time.time())}'
     with tempfile.NamedTemporaryFile('w', suffix='.yaml',
                                      delete=False) as task_file:
@@ -197,7 +209,8 @@ def _launch_log_producer() -> str:
             'sky', 'jobs', 'launch', '-n', job_name, '--infra', 'kubernetes',
             '--cpus', '2+', '--memory', '4+', task_path, '-y', '-d'
         ],
-                       check=True)
+                       check=True,
+                       env=env)
         # The tail has nothing to follow until the job is actually running,
         # and a stream that opens against a pending job ends immediately --
         # which the harness would (correctly) call an invalid trial.
@@ -208,9 +221,14 @@ def _launch_log_producer() -> str:
                 check=False,
                 capture_output=True,
                 text=True,
+                env=env,
             ).stdout
             if any(job_name in line and 'RUNNING' in line
                    for line in status.splitlines()):
+                # Print it: when a later tail cannot find this job, the only
+                # question is what the queue said here, and capture_output
+                # otherwise swallows it.
+                print(f'log producer reached RUNNING on {api_url}:\n{status}')
                 # Give the job a moment to write something to tail.
                 time.sleep(5)
                 return job_name
@@ -336,7 +354,7 @@ def test_api_server_event_loop_lag():
             f'{trial["lag_max_peak_seconds"]:.3f}s reached '
             f'{_LAG_THRESHOLD_SECONDS}s')
 
-    job_name = _launch_log_producer()
+    job_name = _launch_log_producer(api_url)
     try:
         starvation = loop_lag_harness.HarnessConfig(
             name='executor-starvation',
