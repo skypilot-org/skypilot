@@ -106,7 +106,6 @@ def create_and_setup_new_container(target_container_name: str,
                    f'-e LAUNCHED_BY_DOCKER_CONTAINER=1 '
                    f'-e SKYPILOT_DISABLE_USAGE_COLLECTION=1 '
                    f'-e SKY_API_SERVER_METRICS_ENABLED=true '
-                   f'-e SKYPILOT_SERVER_REUSE_PORT=1 '
                    f'{IMAGE_NAME}')
 
         subprocess.check_call(run_cmd, shell=True)
@@ -155,8 +154,7 @@ def create_and_setup_new_container(target_container_name: str,
         docker_cmd.extend([
             *[f'-v={v}' for v in volumes], '-e', f'USERNAME={username}', '-e',
             'SKYPILOT_DISABLE_USAGE_COLLECTION=1', '-e',
-            'SKY_API_SERVER_METRICS_ENABLED=true', '-e',
-            'SKYPILOT_SERVER_REUSE_PORT=1', '-p',
+            'SKY_API_SERVER_METRICS_ENABLED=true', '-p',
             f'{api_server_host_port}:{api_server_container_port}', '-p',
             f'{metrics_host_port}:{metrics_container_port}', IMAGE_NAME
         ])
