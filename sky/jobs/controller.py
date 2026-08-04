@@ -2783,9 +2783,16 @@ class ControllerManager:
             # because when SkyPilot API server machine sends the yaml config to
             # the controller machine, only storage metadata is sent, not the
             # storage object itself.
+            # Only construct the storages that teardown_ephemeral_storage()
+            # below will actually delete (persistent=False). Constructing a
+            # persistent storage here is not just unnecessary, it is harmful:
+            # construct() auto-creates missing buckets, so if the user deletes
+            # their bucket right after the job finishes (`sky storage delete`),
+            # this cleanup would silently re-create and leak it.
             try:
                 for storage in task.storage_mounts.values():
-                    storage.construct()
+                    if not storage.persistent:
+                        storage.construct()
             except (exceptions.StorageSpecError, exceptions.StorageError) as e:
                 logger.warning(
                     f'Failed to construct storage object for teardown: {e}\n'

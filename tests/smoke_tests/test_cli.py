@@ -23,55 +23,41 @@ from sky.server import common as server_common
 from sky.skylet import constants
 from sky.utils import common_utils
 
-# [TEMP][DIAGNOSTIC] Root-causing the post-delete visibility lag seen on the
-# remote-server pipeline: after `sky storage delete` succeeds (bucket is
-# genuinely gone minutes later), the cloud-cmd cluster kept seeing the bucket
-# via get-bucket-location for >300s (same account), while the same probes
-# from a laptop converge instantly. This probe matrix samples six existence
-# probes every 10s with timestamps, from two vantage points (test client and
-# cloud-cmd cluster), to find which probe converges and how fast. Will be
-# replaced by the final check once the data is in.
-_BUCKET_GONE_PROBE = (
-    'echo "--- probe env ---"; '
-    'aws --version 2>&1 || true; '
-    'aws configure list 2>&1 || true; '
-    'TOK=$(curl -s -X PUT http://169.254.169.254/latest/api/token '
-    '-H "X-aws-ec2-metadata-token-ttl-seconds: 60" --max-time 2 '
-    '2>/dev/null || true); '
-    'echo "az: $(curl -s --max-time 2 -H "X-aws-ec2-metadata-token: $TOK" '
-    'http://169.254.169.254/latest/meta-data/placement/availability-zone '
-    '2>/dev/null || true)"; '
-    'gone=0; probe_start=$SECONDS; '
-    'while (( SECONDS - probe_start < {limit} )); do '
-    't=$((SECONDS-probe_start)); '
-    'aws s3api head-bucket --bucket {bucket_name} >/dev/null 2>&1; hb=$?; '
-    'aws s3api head-bucket --bucket {bucket_name} --region us-east-1 '
-    '>/dev/null 2>&1; hbr=$?; '
-    'aws s3api get-bucket-location --bucket {bucket_name} '
-    '>/dev/null 2>&1; loc=$?; '
-    'aws s3api get-bucket-location --bucket {bucket_name} --region us-east-1 '
-    '>/dev/null 2>&1; locr=$?; '
-    'aws s3api list-objects-v2 --bucket {bucket_name} --max-keys 1 '
-    '>/dev/null 2>&1; lo=$?; '
-    'lb=$(aws s3api list-buckets '
-    '--query "Buckets[?Name==\'{bucket_name}\'].Name" --output text '
-    '2>/dev/null || true); '
-    'echo "$(date -u +%H:%M:%S) t+$t: head=$hb head_r=$hbr loc=$loc '
-    'loc_r=$locr listobj=$lo listbuckets=[$lb]"; '
-    'if [ "$hb" -ne 0 ] && [ "$hbr" -ne 0 ] && [ "$loc" -ne 0 ] && '
-    '[ "$locr" -ne 0 ] && [ "$lo" -ne 0 ] && [ -z "$lb" ]; then '
-    'gone=1; echo "all probes report bucket gone at t+$t"; break; fi; '
-    'sleep 10; '
-    'done')
-
+# Check that `sky storage delete` removed the bucket AND that it stays
+# removed. Two lessons baked in (root-caused via CloudTrail, see #10353):
+#   1. The managed-job controller's post-job cleanup used to re-create the
+#      just-deleted bucket a few seconds after deletion (construct() on the
+#      task's storage mounts auto-creates missing buckets). A one-shot
+#      existence check right after delete races ahead of the recreation and
+#      false-passes, silently leaking the bucket. So after the bucket is
+#      first observed gone, hold the assertion open for another 60s and fail
+#      if it reappears.
+#   2. Use `get-bucket-location` rather than `head-bucket`: cross-region
+#      head-bucket keeps returning a redirect the CLI reports as success for
+#      a window after deletion, and this check may run on a cloud-cmd
+#      cluster whose default region differs from the bucket's.
 _CHECK_AWS_BUCKET_DOESNT_EXIST = (
-    _BUCKET_GONE_PROBE + '; '
-    'if [ "$gone" -eq 1 ]; then '
-    'echo "Bucket {bucket_name} confirmed gone."; exit 0; fi; '
-    'echo "Bucket {bucket_name} still visible after {limit}s"; '
+    'start=$SECONDS; '
+    'while aws s3api get-bucket-location --bucket {bucket_name} '
+    '>/dev/null 2>&1; do '
+    'if (( SECONDS - start > 120 )); then '
+    'echo "Bucket {bucket_name} still exists 120s after deletion"; '
     'aws sts get-caller-identity || true; '
     'aws s3api get-bucket-location --bucket {bucket_name} || true; '
-    'exit 1')
+    'exit 1; fi; '
+    'echo "Bucket {bucket_name} still resolves, waiting..."; sleep 5; '
+    'done; '
+    'echo "Bucket {bucket_name} gone; verifying it stays gone '
+    '(no recreation)..."; '
+    'for i in 1 2 3 4 5 6; do '
+    'sleep 10; '
+    'if aws s3api get-bucket-location --bucket {bucket_name} '
+    '>/dev/null 2>&1; then '
+    'echo "Bucket {bucket_name} REAPPEARED after deletion (recreated at '
+    '+$((SECONDS-start))s)"; exit 1; fi; '
+    'done; '
+    'echo "Bucket {bucket_name} confirmed deleted and not recreated."; '
+    'exit 0')
 
 
 @pytest.mark.no_remote_server
@@ -279,29 +265,22 @@ def test_storage_delete(generic_cloud: str):
         job_yaml.write(bucket_job_yaml.encode('utf-8'))
         job_yaml.flush()
 
-        test = smoke_tests_utils.Test(
-            'storage_delete',
-            [
-                f'echo "bucket name: {bucket_name}"',
-                smoke_tests_utils.launch_cluster_for_cloud_cmd(
-                    'aws', name, skip_remote_server_check=True),
-                f's=$(SKYPILOT_DEBUG=0 sky jobs launch -y {job_yaml.name}) && echo "$s" | grep "Job finished (status: SUCCEEDED)."',
-                f's=$(SKYPILOT_DEBUG=0 sky storage delete -y {bucket_name}) && echo "$s" && echo "$s" | grep "Deleted S3 bucket {bucket_name}"',
-                # [TEMP][DIAGNOSTIC] Same probe matrix from the test client
-                # (data-gathering only, never fails the test) for contrast with
-                # the cloud-cmd cluster's vantage point below.
-                ('echo "=== [diagnostic] bucket visibility from test client ==="; '
-                 +
-                 _BUCKET_GONE_PROBE.format(bucket_name=bucket_name, limit=120) +
-                 '; echo "client probe done (gone=$gone)"; true'),
-                smoke_tests_utils.run_cloud_cmd_on_cluster(
-                    name,
-                    cmd=_CHECK_AWS_BUCKET_DOESNT_EXIST.format(
-                        bucket_name=bucket_name, limit=480)),
-            ],
-            teardown=smoke_tests_utils.down_cluster_for_cloud_cmd(
-                name, skip_remote_server_check=True),
-            timeout=smoke_tests_utils.get_timeout(generic_cloud, 25 * 60))
+        test = smoke_tests_utils.Test('storage_delete', [
+            f'echo "bucket name: {bucket_name}"',
+            smoke_tests_utils.launch_cluster_for_cloud_cmd(
+                'aws', name, skip_remote_server_check=True),
+            f's=$(SKYPILOT_DEBUG=0 sky jobs launch -y {job_yaml.name}) && echo "$s" | grep "Job finished (status: SUCCEEDED)."',
+            f's=$(SKYPILOT_DEBUG=0 sky storage delete -y {bucket_name}) && echo "$s" && echo "$s" | grep "Deleted S3 bucket {bucket_name}"',
+            smoke_tests_utils.run_cloud_cmd_on_cluster(
+                name,
+                cmd=_CHECK_AWS_BUCKET_DOESNT_EXIST.format(
+                    bucket_name=bucket_name)),
+        ],
+                                      teardown=smoke_tests_utils.
+                                      down_cluster_for_cloud_cmd(
+                                          name, skip_remote_server_check=True),
+                                      timeout=smoke_tests_utils.get_timeout(
+                                          generic_cloud))
         smoke_tests_utils.run_one_test(test, check_sky_status=False)
 
 
