@@ -1006,9 +1006,9 @@ class PrometheusMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
                 # /api/get long-polls until the underlying request is terminal,
                 # so its duration is the client-observed latency of that request
                 # type. The handler stamps request.state.request_name once it
-                # knows which request is being fetched; record it broken out by
-                # name so bounded request types can be alerted on separately from
-                # unbounded ones (launch/exec/...).
+                # knows which request is being fetched; record it by name so
+                # bounded types can be alerted on separately from unbounded ones
+                # (launch/exec/...).
                 request_name = getattr(request.state, 'request_name', None)
                 if request_name is not None:
                     metrics_utils.SKY_APISERVER_REQUEST_GET_DURATION_SECONDS \
