@@ -9,6 +9,7 @@ Also tests the cancelled job log download feature in ControllerManager
 and file mount cleanup in task_cleanup().
 """
 import asyncio
+import copy
 import runpy
 import sys
 from typing import Dict, List, Optional, Tuple
@@ -19,7 +20,10 @@ import warnings
 
 import pytest
 
+import sky
+from sky import task as task_lib
 from sky.jobs import controller as controller_module
+from sky.jobs import job_group_networking
 from sky.jobs import state as managed_job_state
 from sky.jobs import utils as managed_job_utils
 from sky.jobs.controller import ControllerManager
@@ -741,6 +745,11 @@ class TestTaskCleanup:
                 'sky.jobs.utils.generate_managed_job_cluster_name',
                 return_value='test-cluster'),
             'status': patch('sky.core.status', return_value=[]),
+            # File-mount cleanup is gated on NOT consolidation mode; pin
+            # it so the test does not depend on the local ~/.sky config
+            # (a configured API server endpoint flips it to True).
+            'consolidation': patch('sky.jobs.utils.is_consolidation_mode',
+                                   return_value=False),
             'backend': patch('sky.backends.cloud_vm_ray_backend.'
                              'CloudVmRayBackend'),
         }
@@ -1162,6 +1171,7 @@ class TestJobGroupResumeDoesNotReissueStarting:
         task.name = 'job-a'
         task.envs = {}
         task.run = 'echo hi'
+        task.resources = []
         controller._dag.tasks = [task]
         controller._backend = MagicMock()
         controller._backend.run_timestamp = 'run-ts'
@@ -1207,6 +1217,86 @@ class TestJobGroupResumeDoesNotReissueStarting:
                                                     task,
                                                     set_starting=True)
         set_starting_async.assert_awaited_once()
+
+
+class TestJobGroupNetworkingInjectionGate:
+    """Networking wait/updater scripts are only injected when the group
+    requires in-group networking (inter_connection enabled) and the task
+    runs on Kubernetes."""
+
+    def _make_task(self, cloud_str):
+        task = MagicMock()
+        task.name = 'job-a'
+        task.envs = {}
+        task.run = 'echo hi'
+        resource = MagicMock()
+        if cloud_str is None:
+            resource.cloud = None
+        else:
+            cloud = MagicMock()
+            cloud.__str__ = MagicMock(return_value=cloud_str)
+            resource.cloud = cloud
+        task.resources = [resource]
+        return task
+
+    def test_task_uses_kubernetes(self):
+        from sky.jobs import controller as controller_lib
+        assert controller_lib._task_uses_kubernetes(
+            self._make_task('Kubernetes'))
+        assert not controller_lib._task_uses_kubernetes(self._make_task('AWS'))
+        assert not controller_lib._task_uses_kubernetes(self._make_task(None))
+
+    async def _prepare(self, inter_connection_enabled, cloud_str):
+        controller = MagicMock(spec=JobController)
+        controller._job_id = 1
+        controller._dag = MagicMock()
+        controller._dag.inter_connection_enabled = MagicMock(
+            return_value=inter_connection_enabled)
+        task = self._make_task(cloud_str)
+        controller._dag.tasks = [task]
+        controller._backend = MagicMock()
+        controller._backend.run_timestamp = 'run-ts'
+        controller.starting = set()
+        controller.starting_lock = MagicMock()
+        controller.starting_signal = MagicMock()
+
+        with patch('sky.jobs.controller.job_group_networking') as net, \
+             patch('sky.jobs.controller.managed_job_utils') as utils, \
+             patch('sky.jobs.controller.recovery_strategy') as recovery, \
+             patch('sky.jobs.controller.managed_job_state') as state, \
+             patch('sky.jobs.controller.backend_utils'), \
+             patch('sky.jobs.controller._build_task_specs', return_value={}):
+            net.generate_wait_for_networking_script.return_value = 'WAIT'
+            net.generate_inline_networking_setup_script.return_value = ''
+            utils.generate_managed_job_cluster_name.return_value = 'job-a-1'
+            recovery.StrategyExecutor.make.return_value = MagicMock()
+            state.get_file_mounts_blob_id.return_value = None
+            state.set_starting_async = AsyncMock()
+
+            await JobController._prepare_job_group_task_for_launch(
+                controller, task, 0, 'group', ['peer'], set_starting=False)
+            return task, net
+
+    @pytest.mark.asyncio
+    async def test_injects_wait_for_kubernetes_task(self):
+        task, net = await self._prepare(inter_connection_enabled=True,
+                                        cloud_str='Kubernetes')
+        assert task.run.startswith('WAIT')
+        net.generate_wait_for_networking_script.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_skips_injection_when_inter_connection_disabled(self):
+        task, net = await self._prepare(inter_connection_enabled=False,
+                                        cloud_str='Kubernetes')
+        assert task.run == 'echo hi'
+        net.generate_wait_for_networking_script.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_skips_injection_for_non_kubernetes_task(self):
+        task, net = await self._prepare(inter_connection_enabled=True,
+                                        cloud_str='AWS')
+        assert task.run == 'echo hi'
+        net.generate_wait_for_networking_script.assert_not_called()
 
 
 class TestUserJobStatusClassification:
@@ -1665,3 +1755,352 @@ class TestTransientJobStatusRecoveryWindow:
                 executor=MagicMock())
 
         status_logger.flush.assert_called_once()
+
+
+class TestAddK8sAnnotations:
+    """Tests for _add_k8s_annotations.
+
+    The function stamps two pod annotations onto every resource. It must add
+    only those annotations: it used to pass the resource's whole config as the
+    override to Resources.copy(), which overlays the config on top of itself.
+    """
+
+    def _make_task(self, pod_config):
+        task = task_lib.Task(name='test-task', run='echo hi')
+        task.set_resources(
+            sky.Resources(cpus=2,
+                          _cluster_config_overrides={
+                              'kubernetes': {
+                                  'pod_config': pod_config
+                              }
+                          }))
+        return task
+
+    @staticmethod
+    def _pod_config(resource_or_task):
+        # Task.resources is a set before _add_k8s_annotations and a list
+        # after it, so index through a list either way.
+        resource = resource_or_task
+        if isinstance(resource_or_task, task_lib.Task):
+            resource = list(resource_or_task.resources)[0]
+        return resource.cluster_config_overrides['kubernetes']['pod_config']
+
+    def test_lists_without_patch_merge_key_not_duplicated(self):
+        """Lists appended by the merge must not be doubled."""
+        task = self._make_task({
+            'spec': {
+                'tolerations': [{
+                    'key': 'nvidia.com/gpu',
+                    'operator': 'Exists'
+                }],
+                'dnsConfig': {
+                    'nameservers': ['1.1.1.1']
+                },
+            }
+        })
+
+        controller_module._add_k8s_annotations(task, job_id=1)
+
+        spec = self._pod_config(task)['spec']
+        assert spec['tolerations'] == [{
+            'key': 'nvidia.com/gpu',
+            'operator': 'Exists'
+        }]
+        assert spec['dnsConfig']['nameservers'] == ['1.1.1.1']
+
+    def test_original_resource_config_not_mutated(self):
+        """The annotations must not leak into the resource we copied from."""
+        task = self._make_task({'spec': {'runtimeClassName': 'nvidia'}})
+        original_resource = list(task.resources)[0]
+
+        controller_module._add_k8s_annotations(task, job_id=1)
+
+        assert 'metadata' not in self._pod_config(original_resource)
+
+    def test_empty_image_pull_secrets_preserved(self):
+        """A task clearing imagePullSecrets must not break the job loop."""
+        task = self._make_task({
+            'spec': {
+                'containers': [{
+                    'imagePullPolicy': 'IfNotPresent'
+                }],
+                'imagePullSecrets': [],
+            }
+        })
+
+        controller_module._add_k8s_annotations(task, job_id=1)
+
+        spec = self._pod_config(task)['spec']
+        assert spec['imagePullSecrets'] == []
+        assert spec['containers'] == [{'imagePullPolicy': 'IfNotPresent'}]
+
+    def test_annotations_added_without_dropping_existing_ones(self):
+        task = self._make_task(
+            {'metadata': {
+                'annotations': {
+                    'user': 'annotation'
+                }
+            }})
+
+        controller_module._add_k8s_annotations(task, job_id=384)
+
+        assert self._pod_config(task)['metadata']['annotations'] == {
+            'user': 'annotation',
+            'skypilot-managed-job-id': '384',
+            'skypilot-managed-job-name': 'test-task',
+        }
+
+    def test_repeated_calls_are_idempotent(self):
+        """Every emergency-recovery retry re-runs this on the same task."""
+        task = self._make_task({
+            'spec': {
+                'tolerations': [{
+                    'key': 'nvidia.com/gpu',
+                    'operator': 'Exists'
+                }]
+            }
+        })
+
+        controller_module._add_k8s_annotations(task, job_id=1)
+        after_first = copy.deepcopy(self._pod_config(task))
+        controller_module._add_k8s_annotations(task, job_id=1)
+
+        assert self._pod_config(task) == after_first
+
+
+class TestJobGroupOnRecoveryNetworking:
+    """on_recovery re-runs networking setup after a task recovers.
+
+    Failures on the recovered task's OWN nodes are fatal
+    (ClusterSetUpError -> FAILED_SETUP): its fresh pod has no DNS
+    updater or readiness marker, so without setup its networking wait
+    would stall and fail minutes later with a generic message.
+    Peer-only failures must NOT fail the task: a healthy peer's running
+    updater short-circuits the re-push, so a failing peer is usually
+    itself mid-recovery (simultaneous preemption) and its own recovery
+    re-runs this setup.
+    """
+
+    async def _captured_on_recovery(self,
+                                    setup_failures,
+                                    inter_connection_enabled=True,
+                                    self_delivering=False):
+        """Run _monitor_job_group_task with a fake executor, return the
+        captured on_recovery callback invoked under patches."""
+        controller = MagicMock(spec=JobController)
+        controller._job_id = 1
+        controller._dag = MagicMock()
+        controller._dag.inter_connection_enabled = MagicMock(
+            return_value=inter_connection_enabled)
+        task = MagicMock()
+        task.name = 'job-a'
+        peer = MagicMock()
+        peer.name = 'job-b'
+
+        captured = {}
+
+        async def fake_monitor_task(**kwargs):
+            captured['on_recovery'] = kwargs['on_recovery']
+            return True
+
+        executor = MagicMock()
+        executor.monitor_task = fake_monitor_task
+
+        with patch('sky.jobs.controller.job_group_networking') as net, \
+             patch('sky.jobs.controller.managed_job_utils') as utils, \
+             patch('sky.jobs.controller.global_user_state') as gus:
+            net.setup_job_group_networking = AsyncMock(
+                return_value=setup_failures)
+            # Non-None marks the recovered task as self-delivering
+            # (inline task.run prelude owns its updater delivery).
+            net.dns_addresses_for_task.return_value = (
+                ['inline-addr'] if self_delivering else None)
+            utils.generate_managed_job_cluster_name.side_effect = (
+                lambda name, job_id: f'{name}-{job_id}')
+            gus.get_handle_from_cluster_name.return_value = MagicMock()
+
+            result = await JobController._monitor_job_group_task(
+                controller, 0, task, 'cluster-a', executor, 'group',
+                [(task, MagicMock()), (peer, MagicMock())])
+            assert result is True
+            error = None
+            try:
+                await captured['on_recovery']()
+            except Exception as e:  # pylint: disable=broad-except
+                error = e
+            return net, error
+
+    @pytest.mark.asyncio
+    async def test_no_failures_no_error(self):
+        net, error = await self._captured_on_recovery(setup_failures=[])
+        assert error is None
+        net.setup_job_group_networking.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_own_node_failure_raises_cluster_setup_error(self):
+        from sky import exceptions
+        _, error = await self._captured_on_recovery(setup_failures=[
+            job_group_networking.SetupFailure('job-a', 'job-a-0',
+                                              'K8s DNS updater failed')
+        ])
+        assert isinstance(error, exceptions.ClusterSetUpError)
+        assert 'job-a' in str(error)
+        assert 'K8s DNS updater failed' in str(error)
+
+    @pytest.mark.asyncio
+    async def test_peer_only_failure_does_not_raise(self):
+        # Simultaneous preemption: the peer is down awaiting its own
+        # recovery; failing this task for it would turn every
+        # multi-task preemption into a group failure.
+        _, error = await self._captured_on_recovery(setup_failures=[
+            job_group_networking.SetupFailure('job-b', 'job-b-0',
+                                              'K8s DNS updater failed')
+        ])
+        assert error is None
+
+    @pytest.mark.asyncio
+    async def test_mixed_failures_raise(self):
+        from sky import exceptions
+        _, error = await self._captured_on_recovery(setup_failures=[
+            job_group_networking.SetupFailure('job-b', 'job-b-0', 'peer down'),
+            job_group_networking.SetupFailure('job-a', 'job-a-1', 'timeout')
+        ])
+        assert isinstance(error, exceptions.ClusterSetUpError)
+
+    @pytest.mark.asyncio
+    async def test_self_delivering_own_failure_does_not_raise(self):
+        # An inline (self-delivering) task's relaunched run prelude
+        # starts its own updater; the controller push is a best-effort
+        # top-up in every phase (Phase 3 skips such tasks entirely), so
+        # a push failure on its own nodes must not be fatal either --
+        # the prelude may well have succeeded.
+        _, error = await self._captured_on_recovery(setup_failures=[
+            job_group_networking.SetupFailure('job-a', 'job-a-0',
+                                              'exec transport broken')
+        ],
+                                                    self_delivering=True)
+        assert error is None
+
+    @pytest.mark.asyncio
+    async def test_disabled_inter_connection_skips_setup(self):
+        net, error = await self._captured_on_recovery(
+            setup_failures=[], inter_connection_enabled=False)
+        assert error is None
+        net.setup_job_group_networking.assert_not_awaited()
+
+
+class TestOnRecoveryIncludesInlineTasks:
+    """on_recovery must refresh ALL group tasks, including tasks that
+    inline their DNS delivery in task.run.
+
+    The inline/push split exists only in Phase 3 (initial delivery,
+    where the inline prelude will do the job itself). Post-recovery,
+    inline tasks go through the same push path as everyone else -- same
+    retries, same own-vs-peer classification -- and the PID-file-guarded
+    start makes the controller push race-safe against the recovered
+    task's own prelude. Guard against anyone 'harmonizing' on_recovery
+    with Phase 3's inline skip.
+    """
+
+    @pytest.mark.asyncio
+    async def test_setup_receives_every_group_task(self):
+        controller = MagicMock(spec=JobController)
+        controller._job_id = 1
+        controller._dag = MagicMock()
+        controller._dag.inter_connection_enabled = MagicMock(return_value=True)
+        task = MagicMock()
+        task.name = 'job-a'
+        inline_peer = MagicMock()
+        inline_peer.name = 'job-inline'
+
+        captured = {}
+
+        async def fake_monitor_task(**kwargs):
+            captured['on_recovery'] = kwargs['on_recovery']
+            return True
+
+        executor = MagicMock()
+        executor.monitor_task = fake_monitor_task
+
+        with patch('sky.jobs.controller.job_group_networking') as net, \
+             patch('sky.jobs.controller.managed_job_utils') as utils, \
+             patch('sky.jobs.controller.global_user_state') as gus:
+            net.setup_job_group_networking = AsyncMock(return_value=[])
+            # Even if the peer inlines its DNS delivery, on_recovery must
+            # not use dns_addresses_for_task to filter the push list (it
+            # is only consulted for fatality classification, and only
+            # when the recovered task's own nodes failed).
+            net.dns_addresses_for_task.return_value = ['inline-addr']
+            utils.generate_managed_job_cluster_name.side_effect = (
+                lambda name, job_id: f'{name}-{job_id}')
+            gus.get_handle_from_cluster_name.return_value = MagicMock()
+
+            await JobController._monitor_job_group_task(
+                controller, 0, task, 'cluster-a', executor, 'group',
+                [(task, MagicMock()), (inline_peer, MagicMock())])
+            await captured['on_recovery']()
+
+            net.setup_job_group_networking.assert_awaited_once()
+            _, passed_handles = (net.setup_job_group_networking.await_args.args)
+            passed_tasks = [t for t, _ in passed_handles]
+            assert passed_tasks == [task, inline_peer]
+            net.dns_addresses_for_task.assert_not_called()
+
+
+class TestOnRecoveryClusterSetUpErrorHandling:
+    """ClusterSetUpError from a Job Group's on_recovery callback must be
+    converted at the _monitor_one_task call site into a terminal
+    FAILED_SETUP (with the real reason) + return False.
+
+    Letting it propagate instead would terminate the Phase 4 monitor
+    asyncio.Task with an exception, which the Phase 4 collection loop
+    swallows into task_results with no terminal state ever set for the
+    task -- run()'s finally would then mislabel the still-RUNNING task
+    as CANCELLED, with the failure reason existing only in controller
+    logs.
+    """
+
+    @pytest.mark.asyncio
+    async def test_sets_failed_setup_and_returns_false(self):
+        from sky import exceptions
+
+        controller = JobController.__new__(JobController)
+        controller._job_id = 1
+        controller._pool = None
+        controller._backend = MagicMock()
+        controller._cleanup_cluster = AsyncMock()
+
+        mock_task = MagicMock()
+        mock_task.name = 'test-task'
+        mock_task.num_nodes = 1
+
+        executor = MagicMock()
+        executor.recover = AsyncMock(return_value=12345.0)
+
+        on_recovery = AsyncMock(
+            side_effect=exceptions.ClusterSetUpError('networking gone'))
+
+        with patch('asyncio.sleep', new=AsyncMock()), \
+             patch('sky.jobs.state.get_job_status_with_task_id_async',
+                   new=AsyncMock(return_value=managed_job_state.
+                                 ManagedJobStatus.RECOVERING)), \
+             patch('sky.jobs.state.set_recovered_async', new=AsyncMock()), \
+             patch('sky.jobs.state.set_failed_async',
+                   new=AsyncMock()) as mock_set_failed:
+            succeeded = await controller._monitor_one_task(
+                task_id=0,
+                task=mock_task,
+                cluster_name='test-cluster',
+                executor=executor,
+                callback_func=MagicMock(),
+                force_transit_to_recovering=True,
+                on_recovery=on_recovery,
+            )
+
+        assert succeeded is False
+        on_recovery.assert_awaited_once()
+        mock_set_failed.assert_awaited_once()
+        kwargs = mock_set_failed.call_args.kwargs
+        assert (kwargs['failure_type'] ==
+                managed_job_state.ManagedJobStatus.FAILED_SETUP)
+        assert 'networking gone' in kwargs['failure_reason']

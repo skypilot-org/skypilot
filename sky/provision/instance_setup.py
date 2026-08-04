@@ -59,13 +59,30 @@ _TARGET_NOFILE = 1048576
 # /proc/<pid>/limits (field 5 of the "Max open files" row) so that it is the
 # raylet's own limit rather than this shell's.
 #
+# Probe with `command -v`, not `which`: minimal non-Debian images
+# (RHEL/UBI/Rocky) ship no `which` binary, so `which prlimit` exits 127 there.
+# That matters because this string is appended LAST to the Ray *worker* start
+# command, so on Kubernetes its exit status becomes the worker's entire
+# runtime-setup step status: a 127 writes runtime-setup.failed and kills the
+# worker pod, failing every multi-node launch on such an image. Reproduced on
+# 2-node rockylinux:9, where Ray itself had started fine. The head is
+# unaffected -- its command ends in RAY_HEAD_WAIT_INITIALIZED_COMMAND, a
+# `while` loop that always returns 0.
+#
+# Trailing `true` for the same reason: this tuning is best-effort and must
+# never decide the exit status of what it is appended to, whichever part fails.
+# `pgrep` is absent on those images too (no procps), which would otherwise
+# poison the status even with the probe fixed.
+#
 # Inlined into ibm-ray.yml.j2 as `ray_prlimit_command`.
 RAY_PRLIMIT = (
-    'which prlimit && for id in $(pgrep -f raylet/raylet); do '
+    'command -v prlimit >/dev/null 2>&1 && '
+    'for id in $(pgrep -f raylet/raylet); do '
     'hard=$(awk \'/Max open files/ {print $5}\' /proc/$id/limits); '
     f'sudo prlimit --nofile={_TARGET_NOFILE}:{_TARGET_NOFILE} --pid=$id '
     '2>/dev/null || sudo prlimit --nofile="$hard:" --pid=$id || '
-    'echo "Failed to raise the open files limit of raylet $id." >&2; done;')
+    'echo "Failed to raise the open files limit of raylet $id." >&2; done; '
+    'true;')
 
 # Raise the *soft* open files limit of the current shell to _TARGET_NOFILE,
 # falling back to the hard limit when that is lower (see RAY_PRLIMIT above for

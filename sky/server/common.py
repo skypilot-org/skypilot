@@ -695,6 +695,27 @@ def get_api_server_status(endpoint: Optional[str] = None) -> ApiServerInfo:
 
 
 def handle_request_error(response: 'requests.Response') -> None:
+    # A synchronous 403 is raised at the API boundary by the per-resource
+    # permission check (see server._reject_cluster_write_for_unauthorized) and
+    # by the workspace endpoints (set/get preferred workspace). Surface its
+    # server-provided `detail` as a clean, single-line error instead of a raw
+    # HTTPError traceback. Scoped to exactly 403 so every other status keeps its
+    # existing behavior — 5xx in particular still raise HTTPError below and
+    # stay retryable by `retry_transient_errors`.
+    if response.status_code == 403:
+        detail = None
+        try:
+            payload = response.json()
+            if isinstance(payload, dict):
+                detail = payload.get('detail')
+        except Exception:  # pylint: disable=broad-except
+            detail = None
+        if detail:
+            with ux_utils.print_exception_no_traceback():
+                # Typed so callers can distinguish authz failures
+                # programmatically; the CLI already renders this cleanly.
+                raise exceptions.PermissionDeniedError(
+                    detail if isinstance(detail, str) else str(detail))
     # Keep the original HTTPError if the response code >= 400
     response.raise_for_status()
 

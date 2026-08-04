@@ -1421,7 +1421,19 @@ def cancel_jobs_by_id(job_ids: Optional[List[int]],
         if job_status is None:
             logger.info(f'Job {job_id} not found. Skipped.')
             continue
-        elif job_status.is_terminal():
+
+        # Workspace isolation is a permission check and is independent of job
+        # status: a job outside the caller's active workspace must not be acted
+        # on (or have its state revealed) whether it is pending, running, or
+        # already terminal. Enforce it first, before any status-based handling
+        # (terminal skip / PENDING short-circuit / signal) below. Kept after the
+        # existence check above because a missing job has no workspace to check.
+        job_workspace = managed_job_state.get_workspace(job_id)
+        if current_workspace is not None and job_workspace != current_workspace:
+            wrong_workspace_job_ids.append(job_id)
+            continue
+
+        if job_status.is_terminal():
             logger.info(f'Job {job_id} is already in terminal state '
                         f'{job_status.value}. Skipped.')
             continue
@@ -1433,11 +1445,6 @@ def cancel_jobs_by_id(job_ids: Optional[List[int]],
                 continue
 
         update_managed_jobs_statuses(job_id)
-
-        job_workspace = managed_job_state.get_workspace(job_id)
-        if current_workspace is not None and job_workspace != current_workspace:
-            wrong_workspace_job_ids.append(job_id)
-            continue
 
         if managed_job_state.is_legacy_controller_process(job_id):
             # The job is running on a legacy single-job controller process.

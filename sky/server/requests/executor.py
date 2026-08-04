@@ -54,6 +54,7 @@ from sky.server.requests import process
 from sky.server.requests import request_names
 from sky.server.requests import requests as api_requests
 from sky.server.requests import threads
+from sky.server.requests import workspace_access
 from sky.server.requests.queues import base as queue_base
 from sky.skylet import constants
 from sky.utils import annotations
@@ -625,10 +626,21 @@ def override_request_env_and_config(
                 # processes (BurstableExecutor = ProcessPoolExecutor).
                 client_api_version = getattr(request_body, 'client_api_version',
                                              None)
+                # The access level this request needs on the active workspace,
+                # classified at the API boundary from the dispatched endpoint
+                # and stamped onto the body (see
+                # sky.server.requests.workspace_access). Reads only need
+                # 'read', which lets a user whose only accessible workspaces
+                # are read-only still list/view them; anything not declared
+                # read-only needs 'write'. An unstamped body (internal daemon
+                # tick, or a body persisted by an older server) falls back to
+                # 'write'.
+                ws_action = (getattr(request_body, 'workspace_access', None) or
+                             workspace_constants.WORKSPACE_ACTION_WRITE)
                 if _should_apply_workspace_resolver(is_daemon,
                                                     client_api_version):
                     resolution = workspaces_core.resolve_workspace_for_user(
-                        user)
+                        user, action=ws_action)
                     workspace_ctx = (skypilot_config.local_active_workspace_ctx(
                         resolution.workspace))
                     logger.debug(f'{request_id} resolved workspace '
@@ -655,7 +667,7 @@ def override_request_env_and_config(
                         # Reject requests that the user does not have
                         # permission to access.
                         workspaces_core.reject_request_for_unauthorized_workspace(  # pylint: disable=line-too-long
-                            user)
+                            user, ws_action)
                     except exceptions.PermissionDeniedError as e:
                         logger.debug(
                             f'{request_id} permission denied to workspace: '
@@ -1074,6 +1086,11 @@ async def prepare_request_async(
     # clients (no header) yield None, which the worker-side gate treats
     # as "skip the workspace resolver".
     request_body.client_api_version = versions.get_remote_api_version()
+    # Same reason as above: classify the access level this request needs on the
+    # caller's active workspace here, while the dispatched endpoint is still
+    # visible, and stamp it so the worker can enforce it. Overwrite
+    # unconditionally — a client-supplied value must never be trusted.
+    request_body.workspace_access = workspace_access.for_current_request()
     request = api_requests.Request(
         request_id=request_id,
         name=server_constants.REQUEST_NAME_PREFIX + request_name,

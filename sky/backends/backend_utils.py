@@ -73,6 +73,7 @@ from sky.utils import ux_utils
 from sky.utils import volume as volume_utils
 from sky.utils import yaml_utils
 from sky.utils.plugin_extensions import ExternalFailureSource
+from sky.workspaces import constants as workspace_constants
 from sky.workspaces import core as workspaces_core
 
 if typing.TYPE_CHECKING:
@@ -4015,7 +4016,10 @@ def get_clusters(
         A list of cluster records. If the cluster does not exist or has been
         terminated, the record will be omitted from the returned list.
     """
-    accessible_workspaces = workspaces_core.get_accessible_workspace_names()
+    # Visibility, not usability: a non-member of a read-only workspace can see
+    # its clusters (that is the point of read-only visibility).
+    accessible_workspaces = workspaces_core.get_accessible_workspace_names(
+        action=workspace_constants.WORKSPACE_ACTION_READ)
 
     # Defense-in-depth: even if some caller bypasses the HTTP layer's
     # role_filter shim and reaches here with include_credentials=True
@@ -4663,11 +4667,14 @@ def open_ssh_tunnel(head_runner: Union[command_runner.SSHCommandRunner,
             # We did not observe this with real Kubernetes clusters.
             timeout = 5
             port_check_cmd = (
-                # We install netcat in our ray-node container,
-                # so we can use it here.
-                # (See kubernetes-ray.yml.j2)
+                # Poll the port with bash's /dev/tcp so no netcat is required:
+                # RHEL/UBI images ship nmap-ncat, whose `nc` has no `-z` flag.
+                # Fall back to `nc -w 1` (portable, no `-z`) for the rare bash
+                # built --disable-net-redirections. (See kubernetes-ray.yml.j2.)
                 f'end=$((SECONDS+{timeout})); '
-                f'while ! nc -z -w 1 localhost {remote_port}; do '
+                f'while ! (timeout 1 bash -c '
+                f'": < /dev/tcp/localhost/{remote_port}" 2>/dev/null || '
+                f'nc -w 1 localhost {remote_port} < /dev/null 2>/dev/null); do '
                 'if (( SECONDS >= end )); then exit 1; fi; '
                 'sleep 0.1; '
                 'done')

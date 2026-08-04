@@ -1540,6 +1540,26 @@ def get_handle_from_cluster_name(
     return pickle.loads(row.handle)
 
 
+@db_retries.retry
+@metrics_lib.time_me
+def get_cluster_workspace(cluster_name: str) -> Optional[str]:
+    """Returns the workspace a cluster belongs to, or None if no such cluster.
+
+    Selects only the ``workspace`` column so callers doing a permission check
+    don't pay the cost of unpickling the handle. A stored NULL (clusters that
+    predate the column) is normalized to the default workspace, so a non-None
+    return always means "the cluster exists and lives in this workspace".
+    """
+    engine = _db_manager.get_engine()
+    assert cluster_name is not None, 'cluster_name cannot be None'
+    with orm.Session(engine) as session:
+        row = (session.query(
+            cluster_table.c.workspace).filter_by(name=cluster_name).first())
+    if row is None:
+        return None
+    return row.workspace or constants.SKYPILOT_DEFAULT_WORKSPACE
+
+
 @metrics_lib.time_me
 def get_handles_from_cluster_names(
         cluster_names: Set[str]

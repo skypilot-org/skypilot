@@ -91,7 +91,8 @@ def run_new_resolver(active_workspace: Optional[str], preferred: Optional[str],
 
     # check_workspace_permission gets called when `requested` is set; mirror
     # the real RBAC: pass if requested in accessible, raise otherwise.
-    def _perm_check(_user, ws):
+    def _perm_check(_user, ws, action='write'):
+        del action
         if ws not in accessible:
             raise exceptions.PermissionDeniedError(
                 f'no access to workspace {ws!r}')

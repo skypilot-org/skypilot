@@ -1,5 +1,6 @@
 """Unit tests for sky.server.requests.requests module."""
 import asyncio
+import json
 import logging
 import pathlib
 import time
@@ -15,6 +16,7 @@ from sky.server.requests import payloads
 from sky.server.requests import requests
 from sky.server.requests.requests import RequestStatus
 from sky.server.requests.requests import ScheduleType
+from sky.server.requests.serializers import decoders
 from sky.server.requests.serializers import encoders
 
 
@@ -2217,3 +2219,90 @@ async def test_interrupt_request_without_retry_records_plain_cancellation(
     error = interrupted.get_error()
     assert error is not None
     assert isinstance(error['object'], exceptions.RequestInterruptedError)
+
+
+# --- Display serializers: request body scoped to the caller -----------------
+
+_SECRET_TASK_YAML = """name: t
+resources:
+  cloud: aws
+envs:
+  HF_TOKEN: env-marker-secret
+secrets:
+  WANDB_API_KEY: secret-marker-value
+run: echo hi
+"""
+
+
+def _launch_body_with_secrets():
+    return payloads.LaunchBody(
+        task=_SECRET_TASK_YAML,
+        cluster_name='c',
+        env_vars={'MY_TOKEN': 'env-var-marker'},
+        override_skypilot_config={'aws': {
+            'token': 'CONFIG-MARKER'
+        }})
+
+
+def _make_request(request_id: str, body) -> requests.Request:
+    return requests.Request(request_id=request_id,
+                            name='sky.launch',
+                            entrypoint=dummy,
+                            request_body=body,
+                            status=RequestStatus.SUCCEEDED,
+                            created_at=0.0,
+                            user_id='alice')
+
+
+def _assert_full(request_body: str):
+    for marker in ('env-marker-secret', 'secret-marker-value', 'CONFIG-MARKER',
+                   'env-var-marker'):
+        assert marker in request_body, f'{marker!r} missing from owner body'
+
+
+def test_encode_owner_path_keeps_real_values():
+    """Request.encode() (the /api/get owner path) is never scoped/dropped."""
+    request = _make_request('display-owner-1', _launch_body_with_secrets())
+    encoded = request.encode()
+    decoded_body = decoders.decode_and_unpickle(encoded.request_body)
+    assert 'env-marker-secret' in decoded_body.task
+    assert 'secret-marker-value' in decoded_body.task
+    assert decoded_body.override_skypilot_config == {
+        'aws': {
+            'token': 'CONFIG-MARKER'
+        }
+    }
+
+
+@pytest.mark.asyncio
+async def test_readable_encode_scopes_to_caller(isolated_database):
+    request = _make_request('display-readable-1', _launch_body_with_secrets())
+    await requests.create_if_not_exists_async(request)
+    row = requests.get_request('display-readable-1')
+    # Owner (caller == owner) and no-auth (caller None) get the full body.
+    _assert_full(row.readable_encode(caller_user_id='alice').request_body)
+    _assert_full(row.readable_encode(caller_user_id=None).request_body)
+    # Any other caller (e.g. an admin listing everyone) gets no body at all.
+    other = row.readable_encode(caller_user_id='some-admin')
+    assert other.request_body == json.dumps(None)
+
+
+def test_encode_requests_scopes_to_caller():
+    """The other listing serializer (GET /api/status without request_ids)."""
+    request = _make_request('display-listing-1', _launch_body_with_secrets())
+    with mock.patch('sky.global_user_state.get_all_users', return_value=[]):
+        _assert_full(
+            requests.encode_requests([request],
+                                     caller_user_id='alice')[0].request_body)
+        other = requests.encode_requests([request],
+                                         caller_user_id='some-admin')[0]
+        assert other.request_body == json.dumps(None)
+
+
+def test_encode_requests_omits_body_when_owner_unknown():
+    """Fail-safe: an unknown (blanked) owner is not the caller, so no body."""
+    request = _make_request('display-listing-2', _launch_body_with_secrets())
+    request.user_id = ''  # user_id excluded from the fetched fields
+    with mock.patch('sky.global_user_state.get_all_users', return_value=[]):
+        payload = requests.encode_requests([request], caller_user_id='bob')[0]
+    assert payload.request_body == json.dumps(None)

@@ -218,6 +218,14 @@ def _make_node_info(node_name: str, cluster_name: str) -> dict:
     }
 
 
+def _make_command_error() -> exceptions.CommandError:
+    """The error raised when a Slurm command fails, e.g. on an unreachable
+    login node: `sinfo` exits with 255 and `handle_returncode` raises."""
+    return exceptions.CommandError(
+        255, 'sinfo -h --Node', 'Failed to get Slurm node information.',
+        'ssh: connect to host slurm-login port 22: Connection timed out')
+
+
 class TestSlurmNodeInfo:
     """Test slurm_node_info() multi-cluster aggregation."""
 
@@ -261,7 +269,15 @@ class TestSlurmNodeInfo:
                             mock.Mock(return_value=[]))
         assert not utils.slurm_node_info()
 
-    def test_unreachable_cluster_does_not_break_others(self, monkeypatch):
+    @pytest.mark.parametrize('error', [
+        RuntimeError('sinfo returned unexpected output'),
+        _make_command_error(),
+        KeyError('user'),
+        exceptions.NotSupportedError('nope'),
+        FileNotFoundError('~/.slurm/config'),
+    ])
+    def test_unreachable_cluster_does_not_break_others(self, monkeypatch,
+                                                       error):
         """A failure on one cluster should not drop nodes of other clusters."""
         clusters = ['cluster-a', 'cluster-b']
         monkeypatch.setattr('sky.clouds.Slurm.existing_allowed_clusters',
@@ -269,7 +285,7 @@ class TestSlurmNodeInfo:
 
         def _fake_get_node_info_list(slurm_cluster_name):
             if slurm_cluster_name == 'cluster-a':
-                raise RuntimeError('SSH connection failed')
+                raise error
             return [_make_node_info('node-0', slurm_cluster_name)]
 
         monkeypatch.setattr(utils, '_get_slurm_node_info_list',
@@ -280,11 +296,57 @@ class TestSlurmNodeInfo:
         assert len(result) == 1
         assert result[0]['slurm_cluster_name'] == 'cluster-b'
 
+    def test_only_configured_cluster_failing_returns_empty_list(
+            self, monkeypatch):
+        """Aggregation is best-effort even with a single allowed cluster."""
+        monkeypatch.setattr('sky.clouds.Slurm.existing_allowed_clusters',
+                            mock.Mock(return_value=['cluster-a']))
+        monkeypatch.setattr(utils, '_get_slurm_node_info_list',
+                            mock.Mock(side_effect=_make_command_error()))
+        assert not utils.slurm_node_info()
+
     def test_single_cluster_error_returns_empty_list(self, monkeypatch):
         monkeypatch.setattr(
             utils, '_get_slurm_node_info_list',
             mock.Mock(side_effect=exceptions.NotSupportedError('nope')))
         assert not utils.slurm_node_info(slurm_cluster_name='cluster-a')
+
+    def test_single_cluster_command_error_propagates(self, monkeypatch):
+        """An explicitly requested cluster surfaces query failures.
+
+        Callers such as `core.realtime_slurm_gpu_availability` need to tell an
+        unreachable cluster apart from a cluster without nodes.
+        """
+        monkeypatch.setattr(utils, '_get_slurm_node_info_list',
+                            mock.Mock(side_effect=_make_command_error()))
+        with pytest.raises(exceptions.CommandError):
+            utils.slurm_node_info(slurm_cluster_name='cluster-a')
+
+
+class TestSlurmClusterNames:
+    """Test slurm_cluster_names()."""
+
+    def test_returns_configured_clusters(self, monkeypatch):
+        monkeypatch.setattr('sky.clouds.Slurm.existing_allowed_clusters',
+                            mock.Mock(return_value=['cluster-a', 'cluster-b']))
+        assert utils.slurm_cluster_names() == ['cluster-a', 'cluster-b']
+
+    def test_returns_empty_list_when_none_configured(self, monkeypatch):
+        monkeypatch.setattr('sky.clouds.Slurm.existing_allowed_clusters',
+                            mock.Mock(return_value=[]))
+        assert utils.slurm_cluster_names() == []
+
+    def test_does_not_query_the_clusters(self, monkeypatch):
+        """The point of the call: names without contacting a login node."""
+        monkeypatch.setattr('sky.clouds.Slurm.existing_allowed_clusters',
+                            mock.Mock(return_value=['cluster-a']))
+        get_node_info_list = mock.Mock(
+            side_effect=AssertionError('must not query the cluster'))
+        monkeypatch.setattr(utils, '_get_slurm_node_info_list',
+                            get_node_info_list)
+
+        assert utils.slurm_cluster_names() == ['cluster-a']
+        get_node_info_list.assert_not_called()
 
 
 class TestGetGpuTypeAndCount:

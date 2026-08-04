@@ -47,6 +47,7 @@ import {
   useClusterData,
 } from '@/data/connectors/clusters';
 import { getWorkspaces } from '@/data/connectors/workspaces';
+import { useWorkspacesConfig } from '@/hooks/useWorkspacesConfig';
 import { sortData } from '@/data/utils';
 import { SquareCode, Terminal, RotateCwIcon, Brackets } from 'lucide-react';
 import { ServerIcon } from '@/components/elements/icons';
@@ -777,6 +778,12 @@ export function ClusterTable({
     direction: 'ascending',
   });
 
+  // Per-workspace writability, so the per-row Connect/VSCode actions can be
+  // disabled for clusters in workspaces the user can only read (read-only
+  // visibility). Shared with the cluster detail page; missing entry -> treated
+  // as writable (open/default).
+  const { isWorkspaceWritable } = useWorkspacesConfig();
+
   // Read initial page/limit from URL
   const getInitialPage = () => {
     if (typeof window !== 'undefined') {
@@ -1358,6 +1365,7 @@ export function ClusterTable({
               status={item.status}
               onOpenSSHModal={onOpenSSHModal}
               onOpenVSCodeModal={onOpenVSCodeModal}
+              writable={isWorkspaceWritable(item.workspace)}
             />
           )}
         </TableCell>
@@ -1555,6 +1563,11 @@ export function Status2Actions({
   status,
   onOpenSSHModal,
   onOpenVSCodeModal,
+  // False when the cluster is in a workspace the current user cannot write to
+  // (e.g. a read-only workspace they are not a member of). Connect (SSH) and
+  // VSCode both open an interactive shell, so they are write operations and
+  // must be disabled for non-members.
+  writable = true,
 }) {
   const actions = enabledActions(status);
   const isMobile = useMobile();
@@ -1593,7 +1606,11 @@ export function Status2Actions({
           if (!withLabel) {
             label = '';
           }
-          if (actions.includes(actionName)) {
+          if (!writable) {
+            tooltipText =
+              'Read-only: you are not a member of this cluster’s workspace';
+          }
+          if (writable && actions.includes(actionName)) {
             return (
               <Tooltip
                 key={actionName}
@@ -1610,8 +1627,11 @@ export function Status2Actions({
               </Tooltip>
             );
           }
+          // The read-only hint is a full sentence, so it must not be
+          // title-cased.
+          const DisabledTooltip = !writable ? NonCapitalizedTooltip : Tooltip;
           return (
-            <Tooltip
+            <DisabledTooltip
               key={actionName}
               content={tooltipText}
               className="capitalize text-sm text-muted-foreground"
@@ -1623,7 +1643,7 @@ export function Status2Actions({
                 {actionIcon}
                 {!isMobile && <span className="ml-1.5">{label}</span>}
               </span>
-            </Tooltip>
+            </DisabledTooltip>
           );
         })}
       </div>

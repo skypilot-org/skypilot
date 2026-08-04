@@ -269,8 +269,10 @@ cloud_dependencies: Dict[str, List[str]] = {
     'nebius': [
         # Nebius requires grpcio and protobuf, so we need to include
         # our constraints here.
-        # 0.4.1 fails with "attached to a different loop".
-        'nebius>=0.3.59,<0.4',
+        # 0.4.1 and 0.4.2 pool grpc.aio channels without event loop affinity
+        # and fail with "attached to a different loop"; fixed in 0.4.3.
+        # https://github.com/nebius/pysdk/issues/178
+        'nebius>=0.3.59,!=0.4.1,!=0.4.2',
         GRPC,
         PROTOBUF,
     ] + aws_dependencies,

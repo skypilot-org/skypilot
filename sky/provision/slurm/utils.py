@@ -1036,10 +1036,16 @@ def _parse_float_or_none(value: Optional[str]) -> Optional[float]:
 def _get_slurm_node_info_list(slurm_cluster_name: str) -> List[Dict[str, Any]]:
     """Gathers detailed information about each node in the Slurm cluster.
 
+    Args:
+        slurm_cluster_name: The Slurm cluster to query. Must be a host defined
+            in the Slurm SSH config (~/.slurm/config).
+
     Raises:
         FileNotFoundError: If the Slurm configuration file does not exist.
-        ValueError: If no Slurm cluster name is found in the Slurm
-                    configuration file.
+        KeyError: If the cluster's entry in the Slurm configuration file is
+            missing a required field, e.g. `User`.
+        exceptions.CommandError: If a Slurm command fails on the cluster, e.g.
+            because the login node is unreachable.
     """
     # 1. Get node state and GRES using sinfo
 
@@ -1194,6 +1200,20 @@ def _get_slurm_node_info_list(slurm_cluster_name: str) -> List[Dict[str, Any]]:
     return list(slurm_nodes_info.values())
 
 
+def slurm_cluster_names() -> List[str]:
+    """Gets the names of the Slurm clusters this server is configured with.
+
+    Derived from ~/.slurm/config and the ``allowed_clusters`` config alone —
+    nothing here contacts a login node, so a cluster that is currently
+    unreachable is still reported. Callers that need node or GPU data still
+    have to query the cluster itself.
+
+    Returns:
+        List[str]: The configured and allowed Slurm cluster names.
+    """
+    return clouds.Slurm.existing_allowed_clusters()
+
+
 def slurm_node_info(
         slurm_cluster_name: Optional[str] = None) -> List[Dict[str, Any]]:
     """Gets detailed information for each node in the Slurm cluster(s).
@@ -1211,25 +1231,44 @@ def slurm_node_info(
             cpu_load / free_memory_gb (slurmd-sampled usage) — the
             enrichment fields are None when scontrol is unavailable or
             reports N/A.
+
+    Raises:
+        exceptions.CommandError: If a single cluster is explicitly requested
+            and querying it fails. Failures are never raised when aggregating
+            across clusters, so that one unreachable cluster does not hide the
+            nodes of the reachable ones.
     """
     if slurm_cluster_name is not None:
-        clusters_to_query = [slurm_cluster_name]
-    else:
-        clusters_to_query = clouds.Slurm.existing_allowed_clusters()
-        if not clusters_to_query:
+        # An explicitly requested cluster propagates query failures, so that
+        # callers can tell an unreachable cluster apart from a cluster with no
+        # nodes. `sky show-gpus` and the dashboard's per-cluster GPU tile rely
+        # on this to report the cluster as failed instead of empty, see
+        # `core.realtime_slurm_gpu_availability`.
+        try:
+            return _get_slurm_node_info_list(
+                slurm_cluster_name=slurm_cluster_name)
+        except (FileNotFoundError, RuntimeError,
+                exceptions.NotSupportedError) as e:
+            logger.debug(f'Could not retrieve Slurm node info: {e}')
             return []
+
+    clusters_to_query = clouds.Slurm.existing_allowed_clusters()
+    if not clusters_to_query:
+        return []
 
     def _query_cluster(cluster_name: str) -> List[Dict[str, Any]]:
         try:
             return _get_slurm_node_info_list(slurm_cluster_name=cluster_name)
-        except (FileNotFoundError, RuntimeError,
-                exceptions.NotSupportedError) as e:
-            logger.debug('Could not retrieve Slurm node info for cluster '
-                         f'{cluster_name!r}: {e}')
+        except Exception as e:  # pylint: disable=broad-except
+            # Best-effort aggregation: an unreachable login node raises
+            # exceptions.CommandError and a malformed ~/.slurm/config entry
+            # raises KeyError. run_in_parallel re-raises the first exception,
+            # so anything escaping here would drop every cluster's nodes.
+            logger.warning(
+                f'Skipping Slurm cluster {cluster_name!r} while collecting '
+                f'node info: {common_utils.format_exception(e)}')
             return []
 
-    if len(clusters_to_query) == 1:
-        return _query_cluster(clusters_to_query[0])
     node_info_lists = subprocess_utils.run_in_parallel(_query_cluster,
                                                        clusters_to_query)
     return [
