@@ -25,6 +25,24 @@ _OFFER_UNAVAILABLE_ERROR_SNIPPETS = (
     'already been rented',
     'already rented',
 )
+_REGISTRY_LOGIN_OVERRIDE_KEYS = frozenset({'login', 'image_login'})
+
+
+def _validate_registry_login_kwargs(
+        create_instance_kwargs: Dict[str, Any]) -> None:
+    """Reject provider-specific registry credentials.
+
+    SkyPilot derives the credentials from the task's complete
+    SKYPILOT_DOCKER_* secret triplet, which works consistently across
+    providers and keeps precedence unambiguous.
+    """
+    override_keys = _REGISTRY_LOGIN_OVERRIDE_KEYS & set(create_instance_kwargs)
+    if override_keys:
+        raise ValueError(
+            'Vast registry credentials must be supplied through the complete '
+            'SKYPILOT_DOCKER_* task-secret trio; '
+            'vast.create_instance_kwargs.login and image_login are not '
+            'supported.')
 
 
 def _is_offer_unavailable_error(exc: Exception) -> bool:
@@ -134,8 +152,8 @@ def launch(name: str,
 
     Converts the instance_type to the Vast GPU name, finds the specs for the
     GPU, and launches the instance. User-provided parameters in
-    create_instance_kwargs are passed through to the Vast API, allowing full
-    access to Vast's instance creation options.
+    create_instance_kwargs are passed through to the Vast API, except for
+    private-registry credentials, which SkyPilot derives from task secrets.
 
     Supported Vast API parameters (via create_instance_kwargs):
       - image: Docker image to use
@@ -146,7 +164,6 @@ def launch(name: str,
       - extra: Extra docker run arguments
       - onstart_cmd: Command to run on instance start
       - onstart: Path to a local script file to run on start
-      - login: Docker registry login (e.g., "-u user -p pass registry")
       - python_utf8: Enable Python UTF-8 mode
       - lang_utf8: Enable system UTF-8 locale
       - jupyter_lab: Use JupyterLab instead of Jupyter
@@ -194,6 +211,13 @@ def launch(name: str,
     # `ports` is currently unused. Keep it in the signature for caller
     # compatibility and future use (port-forwarding is handled separately).
     del ports
+    create_instance_kwargs = dict(create_instance_kwargs or {})
+    _validate_registry_login_kwargs(create_instance_kwargs)
+    if private_docker_registry and not login:
+        raise ValueError(
+            'Private Docker registry requested but no SkyPilot registry '
+            'credentials were provided.')
+
     cpu_ram = float(instance_type.split('-')[-1]) / 1024
     gpu_name = instance_type.split('-')[1].replace('_', ' ')
     num_gpus = int(instance_type.split('-')[0].replace('x', ''))
@@ -243,7 +267,7 @@ def launch(name: str,
     instance_touse = instance_list[0]
 
     # Start with user-provided kwargs as the base
-    launch_params: Dict[str, Any] = dict(create_instance_kwargs or {})
+    launch_params: Dict[str, Any] = dict(create_instance_kwargs)
     # Remove None values to avoid overriding defaults
     launch_params = {k: v for k, v in launch_params.items() if v is not None}
 
@@ -271,13 +295,10 @@ def launch(name: str,
     if 'disk' not in launch_params and not use_template:
         launch_params['disk'] = disk_size
 
-    # Handle login - from function arg or user kwargs
-    if login and 'login' not in launch_params:
+    # The SkyPilot-derived login is the only supported registry credential
+    # source for Vast provisioning.
+    if login:
         launch_params['login'] = login
-    if private_docker_registry and 'login' not in launch_params:
-        raise RuntimeError(
-            'Private docker registry requested but no login credentials '
-            'were provided.')
 
     # Handle price/bid_price - user can override
     # Vast.ai SDK uses 'price' since SDK v6+; normalize bid_price for compat

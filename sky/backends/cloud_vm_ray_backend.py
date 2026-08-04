@@ -4027,7 +4027,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
         def _setup_node(node_id: int) -> None:
             setup_envs = task_lib.get_plaintext_envs_and_secrets(
-                task.envs_and_secrets)
+                task.runtime_envs_and_secrets)
             setup_envs.update(self._skypilot_predefined_env_vars(handle))
             setup_envs['SKYPILOT_SETUP_NODE_IPS'] = '\n'.join(internal_ips)
             setup_envs['SKYPILOT_SETUP_NODE_RANK'] = str(node_id)
@@ -6918,7 +6918,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                            handle: CloudVmRayResourceHandle) -> Dict[str, str]:
         """Returns the environment variables for the task."""
         env_vars = task_lib.get_plaintext_envs_and_secrets(
-            task.envs_and_secrets)
+            task.runtime_envs_and_secrets)
         # If it is a managed job, the TASK_ID_ENV_VAR will have been already set
         # by the controller.
         if constants.TASK_ID_ENV_VAR not in env_vars:

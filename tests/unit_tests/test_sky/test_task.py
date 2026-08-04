@@ -659,6 +659,28 @@ def test_docker_login_config_all_in_envs_or_secrets():
         task_obj5.set_resources(resources_lib.Resources())
 
 
+def test_docker_login_credentials_are_provisioning_only():
+    task_obj = task.Task(name='test-docker-runtime-environment',
+                         run='echo hello',
+                         secrets={
+                             'APP_SECRET': 'application-secret',
+                             'SKYPILOT_DOCKER_USERNAME': 'registry-user',
+                             'SKYPILOT_DOCKER_SERVER': 'registry.example.com',
+                             'SKYPILOT_DOCKER_PASSWORD': 'registry-password',
+                         })
+    task_obj.set_resources(
+        resources_lib.Resources(
+            image_id='docker:registry.example.com/team/image:latest'))
+
+    runtime_envs = task.get_plaintext_envs_and_secrets(
+        task_obj.runtime_envs_and_secrets)
+
+    assert runtime_envs == {'APP_SECRET': 'application-secret'}
+    resource = next(iter(task_obj.resources))
+    assert resource.docker_login_config is not None
+    assert resource.docker_login_config.server == 'registry.example.com'
+
+
 def test_docker_login_config_update_methods():
     """Test Docker login config validation when using update_envs and update_secrets."""
     # Test 1: Add complete Docker config to envs all at once - should work

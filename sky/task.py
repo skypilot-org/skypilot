@@ -1316,6 +1316,19 @@ class Task:
         envs.update(self.secrets)
         return envs
 
+    @property
+    def runtime_envs_and_secrets(self) -> Dict[str, Union[str, SecretStr]]:
+        """Return task variables that are safe to expose at runtime.
+
+        Docker registry credentials are consumed while provisioning the image
+        and must not be available to setup or workload commands.
+        """
+        return {
+            key: value
+            for key, value in self.envs_and_secrets.items()
+            if key not in constants.DOCKER_LOGIN_ENV_VARS
+        }
+
     def set_inputs(self, inputs: str,
                    estimated_size_gigabytes: float) -> 'Task':
         # E.g., 's3://bucket', 'gs://bucket', or None.

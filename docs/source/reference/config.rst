@@ -2812,6 +2812,16 @@ options added by newer SDK versions. The options below are the fields supported
 by the current integration and Vast API. The SDK version installed with
 SkyPilot determines which fields are available.
 
+.. note::
+
+    Private-registry credentials must not be supplied through ``login`` or
+    ``image_login`` in this mapping. Supply the complete
+    ``SKYPILOT_DOCKER_SERVER``, ``SKYPILOT_DOCKER_USERNAME``, and
+    ``SKYPILOT_DOCKER_PASSWORD`` task credential triplet instead. SkyPilot
+    passes the derived credential to Vast while creating the instance, before
+    the runtime image is pulled. The reserved credential variables are used
+    only for provisioning and are not injected into task setup or run commands.
+
 .. dropdown:: Supported parameters
 
     ``image``
@@ -2848,15 +2858,6 @@ SkyPilot determines which fields are available.
     ``onstart``
         Path to a local script file to run on instance start. The file contents
         are read and appended to ``onstart_cmd``.
-
-    ``login``
-        Docker registry login credentials (e.g., ``"-u user -p pass registry"``).
-        Required when using a private Docker registry. A value supplied here
-        takes precedence over credentials from SkyPilot's Docker configuration.
-
-    ``image_login``
-        Docker registry credentials if needed.
-        Required when using private Docker registries.
 
     ``python_utf8``
         Enable Python UTF-8 mode (boolean true | false).

@@ -228,6 +228,32 @@ def _get_sensitive_values(create_instance_kwargs: Dict[str, Any],
     return sensitive_values
 
 
+def _build_docker_login_args(
+        login_config: docker_utils.DockerLoginConfig) -> str:
+    """Build Vast's single registry-login argument safely.
+
+    Vast accepts login credentials as a space-delimited string rather than
+    separate structured fields. Reject whitespace because the provider parser
+    cannot safely distinguish it from argument separators.
+    """
+    credential_values = {
+        'username': login_config.username,
+        'password': login_config.password,
+        'server': login_config.server,
+    }
+    invalid_names = [
+        name for name, value in credential_values.items()
+        if not isinstance(value, str) or not value or any(
+            character.isspace() for character in value)
+    ]
+    if invalid_names:
+        raise ValueError(
+            'Vast Docker registry credentials must be non-empty and must not '
+            'contain whitespace.')
+    return (f'-u {login_config.username} -p {login_config.password} '
+            f'{login_config.server}')
+
+
 def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
                   config: common.ProvisionConfig) -> common.ProvisionRecord:
     """Runs instances for the given cluster."""
@@ -265,9 +291,7 @@ def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
         login_config = (docker_login_config if isinstance(
             docker_login_config, docker_utils.DockerLoginConfig) else
                         docker_utils.DockerLoginConfig(**docker_login_config))
-        login_args = (f'-u {login_config.username} '
-                      f'-p {login_config.password} '
-                      f'{login_config.server}')
+        login_args = _build_docker_login_args(login_config)
         image_name = login_config.format_image(image_name)
 
     sensitive_values = _get_sensitive_values(create_instance_kwargs, login_args,
