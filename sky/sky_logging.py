@@ -1,6 +1,7 @@
 """Logging utilities."""
 import builtins
 import contextlib
+import contextvars
 from datetime import datetime
 import logging
 import os
@@ -52,6 +53,15 @@ class NewLineFormatter(logging.Formatter):
         return msg
 
 
+# Log level requested by the currently running request / background daemon, or
+# None to fall back to the handler's own level. Scoped to the contextvars
+# Context rather than applied to the shared `sky.*` Logger objects: the API
+# server runs many requests and daemons in one process, so mutating logger
+# levels there lets one component's verbosity silence another's logs.
+_level_override: contextvars.ContextVar = contextvars.ContextVar(
+    'sky_logging_level_override', default=None)
+
+
 class EnvAwareHandler(rich_utils.RichSafeStreamHandler):
     """A handler that awares environment variables.
 
@@ -76,11 +86,21 @@ class EnvAwareHandler(rich_utils.RichSafeStreamHandler):
                 # SKYPILOT_DEBUG env var if SUPPRESS_SENSITIVE_LOG is set
                 if env_options.Options.SUPPRESS_SENSITIVE_LOG.get():
                     return logging.INFO
+            # An explicit per-context level (set by set_sky_logging_levels)
+            # wins over SKYPILOT_DEBUG: it is how a background daemon asks for
+            # its own verbosity, and the daemon shares this process - and this
+            # handler object - with everything else running here.
+            override = _level_override.get()
+            if override is not None:
+                return override
             if env_options.Options.SHOW_DEBUG_INFO.get():
                 return logging.DEBUG
             else:
                 return self._level
         else:
+            override = _level_override.get()
+            if override is not None:
+                return override
             return self._level
 
     @level.setter
@@ -165,32 +185,31 @@ def init_logger(name: str) -> logging.Logger:
 
 @contextlib.contextmanager
 def set_sky_logging_levels(level: int):
-    """Set the logging level for all loggers."""
-    # Turn off logger
-    previous_levels = {}
-    for logger_name in logging.Logger.manager.loggerDict:
-        if logger_name.startswith('sky'):
-            logger = logging.getLogger(logger_name)
-            previous_levels[logger_name] = logger.level
-            logger.setLevel(level)
+    """Sets the sky logging level for the current context.
+
+    The level applies to whatever runs inside this context manager - a request,
+    or one background daemon's tick - and to nothing else. It is deliberately
+    not applied to the `sky.*` Logger objects: those are process-global, and
+    the API server runs requests and daemons concurrently in one process, so
+    setting levels there made one component's verbosity suppress another's log
+    records (the `sky` root logger is intentionally left at DEBUG so that the
+    context-aware handler decides, see `_setup_logger` and `logging_enabled`).
+
+    Filtering happens in EnvAwareHandler.level, which reads the override below.
+    """
+    token = _level_override.set(level)
+    previous_show_debug_info = None
     if level == logging.DEBUG:
         previous_show_debug_info = env_options.Options.SHOW_DEBUG_INFO.get()
+        # Context-aware: writes land in this context's env overrides when a
+        # SkyPilotContext is active, so subprocesses spawned here inherit it.
         os.environ[env_options.Options.SHOW_DEBUG_INFO.env_key] = '1'
     try:
         yield
     finally:
-        # Restore logger
-        for logger_name in logging.Logger.manager.loggerDict:
-            if logger_name.startswith('sky'):
-                logger = logging.getLogger(logger_name)
-                try:
-                    logger.setLevel(previous_levels[logger_name])
-                except KeyError:
-                    # New loggers maybe initialized after the context manager,
-                    # no need to restore the level.
-                    pass
+        _level_override.reset(token)
         if level == logging.DEBUG and not previous_show_debug_info:
-            os.environ.pop(env_options.Options.SHOW_DEBUG_INFO.env_key)
+            os.environ.pop(env_options.Options.SHOW_DEBUG_INFO.env_key, None)
 
 
 def logging_enabled(logger: logging.Logger, level: int) -> bool:

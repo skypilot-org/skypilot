@@ -122,3 +122,62 @@ def test_handler_output(mock_get, handler, stream, monkeypatch):
     handler.level = logging.DEBUG
     logger.debug('Debug message 2')
     assert 'Debug message 2' in stream.getvalue()
+
+
+def test_set_sky_logging_levels_does_not_mutate_shared_loggers():
+    """The level must be scoped to the caller, not written to shared state.
+
+    `logging.Logger` objects are process-global, and the API server runs
+    requests and background daemons concurrently in one process. Setting levels
+    on those objects let one component's verbosity change what another wrote,
+    and left a logger at the wrong level for good when two callers interleaved
+    their save/restore.
+    """
+    probe = logging.getLogger('sky.test_no_shared_mutation')
+    original = probe.level
+
+    with sky_logging.set_sky_logging_levels(logging.WARNING):
+        assert probe.level == original, (
+            'set_sky_logging_levels mutated a shared Logger object; the level '
+            'must live in the context instead')
+
+    assert probe.level == original
+
+
+def test_set_sky_logging_levels_applies_to_the_handler(monkeypatch):
+    """The requested level must still take effect, via the handler."""
+    monkeypatch.setattr(context, 'get', lambda: None)
+    handler = sky_logging.EnvAwareHandler(io.StringIO(), level=logging.INFO)
+    assert handler.level == logging.INFO
+
+    with sky_logging.set_sky_logging_levels(logging.WARNING):
+        assert handler.level == logging.WARNING
+
+    assert handler.level == logging.INFO
+
+
+def test_set_sky_logging_levels_is_isolated_per_context():
+    """Two contexts must not see each other's level."""
+    import contextvars
+
+    handler = sky_logging.EnvAwareHandler(io.StringIO(), level=logging.INFO)
+    seen = {}
+
+    def quiet():
+        with sky_logging.set_sky_logging_levels(logging.WARNING):
+            seen['inside'] = handler.level
+            # A sibling context running concurrently must be unaffected.
+            contextvars.copy_context().run(other)
+            seen['after_sibling'] = handler.level
+
+    def other():
+        seen['sibling'] = handler.level
+
+    contextvars.copy_context().run(quiet)
+
+    assert seen['inside'] == logging.WARNING
+    assert seen['after_sibling'] == logging.WARNING
+    # The sibling context inherits a copy, so it sees the same level; what must
+    # hold is that it cannot leak a change back out.
+    assert handler.level == logging.INFO, (
+        'the level escaped the context that set it')
