@@ -88,7 +88,7 @@ class LeaderElector(abc.ABC):
 
     @abc.abstractmethod
     def try_acquire(self) -> bool:
-        """Non-blocking bid for leadership. True iff this candidate now leads."""
+        """Non-blocking bid for leadership. True iff this candidate leads."""
         raise NotImplementedError
 
     @abc.abstractmethod
@@ -294,8 +294,8 @@ class PgLeaseElector(LeaderElector):
             # TTL; a slower handoff, not a correctness problem.
             logger.debug('%s: lease release failed: %s', self._lock_id, e)
         finally:
-            # Clear our fencing token only after the round-trip: until the row is
-            # expired we may still be the named holder until the TTL.
+            # Clear our fencing token only after the round-trip: until the
+            # row is expired we may still be the named holder until the TTL.
             self._epoch = None
 
     def fencing_token(self) -> Optional[int]:
