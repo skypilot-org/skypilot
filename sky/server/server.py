@@ -2445,11 +2445,24 @@ async def local_down(request: fastapi.Request,
     )
 
 
-async def get_expanded_request_id(request_id: str) -> str:
-    """Gets the expanded request ID for a given request ID prefix."""
+async def get_expanded_request_id(request_id: str,
+                                  scope_user_id: Optional[str] = None) -> str:
+    """Gets the expanded request ID for a given request ID prefix.
+
+    When ``scope_user_id`` is set, only requests owned by that user are
+    considered candidates. This both hides other users' requests (a
+    non-owned prefix resolves to a 404, identical to a genuine miss) and
+    closes an existence oracle: uniqueness is decided over the caller's own
+    requests only, so another user's request can never turn the response
+    into the distinguishable "multiple requests found" 400.
+    """
     request_tasks = await requests_lib.get_requests_async_with_prefix(
-        request_id, fields=['request_id'])
-    if request_tasks is None:
+        request_id, fields=['request_id', 'user_id'])
+    if request_tasks is not None and scope_user_id is not None:
+        request_tasks = [
+            task for task in request_tasks if task.user_id == scope_user_id
+        ]
+    if not request_tasks:
         raise fastapi.HTTPException(status_code=404,
                                     detail=f'Request {request_id!r} not found')
     if len(request_tasks) > 1:
@@ -2461,10 +2474,13 @@ async def get_expanded_request_id(request_id: str) -> str:
 
 # === API server related APIs ===
 @app.get('/api/get')
-async def api_get(request_id: str) -> payloads.RequestPayload:
+async def api_get(request: fastapi.Request,
+                  request_id: str) -> payloads.RequestPayload:
     """Gets a request with a given request ID prefix."""
-    # Validate request_id prefix matches a single request.
-    request_id = await get_expanded_request_id(request_id)
+    # Validate request_id prefix matches a single request, scoped to the
+    # caller so a non-admin cannot read another user's request.
+    request_id = await get_expanded_request_id(
+        request_id, scope_user_id=role_filter.request_owner_scope(request))
 
     # Exponential backoff: start fast (10ms) for short requests like
     # status/queue, then back off to 100ms for long requests like
@@ -2562,11 +2578,32 @@ async def stream(
             status_code=400,
             detail='Only one of request_id and log_path can be provided')
 
+    scope_user_id = role_filter.request_owner_scope(request)
+
+    if log_path is not None and scope_user_id is not None:
+        # log_path streaming targets arbitrary files under the shared
+        # ~/sky_logs tree and the multi-tenant API server log. A non-admin
+        # has no supported use for it, so gate it to admins/no-auth.
+        raise fastapi.HTTPException(
+            status_code=403,
+            detail='Streaming logs by log_path is restricted to admins.')
+
     if request_id is not None:
-        request_id = await get_expanded_request_id(request_id)
+        request_id = await get_expanded_request_id(request_id,
+                                                   scope_user_id=scope_user_id)
 
     if request_id is None and log_path is None:
-        request_id = await requests_lib.get_latest_request_id_async()
+        if scope_user_id is None:
+            request_id = await requests_lib.get_latest_request_id_async()
+        else:
+            # Scope "latest request" to the caller instead of leaking the
+            # server-wide most-recent request from any user.
+            latest = await requests_lib.get_request_tasks_async(
+                req_filter=requests_lib.RequestTaskFilter(user_id=scope_user_id,
+                                                          fields=['request_id'],
+                                                          sort=True,
+                                                          limit=1))
+            request_id = latest[0].request_id if latest else None
         if request_id is None:
             raise fastapi.HTTPException(status_code=404,
                                         detail='No request found')
@@ -2746,8 +2783,11 @@ async def stream(
 
 
 @app.post('/api/cancel')
-async def api_cancel(request: fastapi.Request,
-                     request_cancel_body: payloads.RequestCancelBody) -> None:
+async def api_cancel(
+    request: fastapi.Request,
+    request_cancel_body: payloads.RequestCancelBody = fastapi.Depends(
+        role_filter.force_caller_scope_cancel_body),
+) -> None:
     """Cancels requests."""
     await executor.schedule_request_async(
         request_id=request.state.request_id,
@@ -2785,6 +2825,9 @@ async def api_status(
         requests_lib.validate_fields(fields)
     except ValueError as e:
         raise fastapi.HTTPException(status_code=400, detail=str(e)) from e
+    # Scope to the caller so a non-admin only sees their own requests. None
+    # (admin / no-auth) means unscoped, i.e. every user's requests.
+    scope_user_id = role_filter.request_owner_scope(request)
     if request_ids is None:
         statuses = None
         if not all_status:
@@ -2793,6 +2836,7 @@ async def api_status(
             req_filter=requests_lib.RequestTaskFilter(
                 status=statuses,
                 cluster_names=[cluster_name] if cluster_name else None,
+                user_id=scope_user_id,
                 exclude_request_names=[
                     server_constants.REQUEST_NAME_PREFIX + d.value
                     for d in daemons.HIDDEN_REQUEST_NAMES
@@ -2811,6 +2855,10 @@ async def api_status(
             if request_tasks is None:
                 continue
             for request_task in request_tasks:
+                # Drop requests the caller does not own (non-admin scope).
+                if (scope_user_id is not None and
+                        request_task.user_id != scope_user_id):
+                    continue
                 encoded_request_tasks.append(
                     request_task.readable_encode(caller_user_id=caller_user_id))
         return encoded_request_tasks
@@ -3617,8 +3665,26 @@ async def complete_volume_name(incomplete: str,) -> List[str]:
 
 
 @app.get('/api/completion/api_request')
-async def complete_api_request(incomplete: str,) -> List[str]:
-    return await requests_lib.get_api_request_ids_start_with(incomplete)
+async def complete_api_request(request: fastapi.Request,
+                               incomplete: str) -> List[str]:
+    scope_user_id = role_filter.request_owner_scope(request)
+    if scope_user_id is None:
+        return await requests_lib.get_api_request_ids_start_with(incomplete)
+    # Non-admin: complete only the caller's own request IDs. Fetch their recent
+    # requests with the user_id filter, ordering, and 1000-row cap applied in
+    # SQL (via RequestTaskFilter), then prefix-match in memory. This keeps the
+    # bounded, recency-ordered behavior of the admin path instead of an
+    # unbounded full-table scan (an empty prefix would otherwise load every
+    # user's requests into memory).
+    request_tasks = await requests_lib.get_request_tasks_async(
+        req_filter=requests_lib.RequestTaskFilter(
+            user_id=scope_user_id, fields=['request_id'], sort=True, limit=1000)
+    )
+    return [
+        task.request_id
+        for task in request_tasks
+        if task.request_id.startswith(incomplete)
+    ]
 
 
 def _load_dynamic_routes() -> List[Tuple['re.Pattern[str]', str]]:

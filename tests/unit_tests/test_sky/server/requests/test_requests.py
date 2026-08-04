@@ -2306,3 +2306,54 @@ def test_encode_requests_omits_body_when_owner_unknown():
     with mock.patch('sky.global_user_state.get_all_users', return_value=[]):
         payload = requests.encode_requests([request], caller_user_id='bob')[0]
     assert payload.request_body == json.dumps(None)
+
+
+@pytest.mark.asyncio
+async def test_kill_requests_scoped_by_user(isolated_database):
+    """kill_requests with an explicit request_ids list must still honor the
+    user_id scope, so a caller cannot cancel another user's request."""
+    alice = requests.Request(request_id='kill-alice-1',
+                             name='sky.launch',
+                             entrypoint=dummy,
+                             request_body=payloads.RequestBody(),
+                             status=RequestStatus.RUNNING,
+                             created_at=0.0,
+                             pid=None,
+                             user_id='alice')
+    bob = requests.Request(request_id='kill-bob-1',
+                           name='sky.launch',
+                           entrypoint=dummy,
+                           request_body=payloads.RequestBody(),
+                           status=RequestStatus.RUNNING,
+                           created_at=0.0,
+                           pid=None,
+                           user_id='bob')
+    await requests.create_if_not_exists_async(alice)
+    await requests.create_if_not_exists_async(bob)
+
+    # Alice tries to cancel both by explicit id; only her own is cancelled.
+    cancelled = requests.kill_requests(
+        request_ids=['kill-alice-1', 'kill-bob-1'], user_id='alice')
+    assert cancelled == ['kill-alice-1']
+    assert requests.get_request(
+        'kill-alice-1').status == RequestStatus.CANCELLED
+    # Bob's request is untouched.
+    assert requests.get_request('kill-bob-1').status == RequestStatus.RUNNING
+
+
+@pytest.mark.asyncio
+async def test_kill_requests_unscoped_cancels_all(isolated_database):
+    """user_id=None stays privileged (internal shutdown path): cancels all."""
+    for rid, uid in [('shutdown-a', 'alice'), ('shutdown-b', 'bob')]:
+        await requests.create_if_not_exists_async(
+            requests.Request(request_id=rid,
+                             name='sky.launch',
+                             entrypoint=dummy,
+                             request_body=payloads.RequestBody(),
+                             status=RequestStatus.RUNNING,
+                             created_at=0.0,
+                             pid=None,
+                             user_id=uid))
+    cancelled = requests.kill_requests(request_ids=['shutdown-a', 'shutdown-b'],
+                                       user_id=None)
+    assert set(cancelled) == {'shutdown-a', 'shutdown-b'}

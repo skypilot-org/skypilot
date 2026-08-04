@@ -819,7 +819,7 @@ def test_api_get_endpoint_serializes_request_payload(monkeypatch):
         user_id='user-123',
     )
 
-    async def fake_expand(request_id):
+    async def fake_expand(request_id, scope_user_id=None):
         return request_id
 
     async def fake_status(request_id, include_msg=False):
@@ -870,7 +870,7 @@ def _make_interrupted_request(with_error: bool):
 def _mount_api_get_request(monkeypatch, request):
     from sky.server.requests import requests as requests_lib
 
-    async def fake_expand(request_id):
+    async def fake_expand(request_id, scope_user_id=None):
         return request_id
 
     async def fake_status(request_id, include_msg=False):
@@ -1148,3 +1148,187 @@ def test_prune_sky_logs_missing_dir_is_noop(tmp_path, monkeypatch):
     monkeypatch.setattr(constants, 'SKY_LOGS_DIRECTORY',
                         str(tmp_path / 'does-not-exist'))
     assert server._prune_sky_logs(cutoff=1_000_000.0) == 0
+
+
+class _FakeTask:
+    """Minimal stand-in for a Request row (only the fields get_expanded uses)."""
+
+    def __init__(self, request_id, user_id):
+        self.request_id = request_id
+        self.user_id = user_id
+
+
+@pytest.mark.asyncio
+async def test_get_expanded_request_id_scopes_to_owner(monkeypatch):
+    all_tasks = [_FakeTask('abc-alice', 'alice'), _FakeTask('abc-bob', 'bob')]
+
+    async def fake_prefix(prefix, fields=None):
+        matched = [t for t in all_tasks if t.request_id.startswith(prefix)]
+        return matched or None
+
+    monkeypatch.setattr(server.requests_lib, 'get_requests_async_with_prefix',
+                        fake_prefix)
+
+    # Alice: uniqueness is decided over her own requests only -> resolves to
+    # hers, NOT a 400 "multiple found" (which would be an existence oracle).
+    assert await server.get_expanded_request_id(
+        'abc', scope_user_id='alice') == 'abc-alice'
+
+    # A prefix that only matches bob's request is a 404 for alice, identical
+    # to a genuine miss (no 400 that would confirm the row exists).
+    with pytest.raises(fastapi.HTTPException) as exc:
+        await server.get_expanded_request_id('abc-bob', scope_user_id='alice')
+    assert exc.value.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_get_expanded_request_id_admin_unscoped(monkeypatch):
+    both = [_FakeTask('abc-alice', 'alice'), _FakeTask('abc-bob', 'bob')]
+
+    async def fake_prefix(prefix, fields=None):
+        return list(both)
+
+    monkeypatch.setattr(server.requests_lib, 'get_requests_async_with_prefix',
+                        fake_prefix)
+
+    # Unscoped (admin / no-auth): the ambiguous prefix is a 400 as before.
+    with pytest.raises(fastapi.HTTPException) as exc:
+        await server.get_expanded_request_id('abc', scope_user_id=None)
+    assert exc.value.status_code == 400
+
+
+# --- SKY-6429: cross-user request-API access control (integration) ----------
+
+
+def _seed_request(rid, user_id, status=None):
+    from sky.server.requests import payloads
+    from sky.server.requests import requests as requests_lib
+    return requests_lib.Request(request_id=rid,
+                                name='sky.launch',
+                                entrypoint=_api_get_dummy_entrypoint,
+                                request_body=payloads.RequestBody(),
+                                status=status or
+                                requests_lib.RequestStatus.SUCCEEDED,
+                                created_at=1234567890.0,
+                                pid=None,
+                                user_id=user_id)
+
+
+@pytest.fixture()
+def _request_authz_env(tmp_path, monkeypatch):
+    """Isolated request DB seeded with alice's and bob's requests."""
+    import asyncio
+
+    from sky.server.requests import requests as requests_lib
+
+    logs = tmp_path / 'logs'
+    logs.mkdir()
+    monkeypatch.setattr('sky.server.constants.API_SERVER_REQUEST_DB_PATH',
+                        str(tmp_path / 'requests.db'))
+    monkeypatch.setattr('sky.server.constants.REQUEST_LOG_PATH_PREFIX',
+                        str(logs))
+    requests_lib._DB = None
+
+    async def _seed():
+        await requests_lib.create_if_not_exists_async(
+            _seed_request('alice-req-1', 'alice'))
+        await requests_lib.create_if_not_exists_async(
+            _seed_request('bob-req-1', 'bob'))
+
+    asyncio.new_event_loop().run_until_complete(_seed())
+    yield
+    requests_lib._DB = None
+
+
+def _scope_as(monkeypatch, scope):
+    """Force request_owner_scope (the single chokepoint) to a given value."""
+    monkeypatch.setattr(server.role_filter, 'request_owner_scope',
+                        lambda request: scope)
+
+
+def test_api_get_blocks_other_users_request(_request_authz_env, monkeypatch):
+    from fastapi.testclient import TestClient
+    client = TestClient(server.app)
+
+    # Alice can read her own request.
+    _scope_as(monkeypatch, 'alice')
+    assert client.get('/api/get', params={
+        'request_id': 'alice-req-1'
+    }).status_code == 200
+    # Alice cannot read bob's — 404, identical to a genuine miss.
+    assert client.get('/api/get', params={
+        'request_id': 'bob-req-1'
+    }).status_code == 404
+    # Admin (unscoped) can read bob's.
+    _scope_as(monkeypatch, None)
+    assert client.get('/api/get', params={
+        'request_id': 'bob-req-1'
+    }).status_code == 200
+
+
+def test_api_status_scopes_to_caller(_request_authz_env, monkeypatch):
+    from fastapi.testclient import TestClient
+    client = TestClient(server.app)
+
+    _scope_as(monkeypatch, 'alice')
+    ids = {
+        r['request_id']
+        for r in client.get('/api/status', params={
+            'all_status': True
+        }).json()
+    }
+    assert 'alice-req-1' in ids
+    assert 'bob-req-1' not in ids
+
+    # The request_ids (prefix) branch also drops non-owned rows.
+    body = client.get('/api/status',
+                      params={
+                          'request_ids': ['bob-req-1'],
+                          'all_status': True
+                      }).json()
+    assert body == []
+
+    # Admin sees everyone.
+    _scope_as(monkeypatch, None)
+    ids = {
+        r['request_id']
+        for r in client.get('/api/status', params={
+            'all_status': True
+        }).json()
+    }
+    assert {'alice-req-1', 'bob-req-1'} <= ids
+
+
+def test_api_completion_scopes_to_caller(_request_authz_env, monkeypatch):
+    from fastapi.testclient import TestClient
+    client = TestClient(server.app)
+
+    _scope_as(monkeypatch, 'alice')
+    ids = client.get('/api/completion/api_request', params={
+        'incomplete': ''
+    }).json()
+    assert 'alice-req-1' in ids
+    assert 'bob-req-1' not in ids
+
+
+def test_api_stream_log_path_admin_only(_request_authz_env, monkeypatch):
+    from fastapi.testclient import TestClient
+    client = TestClient(server.app)
+
+    # Non-admin: log_path streaming is forbidden.
+    _scope_as(monkeypatch, 'alice')
+    assert client.get('/api/stream',
+                      params={
+                          'log_path': 'api_server/foo.log'
+                      },
+                      headers={
+                          'user-agent': 'curl'
+                      }).status_code == 403
+    # Non-admin cannot stream another user's request either.
+    assert client.get('/api/stream',
+                      params={
+                          'request_id': 'bob-req-1'
+                      },
+                      headers={
+                          'user-agent': 'curl'
+                      }).status_code == 404
