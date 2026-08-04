@@ -23,19 +23,26 @@ from sky.server import common as server_common
 from sky.skylet import constants
 from sky.utils import common_utils
 
-# `sky storage delete` returns as soon as the DeleteBucket API call
-# succeeds, but S3 bucket deletion is eventually consistent: for a short
-# window afterwards head-bucket can still report the bucket as existing.
-# Poll (rather than assert once) so the check tolerates that propagation
-# delay instead of flaking. A non-zero head-bucket (bucket gone / 404)
-# means success; keep retrying only while the bucket still exists.
+# Check that `sky storage delete` actually removed the bucket. `head-bucket`
+# is NOT reliable here: this check runs on the cloud-cmd cluster, whose aws
+# CLI default region usually differs from the (us-east-1) bucket's region,
+# and a cross-region head-bucket keeps returning a redirect that the CLI
+# reports as success ("BucketRegion: ...") for a window after deletion (and
+# even flickers back to success afterwards). `get-bucket-location` instead
+# returns NoSuchBucket immediately and region-robustly, so use it as the
+# deletion signal: while it still resolves the bucket, keep waiting; once it
+# fails (NoSuchBucket / not accessible), the bucket is gone.
 _CHECK_AWS_BUCKET_DOESNT_EXIST = (
     'start=$SECONDS; '
-    'while aws s3api head-bucket --bucket {bucket_name} 2>/dev/null; do '
-    'if (( SECONDS - start > 90 )); then '
-    'echo "Bucket {bucket_name} still exists 90s after deletion"; exit 1; fi; '
-    'echo "Bucket {bucket_name} still exists, waiting for deletion to '
-    'propagate..."; sleep 5; '
+    'while aws s3api get-bucket-location --bucket {bucket_name} '
+    '> /dev/null 2>&1; do '
+    'if (( SECONDS - start > 60 )); then '
+    'echo "Bucket {bucket_name} still exists 60s after deletion"; '
+    'aws sts get-caller-identity || true; '
+    'aws s3api get-bucket-location --bucket {bucket_name} || true; '
+    'exit 1; fi; '
+    'echo "Bucket {bucket_name} still resolves, waiting for deletion..."; '
+    'sleep 5; '
     'done; '
     'echo "Bucket {bucket_name} no longer exists."; exit 0')
 
