@@ -1,21 +1,5 @@
 """Leader election for singleton background work.
 
-SkyPilot runs a number of fleet-wide singleton loops (one runner across all
-API-server replicas). Historically the only way to elect that single runner was
-a Postgres *session-scoped advisory lock* (``sky.utils.locks.PostgresLock``):
-the winner holds one dedicated backend connection open for the entire duration
-of its leadership, and loses the role only when that connection dies.
-
-That has two structural costs:
-
-1. **Connection cost.** The advisory lock is pinned to a direct (non-pooled)
-   connection for as long as the role is held, so every held lock is one
-   permanent backend connection that cannot ride a transaction-mode pooler.
-2. **Fragile step-down.** Leadership loss is only observable by probing the
-   connection (``is_session_alive``); a role reaped mid-work is not noticed
-   until the next probe, and the lock carries no fencing token, so a stale
-   leader's writes cannot be rejected.
-
 This module abstracts leader election behind :class:`LeaderElector` and offers
 a second, lease-based backend. A *lease* is a single row
 (``leader_leases(lock_id, holder, epoch, expires_at)``) refreshed by a short
