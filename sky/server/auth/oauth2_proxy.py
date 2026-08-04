@@ -241,5 +241,8 @@ class OAuth2ProxyMiddleware(middleware_utils.ASGIMiddleware):
             user_hash = email_hash[:common_utils.USER_HASH_LENGTH]
             return models.User(id=user_hash,
                                name=email_header,
-                               user_type=models.UserType.SSO.value)
+                               user_type=models.UserType.SSO.value,
+                               groups=models.parse_groups(
+                                   response.headers.get(
+                                       'X-Auth-Request-Groups')))
         return None
