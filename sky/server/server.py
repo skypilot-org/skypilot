@@ -2461,7 +2461,8 @@ async def get_expanded_request_id(request_id: str) -> str:
 
 # === API server related APIs ===
 @app.get('/api/get')
-async def api_get(request_id: str) -> payloads.RequestPayload:
+async def api_get(request: fastapi.Request,
+                  request_id: str) -> payloads.RequestPayload:
     """Gets a request with a given request ID prefix."""
     # Validate request_id prefix matches a single request.
     request_id = await get_expanded_request_id(request_id)
@@ -2486,6 +2487,11 @@ async def api_get(request_id: str) -> payloads.RequestPayload:
         # Back off: 10ms -> 20ms -> 40ms -> 80ms -> 100ms (cap)
         poll_interval = min(poll_interval * 2, 0.1)
     request_task = await requests_lib.get_request_async(request_id)
+    # Stamp the request name so PrometheusMiddleware can record this /api/get
+    # call's latency broken out by request type (see
+    # SKY_APISERVER_REQUEST_GET_DURATION_SECONDS). Set on every non-404 outcome
+    # (success, error, should_retry) since request_task is available here.
+    request.state.request_name = request_task.name
     # Check the error before should_retry: an interrupted request is in a
     # terminal state (the server does not re-execute it after a restart),
     # so clients polling /api/get must get a definitive error telling them
