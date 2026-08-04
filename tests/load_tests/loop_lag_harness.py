@@ -177,6 +177,14 @@ class HarnessConfig:
     lag_gauge_sample_seconds: float = 15.0
     request_timeout_seconds: float = 30.0
     max_connections: int = 512
+    # Retire pooled connections before the server does. uvicorn's keep-alive
+    # timeout defaults to 5s and httpx's keepalive_expiry defaults to the same
+    # 5s, so the two race: the client sends on a connection at the moment the
+    # server is closing it and httpx reports RemoteProtocolError. That is a
+    # client-side artifact, but it is indistinguishable in the results from
+    # the server dropping a request, which is what this benchmark is
+    # supposed to be able to see.
+    keepalive_expiry_seconds: float = 2.0
     verify_tls: bool = True
 
 
@@ -623,7 +631,8 @@ async def _held_streams(auth: Auth,
         verify=config.verify_tls,
         timeout=httpx.Timeout(connect=30.0, read=None, write=30.0, pool=30.0),
         limits=httpx.Limits(max_connections=spec.count * 2,
-                            max_keepalive_connections=spec.count * 2),
+                            max_keepalive_connections=spec.count * 2,
+                            keepalive_expiry=config.keepalive_expiry_seconds),
     )
     await stack.enter_async_context(client)
     try:
@@ -813,7 +822,8 @@ async def _run_trial(load_client: httpx.AsyncClient,
 async def run_async(config: HarnessConfig, auth: Auth) -> RunResult:
     """Run baseline, warmup and trials, and return the artifact."""
     limits = httpx.Limits(max_connections=config.max_connections,
-                          max_keepalive_connections=config.max_connections)
+                          max_keepalive_connections=config.max_connections,
+                          keepalive_expiry=config.keepalive_expiry_seconds)
     created_at = datetime.datetime.now(
         datetime.timezone.utc).isoformat(timespec='seconds')
     config_dict = dataclasses.asdict(config)
@@ -906,6 +916,8 @@ CONFIG_COMPARE_KEYS = (
     # Decides which trials are excluded as INVALID, and therefore which ones
     # the summaries are taken over.
     'max_send_lateness_seconds',
+    # Changes how often a request pays for a new connection.
+    'keepalive_expiry_seconds',
 )
 
 
