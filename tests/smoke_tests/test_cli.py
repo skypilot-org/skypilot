@@ -23,21 +23,27 @@ from sky.server import common as server_common
 from sky.skylet import constants
 from sky.utils import common_utils
 
-# Check that `sky storage delete` actually removed the bucket. `head-bucket`
-# is NOT reliable here: this check runs on the cloud-cmd cluster, whose aws
-# CLI default region usually differs from the (us-east-1) bucket's region,
-# and a cross-region head-bucket keeps returning a redirect that the CLI
-# reports as success ("BucketRegion: ...") for a window after deletion (and
-# even flickers back to success afterwards). `get-bucket-location` instead
-# returns NoSuchBucket immediately and region-robustly, so use it as the
-# deletion signal: while it still resolves the bucket, keep waiting; once it
+# Check that `sky storage delete` actually removed the bucket. Two subtleties
+# make this a polling check rather than a one-shot assertion:
+#   1. `head-bucket` is unreliable here: this check runs on the cloud-cmd
+#      cluster, whose aws CLI default region usually differs from the
+#      (us-east-1) bucket's region, and a cross-region head-bucket keeps
+#      returning a redirect the CLI reports as success ("BucketRegion: ...")
+#      for a window after deletion (and even flickers back). So use
+#      `get-bucket-location`, which is region-robust.
+#   2. Even with get-bucket-location, the deletion (done on the API server)
+#      is not immediately visible from the cloud-cmd cluster: observed to
+#      take >60s to become NoSuchBucket (systematic in CI, 3/3 runs; the
+#      bucket does get deleted -- it is gone minutes later). Poll up to 5min
+#      so the check tolerates that visibility lag instead of flaking.
+# While get-bucket-location still resolves the bucket, keep waiting; once it
 # fails (NoSuchBucket / not accessible), the bucket is gone.
 _CHECK_AWS_BUCKET_DOESNT_EXIST = (
     'start=$SECONDS; '
     'while aws s3api get-bucket-location --bucket {bucket_name} '
     '> /dev/null 2>&1; do '
-    'if (( SECONDS - start > 60 )); then '
-    'echo "Bucket {bucket_name} still exists 60s after deletion"; '
+    'if (( SECONDS - start > 300 )); then '
+    'echo "Bucket {bucket_name} still visible 300s after deletion"; '
     'aws sts get-caller-identity || true; '
     'aws s3api get-bucket-location --bucket {bucket_name} || true; '
     'exit 1; fi; '
