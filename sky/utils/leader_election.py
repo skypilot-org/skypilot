@@ -224,23 +224,30 @@ class PgLeaseElector(LeaderElector):
         self._ttl = ttl_seconds
         self._epoch: Optional[int] = None
 
-    def _acquire_or_renew(self) -> bool:
+    def _execute_bounded(self, sql, params, fetch):
+        """Run *sql* in one short transaction bounded by ``statement_timeout``
+        so a slow/locked DB fails fast rather than hanging the renew (→ step
+        down) or the release (→ blocked re-contention) past the renew deadline.
+        ``SET LOCAL`` scopes the timeout to this transaction only. Returns the
+        fetched row when *fetch* is set, else None."""
         engine = db_utils.get_engine(None)
+        with engine.connect() as conn:
+            conn.execute(
+                sqlalchemy.text(f'SET LOCAL statement_timeout = '
+                                f'{_RENEW_STATEMENT_TIMEOUT_MS}'))
+            result = conn.execute(sql, params)
+            row = result.fetchone() if fetch else None
+            conn.commit()
+        return row
+
+    def _acquire_or_renew(self) -> bool:
         try:
-            with engine.connect() as conn:
-                # Bound the renew server-side: a slow/locked DB must fail the
-                # renew (→ step down) rather than hang past the renew deadline.
-                # SET LOCAL scopes it to this transaction only.
-                conn.execute(
-                    sqlalchemy.text(f'SET LOCAL statement_timeout = '
-                                    f'{_RENEW_STATEMENT_TIMEOUT_MS}'))
-                row = conn.execute(
-                    self._ACQUIRE_SQL, {
-                        'lock_id': self._lock_id,
-                        'holder': self._holder,
-                        'ttl': self._ttl,
-                    }).fetchone()
-                conn.commit()
+            row = self._execute_bounded(self._ACQUIRE_SQL, {
+                'lock_id': self._lock_id,
+                'holder': self._holder,
+                'ttl': self._ttl,
+            },
+                                        fetch=True)
         except Exception as e:  # pylint: disable=broad-except
             # A DB blip (or a statement-timeout) is treated as a lost/failed
             # term: the caller re-contends or steps down. Never crash the daemon
@@ -274,14 +281,12 @@ class PgLeaseElector(LeaderElector):
 
     def release(self) -> None:
         self._epoch = None
-        engine = db_utils.get_engine(None)
         try:
-            with engine.connect() as conn:
-                conn.execute(self._RELEASE_SQL, {
-                    'lock_id': self._lock_id,
-                    'holder': self._holder,
-                })
-                conn.commit()
+            self._execute_bounded(self._RELEASE_SQL, {
+                'lock_id': self._lock_id,
+                'holder': self._holder,
+            },
+                                  fetch=False)
         except Exception as e:  # pylint: disable=broad-except
             # If we cannot expire the row, it will lapse on its own after the
             # TTL; a slower handoff, not a correctness problem.
