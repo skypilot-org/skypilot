@@ -3,8 +3,9 @@
 This module abstracts leader election behind :class:`LeaderElector` and offers
 a second, lease-based backend. A *lease* is a single row
 (``leader_leases(lock_id, holder, epoch, expires_at)``) refreshed by a short
-autocommit ``UPDATE``. Each renewal is a self-contained transaction, so it can
-ride a pooled/pgBouncer connection and holds no persistent connection; the row
+``UPDATE`` in its own bounded transaction. Each renewal is a self-contained
+transaction, so it can ride a pooled/pgBouncer connection and holds no
+persistent connection between renewals; the row
 also carries a monotonic ``epoch`` that acts as a fencing token, letting a
 caller verify leadership atomically inside its own write transaction.
 
@@ -190,30 +191,52 @@ class AdvisoryLockElector(LeaderElector):
 class PgLeaseElector(LeaderElector):
     """Leader election backed by a renewable Postgres lease row.
 
-    Acquire and renew are the same atomic upsert: insert the lease if absent,
-    else take it over only if we already hold it or the current lease has
-    expired, bumping ``epoch`` on every change of holder. Every call is a short
-    autocommit transaction on the pooled engine, so it rides a transaction-mode
-    pooler and holds no persistent connection between renewals.
+    ``try_acquire`` is an insert-or-take-over upsert that bumps ``epoch`` on
+    every fresh acquisition; ``renew`` is a separate statement that only extends
+    a lease we still validly hold, keeping ``epoch`` fixed for the term. Every
+    call is one short bounded transaction (see :meth:`_execute_bounded`) on the
+    pooled engine, so it rides a transaction-mode pooler and holds no persistent
+    connection between renewals.
     """
 
-    # Insert-or-take-over in one statement. All time math is server-side
-    # (``now()``) so replicas never compare against their own wall clocks.
-    # ``RETURNING`` yields a row iff we hold the lease after the statement: on
-    # first insert, on renewal by the same holder, or on takeover of an expired
-    # lease. When another holder's lease is still valid the ``DO UPDATE`` WHERE
-    # is false, no row is written, and ``RETURNING`` is empty.
+    # Insert-or-take-over in one statement, used only by ``try_acquire``. All
+    # time math is server-side (``now()``) so replicas never compare against
+    # their own wall clocks. ``RETURNING`` yields a row iff we hold the lease
+    # after the statement: on first insert, on a redundant acquire while we
+    # still hold it, or on takeover of an expired lease. When another holder's
+    # lease is still valid the ``DO UPDATE`` WHERE is false, no row is written,
+    # and ``RETURNING`` is empty. ``epoch`` is kept only when we already hold a
+    # *still-valid* lease (a redundant acquire); every other write is a fresh
+    # term (first insert, or takeover of an expired lease -- even by the same
+    # holder after a release/lapse) and bumps ``epoch``, so the fencing token is
+    # strictly increasing per acquisition as documented.
     _ACQUIRE_SQL = sqlalchemy.text(f"""
         INSERT INTO {_LEASE_TABLE} (lock_id, holder, epoch, expires_at)
         VALUES (:lock_id, :holder, 1, now() + make_interval(secs => :ttl))
         ON CONFLICT (lock_id) DO UPDATE
           SET holder = :holder,
               epoch = CASE WHEN {_LEASE_TABLE}.holder = :holder
+                            AND {_LEASE_TABLE}.expires_at >= now()
                            THEN {_LEASE_TABLE}.epoch
                            ELSE {_LEASE_TABLE}.epoch + 1 END,
               expires_at = now() + make_interval(secs => :ttl)
           WHERE {_LEASE_TABLE}.holder = :holder
              OR {_LEASE_TABLE}.expires_at < now()
+        RETURNING epoch
+    """)
+
+    # Renew is *not* the acquire upsert: it extends the expiry only while we
+    # still hold a valid lease, and never changes ``holder`` or ``epoch``. This
+    # gives renew a real precondition -- an elector that never won, or one whose
+    # lease has lapsed or been taken over, gets zero rows and a ``False`` return
+    # rather than silently (re)acquiring inside a renew. Re-acquisition after a
+    # lapse goes through ``try_acquire`` instead, which bumps ``epoch``.
+    _RENEW_SQL = sqlalchemy.text(f"""
+        UPDATE {_LEASE_TABLE}
+           SET expires_at = now() + make_interval(secs => :ttl)
+         WHERE lock_id = :lock_id
+           AND holder = :holder
+           AND {_LEASE_TABLE}.expires_at >= now()
         RETURNING epoch
     """)
 
@@ -259,7 +282,13 @@ class PgLeaseElector(LeaderElector):
         so a slow/locked DB fails fast rather than hanging the renew (→ step
         down) or the release (→ blocked re-contention) past the renew deadline.
         ``SET LOCAL`` scopes the timeout to this transaction only. Returns the
-        fetched row when *fetch* is set, else None."""
+        fetched row when *fetch* is set, else None.
+
+        This is an explicit READ COMMITTED transaction on purpose: ``SET LOCAL``
+        only takes effect inside a transaction block, so do NOT "simplify" this
+        to ``isolation_level='AUTOCOMMIT'`` -- under autocommit ``SET LOCAL``
+        degrades to a WARNING no-op and the statement timeout silently
+        disappears."""
         engine = db_utils.get_engine(None)
         with engine.connect() as conn:
             conn.execute(
@@ -270,19 +299,24 @@ class PgLeaseElector(LeaderElector):
             conn.commit()
         return row
 
-    def _acquire_or_renew(self) -> bool:
+    def _run_epoch_stmt(self, sql) -> bool:
+        """Run an ``epoch``-returning lease statement (acquire or renew).
+
+        True iff a row came back (we hold the lease); records ``epoch`` as the
+        fencing token. Any failure -- a DB blip, a statement-timeout, or a
+        precondition miss (no row) -- clears the token and returns False, so the
+        caller re-contends or steps down and the daemon never crashes on a
+        transient error.
+        """
         try:
-            row = self._execute_bounded(self._ACQUIRE_SQL, {
+            row = self._execute_bounded(sql, {
                 'lock_id': self._lock_id,
                 'holder': self._holder,
                 'ttl': self._ttl,
             },
                                         fetch=True)
         except Exception as e:  # pylint: disable=broad-except
-            # A DB blip (or a statement-timeout) is treated as a lost/failed
-            # term: the caller re-contends or steps down. Never crash the daemon
-            # on a transient error.
-            logger.warning('%s: lease upsert failed: %s', self._lock_id, e)
+            logger.warning('%s: lease statement failed: %s', self._lock_id, e)
             self._epoch = None
             return False
         if row is None:
@@ -303,10 +337,10 @@ class PgLeaseElector(LeaderElector):
         return self._renew_deadline
 
     def try_acquire(self) -> bool:
-        return self._acquire_or_renew()
+        return self._run_epoch_stmt(self._ACQUIRE_SQL)
 
     def renew(self) -> bool:
-        return self._acquire_or_renew()
+        return self._run_epoch_stmt(self._RENEW_SQL)
 
     def release(self) -> None:
         try:
