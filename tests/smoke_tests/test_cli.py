@@ -23,34 +23,55 @@ from sky.server import common as server_common
 from sky.skylet import constants
 from sky.utils import common_utils
 
-# Check that `sky storage delete` actually removed the bucket. Two subtleties
-# make this a polling check rather than a one-shot assertion:
-#   1. `head-bucket` is unreliable here: this check runs on the cloud-cmd
-#      cluster, whose aws CLI default region usually differs from the
-#      (us-east-1) bucket's region, and a cross-region head-bucket keeps
-#      returning a redirect the CLI reports as success ("BucketRegion: ...")
-#      for a window after deletion (and even flickers back). So use
-#      `get-bucket-location`, which is region-robust.
-#   2. Even with get-bucket-location, the deletion (done on the API server)
-#      is not immediately visible from the cloud-cmd cluster: observed to
-#      take >60s to become NoSuchBucket (systematic in CI, 3/3 runs; the
-#      bucket does get deleted -- it is gone minutes later). Poll up to 5min
-#      so the check tolerates that visibility lag instead of flaking.
-# While get-bucket-location still resolves the bucket, keep waiting; once it
-# fails (NoSuchBucket / not accessible), the bucket is gone.
+# [TEMP][DIAGNOSTIC] Root-causing the post-delete visibility lag seen on the
+# remote-server pipeline: after `sky storage delete` succeeds (bucket is
+# genuinely gone minutes later), the cloud-cmd cluster kept seeing the bucket
+# via get-bucket-location for >300s (same account), while the same probes
+# from a laptop converge instantly. This probe matrix samples six existence
+# probes every 10s with timestamps, from two vantage points (test client and
+# cloud-cmd cluster), to find which probe converges and how fast. Will be
+# replaced by the final check once the data is in.
+_BUCKET_GONE_PROBE = (
+    'echo "--- probe env ---"; '
+    'aws --version 2>&1 || true; '
+    'aws configure list 2>&1 || true; '
+    'TOK=$(curl -s -X PUT http://169.254.169.254/latest/api/token '
+    '-H "X-aws-ec2-metadata-token-ttl-seconds: 60" --max-time 2 '
+    '2>/dev/null || true); '
+    'echo "az: $(curl -s --max-time 2 -H "X-aws-ec2-metadata-token: $TOK" '
+    'http://169.254.169.254/latest/meta-data/placement/availability-zone '
+    '2>/dev/null || true)"; '
+    'gone=0; probe_start=$SECONDS; '
+    'while (( SECONDS - probe_start < {limit} )); do '
+    't=$((SECONDS-probe_start)); '
+    'aws s3api head-bucket --bucket {bucket_name} >/dev/null 2>&1; hb=$?; '
+    'aws s3api head-bucket --bucket {bucket_name} --region us-east-1 '
+    '>/dev/null 2>&1; hbr=$?; '
+    'aws s3api get-bucket-location --bucket {bucket_name} '
+    '>/dev/null 2>&1; loc=$?; '
+    'aws s3api get-bucket-location --bucket {bucket_name} --region us-east-1 '
+    '>/dev/null 2>&1; locr=$?; '
+    'aws s3api list-objects-v2 --bucket {bucket_name} --max-keys 1 '
+    '>/dev/null 2>&1; lo=$?; '
+    'lb=$(aws s3api list-buckets '
+    '--query "Buckets[?Name==\'{bucket_name}\'].Name" --output text '
+    '2>/dev/null || true); '
+    'echo "$(date -u +%H:%M:%S) t+$t: head=$hb head_r=$hbr loc=$loc '
+    'loc_r=$locr listobj=$lo listbuckets=[$lb]"; '
+    'if [ "$hb" -ne 0 ] && [ "$hbr" -ne 0 ] && [ "$loc" -ne 0 ] && '
+    '[ "$locr" -ne 0 ] && [ "$lo" -ne 0 ] && [ -z "$lb" ]; then '
+    'gone=1; echo "all probes report bucket gone at t+$t"; break; fi; '
+    'sleep 10; '
+    'done')
+
 _CHECK_AWS_BUCKET_DOESNT_EXIST = (
-    'start=$SECONDS; '
-    'while aws s3api get-bucket-location --bucket {bucket_name} '
-    '> /dev/null 2>&1; do '
-    'if (( SECONDS - start > 300 )); then '
-    'echo "Bucket {bucket_name} still visible 300s after deletion"; '
+    _BUCKET_GONE_PROBE + '; '
+    'if [ "$gone" -eq 1 ]; then '
+    'echo "Bucket {bucket_name} confirmed gone."; exit 0; fi; '
+    'echo "Bucket {bucket_name} still visible after {limit}s"; '
     'aws sts get-caller-identity || true; '
     'aws s3api get-bucket-location --bucket {bucket_name} || true; '
-    'exit 1; fi; '
-    'echo "Bucket {bucket_name} still resolves, waiting for deletion..."; '
-    'sleep 5; '
-    'done; '
-    'echo "Bucket {bucket_name} no longer exists."; exit 0')
+    'exit 1')
 
 
 @pytest.mark.no_remote_server
@@ -258,22 +279,29 @@ def test_storage_delete(generic_cloud: str):
         job_yaml.write(bucket_job_yaml.encode('utf-8'))
         job_yaml.flush()
 
-        test = smoke_tests_utils.Test('storage_delete', [
-            f'echo "bucket name: {bucket_name}"',
-            smoke_tests_utils.launch_cluster_for_cloud_cmd(
-                'aws', name, skip_remote_server_check=True),
-            f's=$(SKYPILOT_DEBUG=0 sky jobs launch -y {job_yaml.name}) && echo "$s" | grep "Job finished (status: SUCCEEDED)."',
-            f's=$(SKYPILOT_DEBUG=0 sky storage delete -y {bucket_name}) && echo "$s" && echo "$s" | grep "Deleted S3 bucket {bucket_name}"',
-            smoke_tests_utils.run_cloud_cmd_on_cluster(
-                name,
-                cmd=_CHECK_AWS_BUCKET_DOESNT_EXIST.format(
-                    bucket_name=bucket_name)),
-        ],
-                                      teardown=smoke_tests_utils.
-                                      down_cluster_for_cloud_cmd(
-                                          name, skip_remote_server_check=True),
-                                      timeout=smoke_tests_utils.get_timeout(
-                                          generic_cloud))
+        test = smoke_tests_utils.Test(
+            'storage_delete',
+            [
+                f'echo "bucket name: {bucket_name}"',
+                smoke_tests_utils.launch_cluster_for_cloud_cmd(
+                    'aws', name, skip_remote_server_check=True),
+                f's=$(SKYPILOT_DEBUG=0 sky jobs launch -y {job_yaml.name}) && echo "$s" | grep "Job finished (status: SUCCEEDED)."',
+                f's=$(SKYPILOT_DEBUG=0 sky storage delete -y {bucket_name}) && echo "$s" && echo "$s" | grep "Deleted S3 bucket {bucket_name}"',
+                # [TEMP][DIAGNOSTIC] Same probe matrix from the test client
+                # (data-gathering only, never fails the test) for contrast with
+                # the cloud-cmd cluster's vantage point below.
+                ('echo "=== [diagnostic] bucket visibility from test client ==="; '
+                 +
+                 _BUCKET_GONE_PROBE.format(bucket_name=bucket_name, limit=120) +
+                 '; echo "client probe done (gone=$gone)"; true'),
+                smoke_tests_utils.run_cloud_cmd_on_cluster(
+                    name,
+                    cmd=_CHECK_AWS_BUCKET_DOESNT_EXIST.format(
+                        bucket_name=bucket_name, limit=480)),
+            ],
+            teardown=smoke_tests_utils.down_cluster_for_cloud_cmd(
+                name, skip_remote_server_check=True),
+            timeout=smoke_tests_utils.get_timeout(generic_cloud, 25 * 60))
         smoke_tests_utils.run_one_test(test, check_sky_status=False)
 
 
