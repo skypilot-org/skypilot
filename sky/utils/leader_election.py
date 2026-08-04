@@ -141,11 +141,12 @@ class LeaderElector(abc.ABC):
 class AdvisoryLockElector(LeaderElector):
     """Leader election backed by a Postgres session-scoped advisory lock.
 
-    Wraps ``sky.utils.locks`` with no behavior change from the historical path:
-    ``try_acquire`` is a non-blocking advisory-lock acquire, ``renew`` is the
-    session-liveness probe, and ``release`` drops the lock. Provides no fencing
-    token. On non-Postgres backends the underlying ``FileLock`` makes this a
-    process-local lock, which is exactly right for single-node deployments.
+    Wraps ``sky.utils.locks``: ``try_acquire`` confirms a session this
+    candidate already holds and otherwise bids for the lock without blocking,
+    ``renew`` is the session-liveness probe, and ``release`` drops the lock.
+    Provides no fencing token. On non-Postgres backends the underlying
+    ``FileLock`` makes this a process-local lock, which is exactly right for
+    single-node deployments.
     """
 
     def __init__(self, lock_id: str):
@@ -153,8 +154,18 @@ class AdvisoryLockElector(LeaderElector):
         self._lock: Optional[locks.DistributedLock] = None
 
     def try_acquire(self) -> bool:
-        # Build a fresh lock object each bid so a prior term's closed connection
-        # is never reused (mirrors the historical per-cycle ``get_lock`` call).
+        if self._lock is not None:
+            # A previous bid won, and that session may well still hold the
+            # lock. A fresh bid would open a new session and be refused by our
+            # own exclusive lock -- answering False, to the leader, with the
+            # role unmoved and nothing left that would ever release it.
+            # Confirm the held session instead, and bid anew only after a dead
+            # one has been dropped.
+            if self.renew():
+                return True
+            self.release()
+        # A contending bid builds a fresh lock object, so a prior term's
+        # closed connection is never reused.
         lock = locks.get_lock(self._lock_id)
         try:
             lock.acquire(blocking=False)

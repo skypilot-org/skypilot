@@ -264,7 +264,7 @@ def test_pg_release_hands_over_immediately(lease_db):
 # synchronisation point, so the machine is still one call at a time.
 #
 # Both backends implement the same ``LeaderElector`` contract, so one machine
-# drives both. They differ in four places, and only those live in the adapters
+# drives both. They differ in three places, and only those live in the adapters
 # below; every invariant is shared.
 
 # A lease TTL far longer than a run, so a lease only ever ends because the
@@ -491,9 +491,6 @@ class _LeaseBackend:
     pre-commit park seam.
     """
 
-    # The upsert matches on ``holder``, so the current holder re-bidding for
-    # its own still-valid lease is served the same row back.
-    holder_can_reacquire = True
     has_fencing_token = True
     # Losing the role leaves the row in place, named but expired. That is what
     # lets a same-holder re-acquire be told apart from a first acquire.
@@ -570,11 +567,6 @@ class _AdvisoryBackend:
     reset.
     """
 
-    # Each bid opens its own session and an exclusive advisory lock admits one
-    # session, so the holder re-bidding is refused by the lock it is already
-    # holding -- and keeps holding it. See
-    # ``test_advisory_reacquire_while_leading_is_refused``.
-    holder_can_reacquire = False
     has_fencing_token = False
     # A reaped or released session frees the lock outright; the server keeps
     # no record of who held it.
@@ -782,14 +774,6 @@ class LeaderElectionMachine(stateful.RuleBasedStateMachine):
         self._server_state = _UNREAD
         elector = self._electors[actor]
         leader = self._leader()
-        if leader == actor and not self._backend.holder_can_reacquire:
-            # Left out of the machine on this backend: the bid answers False
-            # while the role stays put, so the actor's belief and the server's
-            # state come apart and no interleaving can put them back together.
-            # Pinned on its own by
-            # ``test_advisory_reacquire_while_leading_is_refused``.
-            hypothesis.event('acquire: self-bid, not modelled')
-            return
         if self._blocks_acquire():
             # The upsert waits on the parked transaction's row and dies at the
             # statement timeout. A lost role is the safe reading of a bid that
@@ -1483,25 +1467,43 @@ def test_advisory_election_invariants_hold_under_contention(advisory_db):
 
 @pg_only
 @pytest.mark.xdist_group('leader_election_lease')
-def test_advisory_reacquire_while_leading_is_refused(advisory_db):
-    """The holder's own bid loses to its own lock, and it keeps the lock.
+def test_advisory_reacquire_while_leading_confirms_leadership(advisory_db):
+    """The holder's own bid confirms the role instead of contending with it.
 
-    Each ``try_acquire`` opens a fresh session (a prior term's connection is
-    never reused), and an exclusive advisory lock admits one session, so the
-    holder's second bid is refused by the lock it is already holding. The role
-    does not move: ``renew`` still reports leadership, the lock stays held, and
-    no other candidate can take it. So the ``False`` here does not mean what it
-    means everywhere else -- the lease backend answers True in this position --
-    which is why the state machine leaves this transition to this test.
+    A fresh bid opens its own session, and an exclusive advisory lock admits
+    one, so an unconditional re-bid would be refused by the very lock the
+    caller is holding -- ``False``, to the leader, with the role unmoved and
+    nothing left that would ever release it. ``try_acquire`` therefore
+    confirms a held session first ("True iff this candidate leads", matching
+    the lease backend's answer in this position), and opens a fresh bid only
+    once a dead session has been dropped.
     """
     a = leader_election.AdvisoryLockElector('reacquire-lock')
     assert a.try_acquire() is True
-    assert a.try_acquire() is False
+    assert a.try_acquire() is True
     assert a.renew() is True
     assert a._lock.is_locked() is True
 
     b = leader_election.AdvisoryLockElector('reacquire-lock')
     assert b.try_acquire() is False
+
+    # A dead session is not blindly confirmed: reap it, and the holder's next
+    # bid drops the dead lock and contends fresh for the freed role.
+    key = locks.PostgresLock('reacquire-lock')._lock_key
+    with advisory_db.connect() as connection:
+        pid = connection.execute(
+            sqlalchemy.text(
+                'SELECT l.pid FROM pg_locks l WHERE l.locktype = '
+                "'advisory' "
+                'AND l.granted '
+                'AND ((l.classid::bigint << 32) | l.objid::bigint) = :key'), {
+                    'key': key
+                }).scalar()
+        connection.execute(sqlalchemy.text('SELECT pg_terminate_backend(:p)'),
+                           {'p': pid})
+        connection.commit()
+    assert a.renew() is False
+    assert a.try_acquire() is True
     a.release()
     assert b.try_acquire() is True
     b.release()
