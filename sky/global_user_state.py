@@ -2588,6 +2588,25 @@ def get_cluster_names_start_with(starts_with: str) -> List[str]:
     return [row[0] for row in rows]
 
 
+def get_cluster_names_and_workspaces_start_with(
+        starts_with: str) -> List[Tuple[str, str]]:
+    """Returns (name, workspace) for clusters whose name has the prefix.
+
+    Used by API-layer completion to scope suggestions to the caller's
+    accessible workspaces. A stored NULL workspace (clusters predating the
+    column) is normalized to the default workspace, matching
+    ``get_cluster_workspace``.
+    """
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
+        rows = session.query(
+            cluster_table.c.name, cluster_table.c.workspace).filter(
+                cluster_table.c.name.like(f'{starts_with}%')).all()
+    return [
+        (row[0], row[1] or constants.SKYPILOT_DEFAULT_WORKSPACE) for row in rows
+    ]
+
+
 @metrics_lib.time_me
 def get_cached_enabled_clouds(cloud_capability: 'cloud.CloudCapability',
                               workspace: str) -> List['clouds.Cloud']:

@@ -1489,6 +1489,30 @@ def queue_v2(
     return filtered_jobs, total, status_counts, total_no_filter
 
 
+def _reject_inaccessible_job_ids(job_ids: Optional[List[int]]) -> None:
+    """Rejects a by-id job op when a target job's workspace is not accessible.
+
+    Per-resource read-side workspace check for managed jobs.
+    Managed jobs carry a ``workspace`` column and the job queue already filters
+    by the caller's accessible workspaces (READ). We reuse that scoped path: a
+    job living in a workspace the caller cannot access (or a nonexistent job)
+    is not returned, so a missing id is treated as not-found. Returning the
+    same not-found for both cases avoids disclosing the job's existence and
+    stops a direct-by-id call from bypassing the queue's workspace filter.
+    """
+    if not job_ids:
+        return
+    records, _, _, _ = queue_v2_api(refresh=False,
+                                    job_ids=list(job_ids),
+                                    all_users=True,
+                                    fields=['job_id'])
+    accessible_ids = {record.job_id for record in records}
+    missing = [job_id for job_id in job_ids if job_id not in accessible_ids]
+    if missing:
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(f'Managed job(s) {missing} not found.')
+
+
 @usage_lib.entrypoint
 # pylint: disable=redefined-builtin
 def cancel(name: Optional[str] = None,
@@ -1531,6 +1555,11 @@ def cancel(name: Optional[str] = None,
                     f'all_users. Provided {" ".join(arguments)!r}.')
 
         job_ids = None if (all_users or all) else job_ids
+
+        # Gate a by-id cancel on the target job's own workspace (accessible-ws),
+        # so a caller cannot cancel a job in a workspace they cannot access by
+        # naming its id. name/all/all_users paths are scoped by the controller.
+        _reject_inaccessible_job_ids(job_ids)
 
         backend = backend_utils.get_backend_from_handle(handle)
         assert isinstance(backend, backends.CloudVmRayBackend)
@@ -1621,6 +1650,10 @@ def tail_logs(name: Optional[str],
     if name is not None and job_id is not None:
         with ux_utils.print_exception_no_traceback():
             raise ValueError('Cannot specify both name and job_id.')
+
+    # Gate a by-id log read on the target job's own workspace (accessible-ws).
+    if job_id is not None:
+        _reject_inaccessible_job_ids([job_id])
 
     jobs_controller_type = controller_utils.Controllers.JOBS_CONTROLLER
     job_name_or_id_str = ''
@@ -1780,6 +1813,10 @@ def download_logs(
         with ux_utils.print_exception_no_traceback():
             raise ValueError('Cannot specify both name and job_id.')
 
+    # Gate a by-id log download on the target job's own workspace.
+    if job_id is not None:
+        _reject_inaccessible_job_ids([job_id])
+
     jobs_controller_type = controller_utils.Controllers.JOBS_CONTROLLER
     job_name_or_id_str = ''
     if job_id is not None:
@@ -1932,6 +1969,8 @@ def get_job_events(
     Returns:
         List of task event records, ordered newest first.
     """
+    # Gate a by-id events read on the target job's own workspace.
+    _reject_inaccessible_job_ids([job_id])
     events = managed_job_state.get_job_events(job_id=job_id,
                                               task_id=task_id,
                                               limit=limit)
