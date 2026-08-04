@@ -42,6 +42,7 @@ class StopFailoverError(Exception):
 SENSITIVE_FIELDS: List[Tuple[str, ...]] = [
     ('docker_config', 'docker_login_config', 'password'),
     ('provider_config', 'create_instance_kwargs', 'login'),
+    ('provider_config', 'create_instance_kwargs', 'image_login'),
     ('provider_config', 'create_instance_kwargs', 'api_key'),
 ]
 

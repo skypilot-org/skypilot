@@ -589,7 +589,7 @@ def _execute_dag(
                     'Syncing files to cluster',
                     global_user_state.ClusterEventType.STATUS_CHANGE)
             envs_and_secrets = task_lib.get_plaintext_envs_and_secrets(
-                task.envs_and_secrets)
+                task.runtime_envs_and_secrets)
             backend.sync_workdir(handle, task.workdir, envs_and_secrets)
 
         if do_file_mounts:

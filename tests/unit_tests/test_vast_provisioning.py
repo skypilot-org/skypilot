@@ -96,6 +96,89 @@ def test_launch_standard_network_tier_preserves_reliable_host_filter(
     assert 'inet_up>=1000' not in query
 
 
+@pytest.mark.parametrize('registry_key', ['login', 'image_login'])
+def test_launch_rejects_direct_registry_login_override_before_offer_query(
+        monkeypatch, registry_key):
+    sdk = _mock_vast_sdk(monkeypatch)
+
+    with pytest.raises(ValueError, match='SKYPILOT_DOCKER'):
+        vast_utils.launch(
+            name='test-head',
+            instance_type='1x-A100-4-8192',
+            region='US',
+            disk_size=30,
+            image_name='registry.example.com/team/image:latest',
+            ports=None,
+            preemptible=False,
+            secure_only=False,
+            reliable_hosts=False,
+            network_tier=resources_utils.NetworkTier.STANDARD,
+            private_docker_registry=True,
+            login='-u registry-user -p registry-password registry.example.com',
+            create_instance_kwargs={registry_key: 'direct-login'},
+        )
+
+    sdk.search_offers.assert_not_called()
+    sdk.create_instance.assert_not_called()
+
+
+def test_run_instances_rejects_whitespace_registry_credentials_before_wait(
+        monkeypatch):
+    configuration = _provision_config()
+    configuration.docker_config = {
+        'docker_login_config': {
+            'username': 'registry user',
+            'password': 'registry-password',
+            'server': 'registry.example.com',
+        }
+    }
+    wait_for_pending_instances = mock.Mock(return_value={})
+    monkeypatch.setattr(vast_instance, '_wait_for_no_pending_instances',
+                        wait_for_pending_instances)
+    monkeypatch.setattr(vast_utils, 'launch',
+                        mock.Mock(return_value='instance-1'))
+    monkeypatch.setattr(vast_instance, '_wait_for_instances_ready',
+                        lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        vast_utils, 'list_instances',
+        lambda: {'instance-1': _instance('instance-1', 'RUNNING')})
+
+    with pytest.raises(ValueError, match='whitespace'):
+        vast_instance.run_instances('US', 'test', 'test', configuration)
+
+    wait_for_pending_instances.assert_not_called()
+
+
+def test_run_instances_passes_generated_registry_login_to_vast(monkeypatch):
+    configuration = _provision_config()
+    configuration.node_config['ImageId'] = 'team/image:latest'
+    configuration.docker_config = {
+        'docker_login_config': {
+            'username': 'registry-user',
+            'password': 'registry-password',
+            'server': 'registry.example.com',
+        }
+    }
+    monkeypatch.setattr(vast_instance, '_wait_for_no_pending_instances',
+                        lambda *_args, **_kwargs: {})
+    launch = mock.Mock(return_value='instance-1')
+    monkeypatch.setattr(vast_utils, 'launch', launch)
+    monkeypatch.setattr(vast_instance, '_wait_for_instances_ready',
+                        lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        vast_utils, 'list_instances',
+        lambda: {'instance-1': _instance('instance-1', 'RUNNING')})
+
+    vast_instance.run_instances('US', 'test', 'test', configuration)
+
+    launch_kwargs = launch.call_args.kwargs
+    assert launch_kwargs[
+        'image_name'] == 'registry.example.com/team/image:latest'
+    assert launch_kwargs['login'] == (
+        '-u registry-user -p registry-password registry.example.com')
+    assert launch_kwargs['private_docker_registry'] is True
+
+
 def test_wait_for_instances_ready_treats_null_as_pending(monkeypatch):
     instances = [
         {
