@@ -2,6 +2,7 @@
 # pylint: disable=protected-access
 
 import logging
+import traceback
 from unittest import mock
 
 import pytest
@@ -125,12 +126,10 @@ def test_launch_rejects_direct_registry_login_override_before_offer_query(
 def test_run_instances_rejects_whitespace_registry_credentials_before_wait(
         monkeypatch):
     configuration = _provision_config()
-    configuration.docker_config = {
-        'docker_login_config': {
-            'username': 'registry user',
-            'password': 'registry-password',
-            'server': 'registry.example.com',
-        }
+    configuration.provider_config['docker_login_config'] = {
+        'username': 'registry user',
+        'password': 'registry-password',
+        'server': 'registry.example.com',
     }
     wait_for_pending_instances = mock.Mock(return_value={})
     monkeypatch.setattr(vast_instance, '_wait_for_no_pending_instances',
@@ -152,12 +151,10 @@ def test_run_instances_rejects_whitespace_registry_credentials_before_wait(
 def test_run_instances_passes_generated_registry_login_to_vast(monkeypatch):
     configuration = _provision_config()
     configuration.node_config['ImageId'] = 'team/image:latest'
-    configuration.docker_config = {
-        'docker_login_config': {
-            'username': 'registry-user',
-            'password': 'registry-password',
-            'server': 'registry.example.com',
-        }
+    configuration.provider_config['docker_login_config'] = {
+        'username': 'registry-user',
+        'password': 'registry-password',
+        'server': 'registry.example.com',
     }
     monkeypatch.setattr(vast_instance, '_wait_for_no_pending_instances',
                         lambda *_args, **_kwargs: {})
@@ -177,6 +174,60 @@ def test_run_instances_passes_generated_registry_login_to_vast(monkeypatch):
     assert launch_kwargs['login'] == (
         '-u registry-user -p registry-password registry.example.com')
     assert launch_kwargs['private_docker_registry'] is True
+
+
+def test_run_instances_redacts_registry_password_from_launch_failure(
+        monkeypatch, caplog):
+    configuration = _provision_config()
+    configuration.provider_config['docker_login_config'] = {
+        'username': 'registry-user',
+        'password': 'registry-password',
+        'server': 'registry.example.com',
+    }
+    monkeypatch.setattr(vast_instance, '_wait_for_no_pending_instances',
+                        lambda *_args, **_kwargs: {})
+    monkeypatch.setattr(
+        vast_utils, 'launch',
+        mock.Mock(side_effect=RuntimeError(
+            'Vast rejected -u registry-user -p registry-password '
+            'registry.example.com')))
+
+    with caplog.at_level(logging.WARNING), pytest.raises(
+            exceptions.VastProvisioningError) as exc_info:
+        vast_instance.run_instances('US', 'test', 'test', configuration)
+
+    formatted_exception = ''.join(
+        traceback.format_exception(exc_info.type, exc_info.value, exc_info.tb))
+    assert 'registry-password' not in str(exc_info.value)
+    assert 'registry-password' not in formatted_exception
+    assert 'registry-password' not in caplog.text
+    assert '<redacted>' in str(exc_info.value)
+
+
+def test_run_instances_preserves_registry_override_value_error(
+        monkeypatch, caplog):
+    configuration = _provision_config()
+    configuration.provider_config.update({
+        'create_instance_kwargs': {
+            'login': 'stale-direct-login',
+        },
+        'docker_login_config': {
+            'username': 'registry-user',
+            'password': 'registry-password',
+            'server': 'registry.example.com',
+        },
+    })
+    monkeypatch.setattr(vast_instance, '_wait_for_no_pending_instances',
+                        lambda *_args, **_kwargs: {})
+    sdk = _mock_vast_sdk(monkeypatch)
+
+    with caplog.at_level(logging.WARNING), pytest.raises(
+            ValueError, match='SKYPILOT_DOCKER'):
+        vast_instance.run_instances('US', 'test', 'test', configuration)
+
+    assert 'stale-direct-login' not in caplog.text
+    assert 'registry-password' not in caplog.text
+    sdk.search_offers.assert_not_called()
 
 
 def test_wait_for_instances_ready_treats_null_as_pending(monkeypatch):
@@ -295,6 +346,25 @@ def test_diagnostics_redact_known_secrets(monkeypatch, caplog):
     assert 'api-key' not in caplog.text
     assert 'registry-password' not in caplog.text
     assert 'env-secret' not in caplog.text
+    assert '<redacted>' in caplog.text
+
+
+def test_diagnostics_redact_log_fetch_exception(monkeypatch, caplog):
+
+    def get_logs(instance_id, daemon_logs, tail):
+        del instance_id, daemon_logs, tail
+        raise RuntimeError('log request exposed registry-password')
+
+    monkeypatch.setattr(vast_utils, 'get_instance_logs', get_logs)
+    vast_instance.logger.addHandler(caplog.handler)
+    try:
+        caplog.set_level(logging.DEBUG, logger=vast_instance.logger.name)
+        vast_instance._log_instance_diagnostics(['instance-1'],
+                                                ['registry-password'])
+    finally:
+        vast_instance.logger.removeHandler(caplog.handler)
+
+    assert 'registry-password' not in caplog.text
     assert '<redacted>' in caplog.text
 
 

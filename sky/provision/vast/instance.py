@@ -161,8 +161,9 @@ def _log_instance_diagnostics(instance_ids: List[str],
                                                  daemon_logs=daemon_logs,
                                                  tail=DIAGNOSTIC_LOG_TAIL)
             except Exception as exc:  # pylint: disable=broad-except
+                safe_error = utils.redact_log_output(str(exc), sensitive_values)
                 logger.debug('Could not collect Vast %s logs for %s: %s',
-                             source, instance_id, exc)
+                             source, instance_id, safe_error)
                 continue
             logger.debug('Vast %s log tail for %s:\n%s', source, instance_id,
                          utils.redact_log_output(output, sensitive_values))
@@ -228,6 +229,22 @@ def _get_sensitive_values(create_instance_kwargs: Dict[str, Any],
     return sensitive_values
 
 
+def _sanitize_launch_exception(exc: Exception,
+                               sensitive_values: List[str]) -> Exception:
+    """Preserve launch-error semantics while removing known secrets."""
+    message = utils.redact_log_output(str(exc), sensitive_values)
+    if isinstance(exc, ValueError):
+        return ValueError(message)
+    if isinstance(exc, TypeError):
+        return TypeError(message)
+    if isinstance(exc, exceptions.VastOfferUnavailableError):
+        return exceptions.VastOfferUnavailableError(message)
+    if isinstance(exc, exceptions.VastProvisioningError):
+        return exceptions.VastProvisioningError(message,
+                                                instance_ids=exc.instance_ids)
+    return exceptions.VastProvisioningError(message)
+
+
 def _build_docker_login_args(
         login_config: docker_utils.DockerLoginConfig) -> str:
     """Build Vast's single registry-login argument safely.
@@ -283,7 +300,7 @@ def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
             logger.warning(f'Failed to read SSH public key from '
                            f'{ssh_public_key_path}: {e}')
 
-    docker_login_config = config.docker_config.get('docker_login_config')
+    docker_login_config = config.provider_config.get('docker_login_config')
     login_args = None
     login_config = None
     image_name = config.node_config['ImageId']
@@ -356,10 +373,11 @@ def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
                 if current_head_instance_id is None:
                     current_head_instance_id = instance_id
         except Exception as exc:  # pylint: disable=broad-except
-            logger.warning(f'Vast instance launch failed: {exc}')
+            sanitized_exc = _sanitize_launch_exception(exc, sensitive_values)
+            logger.warning('Vast instance launch failed: %s', sanitized_exc)
             if created_instance_ids:
                 _cleanup_failed_instances(created_instance_ids)
-            raise
+            raise sanitized_exc from None
         return created_instance_ids
 
     created_instance_ids = _launch_missing_instances(to_start_count,

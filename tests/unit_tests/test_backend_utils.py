@@ -16,6 +16,7 @@ from sky.backends import backend_utils
 from sky.clouds.cloud import TeardownExecutionStrategy
 from sky.data import storage as storage_lib
 from sky.exceptions import ClusterNotUpError
+from sky.provision import docker_utils
 from sky.resources import Resources
 from sky.utils import common
 from sky.utils import common_utils
@@ -568,6 +569,91 @@ def test_write_cluster_config_scopes_storage_credentials(monkeypatch, tmp_path):
     assert len(allowed_clouds) == 2
     assert ((yaml_path.with_name(yaml_path.name + '.tmp').stat().st_mode &
              0o777) == 0o600)
+
+
+def _write_vast_cluster_config(monkeypatch, tmp_path, login_config):
+    cloud = clouds.Vast()
+    resource = Resources(
+        cloud=cloud,
+        instance_type='1x-A100-4-8192',
+        image_id='docker:team/image:latest',
+        _docker_login_config=login_config,
+    )
+    monkeypatch.setattr(cloud, 'get_accelerators_from_instance_type',
+                        lambda _: {'A100': 1})
+    monkeypatch.setattr(backend_utils, '_get_credential_file_mounts',
+                        lambda *args, **kwargs: {})
+    monkeypatch.setattr(backend_utils.auth_utils, 'get_or_generate_keys',
+                        lambda: ('/tmp/fake-key', '/tmp/fake-key.pub'))
+    yaml_path = tmp_path / 'vast-cluster.yml'
+    monkeypatch.setattr(backend_utils, '_get_yaml_path_from_cluster_name',
+                        lambda _: str(yaml_path))
+    monkeypatch.setattr(backend_utils, '_deterministic_cluster_yaml_hash',
+                        lambda _: 'fake-hash')
+
+    config = backend_utils.write_cluster_config(
+        to_provision=resource,
+        num_nodes=1,
+        cluster_config_template='vast-ray.yml.j2',
+        cluster_name='vast-private-registry',
+        local_wheel_path=pathlib.Path('/tmp/fake-wheel'),
+        wheel_hash='fake-hash',
+        region=clouds.Region(name='US'),
+        zones=None,
+        dryrun=True,
+    )
+
+    return yaml_utils.read_yaml(config['ray'])
+
+
+@mock.patch.object(skypilot_config, '_global_config_context',
+                   skypilot_config.ConfigContext())
+@pytest.mark.parametrize(
+    ('username', 'password', 'server'),
+    [
+        ('registry-user', 'registry-password', 'registry.example.com'),
+        ('registry-user\n  injected_username: true', 'registry-password',
+         'registry.example.com'),
+        ('registry-user', 'registry-password\n  injected_password: true',
+         'registry.example.com'),
+        ('registry-user', 'registry-password',
+         'registry.example.com\n  injected_server: true'),
+    ],
+)
+def test_vast_cluster_config_propagates_registry_login(monkeypatch, tmp_path,
+                                                       username, password,
+                                                       server):
+    monkeypatch.delenv(skypilot_config.ENV_VAR_SKYPILOT_CONFIG, raising=False)
+    skypilot_config.reload_config()
+    login_config = docker_utils.DockerLoginConfig(
+        username=username,
+        password=password,
+        server=server,
+    )
+
+    cluster_config = _write_vast_cluster_config(monkeypatch, tmp_path,
+                                                login_config)
+
+    assert cluster_config['provider']['docker_login_config'] == {
+        'username': username,
+        'password': password,
+        'server': server,
+    }
+    assert not any(
+        key.startswith('injected_') for key in cluster_config['provider'])
+    assert cluster_config['provider']['create_instance_kwargs'] == {}
+    assert 'docker' not in cluster_config
+
+
+@mock.patch.object(skypilot_config, '_global_config_context',
+                   skypilot_config.ConfigContext())
+def test_vast_cluster_config_clears_registry_login(monkeypatch, tmp_path):
+    monkeypatch.delenv(skypilot_config.ENV_VAR_SKYPILOT_CONFIG, raising=False)
+    skypilot_config.reload_config()
+
+    cluster_config = _write_vast_cluster_config(monkeypatch, tmp_path, None)
+
+    assert cluster_config['provider']['docker_login_config'] is None
 
 
 @mock.patch.object(skypilot_config, '_global_config_context',
@@ -1161,6 +1247,86 @@ def test_replace_yaml_dicts_restores_new_nested_field_when_old_is_null():
         backend_utils._RAY_YAML_KEYS_TO_RESTORE_EXCEPTIONS)
     result = yaml_utils.read_yaml_str(out)
     assert result['provider']['security_group']['GroupName'] == 'new-name'
+
+
+def test_replace_yaml_dicts_drops_stale_vast_registry_overrides():
+    """Restart uses the current Vast create-instance settings as a unit."""
+    new_yaml = ('cluster_name: c\n'
+                'provider:\n'
+                '  type: external\n'
+                '  create_instance_kwargs:\n'
+                '    onstart_cmd: new-command\n'
+                '  docker_login_config:\n'
+                '    username: new-user\n'
+                '    password: new-password\n'
+                '    server: registry.example.com\n')
+    old_yaml = ('cluster_name: c\n'
+                'provider:\n'
+                '  type: external\n'
+                '  create_instance_kwargs:\n'
+                '    login: stale-login\n'
+                '    image_login: stale-image-login\n'
+                '    onstart_cmd: old-command\n'
+                '  docker_login_config:\n'
+                '    username: old-user\n'
+                '    password: old-password\n'
+                '    server: old-registry.example.com\n')
+
+    out = backend_utils._replace_yaml_dicts(
+        new_yaml, old_yaml,
+        backend_utils._RAY_YAML_KEYS_TO_RESTORE_FOR_BACK_COMPATIBILITY,
+        backend_utils._RAY_YAML_KEYS_TO_RESTORE_EXCEPTIONS)
+
+    provider = yaml_utils.read_yaml_str(out)['provider']
+    assert provider['create_instance_kwargs'] == {'onstart_cmd': 'new-command'}
+    assert provider['docker_login_config'] == {
+        'username': 'new-user',
+        'password': 'new-password',
+        'server': 'registry.example.com',
+    }
+
+
+def test_replace_yaml_dicts_drops_stale_vast_overrides_when_new_empty():
+    new_yaml = ('cluster_name: c\n'
+                'provider:\n'
+                '  type: external\n'
+                '  create_instance_kwargs: {}\n')
+    old_yaml = ('cluster_name: c\n'
+                'provider:\n'
+                '  type: external\n'
+                '  create_instance_kwargs:\n'
+                '    login: stale-login\n'
+                '    image_login: stale-image-login\n')
+
+    out = backend_utils._replace_yaml_dicts(
+        new_yaml, old_yaml,
+        backend_utils._RAY_YAML_KEYS_TO_RESTORE_FOR_BACK_COMPATIBILITY,
+        backend_utils._RAY_YAML_KEYS_TO_RESTORE_EXCEPTIONS)
+
+    provider = yaml_utils.read_yaml_str(out)['provider']
+    assert provider['create_instance_kwargs'] == {}
+
+
+def test_replace_yaml_dicts_clears_stale_vast_docker_login():
+    new_yaml = ('cluster_name: c\n'
+                'provider:\n'
+                '  type: external\n'
+                '  docker_login_config: null\n')
+    old_yaml = ('cluster_name: c\n'
+                'provider:\n'
+                '  type: external\n'
+                '  docker_login_config:\n'
+                '    username: old-user\n'
+                '    password: old-password\n'
+                '    server: old-registry.example.com\n')
+
+    out = backend_utils._replace_yaml_dicts(
+        new_yaml, old_yaml,
+        backend_utils._RAY_YAML_KEYS_TO_RESTORE_FOR_BACK_COMPATIBILITY,
+        backend_utils._RAY_YAML_KEYS_TO_RESTORE_EXCEPTIONS)
+
+    provider = yaml_utils.read_yaml_str(out)['provider']
+    assert provider['docker_login_config'] is None
 
 
 def test_make_safe_symlink_command_default_uses_sudo():

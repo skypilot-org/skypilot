@@ -14,9 +14,17 @@ provider:
   reliable_hosts: {{reliable_hosts}}
   network_tier: {{network_tier}}
   provision_timeout: {{provision_timeout}}
-  {%- if create_instance_kwargs %}
-  create_instance_kwargs: {{create_instance_kwargs | tojson}}
+  # Vast pulls the runtime image during instance creation. Keep registry
+  # credentials in provider config to avoid the nested Docker initializer.
+  {%- if docker_login_config is not none %}
+  docker_login_config:
+    username: {{docker_login_config.username | tojson}}
+    password: {{docker_login_config.password | tojson}}
+    server: {{docker_login_config.server | tojson}}
+  {%- else %}
+  docker_login_config: null
   {%- endif %}
+  create_instance_kwargs: {{create_instance_kwargs | tojson}}
 
 auth:
   ssh_user: root
