@@ -317,6 +317,20 @@ system_config_table = sqlalchemy.Table(
     sqlalchemy.Column('updated_at', sqlalchemy.Integer),
 )
 
+# Renewable leases for fleet-wide leader election. Each row is one singleton
+# role: ``holder`` is the current leader's identity, ``epoch`` is a monotonic
+# fencing token bumped on every change of holder, and ``expires_at`` is the
+# server-side deadline by which the holder must renew or be taken over. See
+# ``sky.utils.leader_election.PgLeaseElector``.
+leader_leases_table = sqlalchemy.Table(
+    'leader_leases',
+    Base.metadata,
+    sqlalchemy.Column('lock_id', sqlalchemy.Text, primary_key=True),
+    sqlalchemy.Column('holder', sqlalchemy.Text),
+    sqlalchemy.Column('epoch', sqlalchemy.BigInteger),
+    sqlalchemy.Column('expires_at', sqlalchemy.DateTime(timezone=True)),
+)
+
 
 def _glob_to_similar(glob_pattern):
     """Converts a glob pattern to a PostgreSQL LIKE pattern."""
