@@ -59,6 +59,17 @@ def test_get_elector_lease_requires_postgres(monkeypatch):
                           leader_election.PgLeaseElector)
 
 
+def test_lease_renew_cadence_tracks_ttl():
+    """Renew interval and deadline are derived from the instance TTL, not the
+    module default, so a short TTL renews (and steps down) proportionally."""
+    e = leader_election.PgLeaseElector('lock', holder='a', ttl_seconds=6)
+    assert e.renew_interval_seconds == 2  # ttl / 3
+    assert e.renew_deadline_seconds == 4  # 2 * ttl / 3
+    # Advisory has no time-bounded lease -> no renew deadline.
+    assert leader_election.AdvisoryLockElector('lock').renew_deadline_seconds \
+        is None
+
+
 def test_advisory_elector_filelock_lifecycle(monkeypatch):
     """On the (non-Postgres) file-lock path, renew is always true while held."""
     monkeypatch.delenv(leader_election.ENV_VAR_BACKEND, raising=False)

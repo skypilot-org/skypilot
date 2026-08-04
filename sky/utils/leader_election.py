@@ -49,11 +49,17 @@ ENV_VAR_BACKEND = 'SKYPILOT_LEADER_ELECTION_BACKEND'
 BACKEND_ADVISORY = 'advisory'
 BACKEND_LEASE = 'lease'
 
-# Default lease time-to-live. A leader renews well within this window; a
-# follower may take over once a lease is this old without a renewal. Kept
-# comfortably larger than the renewal cadence (``ttl / 3``) to tolerate clock
-# jitter and transient DB latency between renewals.
+# Default lease time-to-live. A leader renews every ``ttl / 3`` and steps down
+# if it has not renewed within ``2 * ttl / 3`` (the renew deadline), so a lost
+# role is surfaced with a ``ttl / 3`` margin before the lease actually lapses --
+# room for clock jitter, a stop-the-world pause, or transient DB latency.
 DEFAULT_LEASE_TTL_SECONDS = 30.0
+
+# Server-side bound on a single renew/acquire so a slow or locked DB cannot make
+# the renew hang past the renew deadline undetected. Must stay well under
+# ``renew_deadline_seconds`` (``2 * ttl / 3``). A timed-out renew raises and is
+# treated as a lost role, which is the safe outcome.
+_RENEW_STATEMENT_TIMEOUT_MS = 5000
 
 # Name of the lease table (see the ``leader_leases`` migration in the state DB).
 _LEASE_TABLE = 'leader_leases'
@@ -106,6 +112,19 @@ class LeaderElector(abc.ABC):
     def renew_interval_seconds(self) -> float:
         """How often :meth:`renew` should be called while leading."""
         return DEFAULT_LEASE_TTL_SECONDS / 3
+
+    @property
+    def renew_deadline_seconds(self) -> Optional[float]:
+        """Step down if no renew has succeeded within this many seconds.
+
+        A time-based backend (the lease) returns a finite deadline so the runner
+        stops acting once its lease is stale, even if a renew is hanging or the
+        process was paused across a renew. A backend whose leadership is not
+        time-bounded (the advisory lock, whose lock is held until the session
+        dies) returns ``None`` -- there is no deadline to enforce, matching its
+        historical behavior of stepping down only on a failed liveness probe.
+        """
+        return None
 
 
 class AdvisoryLockElector(LeaderElector):
@@ -209,6 +228,12 @@ class PgLeaseElector(LeaderElector):
         engine = db_utils.get_engine(None)
         try:
             with engine.connect() as conn:
+                # Bound the renew server-side: a slow/locked DB must fail the
+                # renew (→ step down) rather than hang past the renew deadline.
+                # SET LOCAL scopes it to this transaction only.
+                conn.execute(
+                    sqlalchemy.text(f'SET LOCAL statement_timeout = '
+                                    f'{_RENEW_STATEMENT_TIMEOUT_MS}'))
                 row = conn.execute(
                     self._ACQUIRE_SQL, {
                         'lock_id': self._lock_id,
@@ -217,8 +242,9 @@ class PgLeaseElector(LeaderElector):
                     }).fetchone()
                 conn.commit()
         except Exception as e:  # pylint: disable=broad-except
-            # A DB blip is treated as a lost/failed term: the caller re-contends
-            # or steps down. Never crash the daemon on a transient error.
+            # A DB blip (or a statement-timeout) is treated as a lost/failed
+            # term: the caller re-contends or steps down. Never crash the daemon
+            # on a transient error.
             logger.warning('%s: lease upsert failed: %s', self._lock_id, e)
             self._epoch = None
             return False
@@ -227,6 +253,18 @@ class PgLeaseElector(LeaderElector):
             return False
         self._epoch = int(row[0])
         return True
+
+    @property
+    def renew_interval_seconds(self) -> float:
+        # Renew at a third of the TTL: two consecutive missed renewals still
+        # leave a ``ttl / 3`` margin before the lease lapses.
+        return self._ttl / 3
+
+    @property
+    def renew_deadline_seconds(self) -> Optional[float]:
+        # Step down once we are within one renew interval of expiry, so another
+        # replica does not take the lease while we still believe we hold it.
+        return self._ttl * 2 / 3
 
     def try_acquire(self) -> bool:
         return self._acquire_or_renew()
