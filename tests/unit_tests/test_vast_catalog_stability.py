@@ -182,7 +182,8 @@ def test_launch_reconciles_eventual_instance_visibility(monkeypatch):
     assert client.show_instance.call_count == 2
 
 
-def test_launch_normalizes_template_login_startup_and_env_kwargs(monkeypatch):
+def test_launch_normalizes_template_startup_env_and_generated_login(
+        monkeypatch):
     client = _make_vast_client("search_offers", "create_instance",
                                "show_instance")
     client.search_offers.return_value = [{"id": 123, "min_bid": 0.4}]
@@ -199,10 +200,9 @@ def test_launch_normalizes_template_login_startup_and_env_kwargs(monkeypatch):
         ports=None,
         preemptible=False,
         secure_only=False,
-        login="default-login",
+        login="-u registry-user -p registry-token registry.example.com",
         create_instance_kwargs={
             "template_hash_id": "template-123",
-            "login": "user-login",
             "onstart_cmd": "echo ready",
             "env": {
                 "KEY": "value"
@@ -217,7 +217,8 @@ def test_launch_normalizes_template_login_startup_and_env_kwargs(monkeypatch):
     params = client.create_instance.call_args.kwargs
     assert params["template_hash"] == "template-123"
     assert params["template_hash_id"] == "template-123"
-    assert params["login"] == "user-login"
+    assert (params["login"] ==
+            "-u registry-user -p registry-token registry.example.com")
     assert params["env"] == {"__SOURCE": "skypilot", "KEY": "value"}
     assert params["extra"] == "--shm-size=16g"
     assert "image" not in params
