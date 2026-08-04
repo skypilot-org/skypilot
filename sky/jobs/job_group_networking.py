@@ -658,6 +658,11 @@ def generate_wait_for_networking_script(job_group_name: str,
     1. Wait for the networking ready marker file (created by Phase 3)
     2. Wait for all hostnames to be resolvable
 
+    If networking is not ready after the wait, the script fails the job
+    (exit 1). It is only injected when the job group requires in-group
+    networking (``inter_connection`` enabled, the default), so continuing
+    without networking is never correct here.
+
     Args:
         job_group_name: Name of the JobGroup.
         other_job_names: List of other task names in the group to wait for.
@@ -680,14 +685,10 @@ def generate_wait_for_networking_script(job_group_name: str,
                    f'{job_group_name}.log')
     updater_process = f'skypilot-jobgroup-dns-updater-{job_group_name}'
 
-    # TODO(zhwu): The current handling is not robust against the case where
-    # network setup fails. The job will continue but may get stuck if it
-    # depends on networking. We should make the job group automatically
-    # recover (e.g., re-trigger network setup or restart the job) if the
-    # network fails to initialize properly.
     wait_script = textwrap.dedent(f"""
-        # Wait for JobGroup networking to be ready (best-effort, non-blocking)
-        # If networking fails, we continue anyway to allow job group recovery
+        # Wait for JobGroup networking to be ready. This job group requires
+        # in-group networking (inter_connection), so failure to initialize
+        # networking fails the job.
         echo "[SkyPilot] Waiting for network setup..."
         NETWORK_READY=true
 
@@ -699,8 +700,7 @@ def generate_wait_for_networking_script(job_group_name: str,
         echo "[SkyPilot] Waiting for networking initialization marker..."
         while [ ! -f "$MARKER_FILE" ]; do
           if [ $MARKER_ELAPSED -ge $MARKER_WAIT ]; then
-            echo "[SkyPilot] Warning: Networking setup not initiated after ${{MARKER_ELAPSED}}s"
-            echo "[SkyPilot] Continuing without full network setup (job group may recover later)"
+            echo "[SkyPilot] Error: Networking setup not initiated after ${{MARKER_ELAPSED}}s"
             NETWORK_READY=false
             break
           fi
@@ -724,9 +724,8 @@ def generate_wait_for_networking_script(job_group_name: str,
           for hostname in $HOSTNAMES; do
             while ! getent hosts "$hostname" >/dev/null 2>&1; do
               if [ $ELAPSED -ge $MAX_WAIT ]; then
-                echo "[SkyPilot] Warning: Network setup timed out for \\"$hostname\\" after ${{ELAPSED}}s"
+                echo "[SkyPilot] Error: Network setup timed out for \\"$hostname\\" after ${{ELAPSED}}s"
                 echo "[SkyPilot] DNS updater running: $(pgrep -f "$UPDATER_PROCESS" > /dev/null && echo 'yes' || echo 'no')"
-                echo "[SkyPilot] Continuing without full network setup (job group may recover later)"
                 NETWORK_READY=false
                 break 2  # Break out of both loops
               fi
@@ -744,6 +743,10 @@ def generate_wait_for_networking_script(job_group_name: str,
 
         if [ "$NETWORK_READY" = "true" ]; then
           echo "[SkyPilot] Network is ready!"
+        else
+          echo "[SkyPilot] Error: this job group requires in-group networking (inter_connection is enabled) but networking failed to initialize; failing the job."
+          echo "[SkyPilot] If tasks in this job group do not need to reach each other by hostname, set 'inter_connection: false' in the job group header."
+          exit 1
         fi
     """)
 

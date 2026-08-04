@@ -152,6 +152,20 @@ def _add_k8s_annotations(task: 'sky.Task', job_id: int) -> None:
     task.set_resources(new_resources_list)
 
 
+def _task_uses_kubernetes(task: 'sky.Task') -> bool:
+    """Whether any of the task's resources target Kubernetes.
+
+    JobGroup tasks are pinned to a single cloud by the optimizer before
+    reaching the controller, so checking all resource candidates is
+    equivalent to checking the pinned cloud. In-group networking (hostname
+    discovery) is only supported on Kubernetes.
+    """
+    for res in task.resources:
+        if res.cloud is not None and str(res.cloud).lower() == 'kubernetes':
+            return True
+    return False
+
+
 def _build_task_specs(
     executor: 'recovery_strategy.StrategyExecutor',) -> Dict[str, Any]:
     """Merge base and strategy-specific task specs with collision detection."""
@@ -1667,26 +1681,36 @@ class JobController:
         task_name = task.name
         assert task_name is not None, f'Task {task_id} must have a name'
 
-        # Inject wait script to ensure networking is ready before task runs.
-        # We inject this into task.run (not task.setup) because:
-        # - setup runs during cluster provisioning (Phase 1)
-        # - DNS mappings file is written in Phase 3 (after clusters are UP)
-        # - If we block in setup, it times out before Phase 3 can run
-        wait_script = job_group_networking.generate_wait_for_networking_script(
-            job_group_name, other_job_names)
-        # When non-empty, this prelude is prepended to the task's run
-        # section to start the JobGroup DNS updater from there. Phase 3
-        # below does the same delivery via SSH for tasks not covered here.
-        inline_networking_setup_script = (
-            job_group_networking.generate_inline_networking_setup_script(
-                job_group_name, self._dag.tasks, self._job_id))
-        run_prefixes = [
-            script for script in (inline_networking_setup_script, wait_script)
-            if script
-        ]
-        if run_prefixes:
-            current_run = task.run or ''
-            task.run = '\n\n'.join(run_prefixes + [current_run])
+        # In-group networking machinery is only set up when the group
+        # requires it (inter_connection enabled, the default) and the task
+        # runs on Kubernetes — the only infra with in-group networking
+        # support. Otherwise no wait/updater is injected: the task starts
+        # immediately and peers are not reachable by hostname.
+        if (self._dag.inter_connection_enabled() and
+                _task_uses_kubernetes(task)):
+            # Inject wait script to ensure networking is ready before task
+            # runs. We inject this into task.run (not task.setup) because:
+            # - setup runs during cluster provisioning (Phase 1)
+            # - DNS mappings file is written in Phase 3 (after clusters are
+            #   UP)
+            # - If we block in setup, it times out before Phase 3 can run
+            wait_script = (
+                job_group_networking.generate_wait_for_networking_script(
+                    job_group_name, other_job_names))
+            # When non-empty, this prelude is prepended to the task's run
+            # section to start the JobGroup DNS updater from there. Phase 3
+            # below does the same delivery via SSH for tasks not covered
+            # here.
+            inline_networking_setup_script = (
+                job_group_networking.generate_inline_networking_setup_script(
+                    job_group_name, self._dag.tasks, self._job_id))
+            run_prefixes = [
+                script for script in (inline_networking_setup_script,
+                                      wait_script) if script
+            ]
+            if run_prefixes:
+                current_run = task.run or ''
+                task.run = '\n\n'.join(run_prefixes + [current_run])
 
         # JobGroups don't support pools, so cluster name is always deterministic
         cluster_name = managed_job_utils.generate_managed_job_cluster_name(
@@ -1762,6 +1786,8 @@ class JobController:
             mapping — a recovered peer may have a new IP, so every
             task's /etc/hosts needs refreshing.
             """
+            if not self._dag.inter_connection_enabled():
+                return
             updated_handles = []
             for t, _ in all_tasks_handles:
                 t_name = t.name
@@ -2018,10 +2044,11 @@ class JobController:
             handles[task_id] = handle
 
         # Phase 3: Set up networking
-        logger.info('Phase 3: Setting up JobGroup networking...')
         # Build list of (task, handle) for non-terminal tasks with valid
         # handles. Skip tasks that inline the DNS mapping — they already
-        # start the DNS updater from task.run.
+        # start the DNS updater from task.run. Built unconditionally: the
+        # per-task monitors take this list for their on-recovery
+        # networking refresh (which itself no-ops when networking is off).
         tasks_handles: List[Tuple[
             'sky.Task', 'cloud_vm_ray_backend.CloudVmRayResourceHandle']] = []
         for tid, task in enumerate(tasks):
@@ -2033,13 +2060,33 @@ class JobController:
                 continue
             tasks_handles.append((task, task_handle))
 
-        if tasks_handles:
-            networking_success = await (
-                job_group_networking.setup_job_group_networking(
-                    job_group_name, tasks_handles))
-            if not networking_success:
-                logger.warning(
-                    'Some networking setup failed, continuing anyway')
+        if not self._dag.inter_connection_enabled():
+            logger.info('Phase 3: Skipping JobGroup networking setup '
+                        '(inter_connection disabled).')
+        else:
+            logger.info('Phase 3: Setting up JobGroup networking...')
+            if tasks_handles:
+                networking_success = await (
+                    job_group_networking.setup_job_group_networking(
+                        job_group_name, tasks_handles))
+                if not networking_success:
+                    # This group requires in-group networking
+                    # (inter_connection enabled): without it, every task
+                    # would stall at its networking wait and fail anyway.
+                    # Fail fast and clean up instead. Phase 2/3 run outside
+                    # the Phase 1 and Phase 4 try blocks, so clean up here
+                    # before raising to avoid leaking clusters.
+                    logger.error('JobGroup networking setup failed and '
+                                 'inter_connection is enabled; failing the '
+                                 'job group.')
+                    await self._cleanup_job_group_clusters(cluster_names)
+                    raise RuntimeError(
+                        f'Failed to set up in-group networking for JobGroup '
+                        f'{job_group_name!r}, which requires inter-task '
+                        'connectivity (inter_connection is enabled). If '
+                        'tasks in this job group do not need to reach each '
+                        'other by hostname, set \'inter_connection: false\' '
+                        'in the job group header.')
 
         logger.info('JobGroup setup complete, all jobs are running')
 

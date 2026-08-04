@@ -107,6 +107,16 @@ The header document supports the following fields:
        allowing them to finish pending work (e.g., flushing data). Can be a
        string (e.g., ``"30s"``, ``"5m"``) or a dict with per-task delays
        (e.g., ``{"default": "30s", "replay-buffer": "1m"}``).
+   * - ``inter_connection``
+     - ``None``
+     - Whether tasks need to reach each other by hostname.
+       ``true``: place all tasks on a single Kubernetes cluster and set
+       up hostname connectivity between them; hard-fail if either is not
+       possible. ``false``: deliberately skip all networking setup; tasks
+       still prefer co-location but may land on separate clusters.
+       Unset: behaves like ``true`` where supported,
+       like ``false`` (with a warning) where not.
+       See :ref:`job-groups-inter-connection`.
 
 Each task document after the header follows the standard :ref:`SkyPilot task YAML format <yaml-spec>`.
 
@@ -162,6 +172,52 @@ Example usage in a task:
 
     # Access the trainer task from the evaluator using the hostname
     curl http://trainer-0.${SKYPILOT_JOBGROUP_NAME}:8000/status
+
+.. _job-groups-inter-connection:
+
+Requiring or skipping in-group networking
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+In-group service discovery is supported on Kubernetes. By default,
+in-group networking is enabled: SkyPilot places all tasks in a job group
+on a single Kubernetes cluster, and tasks wait for peer hostnames to
+become resolvable before running. If networking cannot be initialized,
+the job fails with a clear error rather than running without
+connectivity.
+
+Explicitly setting ``inter_connection: true`` is stricter than leaving it
+unset: placements where in-group networking cannot exist (non-Kubernetes
+infra, or infra pins with no common option) are rejected with an error,
+whereas with the field unset such placements proceed without networking
+and emit a warning.
+
+Set ``inter_connection: false`` in the header for tasks that do not need to
+reach each other by hostname (e.g., components that coordinate through an
+external endpoint or a shared object store):
+
+.. code-block:: yaml
+
+    name: my-job-group
+    execution: parallel
+    inter_connection: false
+    ---
+    # ... task documents ...
+
+With ``inter_connection: false``:
+
+- No in-group networking is set up, and tasks start immediately without
+  waiting for peers.
+- Tasks may be placed on **different Kubernetes clusters** when no single
+  cluster can host the whole group (e.g., the required GPU types live in
+  different clusters), or on non-Kubernetes infrastructure.
+- Tasks can also pin different clusters explicitly, via per-task
+  ``infra: k8s/<context>``.
+
+.. note::
+
+   Hostname-based service discovery across clusters is not yet
+   supported: tasks placed on different clusters cannot reach each other
+   via in-group hostnames.
 
 
 Viewing logs

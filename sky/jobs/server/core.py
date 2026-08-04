@@ -731,18 +731,28 @@ def launch(
                         override_params['region'] = best_region
                     task_.set_resources_override(override_params)
 
-        # Warn if job group is not running on Kubernetes (networking won't work)
-        first_task = dag.tasks[0]
-        if first_task.best_resources is not None:
-            best_cloud = first_task.best_resources.cloud
-            if best_cloud is not None and str(
-                    best_cloud).lower() != 'kubernetes':
-                logger.warning(
-                    f'{colorama.Fore.YELLOW}Job group service discovery '
-                    f'(hostname-based networking) is only supported on '
-                    f'Kubernetes. Tasks will run on {best_cloud} but cannot '
-                    f'communicate with each other using hostnames.'
-                    f'{colorama.Style.RESET_ALL}')
+        # Post-optimization invariant: a group that still has in-group
+        # networking enabled (inter_connection unset or true) was placed
+        # by the same-infra path, which pins every job to one cloud (and
+        # to Kubernetes: unset degrades to False in the optimizer when
+        # placed elsewhere, and explicit true only ever gets Kubernetes
+        # candidates). Heterogeneous placements only arise via
+        # independent placement, which always carries
+        # inter_connection == False.
+        if dag.inter_connection is not False:
+            best_clouds = {
+                str(task_.best_resources.cloud)
+                for task_ in dag.tasks
+                if task_.best_resources is not None and
+                task_.best_resources.cloud is not None
+            }
+            assert len(best_clouds) <= 1, (
+                f'JobGroup {dag.name!r} has in-group networking enabled '
+                f'but was placed on multiple clouds: {sorted(best_clouds)}')
+            assert all(
+                cloud.lower() == 'kubernetes' for cloud in best_clouds), (
+                    f'JobGroup {dag.name!r} has in-group networking '
+                    f'enabled but was placed on {sorted(best_clouds)}')
 
     # If there is a local postgres db, when the api server tries launching on
     # the remote jobs controller it will fail. therefore, we should remove this
