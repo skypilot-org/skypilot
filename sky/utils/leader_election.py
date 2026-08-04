@@ -55,10 +55,13 @@ BACKEND_LEASE = 'lease'
 # room for clock jitter, a stop-the-world pause, or transient DB latency.
 DEFAULT_LEASE_TTL_SECONDS = 30.0
 
-# Server-side bound on a single renew/acquire so a slow or locked DB cannot make
-# the renew hang past the renew deadline undetected. Must stay well under
-# ``renew_deadline_seconds`` (``2 * ttl / 3``). A timed-out renew raises and is
-# treated as a lost role, which is the safe outcome.
+# Server-side bound on a single renew/acquire/release. It caps *server-side*
+# execution (a slow query, lock contention), so a locked/slow DB fails the call
+# fast — the caller then steps down / re-contends. It does NOT bound a client
+# socket that blackholes (the server never responds), which is instead governed
+# by the engine's TCP-level timeouts; keep it well under ``renew_deadline_
+# seconds`` (``2 * ttl / 3``). A timed-out call raises and is treated as a lost
+# role, which is the safe outcome.
 _RENEW_STATEMENT_TIMEOUT_MS = 5000
 
 # Name of the lease table (see the ``leader_leases`` migration in the state DB).
@@ -280,7 +283,6 @@ class PgLeaseElector(LeaderElector):
         return self._acquire_or_renew()
 
     def release(self) -> None:
-        self._epoch = None
         try:
             self._execute_bounded(self._RELEASE_SQL, {
                 'lock_id': self._lock_id,
@@ -291,6 +293,10 @@ class PgLeaseElector(LeaderElector):
             # If we cannot expire the row, it will lapse on its own after the
             # TTL; a slower handoff, not a correctness problem.
             logger.debug('%s: lease release failed: %s', self._lock_id, e)
+        finally:
+            # Clear our fencing token only after the round-trip: until the row is
+            # expired we may still be the named holder until the TTL.
+            self._epoch = None
 
     def fencing_token(self) -> Optional[int]:
         return self._epoch
