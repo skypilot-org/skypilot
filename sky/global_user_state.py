@@ -299,6 +299,8 @@ service_account_token_table = sqlalchemy.Table(
                       sqlalchemy.Text),  # Who created this token
     sqlalchemy.Column('service_account_user_id',
                       sqlalchemy.Text),  # Service account's own user ID
+    sqlalchemy.Column('last_four', sqlalchemy.Text,
+                      server_default=None),  # Last 4 chars of token
 )
 
 cluster_yaml_table = sqlalchemy.Table(
@@ -3168,7 +3170,8 @@ def add_service_account_token(token_id: str,
                               token_hash: str,
                               creator_user_hash: str,
                               service_account_user_id: str,
-                              expires_at: Optional[int] = None) -> None:
+                              expires_at: Optional[int] = None,
+                              last_four: Optional[str] = None) -> None:
     """Add a service account token to the database."""
     engine = _db_manager.get_engine()
     created_at = int(time.time())
@@ -3189,7 +3192,8 @@ def add_service_account_token(token_id: str,
             created_at=created_at,
             expires_at=expires_at,
             creator_user_hash=creator_user_hash,
-            service_account_user_id=service_account_user_id)
+            service_account_user_id=service_account_user_id,
+            last_four=last_four)
         session.execute(insert_stmnt)
         session.commit()
 
@@ -3212,6 +3216,7 @@ def get_service_account_token(token_id: str) -> Optional[Dict[str, Any]]:
         'expires_at': row.expires_at,
         'creator_user_hash': row.creator_user_hash,
         'service_account_user_id': row.service_account_user_id,
+        'last_four': getattr(row, 'last_four', None),
     }
 
 
@@ -3240,6 +3245,7 @@ def get_service_account_token_by_hash(
         'expires_at': row.expires_at,
         'creator_user_hash': row.creator_user_hash,
         'service_account_user_id': row.service_account_user_id,
+        'last_four': getattr(row, 'last_four', None),
     }
 
 
@@ -3259,6 +3265,7 @@ def get_user_service_account_tokens(user_hash: str) -> List[Dict[str, Any]]:
         'expires_at': row.expires_at,
         'creator_user_hash': row.creator_user_hash,
         'service_account_user_id': row.service_account_user_id,
+        'last_four': getattr(row, 'last_four', None),
     } for row in rows]
 
 
@@ -3294,13 +3301,15 @@ def delete_service_account_token(token_id: str) -> bool:
 @metrics_lib.time_me
 def rotate_service_account_token(token_id: str,
                                  new_token_hash: str,
-                                 new_expires_at: Optional[int] = None) -> None:
+                                 new_expires_at: Optional[int] = None,
+                                 new_last_four: Optional[str] = None) -> None:
     """Rotate a service account token by updating its hash and expiration.
 
     Args:
         token_id: The token ID to rotate.
         new_token_hash: The new hashed token value.
         new_expires_at: New expiration timestamp, or None for no expiration.
+        new_last_four: Last 4 characters of the new token.
     """
     engine = _db_manager.get_engine()
     current_time = int(time.time())
@@ -3314,6 +3323,7 @@ def rotate_service_account_token(token_id: str,
             service_account_token_table.c.last_used_at: None,  # Reset last used
             # Update creation time
             service_account_token_table.c.created_at: current_time,
+            service_account_token_table.c.last_four: new_last_four,
         })
         session.commit()
 
@@ -3480,6 +3490,7 @@ def get_expired_service_account_tokens_by_name_prefix(
         'expires_at': row.expires_at,
         'creator_user_hash': row.creator_user_hash,
         'service_account_user_id': row.service_account_user_id,
+        'last_four': getattr(row, 'last_four', None),
     } for row in rows]
 
 
@@ -3498,6 +3509,7 @@ def get_all_service_account_tokens() -> List[Dict[str, Any]]:
         'expires_at': row.expires_at,
         'creator_user_hash': row.creator_user_hash,
         'service_account_user_id': row.service_account_user_id,
+        'last_four': getattr(row, 'last_four', None),
     } for row in rows]
 
 
