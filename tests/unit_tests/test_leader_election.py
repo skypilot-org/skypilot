@@ -59,12 +59,26 @@ def test_get_elector_lease_requires_postgres(monkeypatch):
                           leader_election.PgLeaseElector)
 
 
-def test_lease_renew_cadence_tracks_ttl():
-    """Renew interval and deadline are derived from the instance TTL, not the
-    module default, so a short TTL renews (and steps down) proportionally."""
-    e = leader_election.PgLeaseElector('lock', holder='a', ttl_seconds=6)
-    assert e.renew_interval_seconds == 2  # ttl / 3
-    assert e.renew_deadline_seconds == 4  # 2 * ttl / 3
+def test_lease_timing_is_independently_tunable():
+    """Interval and deadline are independent knobs (not derived from the TTL),
+    and the constructor enforces 0 < interval < deadline < ttl."""
+    e = leader_election.PgLeaseElector('lock',
+                                       holder='a',
+                                       ttl_seconds=6,
+                                       renew_interval_seconds=1,
+                                       renew_deadline_seconds=3)
+    assert e.renew_interval_seconds == 1
+    assert e.renew_deadline_seconds == 3
+    # Defaults are the conservative 60/10/30.
+    d = leader_election.PgLeaseElector('lock', holder='a')
+    assert d.renew_interval_seconds == 10
+    assert d.renew_deadline_seconds == 30
+    # deadline >= ttl (or any out-of-order timing) is rejected.
+    with pytest.raises(ValueError):
+        leader_election.PgLeaseElector('lock',
+                                       ttl_seconds=6,
+                                       renew_interval_seconds=4,
+                                       renew_deadline_seconds=6)
     # Advisory has no time-bounded lease -> no renew deadline.
     assert leader_election.AdvisoryLockElector('lock').renew_deadline_seconds \
         is None

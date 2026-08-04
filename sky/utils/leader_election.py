@@ -33,20 +33,43 @@ ENV_VAR_BACKEND = 'SKYPILOT_LEADER_ELECTION_BACKEND'
 BACKEND_ADVISORY = 'advisory'
 BACKEND_LEASE = 'lease'
 
-# Default lease time-to-live. A leader renews every ``ttl / 3`` and steps down
-# if it has not renewed within ``2 * ttl / 3`` (the renew deadline), so a lost
-# role is surfaced with a ``ttl / 3`` margin before the lease actually lapses --
-# room for clock jitter, a stop-the-world pause, or transient DB latency.
-DEFAULT_LEASE_TTL_SECONDS = 30.0
+# Default lease timing. These are three independent knobs (not derived from one
+# another) so the retry budget and the safety margin can be tuned separately:
+#   - ttl: a follower can grab the lease ``ttl`` after the leader's last
+#     successful renew; this bounds hard-crash failover latency (a leader that
+#     dies without releasing holds the lease for the full ttl).
+#   - interval: how often the leader renews while healthy.
+#   - deadline: the leader stops acting if it has not renewed within this long.
+# The single-leader invariant is ``deadline < ttl`` (strict): the old leader
+# steps down at ``deadline`` while a follower cannot acquire until ``ttl``, so
+# the margin ``ttl - deadline`` (30s) absorbs the check->act gap -- clock
+# jitter, a stop-the-world pause, or a VM freeze. The retry budget
+# ``deadline - interval`` (20s) is how long a leader rides out a slow/failing DB
+# before surrendering, and is kept at several times
+# ``_RENEW_STATEMENT_TIMEOUT_MS`` so a single hung renew cannot eat the budget.
+DEFAULT_LEASE_TTL_SECONDS = 60.0
+DEFAULT_RENEW_INTERVAL_SECONDS = 10.0
+DEFAULT_RENEW_DEADLINE_SECONDS = 30.0
 
 # Server-side bound on a single renew/acquire/release. It caps *server-side*
 # execution (a slow query, lock contention), so a locked/slow DB fails the call
 # fast — the caller then steps down / re-contends. It does NOT bound a client
 # socket that blackholes (the server never responds), which is instead governed
-# by the engine's TCP-level timeouts; keep it well under ``renew_deadline_
-# seconds`` (``2 * ttl / 3``). A timed-out call raises and is treated as a lost
-# role, which is the safe outcome.
+# by the engine's TCP-level timeouts. Keep it well under the retry budget
+# (``renew_deadline - renew_interval``) so a single hung renew still leaves room
+# for a clean retry before the deadline. A timed-out call raises and is treated
+# as a lost role, which is the safe outcome.
 _RENEW_STATEMENT_TIMEOUT_MS = 5000
+
+# Guard the shipped defaults: the retry budget (deadline - interval) must stay
+# above a single statement_timeout so one hung renew cannot consume the whole
+# budget, and the full ordering must hold. Instances may override the timing
+# (e.g. tests using short TTLs) and are checked for ordering in the constructor;
+# this pins the defaults we actually ship.
+assert (_RENEW_STATEMENT_TIMEOUT_MS / 1000 < DEFAULT_RENEW_INTERVAL_SECONDS <
+        DEFAULT_RENEW_DEADLINE_SECONDS < DEFAULT_LEASE_TTL_SECONDS), (
+            'default lease timing violates statement_timeout < interval < '
+            'deadline < ttl')
 
 # Name of the lease table (see the ``leader_leases`` migration in the state DB).
 _LEASE_TABLE = 'leader_leases'
@@ -98,7 +121,7 @@ class LeaderElector(abc.ABC):
     @property
     def renew_interval_seconds(self) -> float:
         """How often :meth:`renew` should be called while leading."""
-        return DEFAULT_LEASE_TTL_SECONDS / 3
+        return DEFAULT_RENEW_INTERVAL_SECONDS
 
     @property
     def renew_deadline_seconds(self) -> Optional[float]:
@@ -202,14 +225,34 @@ class PgLeaseElector(LeaderElector):
         WHERE lock_id = :lock_id AND holder = :holder
     """)
 
-    def __init__(self,
-                 lock_id: str,
-                 holder: Optional[str] = None,
-                 ttl_seconds: float = DEFAULT_LEASE_TTL_SECONDS):
+    def __init__(
+            self,
+            lock_id: str,
+            holder: Optional[str] = None,
+            ttl_seconds: float = DEFAULT_LEASE_TTL_SECONDS,
+            renew_interval_seconds: float = DEFAULT_RENEW_INTERVAL_SECONDS,
+            renew_deadline_seconds: float = DEFAULT_RENEW_DEADLINE_SECONDS):
         super().__init__(lock_id)
         self._holder = holder or _HOLDER_ID
         self._ttl = ttl_seconds
+        self._renew_interval = renew_interval_seconds
+        self._renew_deadline = renew_deadline_seconds
         self._epoch: Optional[int] = None
+        # Enforce the correctness ordering 0 < interval < deadline < ttl. The
+        # strict ``deadline < ttl`` is the single-leader safety invariant (the
+        # old leader stops at ``deadline`` before a follower can acquire at
+        # ``ttl``); ``interval < deadline`` keeps a healthy renew inside the
+        # window. A mis-tuned value fails loudly rather than silently narrowing
+        # the margin. The ``statement_timeout < interval`` relationship (retry
+        # budget vs. one hung renew) is a tuning concern, not a correctness one,
+        # and is guarded on the shipped defaults at module load -- keeping it
+        # out of here lets tests drive short (sub-``statement_timeout``) TTLs.
+        if not (0 < renew_interval_seconds < renew_deadline_seconds <
+                ttl_seconds):
+            raise ValueError(
+                'lease timing must satisfy 0 < interval < deadline < ttl, got '
+                f'interval={renew_interval_seconds}, '
+                f'deadline={renew_deadline_seconds}, ttl={ttl_seconds}')
 
     def _execute_bounded(self, sql, params, fetch):
         """Run *sql* in one short transaction bounded by ``statement_timeout``
@@ -250,15 +293,14 @@ class PgLeaseElector(LeaderElector):
 
     @property
     def renew_interval_seconds(self) -> float:
-        # Renew at a third of the TTL: two consecutive missed renewals still
-        # leave a ``ttl / 3`` margin before the lease lapses.
-        return self._ttl / 3
+        return self._renew_interval
 
     @property
     def renew_deadline_seconds(self) -> Optional[float]:
-        # Step down once we are within one renew interval of expiry, so another
-        # replica does not take the lease while we still believe we hold it.
-        return self._ttl * 2 / 3
+        # Step down once we have not renewed for this long, so a follower does
+        # not take the lease (grabbable only at ``ttl``) while we still believe
+        # we hold it. ``deadline < ttl`` leaves the ``ttl - deadline`` margin.
+        return self._renew_deadline
 
     def try_acquire(self) -> bool:
         return self._acquire_or_renew()
