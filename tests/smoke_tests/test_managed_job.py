@@ -3132,6 +3132,99 @@ def test_job_group_networking_custom_image(generic_cloud: str, image_id: str):
 
 @pytest.mark.managed_jobs
 @pytest.mark.kubernetes
+def test_job_group_networking_recovery():
+    """In-group networking re-establishes after a task is preempted.
+
+    Deletes one task's pod mid-run and asserts, via epoch-tagged connect
+    logs from both tasks, that after recovery (a) the surviving peer
+    reaches the recovered task's new pod, and (b) the recovered task's
+    fresh pod gets networking set up again and reaches its peer.
+    """
+    name = smoke_tests_utils.get_cluster_name()
+    # Task names become the managed cluster names (and the
+    # `skypilot-cluster-name` pod annotation the deletion command greps),
+    # so they must be unique per test run in a shared namespace.
+    suffix = name.replace('-', '')[-8:]
+    srv_task = f'srv{suffix}'
+    png_task = f'png{suffix}'
+    yaml_path = _render_job_group_yaml(
+        'tests/test_job_groups/smoke_networking_recovery.yaml',
+        name,
+        'kubernetes',
+        suffix=suffix)
+
+    get_job_id_cmd = (f'sky jobs queue | grep {name} | head -1 | '
+                      f'awk \'{{print $1}}\'')
+    delete_server_pod_cmd = (
+        'kubectl get pods -l skypilot-cluster-name --no-headers '
+        '-o custom-columns="NAME:.metadata.name,'
+        'CLUSTER:.metadata.annotations.skypilot-cluster-name" | '
+        f'grep -- "{srv_task}-" | grep -v -- "-cloud-cmd" | '
+        'awk \'{print $1}\' | head -1 | xargs kubectl delete pod')
+
+    def wait_connect_after(task: str, epoch_file: str, timeout: int) -> str:
+        """Poll a task's logs for a CONNECT_OK whose epoch is newer than
+        the recorded pod-deletion epoch (pre-deletion lines don't count)."""
+        return (
+            f'DEL=$(cat {epoch_file}); END=$(($(date +%s) + {timeout})); '
+            f'until sky jobs logs $({get_job_id_cmd}) {task} --no-follow | '
+            'grep -o "epoch=[0-9]*" | cut -d= -f2 | '
+            'awk -v t="$DEL" \'$1 > t\' | grep -q .; do '
+            'if [ $(date +%s) -gt $END ]; then '
+            f'echo "Timed out waiting for post-recovery connect from {task}"; '
+            'exit 1; fi; sleep 15; done; '
+            f'echo "{task} reconnected post-recovery"')
+
+    epoch_file = f'/tmp/{name}-del-epoch'
+    test = smoke_tests_utils.Test(
+        'job_group_networking_recovery',
+        [
+            smoke_tests_utils.launch_cluster_for_cloud_cmd('kubernetes', name),
+            f'sky jobs launch {yaml_path} -y -d',
+            smoke_tests_utils.
+            get_cmd_wait_until_managed_job_status_contains_matching_job_name(
+                job_name=name,
+                job_status=[sky.ManagedJobStatus.RUNNING],
+                timeout=300),
+            # Initial connectivity before the preemption, so the recovery
+            # assertions below measure re-establishment, not first setup.
+            (f'END=$(($(date +%s) + 240)); '
+             f'until sky jobs logs $({get_job_id_cmd}) {png_task} '
+             '--no-follow | grep -q CONNECT_OK; do '
+             'if [ $(date +%s) -gt $END ]; then '
+             'echo "Timed out waiting for initial connectivity"; exit 1; fi; '
+             'sleep 10; done'),
+            # Record the deletion epoch, then preempt the server task's pod.
+            f'date +%s | tee {epoch_file}',
+            smoke_tests_utils.run_cloud_cmd_on_cluster(
+                name, cmd=delete_server_pod_cmd),
+            smoke_tests_utils.
+            get_cmd_wait_until_managed_job_status_contains_matching_job_name(
+                job_name=name,
+                job_status=[sky.ManagedJobStatus.RECOVERING],
+                timeout=managed_jobs_utils.JOB_STATUS_CHECK_GAP_SECONDS * 3,
+                gap_seconds=2),
+            smoke_tests_utils.
+            get_cmd_wait_until_managed_job_status_contains_matching_job_name(
+                job_name=name,
+                job_status=[sky.ManagedJobStatus.RUNNING],
+                timeout=300),
+            # Surviving peer reaches the recovered task's NEW pod.
+            wait_connect_after(png_task, epoch_file, timeout=300),
+            # Recovered task's fresh pod got networking set up again
+            # (its wait script passed and it resolves its peer).
+            wait_connect_after(srv_task, epoch_file, timeout=300),
+        ],
+        (f'sky jobs cancel -y -n {name}; '
+         f'{smoke_tests_utils.down_cluster_for_cloud_cmd(name)}'),
+        env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
+        timeout=30 * 60,
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.managed_jobs
+@pytest.mark.kubernetes
 def test_job_group_rl_architecture(generic_cloud: str):
     """Test JobGroup with RL-style heterogeneous architecture (4 components)."""
     name = smoke_tests_utils.get_cluster_name()

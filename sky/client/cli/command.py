@@ -1029,14 +1029,14 @@ def _make_task_or_dag_from_entrypoint_with_overrides(
 
         # Check if this is a JobGroup YAML
         if dag_utils.is_job_group_yaml(entrypoint):
-            click.secho('Detected JobGroup YAML', fg='cyan')
+            click.secho('Detected Job Group YAML', fg='cyan')
             dag = dag_utils.load_job_group_from_yaml(entrypoint,
                                                      env_overrides=env,
                                                      secrets_overrides=secret)
             if override_params:
                 click.secho(
                     f'WARNING: override params {override_params} are ignored '
-                    'for JobGroup YAML.',
+                    'for Job Group YAML.',
                     fg='yellow')
             for task in dag.tasks:
                 task.update_workdir(workdir, git_url, git_ref)

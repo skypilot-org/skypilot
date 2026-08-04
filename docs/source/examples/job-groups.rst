@@ -114,8 +114,11 @@ The header document supports the following fields:
        up hostname connectivity between them; hard-fail if either is not
        possible. ``false``: deliberately skip all networking setup; tasks
        still prefer co-location but may land on separate clusters.
-       Unset: behaves like ``true`` where supported,
-       like ``false`` (with a warning) where not.
+       Unset (default): assumes ``true`` — co-locate all tasks on a
+       single Kubernetes cluster and set up networking, unless the tasks
+       request non-Kubernetes infrastructure or pin infrastructures that
+       cannot be co-located, in which case it degrades to ``false`` with
+       a warning and skips networking setup.
        See :ref:`job-groups-inter-connection`.
 
 Each task document after the header follows the standard :ref:`SkyPilot task YAML format <yaml-spec>`.

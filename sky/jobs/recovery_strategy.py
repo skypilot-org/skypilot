@@ -281,6 +281,14 @@ class StrategyExecutor:
         # uniform result), the controller could own a single generic loop
         # and this override would be unnecessary.
 
+        Contract for implementations: if the strategy owns the loop and
+        invokes ``on_recovery`` (JobGroups pass their networking refresh
+        here), it must handle ``exceptions.ClusterSetUpError`` from it the
+        way ``JobController._monitor_one_task`` does: mark the task
+        FAILED_SETUP with the exception message and return False. Letting
+        it escape gets swallowed into the group's monitor results with no
+        terminal state set for the task.
+
         Returns:
             None: fall back to OSS default monitor.
             True: task succeeded (strategy handled monitoring).

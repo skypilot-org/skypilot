@@ -1629,7 +1629,28 @@ class JobController:
 
             # Call recovery callback if provided
             if on_recovery is not None:
-                await on_recovery()
+                try:
+                    await on_recovery()
+                except exceptions.ClusterSetUpError as e:
+                    # Job Groups: in-group networking could not be
+                    # re-established on this task's own nodes after its
+                    # recovery. Without it the relaunched task would only
+                    # stall at its networking wait and fail minutes later
+                    # with a generic message; fail the task now with the
+                    # actual reason instead. Raising here would instead be
+                    # swallowed into the Phase 4 monitor results with no
+                    # terminal state set for this task, which run()'s
+                    # finally would then mislabel as CANCELLED.
+                    failure_reason = common_utils.format_exception(e)
+                    logger.error(failure_reason)
+                    await managed_job_state.set_failed_async(
+                        self._job_id,
+                        task_id,
+                        failure_type=managed_job_state.ManagedJobStatus.
+                        FAILED_SETUP,
+                        failure_reason=failure_reason,
+                        callback_func=callback_func)
+                    return False
 
             logger.info(f'Task {task.name} recovered, continuing monitoring')
 
@@ -1788,19 +1809,67 @@ class JobController:
             """
             if not self._dag.inter_connection_enabled():
                 return
-            updated_handles = []
-            for t, _ in all_tasks_handles:
+
+            async def _fetch_handle(t: 'sky.Task') -> typing.Any:
                 t_name = t.name
                 assert t_name is not None
                 # JobGroups don't support pools, cluster name is deterministic
                 t_cluster = managed_job_utils.generate_managed_job_cluster_name(
                     t_name, self._job_id)
-                t_handle = await asyncio.to_thread(
+                return await asyncio.to_thread(
                     global_user_state.get_handle_from_cluster_name, t_cluster)
-                updated_handles.append((t, t_handle))
 
-            await job_group_networking.setup_job_group_networking(
-                job_group_name, updated_handles)
+            # Independent DB reads; fetched in parallel, mirroring the
+            # Phase 2 handle sync.
+            group_tasks = [t for t, _ in all_tasks_handles]
+            handles = await asyncio.gather(
+                *(_fetch_handle(t) for t in group_tasks))
+            updated_handles = list(zip(group_tasks, handles))
+
+            failed_nodes = await (
+                job_group_networking.setup_job_group_networking(
+                    job_group_name, updated_handles))
+            if not failed_nodes:
+                return
+            # Only failures on the recovered task's own nodes are fatal:
+            # its fresh pod has no DNS updater or readiness marker, so
+            # without this setup its networking wait would stall and fail
+            # the task minutes later with a generic message. Failures on
+            # peer nodes are not: a healthy peer's running updater
+            # short-circuits the re-push (it never fails), so a peer
+            # failure means the peer is unreachable -- typically because
+            # it was preempted at the same time and its own recovery,
+            # which re-runs this setup, owns fixing it.
+            own_failures = [f for f in failed_nodes if f.task_name == task.name]
+            failed_desc = '; '.join(
+                f'{f.node_label}: {f.reason}' for f in failed_nodes)
+            if own_failures and (job_group_networking.dns_addresses_for_task(
+                    task, self._job_id) is not None):
+                # The recovered task delivers its own networking: its
+                # relaunched task.run prelude starts the updater and its
+                # networking wait enforces the outcome. The controller
+                # push is a best-effort top-up for such tasks in every
+                # phase (Phase 3 skips them entirely), so its failure
+                # must not be fatal here either -- the prelude may well
+                # have succeeded.
+                logger.error(
+                    'Controller networking push after recovery of '
+                    f'self-delivering task {task.name!r} failed on node(s): '
+                    f'[{failed_desc}]. Not failing the task: its run '
+                    'prelude starts the updater and its networking wait '
+                    'enforces the outcome.')
+                return
+            if not own_failures:
+                logger.error(
+                    'Networking re-setup after recovery of task '
+                    f'{task.name!r} failed on peer node(s): [{failed_desc}]. '
+                    'Not failing the task: unreachable peers are usually '
+                    'themselves mid-recovery, which re-runs this setup.')
+                return
+            raise exceptions.ClusterSetUpError(
+                'Failed to re-establish in-group networking for Job Group '
+                f'{job_group_name!r} after recovery of task {task.name!r}; '
+                f'failed node(s): [{failed_desc}]')
 
         # Mirror the dispatch in `_run_one_task`: give the recovery
         # strategy first refusal at owning the per-task monitor loop so
@@ -1844,7 +1913,7 @@ class JobController:
         assert job_group_name is not None, 'JobGroup name must be set'
         assert self._pool is None, 'JobGroups do not support pools'
         tasks = self._dag.tasks
-        logger.info(f'Starting JobGroup "{job_group_name}" with '
+        logger.info(f'Starting Job Group "{job_group_name}" with '
                     f'{len(tasks)} jobs: {[t.name for t in tasks]}')
 
         # Inject JobGroup environment variables into all tasks
@@ -1888,7 +1957,7 @@ class JobController:
                             f'terminal state: {task_status}')
             elif task_status == managed_job_state.ManagedJobStatus.CANCELLING:
                 # Job was being cancelled when controller went down
-                logger.info('JobGroup was being cancelled, '
+                logger.info('Job Group was being cancelled, '
                             're-raising cancellation')
                 raise asyncio.CancelledError()
             elif task_status == managed_job_state.ManagedJobStatus.RUNNING:
@@ -2061,34 +2130,43 @@ class JobController:
             tasks_handles.append((task, task_handle))
 
         if not self._dag.inter_connection_enabled():
-            logger.info('Phase 3: Skipping JobGroup networking setup '
+            logger.info('Phase 3: Skipping Job Group networking setup '
                         '(inter_connection disabled).')
         else:
-            logger.info('Phase 3: Setting up JobGroup networking...')
+            logger.info('Phase 3: Setting up Job Group networking...')
             if tasks_handles:
-                networking_success = await (
+                failed_nodes = await (
                     job_group_networking.setup_job_group_networking(
                         job_group_name, tasks_handles))
-                if not networking_success:
+                if failed_nodes:
                     # This group requires in-group networking
                     # (inter_connection enabled): without it, every task
                     # would stall at its networking wait and fail anyway.
                     # Fail fast and clean up instead. Phase 2/3 run outside
                     # the Phase 1 and Phase 4 try blocks, so clean up here
                     # before raising to avoid leaking clusters.
-                    logger.error('JobGroup networking setup failed and '
+                    # ClusterSetUpError (not a generic error) so run()
+                    # marks the job terminal (FAILED_SETUP): a generic
+                    # error would trigger emergency recovery, which
+                    # resumes in place against the clusters just cleaned
+                    # up here (Phase 2 already marked tasks RUNNING, so
+                    # the resume would skip Phase 1 relaunch).
+                    logger.error('Job Group networking setup failed and '
                                  'inter_connection is enabled; failing the '
                                  'job group.')
                     await self._cleanup_job_group_clusters(cluster_names)
-                    raise RuntimeError(
-                        f'Failed to set up in-group networking for JobGroup '
-                        f'{job_group_name!r}, which requires inter-task '
-                        'connectivity (inter_connection is enabled). If '
-                        'tasks in this job group do not need to reach each '
-                        'other by hostname, set \'inter_connection: false\' '
-                        'in the job group header.')
+                    failed_desc = '; '.join(
+                        f'{f.node_label}: {f.reason}' for f in failed_nodes)
+                    raise exceptions.ClusterSetUpError(
+                        f'Failed to set up in-group networking for Job Group '
+                        f'{job_group_name!r} on node(s): [{failed_desc}]. '
+                        'This job group requires inter-task connectivity '
+                        '(inter_connection is enabled). If tasks in this job '
+                        'group do not need to reach each other by hostname, '
+                        'set \'inter_connection: false\' in the job group '
+                        'header.')
 
-        logger.info('JobGroup setup complete, all jobs are running')
+        logger.info('Job Group setup complete, all jobs are running')
 
         # Phase 4: Monitor all jobs in parallel with primary/auxiliary support
         logger.info('Phase 4: Monitoring all jobs...')
@@ -2354,7 +2432,7 @@ class JobController:
                     # Check if this is a JobGroup (parallel execution)
                     if self._dag.is_job_group():
                         logger.info(
-                            f'Running as JobGroup with {len(self._dag.tasks)} '
+                            f'Running as Job Group with {len(self._dag.tasks)} '
                             f'parallel jobs')
                         succeeded = await self._run_job_group()
                     else:
