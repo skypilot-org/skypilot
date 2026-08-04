@@ -23,9 +23,21 @@ from sky.server import common as server_common
 from sky.skylet import constants
 from sky.utils import common_utils
 
+# `sky storage delete` returns as soon as the DeleteBucket API call
+# succeeds, but S3 bucket deletion is eventually consistent: for a short
+# window afterwards head-bucket can still report the bucket as existing.
+# Poll (rather than assert once) so the check tolerates that propagation
+# delay instead of flaking. A non-zero head-bucket (bucket gone / 404)
+# means success; keep retrying only while the bucket still exists.
 _CHECK_AWS_BUCKET_DOESNT_EXIST = (
-    'aws s3api head-bucket --bucket {bucket_name} 2>/dev/null && exit 1 || exit 0'
-)
+    'start=$SECONDS; '
+    'while aws s3api head-bucket --bucket {bucket_name} 2>/dev/null; do '
+    'if (( SECONDS - start > 90 )); then '
+    'echo "Bucket {bucket_name} still exists 90s after deletion"; exit 1; fi; '
+    'echo "Bucket {bucket_name} still exists, waiting for deletion to '
+    'propagate..."; sleep 5; '
+    'done; '
+    'echo "Bucket {bucket_name} no longer exists."; exit 0')
 
 
 @pytest.mark.no_remote_server
