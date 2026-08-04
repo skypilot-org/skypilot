@@ -28,6 +28,24 @@ _BENCHMARK_IDENTITY = 'loop-lag-benchmark@example.com'
 # enough to be user-visible on every concurrent request.
 _LAG_THRESHOLD_SECONDS = 0.25
 
+# The flood's request mix. Every entry is read-only and does its work on the
+# request path. Deliberately excluded: endpoints whose handler calls
+# executor.schedule_request_async (GET /workspaces, POST /status and the rest
+# of the async API) -- those return as soon as the request is enqueued, so the
+# benchmark would time the enqueue rather than the work, and 30k of them per
+# scenario would bury the request queue and its DB.
+_FLOOD_REQUESTS = [
+    # async handler, so it runs on the event loop itself, and does almost
+    # nothing: this is the middleware's own cost with nothing behind it.
+    loop_lag_harness.RequestSpec(path='/api/health'),
+    # Sync handlers. FastAPI runs those in the default threadpool -- the same
+    # pool log tailing reads through -- and each does real DB and RBAC work,
+    # so the mix loads both sides of the server rather than just the loop.
+    loop_lag_harness.RequestSpec(path='/users'),
+    loop_lag_harness.RequestSpec(path='/users/role'),
+    loop_lag_harness.RequestSpec(path='/users/me/workspace'),
+]
+
 # Request rates for the two scenarios. The authenticated path does three DB
 # operations per request on a bounded thread pool, so these are high enough to
 # keep that pool busy without turning the benchmark into a DB throughput test.
@@ -240,6 +258,29 @@ def _launch_log_producer(api_url: str) -> str:
         os.unlink(task_path)
 
 
+def _preflight_requests(api_url: str, auth: loop_lag_harness.Auth) -> None:
+    """Check every endpoint in the mix answers 200 before measuring.
+
+    The scenarios assert that every request came back 200, so one endpoint
+    that 403s or 404s fails the benchmark with a status-count mismatch that
+    says nothing about the event loop. Ask each one once, up front, and name
+    the endpoint that is wrong.
+    """
+    for spec in _FLOOD_REQUESTS:
+        response = requests.request(spec.method,
+                                    f'{api_url}{spec.path}',
+                                    headers=auth.headers,
+                                    timeout=60)
+        if response.status_code != 200:
+            pytest.fail(
+                f'{spec.method} {spec.path} returned '
+                f'{response.status_code}, so the flood would fail on '
+                f'status counts rather than on lag: {response.text[:300]}')
+    print(
+        f'preflight: {len(_FLOOD_REQUESTS)} endpoints in the mix all answer 200'
+    )
+
+
 def _publish(result: loop_lag_harness.RunResult, name: str) -> pathlib.Path:
     """Write the run artifact and hand it to Buildkite when running under it."""
     # TODO(kevin): move to a pipeline-level artifact_paths declaration if that
@@ -317,13 +358,13 @@ def test_api_server_event_loop_lag():
         'Authorization': f'Bearer {_mint_service_account_token(api_url)}'
     })
 
+    _preflight_requests(api_url, auth)
+
     flood = loop_lag_harness.HarnessConfig(
         name='authenticated-flood',
         base_url=api_url,
         metrics_url=metrics_url,
-        # Cheapest authenticated endpoint there is: it does no cloud work and
-        # touches no request queue, so lag it shows is the middleware's.
-        requests=[loop_lag_harness.RequestSpec(path='/api/health')],
+        requests=_FLOOD_REQUESTS,
         target_qps=_FLOOD_QPS,
         lag_threshold_seconds=_LAG_THRESHOLD_SECONDS,
     )
@@ -357,10 +398,10 @@ def test_api_server_event_loop_lag():
     job_name = _launch_log_producer(api_url)
     try:
         starvation = loop_lag_harness.HarnessConfig(
-            name='executor-starvation',
+            name='held-stream-pressure',
             base_url=api_url,
             metrics_url=metrics_url,
-            requests=[loop_lag_harness.RequestSpec(path='/api/health')],
+            requests=_FLOOD_REQUESTS,
             target_qps=_STARVATION_FLOOD_QPS,
             lag_threshold_seconds=_LAG_THRESHOLD_SECONDS,
             streams=loop_lag_harness.StreamSpec(
@@ -383,8 +424,8 @@ def test_api_server_event_loop_lag():
         subprocess.run(['sky', 'jobs', 'cancel', '-n', job_name, '-y'],
                        check=False,
                        capture_output=True)
-    _publish(starvation_result, 'executor-starvation')
-    _require_valid(starvation_result, 'executor-starvation')
+    _publish(starvation_result, 'held-stream-pressure')
+    _require_valid(starvation_result, 'held-stream-pressure')
 
     assert starvation_result.streams_opened == _HELD_STREAMS, (
         f'only {starvation_result.streams_opened}/{_HELD_STREAMS} streams '
