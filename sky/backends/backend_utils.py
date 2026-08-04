@@ -194,6 +194,9 @@ _RAY_YAML_KEYS_TO_RESTORE_FOR_BACK_COMPATIBILITY = {
 # - docker_login_config: The docker_login_config field of the old yaml may be
 #   outdated or wrong. Users may want to fix the login config if a cluster fails
 #   to launch due to the login config.
+# - create_instance_kwargs: Provider launch overrides must be replaced as a
+#   unit. Retaining removed credentials from an old config can make a corrected
+#   cluster fail again on restart.
 # - UserData: The UserData field of the old yaml may be outdated, and we want to
 #   use the new yaml's UserData field, which contains the authorized key setup as
 #   well as the disabling of the auto-update with apt-get.
@@ -208,6 +211,7 @@ _RAY_YAML_KEYS_TO_RESTORE_EXCEPTIONS = [
     ('docker', 'run_options'),
     # Other clouds
     ('provider', 'docker_login_config'),
+    ('provider', 'create_instance_kwargs'),
     ('provider', 'firewall_rule'),
     # TPU node launched before #2943 does not have the `provider.tpu_node` set,
     # and our latest code need this field to be set to distinguish the node, so
