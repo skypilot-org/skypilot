@@ -390,10 +390,14 @@ def test_api_server_event_loop_lag():
             f'event loop tick(s) landed above {_LAG_THRESHOLD_SECONDS}s under '
             f'{_FLOOD_QPS} req/s of authenticated load; bucket deltas: '
             f'{trial["lag_bucket_deltas"]}')
-        assert trial['lag_max_peak_seconds'] < _LAG_THRESHOLD_SECONDS, (
-            f'trial {trial["index"]}: peak event loop lag '
-            f'{trial["lag_max_peak_seconds"]:.3f}s reached '
-            f'{_LAG_THRESHOLD_SECONDS}s')
+        # lag_max_peak_seconds is reported, not asserted: the gauge behind it
+        # is a 30s tumbling window whose boundary does not line up with the
+        # trial, so a sample taken at trial start can carry a peak from
+        # before the trial began. The histogram delta above is the exact
+        # record of the ticks that happened inside this trial.
+        print(f'trial {trial["index"]}: peak lag gauge '
+              f'{trial["lag_max_peak_seconds"]:.3f}s (window may predate the '
+              f'trial), {trial["lag_gauge_samples"]} samples')
 
     job_name = _launch_log_producer(api_url)
     try:
@@ -452,11 +456,20 @@ def test_api_server_event_loop_lag():
             f'{trial["completed_requests"]} requests failed while '
             f'{_HELD_STREAMS} streams were held open; statuses: '
             f'{trial["status_counts"]}')
+        assert trial['lag_observations_above_threshold'] == 0, (
+            f'trial {trial["index"]}: '
+            f'{trial["lag_observations_above_threshold"]:.0f} event loop '
+            f'tick(s) landed above {_LAG_THRESHOLD_SECONDS}s with '
+            f'{_HELD_STREAMS} streams held open; bucket deltas: '
+            f'{trial["lag_bucket_deltas"]}')
         assert trial['latency_p99'] < _STARVATION_P99_LIMIT_SECONDS, (
             f'trial {trial["index"]}: p99 {trial["latency_p99"]:.3f}s exceeds '
             f'{_STARVATION_P99_LIMIT_SECONDS}s with {_HELD_STREAMS} streams '
             'held open')
-        assert trial['lag_max_peak_seconds'] < _LAG_THRESHOLD_SECONDS, (
-            f'trial {trial["index"]}: peak event loop lag '
-            f'{trial["lag_max_peak_seconds"]:.3f}s reached '
-            f'{_LAG_THRESHOLD_SECONDS}s with streams held open')
+        # Reported rather than asserted, for the same reason as the flood: the
+        # gauge's 30s window can still be showing the cost of opening the 32
+        # streams when the first trial samples it, which is real but is not
+        # something that happened during the trial.
+        print(f'trial {trial["index"]}: peak lag gauge '
+              f'{trial["lag_max_peak_seconds"]:.3f}s with {_HELD_STREAMS} '
+              f'streams held (window may predate the trial)')
