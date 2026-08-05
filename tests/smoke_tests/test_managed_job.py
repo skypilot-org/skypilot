@@ -1538,23 +1538,25 @@ def test_managed_jobs_storage(generic_cloud: str):
             'azure': storage_lib.StoreType.AZURE,
             'nebius': storage_lib.StoreType.NEBIUS,
         }
-        # A remote API server may have only a subset of storage clouds
-        # enabled (e.g. the shared GKE API server only enables AWS), and
+        # An API server may have only a subset of storage clouds enabled, and
         # specifying a store whose cloud is disabled on the server fails the
-        # job at FAILED_PRECHECKS. Only pin stores whose cloud is enabled on
-        # the server.
-        if smoke_tests_utils.is_remote_server_test():
-            enabled_storage_cloud_names = {
-                str(cloud).lower()
-                for cloud in smoke_tests_utils.get_enabled_cloud_storages()
-            }
-            pinned_stores = {
-                store_str: store_type
-                for store_str, store_type in pinned_stores.items()
-                if store_type.to_cloud().lower() in enabled_storage_cloud_names
-            }
-            assert pinned_stores, ('No object store enabled on the API server: '
-                                   f'{enabled_storage_cloud_names}')
+        # job at FAILED_PRECHECKS. Only pin stores whose cloud is enabled.
+        #
+        # This applies to a local API server too, not just a remote one: the
+        # set of enabled storage clouds is a property of the server, not of how
+        # the test reaches it. Gating this filter on remote-server runs left
+        # local runs pinning stores that the server could not serve.
+        enabled_storage_cloud_names = {
+            str(cloud).lower()
+            for cloud in smoke_tests_utils.get_enabled_cloud_storages()
+        }
+        pinned_stores = {
+            store_str: store_type
+            for store_str, store_type in pinned_stores.items()
+            if store_type.to_cloud().lower() in enabled_storage_cloud_names
+        }
+        assert pinned_stores, ('No object store enabled on the API server: '
+                               f'{enabled_storage_cloud_names}')
         # For Azure, the bucket lands in the configured storage account when
         # the API server shares the client config, or in the default per-user
         # account (AzureBlobStore's default region) when a remote API server
