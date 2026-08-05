@@ -340,20 +340,23 @@ def on_before_recovery(
     exit_codes: Optional[List[int]] = None,
     job_id_on_pool_cluster: Optional[int] = None,
 ) -> None:
-    if _current is None:
-        return
-    # Defensive: a runtime registered by an older plugin build may not
-    # implement this hook. Skip rather than crash on version skew.
-    hook = getattr(_current, 'on_before_recovery', None)
-    if hook is None:
-        return
-    hook(  # pylint: disable=not-callable
-        handle,
-        backend,
-        job_id,
-        task_id,
-        exit_codes=exit_codes,
-        job_id_on_pool_cluster=job_id_on_pool_cluster)
+    # This hook fires for legacy (has_ray) handles too — runtimes may
+    # capture VM logs before recovery — and ``handle`` may be None when
+    # the cluster is already unreachable. Runtimes self-filter inside
+    # the hook.
+    for r in _claimants(handle):
+        # Defensive: a runtime registered by an older plugin build may not
+        # implement this hook. Skip rather than crash on version skew.
+        hook = getattr(r, 'on_before_recovery', None)
+        if hook is None:
+            continue
+        hook(  # pylint: disable=not-callable
+            handle,
+            backend,
+            job_id,
+            task_id,
+            exit_codes=exit_codes,
+            job_id_on_pool_cluster=job_id_on_pool_cluster)
 
 
 def tail_logs(

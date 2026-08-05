@@ -541,6 +541,21 @@ class SlurmManagedJobRuntime:
         logger.info(f'Downloaded Slurm managed job logs to {log_file}')
         return log_file
 
+    def on_before_recovery(
+        self,
+        handle: Optional['cloud_vm_ray_backend.CloudVmRayResourceHandle'],
+        backend: 'backends.CloudVmRayBackend',
+        job_id: int,
+        task_id: Optional[int],
+        exit_codes: Optional[List[int]] = None,
+        job_id_on_pool_cluster: Optional[int] = None,
+    ) -> None:
+        # The failed attempt's sbatch --output file stays on the login
+        # node after recovery (each attempt writes its own file), so
+        # there is no state to snapshot before the relaunch.
+        del handle, backend, job_id, task_id
+        del exit_codes, job_id_on_pool_cluster
+
     def tail_logs(
         self,
         handle: 'cloud_vm_ray_backend.CloudVmRayResourceHandle',
