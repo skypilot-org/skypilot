@@ -156,10 +156,14 @@ def test_set_sky_logging_levels_applies_to_the_handler(monkeypatch):
     assert handler.level == logging.INFO
 
 
-def test_set_sky_logging_levels_is_isolated_per_context():
+def test_set_sky_logging_levels_is_isolated_per_context(monkeypatch):
     """Two contexts must not see each other's level."""
     import contextvars
 
+    # Pin out the SKYPILOT_DEBUG branch of EnvAwareHandler.level so this test
+    # is about the override alone: the suite runs with SKYPILOT_DEBUG=1, and a
+    # SkyPilotContext initialized by an earlier test can still be active here.
+    monkeypatch.setattr(context, 'get', lambda: None)
     handler = sky_logging.EnvAwareHandler(io.StringIO(), level=logging.INFO)
     seen = {}
 
