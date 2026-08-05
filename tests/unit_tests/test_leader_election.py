@@ -8,6 +8,7 @@ property-based state machine of several contenders for one lock.
 import os
 import re
 import threading
+import time
 from typing import Dict, Optional, Tuple
 from unittest import mock
 
@@ -292,7 +293,11 @@ _PARK_WAIT_SECONDS = 10.0
 # The rules talk about statements; the elector exposes methods. Naming both
 # here means renaming a method breaks the park loudly rather than silently
 # parking nothing.
-_PARKED_METHODS = {'acquire': 'try_acquire', 'renew': 'renew'}
+_PARKED_METHODS = {
+    'acquire': 'try_acquire',
+    'renew': 'renew',
+    'release': 'release',
+}
 
 # Distinguishes "not read yet" from a real reading of None (nobody leads).
 _UNREAD = object()
@@ -324,26 +329,63 @@ class _ParkSlot:
         self.error = None
 
 
-class _ParkedCall:
-    """A real elector call stopped at its own pre-commit.
+class _InFlightCall:
+    """A real elector call running on a thread of its own.
 
-    The call is the shipping method -- ``PgLeaseElector.try_acquire`` or
-    ``renew`` -- running on a helper thread, halted inside its own
-    ``conn.commit()`` by :class:`_CommitParker`. Its statement has run and holds
-    whatever lock it took, but nothing it wrote is visible to any other
-    connection, and it has not yet returned, so its result and fencing token do
-    not exist yet. That is why nothing is asserted about the statement at park
-    time: what it produced is checked when the call is let go.
+    Held at its own pre-commit when :class:`_CommitParker` was told to hold it;
+    otherwise it runs straight through. Either way this is the handle the test
+    uses to see where the call has got to and to collect what it returned.
+    """
 
-    Letting it go is the only thing that ends it. A contender that blocks behind
-    it does not: that contender dies at the statement timeout and reports a lost
-    role, which is an outcome to assert on.
+    def __init__(self, slot, thread, label):
+        self._slot = slot
+        self._thread = thread
+        self.label = label
+
+    def wait_until_parked(self, timeout: float = _PARK_WAIT_SECONDS) -> bool:
+        """True once the call is sitting in its pre-commit."""
+        return self._slot.parked.wait(timeout)
+
+    def reached_its_commit(self) -> bool:
+        return self._slot.parked.is_set()
+
+    def is_running(self) -> bool:
+        return self._thread.is_alive()
+
+    def finish(self, *, crash: bool = False):
+        """Let the call complete and hand back what it returned.
+
+        With *crash*, the hook raises instead of returning, so the commit never
+        reaches the server and the exception travels the module's own failure
+        path out of ``_execute_bounded``.
+        """
+        self._slot.crash = crash
+        self._slot.release.set()
+        self._thread.join(_PARK_WAIT_SECONDS)
+        assert not self._thread.is_alive(), (
+            f'{self.label} did not finish after being released')
+        assert self._slot.error is None, (
+            f'{self.label} raised out of the elector: {self._slot.error!r}')
+        return self._slot.returned
+
+
+class _ParkedCall(_InFlightCall):
+    """A call the machine is holding, plus what it predicts the call did.
+
+    Its statement has run and holds whatever lock it took, but nothing it wrote
+    is visible to any other connection, and it has not yet returned, so its
+    result and fencing token do not exist yet. That is why nothing is asserted
+    about the statement at park time: what it produced is checked when the call
+    is let go.
+
+    Letting it go is the only thing that ends it. A contender that blocks
+    behind it does not: that contender dies at the statement timeout and
+    reports a lost role, which is an outcome to assert on.
     """
 
     def __init__(self, slot, thread, actor, statement, wrote, pending_epoch,
                  row_existed):
-        self._slot = slot
-        self._thread = thread
+        super().__init__(slot, thread, f'parked {statement} by {actor}')
         self.actor = actor
         self.statement = statement
         # What the model says the statement will have produced, checked against
@@ -364,31 +406,6 @@ class _ParkedCall:
             # took no lock and blocks nobody.
             self.blocks_acquire = wrote
             self.blocks_row_write = wrote
-
-    def wait_until_parked(self, timeout: float = _PARK_WAIT_SECONDS) -> bool:
-        """True once the call is sitting in its pre-commit."""
-        return self._slot.parked.wait(timeout)
-
-    def reached_its_commit(self) -> bool:
-        return self._slot.parked.is_set()
-
-    def resume(self, *, crash: bool) -> bool:
-        """Let the call finish and hand back what it returned.
-
-        With *crash*, the hook raises instead of returning, so the commit never
-        reaches the server and the exception travels the module's own failure
-        path out of ``_execute_bounded``.
-        """
-        self._slot.crash = crash
-        self._slot.release.set()
-        self._thread.join(_PARK_WAIT_SECONDS)
-        assert not self._thread.is_alive(), (
-            f'parked {self.statement} by {self.actor} did not finish after '
-            'being released')
-        assert self._slot.error is None, (
-            f'parked {self.statement} by {self.actor} raised out of the '
-            f'elector: {self._slot.error!r}')
-        return self._slot.returned
 
 
 class _CommitParker:
@@ -429,11 +446,14 @@ class _CommitParker:
         if slot.crash:
             raise RuntimeError('injected failure before commit')
 
-    def park(self, elector, statement: str, actor: str, *, wrote: bool,
-             pending_epoch: int, row_existed: bool) -> _ParkedCall:
-        """Start the elector call for *statement* on a self-parking thread."""
+    def _launch(self, elector, statement: str, name: str, hold: bool):
+        """Run the elector call for *statement* on an armed thread."""
         method = getattr(elector, _PARKED_METHODS[statement])
         slot = _ParkSlot()
+        if not hold:
+            # Armed only so the caller can see the call reach its commit; the
+            # hook records that and lets it straight through.
+            slot.release.set()
 
         def run() -> None:
             # Armed from inside the thread, before the call starts, so the
@@ -444,10 +464,20 @@ class _CommitParker:
             except BaseException as e:  # pylint: disable=broad-except
                 slot.error = e
 
-        thread = threading.Thread(target=run,
-                                  name=f'parked-{statement}-{actor}',
-                                  daemon=True)
+        thread = threading.Thread(target=run, name=name, daemon=True)
         thread.start()
+        return slot, thread
+
+    def start(self, elector, statement: str, label: str, *,
+              hold: bool) -> _InFlightCall:
+        slot, thread = self._launch(elector, statement, label, hold)
+        return _InFlightCall(slot, thread, label)
+
+    def park(self, elector, statement: str, actor: str, *, wrote: bool,
+             pending_epoch: int, row_existed: bool) -> _ParkedCall:
+        """Start the elector call for *statement* on a self-parking thread."""
+        slot, thread = self._launch(elector, statement,
+                                    f'parked-{statement}-{actor}', True)
         return _ParkedCall(slot, thread, actor, statement, wrote, pending_epoch,
                            row_existed)
 
@@ -524,6 +554,11 @@ class _LeaseBackend:
                                  wrote=wrote,
                                  pending_epoch=pending_epoch,
                                  row_existed=row_existed)
+
+    def start_in_flight(self, elector, statement: str, label: str, *,
+                        hold: bool) -> _InFlightCall:
+        """Run one elector call on its own thread, held pre-commit or not."""
+        return self._parker.start(elector, statement, label, hold=hold)
 
 
 class _AdvisoryBackend:
@@ -928,7 +963,7 @@ class LeaderElectionMachine(stateful.RuleBasedStateMachine):
             f'commit parked {handle.statement}: wrote={handle.wrote}')
         actor = handle.actor
         elector = self._electors[actor]
-        result = handle.resume(crash=False)
+        result = handle.finish(crash=False)
         self._parked = None
 
         assert result is handle.wrote, (
@@ -970,7 +1005,7 @@ class LeaderElectionMachine(stateful.RuleBasedStateMachine):
             f'roll back parked {handle.statement}: wrote={handle.wrote}')
         actor = handle.actor
         before = self._backend.observe()
-        result = handle.resume(crash=True)
+        result = handle.finish(crash=True)
         self._parked = None
         after = self._backend.observe()
 
@@ -1073,7 +1108,7 @@ class LeaderElectionMachine(stateful.RuleBasedStateMachine):
         # Ended by failing it, so the example leaves the world as it found it,
         # and ``resume`` asserts the thread is gone.
         if self._parked is not None:
-            self._parked.resume(crash=True)
+            self._parked.finish(crash=True)
             self._parked = None
         for elector in self._electors.values():
             elector.release()
@@ -1159,11 +1194,11 @@ def test_pg_a_second_writer_on_the_lease_row_hits_the_statement_timeout(
                                       wrote=True,
                                       pending_epoch=1,
                                       row_existed=False)
-        assert second.resume(crash=False) is False
+        assert second.finish(crash=False) is False
         assert second.reached_its_commit() is False
         assert b.fencing_token() is None
     finally:
-        first.resume(crash=True)
+        first.finish(crash=True)
     assert backend.observe() is None
 
 
@@ -1191,7 +1226,7 @@ def test_pg_a_parked_renew_commits_and_keeps_its_term(parking_db):
                                   pending_epoch=1,
                                   row_existed=True)
     assert parked.wait_until_parked()
-    assert parked.resume(crash=False) is True
+    assert parked.finish(crash=False) is True
     assert a.fencing_token() == 1
     assert backend.observe() == ('a', 1, False)
 
@@ -1235,7 +1270,196 @@ def test_pg_release_swallows_a_cancelled_expiry(parking_db):
         # release gives up on failure.
         assert backend.observe() == ('a', 1, False)
     finally:
-        parked.resume(crash=True)
+        parked.finish(crash=True)
+    assert backend.observe() == ('a', 1, False)
+
+
+# --- Block, then proceed: what a waiter sees when the blocker resolves ------
+#
+# Everywhere else in this file a blocked contender dies at the statement
+# timeout, because the machine's one thread is inside the blocked call and
+# nothing can free the blocker until that call returns. A fleet has the other
+# exit: the blocker commits or aborts while the waiter is still waiting, and
+# under READ COMMITTED the server re-evaluates the waiter's WHERE against the
+# row version that just landed before letting it through. These pin that
+# re-evaluation of the lease statements, which nothing else here reaches.
+#
+# They are deterministic for the same reason the parked cells are: the row lock
+# is the synchronisation. The waiter provably cannot proceed until the blocker's
+# transaction resolves, and resolving it is an explicit call from the test --
+# nothing settles, nothing polls.
+#
+# The waiter needs a thread of its own because it blocks, and the main thread
+# has to stay free to free the blocker. It is armed in the parker only so the
+# test can watch it reach its own commit; it is never held there.
+
+# Long enough that a waiter which was never going to block would have finished
+# and been caught. It cannot expire a real wait: a genuinely blocked waiter
+# stays blocked until the test frees the blocker, however long that takes.
+_BLOCKED_GRACE_SECONDS = 0.5
+
+
+def _assert_still_blocked(waiter) -> None:
+    """Fail unless the waiter really is stuck behind the blocker.
+
+    Load-bearing rather than defensive: if the waiter had already run to
+    completion, the cell would have degenerated into two calls in sequence and
+    would say nothing about what a waiter sees on being let through.
+    """
+    time.sleep(_BLOCKED_GRACE_SECONDS)
+    assert waiter.is_running(), (
+        f'{waiter.label} finished instead of blocking; this cell proves '
+        'nothing unless the waiter is still waiting')
+    assert not waiter.reached_its_commit(), (
+        f'{waiter.label} reached its own commit instead of blocking')
+
+
+def _waiter_setup(db, lock_id):
+    """A backend and two electors contending for *lock_id*."""
+    backend = _LeaseBackend(db, lock_id)
+    backend.reset()
+    holder = leader_election.PgLeaseElector(lock_id,
+                                            holder='a',
+                                            ttl_seconds=_MACHINE_TTL_SECONDS)
+    waiter = leader_election.PgLeaseElector(lock_id,
+                                            holder='b',
+                                            ttl_seconds=_MACHINE_TTL_SECONDS)
+    return backend, holder, waiter
+
+
+# These take ``lease_db`` rather than ``parking_db`` on purpose: the waiter has
+# to SURVIVE its block window, and ``parking_db`` shortens the module's
+# statement bound to 250ms so blocked contenders die fast. Racing that against
+# the release would be flake by construction. The shipped 5s bound is what
+# makes the wait safe.
+@pg_only
+@pytest.mark.xdist_group('leader_election_lease')
+def test_pg_waiter_is_refused_by_the_lease_the_blocker_committed(lease_db):
+    """A waiter let through onto a fresh valid lease loses its bid.
+
+    Both are inserting the first row, so the waiter waits on the unique index
+    rather than on a row lock. When the insert it collided with commits, its
+    upsert is re-evaluated against a lease that now exists and is live, so the
+    DO UPDATE WHERE is false and it takes nothing.
+    """
+    backend, holder, waiter = _waiter_setup(lease_db, 'waiter-refused-lock')
+
+    blocker = backend.start_parked(holder,
+                                   'acquire',
+                                   'a',
+                                   wrote=True,
+                                   pending_epoch=1,
+                                   row_existed=False)
+    assert blocker.wait_until_parked()
+    contender = backend.start_in_flight(waiter,
+                                        'acquire',
+                                        'acquire by b',
+                                        hold=False)
+    _assert_still_blocked(contender)
+    # Nothing is committed yet, so the lease still looks free from outside.
+    assert backend.observe() is None
+
+    assert blocker.finish(crash=False) is True
+    assert contender.finish() is False
+    assert waiter.fencing_token() is None
+    assert backend.observe() == ('a', 1, False)
+
+
+@pg_only
+@pytest.mark.xdist_group('leader_election_lease')
+def test_pg_waiter_wins_the_lease_the_blocker_rolled_back(lease_db):
+    """A waiter let through onto an empty table takes the first term.
+
+    The insert it was waiting on never landed, so its own upsert is
+    re-evaluated against a table with no row at all: it inserts, and the term
+    it gets is the first one, not one numbered around the write that vanished.
+    """
+    backend, holder, waiter = _waiter_setup(lease_db, 'waiter-wins-lock')
+
+    blocker = backend.start_parked(holder,
+                                   'acquire',
+                                   'a',
+                                   wrote=True,
+                                   pending_epoch=1,
+                                   row_existed=False)
+    assert blocker.wait_until_parked()
+    contender = backend.start_in_flight(waiter,
+                                        'acquire',
+                                        'acquire by b',
+                                        hold=False)
+    _assert_still_blocked(contender)
+
+    assert blocker.finish(crash=True) is False
+    assert holder.fencing_token() is None
+    assert contender.finish() is True
+    assert waiter.fencing_token() == 1
+    assert backend.observe() == ('b', 1, False)
+
+
+@pg_only
+@pytest.mark.xdist_group('leader_election_lease')
+def test_pg_waiter_takes_over_a_released_lease_with_a_fresh_epoch(lease_db):
+    """A waiter let through by a release takes over on a new term.
+
+    The release expires the row while the waiter is already waiting on it. The
+    waiter's upsert is then re-evaluated against that expired version: its
+    WHERE passes on ``expires_at < now()``, and the epoch CASE, re-evaluated
+    against the same version, has to hand out the next term rather than repeat
+    the one being stepped down from -- otherwise the outgoing leader's writes
+    could not be told from the incoming leader's.
+    """
+    backend, holder, waiter = _waiter_setup(lease_db, 'waiter-takeover-lock')
+    assert holder.try_acquire() is True
+    assert holder.fencing_token() == 1
+
+    blocker = backend.start_in_flight(holder,
+                                      'release',
+                                      'release by a',
+                                      hold=True)
+    assert blocker.wait_until_parked()
+    contender = backend.start_in_flight(waiter,
+                                        'acquire',
+                                        'acquire by b',
+                                        hold=False)
+    _assert_still_blocked(contender)
+    # The expiry has not committed, so a is still the live holder outside.
+    assert backend.observe() == ('a', 1, False)
+
+    assert blocker.finish(crash=False) is None
+    assert contender.finish() is True
+    assert waiter.fencing_token() == 2
+    assert backend.observe() == ('b', 2, False)
+
+
+@pg_only
+@pytest.mark.xdist_group('leader_election_lease')
+def test_pg_waiter_is_refused_by_a_lease_the_blocker_extended(lease_db):
+    """A waiter let through by a renew finds the lease still held.
+
+    The leader pushes its expiry out from under the waiter. Re-evaluated
+    against the extended row, the waiter's WHERE fails on both arms and the
+    term is untouched.
+    """
+    backend, holder, waiter = _waiter_setup(lease_db, 'waiter-extended-lock')
+    assert holder.try_acquire() is True
+
+    blocker = backend.start_parked(holder,
+                                   'renew',
+                                   'a',
+                                   wrote=True,
+                                   pending_epoch=1,
+                                   row_existed=True)
+    assert blocker.wait_until_parked()
+    contender = backend.start_in_flight(waiter,
+                                        'acquire',
+                                        'acquire by b',
+                                        hold=False)
+    _assert_still_blocked(contender)
+
+    assert blocker.finish(crash=False) is True
+    assert holder.fencing_token() == 1
+    assert contender.finish() is False
+    assert waiter.fencing_token() is None
     assert backend.observe() == ('a', 1, False)
 
 
