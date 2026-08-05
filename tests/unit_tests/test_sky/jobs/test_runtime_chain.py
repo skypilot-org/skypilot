@@ -241,6 +241,78 @@ class TestDispatchClaiming:
         rt_b.get_job_status.assert_called_once()
 
 
+def _make_owns_less_runtime(name, hook_return=None):
+    """Build a pre-chain runtime: no ``owns()`` attribute at all."""
+    rt = mock.MagicMock(name=name,
+                        spec=[
+                            'get_job_status',
+                            'get_job_submitted_at',
+                            'get_job_ended_at',
+                            'get_exit_codes',
+                            'download_logs',
+                            'tail_logs',
+                            'job_group_envs',
+                            'k8s_dns_addresses_for_task',
+                            'k8s_dns_addresses_for_handle',
+                        ])
+    rt.get_job_status = mock.MagicMock(return_value=hook_return)
+    return rt
+
+
+class TestFallbackClaimants:
+    """owns()-less runtimes are fallback claimants: dispatched after
+    every explicit claimant, and excluded from the conflict warning."""
+
+    def test_explicit_claimant_ordered_before_fallback(self):
+        fallback = _make_owns_less_runtime('fallback')
+        explicit = _make_runtime('explicit', owns_return=True)
+        # Fallback registers FIRST; explicit must still dispatch first.
+        runtime_chain.register(fallback)
+        runtime_chain.register(explicit)
+        handle = _make_handle(has_ray=False)
+
+        assert runtime_chain._claimants(handle) == [explicit, fallback]
+
+    def test_dispatch_prefers_explicit_claimant(self):
+        fallback = _make_owns_less_runtime('fallback',
+                                           hook_return=('fallback-fired', None))
+        explicit = _make_runtime('explicit',
+                                 owns_return=True,
+                                 hook_return=('explicit-fired', None))
+        runtime_chain.register(fallback)
+        runtime_chain.register(explicit)
+        handle = _make_handle(has_ray=False)
+
+        assert runtime_chain.get_job_status(handle,
+                                            'cluster') == ('explicit-fired',
+                                                           None)
+        fallback.get_job_status.assert_not_called()
+
+    def test_no_warning_for_explicit_plus_fallback(self):
+        """The expected plugin configuration — one explicit claimant
+        plus an owns()-less plugin runtime — must not warn on every
+        dispatch."""
+        runtime_chain.register(_make_runtime('explicit', owns_return=True))
+        runtime_chain.register(_make_owns_less_runtime('fallback'))
+        handle = _make_handle(has_ray=False)
+
+        warning_mock = mock.MagicMock()
+        with mock.patch.object(runtime_chain.logger, 'warning', warning_mock):
+            claims = runtime_chain._claimants(handle)
+        assert len(claims) == 2
+        warning_mock.assert_not_called()
+
+    def test_warning_for_two_explicit_claimants(self):
+        runtime_chain.register(_make_runtime('a', owns_return=True))
+        runtime_chain.register(_make_runtime('b', owns_return=True))
+        handle = _make_handle(has_ray=False)
+
+        warning_mock = mock.MagicMock()
+        with mock.patch.object(runtime_chain.logger, 'warning', warning_mock):
+            runtime_chain._claimants(handle)
+        warning_mock.assert_called_once()
+
+
 class TestIsRegistered:
 
     def test_empty(self):

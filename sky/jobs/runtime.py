@@ -232,34 +232,37 @@ def _is_v1_candidate(handle) -> bool:
 
 
 def _claimants(handle) -> List[ManagedJobRuntime]:
-    """Iterate runtimes that claim ``handle`` via ``owns()``.
+    """Iterate runtimes that claim ``handle``, explicit claims first.
 
-    Backward-compat shim: runtimes that pre-date the chain refactor may
-    not implement ``owns()`` yet. For those, fall back to "claims
-    everything" — their per-hook resolvers already self-filter by
-    returning None for handles they don't recognize.
+    A runtime with ``owns()`` returning True is an explicit claimant.
+    Runtimes that pre-date the chain refactor and lack ``owns()`` are
+    fallback claimants: they are dispatched to (their per-hook
+    resolvers self-filter by returning None for handles they don't
+    recognize) but ordered after every explicit claimant and excluded
+    from the conflict warning — an ``owns()``-less runtime registered
+    alongside an explicit one is the expected plugin configuration,
+    not a bug, and warning on it would fire on every dispatch.
     """
-    claims = []
+    explicit = []
+    fallback = []
     for r in _runtimes:
         owns = getattr(r, 'owns', None)
         if owns is None:
-            # Backward-compat: pre-chain runtimes self-filter inside
-            # each hook via their own ``_resolve_target`` returning None.
-            claims.append(r)
+            fallback.append(r)
             continue
         try:
             if owns(handle):
-                claims.append(r)
+                explicit.append(r)
         except Exception as e:  # pylint: disable=broad-except
             logger.debug('ManagedJobRuntime.owns() raised on %s: %s',
                          type(r).__name__, e)
-    if len(claims) > 1:
+    if len(explicit) > 1:
         logger.warning(
             'Multiple ManagedJobRuntime instances claimed the same '
             'handle: %s. Dispatch will resolve in registration order; '
             'this is usually a configuration bug.',
-            [type(r).__name__ for r in claims])
-    return claims
+            [type(r).__name__ for r in explicit])
+    return explicit + fallback
 
 
 # Module-level dispatch. Each function returns ``None`` when no
