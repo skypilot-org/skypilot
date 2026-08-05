@@ -509,6 +509,15 @@ if script or True:
         cluster_home = shlex.quote(os.path.expanduser('~'))
         runner_args = f'--log-dir={log_dir} --env-vars={env_vars} --cluster-num-nodes=1 --cluster-ips={cluster_ips} --cluster-home-dir={cluster_home}'
 
+        # The executor prefers Slurm node names over IP matching
+        # to determine the node index, since the IP resolved
+        # inside a Slurm job can differ from the one recorded at
+        # provisioning time (#10333). Executors below skylet
+        # version 40 do not accept --cluster-nodes.
+        cluster_nodes = None
+        if cluster_nodes is not None and int(constants.SKYLET_VERSION) >= 40:
+            runner_args += ' --cluster-nodes=' + shlex.quote(','.join(cluster_nodes))
+
         if task_name is not None:
             runner_args += f' --task-name={shlex.quote(task_name)}'
 
