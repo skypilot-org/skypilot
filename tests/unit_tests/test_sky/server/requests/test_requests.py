@@ -14,14 +14,49 @@ from sky import core
 from sky.server import constants as server_constants
 from sky.server.requests import payloads
 from sky.server.requests import requests
+from sky.server.requests import storage as request_storage
 from sky.server.requests.requests import RequestStatus
 from sky.server.requests.requests import ScheduleType
 from sky.server.requests.serializers import decoders
 from sky.server.requests.serializers import encoders
+from sky.skylet import constants as skylet_constants
 
 
 def dummy():
     return None
+
+
+def test_get_request_backend_selects_postgres(monkeypatch):
+    """The request backend can be switched to Postgres via env var."""
+    backend = mock.Mock()
+    postgres_backend = mock.Mock(return_value=backend)
+    monkeypatch.setenv(skylet_constants.ENV_VAR_API_REQUEST_DB_BACKEND,
+                       'postgres')
+    monkeypatch.setattr(request_storage, '_storage_backend', None)
+    monkeypatch.setattr(requests, 'PostgresRequestBackend', postgres_backend)
+
+    assert request_storage.get_request_backend() is backend
+    postgres_backend.assert_called_once_with()
+
+
+def test_postgres_request_backend_rewrites_sqlite_upsert():
+    """Postgres backend rewrites SQLite-specific upsert syntax."""
+    sql = requests.PostgresRequestBackend._rewrite_sql(
+        requests._add_or_update_request_sql)
+
+    assert sql.startswith(f'INSERT INTO {requests.REQUEST_TABLE}')
+    assert 'ON CONFLICT(request_id) DO UPDATE SET' in sql
+    assert 'INSERT OR REPLACE' not in sql
+    assert 'EXCLUDED.status' in sql
+
+
+def test_postgres_request_backend_requires_db_uri(monkeypatch):
+    monkeypatch.delenv(skylet_constants.ENV_VAR_DB_CONNECTION_URI,
+                       raising=False)
+
+    with pytest.raises(RuntimeError,
+                       match=skylet_constants.ENV_VAR_DB_CONNECTION_URI):
+        requests.PostgresRequestBackend()
 
 
 @pytest.fixture()

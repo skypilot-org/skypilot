@@ -40,6 +40,27 @@ if typing.TYPE_CHECKING:
 # For more info, see the PR description for #4552.
 _DB_TIMEOUT_S = 60
 
+# Async Postgres connection pooling.
+#
+# By default the async engine uses NullPool (a fresh asyncpg connection per
+# operation). That is safe under multiple event loops but pays a full
+# connect/TLS/auth round-trip on every DB op, which dominates hot-path latency
+# for client polling in multi-replica deployments (see PostgresRequestBackend).
+#
+# Setting SKYPILOT_API_DB_ASYNC_POOL_SIZE > 0 switches to a real per-event-loop
+# AsyncAdaptedQueuePool, reusing warm connections and eliminating that overhead.
+#
+# CONNECTION BUDGET (must be sized against the server's max_connections):
+#   peak_conns_per_pod ~= num_uvicorn_workers * (pool_size + max_overflow)
+#   num_uvicorn_workers defaults to the pod's CPU count (see
+#   server_config.compute_server_config). With many workers this multiplies
+#   fast, so keep pool_size small (1-2) unless a connection pooler (e.g.
+#   PgBouncer, transaction mode) sits in front of Postgres. When behind a
+#   pooler, larger values are safe because the pooler multiplexes.
+_ASYNC_POOL_SIZE = int(os.environ.get('SKYPILOT_API_DB_ASYNC_POOL_SIZE', '0'))
+_ASYNC_POOL_MAX_OVERFLOW = int(
+    os.environ.get('SKYPILOT_API_DB_ASYNC_POOL_MAX_OVERFLOW', '2'))
+
 
 class UniqueConstraintViolationError(Exception):
     """Exception raised for unique constraint violation.
@@ -627,13 +648,50 @@ def get_engine(
         # because we prefix the cache key in the async case,
         # so they would not overlap.
         cache_key = f'async:{conn_string}' if async_engine else conn_string
+        if async_engine and _ASYNC_POOL_SIZE > 0:
+            # A pooled async engine binds its connections to the event loop
+            # that first checks them out, so it must be cached per running
+            # loop; sharing one engine across loops raises "Future attached to
+            # a different loop". NullPool sidesteps this, but pooling requires
+            # per-loop isolation. Fall back to the shared (loop-independent)
+            # cache key if there is no running loop.
+            try:
+                cache_key = f'{cache_key}:loop{id(asyncio.get_running_loop())}'
+            except RuntimeError:
+                pass
+        asyncpg_dsn = conn_string
+        if async_engine:
+            for sync_scheme in ('postgresql://', 'postgresql+psycopg://',
+                                'postgresql+psycopg2://'):
+                if asyncpg_dsn.startswith(sync_scheme):
+                    asyncpg_dsn = asyncpg_dsn.replace(sync_scheme,
+                                                      'postgresql://', 1)
+                    break
         with _db_creation_lock:
             if cache_key not in _postgres_engine_cache:
                 engine_type = 'sync' if not async_engine else 'async'
                 logger.debug(
                     f'Creating a new postgres {engine_type} engine with '
                     f'maximum {_max_connections} connections')
-                if async_engine:
+                if async_engine and _ASYNC_POOL_SIZE > 0:
+                    # Pooled async engine. The cache_key is suffixed with the
+                    # running event loop id above, so each loop gets its own
+                    # engine/pool and connections never cross loops. Reuses warm
+                    # connections, avoiding a connect/TLS/auth round-trip per
+                    # op.
+                    logger.debug('Creating pooled postgres async engine '
+                                 f'(pool_size={_ASYNC_POOL_SIZE}, '
+                                 f'max_overflow={_ASYNC_POOL_MAX_OVERFLOW})')
+                    _postgres_engine_cache[cache_key] = (
+                        sqlalchemy_async.create_async_engine(
+                            'postgresql+asyncpg://',
+                            poolclass=sqlalchemy.pool.AsyncAdaptedQueuePool,
+                            pool_size=_ASYNC_POOL_SIZE,
+                            max_overflow=_ASYNC_POOL_MAX_OVERFLOW,
+                            pool_pre_ping=True,
+                            pool_recycle=1800,
+                            async_creator=_make_asyncpg_creator(asyncpg_dsn)))
+                elif async_engine:
                     # Use NullPool for async engines to avoid event loop binding
                     # issues. asyncpg connection pools bind to the event loop on
                     # first use, which causes "Future attached to a different
@@ -647,7 +705,7 @@ def get_engine(
                             # all connection params come from async_creator.
                             'postgresql+asyncpg://',
                             poolclass=sqlalchemy.NullPool,
-                            async_creator=_make_asyncpg_creator(conn_string)))
+                            async_creator=_make_asyncpg_creator(asyncpg_dsn)))
                 elif _max_connections == 0 or (direct and _pooler_configured()):
                     # NullPool: no persistent connections. Used when no pool
                     # size is configured, and — crucially — for the direct

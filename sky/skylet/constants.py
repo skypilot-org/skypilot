@@ -719,6 +719,11 @@ ENV_VAR_DB_POOL_CONNECTION_URI = (
     f'{SKYPILOT_ENV_VAR_PREFIX}DB_POOL_CONNECTION_URI')
 ENV_VAR_DB_POOL_HOSTPORT = (f'{SKYPILOT_ENV_VAR_PREFIX}DB_POOL_HOSTPORT')
 
+# Backend for API request tracking. Defaults to SQLite. Set to "postgres" to
+# store API request metadata in the configured external database.
+ENV_VAR_API_REQUEST_DB_BACKEND = (
+    f'{SKYPILOT_ENV_VAR_PREFIX}API_REQUEST_DB_BACKEND')
+
 # Environment variable that is set to 'true' if basic
 # authentication is enabled in the API server.
 ENV_VAR_ENABLE_BASIC_AUTH = 'ENABLE_BASIC_AUTH'

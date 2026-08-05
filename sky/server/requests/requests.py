@@ -5,8 +5,10 @@ import contextlib
 import dataclasses
 import enum
 import functools
+import hashlib
 import os
 import pathlib
+import re
 import shutil
 import signal
 import sqlite3
@@ -21,6 +23,7 @@ import anyio
 import colorama
 import filelock
 import orjson
+import sqlalchemy
 
 from sky import exceptions
 from sky import global_user_state
@@ -760,9 +763,8 @@ def _kill_requests(request_ids: Optional[List[str]] = None,
                    user_id: Optional[str] = None) -> List[str]:
     """Kill SkyPilot API requests and set their status to cancelled.
 
-    Delegates to the registered request backend, which handles local
-    process killing and (for multi-replica backends) cross-replica
-    cancellation.
+    Delegates to the registered request backend, which handles cancellation
+    semantics for that storage implementation.
     """
     return request_storage.get_request_backend().kill_requests(
         request_ids=request_ids, user_id=user_id)
@@ -1386,6 +1388,512 @@ def _cleanup():
 
 
 atexit.register(_cleanup)
+
+
+class PostgresRequestBackend(request_storage.RequestBackend):
+    """Postgres-backed request backend for shared request metadata."""
+
+    def __init__(self):
+        if not os.environ.get(skylet_constants.ENV_VAR_DB_CONNECTION_URI):
+            raise RuntimeError(
+                f'{skylet_constants.ENV_VAR_API_REQUEST_DB_BACKEND}=postgres '
+                f'requires {skylet_constants.ENV_VAR_DB_CONNECTION_URI} to be '
+                'set.')
+        self._engine = db_utils.get_engine(None)
+        self._create_table()
+
+    @property
+    def _async_engine(self):
+        # Resolved lazily (never cached on the instance) so it is fetched from
+        # inside the running event loop. When async pooling is enabled
+        # (SKYPILOT_API_DB_ASYNC_POOL_SIZE > 0), db_utils caches one pooled
+        # engine per event loop; caching it once in __init__ would bind a
+        # single pool to whatever loop (or no loop) existed at construction
+        # time and leak connections across loops. The lookup is a cheap cached
+        # dict hit, so per-call resolution is fine.
+        return db_utils.get_engine(None, async_engine=True)
+
+    @staticmethod
+    def _lock_key(request_id: str) -> int:
+        digest = hashlib.sha256(request_id.encode('utf-8')).digest()
+        return int.from_bytes(digest[:8], 'big') & ((1 << 63) - 1)
+
+    _PLACEHOLDER_RE = re.compile(r'\?')
+
+    @staticmethod
+    def _bind_sql(
+            sql: str,
+            parameters: Optional[Any] = None) -> Tuple[str, Dict[str, Any]]:
+        if parameters is None:
+            values = []
+        elif isinstance(parameters, (list, tuple)):
+            values = list(parameters)
+        else:
+            values = [parameters]
+
+        bind_params: Dict[str, Any] = {}
+        for i, value in enumerate(values):
+            bind_params[f'p{i}'] = value
+        counter = iter(range(len(values)))
+
+        def _replacer(match: re.Match) -> str:  # pylint: disable=unused-argument
+            return f':p{next(counter)}'
+
+        sql = PostgresRequestBackend._PLACEHOLDER_RE.sub(_replacer, sql)
+        return sql, bind_params
+
+    @staticmethod
+    def _rewrite_sql(sql: str) -> str:
+        if sql.strip().startswith(f'INSERT OR REPLACE INTO {REQUEST_TABLE} '):
+            values = ', '.join(f':p{i}' for i in range(len(REQUEST_COLUMNS)))
+            updates = ', '.join(
+                f'{column}=EXCLUDED.{column}' for column in REQUEST_COLUMNS
+                if column != 'request_id')
+            return (f'INSERT INTO {REQUEST_TABLE} '
+                    f'({", ".join(REQUEST_COLUMNS)}) VALUES ({values}) '
+                    f'ON CONFLICT(request_id) DO UPDATE SET {updates}')
+        return sql.replace('RETURNING ROWID', 'RETURNING request_id')
+
+    def _execute_on_conn(self,
+                         conn,
+                         sql: str,
+                         parameters: Optional[Any] = None,
+                         fetch: bool = False,
+                         fetch_one: bool = False):
+        sql = self._rewrite_sql(sql)
+        sql, bind_params = self._bind_sql(sql, parameters)
+        result = conn.execute(sqlalchemy.text(sql), bind_params)
+        if fetch_one:
+            row = result.fetchone()
+            return tuple(row) if row is not None else None
+        if fetch:
+            return [tuple(row) for row in result.fetchall()]
+        return None
+
+    async def _execute_on_async_conn(self,
+                                     conn,
+                                     sql: str,
+                                     parameters: Optional[Any] = None,
+                                     fetch: bool = False,
+                                     fetch_one: bool = False):
+        sql = self._rewrite_sql(sql)
+        sql, bind_params = self._bind_sql(sql, parameters)
+        result = await conn.execute(sqlalchemy.text(sql), bind_params)
+        if fetch_one:
+            row = result.fetchone()
+            return tuple(row) if row is not None else None
+        if fetch:
+            return [tuple(row) for row in result.fetchall()]
+        return None
+
+    def _execute(self,
+                 sql: str,
+                 parameters: Optional[Any] = None,
+                 fetch: bool = False,
+                 fetch_one: bool = False):
+        with self._engine.begin() as conn:
+            return self._execute_on_conn(conn, sql, parameters, fetch,
+                                         fetch_one)
+
+    async def _execute_async(self,
+                             sql: str,
+                             parameters: Optional[Any] = None,
+                             fetch: bool = False,
+                             fetch_one: bool = False):
+        async with self._async_engine.begin() as conn:
+            return await self._execute_on_async_conn(conn, sql, parameters,
+                                                     fetch, fetch_one)
+
+    def _create_table(self):
+        with self._engine.begin() as conn:
+            conn.execute(
+                sqlalchemy.text(f"""\
+                CREATE TABLE IF NOT EXISTS {REQUEST_TABLE} (
+                    request_id TEXT PRIMARY KEY,
+                    name TEXT,
+                    entrypoint TEXT,
+                    request_body TEXT,
+                    status TEXT,
+                    return_value TEXT,
+                    error TEXT,
+                    pid INTEGER,
+                    created_at DOUBLE PRECISION,
+                    {COL_CLUSTER_NAME} TEXT,
+                    schedule_type TEXT,
+                    {COL_USER_ID} TEXT,
+                    {COL_STATUS_MSG} TEXT,
+                    {COL_SHOULD_RETRY} BOOLEAN,
+                    {COL_FINISHED_AT} DOUBLE PRECISION,
+                    {COL_FILE_MOUNTS_BLOB_ID} TEXT
+                )"""))
+            conn.execute(
+                sqlalchemy.text(f"""\
+                CREATE INDEX IF NOT EXISTS status_name_idx
+                ON {REQUEST_TABLE} (status, name)
+                WHERE status IN ('PENDING', 'WAITING', 'RUNNING')"""))
+            conn.execute(
+                sqlalchemy.text(f"""\
+                CREATE INDEX IF NOT EXISTS cluster_name_idx
+                ON {REQUEST_TABLE} ({COL_CLUSTER_NAME})
+                WHERE status IN ('PENDING', 'WAITING', 'RUNNING')"""))
+            conn.execute(
+                sqlalchemy.text(f"""\
+                CREATE INDEX IF NOT EXISTS created_at_idx
+                ON {REQUEST_TABLE} (created_at)"""))
+
+    def _acquire_request_lock(self, conn, request_id: str) -> None:
+        conn.execute(sqlalchemy.text('SELECT pg_advisory_xact_lock(:lock_key)'),
+                     {'lock_key': self._lock_key(request_id)})
+
+    async def _acquire_request_lock_async(self, conn, request_id: str) -> None:
+        await conn.execute(
+            sqlalchemy.text('SELECT pg_advisory_xact_lock(:lock_key)'),
+            {'lock_key': self._lock_key(request_id)})
+
+    def _get_request_on_conn(
+            self,
+            conn,
+            request_id: str,
+            fields: Optional[List[str]] = None) -> Optional[Request]:
+        columns_str = ', '.join(fields) if fields else ', '.join(
+            REQUEST_COLUMNS)
+        where, params = _request_id_where(request_id)
+        rows = self._execute_on_conn(
+            conn, f'SELECT {columns_str} FROM {REQUEST_TABLE} '
+            f'WHERE {where}',
+            params,
+            fetch=True)
+        row = rows[0] if rows else None
+        if row is None:
+            return None
+        if fields:
+            row = _update_request_row_fields(row, fields)
+        return Request.from_row(row)
+
+    async def _get_request_on_async_conn(
+            self,
+            conn,
+            request_id: str,
+            fields: Optional[List[str]] = None) -> Optional[Request]:
+        columns_str = ', '.join(fields) if fields else ', '.join(
+            REQUEST_COLUMNS)
+        where, params = _request_id_where(request_id)
+        rows = await self._execute_on_async_conn(
+            conn, f'SELECT {columns_str} FROM {REQUEST_TABLE} '
+            f'WHERE {where}',
+            params,
+            fetch=True)
+        row = rows[0] if rows else None
+        if row is None:
+            return None
+        if fields:
+            row = _update_request_row_fields(row, fields)
+        return Request.from_row(row)
+
+    def _add_or_update_request_on_conn(self, conn, request: Request) -> None:
+        self._execute_on_conn(conn, _add_or_update_request_sql,
+                              request.to_row())
+
+    async def _add_or_update_request_on_async_conn(self, conn,
+                                                   request: Request) -> None:
+        await self._execute_on_async_conn(conn, _add_or_update_request_sql,
+                                          request.to_row())
+
+    def get_request(self,
+                    request_id: str,
+                    fields: Optional[List[str]] = None) -> Optional[Request]:
+        with self._engine.begin() as conn:
+            return self._get_request_on_conn(conn, request_id, fields)
+
+    @asyncio_utils.shield
+    async def get_request_async(
+            self,
+            request_id: str,
+            fields: Optional[List[str]] = None) -> Optional[Request]:
+        async with self._async_engine.begin() as conn:
+            return await self._get_request_on_async_conn(
+                conn, request_id, fields)
+
+    @contextlib.contextmanager
+    def update_request(
+            self, request_id: str) -> Generator[Optional[Request], None, None]:
+        with self._engine.begin() as conn:
+            self._acquire_request_lock(conn, request_id)
+            request = self._get_request_on_conn(conn, request_id)
+            yield request
+            if request is not None:
+                self._add_or_update_request_on_conn(conn, request)
+
+    @contextlib.asynccontextmanager
+    async def update_request_async(self, request_id: str):
+        async with self._async_engine.begin() as conn:
+            await self._acquire_request_lock_async(conn, request_id)
+            request = await self._get_request_on_async_conn(conn, request_id)
+            yield request
+            if request is not None:
+                await self._add_or_update_request_on_async_conn(conn, request)
+
+    @asyncio_utils.shield
+    async def create_if_not_exists_async(self, request: Request) -> bool:
+        request_columns = ', '.join(REQUEST_COLUMNS)
+        values_str = ', '.join(['?'] * len(REQUEST_COLUMNS))
+        sql_statement = (f'INSERT INTO {REQUEST_TABLE} '
+                         f'({request_columns}) VALUES '
+                         f'({values_str}) ON CONFLICT(request_id) DO NOTHING '
+                         f'RETURNING ROWID')
+        if sky_logging.logging_enabled(logger, sky_logging.DEBUG):
+            logger.debug(f'Start creating request {request.request_id}')
+        try:
+            row = await self._execute_async(sql_statement,
+                                            request.to_row(),
+                                            fetch_one=True)
+        finally:
+            if sky_logging.logging_enabled(logger, sky_logging.DEBUG):
+                logger.debug(f'End creating request {request.request_id}')
+        return True if row else False
+
+    @asyncio_utils.shield
+    async def create_or_refresh_internal_daemon_async(self,
+                                                      request: Request) -> bool:
+        inserted = await self.create_if_not_exists_async(request)
+        if inserted:
+            return True
+        encoded_body = encoders.pickle_and_encode(request.request_body)
+        await self._execute_async(
+            f'UPDATE {REQUEST_TABLE} '
+            f'SET request_body=?, name=?, schedule_type=? '
+            f'WHERE request_id=?',
+            (encoded_body, request.name, request.schedule_type.value,
+             request.request_id))
+        return False
+
+    @asyncio_utils.shield
+    async def delete_orphan_internal_daemons_async(
+        self,
+        internal_daemons: List['daemons.InternalRequestDaemon'],
+    ) -> None:
+        keep_ids = {d.id for d in internal_daemons}
+        rows = await self._execute_async(
+            f'SELECT request_id FROM {REQUEST_TABLE} '
+            f'WHERE request_id LIKE ?', ('%-daemon',),
+            fetch=True)
+        stale_ids = [row[0] for row in rows if row[0] not in keep_ids]
+        if not stale_ids:
+            return
+        id_placeholders = ','.join(['?'] * len(stale_ids))
+        await self._execute_async(
+            f'DELETE FROM {REQUEST_TABLE} '
+            f'WHERE request_id IN ({id_placeholders})', tuple(stale_ids))
+        logger.info(f'Deleted orphan internal daemon rows: {stale_ids}')
+
+    def query_requests(self, req_filter: RequestTaskFilter) -> List[Request]:
+        rows = self._execute(*req_filter.build_query(), fetch=True)
+        if req_filter.fields:
+            rows = [
+                _update_request_row_fields(row, req_filter.fields)
+                for row in rows
+            ]
+        return [Request.from_row(row) for row in rows]
+
+    async def query_requests_async(
+            self, req_filter: RequestTaskFilter) -> List[Request]:
+        rows = await self._execute_async(*req_filter.build_query(), fetch=True)
+        if not rows:
+            return []
+        if req_filter.fields:
+            rows = [
+                _update_request_row_fields(row, req_filter.fields)
+                for row in rows
+            ]
+        return [Request.from_row(row) for row in rows]
+
+    async def delete_requests(self, request_ids: List[str]) -> None:
+        if not request_ids:
+            return
+        id_list_str = ','.join(repr(rid) for rid in request_ids)
+        if sky_logging.logging_enabled(logger, sky_logging.DEBUG):
+            logger.debug(f'Start deleting requests {request_ids}')
+        try:
+            await self._execute_async(f'DELETE FROM {REQUEST_TABLE} '
+                                      f'WHERE request_id IN ({id_list_str})')
+        finally:
+            if sky_logging.logging_enabled(logger, sky_logging.DEBUG):
+                logger.debug(f'End deleting requests {request_ids}')
+
+    @asyncio_utils.shield
+    async def update_status_async(self, request_id: str,
+                                  status: RequestStatus) -> None:
+        # Blind single-column write: no read-modify-write, so skip the advisory
+        # lock + SELECT that update_request_async performs. One statement / one
+        # round-trip instead of BEGIN + advisory lock + SELECT + UPDATE +
+        # COMMIT. Setting status is idempotent and does not depend on the prior
+        # row, so this is safe across replicas.
+        where, params = _request_id_where(request_id)
+        await self._execute_async(
+            f'UPDATE {REQUEST_TABLE} SET status=? WHERE {where}',
+            (status.value, *params))
+
+    @asyncio_utils.shield
+    async def update_status_msg_async(self, request_id: str,
+                                      status_msg: str) -> None:
+        # Blind single-column write; see update_status_async for why the
+        # advisory lock + SELECT round-trips are unnecessary here.
+        where, params = _request_id_where(request_id)
+        await self._execute_async(
+            f'UPDATE {REQUEST_TABLE} SET {COL_STATUS_MSG}=? WHERE {where}',
+            (status_msg, *params))
+
+    def kill_requests(self,
+                      request_ids: Optional[List[str]] = None,
+                      user_id: Optional[str] = None) -> List[str]:
+        if request_ids is None:
+            request_ids = [
+                r.request_id
+                for r in self.query_requests(req_filter=RequestTaskFilter(
+                    status=[RequestStatus.PENDING, RequestStatus.RUNNING],
+                    exclude_request_names=['sky.api_cancel'],
+                    user_id=user_id,
+                    fields=['request_id']))
+            ]
+        cancelled = []
+        for request_id in request_ids:
+            with self.update_request(request_id) as request_record:
+                if not _should_kill_request(request_id, request_record):
+                    continue
+                assert request_record is not None
+                if request_record.pid is not None:
+                    logger.warning(
+                        'Postgres request backend cannot safely signal API '
+                        'worker pid %s from this process; marking request %s '
+                        'cancelled in the request DB.', request_record.pid,
+                        request_id)
+                request_record.status = RequestStatus.CANCELLED
+                request_record.finished_at = time.time()
+                cancelled.append(request_id)
+        return cancelled
+
+    @asyncio_utils.shield
+    async def kill_request_async(self, request_id: str) -> bool:
+        async with self.update_request_async(request_id) as request:
+            if not _should_kill_request(request_id, request):
+                return False
+            assert request is not None
+            if request.pid is not None:
+                logger.warning(
+                    'Postgres request backend cannot safely signal API worker '
+                    'pid %s from this process; marking request %s cancelled in '
+                    'the request DB.', request.pid, request_id)
+            request.status = RequestStatus.CANCELLED
+            request.finished_at = time.time()
+        return True
+
+    async def get_latest_request_id_async(self) -> Optional[str]:
+        rows = await self._execute_async(
+            f'SELECT request_id FROM {REQUEST_TABLE} '
+            'ORDER BY created_at DESC LIMIT 1',
+            fetch=True)
+        return rows[0][0] if rows else None
+
+    def get_requests_with_prefix(
+            self,
+            request_id_prefix: str,
+            fields: Optional[List[str]] = None) -> Optional[List[Request]]:
+        columns_str = ', '.join(fields) if fields else ', '.join(
+            REQUEST_COLUMNS)
+        rows = self._execute(
+            f'SELECT {columns_str} FROM {REQUEST_TABLE} '
+            'WHERE request_id LIKE ?', (request_id_prefix + '%',),
+            fetch=True)
+        if not rows:
+            return None
+        if fields:
+            rows = [_update_request_row_fields(row, fields) for row in rows]
+        return [Request.from_row(row) for row in rows]
+
+    @asyncio_utils.shield
+    async def get_requests_async_with_prefix(
+            self,
+            request_id_prefix: str,
+            fields: Optional[List[str]] = None) -> Optional[List[Request]]:
+        columns_str = ', '.join(fields) if fields else ', '.join(
+            REQUEST_COLUMNS)
+        rows = await self._execute_async(
+            f'SELECT {columns_str} FROM {REQUEST_TABLE} '
+            'WHERE request_id LIKE ?', (request_id_prefix + '%',),
+            fetch=True)
+        if not rows:
+            return None
+        if fields:
+            rows = [_update_request_row_fields(row, fields) for row in rows]
+        return [Request.from_row(row) for row in rows]
+
+    async def get_request_status_async(
+            self,
+            request_id: str,
+            include_msg: bool = False) -> Optional[StatusWithMsg]:
+        columns = 'status'
+        if include_msg:
+            columns += ', status_msg'
+        where, params = _request_id_where(request_id)
+        rows = await self._execute_async(
+            f'SELECT {columns} FROM {REQUEST_TABLE} '
+            f'WHERE {where}',
+            params,
+            fetch=True)
+        if not rows:
+            return None
+        status = RequestStatus(rows[0][0])
+        status_msg = rows[0][1] if include_msg else None
+        return StatusWithMsg(status, status_msg)
+
+    async def get_api_request_ids_start_with(self,
+                                             incomplete: str) -> List[str]:
+        clause, params = _request_id_prefix_clause(incomplete)
+        rows = await self._execute_async(
+            f"""SELECT request_id FROM {REQUEST_TABLE}
+                {clause}
+                ORDER BY
+                    CASE
+                        WHEN status IN ('PENDING', 'RUNNING') THEN 0
+                        ELSE 1
+                    END,
+                    created_at DESC
+                LIMIT 1000""",
+            params,
+            fetch=True)
+        if not rows:
+            return []
+        return [row[0] for row in rows]
+
+    def get_active_file_mounts_blob_ids(self) -> Set[str]:
+        active_values = [s.value for s in RequestStatus.active_statuses()]
+        placeholders = ', '.join(['?'] * len(active_values))
+        rows = self._execute(
+            f'SELECT DISTINCT {COL_FILE_MOUNTS_BLOB_ID} '
+            f'FROM {REQUEST_TABLE} '
+            f'WHERE status IN ({placeholders}) '
+            f'AND {COL_FILE_MOUNTS_BLOB_ID} IS NOT NULL',
+            tuple(active_values),
+            fetch=True)
+        return {row[0] for row in rows}
+
+    def get_shutdown_active_requests(self) -> List[Tuple[str, str]]:
+        tasks = self.query_requests(
+            RequestTaskFilter(
+                status=[
+                    RequestStatus.PENDING,
+                    RequestStatus.RUNNING,
+                ],
+                fields=['request_id', 'name'],
+            ))
+        return [(t.request_id, t.name) for t in tasks]
+
+    def reset_on_startup(self) -> None:
+        self._create_table()
+
+    async def close(self):
+        await self._async_engine.dispose()
+        self._engine.dispose()
 
 
 class SqliteRequestBackend(request_storage.RequestBackend):
