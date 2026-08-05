@@ -31,12 +31,28 @@ class LoggingAgent(abc.ABC):
 class FluentbitAgent(LoggingAgent):
     """Base class for logging store that use fluentbit as the agent."""
 
+    # apt defaults to no retries and a 120s per-file inactivity timeout, so a
+    # single unresponsive package-mirror backend stalls the whole install --
+    # `apt-get update` alone fetches dozens of index files, and distro mirrors
+    # are commonly a DNS pool where only some backends are wedged. Since this
+    # install runs inline on every node of every cluster launch, that turns into
+    # minutes (or, with nothing bounding it, an apparently hung launch).
+    #
+    # Bound each stall and retry instead. Acquire::*::Timeout is an *inactivity*
+    # timeout rather than a total transfer deadline, so a slow-but-progressing
+    # download is not affected -- only one that has stopped sending data.
+    _APT_RETRY_OPTS = ('-o Acquire::Retries=3 '
+                       '-o Acquire::http::Timeout=15 '
+                       '-o Acquire::https::Timeout=15')
+
     def get_setup_command(self,
                           cluster_name: resources_utils.ClusterName) -> str:
+        apt_opts = self._APT_RETRY_OPTS
         install_cmd = (
             # pylint: disable=line-too-long
             'if ! command -v fluent-bit >/dev/null 2>&1 && [ ! -f /opt/fluent-bit/bin/fluent-bit ]; then '
-            'sudo apt-get update; sudo apt-get install -y gnupg; '
+            f'sudo apt-get update {apt_opts}; '
+            f'sudo apt-get install -y {apt_opts} gnupg; '
             # pylint: disable=line-too-long
             'sudo sh -c \'curl -L https://packages.fluentbit.io/fluentbit.key | gpg --dearmor > /usr/share/keyrings/fluentbit-keyring.gpg\'; '
             # pylint: disable=line-too-long
@@ -45,11 +61,11 @@ class FluentbitAgent(LoggingAgent):
             'codename=$(grep -oP \'(?<=VERSION_CODENAME=).*\' /etc/os-release 2>/dev/null || lsb_release -cs 2>/dev/null); '
             # pylint: disable=line-too-long
             'echo "deb [signed-by=/usr/share/keyrings/fluentbit-keyring.gpg] https://packages.fluentbit.io/$os_id/$codename $codename main" | sudo tee /etc/apt/sources.list.d/fluent-bit.list; '
-            'sudo apt-get update; '
+            f'sudo apt-get update {apt_opts}; '
             # Pin to <5.0 because fluent-bit 5.0.0 broke the stackdriver
             # output plugin's service account auth (google_service_credentials
             # and GOOGLE_APPLICATION_CREDENTIALS are both ignored).
-            'sudo apt-get install -y \"fluent-bit=4.*\"; '
+            f'sudo apt-get install -y {apt_opts} \"fluent-bit=4.*\"; '
             'fi')
         cfg = self.fluentbit_config(cluster_name)
         cfg_path = os.path.join(constants.LOGGING_CONFIG_DIR, 'fluentbit.yaml')
