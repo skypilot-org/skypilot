@@ -564,7 +564,7 @@ def launch(cluster_name_on_cloud: str,
     # The GPU clusters are built with InfiniBand secure high-speed networking.
     # https://docs.nebius.com/compute/clusters/gpu
     if platform in nebius_constants.INFINIBAND_INSTANCE_PLATFORMS:
-        if preset == '8gpu-128vcpu-1600gb':
+        if preset.startswith(nebius_constants.INFINIBAND_PRESET_PREFIX):
             fabric = skypilot_config.get_effective_region_config(
                 cloud='nebius',
                 region=region,
