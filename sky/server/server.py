@@ -3731,7 +3731,10 @@ async def complete_cluster_name(request: fastapi.Request,
     auth_user = request.state.auth_user
     if auth_user is None:
         return [name for name, _ in names_and_workspaces]
-    accessible = permission.permission_service.get_accessible_workspace_names(
+    # Offload the casbin permission check off the event loop (it acquires the
+    # enforcer read lock and may hit the DB on a cache miss).
+    accessible = await asyncio.to_thread(
+        permission.permission_service.get_accessible_workspace_names,
         auth_user.id, {workspace for _, workspace in names_and_workspaces},
         action=workspace_constants.WORKSPACE_ACTION_READ)
     accessible_set = set(accessible)

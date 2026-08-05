@@ -1492,25 +1492,30 @@ def queue_v2(
 def _reject_inaccessible_job_ids(job_ids: Optional[List[int]]) -> None:
     """Rejects a by-id job op when a target job's workspace is not accessible.
 
-    Per-resource read-side workspace check for managed jobs.
-    Managed jobs carry a ``workspace`` column and the job queue already filters
-    by the caller's accessible workspaces (READ). We reuse that scoped path: a
-    job living in a workspace the caller cannot access (or a nonexistent job)
-    is not returned, so a missing id is treated as not-found. Returning the
-    same not-found for both cases avoids disclosing the job's existence and
-    stops a direct-by-id call from bypassing the queue's workspace filter.
+    Per-resource read-side workspace check for managed jobs, applied only in
+    consolidation mode. The check resolves each job's workspace directly from
+    managed-jobs state (``get_workspace`` -- one indexed DB row). Only in
+    consolidation mode does the API server share the jobs-state DB (the
+    controller runs in-process); in non-consolidation mode that DB lives on a
+    separate controller the API server cannot read here, so the check is
+    skipped. A job in a workspace the caller cannot read is rejected; a
+    nonexistent job resolves to the default workspace and is left to the
+    handler's own not-found handling.
     """
     if not job_ids:
         return
-    records, _, _, _ = queue_v2_api(refresh=False,
-                                    job_ids=list(job_ids),
-                                    all_users=True,
-                                    fields=['job_id'])
-    accessible_ids = {record.job_id for record in records}
-    missing = [job_id for job_id in job_ids if job_id not in accessible_ids]
-    if missing:
+    if not managed_job_utils.is_consolidation_mode():
+        return
+    accessible = set(
+        workspaces_core.get_accessible_workspace_names(
+            action=workspace_constants.WORKSPACE_ACTION_READ))
+    inaccessible = [
+        job_id for job_id in job_ids
+        if managed_job_state.get_workspace(job_id) not in accessible
+    ]
+    if inaccessible:
         with ux_utils.print_exception_no_traceback():
-            raise ValueError(f'Managed job(s) {missing} not found.')
+            raise ValueError(f'Managed job(s) {inaccessible} not found.')
 
 
 @usage_lib.entrypoint
