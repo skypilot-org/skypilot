@@ -4,8 +4,8 @@ from sky.skylet import constants
 
 
 def test_parse_groups_distinguishes_absent_from_empty():
-    assert models.parse_groups(None) is None          # IdP asserted nothing
-    assert models.parse_groups('') == []              # asserted "no groups"
+    assert models.parse_groups(None) is None  # IdP asserted nothing
+    assert models.parse_groups('') == []  # asserted "no groups"
     assert models.parse_groups('a,b') == ['a', 'b']
     assert models.parse_groups(' a , , b ') == ['a', 'b']
 
@@ -18,7 +18,9 @@ def test_user_carries_groups():
 
 def test_groups_survive_the_env_round_trip():
     """This is the part that silently dropped them: auth_user -> env -> worker."""
-    auth_user = models.User(id='abc', name='x@y.com', groups=['vision', 'mlops'])
+    auth_user = models.User(id='abc',
+                            name='x@y.com',
+                            groups=['vision', 'mlops'])
     env = {}
     env[constants.USER_GROUPS_ENV_VAR] = (','.join(auth_user.groups)
                                           if auth_user.groups else '')
