@@ -18,11 +18,11 @@ from typing import Any, Callable, Dict, List, Optional
 
 from sky import exceptions
 from sky import sky_logging
-from sky.adaptors import slurm
 from sky.utils import command_runner
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
+    from sky.adaptors import slurm
     from sky.provision.slurm.managed_job_runtime import _Target
 
 logger = sky_logging.init_logger(__name__)

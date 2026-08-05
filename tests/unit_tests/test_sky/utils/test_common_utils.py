@@ -843,33 +843,31 @@ class TestFillTemplateUnicode:
         assert parsed == {'run': 'echo 🚀 hello'}
 
     def test_cjk_round_trips(self, tmp_path):
-        rendered = self._render(
-            'run: {{run|tojson}}\n',
-            {'run': 'echo 你好世界 こんにちは 안녕하세요'}, tmp_path)
+        rendered = self._render('run: {{run|tojson}}\n',
+                                {'run': 'echo 你好世界 こんにちは 안녕하세요'}, tmp_path)
         parsed = yaml.safe_load(rendered)
         assert parsed == {'run': 'echo 你好世界 こんにちは 안녕하세요'}
 
     def test_rtl_combining_and_math_round_trip(self, tmp_path):
         # RTL Arabic + math symbols + combining mark.
-        rendered = self._render('run: {{run|tojson}}\n',
-                                {'run': 'مرحبا ∑∫∂ é'}, tmp_path)
+        rendered = self._render('run: {{run|tojson}}\n', {'run': 'مرحبا ∑∫∂ é'},
+                                tmp_path)
         parsed = yaml.safe_load(rendered)
         assert parsed == {'run': 'مرحبا ∑∫∂ é'}
 
     def test_envs_dict_with_unicode_values(self, tmp_path):
-        rendered = self._render(
-            'envs: {{envs|tojson}}\n',
-            {'envs': {
-                'GREETING': '你好',
-                'ROCKET': '🚀'
-            }}, tmp_path)
+        rendered = self._render('envs: {{envs|tojson}}\n',
+                                {'envs': {
+                                    'GREETING': '你好',
+                                    'ROCKET': '🚀'
+                                }}, tmp_path)
         parsed = yaml.safe_load(rendered)
         assert parsed == {'envs': {'GREETING': '你好', 'ROCKET': '🚀'}}
 
     def test_ascii_preserved(self, tmp_path):
         """Ensure we didn't change behavior for ascii-only content."""
-        rendered = self._render('run: {{run|tojson}}\n',
-                                {'run': 'echo hello'}, tmp_path)
+        rendered = self._render('run: {{run|tojson}}\n', {'run': 'echo hello'},
+                                tmp_path)
         assert 'echo hello' in rendered
         parsed = yaml.safe_load(rendered)
         assert parsed == {'run': 'echo hello'}

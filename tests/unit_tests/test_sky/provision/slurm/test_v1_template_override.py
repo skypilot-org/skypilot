@@ -261,6 +261,7 @@ class TestTemplateOverride:
 
         spec = slurm_instance.template_override(
             task,
+            task.resources[0],
             _extra_launch_context={},
             _is_launched_by_jobs_controller=True,
         )
@@ -292,6 +293,7 @@ class TestTemplateOverride:
 
         spec = slurm_instance.template_override(
             task,
+            task.resources[0],
             _extra_launch_context={},
             _is_launched_by_jobs_controller=True,
         )
@@ -307,6 +309,7 @@ class TestTemplateOverride:
 
         spec = slurm_instance.template_override(
             task,
+            task.resources[0],
             _extra_launch_context={},
             _is_launched_by_jobs_controller=True,
         )
@@ -323,6 +326,7 @@ class TestTemplateOverride:
 
         spec = slurm_instance.template_override(
             task,
+            task.resources[0],
             _extra_launch_context={},
             _is_launched_by_jobs_controller=True,
         )
@@ -336,6 +340,7 @@ class TestTemplateOverride:
 
         spec = slurm_instance.template_override(
             task,
+            task.resources[0],
             _extra_launch_context={},
             _is_launched_by_jobs_controller=True,
         )
@@ -352,6 +357,7 @@ class TestTemplateOverride:
         task = _make_task()
         assert slurm_instance.template_override(
             task,
+            task.resources[0],
             _extra_launch_context={},
             _is_launched_by_jobs_controller=False) is None
 
@@ -364,6 +370,7 @@ class TestTemplateOverride:
         ])
         assert slurm_instance.template_override(
             task,
+            task.resources[0],
             _extra_launch_context={},
             _is_launched_by_jobs_controller=True) is None
 
@@ -372,6 +379,7 @@ class TestTemplateOverride:
         task = _make_task()
         assert slurm_instance.template_override(
             task,
+            task.resources[0],
             _extra_launch_context={},
             _is_launched_by_jobs_controller=True) is None
 
@@ -381,6 +389,7 @@ class TestTemplateOverride:
         task = _make_task(workdir='/local/path')
         assert slurm_instance.template_override(
             task,
+            task.resources[0],
             _extra_launch_context={},
             _is_launched_by_jobs_controller=True) is None
 
@@ -402,6 +411,7 @@ class TestTemplateOverride:
         monkeypatch.setattr(slurm_instance.logger, 'warning', warning_mock)
         result = slurm_instance.template_override(
             task,
+            task.resources[0],
             _extra_launch_context={},
             _is_launched_by_jobs_controller=True,
         )
@@ -418,6 +428,7 @@ class TestTemplateOverride:
         monkeypatch.setattr(slurm_instance.logger, 'warning', warning_mock)
         slurm_instance.template_override(
             task,
+            task.resources[0],
             _extra_launch_context={},
             _is_launched_by_jobs_controller=False,
         )
@@ -435,6 +446,7 @@ class TestTemplateOverride:
         monkeypatch.setattr(slurm_instance.logger, 'warning', warning_mock)
         slurm_instance.template_override(
             task,
+            task.resources[0],
             _extra_launch_context={},
             _is_launched_by_jobs_controller=True,
         )
@@ -448,6 +460,7 @@ class TestTemplateOverride:
         monkeypatch.setattr(slurm_instance.logger, 'warning', warning_mock)
         slurm_instance.template_override(
             task,
+            task.resources[0],
             _extra_launch_context={},
             _is_launched_by_jobs_controller=True,
         )

@@ -32,6 +32,7 @@ from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
     from sky import provision as provision_lib
+    from sky import resources as resources_lib
     from sky import task as task_lib
 
 logger = sky_logging.init_logger(__name__)
@@ -297,11 +298,11 @@ def _wait_for_job_nodes(
             # Consult sacct to distinguish "terminated already" from
             # "genuinely not found".
             sacct_state = _v1_sacct_job_state(client, job_id)
-            _SLURM_TERMINAL = ('COMPLETED', 'CANCELLED', 'FAILED', 'TIMEOUT',
+            terminal_states = ('COMPLETED', 'CANCELLED', 'FAILED', 'TIMEOUT',
                                'NODE_FAIL', 'BOOT_FAIL', 'OUT_OF_MEMORY',
                                'DEADLINE', 'SPECIAL_EXIT', 'PREEMPTED',
                                'REVOKED')
-            if sacct_state in _SLURM_TERMINAL:
+            if sacct_state in terminal_states:
                 # The job ran (possibly very briefly) and is already
                 # done. Return cleanly so the caller can build a
                 # ProvisionRecord from sacct's NodeList; the managed-job
@@ -1498,7 +1499,7 @@ def _terminate_managed_job_v1(cluster_name_on_cloud: str,
     # controller may read a stale RUNNING state on its next status poll
     # and conclude the cancel "didn't take".
     start = time.time()
-    while (time.time() - start < _V1_SCANCEL_LEAVE_RUNNING_TIMEOUT_SECONDS):
+    while time.time() - start < _V1_SCANCEL_LEAVE_RUNNING_TIMEOUT_SECONDS:
         state = client.get_job_state(job_id)
         if state is None:
             # Aged out of squeue; reach for sacct to confirm terminal.
@@ -1551,7 +1552,9 @@ _STATE_FILTER_TO_SLURM_STATE: Dict[str, str] = {
     'revoked': 'REVOKED',
 }
 
-_V1_SLURM_STATE_TO_CLUSTER_STATUS: Dict[str, Optional[status_lib.ClusterStatus]] = {
+_ClusterStatusMap = Dict[str, Optional[status_lib.ClusterStatus]]
+
+_V1_SLURM_STATE_TO_CLUSTER_STATUS: _ClusterStatusMap = {
     'PENDING': status_lib.ClusterStatus.INIT,
     'CONFIGURING': status_lib.ClusterStatus.INIT,
     'RESV_DEL_HOLD': status_lib.ClusterStatus.INIT,
@@ -1943,9 +1946,9 @@ def _get_cluster_info_v1(
         # fast-failing v1 jobs: get_cluster_info is called after
         # _create_managed_job_v1 returns but the sbatch has already
         # OOM/FAILED, so squeue's live filter returns empty.
-        recovered = _v1_sacct_latest_attempt(client, cluster_name_on_cloud)
-        if recovered is not None:
-            job_id, nodes = recovered
+        latest_attempt = _v1_sacct_latest_attempt(client, cluster_name_on_cloud)
+        if latest_attempt is not None:
+            job_id, nodes = latest_attempt
             logger.debug(f'V1 get_cluster_info: recovered job {job_id} with '
                          f'nodes={nodes} from sacct (no live job).')
 
@@ -2038,6 +2041,7 @@ def will_use_v1_template(
 
 def template_override(
     task: 'task_lib.Task',
+    to_provision: 'resources_lib.Resources',
     *,
     _extra_launch_context: Dict[str, Any],
     _is_launched_by_jobs_controller: bool,
@@ -2061,18 +2065,18 @@ def template_override(
             logger.warning(
                 'Falling back to legacy Slurm managed-jobs path: jobs with '
                 'local file mounts, workdir, or storage mounts are not '
-                'supported on the v1 fast path. Unsupported inputs:\n  ' +
-                '\n  '.join(unsupported) +
+                'supported on the v1 fast path. Unsupported inputs:\n  %s'
                 '\nUse a git workdir or cloud storage (s3://, gs://, etc.) '
-                'to opt into the v1 fast path.')
+                'to opt into the v1 fast path.', '\n  '.join(unsupported))
         return None
 
-    resources = list(task.resources)
     envs = task_lib.get_plaintext_envs_and_secrets(task.envs_and_secrets)
 
-    resource = resources[0]
+    # ``to_provision`` is the resource for the current launch attempt —
+    # unlike ``task.resources[0]``, it stays correct across the backend's
+    # failover loop.
     sbatch_options: Dict[str, Any] = {}
-    cluster_overrides = resource.cluster_config_overrides
+    cluster_overrides = to_provision.cluster_config_overrides
     if cluster_overrides:
         # Surface task-level sbatch_options into the template; cluster /
         # partition level options are merged later by
@@ -2098,7 +2102,7 @@ def template_override(
     if task.file_mounts:
         file_mounts = dict(task.file_mounts)
 
-    container_image = resource.extract_docker_image()
+    container_image = to_provision.extract_docker_image()
 
     return provision_lib.TemplateSpec(
         template_path='slurm-managed-job-v1.yml.j2',
@@ -2131,12 +2135,12 @@ def _build_workdir_block(workdir: Optional[Dict[str, Any]]) -> str:
     # the canonical destination used elsewhere; expand ~ to $HOME so
     # bash double-quote semantics work.
     remote_workdir = skylet_constants.SKY_REMOTE_WORKDIR.replace('~', '$HOME')
-    return (
-        '# === Workdir: git clone via git_clone.sh ===\n'
-        f"echo '{_GIT_CLONE_SCRIPT_B64}' | base64 -d > /tmp/sky_git_clone.sh\n"
-        f'bash /tmp/sky_git_clone.sh "{remote_workdir}"\n'
-        'rm -f /tmp/sky_git_clone.sh\n'
-        f'cd "{remote_workdir}"\n')
+    return ('# === Workdir: git clone via git_clone.sh ===\n'
+            f'echo \'{_GIT_CLONE_SCRIPT_B64}\' | base64 -d > '
+            '/tmp/sky_git_clone.sh\n'
+            f'bash /tmp/sky_git_clone.sh "{remote_workdir}"\n'
+            'rm -f /tmp/sky_git_clone.sh\n'
+            f'cd "{remote_workdir}"\n')
 
 
 def _build_file_mounts_block(file_mounts: Optional[Dict[str, str]]) -> str:
@@ -2556,9 +2560,8 @@ def _create_managed_job_v1(
                 f'V1 Slurm job {job_id} terminated before nodes were '
                 'observable and sacct has no NodeList record; cannot '
                 'construct a ProvisionRecord.')
-        logger.info(
-            f'V1 Slurm job {job_id} finished fast; recovered '
-            f'NodeList={nodes} from sacct.')
+        logger.info(f'V1 Slurm job {job_id} finished fast; recovered '
+                    f'NodeList={nodes} from sacct.')
     rich_utils.force_update_status(
         ux_utils.spinner_message('Launching', cluster_name=cluster_name))
 

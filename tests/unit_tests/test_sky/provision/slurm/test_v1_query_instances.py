@@ -211,8 +211,8 @@ def test_query_instances_v1_surfaces_user_terminal_via_squeue(
          mock.patch.object(slurm_instance,
                            '_v1_sacct_job_state',
                            return_value=None):
-        result = slurm_instance._query_instances_v1(
-            'slurm-edge-32', {}, non_terminated_only=True)
+        result = slurm_instance._query_instances_v1('slurm-edge-32', {},
+                                                    non_terminated_only=True)
     # Single-entry result keyed on job id (no node fanout for terminal jobs).
     assert result == {'12345': (expected, None)}
 
@@ -237,8 +237,8 @@ def test_query_instances_v1_infra_terminal_via_squeue_falls_through(
          mock.patch.object(slurm_instance,
                            '_v1_sacct_job_state',
                            return_value='NODE_FAIL'):
-        result = slurm_instance._query_instances_v1(
-            'slurm-edge-32', {}, non_terminated_only=True)
+        result = slurm_instance._query_instances_v1('slurm-edge-32', {},
+                                                    non_terminated_only=True)
     assert result == {'slurm-edge-32': (None, 'NODE_FAIL')}
 
 
@@ -257,11 +257,9 @@ def test_query_instances_v1_sacct_fallback_fires_when_squeue_empty():
          mock.patch.object(slurm_instance,
                            '_v1_sacct_job_state',
                            return_value='TIMEOUT'):
-        result = slurm_instance._query_instances_v1(
-            'slurm-edge-32', {}, non_terminated_only=True)
-    assert result == {
-        'slurm-edge-32': (status_lib.ClusterStatus.UP, 'TIMEOUT')
-    }
+        result = slurm_instance._query_instances_v1('slurm-edge-32', {},
+                                                    non_terminated_only=True)
+    assert result == {'slurm-edge-32': (status_lib.ClusterStatus.UP, 'TIMEOUT')}
 
 
 def test_query_instances_v1_sacct_returns_none_for_infra_terminal():
@@ -273,8 +271,8 @@ def test_query_instances_v1_sacct_returns_none_for_infra_terminal():
          mock.patch.object(slurm_instance,
                            '_v1_sacct_job_state',
                            return_value='NODE_FAIL'):
-        result = slurm_instance._query_instances_v1(
-            'slurm-edge-32', {}, non_terminated_only=True)
+        result = slurm_instance._query_instances_v1('slurm-edge-32', {},
+                                                    non_terminated_only=True)
     assert result == {'slurm-edge-32': (None, 'NODE_FAIL')}
 
 
@@ -290,8 +288,8 @@ def test_query_instances_v1_no_sacct_call_when_squeue_has_result():
          mock.patch.object(slurm_instance,
                            '_v1_sacct_job_state',
                            sacct_mock):
-        slurm_instance._query_instances_v1(
-            'slurm-edge-32', {}, non_terminated_only=True)
+        slurm_instance._query_instances_v1('slurm-edge-32', {},
+                                           non_terminated_only=True)
     sacct_mock.assert_not_called()
 
 
@@ -320,8 +318,8 @@ def test_query_instances_v1_terminal_multinode_fans_out_via_sacct():
          mock.patch.object(slurm_instance,
                            '_v1_sacct_job_state',
                            return_value=None):
-        result = slurm_instance._query_instances_v1(
-            'slurm-edge-32', {}, non_terminated_only=True)
+        result = slurm_instance._query_instances_v1('slurm-edge-32', {},
+                                                    non_terminated_only=True)
     assert len(result) == 2, (
         f'Expected 2 fan-out entries for a 2-node terminal job, got {result}')
     # Both entries must report the same (UP, None) and be keyed on a
@@ -351,6 +349,6 @@ def test_query_instances_v1_terminal_singlenode_keeps_single_entry():
          mock.patch.object(slurm_instance,
                            '_v1_sacct_job_state',
                            return_value=None):
-        result = slurm_instance._query_instances_v1(
-            'slurm-edge-32', {}, non_terminated_only=True)
+        result = slurm_instance._query_instances_v1('slurm-edge-32', {},
+                                                    non_terminated_only=True)
     assert result == {'9002': (status_lib.ClusterStatus.UP, None)}
