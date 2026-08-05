@@ -565,6 +565,12 @@ rbac:
     - apiGroups: [ "node.k8s.io" ]
       resources: [ "runtimeclasses" ]
       verbs: [ "get", "list", "watch" ]
+    # Required for discovering GPUs advertised via DRA (Dynamic Resource
+    # Allocation) and accounting their allocations. Read-only; harmless on
+    # clusters without the resource.k8s.io API group.
+    - apiGroups: [ "resource.k8s.io" ]
+      resources: [ "deviceclasses", "resourceslices", "resourceclaims" ]
+      verbs: [ "get", "list", "watch" ]
     # Required for exposing services.
     - apiGroups: [ "networking.k8s.io" ]
       resources: [ "ingressclasses" ]

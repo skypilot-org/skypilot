@@ -732,7 +732,7 @@ def test_heterogenous_gpu_detection():
     with mock.patch('sky.clouds.cloud_in_iterable', return_value=True), \
          mock.patch('sky.provision.kubernetes.utils.get_current_kube_config_context_name', return_value='doesntexist'), \
          mock.patch('sky.provision.kubernetes.utils.check_credentials', return_value=[True]), \
-         mock.patch('sky.provision.kubernetes.utils.detect_accelerator_resource', return_value=True), \
+         mock.patch('sky.provision.kubernetes.utils.detect_accelerator_resource', return_value=(True, set())), \
          mock.patch('sky.provision.kubernetes.utils.detect_gpu_label_formatter', return_value=[utils.GKELabelFormatter(), None]), \
          mock.patch('sky.provision.kubernetes.utils.get_kubernetes_nodes', return_value=[mock_node1, mock_node2]), \
          mock.patch('sky.provision.kubernetes.utils.get_allocated_resources_by_node', return_value=({mock_node1.metadata.name: 1, mock_node2.metadata.name: 0}, {})), \

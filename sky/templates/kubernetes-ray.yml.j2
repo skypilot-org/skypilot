@@ -191,6 +191,9 @@ provider:
         - apiGroups: [ "networking.k8s.io" ]   # Required for exposing services.
           resources: [ "ingressclasses" ]
           verbs: [ "get", "list", "watch" ]
+        - apiGroups: [ "resource.k8s.io" ]   # Required for discovering GPUs advertised via DRA.
+          resources: [ "deviceclasses", "resourceslices", "resourceclaims" ]
+          verbs: [ "get", "list", "watch" ]
 
     # Bind cluster role to the service account
     autoscaler_cluster_role_binding:
