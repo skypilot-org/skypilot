@@ -293,8 +293,7 @@ def _extract_user_from_header(
     user_hash = hashlib.md5(
         user_name.encode(),
         usedforsecurity=False).hexdigest()[:common_utils.USER_HASH_LENGTH]
-    groups = models.parse_groups(
-        request.headers.get('X-Auth-Request-Groups'))
+    groups = models.parse_groups(request.headers.get('X-Auth-Request-Groups'))
     if proxy_config.enabled:
         return models.User(id=user_hash,
                            name=user_name,
