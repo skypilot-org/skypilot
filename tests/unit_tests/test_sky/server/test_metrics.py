@@ -1010,3 +1010,35 @@ def test_managed_jobs_collector_handles_empty_db():
         samples = _collect_to_dict(collector)
     # Metric family exists, just with no rows.
     assert samples.get('sky_managed_jobs_count', {}) == {}
+
+
+def test_sqlite_db_size_collector_no_files(tmp_path, monkeypatch):
+    """No SQLite files on disk (e.g. Postgres backend) -> no series."""
+    monkeypatch.setenv('SKY_RUNTIME_DIR', str(tmp_path))
+    collector = metrics.SqliteDBSizeCollector()
+    samples = _collect_to_dict(collector)
+    assert samples.get('sky_apiserver_sqlite_db_size_bytes', {}) == {}
+
+
+def test_sqlite_db_size_collector_reports_existing_dbs(tmp_path, monkeypatch):
+    """Existing DB files are reported with WAL/SHM sidecars included."""
+    monkeypatch.setenv('SKY_RUNTIME_DIR', str(tmp_path))
+    sky_dir = tmp_path / '.sky'
+    (sky_dir / 'api_server').mkdir(parents=True)
+    (sky_dir / 'state.db').write_bytes(b'x' * 100)
+    # WAL/SHM sidecars count toward the db's footprint.
+    (sky_dir / 'state.db-wal').write_bytes(b'x' * 40)
+    (sky_dir / 'state.db-shm').write_bytes(b'x' * 10)
+    (sky_dir / 'spot_jobs.db').write_bytes(b'x' * 7)
+    (sky_dir / 'api_server' / 'requests.db').write_bytes(b'x' * 55)
+    # A sidecar without its main file must not create a series.
+    (sky_dir / 'config.db-wal').write_bytes(b'x' * 5)
+
+    collector = metrics.SqliteDBSizeCollector()
+    sizes = _collect_to_dict(collector)['sky_apiserver_sqlite_db_size_bytes']
+
+    assert sizes == {
+        (('db', 'state'),): 150.0,
+        (('db', 'spot_jobs'),): 7.0,
+        (('db', 'requests'),): 55.0,
+    }
