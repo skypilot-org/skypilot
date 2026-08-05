@@ -79,12 +79,17 @@ class _Target:
         partition: str,
         region: Optional[str],
         log_path: Optional[str],
+        slurm_user: Optional[str] = None,
     ) -> None:
         self.job_id = job_id
         self.ssh_config = ssh_config
         self.partition = partition
         self.region = region
         self.log_path = log_path
+        # Submit user for slurm.submit_as_user deployments: the sbatch
+        # ran as this Unix user, so every follow-up command (squeue /
+        # sacct / log reads) must run as them too.
+        self.slurm_user = slurm_user
 
 
 def _resolve_slurm_target(handle) -> Optional[_Target]:
@@ -142,7 +147,8 @@ def _resolve_slurm_target(handle) -> Optional[_Target]:
                    ssh_config=ssh_config,
                    partition=partition,
                    region=region,
-                   log_path=log_path)
+                   log_path=log_path,
+                   slurm_user=provider_config.get('slurm_user'))
 
 
 def _slurm_client_from_target(target: _Target) -> 'slurm.SlurmClient':
@@ -155,20 +161,25 @@ def _slurm_client_from_target(target: _Target) -> 'slurm.SlurmClient':
         ssh_proxy_command=ssh.get('proxycommand'),
         ssh_proxy_jump=ssh.get('proxyjump'),
         identities_only=ssh.get('identities_only', False),
+        slurm_user=target.slurm_user,
     )
 
 
 def _login_node_runner(
-        ssh_config: Dict[str, Any]) -> 'command_runner.SSHCommandRunner':
-    """Build an ``SSHCommandRunner`` for the Slurm login node.
+    ssh_config: Dict[str, Any],
+    slurm_user: Optional[str] = None,
+) -> 'command_runner.SSHCommandRunner':
+    """Build a login-node command runner.
 
     Mirrors the constructor block in ``instance.py::_create_virtual_instance``
     (around line 523) and ``_create_managed_job_v1`` (around line 1677).
     Copied rather than imported to avoid an import cycle with the
-    provisioner module from runtime code paths.
+    provisioner module from runtime code paths. ``slurm_user`` wraps
+    every command as the submit user, whose home holds the sbatch
+    output file.
     """
     identities_only = bool(ssh_config.get('identities_only', False))
-    return command_runner.SSHCommandRunner(
+    return command_runner.SlurmLoginNodeCommandRunner(
         (ssh_config['hostname'], int(ssh_config.get('port', 22))),
         ssh_config['user'],
         ssh_config.get('private_key'),
@@ -176,6 +187,7 @@ def _login_node_runner(
         ssh_proxy_jump=ssh_config.get('proxyjump'),
         enable_interactive_auth=True,
         disable_identities_only=not identities_only,
+        slurm_user=slurm_user,
     )
 
 
@@ -510,7 +522,7 @@ class SlurmManagedJobRuntime:
         if log_path is None:
             return None
 
-        runner = _login_node_runner(target.ssh_config)
+        runner = _login_node_runner(target.ssh_config, target.slurm_user)
         # ``cat`` instead of ``rsync`` so a missing file produces a
         # clean empty stdout + non-zero rc rather than an rsync error;
         # job-not-yet-started maps to an empty saved log.

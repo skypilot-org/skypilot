@@ -35,7 +35,9 @@ _TAIL_DRAIN_SECONDS = 5
 
 
 def _login_node_runner(
-        ssh_config: Dict[str, Any]) -> 'command_runner.SSHCommandRunner':
+    ssh_config: Dict[str, Any],
+    slurm_user: Optional[str] = None,
+) -> 'command_runner.SSHCommandRunner':
     """Mirror of ``managed_job_runtime._login_node_runner``.
 
     Duplicated to keep this module free of an import edge back into
@@ -44,7 +46,7 @@ def _login_node_runner(
     ``instance.py::_create_managed_job_v1``'s login-node runner.
     """
     identities_only = bool(ssh_config.get('identities_only', False))
-    return command_runner.SSHCommandRunner(
+    return command_runner.SlurmLoginNodeCommandRunner(
         (ssh_config['hostname'], int(ssh_config.get('port', 22))),
         ssh_config['user'],
         ssh_config.get('private_key'),
@@ -52,6 +54,7 @@ def _login_node_runner(
         ssh_proxy_jump=ssh_config.get('proxyjump'),
         enable_interactive_auth=True,
         disable_identities_only=not identities_only,
+        slurm_user=slurm_user,
     )
 
 
@@ -93,7 +96,8 @@ class SlurmLogStreamer:
 
     def run(self) -> int:
         """Stream the log; return the JobExitCode for the controller."""
-        runner = _login_node_runner(self._target.ssh_config)
+        runner = _login_node_runner(self._target.ssh_config,
+                                    self._target.slurm_user)
         base_ssh = runner.ssh_base_command(
             ssh_mode=command_runner.SshMode.NON_INTERACTIVE,
             port_forward=None,
@@ -115,6 +119,15 @@ class SlurmLogStreamer:
                                self._tail > 0) else None
             tail_flag = f'-n {n}' if n is not None else '-n +1'
             remote_cmd = f'tail {tail_flag} {quoted_path} 2>/dev/null'
+
+        # ``base_ssh`` bypasses ``runner.run()`` (raw argv for the
+        # streaming subprocess), so apply the submit-user wrapping to
+        # the remote command directly — the output file lives in the
+        # submit user's home.
+        if self._target.slurm_user is not None:
+            use_sudo = self._target.ssh_config.get('user') != 'root'
+            remote_cmd = command_runner.wrap_command_as_user(
+                remote_cmd, self._target.slurm_user, use_sudo=use_sudo)
 
         if not self._follow:
             return self._tail_once(base_ssh, remote_cmd)

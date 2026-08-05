@@ -1417,6 +1417,7 @@ def _slurm_client_from_provider_config(
         ssh_proxy_command=ssh_config_dict.get('proxycommand', None),
         ssh_proxy_jump=ssh_config_dict.get('proxyjump', None),
         identities_only=ssh_config_dict.get('identities_only', False),
+        slurm_user=provider_config.get('slurm_user'),
     )
 
 
@@ -2359,6 +2360,7 @@ def _create_managed_job_v1(
     ssh_proxy_command = ssh_config_dict.get('proxycommand', None)
     ssh_proxy_jump = ssh_config_dict.get('proxyjump', None)
     identities_only = ssh_config_dict.get('identities_only', False)
+    slurm_user = provider_config.get('slurm_user')
     partition = slurm_utils.get_partition_from_config(provider_config)
 
     client = slurm.SlurmClient(
@@ -2369,6 +2371,7 @@ def _create_managed_job_v1(
         ssh_proxy_command=ssh_proxy_command,
         ssh_proxy_jump=ssh_proxy_jump,
         identities_only=identities_only,
+        slurm_user=slurm_user,
     )
 
     # ---- Drain COMPLETING jobs before submitting. Ported verbatim ----
@@ -2480,7 +2483,11 @@ def _create_managed_job_v1(
             )
 
     # ---- Fresh submission ----
-    login_node_runner = command_runner.SSHCommandRunner(
+    # The slurm_user-wrapped runner keeps the whole submission consistent
+    # with the submit user: the home dir (and thus the sbatch script,
+    # output file, and cluster dir) resolve to the submit user's home,
+    # and the script is rsynced as that user.
+    login_node_runner = command_runner.SlurmLoginNodeCommandRunner(
         (ssh_host, ssh_port),
         ssh_user,
         ssh_key,
@@ -2488,6 +2495,7 @@ def _create_managed_job_v1(
         ssh_proxy_jump=ssh_proxy_jump,
         enable_interactive_auth=True,
         disable_identities_only=not identities_only,
+        slurm_user=slurm_user,
     )
     remote_home_dir = login_node_runner.get_remote_home_dir()
 

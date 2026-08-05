@@ -130,10 +130,11 @@ def patched_module(monkeypatch):
     # reattach branch and ``submit_job`` so tests targeting the COMPLETING
     # drain (which fall through to submission) can stop execution
     # deterministically at ``submit_job``.
-    runner_mock = mock.MagicMock(name='SSHCommandRunner_instance')
+    runner_mock = mock.MagicMock(name='SlurmLoginNodeCommandRunner_instance')
     runner_mock.get_remote_home_dir.return_value = '/home/slurmuser'
     runner_mock.run.return_value = (0, '', '')
-    monkeypatch.setattr(slurm_instance.command_runner, 'SSHCommandRunner',
+    monkeypatch.setattr(slurm_instance.command_runner,
+                        'SlurmLoginNodeCommandRunner',
                         mock.MagicMock(return_value=runner_mock))
     monkeypatch.setattr(slurm_instance, '_v1_precondition_cleanup',
                         mock.MagicMock())

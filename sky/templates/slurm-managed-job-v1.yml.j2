@@ -31,6 +31,9 @@ provider:
   cluster: "{{slurm_cluster}}"
   partition: "{{slurm_partition}}"
   provision_timeout: {{provision_timeout}}
+{% if slurm_user is defined and slurm_user is not none %}
+  slurm_user: {{slurm_user | tojson}}
+{% endif %}
 
   skypilot_runtime: managed_job_v1
 
