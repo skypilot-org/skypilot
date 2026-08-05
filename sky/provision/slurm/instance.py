@@ -2193,6 +2193,34 @@ def _build_env_exports(envs: Optional[Dict[str, str]]) -> str:
     return '\n'.join(lines) + '\n'
 
 
+def _build_runtime_env_exports(num_nodes: int, accelerator_count: int) -> str:
+    """Render the SkyPilot runtime env vars for the sbatch preamble.
+
+    Matches the contract the legacy executor provides
+    (``sky/skylet/executor/slurm.py``): ``SKYPILOT_NUM_NODES``,
+    ``SKYPILOT_NUM_GPUS_PER_NODE``, and newline-separated
+    ``SKYPILOT_NODE_IPS``. These are allocation-wide, so they are
+    computed once in the preamble (where ``scontrol`` is available —
+    inside pyxis containers it may not be) and propagate into the srun
+    tasks via the environment. The per-task ``SKYPILOT_NODE_RANK`` is
+    exported inside the srun body instead. Nodes that fail DNS
+    resolution fall back to their hostname, which is an equally valid
+    rendezvous address on clusters that schedule by nodename.
+    """
+    return ('# === SkyPilot runtime env vars ===\n'
+            f'export {skylet_constants.SKYPILOT_NUM_NODES}={num_nodes}\n'
+            f'export {skylet_constants.SKYPILOT_NUM_GPUS_PER_NODE}='
+            f'{accelerator_count}\n'
+            f'export {skylet_constants.SKYPILOT_SETUP_NUM_GPUS_PER_NODE}='
+            f'{accelerator_count}\n'
+            f'{skylet_constants.SKYPILOT_NODE_IPS}=$(for host in '
+            '$(scontrol show hostnames "$SLURM_JOB_NODELIST"); do\n'
+            '  addr=$(getent ahostsv4 "$host" | awk \'NR==1 {print $1}\')\n'
+            '  echo "${addr:-$host}"\n'
+            'done)\n'
+            f'export {skylet_constants.SKYPILOT_NODE_IPS}\n')
+
+
 def _build_v1_sbatch_script(
     *,
     cluster_name_on_cloud: str,
@@ -2242,16 +2270,23 @@ def _build_v1_sbatch_script(
     # global shell flag we impose — legacy doesn't add ``-e`` or ``-u``
     # and user setup blocks routinely rely on ``+u`` (sourcing
     # unset-var-tolerant rc files) and ``|| true``-style guards.
+    # ``SKYPILOT_NODE_RANK`` is per-task, so it must be derived inside
+    # the srun step (``SLURM_PROCID`` is 0..N-1 with
+    # ``--ntasks-per-node=1``); the quoted script defers ``$``
+    # expansion to task runtime.
     user_setup = (setup or '').strip()
     user_run = (run or '').strip()
-    if user_setup and user_run:
-        user_script = f'set -o pipefail\n{user_setup}\n{user_run}'
-    elif user_setup:
-        user_script = f'set -o pipefail\n{user_setup}'
-    elif user_run:
-        user_script = f'set -o pipefail\n{user_run}'
-    else:
-        user_script = 'set -o pipefail\n# no setup / run specified'
+    script_lines = [
+        'set -o pipefail',
+        f'export {skylet_constants.SKYPILOT_NODE_RANK}="$SLURM_PROCID"',
+    ]
+    if user_setup:
+        script_lines.append(user_setup)
+    if user_run:
+        script_lines.append(user_run)
+    if not user_setup and not user_run:
+        script_lines.append('# no setup / run specified')
+    user_script = '\n'.join(script_lines)
     quoted_user_script = shlex.quote(user_script)
 
     # Container args (pyxis/enroot). Per-job container name (suffix with
@@ -2275,6 +2310,10 @@ def _build_v1_sbatch_script(
 
     workdir_block = _build_workdir_block(workdir)
     file_mounts_block = _build_file_mounts_block(file_mounts)
+    # Runtime vars come before user envs so user-defined values win on
+    # collision.
+    runtime_env_exports = _build_runtime_env_exports(num_nodes,
+                                                     accelerator_count)
     env_exports = _build_env_exports(envs)
 
     # pylint: disable=line-too-long
@@ -2292,6 +2331,7 @@ def _build_v1_sbatch_script(
             f'\n'
             f'{workdir_block}'
             f'{file_mounts_block}'
+            f'{runtime_env_exports}'
             f'{env_exports}'
             f'\n'
             f'{srun_line}\n')
