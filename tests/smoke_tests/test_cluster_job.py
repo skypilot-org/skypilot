@@ -543,7 +543,14 @@ def test_kubernetes_non_debian_image(image, pkg_mgr, num_nodes):
         [
             # `sky launch` returns 0 only if the non-apt bootstrap installed the
             # prereqs and ray came up on the non-Debian image.
+            # kubernetes.enable_docker is Debian-only by design (its bootstrap
+            # installs the Docker CLI via apt and exits 1 otherwise), so a
+            # server whose config enables it globally would fail these images
+            # during bootstrap before reaching the code under test. This test
+            # exercises the non-Debian runtime bootstrap, not Docker -- pin it
+            # off for this launch.
             f'sky launch -y -c {name} --infra kubernetes '
+            f'--config kubernetes.enable_docker=false '
             f'--num-nodes {num_nodes} {smoke_tests_utils.LOW_RESOURCE_ARG} '
             f'--image-id docker:{image}',
             # Confirm it really ran on the non-Debian image (not a fallback):
