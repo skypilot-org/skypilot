@@ -2,9 +2,9 @@
 
 Covers ``jobs_core._reject_inaccessible_job_ids``, the read/cancel-side of the
 per-resource workspace chokepoint for managed jobs. It applies only in
-consolidation mode (where the API server shares the jobs-state DB); it reads
-each job's workspace directly from managed-jobs state and checks it against the
-caller's readable workspaces.
+consolidation mode (where the API server shares the jobs-state DB); it resolves
+the target jobs' workspaces from managed-jobs state in one batched query and
+checks them against the caller's readable workspaces.
 """
 
 from unittest import mock
@@ -27,11 +27,12 @@ def _accessible(names):
 
 
 def _workspaces(mapping):
-    # get_workspace(job_id) -> workspace; unknown ids resolve to 'default'.
-    return mock.patch.object(
-        jobs_core.managed_job_state,
-        'get_workspace',
-        side_effect=lambda jid: mapping.get(jid, 'default'))
+    # get_workspaces(job_ids) -> {job_id: workspace} for the ids that exist;
+    # ids absent from `mapping` are omitted, modelling nonexistent jobs.
+    return mock.patch.object(jobs_core.managed_job_state,
+                             'get_workspaces',
+                             side_effect=lambda job_ids:
+                             {j: mapping[j] for j in job_ids if j in mapping})
 
 
 class TestRejectInaccessibleJobIds:
@@ -57,14 +58,24 @@ class TestRejectInaccessibleJobIds:
         assert '2' in str(exc_info.value)
         assert '1' not in str(exc_info.value)
 
-    def test_reads_state_not_controller(self):
-        # Must resolve the workspace from managed-jobs state, never via the
-        # controller-dependent queue path.
+    def test_nonexistent_job_rejected(self):
+        # Job 2 has no row (absent from the batch result); it must be rejected
+        # as not-found rather than falling through as the default workspace.
+        with _consolidation(True), _accessible(['default', 'ws1']), \
+                _workspaces({1: 'ws1'}):
+            with pytest.raises(ValueError) as exc_info:
+                jobs_core._reject_inaccessible_job_ids([1, 2])
+        assert '2' in str(exc_info.value)
+        assert '1' not in str(exc_info.value)
+
+    def test_reads_state_in_one_batched_query(self):
+        # Must resolve workspaces from state in a single get_workspaces call,
+        # never via the controller-dependent queue path.
         with _consolidation(True), _accessible(['ws1']), \
                 _workspaces({7: 'ws1'}) as gw:
             with mock.patch.object(jobs_core, 'queue_v2_api') as mock_queue:
                 jobs_core._reject_inaccessible_job_ids([7])
-        gw.assert_called_once_with(7)
+        gw.assert_called_once_with([7])
         mock_queue.assert_not_called()
 
     def test_skipped_in_non_consolidation_mode(self):
