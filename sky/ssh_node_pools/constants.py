@@ -8,5 +8,6 @@ NODE_POOLS_INFO_DIR = os.path.expanduser('~/.sky/ssh_node_pools_info')
 NODE_POOLS_KEY_DIR = os.path.expanduser('~/.sky/ssh_keys')
 DEFAULT_SSH_NODE_POOLS_PATH = os.path.expanduser('~/.sky/ssh_node_pools.yaml')
 
-# TODO (kyuds): make this configurable?
-K3S_TOKEN = 'mytoken'  # Any string can be used as the token
+K3S_TOKEN = os.environ.get('SKYPILOT_K3S_TOKEN')
+if not K3S_TOKEN:
+    raise ValueError('SKYPILOT_K3S_TOKEN must be set for SSH node pools.')
