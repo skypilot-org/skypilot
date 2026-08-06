@@ -2,6 +2,7 @@
 
 import base64
 import os
+import threading
 import time
 from unittest.mock import AsyncMock
 from unittest.mock import MagicMock
@@ -10,7 +11,9 @@ from unittest.mock import patch
 import fastapi
 from prometheus_client import CollectorRegistry
 from prometheus_client import CONTENT_TYPE_LATEST
+from prometheus_client import core as prom_core
 from prometheus_client import generate_latest
+import prometheus_client as prom
 import pytest
 
 from sky.metrics import utils as metrics_utils
@@ -1010,3 +1013,196 @@ def test_managed_jobs_collector_handles_empty_db():
         samples = _collect_to_dict(collector)
     # Metric family exists, just with no rows.
     assert samples.get('sky_managed_jobs_count', {}) == {}
+
+
+# ── ResilientCollector ──────────────────────────────────────────────
+
+
+class _ControlledCollector:
+    """Collector whose behavior on each collect() call is scripted.
+
+    Script entries: ``'ok:<value>'`` yields a gauge with that value,
+    ``'hang'`` blocks until ``release`` is set (then yields 0.0),
+    ``'raise'`` raises. The last entry repeats for further calls.
+    """
+
+    def __init__(self, script):
+        self._script = script
+        self.calls = 0
+        self.hang_started = threading.Event()
+        self.release = threading.Event()
+
+    def collect(self):
+        action = self._script[min(self.calls, len(self._script) - 1)]
+        self.calls += 1
+        value = 0.0
+        if action == 'hang':
+            self.hang_started.set()
+            self.release.wait(timeout=30)
+        elif action == 'raise':
+            raise RuntimeError('scripted failure')
+        else:
+            value = float(action.split(':', 1)[1])
+        family = prom_core.GaugeMetricFamily('test_resilient_gauge', 'test')
+        family.add_metric([], value)
+        yield family
+
+
+def _wait_until(predicate, timeout=10.0, interval=0.01):
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        if predicate():
+            return True
+        time.sleep(interval)
+    return predicate()
+
+
+def _gauge_value(families):
+    for family in families:
+        for sample in family.samples:
+            if sample.name == 'test_resilient_gauge':
+                return sample.value
+    return None
+
+
+def test_resilient_collector_scrape_not_blocked_by_hung_refresh():
+    wrapped = _ControlledCollector(['hang'])
+    collector = metrics.ResilientCollector(wrapped, ttl_seconds=0)
+    try:
+        start = time.time()
+        assert not list(collector.collect())
+        assert time.time() - start < 5.0
+        assert _wait_until(wrapped.hang_started.is_set)
+        # Repeated scrapes while the refresh is hung neither block nor
+        # stack additional refreshes (single in-flight).
+        for _ in range(5):
+            assert not list(collector.collect())
+        assert wrapped.calls == 1
+    finally:
+        wrapped.release.set()
+    # Once the hung refresh finally returns, its data is served.
+    assert _wait_until(lambda: _gauge_value(collector.collect()) is not None)
+
+
+def test_resilient_collector_serves_stale_snapshot_while_hung():
+    wrapped = _ControlledCollector(['ok:1', 'hang'])
+    collector = metrics.ResilientCollector(wrapped, ttl_seconds=0)
+    try:
+        list(collector.collect())  # Triggers the first (successful) refresh.
+        assert _wait_until(lambda: collector.last_success_time() > 0)
+        # This scrape serves the snapshot and triggers the hanging refresh.
+        assert _gauge_value(collector.collect()) == 1.0
+        assert _wait_until(wrapped.hang_started.is_set)
+        # Stale-but-served while hung; last success does not advance.
+        assert _gauge_value(collector.collect()) == 1.0
+        assert wrapped.calls == 2
+    finally:
+        wrapped.release.set()
+
+
+def test_resilient_collector_refresh_error_keeps_snapshot_and_retries():
+    wrapped = _ControlledCollector(['ok:1', 'raise', 'ok:2'])
+    collector = metrics.ResilientCollector(wrapped, ttl_seconds=0)
+    list(collector.collect())
+    assert _wait_until(lambda: collector.last_success_time() > 0)
+    first_success = collector.last_success_time()
+    list(collector.collect())  # Triggers the failing refresh.
+    assert _wait_until(lambda: wrapped.calls == 2)
+    # The failure left the old snapshot in place and did not advance
+    # the success time.
+    assert _gauge_value(collector.collect()) == 1.0
+    assert collector.last_success_time() == first_success
+    # The previous collect() already triggered the third (recovering)
+    # refresh; the in-flight flag was not left stuck by the failure.
+    assert _wait_until(lambda: _gauge_value(collector.collect()) == 2.0)
+
+
+def test_resilient_collector_describe_never_calls_collect():
+
+    class _NoDescribe:
+
+        def __init__(self):
+            self.collected = False
+
+        def collect(self):
+            self.collected = True
+            yield prom_core.GaugeMetricFamily('x', 'x')
+
+    wrapped = _NoDescribe()
+    collector = metrics.ResilientCollector(wrapped)
+    assert not list(collector.describe())
+    assert not wrapped.collected
+    # With a wrapped describe(), it is delegated.
+    described = metrics.ResilientCollector(_ControlledCollector(['ok:1']))
+    described._wrapped.describe = lambda: iter(
+        [prom_core.GaugeMetricFamily('described', 'd')])
+    assert [f.name for f in described.describe()] == ['described']
+
+
+def test_collector_health_active_flips_on_staleness():
+    wrapped = _ControlledCollector(['ok:1', 'hang'])
+    collector = metrics.ResilientCollector(wrapped,
+                                           ttl_seconds=0,
+                                           max_staleness_seconds=0.2)
+    health = metrics.CollectorHealthCollector()
+
+    def health_samples():
+        samples = {}
+        for family in health.collect():
+            for sample in family.samples:
+                samples[sample.name] = sample.value
+        return samples
+
+    with patch.object(metrics, '_resilient_collectors', [collector]):
+        try:
+            # Never refreshed yet: inactive, zero timestamp.
+            samples = health_samples()
+            assert samples['sky_apiserver_metrics_collector_active'] == 0.0
+            assert samples[
+                'sky_apiserver_metrics_collector_last_success_timestamp_'
+                'seconds'] == 0.0
+            list(collector.collect())
+            assert _wait_until(lambda: collector.last_success_time() > 0)
+            samples = health_samples()
+            assert samples['sky_apiserver_metrics_collector_active'] == 1.0
+            # Trigger the hanging refresh and outwait max_staleness.
+            list(collector.collect())
+            assert _wait_until(wrapped.hang_started.is_set)
+            assert _wait_until(lambda: health_samples()[
+                'sky_apiserver_metrics_collector_active'] == 0.0)
+        finally:
+            wrapped.release.set()
+
+
+def test_wrap_collector_dedupes_health_names():
+    with patch.object(metrics, '_resilient_collectors', []):
+        first = metrics._wrap_collector(_ControlledCollector(['ok:1']))
+        second = metrics._wrap_collector(_ControlledCollector(['ok:1']))
+        assert first.name == '_ControlledCollector'
+        assert second.name == '_ControlledCollector-2'
+
+
+def test_metrics_endpoint_responsive_with_hung_plugin_collector():
+    """A plugin collector hung on its data source (e.g. DB outage) must
+    not hang the /metrics scrape: the endpoint responds promptly and the
+    health gauge reports the collector as inactive."""
+    if 'PROMETHEUS_MULTIPROC_DIR' in os.environ:
+        del os.environ['PROMETHEUS_MULTIPROC_DIR']
+    hung = _ControlledCollector(['hang'])
+    metrics.register_plugin_collector(hung)
+    wrapper = metrics._plugin_collectors[-1]
+    try:
+        start = time.time()
+        response = metrics.metrics()
+        elapsed = time.time() - start
+        assert response.status_code == 200
+        assert elapsed < 10.0
+        assert _wait_until(hung.hang_started.is_set)
+        body = metrics.metrics().body.decode()
+        assert ('sky_apiserver_metrics_collector_active'
+                '{collector="_ControlledCollector"} 0.0') in body
+    finally:
+        hung.release.set()
+        prom.REGISTRY.unregister(wrapper)
+        metrics._plugin_collectors.remove(wrapper)
+        metrics._resilient_collectors.remove(wrapper)

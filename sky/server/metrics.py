@@ -175,6 +175,164 @@ async def multiproc_reaper_daemon(
         await asyncio.sleep(interval_seconds)
 
 
+# How long a ResilientCollector snapshot is considered fresh. A scrape
+# arriving after this triggers a background refresh (at most one in
+# flight per collector).
+_COLLECTOR_REFRESH_TTL_SECONDS = 30
+# How stale a snapshot may get before the collector is reported as
+# inactive via sky_apiserver_metrics_collector_active. Spans a couple of
+# refresh windows so a single slow-but-successful refresh does not flap
+# the gauge.
+_COLLECTOR_MAX_STALENESS_SECONDS = 3 * _COLLECTOR_REFRESH_TTL_SECONDS
+
+
+class ResilientCollector:
+    """Serves scrapes from a snapshot that is refreshed off the scrape path.
+
+    Wraps a Prometheus collector whose ``collect()`` may block on external
+    state (typically the state database). ``collect()`` here never blocks:
+    it returns the last snapshot immediately and, if the snapshot is older
+    than ``ttl_seconds``, kicks off a background refresh — at most one in
+    flight per collector, so a refresh hung on a saturated DB pool never
+    stacks additional threads or queries on top of an ongoing outage.
+
+    There is deliberately no cancellation or restart of a hung refresh: a
+    thread blocked inside a DB driver cannot be killed, and retrying
+    against an unhealthy database only adds load. Instead the collector
+    keeps serving its stale snapshot and ``CollectorHealthCollector``
+    flips ``sky_apiserver_metrics_collector_active`` to 0 once the last
+    successful refresh is older than ``max_staleness_seconds`` — that is
+    the signal operators alert on and intervene.
+    """
+
+    def __init__(
+        self,
+        wrapped,
+        ttl_seconds: float = _COLLECTOR_REFRESH_TTL_SECONDS,
+        max_staleness_seconds: float = (_COLLECTOR_MAX_STALENESS_SECONDS)):
+        self._wrapped = wrapped
+        # Label value for the health meta-metrics. May be suffixed by
+        # _wrap_collector() to stay unique across instances.
+        self.name = type(wrapped).__name__
+        self.max_staleness_seconds = max_staleness_seconds
+        self._ttl = ttl_seconds
+        self._lock = threading.Lock()
+        self._snapshot: List[prom_core.Metric] = []
+        self._last_attempt_time = 0.0
+        self._last_success_time = 0.0
+        self._refresh_in_flight = False
+
+    def describe(self):
+        """Delegates to the wrapped ``describe()`` (never its ``collect()``).
+
+        Having a ``describe()`` — even one that yields nothing — matters:
+        ``prometheus_client`` falls back to calling ``collect()`` at
+        registration time for collectors without one, which would put a
+        potentially-blocking call back on the registration path.
+        """
+        describe = getattr(self._wrapped, 'describe', None)
+        if describe is not None:
+            yield from describe()
+
+    def collect(self):
+        now = time.time()
+        with self._lock:
+            snapshot = self._snapshot
+            refresh_due = (not self._refresh_in_flight and
+                           now - self._last_attempt_time >= self._ttl)
+            if refresh_due:
+                self._refresh_in_flight = True
+                self._last_attempt_time = now
+        if refresh_due:
+            threading.Thread(target=self._refresh,
+                             name=f'metrics-refresh-{self.name}',
+                             daemon=True).start()
+        yield from snapshot
+
+    def _refresh(self) -> None:
+        try:
+            # Materialize before swapping so a failure mid-iteration
+            # cannot leave a partial snapshot behind.
+            snapshot = list(self._wrapped.collect())
+        except Exception:  # pylint: disable=broad-except
+            logger.exception(
+                'Metrics collector %s failed to refresh; '
+                'serving stale snapshot.', self.name)
+            with self._lock:
+                self._refresh_in_flight = False
+            return
+        with self._lock:
+            self._snapshot = snapshot
+            self._last_success_time = time.time()
+            self._refresh_in_flight = False
+
+    def last_success_time(self) -> float:
+        with self._lock:
+            return self._last_success_time
+
+
+# All ResilientCollector instances, for CollectorHealthCollector. Also
+# gives the health meta-metrics a single emitter: were each wrapper to
+# yield its own copy of the family, the duplicate names would make the
+# exposition invalid (and fail registry duplicate-name checks).
+_resilient_collectors: List[ResilientCollector] = []
+
+_COLLECTOR_ACTIVE_HELP = (
+    '1 if the collector refreshed successfully within its staleness '
+    'bound; 0 means its metrics are being served from a stale snapshot '
+    '(e.g. the refresh is hung on a DB outage) and needs operator '
+    'attention. Also 0 between process start and the first successful '
+    'refresh.')
+_COLLECTOR_LAST_SUCCESS_HELP = (
+    'Unix timestamp of the collector\'s last successful refresh; 0 if it '
+    'has not succeeded since process start.')
+
+
+class CollectorHealthCollector:
+    """Health meta-metrics for every ResilientCollector in this process."""
+
+    def describe(self):
+        yield prom_core.GaugeMetricFamily(
+            'sky_apiserver_metrics_collector_active',
+            _COLLECTOR_ACTIVE_HELP,
+            labels=['collector'])
+        yield prom_core.GaugeMetricFamily(
+            'sky_apiserver_metrics_collector_last_success_timestamp_seconds',
+            _COLLECTOR_LAST_SUCCESS_HELP,
+            labels=['collector'])
+
+    def collect(self):
+        now = time.time()
+        active_family = prom_core.GaugeMetricFamily(
+            'sky_apiserver_metrics_collector_active',
+            _COLLECTOR_ACTIVE_HELP,
+            labels=['collector'])
+        last_success_family = prom_core.GaugeMetricFamily(
+            'sky_apiserver_metrics_collector_last_success_timestamp_seconds',
+            _COLLECTOR_LAST_SUCCESS_HELP,
+            labels=['collector'])
+        for collector in list(_resilient_collectors):
+            last_success = collector.last_success_time()
+            active = now - last_success <= collector.max_staleness_seconds
+            active_family.add_metric([collector.name], 1.0 if active else 0.0)
+            last_success_family.add_metric([collector.name], last_success)
+        yield active_family
+        yield last_success_family
+
+
+def _wrap_collector(collector) -> ResilientCollector:
+    """Wraps a collector in ResilientCollector with a unique health name."""
+    wrapped = ResilientCollector(collector)
+    existing = {c.name for c in _resilient_collectors}
+    if wrapped.name in existing:
+        suffix = 2
+        while f'{wrapped.name}-{suffix}' in existing:
+            suffix += 1
+        wrapped.name = f'{wrapped.name}-{suffix}'
+    _resilient_collectors.append(wrapped)
+    return wrapped
+
+
 class BurnRateCollector:
     """Collector for SkyPilot cluster burn rate metrics.
     This collector calculates the total hourly burn rate (in USD) of all
@@ -235,22 +393,36 @@ class BurnRateCollector:
         yield metric
 
 
-_BURN_RATE_COLLECTOR = BurnRateCollector()
+_BURN_RATE_COLLECTOR = _wrap_collector(BurnRateCollector())
 
 try:
     prom.REGISTRY.register(_BURN_RATE_COLLECTOR)  # for non-multiprocess
 except ValueError:
     pass
 
-# Collectors registered by plugins at runtime.
+_COLLECTOR_HEALTH_COLLECTOR = CollectorHealthCollector()
+
+try:
+    prom.REGISTRY.register(_COLLECTOR_HEALTH_COLLECTOR)
+except ValueError:
+    pass
+
+# Collectors registered by plugins at runtime (ResilientCollector-wrapped).
 _plugin_collectors: list = []
 
 
 def register_plugin_collector(collector):
-    """Register a custom Prometheus collector from a plugin."""
-    _plugin_collectors.append(collector)
+    """Register a custom Prometheus collector from a plugin.
+
+    The collector is wrapped in ResilientCollector, so a hung or failing
+    data source degrades its metrics to a stale snapshot (flagged by
+    sky_apiserver_metrics_collector_active) instead of hanging the whole
+    /metrics scrape.
+    """
+    wrapped = _wrap_collector(collector)
+    _plugin_collectors.append(wrapped)
     try:
-        prom.REGISTRY.register(collector)
+        prom.REGISTRY.register(wrapped)
     except ValueError:
         pass
 
@@ -674,14 +846,14 @@ class WorkspaceUsageCollector:
         yield m
 
 
-_WORKSPACE_USAGE_COLLECTOR = WorkspaceUsageCollector()
+_WORKSPACE_USAGE_COLLECTOR = _wrap_collector(WorkspaceUsageCollector())
 
 try:
     prom.REGISTRY.register(_WORKSPACE_USAGE_COLLECTOR)
 except ValueError:
     pass
 
-_MANAGED_JOBS_COLLECTOR: Optional[ManagedJobsCollector] = None
+_MANAGED_JOBS_COLLECTOR: Optional[ResilientCollector] = None
 
 
 def maybe_register_managed_jobs_collector():
@@ -692,11 +864,13 @@ def maybe_register_managed_jobs_collector():
     cluster and is not directly accessible.
     """
     global _MANAGED_JOBS_COLLECTOR
+    if _MANAGED_JOBS_COLLECTOR is not None:
+        return
     # pylint: disable=import-outside-toplevel
     from sky.jobs import utils as managed_job_utils
     if not managed_job_utils.is_consolidation_mode():
         return
-    _MANAGED_JOBS_COLLECTOR = ManagedJobsCollector()
+    _MANAGED_JOBS_COLLECTOR = _wrap_collector(ManagedJobsCollector())
     try:
         prom.REGISTRY.register(_MANAGED_JOBS_COLLECTOR)
     except ValueError:
@@ -717,6 +891,7 @@ def metrics() -> fastapi.Response:
         multiprocess.MultiProcessCollector(registry)
         registry.register(_BURN_RATE_COLLECTOR)
         registry.register(_WORKSPACE_USAGE_COLLECTOR)
+        registry.register(_COLLECTOR_HEALTH_COLLECTOR)
         if _MANAGED_JOBS_COLLECTOR is not None:
             registry.register(_MANAGED_JOBS_COLLECTOR)
         for c in _plugin_collectors:
