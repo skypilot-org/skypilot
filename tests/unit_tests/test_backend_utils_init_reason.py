@@ -241,7 +241,9 @@ class TestUpdateClusterStatusInitReason:
 def _collect_cluster_events_with_ray_status(run_return_value,
                                             *,
                                             count_healthy=None,
-                                            launched_nodes=2):
+                                            launched_nodes=2,
+                                            probe_return_value=(255, '', ''),
+                                            status=status_lib.ClusterStatus.UP):
     """Drive _update_cluster_status while controlling the `ray status` check.
 
     All nodes report UP from the cloud/k8s API (so all_nodes_up is True and the
@@ -256,7 +258,7 @@ def _collect_cluster_events_with_ray_status(run_return_value,
     handle = _make_handle()
     handle.launched_nodes = launched_nodes
     handle.num_ips_per_node = 1
-    record = _make_record(handle)
+    record = _make_record(handle, status=status)
 
     node_statuses = {
         f'pod-{i}': (status_lib.ClusterStatus.UP, None)
@@ -264,7 +266,14 @@ def _collect_cluster_events_with_ray_status(run_return_value,
     }
 
     head_runner = mock.Mock()
-    head_runner.run.return_value = run_return_value
+
+    def _run(cmd, *args, **kwargs):
+        # The reachability probe runs `true`; anything else is `ray status`.
+        if cmd == 'true':
+            return probe_return_value
+        return run_return_value
+
+    head_runner.run.side_effect = _run
     handle.get_command_runners.return_value = [head_runner]
 
     events = []
@@ -346,3 +355,27 @@ class TestRayStatusTransientConnectivity:
         assert init_messages, events
         assert 'ray cluster is unhealthy (1/2 ready)' in init_messages[0], (
             init_messages)
+
+    def test_dead_ray_on_reachable_pod_goes_init(self):
+        # `ray status` exits non-zero (Ray itself is down) but the pod is
+        # reachable (the trivial probe succeeds). This must still transition to
+        # INIT -- the keep-UP escape hatch is only for an unreachable control
+        # plane, not a dead Ray runtime under a Running pod.
+        events = _collect_cluster_events_with_ray_status(
+            (1, '', 'ConnectionError: Could not find any running Ray '
+             'instance.'),
+            probe_return_value=(0, '', ''))
+        statuses = [status for status, _ in events]
+        assert status_lib.ClusterStatus.INIT in statuses, events
+
+    def test_init_cluster_not_promoted_to_up(self):
+        # A cluster already in INIT (e.g. `sky launch` interrupted before Ray
+        # was set up) must not be flipped to UP just because `ray status` never
+        # succeeds -- the escape hatch preserves an existing UP but never
+        # promotes to it.
+        events = _collect_cluster_events_with_ray_status(
+            (255, '', 'dial tcp 10.0.0.1:443: connect: operation not '
+             'permitted'),
+            status=status_lib.ClusterStatus.INIT)
+        statuses = [status for status, _ in events]
+        assert status_lib.ClusterStatus.UP not in statuses, events
