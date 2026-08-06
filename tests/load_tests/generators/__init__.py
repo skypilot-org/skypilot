@@ -1,5 +1,6 @@
 """Benchmark load generators."""
 from .base import GeneratorBase
+from .launch_cancel_generator import LaunchCancelGenerator
 from .long_conn_generator import LongConnGenerator
 from .qps_generator import QpsGenerator
 from .shell_generator import ShellGenerator
@@ -11,4 +12,5 @@ __all__ = [
     'QpsGenerator',
     'LongConnGenerator',
     'SshBenchGenerator',
+    'LaunchCancelGenerator',
 ]
