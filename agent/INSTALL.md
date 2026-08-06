@@ -43,7 +43,7 @@ You should see a symlink pointing to the skypilot skills directory.
 
 ## Reload
 
-You may need to restart the agent to reload the skypilot skill if it is not available after installation. Hint user to ask "Bootstrap skypilot" after the skill is loaded.
+You may need to restart the agent to reload the skypilot skill if it is not available after installation. Hint user to ask "Check my available infra" after the skill is loaded.
 
 ## Updating
 
