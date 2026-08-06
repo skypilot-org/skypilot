@@ -746,6 +746,26 @@ class AbstractStore:
             f'{StorageMode.MOUNT_CACHED.value} is '
             f'not supported for {self.name}.')
 
+    def mount_write_verification_command(self, mount_path: str) -> str:
+        """Returns a shell snippet to verify writes to ``mount_path`` after a
+        task run.
+
+        Some FUSE-based mount backends (goofys, rclone for S3) silently produce
+        0-byte files when a writer uses append or partial-flush semantics, e.g.
+        ``pandas.to_parquet`` or pyarrow (see
+        https://github.com/skypilot-org/skypilot/issues/1901). The default
+        implementation returns the same verification snippet for every store
+        that supports a mount — subclasses for non-FUSE backends can override
+        to return the empty string.
+
+        Returns an empty string for stores that do not have a meaningful
+        mount verification step.
+
+        Args:
+          mount_path: str; Mount path on remote server
+        """
+        return mounting_utils.get_mount_write_verification_cmd(mount_path)
+
     def __deepcopy__(self, memo):
         # S3 Client and GCS Client cannot be deep copied, hence the
         # original Store object is returned
