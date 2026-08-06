@@ -2003,6 +2003,19 @@ def stream_logs_by_id(
                             None,
                             follow=False,
                             tail=tail if tail is not None else 0)
+                        if returncode is None:
+                            # Not cluster-addressed: runtimes whose forwarded
+                            # records carry the managed-job identity instead of
+                            # an on-cluster job id (e.g. bare-pod runtimes with
+                            # no per-job log files) are read back directly by
+                            # (job_id, task_id). Readers without managed-job
+                            # addressing return None again and we fall through
+                            # to the terminal-state message.
+                            returncode = log_reader.read_managed_job_logs(
+                                job_id,
+                                task_id,
+                                follow=False,
+                                tail=tail if tail is not None else 0)
                     except Exception as e:  # pylint: disable=broad-except
                         # Surface the failure (streamed to the user via the
                         # request's stdout redirection) and fall through to the

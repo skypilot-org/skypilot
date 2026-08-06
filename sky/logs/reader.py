@@ -31,6 +31,33 @@ class LogReader(abc.ABC):
         """
         raise NotImplementedError
 
+    def read_managed_job_logs(self, job_id: int, task_id: Optional[int], *,
+                              follow: bool, tail: int) -> Optional[int]:
+        """Streams a managed job task's logs from the external store to stdout.
+
+        Addresses logs by the managed job's identity instead of the cluster the
+        job ran on, for runtimes whose forwarded log records carry the managed
+        job id rather than an on-cluster job id (so ``read_cluster_job_logs``
+        cannot locate them). Non-abstract: readers without managed-job
+        addressing inherit the default and return None; callers then rely on
+        ``read_cluster_job_logs`` alone.
+
+        Args:
+            job_id: The managed job id.
+            task_id: The task id within the job, or None for all tasks.
+            follow: Whether to follow the log. An external store is historical,
+                so this may be treated as a no-op.
+            tail: Number of lines from the end to stream; 0 means all.
+
+        Returns:
+            The exit code to report if logs were streamed, or None if this
+            reader does not support managed-job addressing or found no records
+            for the job. A reader that cannot determine the job's status from
+            the store should return 0.
+        """
+        del job_id, task_id, follow, tail  # Unsupported by default.
+        return None
+
 
 _log_reader: Optional[LogReader] = None
 
