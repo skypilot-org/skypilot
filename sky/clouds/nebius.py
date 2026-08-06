@@ -340,6 +340,11 @@ class Nebius(clouds.Cloud):
 
         use_static_ip_address = skypilot_config.get_nested(
             ('nebius', 'use_static_ip_address'), default_value=False)
+        disk_encrypted = skypilot_config.get_effective_region_config(
+            cloud='nebius',
+            region=region.name,
+            keys=('disk_encrypted',),
+            default_value=False)
 
         def _get_disk_tier() -> resources_utils.DiskTier:
             logger.debug(f'Getting disk tier for Nebius {resources.disk_tier}.')
@@ -396,6 +401,7 @@ class Nebius(clouds.Cloud):
             'filesystems': resources_vars_fs,
             'network_tier': resources.network_tier,
             'disk_tier': _get_disk_tier(),
+            'disk_encrypted': disk_encrypted,
             'security_group': security_group,
             'security_group_managed_by_skypilot':
                 str(security_group_managed_by_skypilot).lower(),
