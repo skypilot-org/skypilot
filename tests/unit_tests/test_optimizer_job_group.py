@@ -1223,3 +1223,127 @@ class TestPrintJobGroupPlan:
             # (no "Best plan:" message)
             for call in mock_logger.info.call_args_list:
                 assert 'Best plan' not in str(call)
+
+
+class TestSelectBestInfraDistinctCloudInstances:
+    """Regression tests for cloud-keyed candidate lookups with real clouds.
+
+    Production builds each task's candidate dict with its own Cloud
+    instances. Before Cloud.__eq__/__hash__ existed, the value lookup
+    `cloud in candidates` in _select_best_infra failed for every task
+    except the one whose instance _find_common_infras happened to reuse,
+    so every common infra was skipped as invalid and the fallback
+    returned an arbitrary member of an unordered set. Observed in the
+    wild: a 2-task group placed on paid AWS while free Kubernetes
+    capacity was listed under "Other available common infras".
+
+    The mock-cloud fixtures elsewhere in this file wire up __eq__ on the
+    mocks and share one instance across tasks, which is exactly why they
+    could not catch this; these tests use real cloud objects and fresh
+    instances per task on purpose.
+    """
+
+    def _res(self, cloud, region, cost):
+        res = MagicMock(spec=resources_lib.Resources)
+        res.cloud = cloud
+        res.region = region
+        res.get_cost = MagicMock(return_value=cost)
+        return res
+
+    def _task(self, name):
+        task = MagicMock(spec=task_lib.Task)
+        task.name = name
+        task.time_estimator_func = None
+        task.num_nodes = 1
+        return task
+
+    def _candidates_for_task(self):
+        """Fresh cloud instances every call, as in production."""
+        return {
+            clouds.Kubernetes(): [
+                self._res(clouds.Kubernetes(), 'ctx-dev', cost=0.0)
+            ],
+            clouds.AWS(): [self._res(clouds.AWS(), 'ap-northeast-1', cost=8.6)],
+        }
+
+    def test_free_kubernetes_beats_paid_aws_across_instances(self):
+        task1, task2 = self._task('a'), self._task('b')
+        task_candidates = {
+            task1: self._candidates_for_task(),
+            task2: self._candidates_for_task(),
+        }
+
+        common_infras = optimizer.Optimizer._find_common_infras(task_candidates)
+        as_names = {(str(c), r) for c, r in common_infras}
+        assert as_names == {('Kubernetes', 'ctx-dev'),
+                            ('AWS', 'ap-northeast-1')}
+
+        cloud, region = optimizer.Optimizer._select_best_infra(
+            common_infras, task_candidates, [task1, task2], minimize_cost=True)
+        assert str(cloud) == 'Kubernetes'
+        assert region == 'ctx-dev'
+
+    def test_find_common_infras_order_is_deterministic(self):
+        """The intersection is computed over a set; the returned list
+        must not leak set iteration order into placement decisions."""
+        task1, task2 = self._task('a'), self._task('b')
+
+        def candidates():
+            return {
+                clouds.AWS(): [
+                    self._res(clouds.AWS(), 'us-east-1', cost=1.0),
+                    self._res(clouds.AWS(), 'ap-northeast-1', cost=1.0),
+                ],
+                clouds.Kubernetes(): [
+                    self._res(clouds.Kubernetes(), 'ctx-dev', cost=0.0)
+                ],
+            }
+
+        task_candidates = {task1: candidates(), task2: candidates()}
+        result = optimizer.Optimizer._find_common_infras(task_candidates)
+        assert [(str(c), r) for c, r in result] == [
+            ('AWS', 'ap-northeast-1'),
+            ('AWS', 'us-east-1'),
+            ('Kubernetes', 'ctx-dev'),
+        ]
+
+    def test_optimize_same_infra_end_to_end_distinct_instances(self):
+        """Full _optimize_same_infra pass with per-task cloud instances:
+        the group must land on the free Kubernetes context, not AWS, and
+        the unset inter_connection must NOT degrade (placement is k8s)."""
+        dag = MagicMock(spec=dag_lib.Dag)
+        dag.name = 'g'
+        dag.inter_connection = None
+        dag.inter_connection_enabled = MagicMock(return_value=True)
+
+        task1, task2 = self._task('a'), self._task('b')
+        task1.estimate_runtime = MagicMock(return_value=3600)
+        task2.estimate_runtime = MagicMock(return_value=3600)
+        dag.tasks = [task1, task2]
+
+        per_task_resources = {}
+
+        def mock_fill(task, blocked_resources, quiet):
+            k8s_res = self._res(clouds.Kubernetes(), 'ctx-dev', cost=0.0)
+            k8s_res.cloud.get_vcpus_mem_from_instance_type = MagicMock(
+                return_value=(2.0, 4.0))
+            k8s_res.instance_type = '2CPU--4GB'
+            k8s_res.get_accelerators_str = MagicMock(return_value='-')
+            k8s_res.get_spot_str = MagicMock(return_value='')
+            k8s_res.infra = MagicMock()
+            aws_res = self._res(clouds.AWS(), 'ap-northeast-1', cost=8.6)
+            per_task_resources[task.name] = k8s_res
+            return ({'any': [k8s_res, aws_res]}, None, None, None)
+
+        with patch('sky.optimizer._fill_in_launchable_resources',
+                   side_effect=mock_fill):
+            optimizer.Optimizer._optimize_same_infra(
+                dag,
+                minimize=common.OptimizeTarget.COST,
+                blocked_resources=None,
+                quiet=True)
+
+        assert task1.best_resources is per_task_resources['a']
+        assert task2.best_resources is per_task_resources['b']
+        # k8s placement: the unset default must survive undegraded.
+        assert dag.inter_connection is None

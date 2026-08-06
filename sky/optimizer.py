@@ -1395,6 +1395,10 @@ class Optimizer:
             if cloud_obj:
                 result.append((cloud_obj, region))
 
+        # Deterministic order: the intersection above is a set, so without
+        # sorting the caller's tie-breaks (and any [0] fallback) would vary
+        # run to run.
+        result.sort(key=lambda infra: (str(infra[0]).lower(), infra[1] or ''))
         return result
 
     @staticmethod
