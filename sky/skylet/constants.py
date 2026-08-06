@@ -732,6 +732,12 @@ ENV_VAR_ENABLE_SERVICE_ACCOUNTS = 'ENABLE_SERVICE_ACCOUNTS'
 ENV_VAR_ENABLE_REQUEST_DEBUG_LOGGING = (
     f'{SKYPILOT_SERVER_ENV_VAR_PREFIX}ENABLE_REQUEST_DEBUG_LOGGING')
 
+# When set to a truthy value, each API server worker binds its own listening
+# socket with SO_REUSEPORT so the kernel load-balances new connections across
+# workers, instead of all workers sharing a single inherited socket. Only takes
+# effect with multiple workers on platforms that support SO_REUSEPORT.
+ENV_VAR_SERVER_REUSE_PORT = (f'{SKYPILOT_SERVER_ENV_VAR_PREFIX}REUSE_PORT')
+
 SKYPILOT_DEFAULT_WORKSPACE = 'default'
 
 # BEGIN constants used for service catalog.
