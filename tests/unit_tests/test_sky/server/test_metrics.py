@@ -1108,10 +1108,12 @@ def test_resilient_collector_refresh_error_keeps_snapshot_and_retries():
     first_success = collector.last_success_time()
     list(collector.collect())  # Triggers the failing refresh.
     assert _wait_until(lambda: wrapped.calls == 2)
-    # The failure left the old snapshot in place and did not advance
-    # the success time.
-    assert _gauge_value(collector.collect()) == 1.0
+    # The failure left the old snapshot in place and did not advance the
+    # success time. Checked before the next collect(): that one triggers
+    # the recovering refresh, which may advance the success time at any
+    # point after it.
     assert collector.last_success_time() == first_success
+    assert _gauge_value(collector.collect()) == 1.0
     # The previous collect() already triggered the third (recovering)
     # refresh; the in-flight flag was not left stuck by the failure.
     assert _wait_until(lambda: _gauge_value(collector.collect()) == 2.0)
