@@ -85,7 +85,7 @@ async def health():
     try:
         redis_client.ping()
         return {"status": "healthy", "papers": index.info().get("num_docs", 0)}
-    except:
+    except Exception:
         return {"status": "unhealthy"}
 
 
