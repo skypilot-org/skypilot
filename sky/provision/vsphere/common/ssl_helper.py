@@ -22,13 +22,14 @@ def get_unverified_context():
     return context
 
 
-def get_unverified_session():
-    """    Get a requests session with cert verification disabled.
-    Also disable the insecure warnings message.
-    Note this is not recommended in production code.
-    @return: a requests session with verification disabled.
+def get_unverified_session(insecure: bool = False):
+    """    Get a requests session.
+    Certificate verification is enabled by default.
+    Set insecure=True only for explicit debug usage.
+    @return: a requests session.
     """
     session = requests.session()
-    session.verify = False
-    requests.packages.urllib3.disable_warnings()  # type: ignore[attr-defined]
+    session.verify = not insecure
+    if insecure:
+        requests.packages.urllib3.disable_warnings()  # type: ignore[attr-defined]
     return session
