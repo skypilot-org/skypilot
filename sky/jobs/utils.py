@@ -645,6 +645,17 @@ def controller_process_alive(record: managed_job_state.ControllerPidRecord,
     try:
         process = psutil.Process(record.pid)
 
+        if process.status() == psutil.STATUS_ZOMBIE:
+            # A dead-but-unreaped controller (e.g. SIGKILLed or OOM-killed
+            # before its parent waited on it) will never run again, but
+            # psutil.Process.is_running() returns True for zombies - so
+            # without this check a zombified controller's jobs would look
+            # healthy forever and never be recovered. The pid cannot be
+            # reused while the zombie exists, so acting on it is safe.
+            if not quiet:
+                logger.debug(f'Controller process {record.pid} is a zombie.')
+            return False
+
         if record.started_at is not None:
             if process.create_time() != record.started_at:
                 if not quiet:
@@ -701,10 +712,13 @@ def update_managed_jobs_statuses(job_id: Optional[int] = None):
     """Update managed job status if the controller process failed abnormally.
 
     Check the status of the controller process. If it is not running, it must
-    have exited abnormally, and we should set the job status to
-    FAILED_CONTROLLER. `end_at` will be set to the current timestamp for the job
-    when above happens, which could be not accurate based on the frequency this
-    function is called.
+    have exited abnormally. A non-terminal job whose controller process died
+    is requeued (reset to WAITING) so that a fresh controller can claim it
+    and resume it from the DB, up to the job's recovery budget (shared with
+    the controller's in-place emergency retries); once the budget is
+    exhausted, the job is failed as FAILED_CONTROLLER. `end_at` will be set
+    to the current timestamp for the job when the latter happens, which could
+    be not accurate based on the frequency this function is called.
 
     Note: we expect that job_id, if provided, refers to a nonterminal job or a
     job that has not completed its cleanup (schedule state not DONE).
@@ -842,7 +856,64 @@ def update_managed_jobs_statuses(job_id: Optional[int] = None):
                 continue
 
             logger.error(f'Controller process for {job_id} seems to be dead.')
-            failure_reason = 'Controller process is dead'
+
+            if all(task['status'].is_terminal() for task in tasks):
+                # The controller already wrote a terminal status but died
+                # before finishing its cleanup and marking the job DONE.
+                # Preserve the terminal outcome (e.g. SUCCEEDED) and converge
+                # the remaining bookkeeping (job_done) only after cleanup
+                # succeeds. If cleanup fails, leave this row alone: since the
+                # job is not DONE and its recorded controller pid is dead,
+                # get_jobs_to_check_status will return it again on every
+                # future sweep, and this branch will retry the cleanup. These
+                # retries are bounded by the same emergency-recovery budget
+                # shared with requeues and in-place retries; once it is
+                # exhausted, the job escalates to FAILED_CONTROLLER below,
+                # which doubles as the resources-may-have-leaked signal. A
+                # job must never be marked DONE without a successful cleanup,
+                # and its own terminal status must never be overridden
+                # except via that escalation.
+                logger.info(
+                    f'Job {job_id} is already terminal '
+                    f'({", ".join(task["status"].value for task in tasks)}); '
+                    'cleaning up after the dead controller process.')
+                cleanup_error = _cleanup_job_clusters(job_id)
+                if cleanup_error is None:
+                    scheduler.job_done(job_id, idempotent=True)
+                    continue
+                failure_note = (
+                    managed_job_state.charge_terminal_cleanup_attempt(job_id))
+                if failure_note is None:
+                    logger.error(
+                        f'Cleanup of job {job_id}\'s cluster(s) failed after '
+                        f'its controller process died: {cleanup_error}. '
+                        'Will retry on the next status refresh; the job is '
+                        'not marked done until its resources are cleaned '
+                        'up.')
+                    continue
+                statuses_str = ', '.join(task['status'].value for task in tasks)
+                failure_reason = (
+                    'cluster cleanup failed repeatedly after the '
+                    f'controller process died and {failure_note}: '
+                    f'{cleanup_error}. Resources may have leaked; please '
+                    'verify the job\'s cluster(s) are terminated. The job '
+                    f'itself had already finished (status: {statuses_str})')
+            else:
+                # The controller process died with the job still in flight
+                # (e.g. OOM-killed or crashed). The job itself may well be
+                # fine, so requeue it for a fresh controller to claim and
+                # resume from the DB, instead of failing it. This shares the
+                # emergency-recovery budget with the controller's in-place
+                # retries, so a job whose controller keeps dying eventually
+                # escapes to FAILED_CONTROLLER below.
+                failure_note = managed_job_state.try_requeue_job_for_recovery(
+                    job_id, pid, pid_started_at)
+                if failure_note is None:
+                    # Requeued (or our observation went stale) - nothing
+                    # further to do this sweep.
+                    continue
+                failure_reason = (
+                    f'Controller process is dead and {failure_note}')
 
         # At this point, either pid is None or process is dead.
 
@@ -859,10 +930,16 @@ def update_managed_jobs_statuses(job_id: Optional[int] = None):
             cleanup_error_msg = f'Also, cleanup failed: {cleanup_error}. '
 
         # Set all tasks to FAILED_CONTROLLER, regardless of current status.
-        # This may change a job from SUCCEEDED or another terminal state to
-        # FAILED_CONTROLLER. This is what we want - we are sure that this
-        # controller process crashed, so we want to capture that even if the
-        # underlying job succeeded.
+        # Jobs that already reached a terminal status on their own are
+        # handled above (status preserved once cleanup succeeds, retried
+        # otherwise), so this call only overrides non-terminal statuses -
+        # except for the rare race where another janitor invocation
+        # terminalized the job concurrently, in which case both invocations
+        # write FAILED_CONTROLLER anyway. It is also intentionally overridden
+        # when the terminal-cleanup retry budget (charged above via
+        # charge_terminal_cleanup_attempt) is exhausted: at that point we
+        # give up preserving the original terminal status in favor of
+        # surfacing the resources-may-have-leaked signal.
         # Note: 2+ invocations of update_managed_jobs_statuses could be running
         # at the same time, so this could override the FAILED_CONTROLLER status
         # set by another invocation of update_managed_jobs_statuses. That should
