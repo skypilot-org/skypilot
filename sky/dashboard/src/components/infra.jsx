@@ -110,6 +110,141 @@ const INFRA_PAGE_SIZE_STORAGE_KEY = 'skypilot-infra-page-size';
 // before middle-ellipsis truncation kicks in (full name stays in the tooltip).
 const INFRA_NAME_TRUNCATE_LENGTH = 45;
 
+// Per-node GPU allocation: for each GPU type, show every node as a card with
+// one square per GPU (used vs free), so full vs partially-allocated
+// (fragmented) nodes are explicit at a glance. Kubernetes reports counts per
+// node (not device indices), so squares are ordered used-first within a node.
+const MACHINE_TYPE_RE = /(a\d+-[a-z]+gpu-\d+g|n\d+-[a-z]+-\d+)/;
+
+function NodeGpuAllocationGrid({ perNodeGPUs }) {
+  const gpuNodes = (perNodeGPUs || []).filter(
+    (n) => n.gpu_name && n.gpu_name !== '-' && (n.gpu_total || 0) > 0
+  );
+  if (gpuNodes.length === 0) return null;
+
+  // Group nodes by canonical GPU type
+  const byType = {};
+  gpuNodes.forEach((node) => {
+    const type = canonicalizeGpuName(node.gpu_name);
+    if (!byType[type]) byType[type] = [];
+    byType[type].push(node);
+  });
+
+  return (
+    <div className="mt-6">
+      <h4 className="text-base font-semibold mb-1">Per-node GPU allocation</h4>
+      <div className="flex items-center gap-4 text-xs text-gray-500 mb-3">
+        <span className="inline-flex items-center gap-1.5">
+          <span className="inline-block w-2.5 h-2.5 rounded-sm bg-yellow-500" />
+          used
+        </span>
+        <span className="inline-flex items-center gap-1.5">
+          <span className="inline-block w-2.5 h-2.5 rounded-sm bg-green-700" />
+          free
+        </span>
+      </div>
+      {Object.keys(byType)
+        .sort()
+        .map((gpuType) => {
+          const nodes = [...byType[gpuType]].sort((a, b) =>
+            (a.node_name || '').localeCompare(b.node_name || '')
+          );
+          const total = nodes.reduce((s, n) => s + (n.gpu_total || 0), 0);
+          const free = nodes.reduce((s, n) => s + (n.gpu_free || 0), 0);
+          const used = total - free;
+          const perNode = nodes[0]?.gpu_total || 0;
+          const uniformPerNode = nodes.every((n) => n.gpu_total === perNode);
+          const machineType =
+            nodes[0]?.node_name?.match(MACHINE_TYPE_RE)?.[0] || null;
+
+          return (
+            <div key={gpuType} className="mb-5 last:mb-0">
+              <div className="flex items-baseline gap-2">
+                <span className="font-semibold text-sm">{gpuType}</span>
+                {machineType && (
+                  <span className="text-xs text-gray-500 font-mono">
+                    {machineType}
+                  </span>
+                )}
+              </div>
+              <div className="text-xs text-gray-500 mb-2">
+                {used} used / {total} total · {nodes.length}{' '}
+                {nodes.length === 1 ? 'node' : 'nodes'}
+                {uniformPerNode && perNode > 0 && ` × ${perNode} GPUs`}
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                {nodes.map((node) => {
+                  const nodeTotal = node.gpu_total || 0;
+                  const nodeFree = node.gpu_free || 0;
+                  const nodeUsed = Math.max(0, nodeTotal - nodeFree);
+                  const isFragmented = nodeUsed > 0 && nodeFree > 0;
+                  const isUnavailable =
+                    node.is_ready === false || node.is_cordoned === true;
+                  return (
+                    <div
+                      key={`${node.context || node.cluster || ''}/${node.node_name}`}
+                      className={`rounded-md border p-3 bg-white ${
+                        isFragmented
+                          ? 'border-yellow-400 ring-1 ring-yellow-200'
+                          : 'border-gray-200'
+                      } ${isUnavailable ? 'opacity-60' : ''}`}
+                    >
+                      <div className="flex items-center justify-between gap-2 mb-2">
+                        <NonCapitalizedTooltip
+                          content={node.node_name}
+                          className="text-sm text-muted-foreground"
+                        >
+                          <span className="text-xs font-medium block truncate">
+                            {node.node_name}
+                          </span>
+                        </NonCapitalizedTooltip>
+                        {isFragmented && (
+                          <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-yellow-100 text-yellow-800 whitespace-nowrap">
+                            fragmented
+                          </span>
+                        )}
+                        {isUnavailable && (
+                          <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-gray-200 text-gray-600 whitespace-nowrap">
+                            {node.is_cordoned ? 'cordoned' : 'not ready'}
+                          </span>
+                        )}
+                      </div>
+                      <div
+                        className="grid gap-1"
+                        style={{
+                          gridTemplateColumns: `repeat(${Math.min(nodeTotal, 8)}, minmax(0, 1fr))`,
+                        }}
+                      >
+                        {Array.from({ length: nodeTotal }, (_, i) => {
+                          const isUsed = i < nodeUsed;
+                          return (
+                            <div
+                              key={i}
+                              title={`GPU ${i} — ${isUsed ? 'used' : 'free'}`}
+                              className={`aspect-square rounded-sm ${
+                                isUsed ? 'bg-yellow-500' : 'bg-green-700'
+                              }`}
+                            />
+                          );
+                        })}
+                      </div>
+                      <div className="mt-2 text-xs text-gray-500">
+                        <span className="font-semibold text-gray-900">
+                          {nodeUsed}/{nodeTotal}
+                        </span>{' '}
+                        used
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          );
+        })}
+    </div>
+  );
+}
+
 // Skeleton badge for loading cells - replaces CircularProgress size={12}
 const SkeletonBadge = () => (
   <span className="px-2 py-0.5 bg-muted rounded text-xs font-medium inline-flex items-center">
@@ -1031,6 +1166,13 @@ export function InfrastructureSection({
               );
             })}
           </div>
+          {!isSSH && !isSlurm && (
+            <NodeGpuAllocationGrid
+              perNodeGPUs={safeContexts.flatMap(
+                (context) => (groupedPerNodeGPUs || {})[context] || []
+              )}
+            />
+          )}
         </div>
       </div>
     );
