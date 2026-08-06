@@ -606,6 +606,100 @@ class TestWorkspaceSchema(unittest.TestCase):
                 jsonschema.validate(instance=config,
                                     schema=self.workspaces_schema)
 
+    def test_workspace_slurm_allowed_clusters_valid(self):
+        """slurm.allowed_clusters accepts list / 'all' / [] per workspace."""
+        valid_configs = [
+            # List of cluster names.
+            {
+                'my-workspace': {
+                    'slurm': {
+                        'allowed_clusters': ['slurm-a', 'slurm-b']
+                    }
+                }
+            },
+            # 'all' broadens to every registered cluster.
+            {
+                'my-workspace': {
+                    'slurm': {
+                        'allowed_clusters': 'all'
+                    }
+                }
+            },
+            # Empty list is deny-all (the fail-closed provisioning default).
+            {
+                'my-workspace': {
+                    'slurm': {
+                        'allowed_clusters': []
+                    }
+                }
+            },
+            # disabled still works, matching the other clouds.
+            {
+                'my-workspace': {
+                    'slurm': {
+                        'disabled': True
+                    }
+                }
+            },
+            # allowed_clusters alongside disabled.
+            {
+                'my-workspace': {
+                    'slurm': {
+                        'allowed_clusters': ['slurm-a'],
+                        'disabled': False
+                    }
+                }
+            },
+            # Empty slurm block inherits the global config.
+            {
+                'my-workspace': {
+                    'slurm': {}
+                }
+            },
+        ]
+        for config in valid_configs:
+            try:
+                jsonschema.validate(instance=config,
+                                    schema=self.workspaces_schema)
+            except jsonschema.exceptions.ValidationError as e:
+                self.fail(f'Valid slurm config {config} was rejected: {e}')
+
+    def test_workspace_slurm_allowed_clusters_invalid(self):
+        """Invalid slurm.allowed_clusters shapes / extra props are rejected."""
+        invalid_configs = [
+            # A non-'all' string is not allowed.
+            {
+                'my-workspace': {
+                    'slurm': {
+                        'allowed_clusters': 'everything'
+                    }
+                }
+            },
+            # List items must be strings.
+            {
+                'my-workspace': {
+                    'slurm': {
+                        'allowed_clusters': [1, 2]
+                    }
+                }
+            },
+            # Unknown property under slurm is rejected.
+            {
+                'my-workspace': {
+                    'slurm': {
+                        'bogus': True
+                    }
+                }
+            },
+        ]
+        for config in invalid_configs:
+            with self.assertRaises(
+                    jsonschema.exceptions.ValidationError,
+                    msg=f'Invalid slurm workspace config {config!r} should be '
+                    'rejected'):
+                jsonschema.validate(instance=config,
+                                    schema=self.workspaces_schema)
+
 
 class TestKubernetesSchema(unittest.TestCase):
     """Tests for the kubernetes schema in schemas.py."""

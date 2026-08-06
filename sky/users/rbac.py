@@ -12,46 +12,72 @@ logger = sky_logging.init_logger(__name__)
 
 # Default user blocklist for user role
 # Cannot access workspace CUD operations.
-_DEFAULT_USER_BLOCKLIST = [{
-    'path': '/workspaces/config',
-    'method': 'POST'
-}, {
-    'path': '/workspaces/update',
-    'method': 'POST'
-}, {
-    'path': '/workspaces/create',
-    'method': 'POST'
-}, {
-    'path': '/workspaces/delete',
-    'method': 'POST'
-}, {
-    'path': '/workspaces/batch_add_users',
-    'method': 'POST'
-}, {
-    'path': '/workspaces/batch_remove_users',
-    'method': 'POST'
-}, {
-    'path': '/users/delete',
-    'method': 'POST'
-}, {
-    'path': '/users/create',
-    'method': 'POST'
-}, {
-    'path': '/users/batch_update',
-    'method': 'POST'
-}, {
-    'path': '/users/import',
-    'method': 'POST'
-}, {
-    'path': '/users/export',
-    'method': 'GET'
-}, {
-    'path': '/debug/dump_create',
-    'method': 'POST'
-}, {
-    'path': '/debug/dump_download/:filename',
-    'method': 'GET'
-}]
+_DEFAULT_USER_BLOCKLIST = [
+    {
+        'path': '/workspaces/config',
+        'method': 'POST'
+    },
+    {
+        'path': '/workspaces/update',
+        'method': 'POST'
+    },
+    {
+        'path': '/workspaces/create',
+        'method': 'POST'
+    },
+    {
+        'path': '/workspaces/delete',
+        'method': 'POST'
+    },
+    {
+        'path': '/workspaces/batch_add_users',
+        'method': 'POST'
+    },
+    {
+        'path': '/workspaces/batch_remove_users',
+        'method': 'POST'
+    },
+    {
+        'path': '/users/delete',
+        'method': 'POST'
+    },
+    {
+        'path': '/users/create',
+        'method': 'POST'
+    },
+    {
+        'path': '/users/batch_update',
+        'method': 'POST'
+    },
+    {
+        'path': '/users/import',
+        'method': 'POST'
+    },
+    {
+        'path': '/users/export',
+        'method': 'GET'
+    },
+    {
+        'path': '/debug/dump_create',
+        'method': 'POST'
+    },
+    {
+        'path': '/debug/dump_download/:filename',
+        'method': 'GET'
+    },
+    {
+        'path': '/slurm_clusters',
+        'method': 'GET'
+    },
+    {
+        'path': '/slurm_clusters',
+        'method': 'POST'
+    },
+    {
+        'path': '/slurm_clusters/:name',
+        'method': 'DELETE'
+    }
+]
 
 # Default allowlist for the viewer role. Viewer is allowlist-based: any
 # endpoint NOT on this list is denied for viewers, including any new
