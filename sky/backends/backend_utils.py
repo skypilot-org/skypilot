@@ -1791,6 +1791,141 @@ def ssh_credential_from_yaml(
     return credentials
 
 
+def _find_cluster_alias_in_tokens(
+        tokens: List[str],
+        cluster_names: Set[str]) -> Optional[Tuple[int, str]]:
+    """Returns (index, cluster_name) of the first token that references a known
+    SkyPilot cluster by its SSH host alias, or None. Handles ``user@host`` and
+    ``user@host:port`` forms by matching the host component."""
+    for idx, token in enumerate(tokens):
+        host = token.split('@')[-1].split(':')[0]
+        for candidate in (token, host):
+            if candidate in cluster_names:
+                return idx, candidate
+    return None
+
+
+def _restore_cluster_ssh_materials(
+        cluster_name: str) -> Optional[Tuple[str, int, str, str]]:
+    """Restores a cluster's local SSH key + config stanza from the global user
+    state and returns ``(ip, port, ssh_user, key_path)``, or None if the cluster
+    is unavailable (not found / not SSH-reachable / missing cached IPs or yaml).
+
+    Best-effort: the on-disk key and per-cluster stanza are (re)created so a
+    subsequent SSH can use them. This is the same "restore from DB + fix
+    permissions" path used elsewhere before establishing an SSH connection.
+    """
+    handle = global_user_state.get_handle_from_cluster_name(cluster_name)
+    if not isinstance(handle, backends.CloudVmRayResourceHandle):
+        return None
+    if handle.cluster_yaml is None:
+        return None
+    ips = handle.cached_external_ips
+    ports = handle.cached_external_ssh_ports
+    if not ips or not ports:
+        return None
+    auth_config = ssh_credential_from_yaml(handle.cluster_yaml,
+                                           ssh_user=handle.ssh_user,
+                                           docker_user=handle.docker_user)
+    key_path = auth_config.get('ssh_private_key')
+    ssh_user = auth_config.get('ssh_user')
+    if not key_path or not ssh_user:
+        return None
+    try:
+        auth_utils.create_ssh_key_files_from_db(key_path)
+    except Exception as e:  # pylint: disable=broad-except
+        logger.debug(f'Could not restore SSH key for {cluster_name!r}: {e}')
+    try:
+        cluster_utils.SSHConfigHelper.add_cluster(handle.cluster_name,
+                                                  handle.cluster_name_on_cloud,
+                                                  ips, auth_config, ports,
+                                                  handle.docker_user,
+                                                  handle.ssh_user)
+    except Exception as e:  # pylint: disable=broad-except
+        logger.debug(f'Could not restore SSH stanza for {cluster_name!r}: {e}')
+    return ips[0], ports[0], ssh_user, key_path
+
+
+def expand_proxy_cluster_aliases(
+    ssh_proxy_command: Optional[str],
+    ssh_proxy_jump: Optional[str],
+) -> Tuple[Optional[str], Optional[str]]:
+    """Restores SSH materials and rewrites SkyPilot-cluster aliases in a proxy.
+
+    A user-provided ``ssh_proxy_command`` may reach its destination *through
+    another SkyPilot cluster* referenced by that cluster's SSH host alias (e.g.
+    a bastion started with ``sky launch``: ``ssh -W '[%h]:%p' jump-name``). The
+    inner ``ssh jump-name`` relies on a per-cluster stanza under
+    ``~/.sky/generated/ssh/`` (Included from ``~/.ssh/config``), which is local
+    state present only on the machine that launched the cluster.
+
+    On a machine that did not launch it (e.g. a remote API server that
+    provisioned it in a different session, or was restarted), the stanza is
+    absent and the alias fails to resolve. For each referenced cluster that
+    exists, this:
+
+      1. Restores its SSH key and per-cluster stanza on demand from the DB.
+      2. Rewrites the alias in ``ssh_proxy_command`` to a self-contained
+         explicit target (``-F /dev/null -i <key> -o Port=<port> <user>@<ip>``)
+         so the inner ssh does not depend on ``~/.ssh/config`` at all.
+
+    ``ssh_proxy_jump`` is a jump *spec* that cannot carry ``-i``/``-F``; only its
+    stanza is restored, so its resolution still relies on a readable config.
+
+    Best-effort: on any miss or error the proxy strings are returned unchanged
+    so a connection is never broken by this shim.
+    """
+    if not ssh_proxy_command and not ssh_proxy_jump:
+        return ssh_proxy_command, ssh_proxy_jump
+    try:
+        cluster_names = set(global_user_state.get_cluster_names())
+    except Exception as e:  # pylint: disable=broad-except
+        logger.debug(f'Skip proxy alias expansion; cannot list clusters: {e}')
+        return ssh_proxy_command, ssh_proxy_jump
+    if not cluster_names:
+        return ssh_proxy_command, ssh_proxy_jump
+
+    new_command = ssh_proxy_command
+    if ssh_proxy_command:
+        try:
+            tokens = shlex.split(ssh_proxy_command)
+        except ValueError:
+            tokens = ssh_proxy_command.split()
+        match = _find_cluster_alias_in_tokens(tokens, cluster_names)
+        if match is not None:
+            idx, name = match
+            try:
+                conn = _restore_cluster_ssh_materials(name)
+                if conn is not None:
+                    ip, port, ssh_user, key_path = conn
+                    explicit = (['-F', '/dev/null'] +
+                                command_runner.ssh_options_list(
+                                    key_path,
+                                    ssh_control_name=None,
+                                    port=port,
+                                    disable_control_master=True) +
+                                [f'{ssh_user}@{ip}'])
+                    tokens[idx:idx + 1] = explicit
+                    new_command = shlex.join(tokens)
+            except Exception as e:  # pylint: disable=broad-except
+                logger.debug(f'Failed to rewrite SSH proxy alias {name!r}: {e}')
+
+    if ssh_proxy_jump:
+        try:
+            jump_tokens = shlex.split(ssh_proxy_jump)
+        except ValueError:
+            jump_tokens = ssh_proxy_jump.split()
+        jump_match = _find_cluster_alias_in_tokens(jump_tokens, cluster_names)
+        if jump_match is not None:
+            try:
+                _restore_cluster_ssh_materials(jump_match[1])
+            except Exception as e:  # pylint: disable=broad-except
+                logger.debug('Failed to restore SSH proxy jump '
+                             f'{jump_match[1]!r}: {e}')
+
+    return new_command, ssh_proxy_jump
+
+
 def ssh_credentials_from_handles(
     handles: List['cloud_vm_ray_backend.CloudVmRayResourceHandle'],
 ) -> List[Dict[str, Any]]:
