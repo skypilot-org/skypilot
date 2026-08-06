@@ -90,6 +90,30 @@ def test_lease_timing_is_independently_tunable():
         is None
 
 
+def test_lease_statements_use_the_dedicated_unpooled_engine(monkeypatch):
+    """Every lease statement must ask for the direct, no_pool engine — the
+    heartbeat may never ride the shared application engine or a transaction
+    pooler, where a pool starved by slow application queries would fail
+    renewals (and churn the leader) exactly when the DB is under pressure."""
+    calls = []
+
+    def record_get_engine(*args, **kwargs):
+        calls.append(kwargs)
+        raise RuntimeError('no db in this test')
+
+    monkeypatch.setattr(leader_election.db_utils, 'get_engine',
+                        record_get_engine)
+    e = leader_election.PgLeaseElector('lock', holder='a')
+    # Errors are swallowed into "not leading"; the engine request is the point.
+    assert e.try_acquire() is False
+    assert e.renew() is False
+    e.release()
+    assert len(calls) == 3
+    for kwargs in calls:
+        assert kwargs.get('direct') is True
+        assert kwargs.get('no_pool') is True
+
+
 def test_advisory_elector_filelock_lifecycle(monkeypatch):
     """On the (non-Postgres) file-lock path, renew is always true while held."""
     monkeypatch.delenv(leader_election.ENV_VAR_BACKEND, raising=False)
