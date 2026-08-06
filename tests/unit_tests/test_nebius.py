@@ -218,3 +218,62 @@ class TestNebiusAdaptorLogging:
         other_path = os.path.join('site-packages', 'otherlib', 'client.py')
         assert not log_filter.filter(_record(nebius_path))
         assert log_filter.filter(_record(other_path))
+
+    def test_grpc_aio_poller_filter_drops_only_poller_noise(self):
+        log_filter = nebius_adaptor._GrpcAioPollerNoiseFilter()
+
+        def _record(msg: str) -> logging.LogRecord:
+            return logging.LogRecord(name='asyncio',
+                                     level=logging.ERROR,
+                                     pathname='asyncio/base_events.py',
+                                     lineno=1,
+                                     msg=msg,
+                                     args=None,
+                                     exc_info=None)
+
+        # As emitted by asyncio's default exception handler when grpc.aio
+        # polling raises (e.g. BlockingIOError) in a loop callback.
+        poller_msg = (
+            'Exception in callback PollerCompletionQueue._handle_events('
+            '<_UnixSelecto...e debug=False>)()\n'
+            'handle: <Handle PollerCompletionQueue._handle_events('
+            '<_UnixSelecto...e debug=False>)()>')
+        assert not log_filter.filter(_record(poller_msg))
+        # Unrelated asyncio error reporting must be unaffected.
+        assert log_filter.filter(_record('Task exception was never retrieved'))
+        assert log_filter.filter(_record('Exception in callback my_callback()'))
+
+    def test_set_nebius_loggers_suppresses_poller_noise_end_to_end(self):
+        records = []
+
+        class _CaptureHandler(logging.Handler):
+
+            def emit(self, record: logging.LogRecord) -> None:
+                records.append(record)
+
+        asyncio_logger = logging.getLogger('asyncio')
+        deprecation_logger = logging.getLogger('deprecation')
+        previous_filters = list(asyncio_logger.filters)
+        previous_deprecation_filters = list(deprecation_logger.filters)
+        previous_grpc_verbosity = os.environ.get('GRPC_VERBOSITY')
+        handler = _CaptureHandler(level=logging.DEBUG)
+        asyncio_logger.addHandler(handler)
+        try:
+            nebius_adaptor._set_nebius_loggers()
+            asyncio_logger.error('Exception in callback '
+                                 'PollerCompletionQueue._handle_events('
+                                 '<_UnixSelecto...e debug=False>)()')
+            asyncio_logger.error('some real asyncio error')
+        finally:
+            asyncio_logger.removeHandler(handler)
+            asyncio_logger.filters[:] = previous_filters
+            deprecation_logger.filters[:] = previous_deprecation_filters
+            if previous_grpc_verbosity is None:
+                os.environ.pop('GRPC_VERBOSITY', None)
+            else:
+                os.environ['GRPC_VERBOSITY'] = previous_grpc_verbosity
+
+        messages = [r.getMessage() for r in records]
+        assert not any(
+            'PollerCompletionQueue' in m for m in messages), (messages)
+        assert any('some real asyncio error' in m for m in messages), messages

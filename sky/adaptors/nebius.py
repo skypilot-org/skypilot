@@ -159,10 +159,30 @@ class _NebiusDeprecationFilter(logging.Filter):
         return f'{os.sep}nebius{os.sep}' not in record.pathname
 
 
+class _GrpcAioPollerNoiseFilter(logging.Filter):
+    """Drops grpc.aio poller callback noise logged to the 'asyncio' logger.
+
+    grpc.aio's internal polling can raise known-harmless exceptions (e.g.
+    BlockingIOError: [Errno 11] Resource temporarily unavailable) inside
+    PollerCompletionQueue._handle_events loop callbacks. The nebius SDK
+    may run grpc.aio on event loops it creates internally (see
+    nebius.aio.channel.Channel.run_sync), where the default asyncio
+    exception handler logs a full traceback at ERROR level to stderr,
+    polluting user-facing CLI output. Only records referencing the grpc.aio
+    poller callback are dropped; all other asyncio error reporting is
+    unaffected, and API errors still propagate to callers as exceptions.
+    """
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        return ('PollerCompletionQueue._handle_events'
+                not in record.getMessage())
+
+
 def _set_nebius_loggers() -> None:
     # https://github.com/grpc/grpc/issues/37642 to avoid spam in console
     os.environ['GRPC_VERBOSITY'] = 'NONE'
     logging.getLogger('deprecation').addFilter(_NebiusDeprecationFilter())
+    logging.getLogger('asyncio').addFilter(_GrpcAioPollerNoiseFilter())
 
 
 nebius = common.LazyImport('nebius',
