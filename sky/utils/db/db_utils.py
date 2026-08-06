@@ -589,6 +589,13 @@ def _pooler_configured() -> bool:
         os.environ.get(constants.ENV_VAR_DB_POOL_HOSTPORT))
 
 
+# Bound on the connect phase of a no_pool engine. Unlike a pooled checkout,
+# connection establishment is part of every operation on a NullPool engine,
+# and a server-side statement_timeout cannot bound it — an unresponsive
+# database would otherwise hang the caller for the OS default.
+_NO_POOL_CONNECT_TIMEOUT_SECONDS = 10
+
+
 @typing.overload
 def get_engine(db_name: Optional[str],
                async_engine: Literal[False] = False,
@@ -603,13 +610,6 @@ def get_engine(db_name: Optional[str],
                direct: bool = False,
                no_pool: bool = False) -> sqlalchemy_async.AsyncEngine:
     ...
-
-
-# Bound on the connect phase of a no_pool engine. Unlike a pooled checkout,
-# connection establishment is part of every operation on a NullPool engine,
-# and a server-side statement_timeout cannot bound it — an unresponsive
-# database would otherwise hang the caller for the OS default.
-_NO_POOL_CONNECT_TIMEOUT_SECONDS = 10
 
 
 def get_engine(
@@ -659,12 +659,13 @@ def get_engine(
                 if no_pool and not async_engine:
                     # Isolated per-operation engine: never shares (or starves
                     # on) the default engine's pool. See the docstring.
-                    _postgres_engine_cache[cache_key] = (sqlalchemy.create_engine(
+                    engine_no_pool = sqlalchemy.create_engine(
                         conn_string,
                         poolclass=sqlalchemy.NullPool,
                         connect_args={
                             'connect_timeout': _NO_POOL_CONNECT_TIMEOUT_SECONDS
-                        }))
+                        })
+                    _postgres_engine_cache[cache_key] = engine_no_pool
                 elif async_engine:
                     # Use NullPool for async engines to avoid event loop binding
                     # issues. asyncpg connection pools bind to the event loop on
