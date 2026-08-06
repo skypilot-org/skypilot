@@ -34,7 +34,12 @@ def _is_rbac_permission_error(e: Exception) -> bool:
 def _get_context_namespace(config: models.VolumeConfig) -> Tuple[str, str]:
     """Gets the context and namespace of a volume."""
     if config.region is None:
-        context = kubernetes_utils.get_current_kube_config_context_name()
+        # No context was specified (e.g. `sky volumes apply` without --infra).
+        # Default to an enabled allowed_context rather than the arbitrary
+        # kubeconfig current/first context, otherwise the volume would be
+        # registered against a context the optimizer cannot schedule on and
+        # later launches that mount it would fail their prechecks.
+        context = kubernetes_utils.get_default_volume_context()
         config.region = context
     else:
         context = config.region
