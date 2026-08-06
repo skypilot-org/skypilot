@@ -220,6 +220,21 @@ def executor_initializer(proc_group: str,
     # request mid-pollution in the main process.
     if clean_env is not None:
         clean_env_module.set_clean_server_env(clean_env)
+    # Preload modules whose import mutates process-global state. Request
+    # cancellation raises KeyboardInterrupt at an arbitrary point in the
+    # worker (see _gated_sigterm_handler); if that lands inside a lazy import,
+    # Python drops the half-executed module from sys.modules while its
+    # completed submodules survive, e.g. networkx's algorithm dispatch
+    # registry stays populated and every re-import in this worker then fails
+    # with "Algorithm already exists in dispatch registry". Importing before
+    # the worker serves requests removes the window: later imports are
+    # sys.modules cache hits that an interrupt cannot corrupt.
+    try:
+        import networkx  # pylint: disable=import-outside-toplevel,unused-import
+    except Exception as e:  # pylint: disable=broad-except
+        # An exception escaping the initializer would mark the pool broken,
+        # which is worse than lazily importing at request time.
+        logger.warning(f'Failed to preload networkx in executor worker: {e}')
     # Executor never stops, unless the whole process is killed.
     threading.Thread(target=metrics_lib.process_monitor,
                      args=(f'worker:{proc_group}', threading.Event()),
