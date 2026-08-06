@@ -63,6 +63,18 @@ _FILE_UPLOAD_LOCK_DIR = '~/.sky/locks/file_uploads'
 # Connection timeout when sending requests to the API server.
 API_SERVER_REQUEST_CONNECTION_TIMEOUT_SECONDS = 5
 
+# Read timeout (seconds allowed between bytes from the server) for streaming
+# requests to the API server's heartbeat-emitting endpoints (e.g. /api/stream
+# log following). The server sends a heartbeat every 30s on these streams
+# (sky/server/stream_utils.py:_HEARTBEAT_INTERVAL, added for #5750) to keep the
+# connection busy through idle-timeout proxies/CDNs. This client-side read
+# timeout is the counterpart: set well above the 30s heartbeat so a healthy
+# stream never trips it, but a dead/stalled connection (no heartbeat received
+# for this long) raises ReadTimeout and is retried on a fresh connection instead
+# of blocking forever. NOT applied to heartbeat-less long-poll endpoints (e.g.
+# /api/get), which may legitimately block on a slow request with no output.
+API_SERVER_REQUEST_STREAM_READ_TIMEOUT_SECONDS = 120  # 4x the 30s heartbeat
+
 
 def download_logs_from_api_server(
         paths_on_api_server: Iterable[str],
