@@ -315,14 +315,24 @@ def _extract_marked_tests(
         if param:
             function_name_param_map[clean_function_name].append(param)
 
+    # A run shares one API server across its tests only on the --env-file lane
+    # (one external endpoint); --remote-server gives each test its own Docker
+    # container and the local lane its own restarted server.
+    shared_server = '--env-file' in extra_args
+
     function_cloud_map = {}
     for function_name, marks in function_name_marks_map.items():
-        # Partition exclusive vs normal tests. Exclusive-marked tests run only
-        # in an --exclusive run (serialized) and are excluded from normal
-        # parallel runs; non-exclusive tests are excluded from --exclusive runs.
-        # The two never share a pipeline, so server-mutating tests never run
-        # alongside others.
-        if ('exclusive' in marks) != exclusive_run:
+        # Partition exclusive vs normal tests. In an --exclusive run, only
+        # exclusive (server-mutating) tests are selected (and serialized).
+        # Otherwise exclusive tests are excluded, so a bare run never pulls
+        # them in -- except when one is named explicitly with -k on an
+        # isolated lane (not the shared --env-file server), which lets a single
+        # exclusive test be run individually without an --exclusive pipeline.
+        is_exclusive = 'exclusive' in marks
+        if exclusive_run:
+            if not is_exclusive:
+                continue
+        elif is_exclusive and (shared_server or k_value is None):
             continue
         clouds_to_include = []
         run_on_cloud_kube_backend = ('resource_heavy' in marks and
