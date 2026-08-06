@@ -2941,6 +2941,28 @@ def get_workspace(job_id: int) -> str:
 
 
 @db_retries.retry
+def get_workspaces(job_ids: List[int]) -> Dict[int, str]:
+    """Return ``{job_id: workspace}`` for the jobs in ``job_ids`` that exist.
+
+    A single indexed query (``spot_job_id IN (...)``) instead of one lookup per
+    id. Job ids with no row are absent from the result, so a caller can tell a
+    nonexistent job from one in the default workspace; an existing row with a
+    NULL workspace resolves to the default, like ``get_workspace``.
+    """
+    if not job_ids:
+        return {}
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
+        rows = session.execute(
+            sqlalchemy.select(
+                job_info_table.c.spot_job_id, job_info_table.c.workspace).where(
+                    job_info_table.c.spot_job_id.in_(job_ids))).fetchall()
+    return {
+        row[0]: (row[1] or constants.SKYPILOT_DEFAULT_WORKSPACE) for row in rows
+    }
+
+
+@db_retries.retry
 def get_file_mounts_blob_id(job_id: int) -> Optional[str]:
     """Return the file_mounts_blob_id persisted for a job, if any."""
     engine = _db_manager.get_engine()

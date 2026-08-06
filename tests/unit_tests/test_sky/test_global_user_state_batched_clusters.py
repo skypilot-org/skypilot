@@ -149,3 +149,28 @@ def test_get_clusters_from_names_matches_single_helper(tmp_path, monkeypatch):
             assert type(batched[key]) is type(single[key])  # noqa: E721
         else:
             assert batched[key] == single[key], f'mismatch on {key}'
+
+
+def test_get_cluster_names_and_workspaces_start_with(tmp_path, monkeypatch):
+    """Returns (name, workspace) for prefix-matching clusters; a NULL/unset
+    workspace normalizes to the default (mirrors get_cluster_workspace)."""
+    _fresh_db(tmp_path, monkeypatch)
+    # Cluster in the default workspace.
+    _add_cluster('web-default')
+    # Cluster created while a different workspace is active.
+    monkeypatch.setattr(global_user_state.skypilot_config,
+                        'get_active_workspace', lambda **kwargs: 'ws-b')
+    _add_cluster('web-b')
+
+    result = dict(
+        global_user_state.get_cluster_names_and_workspaces_start_with('web'))
+    assert result == {
+        'web-default': constants.SKYPILOT_DEFAULT_WORKSPACE,
+        'web-b': 'ws-b',
+    }
+
+    # Prefix filter excludes non-matching names.
+    _add_cluster('other')
+    result2 = dict(
+        global_user_state.get_cluster_names_and_workspaces_start_with('web'))
+    assert 'other' not in result2

@@ -1489,6 +1489,36 @@ def queue_v2(
     return filtered_jobs, total, status_counts, total_no_filter
 
 
+def _reject_inaccessible_job_ids(job_ids: Optional[List[int]]) -> None:
+    """Rejects a by-id job op when a target job's workspace is not accessible.
+
+    Per-resource read-side workspace check for managed jobs, applied only in
+    consolidation mode. It resolves the target jobs' workspaces from
+    managed-jobs state in a single batched query (``get_workspaces``). Only in
+    consolidation mode does the API server share the jobs-state DB (the
+    controller runs in-process); in non-consolidation mode that DB lives on a
+    separate controller the API server cannot read here, so the check is
+    skipped. A job in a workspace the caller cannot read is rejected; a
+    nonexistent job (absent from the batch result) is likewise rejected as
+    not-found, so it does not fall through as the default workspace.
+    """
+    if not job_ids:
+        return
+    if not managed_job_utils.is_consolidation_mode():
+        return
+    accessible = set(
+        workspaces_core.get_accessible_workspace_names(
+            action=workspace_constants.WORKSPACE_ACTION_READ))
+    job_workspaces = managed_job_state.get_workspaces(job_ids)
+    inaccessible = [
+        job_id for job_id in job_ids
+        if job_workspaces.get(job_id) not in accessible
+    ]
+    if inaccessible:
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(f'Managed job(s) {inaccessible} not found.')
+
+
 @usage_lib.entrypoint
 # pylint: disable=redefined-builtin
 def cancel(name: Optional[str] = None,
@@ -1531,6 +1561,11 @@ def cancel(name: Optional[str] = None,
                     f'all_users. Provided {" ".join(arguments)!r}.')
 
         job_ids = None if (all_users or all) else job_ids
+
+        # Gate a by-id cancel on the target job's own workspace (accessible-ws),
+        # so a caller cannot cancel a job in a workspace they cannot access by
+        # naming its id. name/all/all_users paths are scoped by the controller.
+        _reject_inaccessible_job_ids(job_ids)
 
         backend = backend_utils.get_backend_from_handle(handle)
         assert isinstance(backend, backends.CloudVmRayBackend)
@@ -1621,6 +1656,10 @@ def tail_logs(name: Optional[str],
     if name is not None and job_id is not None:
         with ux_utils.print_exception_no_traceback():
             raise ValueError('Cannot specify both name and job_id.')
+
+    # Gate a by-id log read on the target job's own workspace (accessible-ws).
+    if job_id is not None:
+        _reject_inaccessible_job_ids([job_id])
 
     jobs_controller_type = controller_utils.Controllers.JOBS_CONTROLLER
     job_name_or_id_str = ''
@@ -1780,6 +1819,10 @@ def download_logs(
         with ux_utils.print_exception_no_traceback():
             raise ValueError('Cannot specify both name and job_id.')
 
+    # Gate a by-id log download on the target job's own workspace.
+    if job_id is not None:
+        _reject_inaccessible_job_ids([job_id])
+
     jobs_controller_type = controller_utils.Controllers.JOBS_CONTROLLER
     job_name_or_id_str = ''
     if job_id is not None:
@@ -1932,6 +1975,8 @@ def get_job_events(
     Returns:
         List of task event records, ordered newest first.
     """
+    # Gate a by-id events read on the target job's own workspace.
+    _reject_inaccessible_job_ids([job_id])
     events = managed_job_state.get_job_events(job_id=job_id,
                                               task_id=task_id,
                                               limit=limit)

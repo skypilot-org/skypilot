@@ -509,18 +509,18 @@ async def test_endpoint_download(monitor, mock_request):
 
 
 @pytest.mark.asyncio
-async def test_endpoint_completion_cluster(monitor):
+async def test_endpoint_completion_cluster(monitor, mock_request):
     """Test /api/completion/cluster_name endpoint for blocking operations."""
     print("\n🔍 Testing: /api/completion/cluster_name")
 
     async def test_func():
         # Mock the actual blocking DB call
         with mock.patch.object(global_user_state,
-                               'get_cluster_names_start_with',
+                               'get_cluster_names_and_workspaces_start_with',
                                side_effect=create_blocking_mock([],
                                                                 delay=0.02)):
             try:
-                await server.complete_cluster_name('test')
+                await server.complete_cluster_name(mock_request, 'test')
             except:
                 pass
 
@@ -555,7 +555,7 @@ async def test_endpoint_completion_storage(monitor):
 
 
 @pytest.mark.asyncio
-async def test_endpoint_provision_logs(monitor):
+async def test_endpoint_provision_logs(monitor, mock_request):
     """Test /provision_logs endpoint for blocking operations."""
     print("\n🔍 Testing: /provision_logs")
 
@@ -572,6 +572,7 @@ async def test_endpoint_provision_logs(monitor):
                 try:
                     body = payloads.ProvisionLogsBody(cluster_name='test')
                     await _run_endpoint_func(server.provision_logs,
+                                             mock_request,
                                              body,
                                              follow=False)
                 except fastapi.HTTPException:

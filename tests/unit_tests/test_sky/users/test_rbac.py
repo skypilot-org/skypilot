@@ -214,6 +214,27 @@ class TestGetViewerAllowlist:
         assert {'path': '/status', 'method': 'POST'} in allowlist
 
 
+class TestKubernetesLabelGpusBlocklisted:
+    """POST /kubernetes_label_gpus is an infra mutation -> admin-only."""
+
+    _ENTRY = {'path': '/kubernetes_label_gpus', 'method': 'POST'}
+
+    def test_on_default_user_blocklist(self):
+        assert self._ENTRY in rbac._DEFAULT_USER_BLOCKLIST  # pylint: disable=protected-access
+
+    def test_blocked_for_user_role_via_get_role_permissions(self):
+        with mock.patch('sky.skypilot_config.get_nested', return_value={}):
+            permissions = rbac.get_role_permissions()
+        blocklist = permissions['user']['permissions']['blocklist']
+        assert self._ENTRY in blocklist
+
+    def test_not_on_viewer_allowlist(self):
+        # It is a mutation, so viewers (allowlist-based) must not reach it.
+        with mock.patch('sky.skypilot_config.get_nested', return_value={}):
+            allowlist = rbac.get_viewer_allowlist()
+        assert self._ENTRY not in allowlist
+
+
 class TestDefaultRoleConfig:
 
     def test_default_role_falls_back_to_admin(self):
