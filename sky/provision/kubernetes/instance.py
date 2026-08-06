@@ -99,6 +99,21 @@ _PENDING_REASON_NORMAL_EVENT_ALLOWLIST = {
     'WaitForFirstConsumer',  # late-binding storage class
 }
 
+# Warning-type pod events that are emitted once during normal startup and
+# then left on the pod after the condition they describe has resolved. The
+# Warning pass skips them, so the scan falls through to a later Warning or to
+# an allow-listed Normal instead of pinning a healthy launch to a stale
+# complaint.
+_PENDING_REASON_WARNING_EVENT_IGNORELIST = {
+    # Kueue's pod reconciler races the creation of a pod group: it fires on
+    # the first pod it observes, sees fewer live pods than
+    # pod-group-total-count, and emits this Warning. It self-resolves within
+    # seconds once the remaining pods exist, but the event object survives
+    # for its full TTL -- see
+    # https://kueue.sigs.k8s.io/docs/tasks/troubleshooting/troubleshooting_pods/
+    'ErrWorkloadCompose',
+}
+
 # Warning-type pod events (emitted by the kubelet, after scheduling) that
 # indicate a volume attach/mount failure. A pod hit by one of these stays in
 # the uninformative 'ContainerCreating' waiting state, so the failure is only
@@ -3089,7 +3104,8 @@ def _get_pod_pending_reason(context: Optional[str], namespace: str,
     """Get the reason why a pod is pending from its events.
 
     Two-pass scan over the event list (sorted newest-first by _get_pod_events):
-      1. Tier 2 -- return the newest event with event.type == 'Warning'.
+      1. Tier 2 -- return the newest event with event.type == 'Warning' whose
+         reason is not in _PENDING_REASON_WARNING_EVENT_IGNORELIST.
       2. Tier 3 -- return the newest event whose reason is in
          _PENDING_REASON_NORMAL_EVENT_ALLOWLIST.
     Warnings always beat allow-listed Normals, regardless of timestamp ordering
@@ -3107,9 +3123,10 @@ def _get_pod_pending_reason(context: Optional[str], namespace: str,
     if not pod_events:
         return None
 
-    # Tier 2: Warning events.
+    # Tier 2: Warning events, minus the ones known to go stale in place.
     for event in pod_events:
-        if event.type == 'Warning':
+        if (event.type == 'Warning' and
+                event.reason not in _PENDING_REASON_WARNING_EVENT_IGNORELIST):
             return event.reason or 'Unknown', event.message or ''
 
     # Tier 3: allow-listed Normal events.

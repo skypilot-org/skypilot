@@ -2996,6 +2996,43 @@ class TestGetPodPendingReasonTieredEventFilter:
         monkeypatch.setattr(instance, '_get_pod_events', raise_for_events)
         assert instance._get_pod_pending_reason('ctx', 'ns', 'p') is None
 
+    def test_stale_kueue_warning_does_not_mask_pulling(self, monkeypatch):
+        # Kueue's pod reconciler emits ErrWorkloadCompose while the pod group
+        # is still being created, and leaves the event on the pod after the
+        # group is composed. Without the ignore-list it outranks Pulling for
+        # the event's whole TTL, so every multi-node Kueue launch reports
+        # "pending due to ErrWorkloadCompose" while it is merely pulling.
+        events = [
+            self._event('Pulling', 'Normal', 'Pulling image "foo:bar"'),
+            self._event(
+                'ErrWorkloadCompose', 'Warning',
+                "'sky-abc' group has fewer runnable pods than "
+                'expected'),
+        ]
+        self._patch_events(monkeypatch, events)
+        assert instance._get_pod_pending_reason(
+            'ctx', 'ns', 'p') == ('Pulling', 'Pulling image "foo:bar"')
+
+    def test_stale_kueue_warning_yields_to_a_real_warning(self, monkeypatch):
+        # Ignoring ErrWorkloadCompose must not swallow a genuine Warning that
+        # is older than it.
+        events = [
+            self._event('ErrWorkloadCompose', 'Warning', 'newer but stale'),
+            self._event('FailedScheduling', 'Warning',
+                        '0/3 nodes are available: insufficient cpu.'),
+        ]
+        self._patch_events(monkeypatch, events)
+        assert instance._get_pod_pending_reason('ctx', 'ns', 'p') == (
+            'FailedScheduling',
+            '0/3 nodes are available: insufficient cpu.',
+        )
+
+    def test_only_ignored_warning_returns_none(self, monkeypatch):
+        # Nothing truthful left to report -- better no reason than a stale one.
+        events = [self._event('ErrWorkloadCompose', 'Warning', 'stale')]
+        self._patch_events(monkeypatch, events)
+        assert instance._get_pod_pending_reason('ctx', 'ns', 'p') is None
+
 
 class TestInspectPodStatusTierIntegration:
     """End-to-end behavior of _inspect_pod_status with the new tier-1 helper.
