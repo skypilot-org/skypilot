@@ -643,6 +643,11 @@ SKIPPED_CLIENT_OVERRIDE_KEYS: List[Tuple[str, ...]] = [
     ('serve', 'controller', 'consolidation_mode'),
     ('jobs', 'controller', 'controller_logs_gc_retention_hours'),
     ('jobs', 'controller', 'task_logs_gc_retention_hours'),
+    # An admin policy the client can replace is not an admin policy: a client that sets its own
+    # `admin_policy` (a module path, or a URL to a server it controls) has the API server apply
+    # that instead. Nothing rejects it, so the request still succeeds and the resulting cluster
+    # looks normal.
+    ('admin_policy',),
     # Slurm submit identity and cluster settings are managed server-side.
     ('slurm', 'cluster_configs'),
     ('slurm', 'submit_as_user'),

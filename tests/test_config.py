@@ -2182,3 +2182,21 @@ def test_replace_skypilot_config_restores_env_var_on_exception(
 
     skypilot_config.reload_config()
     assert skypilot_config.get_nested(('aws', 'vpc_name'), None) == VPC_NAME
+
+
+def test_admin_policy_is_not_client_overridable(monkeypatch, tmp_path):
+    """A client-supplied admin_policy must never reach the server config.
+
+    Without this the client can point admin_policy at its own module or URL and the server
+    applies that instead — the request succeeds and the resulting cluster looks normal, so an
+    operator has no signal that the policy did not run.
+    """
+    server_config = tmp_path / 'server.yaml'
+    server_config.write_text('admin_policy: server_pkg.ServerPolicy\n')
+    monkeypatch.setenv(skypilot_config.ENV_VAR_SKYPILOT_CONFIG, str(server_config))
+    skypilot_config.reload_config()
+
+    with skypilot_config.override_skypilot_config(
+        {'admin_policy': 'attacker_pkg.NoOpPolicy'}):
+        assert skypilot_config.get_nested(
+            ('admin_policy',), None) == 'server_pkg.ServerPolicy'
