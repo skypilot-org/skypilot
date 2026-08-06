@@ -75,6 +75,7 @@ from sky.server import stream_utils
 from sky.server import version_check
 from sky.server import versions
 from sky.server import websocket_utils
+from sky.server.auth import db_lookup
 from sky.server.auth import loopback
 from sky.server.auth import oauth2_proxy
 from sky.server.auth import sessions as auth_sessions
@@ -169,7 +170,27 @@ def _bearer_auth_401_response(content):
         content=content)
 
 
-def _try_set_basic_auth_user(request: fastapi.Request):
+def _find_basic_auth_user(username: str,
+                          password: str) -> Optional[models.User]:
+    """Look up and verify a basic-auth user. Sync: DB query + bcrypt verify.
+
+    Runs on the auth thread executor — both the DB lookup and the
+    (CPU-heavy) password hash verification would otherwise block the
+    request event loop.
+    """
+    users = global_user_state.get_user_by_name(username)
+    for user in users:
+        if not user.name or not user.password:
+            continue
+        username_encoded = username.encode('utf8')
+        db_username_encoded = user.name.encode('utf8')
+        if (username_encoded == db_username_encoded and
+                common.crypt_ctx.verify(password, user.password)):
+            return user
+    return None
+
+
+async def _try_set_basic_auth_user(request: fastapi.Request):
     auth_header = request.headers.get('authorization')
     if not auth_header or not auth_header.lower().startswith('basic '):
         return
@@ -182,19 +203,18 @@ def _try_set_basic_auth_user(request: fastapi.Request):
     except Exception:  # pylint: disable=broad-except
         return
 
-    users = global_user_state.get_user_by_name(username)
-    if not users:
+    try:
+        user = await db_lookup.call_with_deadline(_find_basic_auth_user,
+                                                  username, password)
+    except (asyncio.TimeoutError, exceptions.ConcurrentWorkerExhaustedError):
+        # Best-effort only: this path serves /api/health, which must stay
+        # available during a DB incident. Proceed unauthenticated instead
+        # of failing the probe.
+        logger.warning('Basic auth lookup unavailable on health path; '
+                       'proceeding unauthenticated')
         return
-
-    for user in users:
-        if not user.name or not user.password:
-            continue
-        username_encoded = username.encode('utf8')
-        db_username_encoded = user.name.encode('utf8')
-        if (username_encoded == db_username_encoded and
-                common.crypt_ctx.verify(password, user.password)):
-            request.state.auth_user = user
-            break
+    if user is not None:
+        request.state.auth_user = user
 
 
 @middleware_utils.websocket_aware
@@ -213,10 +233,23 @@ class RBACMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
             return await call_next(request)
 
         permission_service = permission.permission_service
-        # Check the role permission
-        if permission_service.check_endpoint_permission(auth_user.id,
-                                                        request.url.path,
-                                                        request.method):
+        # Check the role permission. Offload to the bounded auth thread
+        # executor under a deadline: the check acquires the casbin enforcer
+        # read lock (and reads the DB on a cache miss), so running it on
+        # the loop lets a slow DB or a concurrent policy reload stall every
+        # request on this worker. Fails closed: a timeout is a retryable
+        # 503, never an allow.
+        try:
+            blocked = await db_lookup.call_with_deadline(
+                permission_service.check_endpoint_permission, auth_user.id,
+                request.url.path, request.method)
+        except asyncio.TimeoutError:
+            logger.error('RBAC check timed out, path: %s', request.url.path)
+            return db_lookup.db_timeout_response()
+        except exceptions.ConcurrentWorkerExhaustedError as e:
+            logger.error(f'Concurrent worker exhausted during RBAC check: {e}')
+            return db_lookup.worker_exhausted_response()
+        if blocked:
             return fastapi.responses.JSONResponse(
                 status_code=403, content={'detail': 'Forbidden'})
 
@@ -356,7 +389,7 @@ class BasicAuthMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
 
         if request.url.path.startswith('/api/health'):
             # Try to set the auth user from basic auth
-            _try_set_basic_auth_user(request)
+            await _try_set_basic_auth_user(request)
             return await call_next(request)
 
         auth_header = request.headers.get('authorization')
@@ -375,23 +408,26 @@ class BasicAuthMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
         except Exception:  # pylint: disable=broad-except
             return _basic_auth_401_response('Invalid basic auth')
 
-        users = global_user_state.get_user_by_name(username)
-        if not users:
+        # Offload the DB lookup + bcrypt verification to the bounded auth
+        # thread executor under a deadline, so a slow DB (or the CPU-heavy
+        # hash verification) cannot stall the request event loop or hold
+        # executor threads indefinitely. Both failure modes convert to a
+        # 503 here: app-level exception handlers wrap the router only, so
+        # an exception raised in a middleware surfaces as a bare 500,
+        # which clients do not retry.
+        try:
+            user = await db_lookup.call_with_deadline(_find_basic_auth_user,
+                                                      username, password)
+        except asyncio.TimeoutError:
+            logger.error('Basic auth DB lookup timed out, path: %s',
+                         request.url.path)
+            return db_lookup.db_timeout_response()
+        except exceptions.ConcurrentWorkerExhaustedError as e:
+            logger.error(f'Concurrent worker exhausted during basic auth: {e}')
+            return db_lookup.worker_exhausted_response()
+        if user is None:
             return _basic_auth_401_response('Invalid credentials')
-
-        valid_user = False
-        for user in users:
-            if not user.name or not user.password:
-                continue
-            username_encoded = username.encode('utf8')
-            db_username_encoded = user.name.encode('utf8')
-            if (username_encoded == db_username_encoded and
-                    common.crypt_ctx.verify(password, user.password)):
-                valid_user = True
-                request.state.auth_user = user
-                break
-        if not valid_user:
-            return _basic_auth_401_response('Invalid credentials')
+        request.state.auth_user = user
 
         return await call_next(request)
 
@@ -492,19 +528,15 @@ class BearerTokenMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
             # JWT carries a freshly-generated token_id; only the hash is
             # consistent between the live JWT and the live DB row.
             incoming_hash = hashlib.sha256(sa_token.encode()).hexdigest()
-            # Offload the sync DB lookups to the bounded auth thread executor so
-            # a slow/locked DB cannot stall the request event loop (this runs on
-            # the loop for every service-account-authenticated request).
-            # Using a dedicated executor (not asyncio's shared default thread
-            # pool) avoids saturating that pool under DB slowness; when it is
-            # exhausted it raises ConcurrentWorkerExhaustedError, which the
-            # app-level handler turns into a 503 so the client retries. The auth
-            # executor is kept separate from the request executor so long-lived
-            # streaming requests cannot starve authentication.
-            loop = asyncio.get_running_loop()
-            auth_executor = executor.get_auth_thread_executor()
-            token_row = await loop.run_in_executor(
-                auth_executor,
+            # Offload the sync DB lookups to the bounded auth thread executor
+            # under a deadline, so a slow/locked DB cannot stall the request
+            # event loop (this runs on the loop for every
+            # service-account-authenticated request) nor hold executor
+            # threads for as long as the DB layer allows. The auth executor
+            # is kept separate from the request executor so long-lived
+            # streaming requests cannot starve authentication; timeouts and
+            # executor exhaustion are converted to retryable 503s below.
+            token_row = await db_lookup.call_with_deadline(
                 global_user_state.get_service_account_token_by_hash,
                 incoming_hash)
             if token_row is None:
@@ -521,9 +553,8 @@ class BearerTokenMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
                     {'detail': 'Service account token has expired'})
 
             # Verify user still exists in database
-            user_info = await loop.run_in_executor(auth_executor,
-                                                   global_user_state.get_user,
-                                                   user_id)
+            user_info = await db_lookup.call_with_deadline(
+                global_user_state.get_user, user_id)
             if user_info is None:
                 logger.warning(
                     f'Service account user {user_id} no longer exists')
@@ -534,8 +565,7 @@ class BearerTokenMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
             # DB row's token_id (not the JWT's): after rotation the JWT
             # carries a different token_id than the DB row.
             try:
-                await loop.run_in_executor(
-                    auth_executor,
+                await db_lookup.call_with_deadline(
                     global_user_state.update_service_account_token_last_used,
                     token_row['token_id'])
             except Exception as e:  # pylint: disable=broad-except
@@ -548,10 +578,19 @@ class BearerTokenMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
 
             logger.debug(f'Authenticated service account: {user_id}')
 
-        except exceptions.ConcurrentWorkerExhaustedError:
-            # Request thread executor is full: let the app-level handler return
-            # 503 so the client retries, instead of masking it as a 401 below.
-            raise
+        except asyncio.TimeoutError:
+            # Convert to a retryable 503 here (not a 401 below, and not a
+            # raise): app-level exception handlers wrap the router only, so
+            # an exception raised in a middleware surfaces as a bare 500,
+            # which clients do not retry.
+            logger.error('Service account auth DB lookup timed out')
+            return db_lookup.db_timeout_response()
+        except exceptions.ConcurrentWorkerExhaustedError as e:
+            # Same reasoning as the timeout above: convert in-middleware so
+            # the client sees a retryable 503 instead of a bare 500.
+            logger.error(f'Concurrent worker exhausted during service account '
+                         f'auth: {e}')
+            return db_lookup.worker_exhausted_response()
         except Exception as e:  # pylint: disable=broad-except
             logger.error(f'Service account authentication failed: {e}',
                          exc_info=True)
@@ -598,9 +637,23 @@ class AuthProxyMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
                              'auth user was already set.')
             return await call_next(request)
 
-        # Add user to database if auth_user is present
+        # Add user to database if auth_user is present. Offload the sync DB
+        # upsert to the bounded auth thread executor under a deadline (it
+        # would otherwise run on the event loop for every
+        # auth-proxy-authenticated request); failures convert to retryable
+        # 503s here because app-level exception handlers cannot see
+        # exceptions raised in middlewares.
         if auth_user is not None:
-            newly_added = global_user_state.add_or_update_user(auth_user)
+            try:
+                newly_added = await db_lookup.call_with_deadline(
+                    global_user_state.add_or_update_user, auth_user)
+            except asyncio.TimeoutError:
+                logger.error('Auth proxy user upsert timed out')
+                return db_lookup.db_timeout_response()
+            except exceptions.ConcurrentWorkerExhaustedError as e:
+                logger.error(f'Concurrent worker exhausted during auth proxy '
+                             f'user upsert: {e}')
+                return db_lookup.worker_exhausted_response()
             if newly_added:
                 # Offload the blocking config reload + role seed to a worker
                 # thread so this async middleware doesn't block the event loop.
