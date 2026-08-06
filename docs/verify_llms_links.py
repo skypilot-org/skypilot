@@ -33,7 +33,7 @@ def main():
     if base_url.startswith("http://127.0.0.1"):
         try:
             requests.get(base_url, timeout=1)
-        except:
+        except Exception:
             print(f"WARNING: No server at {base_url}")
 
     failures = []
