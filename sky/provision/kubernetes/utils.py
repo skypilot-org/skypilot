@@ -247,6 +247,261 @@ class KubernetesHighPerformanceNetworkType(enum.Enum):
         """Check if this cluster type requires TCPXO daemon."""
         return self == KubernetesHighPerformanceNetworkType.GCP_TCPXO
 
+    def get_rdma_resource_requests(
+        self,
+        accelerator_count: Optional[int] = None,
+    ) -> Dict[str, int]:
+        """Device-plugin resources a pod requests to attach this fabric.
+
+        The InfiniBand/RDMA device-plugin resources that must appear in both
+        the pod's resource requests and limits. Empty for cluster types whose
+        fabric needs no explicit device-plugin resource (e.g. Nebius, whose
+        InfiniBand is exposed without one). Single source of truth for the
+        pod's RDMA resources, shared across the pod-spec renderers.
+        """
+        if self == KubernetesHighPerformanceNetworkType.COREWEAVE:
+            return {'rdma/ib': 1}
+        if (self == KubernetesHighPerformanceNetworkType.TOGETHER and
+                accelerator_count):
+            return {'nvidia.com/rdma_ib': accelerator_count}
+        return {}
+
+    def get_gpudirect_env_vars(self, is_a4: bool = False) -> Dict[str, str]:
+        """NCCL/GPUDirect container env for the GCP GPUDirect fabrics.
+
+        The tuned NCCL settings a pod needs to drive this cluster's GPUDirect
+        transport (TCPX / TCPXO / GPUDirect-RDMA). Ordered; values are strings
+        (k8s env values must be strings). Empty for non-GCP-GPUDirect types,
+        whose env is carried by ``get_network_env_vars`` instead. Single source
+        of truth for the GPUDirect env, shared by the pod-spec renderers.
+        """
+        if self == KubernetesHighPerformanceNetworkType.GCP_TCPX:
+            return {
+                'LD_LIBRARY_PATH': '/usr/local/nvidia/lib64:/usr/local/tcpx/lib64',
+                'NCCL_GPUDIRECTTCPX_SOCKET_IFNAME': 'eth1,eth2,eth3,eth4',
+                'NCCL_GPUDIRECTTCPX_CTRL_DEV': 'eth0',
+                'NCCL_GPUDIRECTTCPX_TX_BINDINGS':
+                    ('eth1:8-21,112-125;eth2:8-21,112-125;'
+                     'eth3:60-73,164-177;eth4:60-73,164-177'),
+                'NCCL_GPUDIRECTTCPX_RX_BINDINGS':
+                    ('eth1:22-35,126-139;eth2:22-35,126-139;'
+                     'eth3:74-87,178-191;eth4:74-87,178-191'),
+                'NCCL_GPUDIRECTTCPX_PROGRAM_FLOW_STEERING_WAIT_MICROS': '500000',
+                'NCCL_GPUDIRECTTCPX_UNIX_CLIENT_PREFIX': '/tmp',
+                'NCCL_GPUDIRECTTCPX_FORCE_ACK': '0',
+                'NCCL_SOCKET_IFNAME': 'eth0',
+                'NCCL_CROSS_NIC': '0',
+                'NCCL_ALGO': 'Ring',
+                'NCCL_PROTO': 'Simple',
+                'NCCL_NSOCKS_PERTHREAD': '4',
+                'NCCL_SOCKET_NTHREADS': '1',
+                'NCCL_NET_GDR_LEVEL': 'PIX',
+                'NCCL_DYNAMIC_CHUNK_SIZE': '524288',
+                'NCCL_P2P_PXN_LEVEL': '0',
+                'NCCL_P2P_NET_CHUNKSIZE': '524288',
+                'NCCL_P2P_PCI_CHUNKSIZE': '524288',
+                'NCCL_P2P_NVL_CHUNKSIZE': '1048576',
+                'NCCL_BUFFSIZE': '4194304',
+                'NCCL_MAX_NCHANNELS': '8',
+                'NCCL_MIN_NCHANNELS': '8',
+                'CUDA_VISIBLE_DEVICES': '0,1,2,3,4,5,6,7',
+            }
+        if self == KubernetesHighPerformanceNetworkType.GCP_TCPXO:
+            return {
+                'LD_LIBRARY_PATH': '/usr/local/nvidia/lib64',
+                'NCCL_FASTRAK_LLCM_DEVICE_DIRECTORY': '/dev/aperture_devices',
+                'NCCL_FASTRAK_CTRL_DEV': 'eth0',
+                'NCCL_FASTRAK_IFNAME': 'eth1,eth2,eth3,eth4,eth5,eth6,eth7,eth8',
+                'NCCL_SOCKET_IFNAME': 'eth0',
+                'NCCL_CROSS_NIC': '0',
+                'NCCL_ALGO': 'Ring,Tree',
+                'NCCL_PROTO': 'Simple,LL128',
+                'NCCL_MIN_NCHANNELS': '4',
+                'NCCL_TUNER_PLUGIN': 'libnccl-tuner.so',
+                'NCCL_TUNER_CONFIG_PATH':
+                    '/usr/local/nvidia/lib64/a3plus_tuner_config.textproto',
+                'CUDA_VISIBLE_DEVICES': '0,1,2,3,4,5,6,7',
+            }
+        if self == KubernetesHighPerformanceNetworkType.GCP_GPUDIRECT_RDMA:
+            return {
+                'LD_LIBRARY_PATH': '/usr/local/nvidia/lib64',
+                'NCCL_NET': 'gIB',
+                'NCCL_CROSS_NIC': '0',
+                'NCCL_NET_GDR_LEVEL': 'PIX',
+                'NCCL_P2P_NET_CHUNKSIZE': '131072',
+                'NCCL_NVLS_CHUNKSIZE': '524288',
+                'NCCL_IB_ADAPTIVE_ROUTING': '1',
+                'NCCL_IB_QPS_PER_CONNECTION': '4',
+                'NCCL_IB_TC': '52',
+                'NCCL_IB_FIFO_TC': '84',
+                'NCCL_TUNER_CONFIG_PATH':
+                    ('/usr/local/gib/configs/tuner_config_a4.txtpb' if is_a4 else
+                     '/usr/local/gib/configs/tuner_config_a3u.txtpb'),
+            }
+        return {}
+
+    def get_gpudirect_annotations(self) -> Dict[str, str]:
+        """GKE pod annotations for the GCP GPUDirect fabrics.
+
+        The `devices.gke.io/*` GPU-device list and the
+        `networking.gke.io/interfaces` multi-NIC spec GKE requires to attach
+        the GPUDirect data-plane. Empty for the other network types. Single
+        source of truth shared by the pod-spec renderers.
+        """
+
+        def _devices(names: List[str]) -> str:
+            return ''.join(f'- path: /dev/{n}\n' for n in names)
+
+        def _interfaces(pairs: List[Tuple[str, str]]) -> str:
+            entries = ',\n'.join(f'  {{"interfaceName":"{iface}",'
+                                 f'"network":"{net}"}}' for iface, net in pairs)
+            return f'[\n{entries}\n]\n'
+
+        _nvidia_devices = [
+            'nvidia0', 'nvidia1', 'nvidia2', 'nvidia3', 'nvidia4', 'nvidia5',
+            'nvidia6', 'nvidia7', 'nvidiactl', 'nvidia-uvm'
+        ]
+        if self == KubernetesHighPerformanceNetworkType.GCP_TCPX:
+            return {
+                'devices.gke.io/container.tcpx-daemon':
+                    _devices(_nvidia_devices),
+                'networking.gke.io/default-interface': 'eth0',
+                'networking.gke.io/interfaces': _interfaces([
+                    ('eth0', 'default'), ('eth1', 'vpc1'), ('eth2', 'vpc2'),
+                    ('eth3', 'vpc3'), ('eth4', 'vpc4')
+                ]),
+            }
+        if self == KubernetesHighPerformanceNetworkType.GCP_TCPXO:
+            return {
+                'devices.gke.io/container.tcpxo-daemon':
+                    _devices(_nvidia_devices + ['dmabuf_import_helper']),
+                'networking.gke.io/default-interface': 'eth0',
+                'networking.gke.io/interfaces': _interfaces([
+                    ('eth0', 'default'), ('eth1', 'vpc1'), ('eth2', 'vpc2'),
+                    ('eth3', 'vpc3'), ('eth4', 'vpc4'), ('eth5', 'vpc5'),
+                    ('eth6', 'vpc6'), ('eth7', 'vpc7'), ('eth8', 'vpc8')
+                ]),
+            }
+        if self == KubernetesHighPerformanceNetworkType.GCP_GPUDIRECT_RDMA:
+            return {
+                'networking.gke.io/default-interface': 'eth0',
+                'networking.gke.io/interfaces': _interfaces([
+                    ('eth0', 'default'), ('eth1', 'gvnic-1'), ('eth2', 'rdma-0'),
+                    ('eth3', 'rdma-1'), ('eth4', 'rdma-2'), ('eth5', 'rdma-3'),
+                    ('eth6', 'rdma-4'), ('eth7', 'rdma-5'), ('eth8', 'rdma-6'),
+                    ('eth9', 'rdma-7')
+                ]),
+            }
+        return {}
+
+    def get_gpudirect_pod_spec(self) -> Dict[str, List[Dict[str, Any]]]:
+        """Volumes, main-container volumeMounts and sidecars for GCP GPUDirect.
+
+        The host-path driver/socket volumes, their mounts on the workload
+        container, and the rxdm daemon sidecar(s) a GCP GPUDirect pod needs
+        (TCPX / TCPXO; GPUDirect-RDMA needs no sidecar). Empty for the other
+        network types. Single source of truth shared by the pod-spec renderers;
+        keys are ``volumes`` / ``volume_mounts`` / ``sidecars``.
+        """
+        empty: Dict[str, List[Dict[str, Any]]] = {
+            'volumes': [],
+            'volume_mounts': [],
+            'sidecars': [],
+        }
+        if self == KubernetesHighPerformanceNetworkType.GCP_TCPX:
+            return {
+                'volumes': [
+                    {'name': 'libraries',
+                     'hostPath': {'path': '/home/kubernetes/bin/nvidia/lib64'}},
+                    {'name': 'tcpx-socket', 'emptyDir': {}},
+                    {'name': 'sys', 'hostPath': {'path': '/sys'}},
+                    {'name': 'proc-sys', 'hostPath': {'path': '/proc/sys'}},
+                ],
+                'volume_mounts': [
+                    {'name': 'tcpx-socket', 'mountPath': '/tmp'},
+                    {'name': 'libraries', 'mountPath': '/usr/local/nvidia/lib64',
+                     'readOnly': True},
+                ],
+                'sidecars': [{
+                    'name': 'tcpx-daemon',
+                    'image': ('us-docker.pkg.dev/gce-ai-infra/gpudirect-tcpx/'
+                              'tcpgpudmarxd-dev:v2.0.11'),
+                    'imagePullPolicy': 'Always',
+                    'command': [
+                        '/tcpgpudmarxd/build/app/tcpgpudmarxd',
+                        '--gpu_nic_preset', 'a3vm', '--gpu_shmem_type', 'fd',
+                        '--uds_path', '/run/tcpx', '--setup_param', '--verbose',
+                        '128', '2', '0',
+                    ],
+                    'securityContext': {'capabilities': {'add': ['NET_ADMIN']}},
+                    'volumeMounts': [
+                        {'name': 'libraries',
+                         'mountPath': '/usr/local/nvidia/lib64',
+                         'readOnly': True},
+                        {'name': 'tcpx-socket', 'mountPath': '/run/tcpx'},
+                        {'name': 'sys', 'mountPath': '/hostsysfs'},
+                        {'name': 'proc-sys', 'mountPath': '/hostprocsysfs'},
+                    ],
+                    'env': [{'name': 'LD_LIBRARY_PATH',
+                             'value': '/usr/local/nvidia/lib64'}],
+                }],
+            }
+        if self == KubernetesHighPerformanceNetworkType.GCP_TCPXO:
+            return {
+                'volumes': [
+                    {'name': 'libraries',
+                     'hostPath': {'path': '/home/kubernetes/bin/nvidia'}},
+                    {'name': 'sys', 'hostPath': {'path': '/sys'}},
+                    {'name': 'proc-sys', 'hostPath': {'path': '/proc/sys'}},
+                    {'name': 'aperture-devices',
+                     'hostPath': {'path': '/dev/aperture_devices'}},
+                ],
+                'volume_mounts': [
+                    {'name': 'libraries', 'mountPath': '/usr/local/nvidia'},
+                    {'name': 'aperture-devices',
+                     'mountPath': '/dev/aperture_devices'},
+                ],
+                'sidecars': [{
+                    'name': 'tcpxo-daemon',
+                    'image': ('us-docker.pkg.dev/gce-ai-infra/gpudirect-tcpxo/'
+                              'tcpgpudmarxd-dev:v1.0.17'),
+                    'imagePullPolicy': 'Always',
+                    'command': ['/bin/sh', '-c'],
+                    'args': [
+                        'set -ex\n'
+                        'chmod 755 /fts/entrypoint_rxdm_container.sh\n'
+                        '/fts/entrypoint_rxdm_container.sh --num_hops=2 '
+                        '--num_nics=8 --uid= --alsologtostderr\n'
+                    ],
+                    'securityContext': {
+                        'capabilities': {'add': ['NET_ADMIN', 'NET_BIND_SERVICE']}
+                    },
+                    'volumeMounts': [
+                        {'name': 'libraries', 'mountPath': '/usr/local/nvidia'},
+                        {'name': 'sys', 'mountPath': '/hostsysfs'},
+                        {'name': 'proc-sys', 'mountPath': '/hostprocsysfs'},
+                    ],
+                    'env': [{'name': 'LD_LIBRARY_PATH',
+                             'value': '/usr/local/nvidia/lib64'}],
+                }],
+            }
+        if self == KubernetesHighPerformanceNetworkType.GCP_GPUDIRECT_RDMA:
+            return {
+                'volumes': [
+                    {'name': 'library-dir-host',
+                     'hostPath': {'path': '/home/kubernetes/bin/nvidia'}},
+                    {'name': 'gib',
+                     'hostPath': {'path': '/home/kubernetes/bin/gib'}},
+                ],
+                'volume_mounts': [
+                    {'name': 'library-dir-host',
+                     'mountPath': '/usr/local/nvidia'},
+                    {'name': 'gib', 'mountPath': '/usr/local/gib'},
+                ],
+                'sidecars': [],
+            }
+        return empty
+
 
 # TODO(romilb): Move constants to constants.py
 DEFAULT_NAMESPACE = 'default'

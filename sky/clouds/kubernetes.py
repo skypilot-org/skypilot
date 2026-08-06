@@ -1,6 +1,7 @@
 """Kubernetes."""
 import concurrent.futures
 import fnmatch
+import json
 import math
 import os
 import re
@@ -1142,6 +1143,37 @@ class Kubernetes(clouds.Cloud):
 
         deploy_vars['k8s_ipc_lock_capability'] = (
             network_type.requires_ipc_lock_capability())
+
+        # RDMA/InfiniBand device-plugin resources for this fabric, keyed by
+        # resource name. Rendered into both requests and limits.
+        deploy_vars['k8s_rdma_resource_requests'] = (
+            network_type.get_rdma_resource_requests(acc_count))
+
+        # Tuned NCCL/GPUDirect container env for the GCP GPUDirect fabrics
+        # (empty for the others). Rendered as an ordered env block.
+        deploy_vars['k8s_gpudirect_env'] = network_type.get_gpudirect_env_vars(
+            is_a4=deploy_vars['k8s_enable_gpudirect_rdma_a4'])
+
+        # GCP GPUDirect host-path volumes, their workload-container mounts, and
+        # the rxdm daemon sidecar(s) (empty for the others). Serialized to JSON
+        # (an inline YAML mapping) and rendered raw, rather than via Jinja's
+        # ``tojson`` filter which sorts keys -- key order must stay as authored
+        # to match the rendered pod field-for-field.
+        _gpudirect_pod_spec = network_type.get_gpudirect_pod_spec()
+        deploy_vars['k8s_gpudirect_volumes'] = [
+            json.dumps(v) for v in _gpudirect_pod_spec['volumes']
+        ]
+        deploy_vars['k8s_gpudirect_volume_mounts'] = [
+            json.dumps(m) for m in _gpudirect_pod_spec['volume_mounts']
+        ]
+        deploy_vars['k8s_gpudirect_sidecars'] = [
+            json.dumps(c) for c in _gpudirect_pod_spec['sidecars']
+        ]
+
+        # GKE GPUDirect pod annotations (device list + multi-NIC interfaces).
+        # Values are scalar strings, so the template renders them via tojson.
+        deploy_vars['k8s_gpudirect_annotations'] = (
+            network_type.get_gpudirect_annotations())
 
         # OCI OKE RoCE: requires hostNetwork, privileged containers, and a
         # hostPath mount of /dev/infiniband (no device plugin on OCI). The

@@ -1,0 +1,96 @@
+apiVersion: v1
+
+kind: Pod
+
+metadata:
+  labels:
+    parent: skypilot
+    skypilot-cluster: c
+    skypilot-user: null
+    skypilot-binpack: gpu
+  annotations:
+    skypilot-user: ''
+
+spec:
+  serviceAccountName: skypilot-service-account
+  automountServiceAccountToken: true
+  restartPolicy: Never
+  affinity:
+    nodeAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        nodeSelectorTerms:
+        - matchExpressions:
+          - key: skypilot.co/accelerator
+            operator: In
+            values:
+            - h100
+    podAffinity:
+      preferredDuringSchedulingIgnoredDuringExecution:
+      - weight: 1
+        podAffinityTerm:
+          labelSelector:
+            matchExpressions:
+            - key: skypilot-binpack
+              operator: In
+              values:
+              - gpu
+          topologyKey: kubernetes.io/hostname
+  volumes:
+  - name: dshm
+    emptyDir:
+      medium: Memory
+  - name: fusermount-shared-dir
+    hostPath:
+      path: /var/run/fusermount
+      type: DirectoryOrCreate
+  containers:
+  - name: ray-node
+    imagePullPolicy: Always
+    image: test-image:latest
+    env:
+    - name: SKYPILOT_POD_NODE_TYPE
+      valueFrom:
+        fieldRef:
+          fieldPath: metadata.labels['ray-node-type']
+    - name: SKYPILOT_POD_CPU_CORE_LIMIT
+      valueFrom:
+        resourceFieldRef:
+          containerName: ray-node
+          resource: requests.cpu
+    - name: SKYPILOT_POD_MEMORY_BYTES_LIMIT
+      valueFrom:
+        resourceFieldRef:
+          containerName: ray-node
+          resource: requests.memory
+    - name: RAY_memory_monitor_refresh_ms
+      value: '0'
+    - name: SKYPILOT_IN_CLUSTER_CONTEXT_NAME
+      value: test-context
+    - name: NCCL_IB_HCA
+      value: mlx5
+    - name: UCX_NET_DEVICES
+      value: mlx5_0:1,mlx5_1:1,mlx5_2:1,mlx5_3:1,mlx5_4:1,mlx5_5:1,mlx5_6:1,mlx5_7:1
+    - name: FUSERMOUNT_SHARED_DIR
+      value: /var/run/fusermount
+    ports:
+    - containerPort: 22
+    - containerPort: null
+    - containerPort: 10001
+    - containerPort: null
+    - containerPort: 46590
+    volumeMounts:
+    - mountPath: /dev/shm
+      name: dshm
+    - name: fusermount-shared-dir
+      mountPath: /var/run/fusermount
+    resources:
+      requests:
+        cpu: 8.0
+        memory: 64.0G
+        nvidia.com/gpu: 8
+      limits:
+        nvidia.com/gpu: 8
+    securityContext:
+      capabilities:
+        add:
+        - IPC_LOCK
