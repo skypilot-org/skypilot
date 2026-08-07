@@ -8,6 +8,7 @@ import unittest.mock as mock
 import fastapi
 import pytest
 
+from sky.server.server import _SA_LAST_USED_UPDATE_INTERVAL_SECONDS
 from sky.server.server import BearerTokenMiddleware
 from sky.skylet import constants
 
@@ -291,7 +292,8 @@ class TestBearerTokenMiddleware:
             assert base_mock_request.state.auth_user.name == 'test-service-account'
             # last_used must be updated with the DB row's token_id, not
             # the JWT's.
-            mock_update_last_used.assert_called_once_with('token_db_id_456')
+            mock_update_last_used.assert_called_once_with(
+                'token_db_id_456', _SA_LAST_USED_UPDATE_INTERVAL_SECONDS)
 
     @pytest.mark.asyncio
     async def test_fresh_last_used_skips_update(self, middleware,
@@ -367,7 +369,8 @@ class TestBearerTokenMiddleware:
                                                  mock_call_next)
 
             assert response.status_code == 200
-            mock_update_last_used.assert_called_once_with('token_db_id_456')
+            mock_update_last_used.assert_called_once_with(
+                'token_db_id_456', _SA_LAST_USED_UPDATE_INTERVAL_SECONDS)
 
     @pytest.mark.asyncio
     async def test_missing_user_id_in_token(self, middleware, base_mock_request,

@@ -576,9 +576,15 @@ class BearerTokenMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
             # Update last used timestamp for token tracking, skipped while
             # the row's last_used_at is fresher than
             # _SA_LAST_USED_UPDATE_INTERVAL_SECONDS (see the constant for
-            # why an unthrottled per-request write is dangerous). Use the
-            # DB row's token_id (not the JWT's): after rotation the JWT
-            # carries a different token_id than the DB row.
+            # why an unthrottled per-request write is dangerous). This
+            # pre-check filters the steady state for free (the row is
+            # already in hand); the interval is ALSO passed to the update,
+            # whose WHERE clause re-checks staleness atomically, so the
+            # in-flight requests that all read a stale timestamp at an
+            # interval boundary collapse to one real write instead of
+            # herding on the row lock. Use the DB row's token_id (not the
+            # JWT's): after rotation the JWT carries a different token_id
+            # than the DB row.
             last_used_at = token_row.get('last_used_at')
             if (last_used_at is None or time.time() - last_used_at >=
                     _SA_LAST_USED_UPDATE_INTERVAL_SECONDS):
@@ -586,7 +592,8 @@ class BearerTokenMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
                     await db_lookup.call_with_deadline(
                         global_user_state.
                         update_service_account_token_last_used,
-                        token_row['token_id'])
+                        token_row['token_id'],
+                        _SA_LAST_USED_UPDATE_INTERVAL_SECONDS)
                 except Exception as e:  # pylint: disable=broad-except
                     logger.debug(f'Failed to update token last used time: {e}')
 
