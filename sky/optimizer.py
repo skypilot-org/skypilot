@@ -1395,10 +1395,6 @@ class Optimizer:
             if cloud_obj:
                 result.append((cloud_obj, region))
 
-        # Deterministic order: the intersection above is a set, so without
-        # sorting the caller's tie-breaks (and any [0] fallback) would vary
-        # run to run.
-        result.sort(key=lambda infra: (str(infra[0]).lower(), infra[1] or ''))
         return result
 
     @staticmethod
@@ -1420,6 +1416,15 @@ class Optimizer:
         """
         if len(common_infras) == 1:
             return common_infras[0]
+
+        # The scoring loop below keeps the FIRST of equal-score options
+        # (strict '<'), and equal scores are the norm on Kubernetes where
+        # every context costs 0.0 - so the input order is a tie-breaker.
+        # common_infras comes from a set intersection; sort so ties (and
+        # the last-resort [0] fallback) don't ride set iteration order.
+        common_infras = sorted(common_infras,
+                               key=lambda infra:
+                               (str(infra[0]).lower(), infra[1] or ''))
 
         # Estimate total cost/time for each infra
         best_infra: Optional[Tuple[clouds.Cloud, Optional[str]]] = None

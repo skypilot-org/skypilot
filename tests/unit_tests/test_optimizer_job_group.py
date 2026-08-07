@@ -1283,29 +1283,33 @@ class TestSelectBestInfraDistinctCloudInstances:
         assert str(cloud) == 'Kubernetes'
         assert region == 'ctx-dev'
 
-    def test_find_common_infras_order_is_deterministic(self):
-        """The intersection is computed over a set; the returned list
-        must not leak set iteration order into placement decisions."""
+    def test_select_best_infra_tie_break_ignores_input_order(self):
+        """Equal-score options (the norm on k8s: every context costs 0.0)
+        must tie-break deterministically, not by whatever order the
+        common-infra set intersection happened to iterate in."""
         task1, task2 = self._task('a'), self._task('b')
 
         def candidates():
             return {
-                clouds.AWS(): [
-                    self._res(clouds.AWS(), 'us-east-1', cost=1.0),
-                    self._res(clouds.AWS(), 'ap-northeast-1', cost=1.0),
-                ],
                 clouds.Kubernetes(): [
-                    self._res(clouds.Kubernetes(), 'ctx-dev', cost=0.0)
+                    self._res(clouds.Kubernetes(), 'ctx-a', cost=0.0),
+                    self._res(clouds.Kubernetes(), 'ctx-b', cost=0.0),
                 ],
             }
 
         task_candidates = {task1: candidates(), task2: candidates()}
-        result = optimizer.Optimizer._find_common_infras(task_candidates)
-        assert [(str(c), r) for c, r in result] == [
-            ('AWS', 'ap-northeast-1'),
-            ('AWS', 'us-east-1'),
-            ('Kubernetes', 'ctx-dev'),
-        ]
+        k8s = clouds.Kubernetes()
+        forward = [(k8s, 'ctx-a'), (k8s, 'ctx-b')]
+        reverse = [(k8s, 'ctx-b'), (k8s, 'ctx-a')]
+
+        picks = {
+            optimizer.Optimizer._select_best_infra(order,
+                                                   task_candidates,
+                                                   [task1, task2],
+                                                   minimize_cost=True)[1]
+            for order in (forward, reverse)
+        }
+        assert picks == {'ctx-a'}
 
     def test_optimize_same_infra_end_to_end_distinct_instances(self):
         """Full _optimize_same_infra pass with per-task cloud instances:
@@ -1321,19 +1325,23 @@ class TestSelectBestInfraDistinctCloudInstances:
         task2.estimate_runtime = MagicMock(return_value=3600)
         dag.tasks = [task1, task2]
 
-        per_task_resources = {}
+        per_task_k8s_res = {}
 
         def mock_fill(task, blocked_resources, quiet):
+            # _fill_in_launchable_resources is called once PER TASK and
+            # returns that task's launchable candidates across ALL clouds
+            # (a Dict[Resources, List[Resources]]; the code under test only
+            # reads the value lists). Each task gets BOTH a free k8s option
+            # and a paid AWS option - AWS is a viable common infra that
+            # must lose - with fresh Cloud instances per call, as in
+            # production.
             k8s_res = self._res(clouds.Kubernetes(), 'ctx-dev', cost=0.0)
-            k8s_res.cloud.get_vcpus_mem_from_instance_type = MagicMock(
-                return_value=(2.0, 4.0))
-            k8s_res.instance_type = '2CPU--4GB'
-            k8s_res.get_accelerators_str = MagicMock(return_value='-')
-            k8s_res.get_spot_str = MagicMock(return_value='')
-            k8s_res.infra = MagicMock()
             aws_res = self._res(clouds.AWS(), 'ap-northeast-1', cost=8.6)
-            per_task_resources[task.name] = k8s_res
-            return ({'any': [k8s_res, aws_res]}, None, None, None)
+            # Remember each task's own k8s candidate: Step 4 must assign
+            # THIS task's instance back to it, not another task's.
+            per_task_k8s_res[task.name] = k8s_res
+            requested = MagicMock(spec=resources_lib.Resources)
+            return ({requested: [k8s_res, aws_res]}, None, None, None)
 
         with patch('sky.optimizer._fill_in_launchable_resources',
                    side_effect=mock_fill):
@@ -1343,7 +1351,7 @@ class TestSelectBestInfraDistinctCloudInstances:
                 blocked_resources=None,
                 quiet=True)
 
-        assert task1.best_resources is per_task_resources['a']
-        assert task2.best_resources is per_task_resources['b']
+        assert task1.best_resources is per_task_k8s_res['a']
+        assert task2.best_resources is per_task_k8s_res['b']
         # k8s placement: the unset default must survive undegraded.
         assert dag.inter_connection is None
