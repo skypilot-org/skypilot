@@ -1223,3 +1223,135 @@ class TestPrintJobGroupPlan:
             # (no "Best plan:" message)
             for call in mock_logger.info.call_args_list:
                 assert 'Best plan' not in str(call)
+
+
+class TestSelectBestInfraDistinctCloudInstances:
+    """Regression tests for cloud-keyed candidate lookups with real clouds.
+
+    Production builds each task's candidate dict with its own Cloud
+    instances. Before Cloud.__eq__/__hash__ existed, the value lookup
+    `cloud in candidates` in _select_best_infra failed for every task
+    except the one whose instance _find_common_infras happened to reuse,
+    so every common infra was skipped as invalid and the fallback
+    returned an arbitrary member of an unordered set. Observed in the
+    wild: a 2-task group placed on paid AWS while free Kubernetes
+    capacity was listed under "Other available common infras".
+
+    The mock-cloud fixtures elsewhere in this file wire up __eq__ on the
+    mocks and share one instance across tasks, which is exactly why they
+    could not catch this; these tests use real cloud objects and fresh
+    instances per task on purpose.
+    """
+
+    def _res(self, cloud, region, cost):
+        res = MagicMock(spec=resources_lib.Resources)
+        res.cloud = cloud
+        res.region = region
+        res.get_cost = MagicMock(return_value=cost)
+        return res
+
+    def _task(self, name):
+        task = MagicMock(spec=task_lib.Task)
+        task.name = name
+        task.time_estimator_func = None
+        task.num_nodes = 1
+        return task
+
+    def _candidates_for_task(self):
+        """Fresh cloud instances every call, as in production."""
+        return {
+            clouds.Kubernetes(): [
+                self._res(clouds.Kubernetes(), 'ctx-dev', cost=0.0)
+            ],
+            clouds.AWS(): [self._res(clouds.AWS(), 'ap-northeast-1', cost=8.6)],
+        }
+
+    def test_free_kubernetes_beats_paid_aws_across_instances(self):
+        task1, task2 = self._task('a'), self._task('b')
+        task_candidates = {
+            task1: self._candidates_for_task(),
+            task2: self._candidates_for_task(),
+        }
+
+        common_infras = optimizer.Optimizer._find_common_infras(task_candidates)
+        as_names = {(str(c), r) for c, r in common_infras}
+        assert as_names == {('Kubernetes', 'ctx-dev'),
+                            ('AWS', 'ap-northeast-1')}
+
+        cloud, region = optimizer.Optimizer._select_best_infra(
+            common_infras, task_candidates, [task1, task2], minimize_cost=True)
+        assert str(cloud) == 'Kubernetes'
+        assert region == 'ctx-dev'
+
+    def test_select_best_infra_tie_break_ignores_input_order(self):
+        """Equal-score options (the norm on k8s: every context costs 0.0)
+        must tie-break deterministically, not by whatever order the
+        common-infra set intersection happened to iterate in."""
+        task1, task2 = self._task('a'), self._task('b')
+
+        def candidates():
+            return {
+                clouds.Kubernetes(): [
+                    self._res(clouds.Kubernetes(), 'ctx-a', cost=0.0),
+                    self._res(clouds.Kubernetes(), 'ctx-b', cost=0.0),
+                ],
+            }
+
+        task_candidates = {task1: candidates(), task2: candidates()}
+        k8s = clouds.Kubernetes()
+        forward = [(k8s, 'ctx-a'), (k8s, 'ctx-b')]
+        reverse = [(k8s, 'ctx-b'), (k8s, 'ctx-a')]
+
+        picks = {
+            optimizer.Optimizer._select_best_infra(order,
+                                                   task_candidates,
+                                                   [task1, task2],
+                                                   minimize_cost=True)[1]
+            for order in (forward, reverse)
+        }
+        assert picks == {'ctx-a'}
+
+    def test_optimize_same_infra_end_to_end_distinct_instances(self):
+        """Full _optimize_same_infra pass with per-task cloud instances:
+        the group must land on the free Kubernetes context, not AWS, and
+        the unset inter_connection must NOT degrade (placement is k8s)."""
+        dag = MagicMock(spec=dag_lib.Dag)
+        dag.name = 'g'
+        dag.inter_connection = None
+        dag.inter_connection_enabled = MagicMock(return_value=True)
+
+        task1, task2 = self._task('a'), self._task('b')
+        task1.estimate_runtime = MagicMock(return_value=3600)
+        task2.estimate_runtime = MagicMock(return_value=3600)
+        dag.tasks = [task1, task2]
+
+        per_task_k8s_res = {}
+
+        def mock_fill(task, blocked_resources, quiet):
+            # _fill_in_launchable_resources is called once PER TASK and
+            # returns that task's launchable candidates across ALL clouds
+            # (a Dict[Resources, List[Resources]]; the code under test only
+            # reads the value lists). Each task gets BOTH a free k8s option
+            # and a paid AWS option - AWS is a viable common infra that
+            # must lose - with fresh Cloud instances per call, as in
+            # production.
+            k8s_res = self._res(clouds.Kubernetes(), 'ctx-dev', cost=0.0)
+            aws_res = self._res(clouds.AWS(), 'ap-northeast-1', cost=8.6)
+            # Remember each task's own k8s candidate: Step 4 must assign
+            # THIS task's instance back to it, not another task's.
+            per_task_k8s_res[task.name] = k8s_res
+            requested = MagicMock(spec=resources_lib.Resources)
+            return ({requested: [k8s_res, aws_res]}, None, None, None)
+
+        with patch('sky.optimizer._fill_in_launchable_resources',
+                   side_effect=mock_fill):
+            optimizer.Optimizer._optimize_same_infra(
+                dag,
+                minimize=common.OptimizeTarget.COST,
+                blocked_resources=None,
+                quiet=True)
+
+        assert task1.best_resources is per_task_k8s_res['a']
+        assert task2.best_resources is per_task_k8s_res['b']
+        # k8s placement: the unset default must survive undegraded.
+        assert dag.inter_connection is None
