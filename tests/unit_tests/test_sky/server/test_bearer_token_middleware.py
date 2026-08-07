@@ -337,8 +337,8 @@ class TestBearerTokenMiddleware:
 
     @pytest.mark.asyncio
     async def test_stale_last_used_is_updated(self, middleware,
-                                              base_mock_request,
-                                              mock_call_next, mock_token_row):
+                                              base_mock_request, mock_call_next,
+                                              mock_token_row):
         """A row whose last_used_at is older than the interval IS re-written."""
         base_mock_request.headers = {'authorization': 'Bearer sky_valid_token'}
         mock_token_row['last_used_at'] = int(time.time()) - 3600
