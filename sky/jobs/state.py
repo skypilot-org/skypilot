@@ -138,7 +138,10 @@ job_info_table = sqlalchemy.Table(
                       primary_key=True,
                       autoincrement=True),
     sqlalchemy.Column('name', sqlalchemy.Text),
-    sqlalchemy.Column('schedule_state', sqlalchemy.Text),
+    # Indexed: every scheduling attempt filters on schedule_state (e.g.
+    # get_waiting_job_async, get_num_launching_jobs, get_num_alive_jobs),
+    # and active-state rows are a tiny fraction of the table.
+    sqlalchemy.Column('schedule_state', sqlalchemy.Text, index=True),
     sqlalchemy.Column('controller_pid', sqlalchemy.Integer,
                       server_default=None),
     sqlalchemy.Column('controller_pid_started_at',
