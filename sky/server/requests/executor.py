@@ -997,7 +997,12 @@ async def _execute_request_coroutine(request: api_requests.Request):
         return
 
     async def poll_task(request_id: str) -> bool:
-        req_status = await api_requests.get_request_status_async(request_id)
+        # Batched: all in-flight coroutine requests on this loop share one
+        # snapshot query per tick instead of a point lookup each. A
+        # CANCELLED transition is detected via the point-lookup fallback
+        # (the request drops out of the active snapshot), adding at most
+        # the snapshot staleness (0.5s) to cancellation latency.
+        req_status = await api_requests.get_request_status_batched(request_id)
         if req_status is None:
             raise RuntimeError('Request not found')
 
