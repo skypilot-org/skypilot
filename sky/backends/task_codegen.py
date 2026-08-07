@@ -695,16 +695,23 @@ class SlurmCodeGen(TaskCodeGen):
         self,
         slurm_job_id: str,
         container_name: Optional[str],
+        cluster_node_names: Optional[List[str]] = None,
     ):
         """Initialize SlurmCodeGen.
 
         Args:
             slurm_job_id: The Slurm job ID, i.e. SLURM_JOB_ID
             container_name: pyxis container name, or None
+            cluster_node_names: Slurm node names aligned with the stable
+                cluster internal IPs, or None if unavailable. The executor
+                prefers these over IP matching to determine the node index,
+                since the IP resolved inside a Slurm job can differ from the
+                one recorded at provisioning time (#10333).
         """
         super().__init__()
         self._slurm_job_id = slurm_job_id
         self._container_name = container_name
+        self._cluster_node_names = cluster_node_names
 
     def add_prologue(self, job_id: int) -> None:
         assert not self._has_prologue, 'add_prologue() called twice?'
@@ -887,6 +894,15 @@ class SlurmCodeGen(TaskCodeGen):
 
                     cluster_home = shlex.quote(os.path.expanduser('~'))
                     runner_args = f'--log-dir={{log_dir}} --env-vars={{env_vars}} --cluster-num-nodes={self._cluster_num_nodes} --cluster-ips={{cluster_ips}} --cluster-home-dir={{cluster_home}}'
+
+                    # The executor prefers Slurm node names over IP matching
+                    # to determine the node index, since the IP resolved
+                    # inside a Slurm job can differ from the one recorded at
+                    # provisioning time (#10333). Executors below skylet
+                    # version 40 do not accept --cluster-nodes.
+                    cluster_nodes = {self._cluster_node_names!r}
+                    if cluster_nodes is not None and int(constants.SKYLET_VERSION) >= 40:
+                        runner_args += ' --cluster-nodes=' + shlex.quote(','.join(cluster_nodes))
 
                     if task_name is not None:
                         runner_args += f' --task-name={{shlex.quote(task_name)}}'
