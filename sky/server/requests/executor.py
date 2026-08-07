@@ -85,8 +85,45 @@ logger = sky_logging.init_logger(__name__)
 # can cause issues with certain types of resources, including those used in
 # the QueueManager in mp_queue.py.
 # The 'spawn' start method is generally more compatible across different
-# platforms, including macOS.
+# platforms, including macOS. This remains the default start method for the
+# queue-manager process and any other multiprocessing use; executor worker
+# pools may use a different start method, see _get_executor_mp_context().
 multiprocessing.set_start_method('spawn', force=True)
+
+# Start method used for executor worker processes only. Defaults to the global
+# 'spawn' method above (no behavior change). 'spawn' re-imports the whole sky
+# package in every new worker, costing several CPU-seconds per process; when
+# many workers start at once (e.g. a burst of long requests filling the pool)
+# these concurrent cold imports can saturate the CPU. Setting this to
+# 'forkserver' makes workers fork from a server process that has sky (and
+# plugins) pre-imported, so worker startup is nearly free and the imported
+# pages are shared copy-on-write. Opt-in via env var while the forkserver path
+# is being validated.
+EXECUTOR_START_METHOD_ENV = 'SKYPILOT_API_SERVER_EXECUTOR_START_METHOD'
+# Module preloaded into the forkserver; see _forkserver_preload.py.
+_FORKSERVER_PRELOAD = ['sky.server.requests._forkserver_preload']
+
+
+def _get_executor_mp_context() -> multiprocessing.context.BaseContext:
+    """Build the multiprocessing context for executor worker pools.
+
+    Honors EXECUTOR_START_METHOD_ENV; falls back to the process-wide default
+    ('spawn') so the behavior is unchanged unless explicitly opted in.
+    """
+    method = os.environ.get(EXECUTOR_START_METHOD_ENV, 'spawn').strip().lower()
+    supported = multiprocessing.get_all_start_methods()
+    if method not in supported:
+        logger.warning(
+            'Unsupported executor start method %r (supported on this '
+            'platform: %s); falling back to %r.', method, supported, 'spawn')
+        method = 'spawn'
+    ctx = multiprocessing.get_context(method)
+    if method == 'forkserver':
+        # Preload sky (and plugins) into the fork server so forked workers
+        # inherit them instead of re-importing on every start.
+        ctx.set_forkserver_preload(_FORKSERVER_PRELOAD)
+    return ctx
+
 
 # An upper limit of max threads for request execution per server process that
 # unlikely to be reached to allow higher concurrency while still prevent the
@@ -434,6 +471,7 @@ class RequestWorker:
             executor = process.BurstableExecutor(
                 garanteed_workers=self.garanteed_parallelism,
                 burst_workers=self.burstable_parallelism,
+                mp_context=_get_executor_mp_context(),
                 initializer=executor_initializer,
                 initargs=(proc_group, clean_env_module.get_clean_server_env()))
             # Initialize the appropriate gauge for the number of free executors
