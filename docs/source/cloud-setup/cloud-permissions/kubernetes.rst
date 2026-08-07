@@ -49,6 +49,10 @@ SkyPilot can operate using either of the following three authentication methods:
     Kubernetes cluster. When running outside the cluster (e.g., on AWS),
     SkyPilot will use the local ``~/.kube/config`` file for authentication.
 
+.. tip::
+
+    To let pods access cloud resources (GCS, S3, Azure Blob, etc.) without uploading static credentials, pre-bind your KSA to a cloud identity via OIDC federation. See :ref:`kubernetes-oidc-federation` for cross-cloud setup, or :ref:`aws-eks-iam-roles` for EKS-specific S3 access.
+
 Below are the permissions required by SkyPilot and an example service account YAML that you can use to create a service account with the necessary permissions.
 
 .. _k8s-permissions:
