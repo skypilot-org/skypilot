@@ -70,9 +70,9 @@ def _seed_job(statuses: List[Tuple[ManagedJobStatus, Optional[float]]],
                 ))
         session.execute(
             sqlalchemy.update(state.job_info_table).where(
-                state.job_info_table.c.spot_job_id == job_id).values(
-                    {state.job_info_table.c.schedule_state: schedule_state.value
-                    }))
+                state.job_info_table.c.spot_job_id == job_id).values({
+                    state.job_info_table.c.schedule_state: schedule_state.value
+                }))
         session.commit()
     return job_id
 
@@ -81,11 +81,10 @@ def _task_rows(job_id: int) -> List[Tuple[ManagedJobStatus, Optional[float]]]:
     engine = state._db_manager.get_engine()
     with orm.Session(engine) as session:
         rows = session.execute(
-            sqlalchemy.select(state.spot_table.c.status,
-                              state.spot_table.c.end_at).where(
-                                  state.spot_table.c.spot_job_id ==
-                                  job_id).order_by(
-                                      state.spot_table.c.task_id.asc()))
+            sqlalchemy.select(
+                state.spot_table.c.status, state.spot_table.c.end_at).where(
+                    state.spot_table.c.spot_job_id == job_id).order_by(
+                        state.spot_table.c.task_id.asc()))
         return [(ManagedJobStatus(row[0]), row[1]) for row in rows.fetchall()]
 
 
@@ -294,8 +293,8 @@ class TestSetPendingCancelled:
         assert _schedule_state(job_id) == ManagedJobScheduleState.WAITING
         assert _event_statuses(job_id) == []
 
-    def test_partially_pending_pipeline_rolled_back(
-            self, _mock_managed_jobs_db_conn):
+    def test_partially_pending_pipeline_rolled_back(self,
+                                                    _mock_managed_jobs_db_conn):
         job_id = self._seed(
             ManagedJobScheduleState.WAITING,
             [ManagedJobStatus.SUCCEEDED, ManagedJobStatus.PENDING])

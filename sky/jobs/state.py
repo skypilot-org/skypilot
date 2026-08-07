@@ -1165,8 +1165,9 @@ def set_pending_cancelled(job_id: int) -> bool:
                 return False
 
         total_tasks = session.execute(
-            sqlalchemy.select(sqlalchemy.func.count()).where(
-                spot_table.c.spot_job_id == job_id)).fetchone()[0]
+            sqlalchemy.select(
+                sqlalchemy.func.count()  # pylint: disable=not-callable
+            ).where(spot_table.c.spot_job_id == job_id)).fetchone()[0]
         count = session.query(spot_table).filter(
             spot_table.c.spot_job_id == job_id,
             spot_table.c.status == ManagedJobStatus.PENDING.value).update(
