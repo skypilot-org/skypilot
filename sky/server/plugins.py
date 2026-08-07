@@ -16,6 +16,7 @@ from sky.utils import config_utils
 from sky.utils import yaml_utils
 
 if typing.TYPE_CHECKING:
+    from sky.server import gc as gc_mod
     from sky.server.blob import blob_storage as blob_storage_mod
     from sky.server.requests import log_provider as log_provider_mod
     from sky.server.requests import storage as storage_mod
@@ -173,6 +174,15 @@ class ExtensionContext:
         # pylint: disable=import-outside-toplevel
         from sky.server.requests import log_provider as lp
         lp.set_log_provider(log_provider)
+
+    def register_gc_pause_provider(
+        self,
+        provider: 'gc_mod.GCPauseProvider',
+    ) -> None:
+        """Register a custom provider to pause server-side GC loops."""
+        # pylint: disable=import-outside-toplevel
+        from sky.server import gc as gc_mod
+        gc_mod.set_gc_pause_provider(provider)
 
     def register_rbac_rule(self,
                            path: str,
