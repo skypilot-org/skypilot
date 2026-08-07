@@ -1,10 +1,11 @@
 """Slurm adaptor for SkyPilot."""
 
 import ipaddress
+import json
 import logging
 import re
 import shlex
-from typing import Dict, List, NamedTuple, Optional, Tuple
+from typing import Any, Dict, List, NamedTuple, Optional, Tuple
 
 from sky.adaptors import common
 from sky.utils import command_runner
@@ -36,6 +37,20 @@ hostlist = common.LazyImport('hostlist',
                              import_error_message=_IMPORT_ERROR_MESSAGE)
 
 _UNRESOLVED_HOSTNAME_MARKER = 'UNRESOLVED'
+
+# getopt marker in stderr when the Slurm CLI does not know an option, e.g. on
+# versions predating `--json` output.
+_UNRECOGNIZED_OPTION_MARKER = 'unrecognized option'
+
+# squeue marker in stderr when slurmctld no longer knows the job ID.
+_INVALID_JOB_ID_MARKER = 'invalid job id'
+
+# How much of a malformed JSON payload to include in error messages.
+_JSON_SNIPPET_LEN = 500
+
+
+class _JsonOutputUnsupportedError(Exception):
+    """The Slurm CLI does not support `--json` output."""
 
 
 class SlurmPartition(NamedTuple):
@@ -165,6 +180,10 @@ class SlurmClient:
         self.ssh_key = ssh_key
         self.ssh_proxy_command = ssh_proxy_command
         self.ssh_proxy_jump = ssh_proxy_jump
+
+        # Whether the cluster's Slurm CLI supports `--json` output. None until
+        # the first command that tries it.
+        self._json_output_supported: Optional[bool] = None
 
         self._runner: command_runner.CommandRunner
 
@@ -549,25 +568,183 @@ class SlurmClient:
             return False
         return bool(stdout.strip())
 
-    @timeline.event
-    def get_job_nodes(self, job_id: str) -> Tuple[List[str], List[str]]:
-        """Get the list of nodes and their IPs for a given job ID.
+    def _resolve_hostnames(
+            self, nodes_to_resolve: List[Tuple[str, str]]) -> Dict[str, str]:
+        """Resolve node addresses that are hostnames into IPs.
 
-        The ordering is guaranteed to be stable for the lifetime of the job.
+        The resolution runs on the login node, where the cluster-internal DNS
+        is reachable.
 
         Args:
-            job_id: The Slurm job ID.
+            nodes_to_resolve: List of (node name, hostname) pairs.
 
         Returns:
-            A tuple of (nodes, node_ips) where nodes is a list of node names
-            and node_ips is a list of corresponding IP addresses.
+            A dictionary mapping node name to the resolved IP.
         """
+        hostnames = [h for _, h in nodes_to_resolve]
+        # The output of `getent ahostsv4` is as follows:
+        # 10.0.0.0     STREAM worker-0
+        # 10.0.0.0     DGRAM
+        # 10.0.0.0     RAW
+        resolve_ip_cmd = (
+            f'for h in {" ".join(hostnames)}; do '
+            f'ip=$(getent ahostsv4 "$h" | head -1 | awk \'{{print $1}}\'); '
+            f'if [ -n "$ip" ]; then echo "$h $ip"; '
+            f'else echo "$h {_UNRESOLVED_HOSTNAME_MARKER}"; fi; '
+            f'done')
+        rc, resolve_stdout, stderr = self._run_slurm_cmd(resolve_ip_cmd)
+        subprocess_utils.handle_returncode(
+            rc,
+            resolve_ip_cmd,
+            f'Failed to resolve hostnames for: {hostnames}',
+            stderr=f'{resolve_stdout}\n{stderr}',
+            stream_logs=False)
 
+        hostname_to_ip = {}
+        unresolved = []
+        for line in resolve_stdout.strip().splitlines():
+            parts = line.split()
+            if len(parts) >= 2:
+                hostname = parts[0]
+                ip = parts[1]
+                if ip == _UNRESOLVED_HOSTNAME_MARKER:
+                    unresolved.append(hostname)
+                else:
+                    hostname_to_ip[hostname] = ip
+
+        if unresolved:
+            raise RuntimeError(f'Failed to resolve hostnames for: {unresolved}')
+
+        node_to_ip = {}
+        for node_name, hostname in nodes_to_resolve:
+            if hostname not in hostname_to_ip:
+                raise RuntimeError(
+                    f'Failed to resolve {hostname} for node {node_name}')
+            node_to_ip[node_name] = hostname_to_ip[hostname]
+        return node_to_ip
+
+    def _run_slurm_json_cmd(self, cmd: str) -> Tuple[int, str, str]:
+        """Run a Slurm command with `--json`.
+
+        Raises:
+            _JsonOutputUnsupportedError: The Slurm CLI does not know the
+                `--json` option.
+        """
+        rc, stdout, stderr = self._run_slurm_cmd(cmd)
+        if rc != 0 and _UNRECOGNIZED_OPTION_MARKER in stderr:
+            raise _JsonOutputUnsupportedError(
+                f'{cmd!r} failed: {stderr.strip()}')
+        return rc, stdout, stderr
+
+    def _load_slurm_json(self, cmd: str, stdout: str) -> Dict[str, Any]:
+        """Parse the JSON payload of a Slurm `--json` command."""
+        try:
+            payload = json.loads(stdout)
+        except json.JSONDecodeError as e:
+            raise RuntimeError(
+                f'Failed to parse the JSON output of {cmd!r}: {e}. '
+                f'Output: {stdout[:_JSON_SNIPPET_LEN]!r}') from e
+        if not isinstance(payload, dict):
+            raise RuntimeError(
+                f'Unexpected JSON output of {cmd!r}: expected an object, got '
+                f'{type(payload).__name__}. '
+                f'Output: {stdout[:_JSON_SNIPPET_LEN]!r}')
+        return payload
+
+    def _get_json_field(self, cmd: str, payload: Dict[str, Any],
+                        field: str) -> Any:
+        """Read a field of a Slurm JSON payload, raising if it is absent."""
+        if field not in payload:
+            raise RuntimeError(
+                f'Unexpected JSON output of {cmd!r}: no {field!r} field. '
+                f'Output: {json.dumps(payload)[:_JSON_SNIPPET_LEN]!r}')
+        return payload[field]
+
+    def _get_job_nodes_json(self, job_id: str) -> Tuple[List[str], List[str]]:
+        """get_job_nodes() implementation using Slurm's `--json` output.
+
+        `squeue --json` ships since Slurm 21.08 and `scontrol --json` since
+        23.02, so 23.02 is the floor for this path. Older versions reject the
+        option, and get_job_nodes() falls back to parsing the text output.
+        """
+        no_nodes_error = (
+            f'No nodes found for job {job_id}. '
+            f'The job may have terminated or the output was empty.')
+
+        squeue_cmd = f'squeue --jobs {job_id} --json'
+        rc, stdout, stderr = self._run_slurm_json_cmd(squeue_cmd)
+        if rc != 0 and _INVALID_JOB_ID_MARKER in stderr.lower():
+            # slurmctld no longer knows about the job.
+            raise RuntimeError(no_nodes_error)
+        subprocess_utils.handle_returncode(
+            rc,
+            squeue_cmd,
+            f'Failed to get nodes for job {job_id}.',
+            stderr=f'{stdout}\n{stderr}',
+            stream_logs=False)
+
+        payload = self._load_slurm_json(squeue_cmd, stdout)
+        jobs = self._get_json_field(squeue_cmd, payload, 'jobs')
+        if not jobs:
+            raise RuntimeError(no_nodes_error)
+        # A compact Slurm hostlist expression, e.g. 'ml-16-node-[001-002]'.
+        # Empty while the job is still pending.
+        nodelist = self._get_json_field(squeue_cmd, jobs[0], 'nodes')
+        if not nodelist:
+            raise RuntimeError(no_nodes_error)
+
+        # Expand client-side so the ordering is ours, independent of the order
+        # scontrol returns the nodes in.
+        nodes = hostlist.expand_hostlist(nodelist)
+
+        # scontrol takes the hostlist expression directly, so no per-node
+        # round-trip is needed.
+        scontrol_cmd = f'scontrol show node {shlex.quote(nodelist)} --json'
+        rc, stdout, stderr = self._run_slurm_json_cmd(scontrol_cmd)
+        subprocess_utils.handle_returncode(
+            rc,
+            scontrol_cmd,
+            f'Failed to get node addresses for job {job_id}.',
+            stderr=f'{stdout}\n{stderr}',
+            stream_logs=False)
+
+        payload = self._load_slurm_json(scontrol_cmd, stdout)
+        node_addrs: Dict[str, str] = {}
+        for node in self._get_json_field(scontrol_cmd, payload, 'nodes'):
+            name = self._get_json_field(scontrol_cmd, node, 'name')
+            node_addrs[name] = self._get_json_field(scontrol_cmd, node,
+                                                    'address')
+
+        # scontrol silently omits nodes it does not know, so a node that was
+        # removed from the cluster would otherwise disappear from the result.
+        missing = [node for node in nodes if node not in node_addrs]
+        if missing:
+            raise RuntimeError(
+                f'Slurm did not report an address for the following nodes of '
+                f'job {job_id}: {missing}')
+
+        node_info: Dict[str, str] = {}
+        nodes_to_resolve: List[Tuple[str, str]] = []
+        for node in nodes:
+            address = node_addrs[node]
+            try:
+                ipaddress.ip_address(address)
+                node_info[node] = address  # Already an IP
+            except ValueError:
+                nodes_to_resolve.append((node, address))
+
+        if nodes_to_resolve:
+            node_info.update(self._resolve_hostnames(nodes_to_resolve))
+
+        return nodes, [node_info[node] for node in nodes]
+
+    def _get_job_nodes_text(self, job_id: str) -> Tuple[List[str], List[str]]:
+        """get_job_nodes() implementation for Slurm versions without `--json`.
+        """
         cmd = (
             # Use scontrol show hostnames to expand both compact Slurm
             # hostlist notation (e.g. ml-16-node-[001-002]) and
             # comma-separated nodes into individual node names.
-            # TODO(kevin): Use json output for more robust parsing.
             f'nodelist=$(squeue -h --jobs {job_id} -o "%N"); '
             f'scontrol show hostnames $nodelist | while read -r node; do '
             f'node_addr=$(scontrol show node=$node | grep NodeAddr= | '
@@ -600,46 +777,7 @@ class SlurmClient:
                         nodes_to_resolve.append((node_name, node_addr))
 
         if nodes_to_resolve:
-            hostnames = [h for _, h in nodes_to_resolve]
-            # The output of `getent ahostsv4` is as follows:
-            # 10.0.0.0     STREAM worker-0
-            # 10.0.0.0     DGRAM
-            # 10.0.0.0     RAW
-            resolve_ip_cmd = (
-                f'for h in {" ".join(hostnames)}; do '
-                f'ip=$(getent ahostsv4 "$h" | head -1 | awk \'{{print $1}}\'); '
-                f'if [ -n "$ip" ]; then echo "$h $ip"; '
-                f'else echo "$h {_UNRESOLVED_HOSTNAME_MARKER}"; fi; '
-                f'done')
-            rc, resolve_stdout, stderr = self._run_slurm_cmd(resolve_ip_cmd)
-            subprocess_utils.handle_returncode(
-                rc,
-                resolve_ip_cmd,
-                f'Failed to resolve hostnames for: {hostnames}',
-                stderr=f'{resolve_stdout}\n{stderr}',
-                stream_logs=False)
-
-            hostname_to_ip = {}
-            unresolved = []
-            for line in resolve_stdout.strip().splitlines():
-                parts = line.split()
-                if len(parts) >= 2:
-                    hostname = parts[0]
-                    ip = parts[1]
-                    if ip == _UNRESOLVED_HOSTNAME_MARKER:
-                        unresolved.append(hostname)
-                    else:
-                        hostname_to_ip[hostname] = ip
-
-            if unresolved:
-                raise RuntimeError(
-                    f'Failed to resolve hostnames for: {unresolved}')
-
-            for node_name, hostname in nodes_to_resolve:
-                if hostname not in hostname_to_ip:
-                    raise RuntimeError(
-                        f'Failed to resolve {hostname} for node {node_name}')
-                node_info[node_name] = hostname_to_ip[hostname]
+            node_info.update(self._resolve_hostnames(nodes_to_resolve))
 
         nodes = list(node_info.keys())
         node_ips = [node_info[node] for node in nodes]
@@ -651,6 +789,30 @@ class SlurmClient:
                ), f'Number of nodes and IPs do not match: {nodes} != {node_ips}'
 
         return nodes, node_ips
+
+    @timeline.event
+    def get_job_nodes(self, job_id: str) -> Tuple[List[str], List[str]]:
+        """Get the list of nodes and their IPs for a given job ID.
+
+        The ordering is guaranteed to be stable for the lifetime of the job.
+
+        Args:
+            job_id: The Slurm job ID.
+
+        Returns:
+            A tuple of (nodes, node_ips) where nodes is a list of node names
+            and node_ips is a list of corresponding IP addresses.
+        """
+        if self._json_output_supported is not False:
+            try:
+                nodes, node_ips = self._get_job_nodes_json(job_id)
+                self._json_output_supported = True
+                return nodes, node_ips
+            except _JsonOutputUnsupportedError as e:
+                logger.debug(f'Slurm does not support --json output ({e}), '
+                             'falling back to parsing the text output.')
+                self._json_output_supported = False
+        return self._get_job_nodes_text(job_id)
 
     def submit_job(
         self,
