@@ -10,6 +10,8 @@ import {
   EditIcon,
   TrashIcon,
   PlayIcon,
+  ChevronRightIcon,
+  ChevronDownIcon,
 } from 'lucide-react';
 import { useMobile } from '@/hooks/useMobile';
 import {
@@ -240,6 +242,93 @@ const GpuTypeSummaryStrip = ({ gpus }) => {
   );
 };
 
+// Slurm reports every partition a node belongs to in one comma-joined field,
+// with sinfo's trailing '*' marking the cluster's default partition.
+const parseSlurmPartitions = (partitionField) =>
+  String(partitionField ?? '')
+    .split(',')
+    .map((name) => name.trim())
+    .filter(Boolean)
+    .map((name) => ({
+      name: name.replace(/\*$/, ''),
+      isDefault: name.endsWith('*'),
+    }));
+
+const formatSlurmPartitions = (partitionField) => {
+  const partitions = parseSlurmPartitions(partitionField);
+  return partitions.length > 0 ? partitions.map((p) => p.name).join(', ') : '-';
+};
+
+// The GPU quantities a Slurm node can be asked for, mirroring what
+// `slurm_catalog.list_accelerators_realtime` derives per node: powers of two up
+// to the node's GPU count, plus the count itself when it is not a power of two.
+// Partition rows compute this client-side because the catalog aggregates per
+// cluster, and a partition may hold only some of the cluster's node shapes.
+export const slurmRequestableCounts = (gpusPerNode) => {
+  const counts = [];
+  for (let count = 1; count <= gpusPerNode; count *= 2) {
+    counts.push(count);
+  }
+  if (counts.length > 0 && counts[counts.length - 1] !== gpusPerNode) {
+    counts.push(gpusPerNode);
+  }
+  return counts;
+};
+
+// Group a Slurm cluster's nodes into the partitions they belong to, each
+// partition split by GPU type. Jobs are submitted to a partition, so what is
+// free *in a partition* is the number that decides whether a job can run.
+// A node can belong to several partitions, so its capacity is counted once per
+// partition it is reachable from: partition rows overlap and do not sum to the
+// cluster totals.
+const aggregateSlurmPartitions = (nodes) => {
+  const byPartition = new Map();
+  nodes.forEach((node) => {
+    parseSlurmPartitions(node.partition).forEach(({ name, isDefault }) => {
+      let partition = byPartition.get(name);
+      if (!partition) {
+        partition = { name, isDefault: false, byType: new Map() };
+        byPartition.set(name, partition);
+      }
+      partition.isDefault = partition.isDefault || isDefault;
+      const gpuName = canonicalizeGpuName(node.gpu_name);
+      const type = partition.byType.get(gpuName) || {
+        gpu_name: gpuName,
+        gpu_total: 0,
+        gpu_free: 0,
+        requestableQtys: new Set(),
+      };
+      type.gpu_total += node.gpu_total || 0;
+      type.gpu_free += node.gpu_free || 0;
+      slurmRequestableCounts(node.gpu_total || 0).forEach((count) =>
+        type.requestableQtys.add(count)
+      );
+      partition.byType.set(gpuName, type);
+    });
+  });
+  return Array.from(byPartition.values())
+    .sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }))
+    .map((partition) => {
+      const types = Array.from(partition.byType.values())
+        .filter((type) => type.gpu_total > 0)
+        .map((type) => ({
+          ...type,
+          // Ascending, so the tooltip reads "1, 2, 4, 8" whatever order the
+          // partition's node shapes were seen in.
+          requestableQtys: Array.from(type.requestableQtys).sort(
+            (a, b) => a - b
+          ),
+        }))
+        .sort((a, b) => b.gpu_total - a.gpu_total);
+      return {
+        ...partition,
+        // A CPU-only partition still gets a row; the null type renders as
+        // dashes in the GPU columns.
+        types: types.length > 0 ? types : [null],
+      };
+    });
+};
+
 // Reusable component for infrastructure sections (SSH Node Pool or Kubernetes)
 export function InfrastructureSection({
   title,
@@ -275,6 +364,19 @@ export function InfrastructureSection({
 
   const contextNoun = isSSH ? 'pool' : isSlurm ? 'cluster' : 'context';
 
+  // Slurm clusters with more than one partition start collapsed on their
+  // cluster-wide totals; expanding swaps in the per-partition rows.
+  const [expandedContexts, setExpandedContexts] = useState(() => new Set());
+  const toggleExpanded = useCallback((context) => {
+    setExpandedContexts((prev) => {
+      const next = new Set(prev);
+      if (!next.delete(context)) {
+        next.add(context);
+      }
+      return next;
+    });
+  }, []);
+
   // Per-context derived data, shared by the desktop table and the mobile cards
   // so both render identical numbers from one computation.
   const deriveContextData = (context) => {
@@ -303,6 +405,30 @@ export function InfrastructureSection({
     });
     const typeAgg = Array.from(byType.values());
 
+    // One row per GPU type, from the cluster-wide totals, so the rows add up to
+    // the cluster's capacity. Always shown; for Slurm they are what the
+    // partition breakdown hangs off.
+    const typeRows = typeAgg.map((type) => ({
+      key: type.gpu_name,
+      label: type.gpu_name,
+      type,
+    }));
+
+    // Slurm only, appended when the cluster is expanded: one row per partition,
+    // split by GPU type, since a partition is what a job is submitted to. A
+    // node can be in several partitions, so these rows overlap — which is why
+    // they are behind a toggle rather than shown by default. The partition cell
+    // spans its own type rows.
+    const partitions = isSlurm ? aggregateSlurmPartitions(nodes) : [];
+    const partitionRows = partitions.flatMap((partition) =>
+      partition.types.map((type, index) => ({
+        key: `partition/${partition.name}/${type ? type.gpu_name : 'none'}`,
+        type,
+        partition,
+        partitionRowSpan: index === 0 ? partition.types.length : 0,
+      }))
+    );
+
     const contextStatsKey = buildContextStatsKey(context, { isSSH, isSlurm });
     const stats = contextStats[contextStatsKey] || { clusters: 0, jobs: 0 };
 
@@ -329,7 +455,9 @@ export function InfrastructureSection({
     return {
       gpuList,
       nodes,
-      typeAgg,
+      typeRows,
+      partitionRows,
+      partitions,
       contextStatsKey,
       stats,
       hasGpuData,
@@ -439,6 +567,11 @@ export function InfrastructureSection({
                   <th className="p-3 text-left font-medium text-gray-600 whitespace-nowrap">
                     Nodes
                   </th>
+                  {isSlurm && (
+                    <th className="p-3 text-left font-medium text-gray-600 whitespace-nowrap">
+                      Partition
+                    </th>
+                  )}
                   {!isSlurm && (
                     <th className="p-3 text-left font-medium text-gray-600 whitespace-nowrap">
                       CPU
@@ -469,7 +602,9 @@ export function InfrastructureSection({
                 {safeContexts.map((context) => {
                   const {
                     nodes,
-                    typeAgg,
+                    typeRows,
+                    partitionRows,
+                    partitions,
                     contextStatsKey,
                     stats,
                     hasGpuData,
@@ -482,10 +617,21 @@ export function InfrastructureSection({
                     workspaces,
                   } = deriveContextData(context);
 
-                  // One sub-row per GPU type; CPU-only contexts and contexts
-                  // still loading GPU data render a single row.
+                  const isExpandable = partitions.length > 0;
+                  const isExpanded =
+                    isExpandable && expandedContexts.has(context);
+                  // Expanding appends the partition breakdown under the
+                  // cluster's own totals, so the aggregate stays on screen and
+                  // the toggle keeps its place.
+                  const subRows = isExpanded
+                    ? [...typeRows, ...partitionRows]
+                    : typeRows;
+                  const summaryRowCount = Math.max(1, typeRows.length);
+
+                  // CPU-only contexts and contexts still loading GPU data
+                  // render a single row.
                   const subRowCount = hasGpuData
-                    ? Math.max(1, typeAgg.length)
+                    ? Math.max(1, subRows.length)
                     : 1;
                   const sharedCellClass =
                     subRowCount > 1 ? 'p-3 align-top' : 'p-3';
@@ -516,7 +662,7 @@ export function InfrastructureSection({
                       );
                     }
                     const requestable = Array.from(
-                      typeEntry.requestableQtys
+                      typeEntry.requestableQtys || []
                     ).filter((qty) => qty !== undefined && qty !== null);
                     return (
                       <>
@@ -556,6 +702,77 @@ export function InfrastructureSection({
                       </>
                     );
                   };
+
+                  const partitionName = (partition) => (
+                    <>
+                      {partition.name}
+                      {partition.isDefault && (
+                        <span className="ml-1.5 text-xs text-gray-400">
+                          (default)
+                        </span>
+                      )}
+                    </>
+                  );
+
+                  // Slurm only. The cluster's own rows carry one cell counting
+                  // its partitions and toggling them; each partition row below
+                  // names its partition, spanning that partition's GPU-type
+                  // rows.
+                  const renderPartitionCell = (subRow, index) => {
+                    if (!hasGpuData) {
+                      return (
+                        <td className="p-3">
+                          <SkeletonBadge />
+                        </td>
+                      );
+                    }
+                    if (subRow && subRow.partition) {
+                      return subRow.partitionRowSpan ? (
+                        <td
+                          className="p-3 pl-6 align-top text-gray-700 whitespace-nowrap"
+                          rowSpan={subRow.partitionRowSpan}
+                        >
+                          {partitionName(subRow.partition)}
+                        </td>
+                      ) : null;
+                    }
+                    if (index > 0) {
+                      return null;
+                    }
+                    return (
+                      <td
+                        className="p-3 align-top whitespace-nowrap"
+                        rowSpan={summaryRowCount}
+                      >
+                        {!isExpandable ? (
+                          <span className="text-gray-400">-</span>
+                        ) : (
+                          <button
+                            className="inline-flex items-center gap-1 text-gray-500 hover:text-gray-700"
+                            title={
+                              isExpanded ? 'Hide partitions' : 'Show partitions'
+                            }
+                            onClick={() => toggleExpanded(context)}
+                          >
+                            {isExpanded ? (
+                              <ChevronDownIcon className="w-4 h-4" />
+                            ) : (
+                              <ChevronRightIcon className="w-4 h-4" />
+                            )}
+                            {partitions.length} partition
+                            {partitions.length === 1 ? '' : 's'}
+                          </button>
+                        )}
+                      </td>
+                    );
+                  };
+
+                  const renderSubRowCells = (subRow, index) => (
+                    <>
+                      {isSlurm && renderPartitionCell(subRow, index)}
+                      {renderGpuCells(subRow ? subRow.type : null)}
+                    </>
+                  );
 
                   return (
                     <React.Fragment key={context}>
@@ -657,7 +874,7 @@ export function InfrastructureSection({
                             )}
                           </td>
                         )}
-                        {renderGpuCells(hasGpuData ? typeAgg[0] : null)}
+                        {renderSubRowCells(hasGpuData ? subRows[0] : null, 0)}
                         <td
                           className="w-0 p-0 whitespace-nowrap text-right align-top"
                           rowSpan={subRowCount}
@@ -669,11 +886,11 @@ export function InfrastructureSection({
                         </td>
                       </tr>
                       {hasGpuData &&
-                        typeAgg
+                        subRows
                           .slice(1)
-                          .map((typeEntry) => (
-                            <tr key={`${context}-${typeEntry.gpu_name}`}>
-                              {renderGpuCells(typeEntry)}
+                          .map((subRow, index) => (
+                            <tr key={`${context}-${subRow.key}`}>
+                              {renderSubRowCells(subRow, index + 1)}
                             </tr>
                           ))}
                     </React.Fragment>
@@ -688,7 +905,7 @@ export function InfrastructureSection({
             {safeContexts.map((context) => {
               const {
                 nodes,
-                typeAgg,
+                typeRows,
                 contextStatsKey,
                 stats,
                 hasGpuData,
@@ -700,6 +917,9 @@ export function InfrastructureSection({
                 rowKind,
                 workspaces,
               } = deriveContextData(context);
+              // Cards stay on the cluster-wide totals; partitions are a
+              // desktop-table affordance.
+              const gpuSubRows = typeRows.filter((subRow) => subRow.type);
               const mobileStats = [
                 {
                   label: 'Clusters',
@@ -781,22 +1001,22 @@ export function InfrastructureSection({
                       </div>
                     ))}
                   </div>
-                  {hasGpuData && typeAgg.length > 0 && (
+                  {hasGpuData && gpuSubRows.length > 0 && (
                     <div className="border-t border-gray-100 pt-3 space-y-2">
-                      {typeAgg.map((t) => (
+                      {gpuSubRows.map((subRow) => (
                         <div
-                          key={t.gpu_name}
+                          key={subRow.key}
                           className="flex items-center gap-2"
                         >
                           <span className="text-xs font-medium text-gray-700 w-20 truncate shrink-0">
-                            {t.gpu_name}
+                            {subRow.label}
                           </span>
                           <CleanUtilizationBar
-                            gpu={t}
+                            gpu={subRow.type}
                             className="flex-1 min-w-0"
                           />
                           <span className="text-xs text-gray-500 whitespace-nowrap shrink-0 w-14 text-right">
-                            {t.gpu_free.toLocaleString()} free
+                            {subRow.type.gpu_free.toLocaleString()} free
                           </span>
                         </div>
                       ))}
@@ -1048,6 +1268,11 @@ export function ContextDetails({
                         </th>
                       </>
                     )}
+                    {isSlurm && (
+                      <th className="p-3 text-left font-medium text-gray-600">
+                        Partitions
+                      </th>
+                    )}
                     <th className="p-3 text-left font-medium text-gray-600">
                       GPU
                     </th>
@@ -1169,6 +1394,11 @@ export function ContextDetails({
                               {memoryDisplay}
                             </td>
                           </>
+                        )}
+                        {isSlurm && (
+                          <td className="p-3 whitespace-nowrap text-gray-700">
+                            {formatSlurmPartitions(node.partition)}
+                          </td>
                         )}
                         <td className="p-3 whitespace-nowrap text-gray-700">
                           {canonicalizeGpuName(node.gpu_name)}
@@ -2250,6 +2480,9 @@ export function GPUs() {
   const [allSlurmGPUs, setAllSlurmGPUs] = useState([]);
   const [perClusterSlurmGPUs, setPerClusterSlurmGPUs] = useState([]);
   const [perNodeSlurmGPUs, setPerNodeSlurmGPUs] = useState([]);
+  // Slurm clusters from ~/.slurm/config, independent of whether they answer a
+  // query right now.
+  const [configuredSlurmClusters, setConfiguredSlurmClusters] = useState([]);
   const [cloudInfraData, setCloudInfraData] = useState([]);
   const [totalClouds, setTotalClouds] = useState(0);
   // Separate cluster/job counts for Cloud panel (for progressive loading)
@@ -2373,6 +2606,7 @@ export function GPUs() {
         setSshNodePools({});
         setSshLoading(false);
         setSlurmLoading(false);
+        setConfiguredSlurmClusters([]);
         setAllSlurmGPUs([]);
         setPerClusterSlurmGPUs([]);
         setPerNodeSlurmGPUs([]);
@@ -2609,6 +2843,7 @@ export function GPUs() {
     try {
       const slurmData = await dashboardCache.get(getSlurmInfrastructure);
       if (slurmData) {
+        setConfiguredSlurmClusters(slurmData.slurmClusterNames || []);
         setAllSlurmGPUs(slurmData.allSlurmGPUs || []);
         setPerClusterSlurmGPUs(slurmData.perClusterSlurmGPUs || []);
         setPerNodeSlurmGPUs(slurmData.perNodeSlurmGPUs || []);
@@ -2617,6 +2852,7 @@ export function GPUs() {
       setSlurmLoading(false);
     } catch (error) {
       console.error('Error in fetchSlurmData:', error);
+      setConfiguredSlurmClusters([]);
       setAllSlurmGPUs([]);
       setPerClusterSlurmGPUs([]);
       setPerNodeSlurmGPUs([]);
@@ -3033,16 +3269,35 @@ export function GPUs() {
     return allGPUs.filter((gpu) => kubeGpuNames.has(gpu.gpu_name));
   }, [allGPUs, perContextGPUs]);
 
-  // Extract Slurm cluster names from perClusterSlurmGPUs
+  // Extract Slurm cluster names. Union three sources, because each on its own
+  // omits clusters the section should still list:
+  // - configuredSlurmClusters is answered from ~/.slurm/config without
+  //   contacting a login node, so a cluster that is unreachable still gets a
+  //   row (with empty node/GPU cells) instead of vanishing from the page.
+  // - GPU availability (perClusterSlurmGPUs) only reports clusters that have
+  //   GPUs, so a CPU-only cluster would never appear from it alone.
+  // - Node info (perNodeSlurmGPUs) lists every node regardless of GPUs.
+  // Together they keep parity with the Kubernetes section, which always lists a
+  // context whether or not it has GPUs (GPU counts are just extra columns).
   const slurmClusters = React.useMemo(() => {
-    if (!perClusterSlurmGPUs || !Array.isArray(perClusterSlurmGPUs)) {
-      return [];
+    const clusterSet = new Set();
+    if (Array.isArray(configuredSlurmClusters)) {
+      configuredSlurmClusters.forEach((cluster) => {
+        if (cluster) clusterSet.add(cluster);
+      });
     }
-    const clusters = [
-      ...new Set(perClusterSlurmGPUs.map((gpu) => gpu.cluster)),
-    ];
-    return clusters.sort();
-  }, [perClusterSlurmGPUs]);
+    if (Array.isArray(perClusterSlurmGPUs)) {
+      perClusterSlurmGPUs.forEach((gpu) => {
+        if (gpu.cluster) clusterSet.add(gpu.cluster);
+      });
+    }
+    if (Array.isArray(perNodeSlurmGPUs)) {
+      perNodeSlurmGPUs.forEach((node) => {
+        if (node.cluster) clusterSet.add(node.cluster);
+      });
+    }
+    return [...clusterSet].sort();
+  }, [configuredSlurmClusters, perClusterSlurmGPUs, perNodeSlurmGPUs]);
 
   // Group perClusterSlurmGPUs by cluster
   const groupedPerClusterSlurmGPUs = React.useMemo(() => {

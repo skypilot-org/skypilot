@@ -449,7 +449,11 @@ def test_gcp_mig():
                      f'"(labels.ray-cluster-name:{name}-cpu)" '
                      f'--zones={zone} --format="value(name)" | wc -l | grep 0'))
         ],
-        f'sky down -y {name} && {smoke_tests_utils.down_cluster_for_cloud_cmd(name)}',
+        smoke_tests_utils.chain_teardown(
+            # `{name}-cpu` is only downed by a test command, which is skipped
+            # when the test fails before it.
+            f'sky down -y {name} {name}-cpu',
+            smoke_tests_utils.down_cluster_for_cloud_cmd(name)),
         env={
             skypilot_config.ENV_VAR_PROJECT_CONFIG: 'tests/test_yamls/use_mig_config.yaml',
         })

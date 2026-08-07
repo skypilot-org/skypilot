@@ -54,6 +54,8 @@ from sky.usage import usage_lib
 from sky.utils import annotations
 from sky.utils import common as common_lib
 from sky.utils import common_utils
+from sky.utils import context as context_lib
+from sky.utils import context_utils
 from sky.utils import controller_utils
 from sky.utils import debug_dump_helpers
 from sky.utils import infra_utils
@@ -1419,7 +1421,19 @@ def cancel_jobs_by_id(job_ids: Optional[List[int]],
         if job_status is None:
             logger.info(f'Job {job_id} not found. Skipped.')
             continue
-        elif job_status.is_terminal():
+
+        # Workspace isolation is a permission check and is independent of job
+        # status: a job outside the caller's active workspace must not be acted
+        # on (or have its state revealed) whether it is pending, running, or
+        # already terminal. Enforce it first, before any status-based handling
+        # (terminal skip / PENDING short-circuit / signal) below. Kept after the
+        # existence check above because a missing job has no workspace to check.
+        job_workspace = managed_job_state.get_workspace(job_id)
+        if current_workspace is not None and job_workspace != current_workspace:
+            wrong_workspace_job_ids.append(job_id)
+            continue
+
+        if job_status.is_terminal():
             logger.info(f'Job {job_id} is already in terminal state '
                         f'{job_status.value}. Skipped.')
             continue
@@ -1431,11 +1445,6 @@ def cancel_jobs_by_id(job_ids: Optional[List[int]],
                 continue
 
         update_managed_jobs_statuses(job_id)
-
-        job_workspace = managed_job_state.get_workspace(job_id)
-        if current_workspace is not None and job_workspace != current_workspace:
-            wrong_workspace_job_ids.append(job_id)
-            continue
 
         if managed_job_state.is_legacy_controller_process(job_id):
             # The job is running on a legacy single-job controller process.
@@ -1791,8 +1800,14 @@ def stream_logs_by_id(
                 os.kill(os.getpid(), signal.SIGTERM)
                 return
 
-    watchdog = threading.Thread(target=_orphan_watchdog, daemon=True)
-    watchdog.start()
+    # The watchdog detects a dropped `kubectl exec` connection, which only
+    # happens when this runs as a subprocess on the controller. Inside a
+    # context we are in the API server, where a client disconnect arrives as
+    # ctx.cancel() instead, and this thread's own loop has no exit condition:
+    # it would outlive the request and accumulate one thread per tail call.
+    if context_lib.get() is None:
+        watchdog = threading.Thread(target=_orphan_watchdog, daemon=True)
+        watchdog.start()
 
     def should_keep_logging(status: managed_job_state.ManagedJobStatus) -> bool:
         # If we see CANCELLING, just exit - we could miss some job logs but the
@@ -1859,6 +1874,7 @@ def stream_logs_by_id(
         prev_msg = msg
         while (managed_job_status :=
                managed_job_state.get_status(job_id)) is None:
+            context_utils.raise_if_canceled()
             time.sleep(1)
 
         # Show hint about per-task filtering when there are multiple tasks
@@ -1987,6 +2003,19 @@ def stream_logs_by_id(
                             None,
                             follow=False,
                             tail=tail if tail is not None else 0)
+                        if returncode is None:
+                            # Not cluster-addressed: runtimes whose forwarded
+                            # records carry the managed-job identity instead of
+                            # an on-cluster job id (e.g. bare-pod runtimes with
+                            # no per-job log files) are read back directly by
+                            # (job_id, task_id). Readers without managed-job
+                            # addressing return None again and we fall through
+                            # to the terminal-state message.
+                            returncode = log_reader.read_managed_job_logs(
+                                job_id,
+                                task_id,
+                                follow=False,
+                                tail=tail if tail is not None else 0)
                     except Exception as e:  # pylint: disable=broad-except
                         # Surface the failure (streamed to the user via the
                         # request's stdout redirection) and fall through to the
@@ -2068,6 +2097,7 @@ def stream_logs_by_id(
         task_id = latest_task_id
 
         while should_keep_logging(managed_job_status):
+            context_utils.raise_if_canceled()
             handle = None
             job_id_to_tail = None
             if task_id is not None:
@@ -2101,6 +2131,7 @@ def stream_logs_by_id(
                 # status every JOB_STATUS_CHECK_GAP_SECONDS.
                 waited = 0.0
                 while True:
+                    context_utils.raise_if_canceled()
                     # Keep the "Waiting for task to start" context and append
                     # the live cluster-launch status, so it's clear the job is
                     # waiting on its cluster to be provisioned.
@@ -2219,6 +2250,7 @@ def stream_logs_by_id(
                         while not is_managed_job_status_updated(
                                 managed_job_status :=
                                 managed_job_state.get_status(job_id)):
+                            context_utils.raise_if_canceled()
                             time.sleep(JOB_STATUS_CHECK_GAP_SECONDS)
                         assert managed_job_status is not None, (
                             job_id, managed_job_status)
@@ -2247,6 +2279,7 @@ def stream_logs_by_id(
                     status_display.start()
                     original_task_id = task_id
                     while True:
+                        context_utils.raise_if_canceled()
                         latest_task_id, managed_job_status = (
                             managed_job_state.get_latest_task_id_status(job_id))
                         if original_task_id != latest_task_id:
@@ -2285,6 +2318,7 @@ def stream_logs_by_id(
             # controller, and check the managed job queue again.
             # Wait a bit longer than the controller, so as to make sure the
             # managed job state is updated.
+            context_utils.raise_if_canceled()
             time.sleep(3 * JOB_STATUS_CHECK_GAP_SECONDS)
             managed_job_status = managed_job_state.get_status(job_id)
             assert managed_job_status is not None, (job_id, managed_job_status)
@@ -2297,6 +2331,7 @@ def stream_logs_by_id(
     assert managed_job_status is not None, job_id
     while (should_keep_logging(managed_job_status) and follow and
            wait_seconds < _FINAL_JOB_STATUS_WAIT_TIMEOUT_SECONDS):
+        context_utils.raise_if_canceled()
         time.sleep(1)
         wait_seconds += 1
         managed_job_status = managed_job_state.get_status(job_id)
@@ -2374,6 +2409,7 @@ def stream_logs(job_id: Optional[int],
 
         # Wait for the log file to be written
         while not os.path.exists(controller_log_path):
+            context_utils.raise_if_canceled()
             if not follow:
                 # Assume that the log file hasn't been written yet. Since we
                 # aren't following, just return.
@@ -2430,6 +2466,7 @@ def stream_logs(job_id: Optional[int],
                       encoding='utf-8') as f:
                 f.seek(end_pos)
                 while True:
+                    context_utils.raise_if_canceled()
                     # Print all new lines, if there are any.
                     line = f.readline()
                     while line is not None and line != '':

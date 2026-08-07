@@ -73,6 +73,7 @@ from sky.utils import ux_utils
 from sky.utils import volume as volume_utils
 from sky.utils import yaml_utils
 from sky.utils.plugin_extensions import ExternalFailureSource
+from sky.workspaces import constants as workspace_constants
 from sky.workspaces import core as workspaces_core
 
 if typing.TYPE_CHECKING:
@@ -293,16 +294,11 @@ def _caller_is_viewer() -> bool:
             rbac_mod.RoleName.ADMIN.value not in roles)
 
 
-def is_command_length_over_limit(command: str) -> bool:
-    """Check if the length of the command exceeds the limit.
-
-    We calculate the length of the command after quoting the command twice as
-    when it is executed by the CommandRunner, the command will be quoted twice
-    to ensure the correctness, which will add significant length to the command.
-    """
-
-    quoted_length = len(shlex.quote(shlex.quote(command)))
-    return quoted_length > _MAX_INLINE_SCRIPT_LENGTH
+def is_command_length_over_limit(command: str, quote_levels: int = 2) -> bool:
+    """Check if the quoted command exceeds the inline command limit."""
+    for _ in range(quote_levels):
+        command = shlex.quote(command)
+    return len(command) > _MAX_INLINE_SCRIPT_LENGTH
 
 
 def is_ip(s: str) -> bool:
@@ -1212,6 +1208,9 @@ def write_cluster_config(
             'ray_dashboard_port': constants.SKY_REMOTE_RAY_DASHBOARD_PORT,
             'ray_temp_dir': constants.SKY_REMOTE_RAY_TEMPDIR,
             'dump_port_command': instance_setup.DUMP_RAY_PORTS,
+            # Commands raising the open files (nofile) limit for ray.
+            'ray_prlimit_command': instance_setup.RAY_PRLIMIT,
+            'raise_nofile_limit_command': instance_setup.RAISE_NOFILE_LIMIT_CMD,
             # Sky-internal constants.
             'sky_ray_cmd': constants.SKY_RAY_CMD,
             # pip install needs to have python env activated to make sure
@@ -3943,7 +3942,10 @@ def get_clusters(
         A list of cluster records. If the cluster does not exist or has been
         terminated, the record will be omitted from the returned list.
     """
-    accessible_workspaces = workspaces_core.get_accessible_workspace_names()
+    # Visibility, not usability: a non-member of a read-only workspace can see
+    # its clusters (that is the point of read-only visibility).
+    accessible_workspaces = workspaces_core.get_accessible_workspace_names(
+        action=workspace_constants.WORKSPACE_ACTION_READ)
 
     # Defense-in-depth: even if some caller bypasses the HTTP layer's
     # role_filter shim and reaches here with include_credentials=True
@@ -4591,11 +4593,14 @@ def open_ssh_tunnel(head_runner: Union[command_runner.SSHCommandRunner,
             # We did not observe this with real Kubernetes clusters.
             timeout = 5
             port_check_cmd = (
-                # We install netcat in our ray-node container,
-                # so we can use it here.
-                # (See kubernetes-ray.yml.j2)
+                # Poll the port with bash's /dev/tcp so no netcat is required:
+                # RHEL/UBI images ship nmap-ncat, whose `nc` has no `-z` flag.
+                # Fall back to `nc -w 1` (portable, no `-z`) for the rare bash
+                # built --disable-net-redirections. (See kubernetes-ray.yml.j2.)
                 f'end=$((SECONDS+{timeout})); '
-                f'while ! nc -z -w 1 localhost {remote_port}; do '
+                f'while ! (timeout 1 bash -c '
+                f'": < /dev/tcp/localhost/{remote_port}" 2>/dev/null || '
+                f'nc -w 1 localhost {remote_port} < /dev/null 2>/dev/null); do '
                 'if (( SECONDS >= end )); then exit 1; fi; '
                 'sleep 0.1; '
                 'done')

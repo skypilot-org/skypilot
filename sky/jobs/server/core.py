@@ -55,6 +55,7 @@ from sky.utils import status_lib
 from sky.utils import subprocess_utils
 from sky.utils import timeline
 from sky.utils import ux_utils
+from sky.workspaces import constants as workspace_constants
 from sky.workspaces import core as workspaces_core
 
 if typing.TYPE_CHECKING:
@@ -697,11 +698,11 @@ def launch(
     dag.resolve_and_validate_volumes()
     if not dag.is_chain() and not dag.is_job_group():
         with ux_utils.print_exception_no_traceback():
-            raise ValueError('Only single-task, chain DAG, or JobGroup is '
+            raise ValueError('Only single-task, chain DAG, or Job Group is '
                              f'allowed for job_launch. Dag: {dag}')
     if dag.is_job_group() and pool is not None:
         with ux_utils.print_exception_no_traceback():
-            raise ValueError('JobGroups do not support pools. Please remove '
+            raise ValueError('Job Groups do not support pools. Please remove '
                              'the --pool argument when launching a job group.')
     dag.validate()
     # TODO(aylei): use consolidated job controller instead of performing
@@ -730,18 +731,35 @@ def launch(
                         override_params['region'] = best_region
                     task_.set_resources_override(override_params)
 
-        # Warn if job group is not running on Kubernetes (networking won't work)
-        first_task = dag.tasks[0]
-        if first_task.best_resources is not None:
-            best_cloud = first_task.best_resources.cloud
-            if best_cloud is not None and str(
-                    best_cloud).lower() != 'kubernetes':
-                logger.warning(
-                    f'{colorama.Fore.YELLOW}Job group service discovery '
-                    f'(hostname-based networking) is only supported on '
-                    f'Kubernetes. Tasks will run on {best_cloud} but cannot '
-                    f'communicate with each other using hostnames.'
-                    f'{colorama.Style.RESET_ALL}')
+        # Post-optimization invariant: a group that still has in-group
+        # networking enabled (inter_connection unset or true) was placed
+        # by the same-infra path, which pins every job to one cloud (and
+        # to Kubernetes: unset degrades to False in the optimizer when
+        # placed elsewhere, and explicit true only ever gets Kubernetes
+        # candidates). Heterogeneous placements only arise via
+        # independent placement, which always carries
+        # inter_connection == False.
+        if dag.inter_connection is not False:
+            best_clouds = {
+                str(task_.best_resources.cloud)
+                for task_ in dag.tasks
+                if task_.best_resources is not None and
+                task_.best_resources.cloud is not None
+            }
+            if (len(best_clouds) > 1 or not all(cloud.lower() == 'kubernetes'
+                                                for cloud in best_clouds)):
+                with ux_utils.print_exception_no_traceback():
+                    raise RuntimeError(
+                        f'Internal error: Job Group {dag.name!r} requires '
+                        'in-group networking (inter_connection is enabled), '
+                        'which is only supported on a single Kubernetes '
+                        'cluster, but the optimizer placed it on '
+                        f'{sorted(best_clouds)}. This is likely a SkyPilot '
+                        'bug; please report it at '
+                        'https://github.com/skypilot-org/skypilot/issues. '
+                        'Set \'inter_connection: false\' '
+                        'in the job group header if the jobs do not need '
+                        'to reach each other by hostname.')
 
     # If there is a local postgres db, when the api server tries launching on
     # the remote jobs controller it will fail. therefore, we should remove this
@@ -1356,8 +1374,11 @@ def queue_v2(
             return [], 0, {}, 0
         user_hashes = [user.id for user in users]
 
+    # Visibility, not usability: read-only workspaces' jobs must be listed. See
+    # the same call in backend_utils for clusters.
     accessible_workspaces = list(
-        workspaces_core.get_accessible_workspace_names())
+        workspaces_core.get_accessible_workspace_names(
+            action=workspace_constants.WORKSPACE_ACTION_READ))
 
     if handle.is_grpc_enabled_with_flag:
         try:
