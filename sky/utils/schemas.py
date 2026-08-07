@@ -1801,6 +1801,10 @@ def get_config_schema():
                 'type': 'boolean',
                 'default': False,
             },
+            'require_durable_file_mounts': {
+                'type': 'boolean',
+                'default': False,
+            },
         }
         if extra_properties:
             props.update(extra_properties)

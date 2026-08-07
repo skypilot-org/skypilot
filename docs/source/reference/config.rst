@@ -42,6 +42,7 @@ Below is the configuration syntax and some example values. See detailed explanat
   :ref:`jobs <config-yaml-jobs>`:
     :ref:`bucket <config-yaml-jobs-bucket>`: s3://my-bucket/
     :ref:`force_disable_cloud_bucket <config-yaml-jobs-force-disable-cloud-bucket>`: false
+    :ref:`require_durable_file_mounts <config-yaml-jobs-require-durable-file-mounts>`: false
     controller:
       :ref:`resources <config-yaml-jobs-controller-resources>`:  # same spec as 'resources' in a task YAML
         infra: gcp/us-central1
@@ -459,6 +460,26 @@ Example:
 
   jobs:
     force_disable_cloud_bucket: true
+
+.. _config-yaml-jobs-require-durable-file-mounts:
+
+``jobs.require_durable_file_mounts``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Reject managed jobs whose local file mounts or workdir would not survive an API server rolling update (optional).
+
+By default SkyPilot only prints a warning at submission time when rolling update is enabled, the API server runs in :ref:`consolidation mode <jobs-consolidation-mode>` without persistent storage, no ``jobs.bucket`` is configured, and the job has local file mounts or a workdir. The job is still accepted, but if the worker is preempted after the API server has been replaced, recovery fails when it tries to restage those files -- possibly hours later, with an error that does not point back to the warning.
+
+If set to ``true``, the same condition rejects the job at submission with the same guidance. Use this when the API server is genuinely ephemeral, so that doomed jobs fail fast instead of failing during recovery.
+
+Default: ``false``.
+
+Example:
+
+.. code-block:: yaml
+
+  jobs:
+    require_durable_file_mounts: true
 
 .. _config-yaml-jobs-controller:
 .. _config-yaml-jobs-controller-consolidation-mode:
