@@ -398,6 +398,28 @@ class TestGetGpuCountFromTres:
         assert utils.get_gpu_count_from_tres(tres_str) == expected
 
 
+class TestHasGpuGres:
+    """Test has_gpu_gres() presence detection."""
+
+    @pytest.mark.parametrize(
+        'gres_str,expected',
+        [
+            # A GPU entry is present, even when zero are allocated.
+            ('gpu:0', True),
+            ('gpu:h100:0', True),
+            ('gpu:h100:5(IDX:0-4)', True),
+            ('gpu:8', True),
+            ('gres/gpu=0', True),
+            # No GPU information at all.
+            ('(null)', False),
+            ('N/A', False),
+            ('', False),
+            ('shard:h100:64', False),
+        ])
+    def test_has_gpu_gres(self, gres_str, expected):
+        assert utils.has_gpu_gres(gres_str) is expected
+
+
 class _FakeSlurmClient:
     """Fake SlurmClient for _get_slurm_node_info_list tests."""
 
@@ -489,11 +511,11 @@ class TestGetSlurmNodeInfoList:
         assert result[0]['free_gpus'] == 8
 
     def test_fallback_when_tres_lacks_gpu(self, monkeypatch):
-        """Fall back to squeue if the cluster does not track gres/gpu in TRES.
+        """Fall back to squeue if neither TRES nor GresUsed reports GPUs.
 
         scontrol succeeds, but CfgTRES reports no GPUs while sinfo %G
-        reports 8: AllocTRES cannot be trusted for GPU accounting, so the
-        squeue-based path must be used.
+        reports 8, and GresUsed is absent: neither node-level source can
+        be trusted, so the squeue-based path must be used.
         """
         fake_client = _FakeSlurmClient(
             node_infos=[self._make_sinfo_node('alloc')],
@@ -510,6 +532,91 @@ class TestGetSlurmNodeInfoList:
 
         assert len(result) == 1
         assert result[0]['free_gpus'] == 0
+
+    def test_gres_used_when_tres_lacks_gpu(self, monkeypatch):
+        """GresUsed covers clusters that do not project GRES into TRES.
+
+        CfgTRES has no gres/gpu, so AllocTRES is untrustworthy, but
+        GresUsed is maintained by slurmctld regardless of
+        AccountingStorageTRES — no squeue round-trip needed.
+        """
+        fake_client = _FakeSlurmClient(
+            node_infos=[self._make_sinfo_node('mix')],
+            node_details={
+                'node1': {
+                    'CfgTRES': 'cpu=192,mem=800G,billing=192',
+                    'AllocTRES': 'cpu=64,mem=400G,billing=64',
+                    'GresUsed': 'gpu:h100:5(IDX:0-4)',
+                },
+            },
+            jobs_gres={'node1': ['gpu:h100:8']})
+        self._patch(monkeypatch, fake_client)
+
+        result = utils._get_slurm_node_info_list('cluster-a')
+
+        assert len(result) == 1
+        assert result[0]['free_gpus'] == 3
+        assert fake_client.jobs_gres_calls == 0
+
+    def test_gres_used_zero_is_not_missing_info(self, monkeypatch):
+        """`GresUsed=gpu:h100:0` means 0 allocated, not 'no information'."""
+        fake_client = _FakeSlurmClient(
+            node_infos=[self._make_sinfo_node('idle')],
+            node_details={
+                'node1': {
+                    'CfgTRES': 'cpu=192,mem=800G,billing=192',
+                    'AllocTRES': '',
+                    'GresUsed': 'gpu:h100:0',
+                },
+            },
+            # Would report 8 allocated if the squeue path were taken.
+            jobs_gres={'node1': ['gpu:h100:8']})
+        self._patch(monkeypatch, fake_client)
+
+        result = utils._get_slurm_node_info_list('cluster-a')
+
+        assert len(result) == 1
+        assert result[0]['free_gpus'] == 8
+        assert fake_client.jobs_gres_calls == 0
+
+    def test_alloc_tres_preferred_over_gres_used(self, monkeypatch):
+        """AllocTRES wins when the cluster does track gres/gpu in TRES."""
+        fake_client = _FakeSlurmClient(
+            node_infos=[self._make_sinfo_node('mix')],
+            node_details={
+                'node1': {
+                    'CfgTRES': 'cpu=192,mem=800G,billing=192,gres/gpu=8',
+                    'AllocTRES': 'cpu=64,mem=400G,gres/gpu=6',
+                    # Disagrees with AllocTRES; must not be consulted.
+                    'GresUsed': 'gpu:h100:2',
+                },
+            })
+        self._patch(monkeypatch, fake_client)
+
+        result = utils._get_slurm_node_info_list('cluster-a')
+
+        assert len(result) == 1
+        assert result[0]['free_gpus'] == 2
+
+    def test_squeue_when_gres_used_has_no_gpu_entry(self, monkeypatch):
+        """A GresUsed without any GPU entry still falls through to squeue."""
+        fake_client = _FakeSlurmClient(
+            node_infos=[self._make_sinfo_node('mix')],
+            node_details={
+                'node1': {
+                    'CfgTRES': 'cpu=192,mem=800G,billing=192',
+                    'AllocTRES': 'cpu=64,mem=400G,billing=64',
+                    'GresUsed': '(null)',
+                },
+            },
+            jobs_gres={'node1': ['gres/gpu=1']})
+        self._patch(monkeypatch, fake_client)
+
+        result = utils._get_slurm_node_info_list('cluster-a')
+
+        assert len(result) == 1
+        assert result[0]['free_gpus'] == 7
+        assert fake_client.jobs_gres_calls == 1
 
     def test_fallback_when_node_missing_from_details(self, monkeypatch):
         """A sinfo node absent from scontrol output uses squeue accounting."""
