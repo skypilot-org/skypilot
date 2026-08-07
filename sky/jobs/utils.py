@@ -2014,6 +2014,7 @@ def stream_logs_by_id(
                             returncode = log_reader.read_managed_job_logs(
                                 job_id,
                                 task_id,
+                                task_name=task_name,
                                 follow=False,
                                 tail=tail if tail is not None else 0)
                     except Exception as e:  # pylint: disable=broad-except

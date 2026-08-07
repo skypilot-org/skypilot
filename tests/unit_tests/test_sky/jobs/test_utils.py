@@ -1480,10 +1480,11 @@ class TestStreamLogsByIdExternalStoreFallback:
 
         _, code = jobs_utils.stream_logs_by_id(5, follow=False, tail=None)
 
-        fake_reader.read_managed_job_logs.assert_called_once_with(5,
-                                                                  0,
-                                                                  follow=False,
-                                                                  tail=0)
+        # task_name rides along: a managed job id is unique only within one API
+        # server, so a reader needs it to narrow a store shared by several
+        # deployments.
+        fake_reader.read_managed_job_logs.assert_called_once_with(
+            5, 0, task_name='mytask', follow=False, tail=0)
         assert code == exceptions.JobExitCode.from_managed_job_status(
             managed_job_state.ManagedJobStatus.SUCCEEDED)
 
