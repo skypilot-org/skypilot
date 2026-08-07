@@ -446,6 +446,14 @@ USER_ID_ENV_VAR = f'{SKYPILOT_ENV_VAR_PREFIX}USER_ID'
 # runs on a VM launched by SkyPilot will be recognized as the same user.
 USER_ENV_VAR = f'{SKYPILOT_ENV_VAR_PREFIX}USER'
 
+# Groups asserted by the identity provider for the current request, comma
+# separated. Set by the server from the auth proxy's X-Auth-Request-Groups
+# header so the request worker -- and therefore an admin policy -- can see
+# them. Carried in the env rather than persisted with the user, because group
+# membership belongs to the IdP and a stored copy goes stale silently. Only
+# ever set server-side; anything a client sends is overwritten.
+USER_GROUPS_ENV_VAR = f'{SKYPILOT_ENV_VAR_PREFIX}USER_GROUPS'
+
 # The name for the environment variable that stores the client user hash.
 # This captures the machine-local identity of the actual client user, used to
 # aggregate usage across multiple API servers when basic auth is enabled.

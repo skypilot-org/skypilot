@@ -288,6 +288,12 @@ auth:
     client-details-from-secret: ""
     # Email domains to allow (use "*" for all domains)
     email-domain: "*"
+    # OIDC scopes to request. Set this to include "groups" if you want the IdP's
+    # group membership available to an admin policy as user.groups, e.g.
+    # "openid email profile groups". Unset means oauth2-proxy's default, which
+    # does not include groups.
+    # @schema type: [string, null]
+    scope: null
     # Session storage settings ("cookie" or "redis")
     session-store-type: "redis"
     # Redis connection URL (redis://host[:port][/db-number])
@@ -465,6 +471,12 @@ ingress:
     use-https: false
     # Email domains to allow (use "*" for all domains)
     email-domain: "*"
+    # OIDC scopes to request. Set this to include "groups" if you want the IdP's
+    # group membership available to an admin policy as user.groups, e.g.
+    # "openid email profile groups". Unset means oauth2-proxy's default, which
+    # does not include groups.
+    # @schema type: [string, null]
+    scope: null
     # Session storage settings ("cookie" or "redis")
     session-store-type: "redis"
     # Redis connection URL (redis://host[:port][/db-number])
