@@ -3579,7 +3579,19 @@ def test_launching_with_pending_pods():
             # helper's context so the two are co-located; on a local
             # single-context server this is a no-op (`--infra kubernetes`).
             smoke_tests_utils.resolve_cloud_cmd_k8s_context_cmd(name),
-            f's=$(SKYPILOT_DEBUG=1 sky launch -y -c {name} --infra {smoke_tests_utils.cloud_cmd_landed_k8s_infra(name)} --cpus 0.1+ \'echo hi\'); echo "$s"; echo; echo; echo "$s" | grep "Timed out while waiting for nodes to start"',
+            # Pin provision_timeout: this test asserts on the *provisioning*
+            # timeout path, but the effective default depends on the target
+            # context's config. If a Kueue local queue is configured for that
+            # context (`kueue.local_queue_name` / `quota.queue`),
+            # Kubernetes._calculate_provision_timeout() returns 24 hours, and
+            # the launch would wait on the pending pod far past this test's
+            # per-command timeout instead of emitting the expected message.
+            # 10s is what that same helper computes for a single node when no
+            # queue is configured, i.e. this restores the timeout the test was
+            # written against. The override lands at the cloud level, which
+            # applies as long as the context does not set provision_timeout of
+            # its own.
+            f's=$(SKYPILOT_DEBUG=1 sky launch -y -c {name} --infra {smoke_tests_utils.cloud_cmd_landed_k8s_infra(name)} --config kubernetes.provision_timeout=10 --cpus 0.1+ \'echo hi\'); echo "$s"; echo; echo; echo "$s" | grep "Timed out while waiting for nodes to start"',
             # Check Pods have been deleted
             smoke_tests_utils.run_cloud_cmd_on_cluster(
                 name,
