@@ -1085,3 +1085,91 @@ def prepare_env_file(request):
         # api_login created the file; remove it to avoid polluting the env.
         os.remove(user_hash_file)
         logger.info(f'Removed {user_hash_file} (created during test session)')
+
+
+@pytest.fixture(scope='session', autouse=True)
+def warm_jobs_controller(request, tmp_path_factory, setup_docker_container):
+    """Warm the managed-jobs controller before jobs tests start their clocks.
+
+    The first managed-jobs test in a fresh environment pays the controller
+    cluster's provisioning time inside its own status-wait timeout: a
+    wait-for-RUNNING of e.g. 300s also has to absorb a multi-minute
+    controller cold start, which is the dominant source of first-test
+    flakiness in the managed-jobs suite. Launch one trivial managed job up
+    front so the controller already exists when the first timed test runs.
+
+    Depends on setup_docker_container so that in --remote-server mode the
+    warmup targets the dockerized server rather than racing its startup.
+    Mirrors setup_policy_server's cross-worker coordination: a filelock and
+    marker file in the shared tmp dir so exactly one xdist worker warms and
+    the others wait on the lock.
+
+    A warmup failure is reported but never fails the session: tests then
+    simply pay the cold start as before.
+    """
+    del setup_docker_container  # Ordering-only dependency.
+    if request.config.getoption('--jobs-consolidation'):
+        # Consolidation mode runs the controller inside the API server:
+        # there is no controller cluster to warm.
+        yield
+        return
+
+    has_jobs_tests = False
+    if hasattr(request.session, 'items'):
+        has_jobs_tests = any('test_managed_job' in item.location[0]
+                             for item in request.session.items)
+    if not has_jobs_tests:
+        yield
+        return
+
+    generic_cloud = _generic_cloud(request.config)
+    root_tmp_dir = tmp_path_factory.getbasetemp().parent / 'jobs_warmup'
+    root_tmp_dir.mkdir(parents=True, exist_ok=True)
+    marker = root_tmp_dir / 'warmed.txt'
+    with filelock.FileLock(str(marker) + '.lock'):
+        if not marker.is_file():
+            # Same controller-resources config the tests use, so the
+            # controller launched here is the one they reuse.
+            env = {
+                **os.environ,
+                **smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
+            }
+            cmd = (f'sky jobs launch -y -n jobs-controller-warmup '
+                   f'--infra {generic_cloud} '
+                   f'{smoke_tests_utils.LOW_RESOURCE_ARG} -- true')
+            print(f'Warming jobs controller: {cmd}',
+                  file=sys.stderr,
+                  flush=True)
+            start = time.time()
+            try:
+                proc = subprocess.run(cmd,
+                                      shell=True,
+                                      env=env,
+                                      capture_output=True,
+                                      text=True,
+                                      timeout=1800,
+                                      check=False)
+                status = 'ok' if proc.returncode == 0 else 'failed'
+                if proc.returncode != 0:
+                    print(
+                        f'Jobs controller warmup exited '
+                        f'{proc.returncode}; tests will pay the cold '
+                        f'start.\n{proc.stdout[-2000:]}\n'
+                        f'{proc.stderr[-2000:]}',
+                        file=sys.stderr,
+                        flush=True)
+            except subprocess.TimeoutExpired:
+                status = 'timeout'
+                print(
+                    'Jobs controller warmup timed out after 1800s; '
+                    'tests will pay the cold start.',
+                    file=sys.stderr,
+                    flush=True)
+            print(
+                f'Jobs controller warmup: {status} '
+                f'({time.time() - start:.0f}s)',
+                file=sys.stderr,
+                flush=True)
+            # Written regardless of outcome: one attempt per session.
+            marker.write_text(status)
+    yield
