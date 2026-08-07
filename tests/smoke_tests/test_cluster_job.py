@@ -41,6 +41,25 @@ from sky.utils import common_utils
 from sky.utils import resources_utils
 
 
+# ---------- Modal. ----------
+@pytest.mark.modal
+def test_modal_basic():
+    name = smoke_tests_utils.get_cluster_name()
+    resources = smoke_tests_utils.LOW_RESOURCE_ARG
+    test = smoke_tests_utils.Test(
+        'modal_basic',
+        [
+            f'sky launch -y -c {name} --infra modal {resources} '
+            '-- echo modal-launch',
+            f'sky exec {name} -- echo modal-exec',
+            f's=$(sky status {name}); echo "$s"; echo "$s" | grep UP',
+        ],
+        f'sky down -y {name}',
+        timeout=20 * 60,
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
 # ---------- Job Queue. ----------
 @pytest.mark.no_vast  # Vast has low availability of T4 GPUs
 @pytest.mark.no_shadeform  # Shadeform does not have T4 GPUs

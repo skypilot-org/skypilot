@@ -1,0 +1,6 @@
+resources:
+  cloud: modal
+
+run: |
+  echo "Hello from Modal on SkyPilot"
+  python -V

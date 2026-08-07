@@ -691,6 +691,9 @@ def get_volume_schema():
                     'cleanup_on_deletion': {
                         'type': 'boolean',
                     },
+                    'environment_name': {
+                        'type': 'string',
+                    },
                 },
             },
             **_LABELS_SCHEMA,

@@ -193,8 +193,9 @@ class OAuth2ProxyMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
                 if request.url.query:
                     redirect_path += f'?{request.url.query}'
                 rd = urllib.parse.quote(redirect_path)
-                signin_url = (f'{request.base_url}oauth2/start?'
-                              f'rd={rd}')
+                # Use a relative URL so deployments behind TLS-terminating
+                # proxies do not downgrade the sign-in redirect to http.
+                signin_url = f'/oauth2/start?rd={rd}'
                 return fastapi.responses.RedirectResponse(url=signin_url)
             else:
                 logger.error('oauth2-proxy returned unexpected status '

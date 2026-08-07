@@ -308,7 +308,8 @@ class TestOriginalOAuth2ProxyMiddleware:
                 mock_request, mock_call_next)
 
             assert response.status_code == 307  # RedirectResponse
-            assert 'oauth2/start' in response.headers['location']
+            assert response.headers[
+                'location'] == '/oauth2/start?rd=/api/v1/jobs%3Fparam%3Dvalue'
 
     @pytest.mark.asyncio
     async def test_authenticate_health_endpoint_bypass(self, middleware_enabled,

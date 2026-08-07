@@ -88,6 +88,7 @@ export const CLOUDS_LIST = [
   'GCP',
   'IBM',
   'Lambda',
+  'Modal',
   'SCP',
   'OCI',
   'RunPod',
@@ -106,6 +107,13 @@ export const CLOUD_CANONICALIZATIONS = Object.fromEntries([
   ['kubernetes', 'Kubernetes'],
   ['ssh', 'SSH Node Pool'],
 ]);
+
+export function canonicalizeCloudName(cloud) {
+  if (typeof cloud !== 'string') {
+    return cloud;
+  }
+  return CLOUD_CANONICALIZATIONS[cloud.toLowerCase()] || cloud;
+}
 
 export const COMMON_GPUS = [
   'A10',
