@@ -863,12 +863,18 @@ def _accelerator_name_matches(requested_acc: str,
 
     For backward compatibility with GPU name changes (e.g., when canonical names
     like 'H200' are added to replace fallback names like 'H200-SXM-80GB'), this
-    function also matches if one name is a prefix of the other separated by '-'.
+    function also matches if one name is a prefix of the other separated by '-'
+    and the extra suffix only describes packaging (a form factor such as 'SXM'
+    or a device memory size such as '80GB').
 
     This handles cases where:
     - Clusters were launched with fallback names (e.g., 'H200-SXM-80GB') but
       after upgrading, the same label now maps to canonical name (e.g., 'H200').
     - Users specify canonical names but the cluster uses fallback names.
+
+    A suffix that names a different model does not match, so a request for a
+    variant the cluster does not have (e.g. 'H100-MEGA' or 'RTX3090-TI') is not
+    satisfied by its bare-name sibling ('H100', 'RTX3090').
 
     Args:
         requested_acc: The accelerator type requested (e.g., from launched_resources).
@@ -883,28 +889,40 @@ def _accelerator_name_matches(requested_acc: str,
         if requested_lower == viable_lower:
             return True
         # Check prefix match with '-' separator for backward compatibility.
-        # E.g., 'H200' matches 'H200-SXM-80GB' and vice versa.
-        shorter, longer = ((requested_lower, viable_lower)
-                           if len(requested_lower) <= len(viable_lower) else
-                           (viable_lower, requested_lower))
-        if longer.startswith(shorter):
-            # Ensure it's a proper prefix (followed by '-' or end of string)
-            if len(longer) == len(shorter) or longer[len(shorter)] == '-':
-                # Guard against the OOM direction: a request must not be
-                # satisfied by a node with strictly LESS device memory (e.g.
-                # an 'A100-80GB' (or typo'd 'A100-80G') request on a 40GB
-                # 'A100' node). Only applies when both names imply a known
-                # memory size; same-or-larger node memory still matches, which
-                # preserves backward compatibility (an 'A100' request may still
-                # land on an 'A100-80GB' node) and same-hardware renames (e.g.
-                # 'H100' == 'H100-80GB', both 80GB).
-                requested_mem = gpu_names.get_gpu_device_memory_gib(
-                    requested_lower)
-                viable_mem = gpu_names.get_gpu_device_memory_gib(viable_lower)
-                if (requested_mem is not None and viable_mem is not None and
-                        requested_mem > viable_mem):
-                    continue
-                return True
+        # E.g., 'H200' matches 'H200-SXM-80GB' and vice versa. Which name is
+        # the more specific one decides how much leeway the match gets.
+        if viable_lower.startswith(f'{requested_lower}-'):
+            # The node label is the more specific name, so the node is an
+            # instance of what was asked for (e.g. an 'H100' request on an
+            # 'H100-MEGA' node) and satisfies the request.
+            matched = True
+        elif requested_lower.startswith(f'{viable_lower}-'):
+            # The request is the more specific name. Accept it only when the
+            # extra suffix describes packaging, which is the pre-
+            # canonicalization spelling of the same GPU (e.g. an
+            # 'H200-SXM-80GB' request on an 'H200' node). A suffix naming a
+            # distinct model must not be satisfied by the bare-name node: a
+            # request for 'H100-MEGA' or 'RTX3090-TI' is not met by a plain
+            # 'H100' or 'RTX3090' node.
+            matched = gpu_names.is_packaging_variant(viable_lower,
+                                                     requested_lower)
+        else:
+            matched = False
+        if matched:
+            # Guard against the OOM direction: a request must not be
+            # satisfied by a node with strictly LESS device memory (e.g.
+            # an 'A100-80GB' (or typo'd 'A100-80G') request on a 40GB
+            # 'A100' node). Only applies when both names imply a known
+            # memory size; same-or-larger node memory still matches, which
+            # preserves backward compatibility (an 'A100' request may still
+            # land on an 'A100-80GB' node) and same-hardware renames (e.g.
+            # 'H100' == 'H100-80GB', both 80GB).
+            requested_mem = gpu_names.get_gpu_device_memory_gib(requested_lower)
+            viable_mem = gpu_names.get_gpu_device_memory_gib(viable_lower)
+            if (requested_mem is not None and viable_mem is not None and
+                    requested_mem > viable_mem):
+                continue
+            return True
     return False
 
 
