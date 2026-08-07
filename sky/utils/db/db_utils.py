@@ -589,17 +589,26 @@ def _pooler_configured() -> bool:
         os.environ.get(constants.ENV_VAR_DB_POOL_HOSTPORT))
 
 
+# Bound on the connect phase of a no_pool engine. Unlike a pooled checkout,
+# connection establishment is part of every operation on a NullPool engine,
+# and a server-side statement_timeout cannot bound it — an unresponsive
+# database would otherwise hang the caller for the OS default.
+_NO_POOL_CONNECT_TIMEOUT_SECONDS = 10
+
+
 @typing.overload
 def get_engine(db_name: Optional[str],
                async_engine: Literal[False] = False,
-               direct: bool = False) -> sqlalchemy.engine.Engine:
+               direct: bool = False,
+               no_pool: bool = False) -> sqlalchemy.engine.Engine:
     ...
 
 
 @typing.overload
 def get_engine(db_name: Optional[str],
                async_engine: Literal[True],
-               direct: bool = False) -> sqlalchemy_async.AsyncEngine:
+               direct: bool = False,
+               no_pool: bool = False) -> sqlalchemy_async.AsyncEngine:
     ...
 
 
@@ -607,6 +616,7 @@ def get_engine(
     db_name: Optional[str],
     async_engine: bool = False,
     direct: bool = False,
+    no_pool: bool = False,
 ) -> Union[sqlalchemy.engine.Engine, sqlalchemy_async.AsyncEngine]:
     """Get the engine for the given database name.
 
@@ -620,6 +630,17 @@ def get_engine(
         transaction-mode pooler. When no pooler is configured (the default),
         direct and non-direct resolve to the same connection string and thus
         the same cached engine.
+        no_pool: When True (Postgres, sync only), return a dedicated
+        ``NullPool`` engine: every operation opens a fresh connection and
+        closes it afterwards, and the engine shares no pool state with the
+        default engine for the same connection string. For low-frequency
+        control-plane calls (e.g. the leader-election heartbeat) that must
+        not queue behind application traffic on a shared pool — a pool
+        exhausted by slow application queries would otherwise starve exactly
+        the calls that need to stay reliable under DB pressure. The connect
+        phase is bounded by ``connect_timeout``, since unlike a pooled
+        checkout it is part of every call. No effect on SQLite (a file open
+        is effectively unpooled already).
     """
     conn_string = _resolve_conn_string(direct)
     if conn_string:
@@ -627,13 +648,25 @@ def get_engine(
         # because we prefix the cache key in the async case,
         # so they would not overlap.
         cache_key = f'async:{conn_string}' if async_engine else conn_string
+        if no_pool and not async_engine:
+            cache_key = f'nopool:{conn_string}'
         with _db_creation_lock:
             if cache_key not in _postgres_engine_cache:
                 engine_type = 'sync' if not async_engine else 'async'
                 logger.debug(
                     f'Creating a new postgres {engine_type} engine with '
                     f'maximum {_max_connections} connections')
-                if async_engine:
+                if no_pool and not async_engine:
+                    # Isolated per-operation engine: never shares (or starves
+                    # on) the default engine's pool. See the docstring.
+                    engine_no_pool = sqlalchemy.create_engine(
+                        conn_string,
+                        poolclass=sqlalchemy.NullPool,
+                        connect_args={
+                            'connect_timeout': _NO_POOL_CONNECT_TIMEOUT_SECONDS
+                        })
+                    _postgres_engine_cache[cache_key] = engine_no_pool
+                elif async_engine:
                     # Use NullPool for async engines to avoid event loop binding
                     # issues. asyncpg connection pools bind to the event loop on
                     # first use, which causes "Future attached to a different

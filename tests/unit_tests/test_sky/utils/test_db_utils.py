@@ -228,6 +228,51 @@ class TestGetEngine:
             assert call_args[1]['pool_recycle'] == 1800
             assert engine == mock_engine
 
+    def test_postgres_no_pool_engine_is_nullpool_with_bounded_connect(
+            self, monkeypatch):
+        """no_pool returns a NullPool engine with a bounded connect phase,
+        even when a pool size is configured (which would otherwise pick
+        QueuePool)."""
+        monkeypatch.setenv('IS_SKYPILOT_SERVER', 'true')
+        monkeypatch.setenv('SKYPILOT_DB_CONNECTION_URI',
+                           'postgresql://user:pass@localhost/db')
+        db_utils.set_max_connections(10)
+
+        with mock.patch('sqlalchemy.create_engine') as mock_create:
+            mock_create.return_value = mock.MagicMock()
+
+            db_utils.get_engine(None, direct=True, no_pool=True)
+
+            mock_create.assert_called_once()
+            call_args = mock_create.call_args
+            assert call_args[1]['poolclass'] == sqlalchemy.NullPool
+            assert call_args[1]['connect_args'] == {
+                'connect_timeout': db_utils._NO_POOL_CONNECT_TIMEOUT_SECONDS
+            }
+
+    def test_postgres_no_pool_direct_bypasses_pooler_and_default_engine(
+            self, monkeypatch):
+        """no_pool+direct connects to the direct URI (not the pooler rewrite)
+        and is cached separately from the default engine, so the two never
+        share pool state."""
+        monkeypatch.setenv('IS_SKYPILOT_SERVER', 'true')
+        monkeypatch.setenv('SKYPILOT_DB_CONNECTION_URI',
+                           'postgresql://user:pass@h:5432/db')
+        monkeypatch.setenv('SKYPILOT_DB_POOL_HOSTPORT', '127.0.0.1:6432')
+        db_utils.set_max_connections(10)
+
+        default = db_utils.get_engine(None)
+        nopool = db_utils.get_engine(None, direct=True, no_pool=True)
+
+        assert nopool is not default
+        # The default engine routes through the pooler; no_pool goes direct.
+        assert '127.0.0.1:6432' in str(default.url)
+        assert 'h:5432' in str(nopool.url)
+        assert isinstance(nopool.pool, sqlalchemy.NullPool)
+        # Both are cached: repeat calls return the same objects.
+        assert db_utils.get_engine(None) is default
+        assert db_utils.get_engine(None, direct=True, no_pool=True) is nopool
+
     def test_postgres_sync_engine_queuepool_max_overflow_calculation(
             self, monkeypatch):
         """Test max_overflow calculation with different pool sizes."""

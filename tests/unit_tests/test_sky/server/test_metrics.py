@@ -341,6 +341,7 @@ def prometheus_middleware():
     # Clear metric values before each test
     metrics_utils.SKY_APISERVER_REQUESTS_TOTAL.clear()
     metrics_utils.SKY_APISERVER_REQUEST_DURATION_SECONDS.clear()
+    metrics_utils.SKY_APISERVER_REQUEST_GET_DURATION_SECONDS.clear()
 
     return middleware
 
@@ -675,6 +676,61 @@ async def test_middleware_user_metrics_with_basic_auth(
     assert user_requests == 1.0
 
 
+@pytest.mark.asyncio
+async def test_middleware_records_api_get_duration_by_name(
+        prometheus_middleware):
+    """/api/get latency is recorded under the request name the handler stamps."""
+    request = MagicMock()
+    request.url.path = '/api/v1/api/get'
+    request.method = 'GET'
+    request.state.auth_user = None
+    # The api_get handler stamps request.state.request_name once it knows which
+    # request is being fetched.
+    request.state.request_name = 'status'
+
+    response = MagicMock()
+    response.status_code = 200
+
+    call_next = AsyncMock(return_value=response)
+
+    await prometheus_middleware.dispatch(request, call_next)
+
+    get_collectors = [metrics_utils.SKY_APISERVER_REQUEST_GET_DURATION_SECONDS]
+    duration_count = _get_metric_value(
+        'sky_apiserver_request_get_duration_seconds_count', {
+            'name': 'status',
+            'status': '2xx'
+        },
+        collectors=get_collectors)
+    assert duration_count == 1.0
+
+
+@pytest.mark.asyncio
+async def test_middleware_no_api_get_duration_without_name(
+        prometheus_middleware):
+    """No per-name /api/get series is recorded when the name is not stamped."""
+    request = MagicMock(spec=['url', 'method', 'state'])
+    request.url.path = '/api/v1/status'
+    request.method = 'GET'
+    request.state = MagicMock(
+        spec=[])  # No request_name / auth_user attributes.
+
+    response = MagicMock()
+    response.status_code = 200
+
+    call_next = AsyncMock(return_value=response)
+
+    await prometheus_middleware.dispatch(request, call_next)
+
+    # No per-name series recorded: every _count sample stays at 0.
+    registry = CollectorRegistry()
+    registry.register(metrics_utils.SKY_APISERVER_REQUEST_GET_DURATION_SECONDS)
+    output = generate_latest(registry).decode('utf-8')
+    for line in output.split('\n'):
+        if line.startswith('sky_apiserver_request_get_duration_seconds_count'):
+            assert float(line.split()[-1]) == 0.0
+
+
 @pytest.fixture(autouse=True)
 def cleanup_metrics():
     """Clean up metrics after each test to avoid interference."""
@@ -682,6 +738,7 @@ def cleanup_metrics():
     # Clear all metrics after each test
     metrics_utils.SKY_APISERVER_REQUESTS_TOTAL.clear()
     metrics_utils.SKY_APISERVER_REQUEST_DURATION_SECONDS.clear()
+    metrics_utils.SKY_APISERVER_REQUEST_GET_DURATION_SECONDS.clear()
     metrics_utils.SKY_APISERVER_REQUESTS_BY_USER_TOTAL.clear()
 
 

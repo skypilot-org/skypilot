@@ -1587,6 +1587,12 @@ class SqliteRequestBackend(request_storage.RequestBackend):
                 if not _should_kill_request(request_id, request_record):
                     continue
                 assert request_record is not None
+                # When a user_id scope is given, only cancel requests owned by
+                # that user. Without this, an explicit request_ids list would
+                # bypass the scope entirely and let a caller cancel another
+                # user's request.
+                if (user_id is not None and request_record.user_id != user_id):
+                    continue
                 if request_record.pid is not None:
                     logger.debug(
                         f'Killing request process {request_record.pid}')

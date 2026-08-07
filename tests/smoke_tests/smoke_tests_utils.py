@@ -1506,7 +1506,31 @@ def get_enabled_cloud_storages() -> List[clouds.Cloud]:
                 except ValueError:
                     pass
         return enabled_clouds
-    return [clouds.AWS()]
+    # Local API server: the client shares the server's state, so the cached
+    # enabled-storage-clouds list is authoritative and cheaper than shelling
+    # out to `sky check`.
+    #
+    # Do not hardcode a cloud here. Callers use this to decide which object
+    # stores are usable, so a wrong answer is wrong in both directions: too
+    # narrow silently drops real store coverage, too wide pins a store whose
+    # cloud is disabled and fails the job at FAILED_PRECHECKS.
+    #
+    # Imported lazily: smoke_tests_utils is imported by every test module,
+    # including the limited-dependency lane, and sky.data.storage pulls in the
+    # optional cloud storage SDKs.
+    from sky.data import storage as storage_lib
+    enabled_clouds = []
+    for cloud_name in (
+            storage_lib.get_cached_enabled_storage_cloud_names_or_refresh()):
+        try:
+            cloud_obj = registry.CLOUD_REGISTRY.from_str(cloud_name)
+        except ValueError:
+            # Non-cloud object stores (R2, CoreWeave, VAST, HuggingFace) are
+            # not in the cloud registry.
+            continue
+        if cloud_obj is not None:
+            enabled_clouds.append(cloud_obj)
+    return enabled_clouds
 
 
 def write_blob(file: BinaryIO, total_size: int):
