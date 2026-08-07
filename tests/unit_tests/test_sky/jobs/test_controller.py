@@ -1618,30 +1618,27 @@ class TestDunderMainDispatchesToImportedModule:
 
 
 class TestTransientJobStatusRecoveryWindow:
-    """Tests for the transient job-status-check retry window across recovery.
+    """Tests the transient job-status-check retry window lifecycle.
 
     When the controller cannot fetch a task's job status but the cluster is
     healthy, it retries for up to JOB_STATUS_FETCH_TOTAL_TIMEOUT_SECONDS before
-    recovering, to avoid a false alarm from a transient control-plane error.
-    That window (`transient_job_check_error_start_time`) must be reset after a
-    recovery; otherwise the first status-fetch failure after a recovery is
-    measured from before the recovery, exceeds the timeout immediately, and
-    triggers another recovery with no retries -- turning one transient error
-    into an unbounded recovery loop.
+    recovering, to avoid a false alarm from a transient control-plane error. The
+    initial forced cluster-status refresh must not consume that window, and the
+    window must be reset after recovery.
     """
 
     class _StopLoop(Exception):
         """Sentinel to break the otherwise-infinite monitoring loop."""
 
     @pytest.mark.asyncio
-    async def test_window_reset_after_recovery(self, monkeypatch):
-        """A transient failure after a recovery starts a fresh retry window.
+    async def test_first_refresh_is_excluded_and_window_resets_after_recovery(
+            self, monkeypatch):
+        """The first refresh is excluded and recovery starts a fresh window.
 
         Drives ``_monitor_one_task_impl`` through: transient failure (retry) ->
         transient failure past the timeout (recover) -> transient failure
-        again. With the window reset, the third failure retries instead of
-        recovering, so ``recover`` is called exactly once. Without the reset it
-        would recover a second time immediately.
+        again. The first refresh exceeds the timeout but must not recover. With
+        the window reset, the third failure retries instead of recovering.
 
         Calls the ``_impl`` body rather than ``_monitor_one_task``: the retry
         window lives entirely in the body, and the wrapper only owns the status
@@ -1653,26 +1650,29 @@ class TestTransientJobStatusRecoveryWindow:
         monkeypatch.setattr(managed_job_utils, 'JOB_STATUS_CHECK_GAP_SECONDS',
                             0)
 
-        # A logical clock advanced at the top of each loop iteration (inside
-        # the get_job_status stub) so `elapsed` is fully deterministic:
-        #   iter 1: +0   -> elapsed 0   < 60 -> retry
-        #   iter 2: +100 -> elapsed 100 >= 60 -> recover (#1); window reset
-        #   iter 3: +50  -> fresh window, elapsed 0 < 60 -> retry
+        # A logical clock keeps the retry windows deterministic. The first
+        # forced refresh takes 61 seconds but is excluded from the budget:
+        #   iter 1: status +0, refresh +61 -> elapsed 0   < 60 -> retry
+        #   iter 2: status +100            -> elapsed 100 >= 60 -> recover
+        #   iter 3: status +50             -> elapsed 0   < 60 -> retry
         #   iter 4: stub raises _StopLoop to end the loop
         clock = {'t': 1000.0}
-        deltas = iter([0.0, 100.0, 50.0])
-        recover_calls = 0
+        status_deltas = iter([0.0, 100.0, 50.0])
+        refresh_deltas = iter([61.0, 0.0, 0.0])
+        status_fetches = 0
+        recovery_fetch_counts: List[int] = []
 
         async def fake_get_job_status(*args, **kwargs):
+            nonlocal status_fetches
             try:
-                clock['t'] += next(deltas)
+                clock['t'] += next(status_deltas)
             except StopIteration:
                 raise TestTransientJobStatusRecoveryWindow._StopLoop()
+            status_fetches += 1
             return None, 'Job status check timed out after 30s.'
 
         async def fake_recover(*args, **kwargs):
-            nonlocal recover_calls
-            recover_calls += 1
+            recovery_fetch_counts.append(status_fetches)
             return clock['t']
 
         handle = MagicMock()
@@ -1680,6 +1680,7 @@ class TestTransientJobStatusRecoveryWindow:
             return_value = False
 
         def fake_refresh(*args, **kwargs):
+            clock['t'] += next(refresh_deltas)
             return status_lib.ClusterStatus.UP, handle
 
         mock_self = MagicMock()
@@ -1721,9 +1722,7 @@ class TestTransientJobStatusRecoveryWindow:
                     callback_func=MagicMock(),
                     force_transit_to_recovering=False)
 
-        assert recover_calls == 1, (
-            'expected exactly one recovery; a second recovery means the '
-            'transient retry window was not reset after the first recovery')
+        assert recovery_fetch_counts == [2]
 
     @pytest.mark.asyncio
     async def test_status_logger_flushed_when_body_raises(self, monkeypatch):
