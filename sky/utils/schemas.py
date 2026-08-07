@@ -1908,6 +1908,8 @@ def get_config_schema():
                     'properties': {
                         'run_duration': {
                             'type': 'integer',
+                            'minimum': 600,
+                            'maximum': 604800,
                         },
                         'provision_timeout': {
                             'type': 'integer',
