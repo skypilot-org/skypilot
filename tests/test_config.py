@@ -2193,10 +2193,11 @@ def test_admin_policy_is_not_client_overridable(monkeypatch, tmp_path):
     """
     server_config = tmp_path / 'server.yaml'
     server_config.write_text('admin_policy: server_pkg.ServerPolicy\n')
-    monkeypatch.setenv(skypilot_config.ENV_VAR_SKYPILOT_CONFIG, str(server_config))
+    monkeypatch.setenv(skypilot_config.ENV_VAR_SKYPILOT_CONFIG,
+                       str(server_config))
     skypilot_config.reload_config()
 
     with skypilot_config.override_skypilot_config(
         {'admin_policy': 'attacker_pkg.NoOpPolicy'}):
-        assert skypilot_config.get_nested(
-            ('admin_policy',), None) == 'server_pkg.ServerPolicy'
+        assert skypilot_config.get_nested(('admin_policy',),
+                                          None) == 'server_pkg.ServerPolicy'
