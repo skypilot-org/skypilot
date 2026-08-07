@@ -1275,11 +1275,13 @@ def test_requests_filter():
     filter_status = requests.RequestTaskFilter(
         status=[RequestStatus.PENDING, RequestStatus.RUNNING], sort=True)
     sql, params = filter_status.build_query()
+    # Status values are inlined as literals (not bound) so the planner can
+    # match the partial indexes predicated on status; see build_query.
     expected_sql = (f'SELECT {expected_columns} FROM {requests.REQUEST_TABLE} '
-                    'WHERE status IN (?,?) '
+                    'WHERE status IN (\'PENDING\',\'RUNNING\') '
                     'ORDER BY created_at DESC')
     assert sql == expected_sql
-    assert params == ['PENDING', 'RUNNING']
+    assert params == []
 
     # Test cluster_names filter
     filter_clusters = requests.RequestTaskFilter(
@@ -1339,7 +1341,7 @@ def test_requests_filter():
         sort=True)
     sql, params = filter_combined.build_query()
     expected_sql = (f'SELECT {expected_columns} FROM {requests.REQUEST_TABLE} '
-                    'WHERE status IN (?,?) AND '
+                    'WHERE status IN (\'SUCCEEDED\',\'FAILED\') AND '
                     'name NOT IN (?) AND '
                     'cluster_name IN (?) AND '
                     'user_id = ? AND finished_at < ? '
@@ -1347,8 +1349,7 @@ def test_requests_filter():
     assert sql == expected_sql
     # Parameter order must match placeholder order in the SQL above.
     assert params == [
-        'SUCCEEDED', 'FAILED', 'internal-task', 'prod-cluster', 'admin-user',
-        9876543210.0
+        'internal-task', 'prod-cluster', 'admin-user', 9876543210.0
     ]
 
     # Test mutually exclusive filters raise ValueError
@@ -2357,3 +2358,182 @@ async def test_kill_requests_unscoped_cancels_all(isolated_database):
     cancelled = requests.kill_requests(request_ids=['shutdown-a', 'shutdown-b'],
                                        user_id=None)
     assert set(cancelled) == {'shutdown-a', 'shutdown-b'}
+
+
+# ---------------------------------------------------------------------------
+# get_request_status_batched
+# ---------------------------------------------------------------------------
+
+
+def _make_status_request(request_id: str,
+                         status: RequestStatus,
+                         status_msg: Optional[str] = None) -> requests.Request:
+    return requests.Request(request_id=request_id,
+                            name='test-request',
+                            entrypoint=dummy,
+                            request_body=payloads.RequestBody(),
+                            status=status,
+                            status_msg=status_msg,
+                            created_at=0.0,
+                            user_id='test-user')
+
+
+@pytest.mark.asyncio
+async def test_get_request_status_batched_basic(isolated_database):
+    await requests.create_if_not_exists_async(
+        _make_status_request('batched-pending', RequestStatus.PENDING))
+    await requests.create_if_not_exists_async(
+        _make_status_request('batched-waiting',
+                             RequestStatus.WAITING,
+                             status_msg='Workload is pending on queue q.'))
+    await requests.create_if_not_exists_async(
+        _make_status_request('batched-running', RequestStatus.RUNNING))
+    await requests.create_if_not_exists_async(
+        _make_status_request('batched-cancelled', RequestStatus.CANCELLED))
+
+    # Active requests are served from the snapshot, including status_msg.
+    result = await requests.get_request_status_batched('batched-pending')
+    assert result.status == RequestStatus.PENDING
+    result = await requests.get_request_status_batched('batched-waiting')
+    assert result.status == RequestStatus.WAITING
+    assert result.status_msg == 'Workload is pending on queue q.'
+    result = await requests.get_request_status_batched('batched-running')
+    assert result.status == RequestStatus.RUNNING
+
+    # Finished requests are not in the snapshot: point-lookup fallback.
+    result = await requests.get_request_status_batched('batched-cancelled')
+    assert result.status == RequestStatus.CANCELLED
+
+    # Missing requests resolve to None, like get_request_status_async.
+    assert await requests.get_request_status_batched('batched-missing') is None
+
+
+@pytest.mark.asyncio
+async def test_get_request_status_batched_single_flight(isolated_database):
+    num_requests = 25
+    for i in range(num_requests):
+        await requests.create_if_not_exists_async(
+            _make_status_request(f'batched-sf-{i}', RequestStatus.WAITING))
+
+    real_get_request_tasks_async = requests.get_request_tasks_async
+    snapshot_queries = 0
+
+    async def counting_get_request_tasks_async(req_filter):
+        nonlocal snapshot_queries
+        snapshot_queries += 1
+        # Force all concurrent pollers to overlap with the refresh, so a
+        # non-single-flight implementation would issue one query each.
+        await asyncio.sleep(0.05)
+        return await real_get_request_tasks_async(req_filter)
+
+    point_lookups = 0
+    real_get_request_status_async = requests.get_request_status_async
+
+    async def counting_get_request_status_async(*args, **kwargs):
+        nonlocal point_lookups
+        point_lookups += 1
+        return await real_get_request_status_async(*args, **kwargs)
+
+    with mock.patch.object(requests, 'get_request_tasks_async',
+                           counting_get_request_tasks_async):
+        with mock.patch.object(requests, 'get_request_status_async',
+                               counting_get_request_status_async):
+            results = await asyncio.gather(*[
+                requests.get_request_status_batched(f'batched-sf-{i}')
+                for i in range(num_requests)
+            ])
+
+    assert snapshot_queries == 1
+    # Every poller was answered from the shared snapshot.
+    assert point_lookups == 0
+    assert all(r.status == RequestStatus.WAITING for r in results)
+
+
+@pytest.mark.asyncio
+async def test_get_request_status_batched_staleness_bound(isolated_database):
+    await requests.create_if_not_exists_async(
+        _make_status_request('batched-stale', RequestStatus.RUNNING))
+
+    # Populate the snapshot.
+    result = await requests.get_request_status_batched('batched-stale')
+    assert result.status == RequestStatus.RUNNING
+
+    await requests.set_request_cancelled_async('batched-stale')
+
+    # Within the staleness window the snapshot still answers RUNNING: the
+    # documented (bounded) lag of the batched path.
+    result = await requests.get_request_status_batched('batched-stale')
+    assert result.status == RequestStatus.RUNNING
+
+    # Once the snapshot expires, the request is no longer active, so the
+    # authoritative point lookup reports the terminal status.
+    with mock.patch.object(requests._BatchedStatusPoller, '_MAX_STALENESS', 0):
+        result = await requests.get_request_status_batched('batched-stale')
+    assert result.status == RequestStatus.CANCELLED
+
+
+@pytest.mark.asyncio
+async def test_get_request_status_batched_refresh_failure_not_cached(
+        isolated_database):
+    await requests.create_if_not_exists_async(
+        _make_status_request('batched-fail', RequestStatus.PENDING))
+
+    async def failing_get_request_tasks_async(req_filter):
+        raise RuntimeError('db down')
+
+    with mock.patch.object(requests._BatchedStatusPoller, '_MAX_STALENESS', 0):
+        with mock.patch.object(requests, 'get_request_tasks_async',
+                               failing_get_request_tasks_async):
+            with pytest.raises(RuntimeError, match='db down'):
+                await requests.get_request_status_batched('batched-fail')
+
+        # The failed refresh is not cached as a fresh (empty) snapshot: the
+        # next call refreshes again and succeeds.
+        result = await requests.get_request_status_batched('batched-fail')
+    assert result.status == RequestStatus.PENDING
+
+
+@pytest.mark.asyncio
+async def test_batched_snapshot_query_uses_partial_index(isolated_database):
+    # The snapshot query must be served by the partial index over active
+    # requests (status_name_idx); a full scan of the requests table is what
+    # made per-poller point lookups melt large deployments in the first
+    # place.
+    await requests.create_if_not_exists_async(
+        _make_status_request('batched-plan', RequestStatus.PENDING))
+    sql, params = requests.RequestTaskFilter(
+        status=RequestStatus.active_statuses(),
+        fields=['request_id', 'status', 'status_msg']).build_query()
+    cursor = requests._DB.conn.cursor()
+    plan_rows = cursor.execute('EXPLAIN QUERY PLAN ' + sql, params).fetchall()
+    plan = ' '.join(str(row) for row in plan_rows)
+    assert 'status_name_idx' in plan, plan
+
+
+@pytest.mark.asyncio
+async def test_wait_for_request_to_start_with_batched_polls(isolated_database):
+    from sky.server import stream_utils
+
+    await requests.create_if_not_exists_async(
+        _make_status_request('batched-wait-loop', RequestStatus.PENDING))
+
+    async def flip_to_running():
+        await asyncio.sleep(0.3)
+        with requests.update_request('batched-wait-loop') as request_task:
+            request_task.status = RequestStatus.RUNNING
+
+    flip_task = asyncio.create_task(flip_to_running())
+    with mock.patch.object(requests._BatchedStatusPoller, '_MAX_STALENESS',
+                           0.05):
+        chunks = []
+
+        async def consume():
+            async for chunk in stream_utils.wait_for_request_to_start(
+                    'batched-wait-loop', plain_logs=True):
+                chunks.append(chunk)
+
+        # The generator exits once the (batched) poll observes RUNNING; a
+        # hang here means the batched path failed to surface the flip.
+        await asyncio.wait_for(consume(), timeout=10)
+    await flip_task
+    assert any('Waiting for' in chunk for chunk in chunks)
