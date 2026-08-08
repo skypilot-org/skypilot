@@ -8209,7 +8209,10 @@ def api_info(output_format: str):
                        'server: sky api start')
         else:
             click.echo(
-                f'Could not connect to SkyPilot API server at {url}\n'
+                'Could not connect to SkyPilot API server at '
+                f'{server_common.redact_url_password(url)}\n'
+                # The hint below is meant to be copy-pasted, so it keeps the
+                # real URL -- redacting it would hand the user a broken command.
                 f'{ux_utils.INDENT_SYMBOL}To re-login to the API server: '
                 f'sky api login --relogin -e {url}\n'
                 f'{ux_utils.INDENT_LAST_SYMBOL}To logout the server: '

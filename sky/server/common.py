@@ -524,11 +524,14 @@ def redact_url_password(url: str) -> str:
     """
     try:
         parsed = urllib.parse.urlsplit(url)
+        if not parsed.password:
+            return url
+        # urlsplit does not validate the port; SplitResult.port only raises
+        # when it is read, so keep that read inside the guard too.
+        port = parsed.port
     except ValueError:
         # Not something urlsplit can make sense of; leave it untouched rather
         # than risk mangling it.
-        return url
-    if not parsed.password:
         return url
 
     # urlsplit strips the brackets off an IPv6 literal, so add them back when
@@ -537,8 +540,8 @@ def redact_url_password(url: str) -> str:
     if is_ipv6_host(host):
         host = f'[{host}]'
     netloc = f'{parsed.username or ""}:{_REDACTED_PASSWORD}@{host}'
-    if parsed.port is not None:
-        netloc += f':{parsed.port}'
+    if port is not None:
+        netloc += f':{port}'
     return urllib.parse.urlunsplit(
         (parsed.scheme, netloc, parsed.path, parsed.query, parsed.fragment))
 

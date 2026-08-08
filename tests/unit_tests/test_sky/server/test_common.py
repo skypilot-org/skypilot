@@ -818,3 +818,14 @@ def test_redact_url_password_non_url_is_unchanged():
     # Something that isn't a URL should pass through untouched.
     assert common.redact_url_password('not-a-url') == 'not-a-url'
     assert common.redact_url_password('') == ''
+
+
+def test_redact_url_password_bad_port_is_returned_unchanged():
+    """A malformed port must not raise, even with a password present.
+
+    urlsplit() accepts these, but SplitResult.port only validates when read,
+    so the read has to happen inside the guard. Otherwise `sky check` and
+    `sky api info` would abort instead of printing their summary line.
+    """
+    for url in ('http://user:pw@host:notaport', 'http://user:pw@host:99999'):
+        assert common.redact_url_password(url) == url
