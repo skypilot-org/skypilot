@@ -34,6 +34,9 @@ def test_list_accelerators_skips_unavailable_vast_catalog(monkeypatch):
     with pytest.raises(catalog_common.CatalogFetchError, match='offline'):
         catalog.list_accelerators(clouds='vast')
 
+    with pytest.raises(catalog_common.CatalogFetchError, match='offline'):
+        catalog.list_accelerators(clouds=['vast', 'vast'])
+
 
 def test_rtxpro6000_in_common_gpus():
     # RTXPRO6000 (NVIDIA RTX PRO 6000 Blackwell) must appear in the common GPU
