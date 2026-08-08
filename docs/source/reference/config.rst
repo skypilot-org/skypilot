@@ -139,6 +139,7 @@ Below is the configuration syntax and some example values. See detailed explanat
     :ref:`allowed_clusters <config-yaml-slurm-allowed-clusters>`:
       - mycluster1
       - mycluster2
+    :ref:`submit_as_user <config-yaml-slurm-submit-as-user>`: false
     :ref:`provision_timeout <config-yaml-slurm-provision-timeout>`: 120
     :ref:`pricing <config-yaml-slurm-pricing>`:
       cpu: 0.04        # $/vCPU/hr
@@ -150,6 +151,7 @@ Below is the configuration syntax and some example values. See detailed explanat
     :ref:`cpu_partition <config-yaml-slurm-cpu-partition>`: cpu-batch
     :ref:`cluster_configs <config-yaml-slurm-cluster-configs>`:
       mycluster1:
+        submit_as_user: true
         workdir: /mnt/lustre/$USER
         tmpdir: /local_scratch/sky
         pricing:
@@ -267,6 +269,12 @@ Below is the configuration syntax and some example values. See detailed explanat
   :ref:`daemons <config-yaml-daemons>`:
     skypilot-status-refresh-daemon:
       log_level: DEBUG
+
+  :ref:`dashboard <config-yaml-dashboard>`:
+    :ref:`external_links <config-yaml-dashboard-external-links>`:
+      - label: "Ray Dashboard"
+        url: 'https://ray.internal.example.com/dashboard/${cluster_name}'
+        scope: [cluster]
 
 Fields
 ----------
@@ -714,23 +722,26 @@ Default: ``10``.
 
 Whether to install conda on the remote cluster (optional).
 
-Skypilot clusters come with conda preinstalled for convenience.
-When set to ``false``, SkyPilot will not install conda on the cluster.
+When set to ``true``, SkyPilot installs conda on the cluster (if not already
+present) and makes its ``base`` environment the default Python environment for
+task commands. When ``false`` (the default), SkyPilot does not install conda;
+task commands use the image's own Python. The SkyPilot runtime itself does not
+depend on conda — it runs in a separate ``uv``-managed environment either way.
 
-Default: ``true``.
+Default: ``false``.
 
 Example:
 
 .. code-block:: yaml
 
   provision:
-    install_conda: false
+    install_conda: true
 
 .. note::
 
-  Default SkyPilot images often come with conda preinstalled.
-  To fully avoid installing conda, use a custom Docker image that does not have conda preinstalled
-  along with ``install_conda: false``.
+  The default SkyPilot Kubernetes images no longer bundle conda. If your tasks
+  rely on a conda environment, either set ``install_conda: true`` or use a
+  custom image that ships conda.
 
 .. _config-yaml-aws:
 
@@ -1732,9 +1743,25 @@ Custom labels and annotations to apply to all Kubernetes resources.
 
 Timeout for resource provisioning (optional).
 
-Timeout in seconds for resource provisioning.
+Timeout in seconds to wait for pods to be scheduled (bound to a node) before
+giving up and failing over. Set to ``-1`` to wait indefinitely.
 
-Default: ``10``.
+Time spent waiting for queue admission does not count against this timeout:
+while pods are held by a scheduling gate (e.g. Kueue admission when
+:ref:`kubernetes.kueue.local_queue_name <config-yaml-kubernetes-kueue-local-queue-name>`
+is set), the timeout clock only starts once the pods are admitted. The
+admission wait itself is bounded by
+:ref:`kubernetes.kueue.admission_timeout <config-yaml-kubernetes-kueue-admission-timeout>`
+(default 24 hours).
+
+If unset, the default is chosen based on the launch: ``10`` seconds for a
+single node, scaled up by ``0.2`` seconds per additional node (capped at
+``60`` seconds); ``1200`` seconds (capped at ``2400``) when GCP DWS flex
+start is used; ``180`` seconds (capped at ``240``) when a ``ReadWriteMany``
+PVC must be provisioned; and 24 hours when a Kueue local queue is
+configured.
+
+Default: ``10``–``60`` seconds (see above).
 
 .. _config-yaml-kubernetes-autoscaler:
 
@@ -1878,6 +1905,22 @@ Kueue configuration (optional).
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Name of the `local queue <https://kueue.sigs.k8s.io/docs/concepts/local_queue/>`_ to use for SkyPilot jobs.
+
+.. _config-yaml-kubernetes-kueue-admission-timeout:
+
+``kubernetes.kueue.admission_timeout``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Timeout in seconds for queue admission (optional).
+
+How long a launch may wait for pods held by a scheduling gate (e.g. Kueue
+admission) to be admitted before failing. Time spent waiting for admission
+does not count against
+:ref:`kubernetes.provision_timeout <config-yaml-kubernetes-provision-timeout>`,
+which starts once the pods are admitted. Set to ``-1`` to wait
+indefinitely.
+
+Default: ``86400`` (24 hours).
 
 .. _config-yaml-kubernetes-dws:
 
@@ -2132,6 +2175,43 @@ If you want all available clusters to be allowed, set it to ``all`` like this:
   slurm:
     allowed_clusters: all
 
+.. _config-yaml-slurm-submit-as-user:
+
+``slurm.submit_as_user``
+~~~~~~~~~~~~~~~~~~~~~~~~
+
+Run Slurm operations as the Unix account matching the authenticated SkyPilot
+user (optional).
+
+SkyPilot maps the username to the portion before ``@``. For example,
+``alice@example.com`` maps to ``alice``. The resulting username must start with
+a lowercase letter or ``_`` and contain only lowercase letters, digits, ``_``,
+``.``, or ``-``. The account must already exist on the Slurm cluster.
+
+When enabled, the ``User`` in ``~/.slurm/config`` must be ``root`` or have
+passwordless ``sudo`` permission to run ``su``. SkyPilot connects as that SSH
+user, then runs job lifecycle commands and file transfers as the mapped Unix
+user. A missing account or insufficient privilege causes the operation to fail
+without falling back to the SSH user.
+
+Cluster-wide inventory commands run as the SSH user so monitoring and capacity
+views do not depend on the user requesting them. The SSH user must have
+permission to view the required Slurm node, partition, and job information.
+
+Default: ``false``. This is an API server setting and cannot be overridden by
+client, project, or task configuration.
+
+Example:
+
+.. code-block:: yaml
+
+  slurm:
+    submit_as_user: true
+
+``submit_as_user`` can also be set per cluster using
+:ref:`cluster_configs <config-yaml-slurm-cluster-configs>`. The per-cluster
+value overrides the global value.
+
 .. _config-yaml-slurm-provision-timeout:
 
 ``slurm.provision_timeout``
@@ -2289,6 +2369,10 @@ global values.
 Per-cluster and per-partition configuration for Slurm (optional).
 
 Supported fields:
+
+- ``submit_as_user``:
+  :ref:`Submit as user <config-yaml-slurm-submit-as-user>` override for the
+  cluster.
 
 - ``workdir``: Base directory on a **shared filesystem** for SkyPilot
   cluster files (provision scripts, cluster home directories, sbatch logs, etc).
@@ -2492,6 +2576,20 @@ Should instances be assigned static IPs? (optional).
 Set to ``true`` to use static IPs.
 
 Default: ``false``.
+
+.. _config-yaml-nebius-use-personal-pricing:
+
+``nebius.use_personal_pricing``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Should cost estimates consider different contract prices if available? (optional).
+
+Set to ``false`` to use only publicly available pricing information.
+
+**Note:** This feature only takes into account a different per-unit price of compute instances to give a more accurate estimate.
+Pricing tiers and free quotas are ignored in this estimate, and the final cost could be lower or higher.
+
+Default: ``true``.
 
 .. _config-yaml-nebius-ssh-proxy-command:
 
@@ -2846,3 +2944,85 @@ Valid daemon names are:
       log_level: INFO
     managed-job-status-refresh-daemon:
       log_level: WARNING
+
+.. _config-yaml-metrics:
+
+``metrics``
+~~~~~~~~~~~
+
+GPU metrics federation configuration (optional). Not applicable to client side config.
+
+.. _config-yaml-metrics-prometheus:
+
+``metrics.prometheus``
+~~~~~~~~~~~~~~~~~~~~~~
+
+The Prometheus deployment that ``/gpu-metrics`` federates from in each Kubernetes context (optional).
+
+By default, SkyPilot federates from the Prometheus deployed by the SkyPilot Helm chart: service ``skypilot-prometheus-server`` in namespace ``skypilot``, port ``80``. Set these fields if your Prometheus lives in a different namespace or under a different service name.
+
+``namespace``
+    Namespace the Prometheus service is deployed in. Default: ``skypilot``.
+
+``service``
+    Name of the Prometheus service. Default: ``skypilot-prometheus-server``.
+
+``port``
+    Port of the Prometheus service. Default: ``80``.
+
+.. code-block:: yaml
+
+  metrics:
+    prometheus:
+      namespace: monitoring
+      service: prometheus-server
+      port: 80
+
+.. note::
+
+    When a kubeconfig context points back at the cluster the API server itself runs in, SkyPilot auto-detects this (by comparing the UID of the ``kube-system`` namespace as seen through the context's credentials with the UID seen through the in-cluster credentials) and skips that context during federation: the central Prometheus (the one deployed next to the API server, e.g. by the SkyPilot Helm chart) already scrapes the local cluster's exporters directly, so federating it again would only duplicate the series. The dashboard queries the local cluster's series by their missing ``cluster`` label instead of a context name. If detection fails (e.g. the context's credentials cannot ``get`` the ``kube-system`` namespace), the context is treated as remote and federated over port-forward — the previous behavior for every context.
+
+.. _config-yaml-dashboard:
+
+``dashboard``
+~~~~~~~~~~~~~
+
+Dashboard configuration (optional). Not applicable to client side config.
+
+.. _config-yaml-dashboard-external-links:
+
+``dashboard.external_links``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Admin-configured links rendered in the "External Links" section of the dashboard's cluster and job detail pages (optional). See :ref:`External Links <external-links>` for a full guide.
+
+Each entry takes a ``label`` (the text shown to users) plus exactly one of:
+
+``regex``
+    A Python-style regex matched against URLs printed in streamed log output. The first matching URL is rendered as a clickable link.
+
+``url``
+    A URL template. ``${variable}`` placeholders (``cluster_name``, ``job_id``, ``job_name``, ``user``, ``workspace``) are substituted with URI-encoded values from the page being viewed. The link is only rendered on pages where all of its variables resolve.
+
+and optionally:
+
+``scope``
+    The pages the link may appear on: ``cluster`` (the cluster detail page) and/or ``jobs`` (job detail pages, both managed jobs and cluster jobs). If omitted, the link appears on every page where it can be produced. See :ref:`external-links-scope`.
+
+.. code-block:: yaml
+
+  dashboard:
+    external_links:
+      # Log-scanned link, shown wherever a matching URL appears in logs.
+      - label: "Grafana"
+        regex: 'https://grafana\.internal\.example\.com/d/[a-z0-9]+.*'
+      # Templated link, restricted to the cluster detail page.
+      - label: "Ray Dashboard"
+        url: 'https://ray.internal.example.com/dashboard/${cluster_name}'
+        scope: [cluster]
+      # Templated link, restricted to job detail pages.
+      - label: "Experiment Platform"
+        url: 'https://exp.internal.example.com/jobs/${job_id}'
+        scope: [jobs]
+
+Malformed entries (invalid regexes, unknown template variables, or unknown scope values) are rejected at config load time.

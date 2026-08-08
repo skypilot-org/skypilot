@@ -861,3 +861,93 @@ def test_subnet_names_multi_az_no_error(monkeypatch):
     # Only the subnet in the chosen AZ should remain
     assert len(result_subnets) == 1
     assert result_subnets[0].availability_zone == 'us-east-1a'
+
+
+# --- bootstrap_instances: default security group pre-creation ---------------
+
+
+def _run_bootstrap_sg(security_group_config):
+    """Run bootstrap_instances with mocked AWS calls.
+
+    Returns the mock for _configure_security_group to let tests assert
+    which security groups were configured.
+    """
+    provision_config = provision_common.ProvisionConfig(
+        provider_config={
+            'region': 'us-east-2',
+            'security_group': security_group_config,
+        },
+        authentication_config={},
+        docker_config={},
+        node_config={
+            'ImageId': 'ami-12345',
+            # Skip IAM role configuration.
+            'IamInstanceProfile': {
+                'Name': 'dummy-profile'
+            },
+        },
+        count=1,
+        tags={},
+        resume_stopped_nodes=True,
+        ports_to_open_on_launch=None,
+    )
+    mock_subnet = MagicMock()
+    mock_subnet.subnet_id = 'subnet-12345'
+    with patch.object(config.aws, 'resource'), \
+            patch.object(config, '_get_subnet_and_vpc_id',
+                         return_value=([mock_subnet], 'vpc-12345')), \
+            patch.object(config, '_configure_security_group',
+                         return_value=['sg-12345']) as mock_configure_sg:
+        config.bootstrap_instances('us-east-2', 'test-cluster',
+                                   provision_config)
+    return mock_configure_sg
+
+
+def test_bootstrap_skips_default_sg_for_user_specified_sg():
+    """No default-SG pre-creation when the SG is specified by the user.
+
+    A user-specified security group (aws.security_group_name) is never
+    deleted by SkyPilot at teardown, so the default security group would
+    never be used; attempting to create it is a pointless CreateSecurityGroup
+    call that surfaces a scary (but harmless) warning for users whose IAM
+    policy denies it.
+    """
+    mock_sg = _run_bootstrap_sg({
+        'GroupName': 'user-sg',
+        'ManagedBySkyPilot': False,
+    })
+    assert mock_sg.call_count == 1
+    assert mock_sg.call_args[0][2] == 'user-sg'
+
+
+def test_bootstrap_precreates_default_sg_for_managed_sg():
+    """Default SG is pre-created for SkyPilot-managed per-cluster SGs.
+
+    These SGs (created when ports are opened) are deleted at teardown;
+    the default SG lets terminate_instances re-parent instances so the
+    per-cluster SG can be deleted without blocking on termination.
+    """
+    mock_sg = _run_bootstrap_sg({
+        'GroupName': 'sky-sg-test-cluster',
+        'ManagedBySkyPilot': True,
+    })
+    assert mock_sg.call_count == 2
+    assert mock_sg.call_args_list[0][0][2] == 'sky-sg-test-cluster'
+    assert (mock_sg.call_args_list[1][0][2] ==
+            config.aws_cloud.DEFAULT_SECURITY_GROUP_NAME)
+
+
+def test_bootstrap_precreates_default_sg_when_flag_absent():
+    """Backward compatibility: older cluster YAMLs lack ManagedBySkyPilot."""
+    mock_sg = _run_bootstrap_sg({
+        'GroupName': 'sky-sg-test-cluster',
+    })
+    assert mock_sg.call_count == 2
+
+
+def test_bootstrap_no_precreate_when_using_default_sg():
+    """No second call when the cluster already uses the default SG."""
+    mock_sg = _run_bootstrap_sg({
+        'GroupName': config.aws_cloud.DEFAULT_SECURITY_GROUP_NAME,
+    })
+    assert mock_sg.call_count == 1

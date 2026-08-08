@@ -175,6 +175,164 @@ async def multiproc_reaper_daemon(
         await asyncio.sleep(interval_seconds)
 
 
+# How long a ResilientCollector snapshot is considered fresh. A scrape
+# arriving after this triggers a background refresh (at most one in
+# flight per collector).
+_COLLECTOR_REFRESH_TTL_SECONDS = 30
+# How stale a snapshot may get before the collector is reported as
+# inactive via sky_apiserver_metrics_collector_active. Spans a couple of
+# refresh windows so a single slow-but-successful refresh does not flap
+# the gauge.
+_COLLECTOR_MAX_STALENESS_SECONDS = 3 * _COLLECTOR_REFRESH_TTL_SECONDS
+
+
+class ResilientCollector:
+    """Serves scrapes from a snapshot that is refreshed off the scrape path.
+
+    Wraps a Prometheus collector whose ``collect()`` may block on external
+    state (typically the state database). ``collect()`` here never blocks:
+    it returns the last snapshot immediately and, if the snapshot is older
+    than ``ttl_seconds``, kicks off a background refresh — at most one in
+    flight per collector, so a refresh hung on a saturated DB pool never
+    stacks additional threads or queries on top of an ongoing outage.
+
+    There is deliberately no cancellation or restart of a hung refresh: a
+    thread blocked inside a DB driver cannot be killed, and retrying
+    against an unhealthy database only adds load. Instead the collector
+    keeps serving its stale snapshot and ``CollectorHealthCollector``
+    flips ``sky_apiserver_metrics_collector_active`` to 0 once the last
+    successful refresh is older than ``max_staleness_seconds`` — that is
+    the signal operators alert on and intervene.
+    """
+
+    def __init__(
+        self,
+        wrapped,
+        ttl_seconds: float = _COLLECTOR_REFRESH_TTL_SECONDS,
+        max_staleness_seconds: float = (_COLLECTOR_MAX_STALENESS_SECONDS)):
+        self._wrapped = wrapped
+        # Label value for the health meta-metrics. May be suffixed by
+        # _wrap_collector() to stay unique across instances.
+        self.name = type(wrapped).__name__
+        self.max_staleness_seconds = max_staleness_seconds
+        self._ttl = ttl_seconds
+        self._lock = threading.Lock()
+        self._snapshot: List[prom_core.Metric] = []
+        self._last_attempt_time = 0.0
+        self._last_success_time = 0.0
+        self._refresh_in_flight = False
+
+    def describe(self):
+        """Delegates to the wrapped ``describe()`` (never its ``collect()``).
+
+        Having a ``describe()`` — even one that yields nothing — matters:
+        ``prometheus_client`` falls back to calling ``collect()`` at
+        registration time for collectors without one, which would put a
+        potentially-blocking call back on the registration path.
+        """
+        describe = getattr(self._wrapped, 'describe', None)
+        if describe is not None:
+            yield from describe()
+
+    def collect(self):
+        now = time.time()
+        with self._lock:
+            snapshot = self._snapshot
+            refresh_due = (not self._refresh_in_flight and
+                           now - self._last_attempt_time >= self._ttl)
+            if refresh_due:
+                self._refresh_in_flight = True
+                self._last_attempt_time = now
+        if refresh_due:
+            threading.Thread(target=self._refresh,
+                             name=f'metrics-refresh-{self.name}',
+                             daemon=True).start()
+        yield from snapshot
+
+    def _refresh(self) -> None:
+        try:
+            # Materialize before swapping so a failure mid-iteration
+            # cannot leave a partial snapshot behind.
+            snapshot = list(self._wrapped.collect())
+        except Exception:  # pylint: disable=broad-except
+            logger.exception(
+                'Metrics collector %s failed to refresh; '
+                'serving stale snapshot.', self.name)
+            with self._lock:
+                self._refresh_in_flight = False
+            return
+        with self._lock:
+            self._snapshot = snapshot
+            self._last_success_time = time.time()
+            self._refresh_in_flight = False
+
+    def last_success_time(self) -> float:
+        with self._lock:
+            return self._last_success_time
+
+
+# All ResilientCollector instances, for CollectorHealthCollector. Also
+# gives the health meta-metrics a single emitter: were each wrapper to
+# yield its own copy of the family, the duplicate names would make the
+# exposition invalid (and fail registry duplicate-name checks).
+_resilient_collectors: List[ResilientCollector] = []
+
+_COLLECTOR_ACTIVE_HELP = (
+    '1 if the collector refreshed successfully within its staleness '
+    'bound; 0 means its metrics are being served from a stale snapshot '
+    '(e.g. the refresh is hung on a DB outage) and needs operator '
+    'attention. Also 0 between process start and the first successful '
+    'refresh.')
+_COLLECTOR_LAST_SUCCESS_HELP = (
+    'Unix timestamp of the collector\'s last successful refresh; 0 if it '
+    'has not succeeded since process start.')
+
+
+class CollectorHealthCollector:
+    """Health meta-metrics for every ResilientCollector in this process."""
+
+    def describe(self):
+        yield prom_core.GaugeMetricFamily(
+            'sky_apiserver_metrics_collector_active',
+            _COLLECTOR_ACTIVE_HELP,
+            labels=['collector'])
+        yield prom_core.GaugeMetricFamily(
+            'sky_apiserver_metrics_collector_last_success_timestamp_seconds',
+            _COLLECTOR_LAST_SUCCESS_HELP,
+            labels=['collector'])
+
+    def collect(self):
+        now = time.time()
+        active_family = prom_core.GaugeMetricFamily(
+            'sky_apiserver_metrics_collector_active',
+            _COLLECTOR_ACTIVE_HELP,
+            labels=['collector'])
+        last_success_family = prom_core.GaugeMetricFamily(
+            'sky_apiserver_metrics_collector_last_success_timestamp_seconds',
+            _COLLECTOR_LAST_SUCCESS_HELP,
+            labels=['collector'])
+        for collector in list(_resilient_collectors):
+            last_success = collector.last_success_time()
+            active = now - last_success <= collector.max_staleness_seconds
+            active_family.add_metric([collector.name], 1.0 if active else 0.0)
+            last_success_family.add_metric([collector.name], last_success)
+        yield active_family
+        yield last_success_family
+
+
+def _wrap_collector(collector) -> ResilientCollector:
+    """Wraps a collector in ResilientCollector with a unique health name."""
+    wrapped = ResilientCollector(collector)
+    existing = {c.name for c in _resilient_collectors}
+    if wrapped.name in existing:
+        suffix = 2
+        while f'{wrapped.name}-{suffix}' in existing:
+            suffix += 1
+        wrapped.name = f'{wrapped.name}-{suffix}'
+    _resilient_collectors.append(wrapped)
+    return wrapped
+
+
 class BurnRateCollector:
     """Collector for SkyPilot cluster burn rate metrics.
     This collector calculates the total hourly burn rate (in USD) of all
@@ -235,22 +393,36 @@ class BurnRateCollector:
         yield metric
 
 
-_BURN_RATE_COLLECTOR = BurnRateCollector()
+_BURN_RATE_COLLECTOR = _wrap_collector(BurnRateCollector())
 
 try:
     prom.REGISTRY.register(_BURN_RATE_COLLECTOR)  # for non-multiprocess
 except ValueError:
     pass
 
-# Collectors registered by plugins at runtime.
+_COLLECTOR_HEALTH_COLLECTOR = CollectorHealthCollector()
+
+try:
+    prom.REGISTRY.register(_COLLECTOR_HEALTH_COLLECTOR)
+except ValueError:
+    pass
+
+# Collectors registered by plugins at runtime (ResilientCollector-wrapped).
 _plugin_collectors: list = []
 
 
 def register_plugin_collector(collector):
-    """Register a custom Prometheus collector from a plugin."""
-    _plugin_collectors.append(collector)
+    """Register a custom Prometheus collector from a plugin.
+
+    The collector is wrapped in ResilientCollector, so a hung or failing
+    data source degrades its metrics to a stale snapshot (flagged by
+    sky_apiserver_metrics_collector_active) instead of hanging the whole
+    /metrics scrape.
+    """
+    wrapped = _wrap_collector(collector)
+    _plugin_collectors.append(wrapped)
     try:
-        prom.REGISTRY.register(collector)
+        prom.REGISTRY.register(wrapped)
     except ValueError:
         pass
 
@@ -271,6 +443,29 @@ def _label_or_default(value: Optional[str], default: str) -> str:
     return value if value else default
 
 
+# Hard upper bound on rows emitted by
+# sky_managed_job_emergency_recovery_attempts. Emergencies are rare by
+# construction (a bounded per-job retry budget), but a controller bug
+# hitting many jobs at once could otherwise produce one series per job;
+# capping defends Prometheus's series budget. The query orders by
+# attempt count (highest first, deterministic tiebreak) so the jobs
+# most likely to page survive the cap.
+_EMERGENCY_EPISODES_MAX_SERIES = 100
+
+_RECOVERY_EVENTS_HELP = (
+    'Count of managed-job RECOVERING events currently retained in '
+    'job_events, by recovery source and workspace. NOT monotone: '
+    'job_events has a retention window, so aged-out rows decrease the '
+    'value — use clamp_min(delta(...), 0) for rates, never increase(). '
+    'Events written before recovery_source existed (NULL) are excluded.')
+
+_EMERGENCY_ATTEMPTS_HELP = (
+    'Emergency-recovery attempts used in the managed job\'s current '
+    'episode. The series exists only while the episode is active (last '
+    'attempt within the controller\'s reset window) and the job is '
+    'non-terminal; capped at 100 series, highest attempt counts kept.')
+
+
 class ManagedJobsCollector:
     """Collector for managed job state metrics.
 
@@ -287,6 +482,19 @@ class ManagedJobsCollector:
     window. A proper Counter incremented at the state-transition site
     would be more semantically correct than a gauge here, but is
     deferred.
+
+    Also emits two recovery-observability gauges:
+
+    * ``sky_managed_job_recovery_events_count{recovery_source,
+      workspace}`` — RECOVERING ``job_events`` rows currently retained,
+      by source (FAILURE / EMERGENCY / RESTART). Not monotone (event
+      retention prunes old rows), so rate queries must use
+      ``clamp_min(delta(...), 0)``, never ``increase(...)``.
+    * ``sky_managed_job_emergency_recovery_attempts{job_id, job_name,
+      workspace}`` — per-job attempts used in the job's current
+      emergency-recovery episode, emitted only while the episode is
+      active and the job is non-terminal, so the series (and any alert
+      on it) self-clears. Capped at ``_EMERGENCY_EPISODES_MAX_SERIES``.
     """
 
     def __init__(self):
@@ -295,18 +503,46 @@ class ManagedJobsCollector:
         self._cache_ttl = _COLLECTOR_CACHE_TTL_SECONDS
         # List of (workspace, user_hash, cloud, status, count) tuples.
         self._cached_rows: list = []
+        # List of (recovery_source, workspace, count) tuples.
+        self._cached_recovery_rows: list = []
+        # List of (spot_job_id, job_name, workspace, attempts) tuples.
+        self._cached_episode_rows: list = []
 
     def _refresh(self):
         # pylint: disable=import-outside-toplevel
+        from sky.jobs import constants as managed_job_constants
         from sky.jobs import state as managed_job_state
-        self._cached_rows = (
-            managed_job_state.get_status_counts_by_workspace_user_cloud())
+
+        # Query into locals first, then assign: a failure mid-refresh
+        # (collect() logs it and serves the cache) must not leave a
+        # mixed-age cache where some metrics updated and others didn't.
+        rows = (managed_job_state.get_status_counts_by_workspace_user_cloud())
+        recovery_rows = (
+            managed_job_state.get_recovery_event_counts_by_source_workspace())
+        episode_rows = (
+            managed_job_state.get_active_emergency_recovery_episodes(
+                now=time.time(),
+                window_seconds=managed_job_constants.
+                EMERGENCY_RECOVERY_RESET_WINDOW_SECONDS,
+                limit=_EMERGENCY_EPISODES_MAX_SERIES,
+            ))
+        self._cached_rows = rows
+        self._cached_recovery_rows = recovery_rows
+        self._cached_episode_rows = episode_rows
 
     def describe(self):
         yield prom_core.GaugeMetricFamily(
             'sky_managed_jobs_count', ('Current count of managed job tasks by '
                                        'workspace, user, status, and cloud.'),
             labels=['workspace', 'user', 'status', 'cloud'])
+        yield prom_core.GaugeMetricFamily(
+            'sky_managed_job_recovery_events_count',
+            _RECOVERY_EVENTS_HELP,
+            labels=['recovery_source', 'workspace'])
+        yield prom_core.GaugeMetricFamily(
+            'sky_managed_job_emergency_recovery_attempts',
+            _EMERGENCY_ATTEMPTS_HELP,
+            labels=['job_id', 'job_name', 'workspace'])
 
     def collect(self):
         now = time.time()
@@ -318,6 +554,8 @@ class ManagedJobsCollector:
                     logger.exception('Failed to collect managed jobs metrics')
                 self._last_scrape_time = now
             rows = self._cached_rows
+            recovery_rows = self._cached_recovery_rows
+            episode_rows = self._cached_episode_rows
 
         counts: dict = {}
         for workspace, user_hash, cloud, status, count in rows:
@@ -334,6 +572,26 @@ class ManagedJobsCollector:
         for (workspace, user, status, cloud), count in counts.items():
             metric.add_metric([workspace, user, status, cloud], count)
         yield metric
+
+        recovery_metric = prom_core.GaugeMetricFamily(
+            'sky_managed_job_recovery_events_count',
+            _RECOVERY_EVENTS_HELP,
+            labels=['recovery_source', 'workspace'])
+        for source, workspace, count in recovery_rows:
+            ws_label = _label_or_default(workspace, _NULL_WORKSPACE_LABEL)
+            recovery_metric.add_metric([source, ws_label], count)
+        yield recovery_metric
+
+        episode_metric = prom_core.GaugeMetricFamily(
+            'sky_managed_job_emergency_recovery_attempts',
+            _EMERGENCY_ATTEMPTS_HELP,
+            labels=['job_id', 'job_name', 'workspace'])
+        for job_id, job_name, workspace, attempts in episode_rows:
+            ws_label = _label_or_default(workspace, _NULL_WORKSPACE_LABEL)
+            name_label = _label_or_default(job_name, _NULL_LABEL)
+            episode_metric.add_metric([str(job_id), name_label, ws_label],
+                                      attempts)
+        yield episode_metric
 
 
 # Transient statuses we report time-in-state for. UP / STOPPED are steady
@@ -588,14 +846,14 @@ class WorkspaceUsageCollector:
         yield m
 
 
-_WORKSPACE_USAGE_COLLECTOR = WorkspaceUsageCollector()
+_WORKSPACE_USAGE_COLLECTOR = _wrap_collector(WorkspaceUsageCollector())
 
 try:
     prom.REGISTRY.register(_WORKSPACE_USAGE_COLLECTOR)
 except ValueError:
     pass
 
-_MANAGED_JOBS_COLLECTOR: Optional[ManagedJobsCollector] = None
+_MANAGED_JOBS_COLLECTOR: Optional[ResilientCollector] = None
 
 
 def maybe_register_managed_jobs_collector():
@@ -606,11 +864,13 @@ def maybe_register_managed_jobs_collector():
     cluster and is not directly accessible.
     """
     global _MANAGED_JOBS_COLLECTOR
+    if _MANAGED_JOBS_COLLECTOR is not None:
+        return
     # pylint: disable=import-outside-toplevel
     from sky.jobs import utils as managed_job_utils
     if not managed_job_utils.is_consolidation_mode():
         return
-    _MANAGED_JOBS_COLLECTOR = ManagedJobsCollector()
+    _MANAGED_JOBS_COLLECTOR = _wrap_collector(ManagedJobsCollector())
     try:
         prom.REGISTRY.register(_MANAGED_JOBS_COLLECTOR)
     except ValueError:
@@ -631,6 +891,7 @@ def metrics() -> fastapi.Response:
         multiprocess.MultiProcessCollector(registry)
         registry.register(_BURN_RATE_COLLECTOR)
         registry.register(_WORKSPACE_USAGE_COLLECTOR)
+        registry.register(_COLLECTOR_HEALTH_COLLECTOR)
         if _MANAGED_JOBS_COLLECTOR is not None:
             registry.register(_MANAGED_JOBS_COLLECTOR)
         for c in _plugin_collectors:
@@ -775,9 +1036,15 @@ async def gpu_metrics() -> fastapi.Response:
     contexts = core.get_all_contexts()
     all_metrics: List[str] = []
 
-    remote_contexts = [
-        context for context in contexts if context != 'in-cluster'
-    ]
+    # Skip contexts that point at the API server's own cluster: the central
+    # Prometheus scrapes the local cluster's exporters directly, so
+    # federating them again would only duplicate the raw series under a
+    # stamped copy. The dashboard matches the local cluster with cluster=""
+    # (see /dashboard_config local_contexts). Non-blocking: verdicts come
+    # from the detection cache and any probing happens in a background
+    # worker, so a slow or broken context cannot stall this scrape (or
+    # the co-located /metrics scrape) no matter how it fails.
+    _, remote_contexts = metrics_utils.split_local_remote_contexts(contexts)
     # One stats record per context, filled in by get_metrics_for_context even
     # if the task is later cancelled by the wait_for timeout — so the timeout
     # log can report how far the attempt got (port-forward vs. federate).
@@ -821,9 +1088,8 @@ async def endpoint_metrics() -> fastapi.Response:
     contexts = core.get_all_contexts()
     all_metrics: List[str] = []
 
-    remote_contexts = [
-        context for context in contexts if context != 'in-cluster'
-    ]
+    # Same local-context handling as /gpu-metrics above (non-blocking).
+    _, remote_contexts = metrics_utils.split_local_remote_contexts(contexts)
     stats_list = [metrics_utils.FederationStats() for _ in remote_contexts]
     tasks = [
         asyncio.create_task(
@@ -912,6 +1178,17 @@ class PrometheusMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
                 metrics_utils.SKY_APISERVER_REQUEST_DURATION_SECONDS.labels(
                     path=path, method=method,
                     status=status_code_group).observe(duration)
+                # /api/get long-polls until the underlying request is terminal,
+                # so its duration is the client-observed latency of that request
+                # type. The handler stamps request.state.request_name once it
+                # knows which request is being fetched; record it by name so
+                # bounded types can be alerted on separately from unbounded ones
+                # (launch/exec/...).
+                request_name = getattr(request.state, 'request_name', None)
+                if request_name is not None:
+                    metrics_utils.SKY_APISERVER_REQUEST_GET_DURATION_SECONDS \
+                        .labels(name=request_name,
+                                status=status_code_group).observe(duration)
 
         return response
 

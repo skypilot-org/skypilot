@@ -18,6 +18,7 @@ import filelock
 import uvicorn
 from uvicorn.supervisors import multiprocess
 
+from sky import exceptions
 from sky import sky_logging
 from sky.server import daemons
 from sky.server import metrics as metrics_lib
@@ -200,8 +201,18 @@ class Server(uvicorn.Server):
             if time.time() - start_time > _WAIT_REQUESTS_TIMEOUT_SECONDS:
                 logger.warning('Timeout waiting for on-going requests to '
                                'finish, cancelling all on-going requests.')
-                for request_id, _ in requests:
-                    self.interrupt_request_for_retry(request_id)
+                for request_id, name in requests:
+                    # should_retry means "the client can meaningfully retry
+                    # by re-submitting" — true only for the logs requests
+                    # (their SDK wrappers re-POST a fresh request) and
+                    # internal daemons (re-registered on boot). For anything
+                    # else, e.g. sky.launch, the client's retry unit only
+                    # re-attaches the same dead request id, so signal a
+                    # plain terminal cancellation instead.
+                    self.interrupt_request_for_retry(
+                        request_id,
+                        should_retry=(name in _RETRIABLE_REQUEST_NAMES or
+                                      request_id in internal_request_ids))
                 break
             interrupted = 0
             for request_id, name in requests:
@@ -217,8 +228,19 @@ class Server(uvicorn.Server):
             if interrupted < len(requests):
                 time.sleep(_WAIT_REQUESTS_INTERVAL_SECONDS)
 
-    def interrupt_request_for_retry(self, request_id: str) -> None:
-        """Interrupt a request for retry."""
+    def interrupt_request_for_retry(self,
+                                    request_id: str,
+                                    should_retry: bool = True) -> None:
+        """Interrupt a request, optionally signaling clients to re-submit.
+
+        Args:
+            request_id: The request to interrupt.
+            should_retry: Whether clients can recover by re-submitting the
+                original request. True for the logs requests (SDK wrappers
+                re-POST a fresh request on interruption) and internal
+                daemons; False for requests whose client-side retry would
+                only re-attach the same interrupted request id.
+        """
         with requests_lib.update_request(request_id) as req:
             if req is None:
                 return
@@ -228,9 +250,25 @@ class Server(uvicorn.Server):
                 except ProcessLookupError:
                     logger.debug(f'Process {req.pid} already finished.')
             req.status = requests_lib.RequestStatus.CANCELLED
-            req.should_retry = True
+            req.should_retry = should_retry
+            # Stamp finished_at: retention cleanup selects finished
+            # requests with finished_at < cutoff, so a NULL finished_at
+            # would keep the cancelled row around forever.
+            req.finished_at = time.time()
+            # Also record a terminal error so that clients polling
+            # /api/get get a definitive answer instead of a retryable
+            # 503 forever: the server does not re-execute interrupted
+            # requests after a restart, so the original request must be
+            # re-submitted by the client.
+            req.set_error(
+                exceptions.RequestInterruptedError(
+                    f'Request {request_id!r} was interrupted by an API '
+                    'server restart and will not be resumed. Please '
+                    're-submit the original request.'))
+        outcome = ('instructed to re-submit it'
+                   if should_retry else 'given a terminal error')
         logger.info(
-            f'Request {request_id} interrupted and will be retried by client.')
+            f'Request {request_id} interrupted; the client will be {outcome}.')
 
     def run(self, *args, **kwargs):
         """Run the server process."""

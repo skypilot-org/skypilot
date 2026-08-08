@@ -46,6 +46,7 @@ from sky.utils import status_lib
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
 from sky.utils.kubernetes import kubernetes_deploy_utils
+from sky.workspaces import constants as workspace_constants
 from sky.workspaces import core as workspaces_core
 
 if typing.TYPE_CHECKING:
@@ -1669,8 +1670,16 @@ def enabled_clouds(workspace: Optional[str] = None,
     if workspace is None:
         workspace = skypilot_config.get_active_workspace()
     else:
+        # A read: this only reports which clouds/contexts the workspace has
+        # enabled, so read access is the right level. Requiring write would
+        # deny a workspace the caller can legitimately see (read-only
+        # visibility for non-members), which in turn fails the whole
+        # `enabled_clouds_batch` fan-out below and empties the dashboard's
+        # "Enabled infra" column and Infra page.
         workspaces_core.check_workspace_permission(
-            common_utils.get_current_user(), workspace)
+            common_utils.get_current_user(),
+            workspace,
+            action=workspace_constants.WORKSPACE_ACTION_READ)
     cached_clouds = global_user_state.get_cached_enabled_clouds(
         sky_cloud.CloudCapability.COMPUTE, workspace=workspace)
     with skypilot_config.local_active_workspace_ctx(workspace):
@@ -1942,9 +1951,11 @@ def realtime_slurm_gpu_availability(
 @usage_lib.entrypoint
 def local_up(gpus: bool,
              name: Optional[str] = None,
-             port_start: Optional[int] = None) -> None:
+             port_start: Optional[int] = None,
+             num_nodes: int = 1) -> None:
     """Creates a local cluster."""
-    kubernetes_deploy_utils.deploy_local_cluster(name, port_start, gpus)
+    kubernetes_deploy_utils.deploy_local_cluster(name, port_start, gpus,
+                                                 num_nodes)
 
 
 def local_down(name: Optional[str] = None) -> None:
@@ -1970,7 +1981,8 @@ def create_debug_dump(request_ids: Optional[List[str]] = None,
                       cluster_names: Optional[List[str]] = None,
                       managed_job_ids: Optional[List[int]] = None,
                       recent_minutes: Optional[float] = None,
-                      client_info: Optional[Dict[str, Any]] = None) -> str:
+                      client_info: Optional[Dict[str, Any]] = None,
+                      overall_deadline: Optional[float] = None) -> str:
     """Create a debug dump for troubleshooting.
 
     Args:
@@ -1980,6 +1992,12 @@ def create_debug_dump(request_ids: Optional[List[str]] = None,
         recent_minutes: If specified, include all resources active within
             this many minutes.
         client_info: Optional client-side info to include in the dump.
+        overall_deadline: Optional absolute wall-clock (time.time()) instant to
+            stop the whole collection by; when reached, collection stops early
+            and a partial dump is returned. Passing an absolute deadline lets an
+            out-of-process caller charge already-elapsed time (e.g. executor
+            queue wait) against the budget rather than ignoring it. None means
+            no deadline.
 
     Returns:
         Path to the created zip file on the server.
@@ -1997,7 +2015,8 @@ def create_debug_dump(request_ids: Optional[List[str]] = None,
         cluster_names=cluster_names,
         managed_job_ids=managed_job_ids,
         recent_minutes=recent_minutes,
-        client_info=client_info)
+        client_info=client_info,
+        overall_deadline=overall_deadline)
     logger.info('Debug dump created')
     logger.debug(f'Debug dump path on API server: {debug_dump_path}')
     return str(debug_dump_path)

@@ -1,10 +1,44 @@
+# pylint: disable=protected-access
+import logging
+import os
 from unittest.mock import MagicMock
 from unittest.mock import patch
 
 from sky import clouds
 from sky import resources as resources_lib
+from sky.adaptors import nebius as nebius_adaptor
 from sky.clouds import nebius
 from sky.utils import resources_utils
+
+
+class TestNebiusAdaptorSDK:
+    """Tests for SkyPilot's Nebius SDK configuration."""
+
+    def test_user_agent_prefix_is_passed_for_all_credentials(self):
+        mock_nebius = MagicMock()
+        with patch.object(nebius_adaptor, 'nebius', mock_nebius), \
+             patch.object(nebius_adaptor,
+                          'api_domain',
+                          return_value='api.nebius.test'), \
+             patch('sky.__version__', '1.2.3'):
+            nebius_adaptor._sdk.cache_clear()
+            try:
+                nebius_adaptor._sdk('iam-token', None)
+                nebius_adaptor._sdk(None, '~/credentials.json')
+            finally:
+                nebius_adaptor._sdk.cache_clear()
+
+        calls = mock_nebius.sdk.SDK.call_args_list
+        assert calls[0].kwargs == {
+            'credentials': 'iam-token',
+            'domain': 'api.nebius.test',
+            'user_agent_prefix': 'skypilot/1.2.3',
+        }
+        assert calls[1].kwargs == {
+            'credentials_file_name': os.path.expanduser('~/credentials.json'),
+            'domain': 'api.nebius.test',
+            'user_agent_prefix': 'skypilot/1.2.3',
+        }
 
 
 class TestNebiusNetworkTier:
@@ -126,3 +160,61 @@ class TestNebiusNetworkTier:
         # Should NOT include InfiniBand options since network_tier != best
         assert '--device=/dev/infiniband' not in docker_options
         assert '--cap-add=IPC_LOCK' not in docker_options
+
+
+class TestNebiusAdaptorLogging:
+    """Nebius SDK log noise must not reach user-facing CLI output."""
+
+    def test_loop_exception_handler_logs_at_debug(self):
+        """Callback exceptions in the SDK loop are logged at debug only."""
+        records = []
+
+        class _CaptureHandler(logging.Handler):
+
+            def emit(self, record: logging.LogRecord) -> None:
+                records.append(record)
+
+        handler = _CaptureHandler(level=logging.DEBUG)
+        previous_level = nebius_adaptor.logger.level
+        nebius_adaptor.logger.addHandler(handler)
+        nebius_adaptor.logger.setLevel(logging.DEBUG)
+        try:
+            context = {
+                'message': ('Exception in callback '
+                            'PollerCompletionQueue._handle_events'),
+                'exception': RuntimeError('unresolved sku'),
+            }
+            nebius_adaptor._loop_exception_handler(MagicMock(), context)
+        finally:
+            nebius_adaptor.logger.removeHandler(handler)
+            nebius_adaptor.logger.setLevel(previous_level)
+
+        assert records, 'Expected a debug record for diagnostics'
+        assert all(r.levelno == logging.DEBUG for r in records)
+
+    def test_dedicated_loop_has_exception_handler(self):
+        with patch.object(nebius_adaptor, '_loop', None):
+            loop = nebius_adaptor._get_event_loop()
+            try:
+                assert (loop.get_exception_handler() is
+                        nebius_adaptor._loop_exception_handler)
+            finally:
+                loop.call_soon_threadsafe(loop.stop)
+
+    def test_deprecation_filter_drops_only_nebius_records(self):
+        log_filter = nebius_adaptor._NebiusDeprecationFilter()
+
+        def _record(pathname: str) -> logging.LogRecord:
+            return logging.LogRecord(name='deprecation',
+                                     level=logging.WARNING,
+                                     pathname=pathname,
+                                     lineno=1,
+                                     msg='Field x is deprecated',
+                                     args=None,
+                                     exc_info=None)
+
+        nebius_path = os.path.join('site-packages', 'nebius', 'aio',
+                                   'client.py')
+        other_path = os.path.join('site-packages', 'otherlib', 'client.py')
+        assert not log_filter.filter(_record(nebius_path))
+        assert log_filter.filter(_record(other_path))

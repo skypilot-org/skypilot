@@ -81,7 +81,9 @@ export async function getEnabledCloudsList() {
 
 export async function getCloudInfrastructure(forceRefresh = false) {
   const { getClusters } = await import('@/data/connectors/clusters');
-  const { getManagedJobs } = await import('@/data/connectors/jobs');
+  const { getManagedJobs, MANAGED_JOBS_SUMMARY_ARGS } = await import(
+    '@/data/connectors/jobs'
+  );
   const { getWorkspaces, getEnabledCloudsBatch } = await import(
     '@/data/connectors/workspaces'
   );
@@ -89,9 +91,9 @@ export async function getCloudInfrastructure(forceRefresh = false) {
   try {
     // Fetch jobs, clusters, and workspaces in parallel for better performance
     const [jobsResult, clustersResult, workspacesData] = await Promise.all([
-      // Use shared cache key (no field filtering) - preloader uses same args
+      // Shared cache key — must match the preloader's args exactly
       dashboardCache
-        .get(getManagedJobs, [{ allUsers: true, skipFinished: true }])
+        .get(getManagedJobs, [MANAGED_JOBS_SUMMARY_ARGS])
         .catch((error) => {
           console.error('Error fetching managed jobs:', error);
           return { jobs: [] };
@@ -1168,6 +1170,35 @@ async function getSlurmPerNodeGPUs() {
   }
 }
 
+// The clusters in ~/.slurm/config, which the server answers without
+// contacting any login node. Independent of the GPU and node queries, so it is
+// fetched alongside them rather than before them: a cluster that is
+// unreachable still comes back here after those two report nothing for it.
+async function getSlurmClusterNames() {
+  try {
+    const response = await apiClient.post(`/slurm_cluster_names`, {});
+    if (!response.ok) {
+      const msg = `Failed to get slurm cluster names with status ${response.status}`;
+      throw new Error(msg);
+    }
+    const id = response.headers.get('X-Skypilot-Request-ID');
+    if (!id) {
+      const msg = 'No request ID received from server for slurm cluster names';
+      throw new Error(msg);
+    }
+    const fetchedData = await apiClient.get(`/api/get?request_id=${id}`);
+    if (!fetchedData.ok) {
+      const msg = `Failed to get slurm cluster names result with status ${fetchedData.status}`;
+      throw new Error(msg);
+    }
+    const data = await fetchedData.json();
+    return data.return_value ? JSON.parse(data.return_value) : [];
+  } catch (error) {
+    console.error('Error fetching Slurm cluster names:', error);
+    return [];
+  }
+}
+
 // Export Slurm infrastructure fetching for parallel loading
 export async function getSlurmInfrastructure() {
   return await getSlurmServiceGPUs();
@@ -1175,8 +1206,10 @@ export async function getSlurmInfrastructure() {
 
 async function getSlurmServiceGPUs() {
   try {
-    // Fetch cluster GPUs and node GPUs in parallel for better performance
-    const [clusterGPUsRaw, nodeGPUsRaw] = await Promise.all([
+    // Fetch the configured cluster names, cluster GPUs and node GPUs in
+    // parallel — none of the three depends on another.
+    const [clusterNames, clusterGPUsRaw, nodeGPUsRaw] = await Promise.all([
+      getSlurmClusterNames(),
       getSlurmClusterGPUs(),
       getSlurmPerNodeGPUs(),
     ]);
@@ -1238,6 +1271,7 @@ async function getSlurmServiceGPUs() {
     }
 
     return {
+      slurmClusterNames: clusterNames,
       allSlurmGPUs: Object.values(allSlurmGPUs).sort((a, b) =>
         a.gpu_name.localeCompare(b.gpu_name)
       ),
@@ -1256,6 +1290,7 @@ async function getSlurmServiceGPUs() {
   } catch (error) {
     console.error('Error fetching Slurm GPUs:', error);
     return {
+      slurmClusterNames: [],
       allSlurmGPUs: [],
       perClusterSlurmGPUs: [],
       perNodeSlurmGPUs: [],

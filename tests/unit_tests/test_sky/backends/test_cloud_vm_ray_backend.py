@@ -8,12 +8,32 @@ from unittest.mock import patch
 
 import pytest
 
+from sky import clouds
+from sky import exceptions
 from sky import resources
 from sky import task
+from sky.backends import backend_utils
 from sky.backends import cloud_vm_ray_backend
 from sky.backends.cloud_vm_ray_backend import CloudVmRayResourceHandle
 from sky.backends.cloud_vm_ray_backend import SSHTunnelInfo
+from sky.utils import locks
 from sky.utils import status_lib
+
+
+def test_command_length_accounts_for_slurm_user_quoting():
+    command = "a'b" * 5000
+    assert not backend_utils.is_command_length_over_limit(command)
+    assert backend_utils.is_command_length_over_limit(command, quote_levels=4)
+
+    handle = MagicMock()
+    handle.launched_resources.cloud = clouds.Slurm()
+    handle.cached_cluster_info.provider_config = {'slurm_user': 'alice'}
+    assert cloud_vm_ray_backend.CloudVmRayBackend._inline_command_quote_levels(
+        handle) == 4
+
+    handle.cached_cluster_info.provider_config = {}
+    assert cloud_vm_ray_backend.CloudVmRayBackend._inline_command_quote_levels(
+        handle) == 3
 
 
 class TestCloudVmRayBackendTaskRedaction:
@@ -633,3 +653,88 @@ class TestNewHandleRuntimeMetadata:
         metadata = handle.provision_runtime_metadata
         assert (metadata.has_ray, metadata.has_skylet, metadata.has_job_queue,
                 metadata.ssh_available) == (False, False, False, False)
+
+
+class TestProvisionClusterLockParking:
+    """_provision on lock contention: park as WAITING only in request ctx."""
+
+    def _run_provision(self,
+                       monkeypatch,
+                       in_request_context,
+                       locked_provision_mock,
+                       is_launched_by_jobs_controller=False):
+        backend = cloud_vm_ray_backend.CloudVmRayBackend()
+        backend._is_launched_by_jobs_controller = (
+            is_launched_by_jobs_controller)
+        monkeypatch.setattr('sky.backends.backend_utils.check_rsync_installed',
+                            lambda: None)
+        monkeypatch.setattr('sky.backends.backend_utils.check_owner_identity',
+                            lambda cluster_name: None)
+        monkeypatch.setattr('sky.utils.common_utils.is_in_request_context',
+                            lambda: in_request_context)
+        monkeypatch.setattr('sky.utils.rich_utils.force_update_status',
+                            lambda msg: None)
+        monkeypatch.setattr(backend, '_locked_provision', locked_provision_mock)
+        return backend._provision(MagicMock(),
+                                  None,
+                                  dryrun=False,
+                                  stream_logs=False,
+                                  cluster_name='test-cluster')
+
+    def test_parks_on_lock_contention_in_request_context(self, monkeypatch):
+        locked_provision = MagicMock(side_effect=locks.LockTimeout('locked'))
+        with pytest.raises(exceptions.ExecutionPausedError) as exc_info:
+            self._run_provision(monkeypatch,
+                                in_request_context=True,
+                                locked_provision_mock=locked_provision)
+        assert 'test-cluster' in str(exc_info.value)
+        assert (exc_info.value.retry_wait_seconds ==
+                cloud_vm_ray_backend._CLUSTER_LOCK_RETRY_GAP_SECONDS)
+        condition = exc_info.value.continue_condition
+        assert isinstance(condition, locks.LockAcquirableCondition)
+        assert condition._lock_id == 'test-cluster_status'
+        assert locked_provision.call_count == 1
+
+    def test_blocks_on_lock_contention_outside_request_context(
+            self, monkeypatch):
+        sentinel = (MagicMock(), False)
+        locked_provision = MagicMock(
+            side_effect=[locks.LockTimeout('locked'), sentinel])
+        result = self._run_provision(monkeypatch,
+                                     in_request_context=False,
+                                     locked_provision_mock=locked_provision)
+        assert result is sentinel
+        assert locked_provision.call_count == 2
+
+    def test_parks_for_jobs_controller_launch_in_request_context(
+            self, monkeypatch):
+        # A jobs-controller launch running as a scheduler-managed request
+        # (consolidation mode submits launches via the SDK like any other
+        # request) must park like any other request: blocking instead would
+        # pin one executor worker per lock contender (e.g. duplicate launch
+        # requests for the same cluster after controller retries), starving
+        # the worker pool at scale.
+        locked_provision = MagicMock(side_effect=locks.LockTimeout('locked'))
+        with pytest.raises(exceptions.ExecutionPausedError) as exc_info:
+            self._run_provision(monkeypatch,
+                                in_request_context=True,
+                                locked_provision_mock=locked_provision,
+                                is_launched_by_jobs_controller=True)
+        condition = exc_info.value.continue_condition
+        assert isinstance(condition, locks.LockAcquirableCondition)
+        assert locked_provision.call_count == 1
+
+    def test_blocks_for_jobs_controller_launch_outside_request_context(
+            self, monkeypatch):
+        # Without a request context there is no scheduler to park/resume the
+        # request, so the blocking behavior is kept regardless of the
+        # jobs-controller flag.
+        sentinel = (MagicMock(), False)
+        locked_provision = MagicMock(
+            side_effect=[locks.LockTimeout('locked'), sentinel])
+        result = self._run_provision(monkeypatch,
+                                     in_request_context=False,
+                                     locked_provision_mock=locked_provision,
+                                     is_launched_by_jobs_controller=True)
+        assert result is sentinel
+        assert locked_provision.call_count == 2

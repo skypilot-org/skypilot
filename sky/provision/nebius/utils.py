@@ -24,7 +24,12 @@ _NEBIUS_PORTS_PER_RULE = 8
 
 # Backoff attempts when deleting an SG that's still attached to terminating
 # VMs. Mirrors AWS's BOTO_DELETE_MAX_ATTEMPTS (sky/provision/aws/instance.py).
-_SG_DELETE_MAX_ATTEMPTS = 6
+# This is only a backstop: `terminate_instances` waits for the cluster's
+# instances to be fully reaped before calling `delete_security_group`, so
+# by the time this retry loop runs the SG should normally be detachable.
+# 8 attempts with the default Backoff (initial 5s, x1.6, cap 25s) gives an
+# effective window of roughly two minutes.
+_SG_DELETE_MAX_ATTEMPTS = 8
 
 
 def retry(func):
@@ -370,10 +375,11 @@ def delete_security_group(sg_id: str) -> None:
     deleted first) or that is still attached to instances. We:
       1. List + delete all rules in the SG, then poll until the rule list
          is empty (Nebius deletes are async).
-      2. Attempt the SG delete with retry-on-dependency-violation (covers
-         the case where VMs are still terminating after `terminate_instances`
-         returned — mirrors the retry block in
-         `sky.provision.aws.instance.cleanup_ports`).
+      2. Attempt the SG delete with retry-on-dependency-violation. Callers
+         (`terminate_instances`) wait for the cluster's instances to be
+         fully reaped before calling this, so the retry is a backstop for
+         stragglers rather than the primary wait; mirrors the retry block
+         in `sky.provision.aws.instance.cleanup_ports`.
 
     On exhaustion, log + return rather than raise: an orphaned SG is
     preferable to a teardown failure.

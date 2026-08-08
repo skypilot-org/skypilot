@@ -507,6 +507,88 @@ def test_docker_preinstalled_package(generic_cloud: str):
     smoke_tests_utils.run_one_test(test)
 
 
+@pytest.mark.kubernetes
+@pytest.mark.parametrize(
+    'image,pkg_mgr,num_nodes',
+    [
+        # Both run 2 nodes so the worker-join /dev/tcp probe is exercised on a
+        # non-Debian image. rockylinux:9 = community rebuild; redhat/ubi9 =
+        # Red Hat's official UBI (the motivating family; ships the free ubi repos).
+        ('rockylinux:9', 'dnf', 2),
+        ('redhat/ubi9', 'dnf', 2),
+    ])
+def test_kubernetes_non_debian_image(image, pkg_mgr, num_nodes):
+    """Non-Debian images boot on Kubernetes (pkg-manager-agnostic bootstrap).
+
+    The per-node bootstrap detects the image's package manager (dnf here)
+    rather than assuming Debian apt/dpkg, so RHEL-family images reach the
+    SkyPilot runtime and run jobs. Regression test for the previously
+    Debian-only bootstrap, which failed such images during setup with a
+    misleading `container not found ("ray-node")`. The 2-node case also covers
+    the worker-join /dev/tcp probe.
+
+    All images are glibc-based; Alpine/musl is intentionally excluded (its
+    conda/uv runtime is unrelated to this path, and Ray publishes no musl
+    wheels). The zypper/openSUSE case was dropped after it proved flaky
+    end-to-end; the zypper name mapping is covered by the map_pkg_names unit
+    test instead.
+    """
+    # get_cluster_name() keys off the (shared) test function name, so the
+    # parametrized cases would otherwise collide on one cluster name -- append a
+    # per-image suffix (e.g. rockyl / ubi9) to keep each unique.
+    name = (smoke_tests_utils.get_cluster_name() + '-' +
+            image.split(':')[0].split('/')[-1][:6])
+    test = smoke_tests_utils.Test(
+        'kubernetes_non_debian_image',
+        [
+            # `sky launch` returns 0 only if the non-apt bootstrap installed the
+            # prereqs and ray came up on the non-Debian image.
+            # kubernetes.enable_docker is Debian-only by design (its bootstrap
+            # installs the Docker CLI via apt and exits 1 otherwise), so a
+            # server whose config enables it globally would fail these images
+            # during bootstrap before reaching the code under test. This test
+            # exercises the non-Debian runtime bootstrap, not Docker -- pin it
+            # off for this launch.
+            f'sky launch -y -c {name} --infra kubernetes '
+            f'--config kubernetes.enable_docker=false '
+            f'--num-nodes {num_nodes} {smoke_tests_utils.LOW_RESOURCE_ARG} '
+            f'--image-id docker:{image}',
+            # Confirm it really ran on the non-Debian image (not a fallback):
+            # the image's own package manager is present and apt-get is not.
+            f'sky exec {name} '
+            f'\'command -v {pkg_mgr} && ! command -v apt-get\'',
+            f'sky logs {name} 1 --status',
+            # The sshd MaxSessions/MaxStartups tuning must survive on an image
+            # where the reload has no systemd AND no `service` command, which is
+            # why this PR made that reload best-effort with a SIGHUP fallback.
+            # Two assertions:
+            #   1. the directives are appended to sshd_config, and
+            #   2. `sshd -T` reports them. This is the load-bearing check:
+            #      sshd_config is first-wins and RHEL-family images
+            #      `Include /etc/ssh/sshd_config.d/*.conf` from line ~15, so an
+            #      appended value can be silently shadowed by a drop-in, which
+            #      grepping the file alone would not catch. `sshd -T` resolves
+            #      includes and precedence.
+            # Scope, deliberately: `sshd -T` RE-PARSES the config in a fresh
+            # process, so this proves the config a starting/re-execing sshd will
+            # use -- not that the already-running daemon reloaded. Asserting the
+            # latter needs the live listener's own state, which has no portable
+            # probe. `sshd -T` also needs root, which both images here are.
+            f'sky exec {name} \''
+            f'grep -q "^MaxSessions 200" /etc/ssh/sshd_config && '
+            f'grep -q "^MaxStartups 150:30:200" /etc/ssh/sshd_config && '
+            f'{{ sshd -T || /usr/sbin/sshd -T || /sbin/sshd -T; }} 2>/dev/null | '
+            f'grep -qx "maxsessions 200"\'',
+            f'sky logs {name} 2 --status',
+        ],
+        f'sky down -y {name}',
+        # A from-scratch runtime bootstrap on a non-Debian base + image pull is
+        # slower than the Debian happy path; give it headroom.
+        timeout=25 * 60,
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
 @pytest.mark.slurm
 def test_docker_preinstalled_package_slurm_sqsh(generic_cloud: str):
     """Test local .sqsh container images on Slurm (both absolute and relative paths)."""
@@ -1072,7 +1154,9 @@ def test_task_labels_aws():
                     '--filters "Name=tag:inlinelabel2,Values=inlinevalue2" '
                     '--region us-east-1 --output text'),
             ],
-            f'sky down -y {name} && {smoke_tests_utils.down_cluster_for_cloud_cmd(name)}',
+            smoke_tests_utils.chain_teardown(
+                f'sky down -y {name}',
+                smoke_tests_utils.down_cluster_for_cloud_cmd(name)),
         )
         smoke_tests_utils.run_one_test(test)
 
@@ -1103,7 +1187,9 @@ def test_task_labels_gcp():
                      'labels.inlinelabel2=\'inlinevalue2\'" '
                      '--format="value(name)" | grep .')),
             ],
-            f'sky down -y {name} && {smoke_tests_utils.down_cluster_for_cloud_cmd(name)}',
+            smoke_tests_utils.chain_teardown(
+                f'sky down -y {name}',
+                smoke_tests_utils.down_cluster_for_cloud_cmd(name)),
         )
         smoke_tests_utils.run_one_test(test)
 
@@ -1213,7 +1299,9 @@ def test_task_labels_azure():
                     '&& tags.inlinelabel2==\'inlinevalue2\'].name" '
                     '--output tsv | grep .'),
             ],
-            f'sky down -y {name} && {smoke_tests_utils.down_cluster_for_cloud_cmd(name)}',
+            smoke_tests_utils.chain_teardown(
+                f'sky down -y {name}',
+                smoke_tests_utils.down_cluster_for_cloud_cmd(name)),
         )
         smoke_tests_utils.run_one_test(test)
 
@@ -1249,8 +1337,9 @@ def test_task_labels_kubernetes():
                     f'grep \'^{common_utils.make_cluster_name_on_cloud(name, sky.Kubernetes.max_cluster_name_length())}\''
                 )
             ],
-            f'sky down -y {name} && '
-            f'{smoke_tests_utils.down_cluster_for_cloud_cmd(name)}',
+            smoke_tests_utils.chain_teardown(
+                f'sky down -y {name}',
+                smoke_tests_utils.down_cluster_for_cloud_cmd(name)),
         )
         smoke_tests_utils.run_one_test(test)
 
@@ -1276,8 +1365,9 @@ def test_services_on_kubernetes():
             smoke_tests_utils.resolve_k8s_context_cmd(name),
             smoke_tests_utils.launch_cloud_cmd_on_landed_context(name),
         ],
-        f'sky down -y {name} && {service_check} && '
-        f'{smoke_tests_utils.down_cluster_for_cloud_cmd(name)}',
+        smoke_tests_utils.chain_teardown(
+            f'sky down -y {name}', service_check,
+            smoke_tests_utils.down_cluster_for_cloud_cmd(name)),
     )
     smoke_tests_utils.run_one_test(test)
 
@@ -1315,8 +1405,9 @@ def test_add_pod_annotations_for_autodown_with_launch():
                 'pod_tag=$(kubectl describe $pod_2); echo "$pod_tag"; echo "$pod_tag" | grep -q skypilot.co/idle_minutes_to_autostop'
             ),
         ],
-        f'sky down -y {name} && '
-        f'{smoke_tests_utils.down_cluster_for_cloud_cmd(name)}',
+        smoke_tests_utils.chain_teardown(
+            f'sky down -y {name}',
+            smoke_tests_utils.down_cluster_for_cloud_cmd(name)),
     )
     smoke_tests_utils.run_one_test(test)
 
@@ -1370,8 +1461,9 @@ def test_add_and_remove_pod_annotations_with_autostop():
                 'pod_tag=$(kubectl describe $pod_2); echo "$pod_tag"; ! echo "$pod_tag" | grep -q skypilot.co/idle_minutes_to_autostop',
             ),
         ],
-        f'sky down -y {name} && '
-        f'{smoke_tests_utils.down_cluster_for_cloud_cmd(name)}',
+        smoke_tests_utils.chain_teardown(
+            f'sky down -y {name}',
+            smoke_tests_utils.down_cluster_for_cloud_cmd(name)),
     )
     smoke_tests_utils.run_one_test(test)
 
@@ -1423,7 +1515,9 @@ def test_volumes_on_kubernetes():
                 'while [ $SECONDS -lt $end ]; do '
                 'if kubectl get pvc existing0; then exit 0; fi; '
                 'sleep 1; '
-                'done; exit 1'),
+                'done; '
+                'echo "Timeout waiting for PVC existing0 to appear"; '
+                'kubectl get pvc; exit 1'),
             f'sky volumes apply -y -n pvc0 --type k8s-pvc --size 2GB',
             f'sky volumes apply -y -n existing0 --type k8s-pvc --size 2GB --use-existing',
             f'sky volumes apply -y -n vol-existing1 --type k8s-pvc --size 2GB --use-existing',
@@ -1441,23 +1535,47 @@ def test_volumes_on_kubernetes():
             f'sky launch -y -c {name} --infra kubernetes tests/test_yamls/pvc_volume_with_new.yaml --env HAVE_SUB_DIR=true --env NEW_LAUNCH=true',
             f'sky logs {name} 1 --status',  # Ensure the first job on the new cluster succeeded.
             f'sky down -y {name} && sky volumes ls && sky volumes delete pvc0 existing0 pvc1 vol-existing1 -y',
-            f'vols=$(sky volumes ls) && echo "$vols" && vol=$(echo "$vols" | grep "pvc0"); if [ -n "$vol" ]; then echo "pvc0 not deleted" && exit 1; else echo "pvc0 deleted"; fi',
-            f'vols=$(sky volumes ls) && echo "$vols" && vol=$(echo "$vols" | grep "existing0"); if [ -n "$vol" ]; then echo "existing0 not deleted" && exit 1; else echo "existing0 deleted"; fi',
-            f'vols=$(sky volumes ls) && echo "$vols" && vol=$(echo "$vols" | grep "pvc1"); if [ -n "$vol" ]; then echo "pvc1 not deleted" && exit 1; else echo "pvc1 deleted"; fi',
-            f'vols=$(sky volumes ls) && echo "$vols" && vol=$(echo "$vols" | grep "vol-existing1"); if [ -n "$vol" ]; then echo "vol-existing1 not deleted" && exit 1; else echo "vol-existing1 deleted"; fi',
-            f'vols=$(sky volumes ls) && echo "$vols" && vol=$(echo "$vols" | grep "{name}"); if [ -n "$vol" ]; then echo "ephemeral volume for cluster {name} not deleted" && exit 1; else echo "ephemeral volume for cluster {name} deleted"; fi',
+            # Volume deletion is asynchronous, so poll until each deleted
+            # volume disappears from `sky volumes ls` instead of checking once.
+            smoke_tests_utils.get_cmd_wait_until_volume_is_not_found('pvc0'),
+            smoke_tests_utils.get_cmd_wait_until_volume_is_not_found(
+                'existing0'),
+            smoke_tests_utils.get_cmd_wait_until_volume_is_not_found('pvc1'),
+            smoke_tests_utils.get_cmd_wait_until_volume_is_not_found(
+                'vol-existing1'),
+            smoke_tests_utils.get_cmd_wait_until_volume_is_not_found(name),
             smoke_tests_utils.run_cloud_cmd_on_cluster(
                 name,
-                'pvcs=$(kubectl get pvc) && echo "$pvcs" && pvc=$(echo "$pvcs" | grep "pvc0"); if [ -n "$pvc" ]; then echo "pvc for volume pvc0 not deleted" && exit 1; else echo "pvc for volume pvc0 deleted"; fi && '
+                # PVC teardown for deleted volumes is asynchronous, so poll
+                # until the PVCs backing the deleted volumes disappear before
+                # asserting. The PVCs backing imported (use_existing) volumes
+                # must be preserved.
+                'end=$((SECONDS+120)); '
+                'while [ $SECONDS -lt $end ]; do '
+                'pvcs=$(kubectl get pvc); echo "$pvcs"; '
+                'if ! echo "$pvcs" | grep -q "pvc0" && '
+                '! echo "$pvcs" | grep -q "pvc1" && '
+                f'! echo "$pvcs" | grep -q "{name}"; then break; fi; '
+                'echo "Waiting for deleted volume PVCs to be removed..."; '
+                'sleep 5; '
+                'done && '
+                'pvcs=$(kubectl get pvc) && echo "$pvcs" && '
+                'if echo "$pvcs" | grep -q "pvc0"; then echo "pvc for volume pvc0 not deleted" && exit 1; else echo "pvc for volume pvc0 deleted"; fi && '
+                'if echo "$pvcs" | grep -q "pvc1"; then echo "pvc for volume pvc1 not deleted" && exit 1; else echo "pvc for volume pvc1 deleted"; fi && '
+                f'if echo "$pvcs" | grep -q "{name}"; then echo "pvc for ephemeral volume of cluster {name} not deleted" && exit 1; else echo "pvc for ephemeral volume of cluster {name} deleted"; fi && '
                 # existing0 was imported with use_existing=True; the underlying PVC is preserved on delete.
-                'pvc=$(echo "$pvcs" | grep "existing0"); if [ -z "$pvc" ]; then echo "pvc for imported volume existing0 was unexpectedly deleted" && exit 1; else echo "pvc for imported volume existing0 preserved"; fi && '
-                'pvc=$(echo "$pvcs" | grep "pvc1"); if [ -n "$pvc" ]; then echo "pvc for volume pvc1 not deleted" && exit 1; else echo "pvc for volume pvc1 deleted"; fi && '
+                'if ! echo "$pvcs" | grep -q "existing0"; then echo "pvc for imported volume existing0 was unexpectedly deleted" && exit 1; else echo "pvc for imported volume existing0 preserved"; fi && '
                 # vol-existing1 wraps an imported PVC named "existing1" (matched by label); that PVC is preserved on delete.
-                'pvc=$(echo "$pvcs" | grep "existing1"); if [ -z "$pvc" ]; then echo "pvc for imported volume vol-existing1 was unexpectedly deleted" && exit 1; else echo "pvc for imported volume vol-existing1 preserved"; fi && '
-                f'pvc=$(echo "$pvcs" | grep "{name}"); if [ -n "$pvc" ]; then echo "pvc for ephemeral volume of cluster {name} not deleted" && exit 1; else echo "pvc for ephemeral volume of cluster {name} deleted"; fi',
+                'if ! echo "$pvcs" | grep -q "existing1"; then echo "pvc for imported volume vol-existing1 was unexpectedly deleted" && exit 1; else echo "pvc for imported volume vol-existing1 preserved"; fi',
             ),
         ],
-        f'{smoke_tests_utils.down_cluster_for_cloud_cmd(name)} && vols=$(sky volumes ls) && echo "$vols" && vol=$(echo "$vols" | grep "existing0"); if [ -n "$vol" ]; then sky volumes delete existing0 -y; fi && vol=$(echo "$vols" | grep "pvc0"); if [ -n "$vol" ]; then sky volumes delete pvc0 -y; fi && vol=$(echo "$vols" | grep "pvc1"); if [ -n "$vol" ]; then sky volumes delete pvc1 -y; fi && vol=$(echo "$vols" | grep "vol-existing1"); if [ -n "$vol" ]; then sky volumes delete vol-existing1 -y; fi',
+        smoke_tests_utils.chain_teardown(
+            smoke_tests_utils.down_cluster_for_cloud_cmd(name),
+            'vols=$(sky volumes ls) && echo "$vols"', *[
+                f'if echo "$vols" | grep -q "{vol}"; then '
+                f'sky volumes delete {vol} -y; fi'
+                for vol in ['existing0', 'pvc0', 'pvc1', 'vol-existing1']
+            ]),
     )
     smoke_tests_utils.run_one_test(test)
 
@@ -1512,7 +1630,7 @@ def test_enable_docker_on_kubernetes(yaml_file, volumes_needed, sidecar,
     ]
     for vol in volumes_needed:
         teardown_parts.append(f'sky volumes delete {vol} -y || true')
-    teardown = ' && '.join(teardown_parts)
+    teardown = smoke_tests_utils.chain_teardown(*teardown_parts)
 
     test = smoke_tests_utils.Test(
         'enable_docker_on_kubernetes',
@@ -1531,6 +1649,10 @@ def test_volume_env_mount_kubernetes():
         volumes:
           /mnt/test-data: ${{USERNAME}}-{pvc_name}
         run: |
+          set -e
+          df -h /mnt/test-data
+          touch /mnt/test-data/test.txt
+          ls -lart /mnt/test-data
           echo "Mounted volume"
     """)
     full_pvc_name = f'user-{pvc_name}'
@@ -1543,7 +1665,7 @@ def test_volume_env_mount_kubernetes():
                 f'sky volumes apply -y -n {full_pvc_name} --type k8s-pvc --size 2GB',
                 f's=$(sky jobs launch -y --infra kubernetes {f.name} --env USERNAME=user); echo "$s"; echo "$s" | grep "Job finished (status: SUCCEEDED)"',
             ],
-            ' && '.join([
+            smoke_tests_utils.chain_teardown(
                 'sky jobs cancel -a -y || true',
                 # The managed job's worker cluster is torn down in the
                 # controller's `finally` block, and the controller only sets
@@ -1565,8 +1687,7 @@ def test_volume_env_mount_kubernetes():
                 f'sky volumes delete {full_pvc_name} -y',
                 f'(vol=$(sky volumes ls | grep "{full_pvc_name}"); '
                 f'if [ -n "$vol" ]; then echo "{full_pvc_name} not deleted" '
-                f'&& exit 1; else echo "{full_pvc_name} deleted"; fi)'
-            ]),
+                f'&& exit 1; else echo "{full_pvc_name} deleted"; fi)'),
         )
         smoke_tests_utils.run_one_test(test)
 
@@ -1635,9 +1756,10 @@ def test_hostpath_volume_on_kubernetes():
                     f'echo "$spec" | grep "path: {host_path}"',
                 ),
             ],
-            f'sky down -y {name} && '
-            f'sky volumes delete {volume_name} -y || true && '
-            f'{smoke_tests_utils.down_cluster_for_cloud_cmd(name)}',
+            smoke_tests_utils.chain_teardown(
+                f'sky down -y {name}',
+                f'sky volumes delete {volume_name} -y || true',
+                smoke_tests_utils.down_cluster_for_cloud_cmd(name)),
         )
         smoke_tests_utils.run_one_test(test)
 
@@ -1721,8 +1843,9 @@ def test_container_logs_multinode_kubernetes():
                 _check_container_logs(name, head_logs, 9, 1),
                 _check_container_logs(name, worker_logs, 9, 1),
             ],
-            f'sky down -y {name} && '
-            f'{smoke_tests_utils.down_cluster_for_cloud_cmd(name)}',
+            smoke_tests_utils.chain_teardown(
+                f'sky down -y {name}',
+                smoke_tests_utils.down_cluster_for_cloud_cmd(name)),
         )
         smoke_tests_utils.run_one_test(test)
 
@@ -1750,8 +1873,9 @@ def test_container_logs_two_jobs_kubernetes():
                 smoke_tests_utils.launch_cloud_cmd_on_landed_context(name),
                 _check_container_logs(name, pod_logs, 9, 2),
             ],
-            f'sky down -y {name} && '
-            f'{smoke_tests_utils.down_cluster_for_cloud_cmd(name)}',
+            smoke_tests_utils.chain_teardown(
+                f'sky down -y {name}',
+                smoke_tests_utils.down_cluster_for_cloud_cmd(name)),
         )
         smoke_tests_utils.run_one_test(test)
 
@@ -1781,8 +1905,9 @@ def test_container_logs_two_simultaneous_jobs_kubernetes():
                 'sleep 30',
                 _check_container_logs(name, pod_logs, 9, 2),
             ],
-            f'sky down -y {name} && '
-            f'{smoke_tests_utils.down_cluster_for_cloud_cmd(name)}',
+            smoke_tests_utils.chain_teardown(
+                f'sky down -y {name}',
+                smoke_tests_utils.down_cluster_for_cloud_cmd(name)),
         )
         smoke_tests_utils.run_one_test(test)
 
@@ -1823,7 +1948,8 @@ def test_gcp_start_stop():
             f'sky logs {name} 1 --status',  # Ensure the job succeeded.
             f'sky exec {name} examples/gcp_start_stop.yaml',
             f'sky logs {name} 2 --status',  # Ensure the job succeeded.
-            f'sky exec {name} "prlimit -n --pid=\$(pgrep -f \'raylet/raylet --raylet_socket_name\') | grep \'"\'1048576 1048576\'"\'"',  # Ensure the raylet process has the correct file descriptor limit.
+            # Ensure the raylet process has the correct file descriptor limit.
+            smoke_tests_utils.get_check_raylet_nofile_limit_cmd(name),
             f'sky logs {name} 3 --status',  # Ensure the job succeeded.
             f'sky stop -y {name}',
             smoke_tests_utils.get_cmd_wait_until_cluster_status_contains(
@@ -1855,7 +1981,8 @@ def test_azure_start_stop():
             f'sky launch -y -c {name} {smoke_tests_utils.LOW_RESOURCE_ARG} examples/azure_start_stop.yaml',
             f'sky exec {name} examples/azure_start_stop.yaml',
             f'sky logs {name} 1 --status',  # Ensure the job succeeded.
-            f'sky exec {name} "prlimit -n --pid=\$(pgrep -f \'raylet/raylet --raylet_socket_name\') | grep \'"\'1048576 1048576\'"\'"',  # Ensure the raylet process has the correct file descriptor limit.
+            # Ensure the raylet process has the correct file descriptor limit.
+            smoke_tests_utils.get_check_raylet_nofile_limit_cmd(name),
             f'sky logs {name} 2 --status',  # Ensure the job succeeded.
             f'sky stop -y {name}',
             f'sky start -y {name} -i 1',
@@ -2480,6 +2607,56 @@ def test_kubernetes_pod_pending_reason():
 
 
 @pytest.mark.kubernetes
+def test_kubernetes_pod_failed_mount_escalation():
+    """A persistent volume mount failure must FAIL provisioning (not hang
+    forever in ContainerCreating), and the error must carry the kubelet
+    FailedMount event message so the user can act on it."""
+    name = smoke_tests_utils.get_cluster_name()
+    template_str = pathlib.Path(
+        'tests/test_yamls/test_k8s_pending_volume.yaml.j2').read_text()
+    template = jinja2.Template(template_str)
+    task_yaml_content = template.render()
+
+    with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
+        f.write(task_yaml_content)
+        f.flush()
+
+        test = smoke_tests_utils.Test(
+            'kubernetes_pod_failed_mount_escalation',
+            [
+                # Pin the launch to a single context: the bad mount
+                # reproduces on every context, so on a multi-context API
+                # server an unpinned launch would fail over context after
+                # context — each attempt consuming the full mount-failure
+                # deadline — and could not exit within the test timeout.
+                # Launch the cloud-cmd helper and pin to the context it
+                # lands on (all three steps are no-ops on a local
+                # single-context server).
+                smoke_tests_utils.launch_cluster_for_cloud_cmd(
+                    'kubernetes', name),
+                # Wait for the helper to be UP so its landed context is
+                # resolvable.
+                smoke_tests_utils.run_cloud_cmd_on_cluster(name, 'true'),
+                smoke_tests_utils.resolve_cloud_cmd_k8s_context_cmd(name),
+                # The launch must exit non-zero on its own (the
+                # mount-failure deadline, ~10 min) — a hang here trips the
+                # test timeout instead.
+                f's=$(sky launch -y -c {name} '
+                f'--infra {smoke_tests_utils.cloud_cmd_landed_k8s_infra(name)} '
+                f'{f.name} '
+                f'2>&1); ret=$?; echo "$s"; [ $ret -ne 0 ] || exit 1; '
+                f'echo "$s" | grep "FailedMount" && '
+                f'echo "$s" | grep "MountVolume.SetUp failed"',
+            ],
+            smoke_tests_utils.chain_teardown(
+                f'sky down -y {name}',
+                smoke_tests_utils.down_cluster_for_cloud_cmd(name)),
+            timeout=25 * 60,
+        )
+        smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.kubernetes
 def test_kubernetes_pod_long_image_pull():
     """Ensure kubelet image pulling events are surfaced in provision logs."""
     name = smoke_tests_utils.get_cluster_name()
@@ -2494,6 +2671,57 @@ def test_kubernetes_pod_long_image_pull():
         f'sky down -y {name}',
         timeout=20 * 60,
     )
+    smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.kubernetes
+def test_kubernetes_task_clears_image_pull_secrets():
+    """A task-level empty imagePullSecrets clears the server-side one.
+
+    The server config sets an imagePullSecrets entry and the task config
+    (tests/test_yamls/test_k8s_pod_config_image_pull_secrets.yaml) sets an
+    empty list, so both sides of the pod_config merge carry the field. The
+    launch used to fail outright in that case.
+
+    The referenced secret does not exist: kubelet warns and falls back to an
+    anonymous pull, which is enough for the public test image. If that ever
+    turns flaky, create a dummy docker-registry secret instead.
+    """
+    name = smoke_tests_utils.get_cluster_name()
+    task_yaml = 'tests/test_yamls/test_k8s_pod_config_image_pull_secrets.yaml'
+    test = smoke_tests_utils.Test(
+        'kubernetes_task_clears_image_pull_secrets',
+        [
+            f'sky launch -y -c {name} --infra kubernetes '
+            f'{smoke_tests_utils.LOW_RESOURCE_ARG} {task_yaml}',
+            f'sky logs {name} 1 --status',
+            f'sky logs {name} 1 --no-follow | grep "image_pull_secrets_check: ok"',
+            smoke_tests_utils.resolve_k8s_context_cmd(name),
+            smoke_tests_utils.launch_cloud_cmd_on_landed_context(name),
+            # The task's empty list must win over the server config, so the
+            # pod carries no imagePullSecrets at all.
+            smoke_tests_utils.run_cloud_cmd_on_cluster(
+                name,
+                f"pod=$(kubectl get pods -o custom-columns=NAME:.metadata.name,ANN:.metadata.annotations.skypilot-cluster-name --no-headers | awk -v n=\"{name}\" '$NF==n{{print $1}}' | sed -n 1p) && "
+                'echo "pod=$pod" && test -n "$pod" && '
+                'secrets=$(kubectl get pod $pod -o jsonpath="{.spec.imagePullSecrets}") && '
+                'echo "imagePullSecrets=$secrets" && '
+                '! echo "$secrets" | grep -q absent-regcred'),
+        ],
+        f'sky down -y {name}; '
+        f'{smoke_tests_utils.down_cluster_for_cloud_cmd(name)}',
+        timeout=25 * 60,
+        config_dict={
+            'kubernetes': {
+                'pod_config': {
+                    'spec': {
+                        'imagePullSecrets': [{
+                            'name': f'{name}-absent-regcred'
+                        }]
+                    }
+                }
+            }
+        })
     smoke_tests_utils.run_one_test(test)
 
 
@@ -2563,7 +2791,9 @@ def test_aws_disk_tier():
                       _get_aws_query_command(region, '$id', 'Throughput',
                                              specs['disk_throughput'])))),
             ],
-            f'sky down -y {name} && {smoke_tests_utils.down_cluster_for_cloud_cmd(name)}',
+            smoke_tests_utils.chain_teardown(
+                f'sky down -y {name}',
+                smoke_tests_utils.down_cluster_for_cloud_cmd(name)),
             timeout=10 * 60,  # 10 mins  (it takes around ~6 mins)
         )
         smoke_tests_utils.run_one_test(test)
@@ -2619,7 +2849,9 @@ def test_gcp_disk_tier(instance_types: List[str]):
                              f'gcloud compute disks list --filter="name=$name" '
                              f'--format="value(type)" | grep {disk_type}'))
                 ],
-                f'sky down -y {name} && {smoke_tests_utils.down_cluster_for_cloud_cmd(name)}',
+                smoke_tests_utils.chain_teardown(
+                    f'sky down -y {name}',
+                    smoke_tests_utils.down_cluster_for_cloud_cmd(name)),
                 timeout=6 * 60,  # 6 mins  (it takes around ~3 mins)
             )
             smoke_tests_utils.run_one_test(test)
@@ -2793,7 +3025,9 @@ def test_gcp_network_tier():
     test = smoke_tests_utils.Test(
         f'gcp-network-tier-{network_tier.value}',
         test_commands,
-        f'sky down -y {name} && {smoke_tests_utils.down_cluster_for_cloud_cmd(name)}',
+        smoke_tests_utils.chain_teardown(
+            f'sky down -y {name}',
+            smoke_tests_utils.down_cluster_for_cloud_cmd(name)),
         timeout=10 * 60,  # 10 mins
     )
     smoke_tests_utils.run_one_test(test)
@@ -2815,7 +3049,9 @@ def test_gcp_network_tier_with_gpu():
             # Check if LD_LIBRARY_PATH contains the required NCCL and TCPX paths for GPU workloads
             f'sky exec {name} {shlex.quote(cmd)} && sky logs {name} --status'
         ],
-        f'sky down -y {name} && {smoke_tests_utils.down_cluster_for_cloud_cmd(name)}',
+        smoke_tests_utils.chain_teardown(
+            f'sky down -y {name}',
+            smoke_tests_utils.down_cluster_for_cloud_cmd(name)),
         timeout=35 * 60,  # 35 mins for GPU provisioning
     )
     smoke_tests_utils.run_one_test(test)
@@ -3043,8 +3279,9 @@ def test_kubernetes_recovery():
             # Check status
             f'sky status -r {name} --no-show-pools --no-show-services --no-show-managed-jobs',
         ],
-        f'sky down -y {name} && {service_cleanup_check} && '
-        f'{smoke_tests_utils.down_cluster_for_cloud_cmd(name)}',
+        smoke_tests_utils.chain_teardown(
+            f'sky down -y {name}', service_cleanup_check,
+            smoke_tests_utils.down_cluster_for_cloud_cmd(name)),
         timeout=30 * 60,
     )
     smoke_tests_utils.run_one_test(test)
@@ -3068,26 +3305,33 @@ def test_kubernetes_stale_pod_cleanup():
         'kubernetes_stale_pod_cleanup',
         [
             # Launch a cluster with memory limits (2GB is enough to boot
-            # but tight enough to OOM on a large allocation).
+            # but tight enough to OOM on a large allocation). It may land on
+            # any context.
             f'sky launch -y -c {name} --infra kubernetes --cpus 1 --memory 2 '
             f'--config kubernetes.set_pod_resource_limits=true',
+            # Pin the cloud-cmd helper to the context the target landed on so
+            # its in-cluster kubectl can see the target's pod.
+            smoke_tests_utils.resolve_k8s_context_cmd(name),
+            smoke_tests_utils.launch_cloud_cmd_on_landed_context(name),
             # OOM the pod by writing 4GB to tmpfs, exceeding the 2GB limit.
             f'sky exec {name} -- dd if=/dev/zero of=/dev/shm/oom bs=1M count=4096 || true',
             # Wait for the pod to enter Failed phase.
-            f'for i in $(seq 1 30); do '
-            f'phase=$(kubectl get pod {head_pod} '
-            f'-o jsonpath=\'{{.status.phase}}\'); '
-            f'echo "attempt $i: phase=$phase"; '
-            f'if [ "$phase" = "Failed" ]; then break; fi; '
-            f'sleep 2; done && '
-            f'test "$phase" = "Failed"',
+            smoke_tests_utils.run_cloud_cmd_on_cluster(
+                name, f'for i in $(seq 1 30); do '
+                f'phase=$(kubectl get pod {head_pod} '
+                f'-o jsonpath=\'{{.status.phase}}\'); '
+                f'echo "attempt $i: phase=$phase"; '
+                f'if [ "$phase" = "Failed" ]; then break; fi; '
+                f'sleep 2; done && '
+                f'test "$phase" = "Failed"'),
             # Refresh state and assert INIT before restart.
             f'sky status {name} -r | grep INIT',
             # sky start should clean up the Failed pod and succeed.
             f'sky start -y {name}',
         ],
-        f'sky down -y {name}',
-        timeout=10 * 60,
+        f'sky down -y {name}; '
+        f'{smoke_tests_utils.down_cluster_for_cloud_cmd(name)}',
+        timeout=15 * 60,
     )
     smoke_tests_utils.run_one_test(test)
 
@@ -3279,8 +3523,9 @@ def test_kubernetes_pod_config_pvc():
                     f'kubectl delete pvc {pvc_name} --ignore-not-found=true --wait=false || true'
                 ),
             ],
-            f'sky down -y {name} && '
-            f'{smoke_tests_utils.down_cluster_for_cloud_cmd(name)}',
+            smoke_tests_utils.chain_teardown(
+                f'sky down -y {name}',
+                smoke_tests_utils.down_cluster_for_cloud_cmd(name)),
             timeout=10 * 60,
         )
         smoke_tests_utils.run_one_test(test)
@@ -3334,15 +3579,28 @@ def test_launching_with_pending_pods():
             # helper's context so the two are co-located; on a local
             # single-context server this is a no-op (`--infra kubernetes`).
             smoke_tests_utils.resolve_cloud_cmd_k8s_context_cmd(name),
-            f's=$(SKYPILOT_DEBUG=1 sky launch -y -c {name} --infra {smoke_tests_utils.cloud_cmd_landed_k8s_infra(name)} --cpus 0.1+ \'echo hi\'); echo "$s"; echo; echo; echo "$s" | grep "Timed out while waiting for nodes to start"',
+            # Pin provision_timeout: this test asserts on the *provisioning*
+            # timeout path, but the effective default depends on the target
+            # context's config. If a Kueue local queue is configured for that
+            # context (`kueue.local_queue_name` / `quota.queue`),
+            # Kubernetes._calculate_provision_timeout() returns 24 hours, and
+            # the launch would wait on the pending pod far past this test's
+            # per-command timeout instead of emitting the expected message.
+            # 10s is what that same helper computes for a single node when no
+            # queue is configured, i.e. this restores the timeout the test was
+            # written against. The override lands at the cloud level, which
+            # applies as long as the context does not set provision_timeout of
+            # its own.
+            f's=$(SKYPILOT_DEBUG=1 sky launch -y -c {name} --infra {smoke_tests_utils.cloud_cmd_landed_k8s_infra(name)} --config kubernetes.provision_timeout=10 --cpus 0.1+ \'echo hi\'); echo "$s"; echo; echo; echo "$s" | grep "Timed out while waiting for nodes to start"',
             # Check Pods have been deleted
             smoke_tests_utils.run_cloud_cmd_on_cluster(
                 name,
                 f'pod=$(kubectl get pod -l ray-cluster-name={name_on_cloud} | grep {head}); if [ -n "$pod" ]; then exit 1; fi'
             ),
         ],
-        f'sky down -y {name} && '
-        f'{smoke_tests_utils.down_cluster_for_cloud_cmd(name)}',
+        smoke_tests_utils.chain_teardown(
+            f'sky down -y {name}',
+            smoke_tests_utils.down_cluster_for_cloud_cmd(name)),
         timeout=10 * 60,
     )
     smoke_tests_utils.run_one_test(test)
@@ -3391,8 +3649,9 @@ def test_kubernetes_pod_config_change_detection():
                 f's=$(SKYPILOT_DEBUG=0 sky launch -y -c {name} --infra kubernetes {smoke_tests_utils.LOW_RESOURCE_ARG} {task_yaml_2_path}); echo "$s"; echo; echo; echo "$s" | grep "TEST_VAR_1 = 2" && '
                 f'echo "$s" | grep "TEST_VAR_2 = 2"',
             ],
-            f'sky down -y {name} && '
-            f'{smoke_tests_utils.down_cluster_for_cloud_cmd(name)}',
+            smoke_tests_utils.chain_teardown(
+                f'sky down -y {name}',
+                smoke_tests_utils.down_cluster_for_cloud_cmd(name)),
             timeout=10 * 60,
         )
         smoke_tests_utils.run_one_test(test)
@@ -3486,8 +3745,9 @@ def test_kubernetes_pod_config_sidecar():
                     f'kubectl logs -l skypilot-cluster-name={name_on_cloud} '
                     '-c sidecar --tail=5 | grep "sidecar running"'),
             ],
-            f'sky down -y {name} && '
-            f'{smoke_tests_utils.down_cluster_for_cloud_cmd(name)}',
+            smoke_tests_utils.chain_teardown(
+                f'sky down -y {name}',
+                smoke_tests_utils.down_cluster_for_cloud_cmd(name)),
             timeout=10 * 60,
         )
         smoke_tests_utils.run_one_test(test)
@@ -3542,9 +3802,10 @@ def test_kubernetes_set_pod_resource_limits():
                     '-o jsonpath=\'{.items[0].spec.containers[0].resources.limits.memory}\' '
                     '| grep -E "^4.*G"'),
             ],
-            f'sky down -y {name} && '
-            f'{smoke_tests_utils.down_cluster_for_cloud_cmd(name)} && '
-            f'rm -f {config_path}',
+            smoke_tests_utils.chain_teardown(
+                f'sky down -y {name}',
+                smoke_tests_utils.down_cluster_for_cloud_cmd(name),
+                f'rm -f {config_path}'),
             timeout=10 * 60,
             env={
                 skypilot_config.ENV_VAR_GLOBAL_CONFIG: config_path,
@@ -3647,9 +3908,17 @@ def test_resize(generic_cloud: str):
     stopped_resize_commands = []
     if generic_cloud != 'kubernetes':
         stopped_resize_commands = [
-            # Stop the (now 1-node) cluster.
+            # Stop the (now 1-node) cluster. Poll for STOPPED instead of
+            # checking `sky status` output once: a background status refresh
+            # that raced with the teardown (its per-cluster lock is
+            # force-unlocked by `sky stop`) can transiently overwrite the
+            # freshly-written STOPPED state with INIT/UNHEALTHY, which
+            # self-corrects on the next refresh.
             f'sky stop -y {name}',
-            f's=$(sky status {name}) && echo "$s" && echo "$s" | grep {name} | grep STOPPED',
+            smoke_tests_utils.get_cmd_wait_until_cluster_status_contains(
+                cluster_name=name,
+                cluster_status=[sky.ClusterStatus.STOPPED],
+                timeout=120),
             # --- Resize a STOPPED cluster: scale up (restarts + grows) ---
             f'sky launch -y -c {name} --resize --num-nodes 2',
             f's=$(sky status {name}) && echo "$s" && echo "$s" | grep "2x" && echo "$s" | grep UP',

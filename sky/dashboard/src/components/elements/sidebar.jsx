@@ -513,7 +513,7 @@ export function TopBar() {
 
             <Link
               href="/"
-              className="flex items-center px-1 pt-1 h-full"
+              className="flex items-center px-1 h-full"
               prefetch={false}
             >
               <div className={`h-20 w-20 flex items-center justify-center`}>

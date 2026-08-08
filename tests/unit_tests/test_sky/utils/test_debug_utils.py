@@ -1,9 +1,11 @@
 """Tests for sky.utils.debug_utils module."""
+import concurrent.futures
 import contextlib
 import datetime
 import json
 import os
 import posixpath
+import subprocess
 import threading
 import time
 from types import SimpleNamespace
@@ -54,6 +56,7 @@ def _make_context(
         request_ids_via_job=request_ids_via_job or set(),
         request_ids_via_cluster=request_ids_via_cluster or set(),
         errors=errors if errors is not None else [],
+        timed_out_ops=[],
     )
 
 
@@ -1894,6 +1897,39 @@ class TestDumpManagedJobQueueInfo:
         assert errors[0]['component'] == 'managed_jobs'
         assert 'queue_v2 failed' in errors[0]['error']
 
+    @mock.patch('sky.jobs.server.core.queue_v2')
+    def test_queue_timeout_recorded_not_raised(self, mock_queue_v2, tmp_path,
+                                               monkeypatch):
+        """A queue_v2 call that exceeds its dump-side bound is recorded as a
+        partial failure and the sub-section is skipped -- the dump does not hang
+        or raise. This bounds the shared, un-timeout-able controller SSH work
+        (fetch_managed_job_table exec + the accessibility ray-status probe)
+        without touching that shared code."""
+        # Tighten the bound so the test is fast.
+        monkeypatch.setattr(debug_utils, '_MANAGED_JOB_QUEUE_TIMEOUT', 0.2)
+        started = threading.Event()
+
+        def _slow_queue(*_args, **_kwargs):
+            started.set()
+            time.sleep(5)  # Longer than the (patched) bound.
+            return ([], 0, {}, 0)
+
+        mock_queue_v2.side_effect = _slow_queue
+
+        jobs_dir = str(tmp_path / 'managed_jobs')
+        os.makedirs(jobs_dir, exist_ok=True)
+        errors: List[Dict[str, str]] = []
+        start = time.time()
+        # Must not raise, and must return well before the slow call finishes.
+        debug_utils._dump_managed_job_queue_info({1}, jobs_dir, errors)
+        elapsed = time.time() - start
+
+        assert started.is_set()
+        assert elapsed < 3
+        assert len(errors) == 1
+        assert errors[0]['component'] == 'managed_jobs'
+        assert errors[0]['resource'] == 'queue_v2_batch'
+
 
 # ---------------------------------------------------------------------------
 # Tests for _collect_controller_debug_data
@@ -2039,6 +2075,108 @@ class TestCollectControllerDebugData:
         debug_utils._collect_controller_debug_data([1], str(tmp_path), errors)
 
         # Should record the rsync error
+        assert len(errors) == 1
+        assert 'rsync/' in errors[0]['resource']
+
+    @mock.patch('sky.utils.debug_utils.CloudVmRayBackend')
+    @mock.patch('sky.utils.debug_utils.backend_utils.is_controller_accessible')
+    def test_controller_exec_and_rsync_are_bounded(self, mock_accessible,
+                                                   mock_backend_cls, tmp_path):
+        """The controller exec + rsync must pass timeouts so a slow/wedged
+        controller can't hang the dump."""
+        from sky.utils import message_utils
+
+        mock_handle = mock.MagicMock()
+        mock_runner = mock.MagicMock()
+        mock_handle.get_command_runners.return_value = [mock_runner]
+        mock_accessible.return_value = mock_handle
+
+        manifest = {
+            'inline_data': [],
+            'file_paths': [{
+                'remote_path': '/some/file.log',
+                'relative_path': 'managed_jobs/1/1.log',
+            }],
+            'errors': [],
+        }
+        mock_backend = mock.MagicMock()
+        mock_backend.run_on_head.return_value = (
+            0, message_utils.encode_payload(manifest), '')
+        mock_backend_cls.return_value = mock_backend
+
+        errors: List[Dict[str, str]] = []
+        debug_utils._collect_controller_debug_data([1], str(tmp_path), errors)
+
+        # Exec is bounded by both a connect timeout and an overall timeout.
+        _, exec_kwargs = mock_backend.run_on_head.call_args
+        assert exec_kwargs['connect_timeout'] == (
+            debug_utils._CONTROLLER_EXEC_CONNECT_TIMEOUT)
+        assert exec_kwargs['timeout'] == debug_utils._CONTROLLER_EXEC_TIMEOUT
+        # Rsync is bounded by a total timeout.
+        _, rsync_kwargs = mock_runner.rsync.call_args
+        assert rsync_kwargs['timeout'] == debug_utils._CONTROLLER_RSYNC_TIMEOUT
+
+    @mock.patch('sky.utils.debug_utils.CloudVmRayBackend')
+    @mock.patch('sky.utils.debug_utils.backend_utils.is_controller_accessible')
+    def test_controller_exec_timeout_is_recorded_not_raised(
+            self, mock_accessible, mock_backend_cls, tmp_path):
+        """A timed-out controller exec is recorded as a partial failure; the
+        function returns instead of propagating and aborting the whole dump."""
+        mock_handle = mock.MagicMock()
+        mock_accessible.return_value = mock_handle
+
+        mock_backend = mock.MagicMock()
+        # run_with_log raises subprocess.TimeoutExpired on an exec timeout,
+        # which propagates out of run_on_head.
+        mock_backend.run_on_head.side_effect = subprocess.TimeoutExpired(
+            cmd='<manifest codegen>',
+            timeout=debug_utils._CONTROLLER_EXEC_TIMEOUT)
+        mock_backend_cls.return_value = mock_backend
+
+        errors: List[Dict[str, str]] = []
+        # Must not raise.
+        debug_utils._collect_controller_debug_data([1], str(tmp_path), errors)
+
+        assert len(errors) == 1
+        assert errors[0]['resource'] == 'controller_manifest'
+
+    @mock.patch('sky.utils.debug_utils.CloudVmRayBackend')
+    @mock.patch('sky.utils.debug_utils.backend_utils.is_controller_accessible')
+    def test_controller_rsync_timeout_is_recorded_not_raised(
+            self, mock_accessible, mock_backend_cls, tmp_path):
+        """A timed-out controller rsync is recorded as a partial failure and
+        does not abort the dump."""
+        from sky import exceptions as sky_exceptions
+        from sky.utils import message_utils
+
+        mock_handle = mock.MagicMock()
+        mock_runner = mock.MagicMock()
+        # rsync(timeout=...) raises CommandError (returncode 255) on timeout.
+        mock_runner.rsync.side_effect = sky_exceptions.CommandError(
+            returncode=255,
+            command='rsync ...',
+            error_msg='rsync timed out after 120 seconds.',
+            detailed_reason=None)
+        mock_handle.get_command_runners.return_value = [mock_runner]
+        mock_accessible.return_value = mock_handle
+
+        manifest = {
+            'inline_data': [],
+            'file_paths': [{
+                'remote_path': '/some/big.log',
+                'relative_path': 'managed_jobs/1/1.log',
+            }],
+            'errors': [],
+        }
+        mock_backend = mock.MagicMock()
+        mock_backend.run_on_head.return_value = (
+            0, message_utils.encode_payload(manifest), '')
+        mock_backend_cls.return_value = mock_backend
+
+        errors: List[Dict[str, str]] = []
+        # Must not raise.
+        debug_utils._collect_controller_debug_data([1], str(tmp_path), errors)
+
         assert len(errors) == 1
         assert 'rsync/' in errors[0]['resource']
 
@@ -3845,6 +3983,28 @@ class TestResolveRemoteSkyletLogPath:
 
         assert path == posixpath.join('~', skylet_constants.SKYLET_LOG_FILE)
 
+    def test_passes_overall_timeout(self):
+        """The resolve exec is bounded by an overall timeout, not just a
+        connect timeout, so a connected-but-stalled shell can't hang it."""
+        runner = mock.Mock()
+        runner.run.return_value = (0, '/home/sky/.sky/skylet.log\n', '')
+
+        debug_utils._resolve_remote_skylet_log_path(runner, 'c')
+
+        _, kwargs = runner.run.call_args
+        assert kwargs['timeout'] == debug_utils._SKYLET_LOG_RESOLVE_TIMEOUT
+
+    def test_falls_back_on_timeout(self):
+        """An overall-timeout (TimeoutExpired) is absorbed by the broad except
+        and the default log path is used -- no raise."""
+        runner = mock.Mock()
+        runner.run.side_effect = subprocess.TimeoutExpired(
+            cmd='echo ...', timeout=debug_utils._SKYLET_LOG_RESOLVE_TIMEOUT)
+
+        path = debug_utils._resolve_remote_skylet_log_path(runner, 'c')
+
+        assert path == posixpath.join('~', skylet_constants.SKYLET_LOG_FILE)
+
 
 class TestCollectClusterKubernetesResources:
     """Tests for the _collect_cluster_kubernetes_resources helper."""
@@ -4129,3 +4289,207 @@ class TestDumpKubeContextsInfo:
         assert len(errors) == 1
         assert errors[0]['resource'] == 'allowed_contexts'
         assert 'boom' in errors[0]['error']
+
+
+# ---------------------------------------------------------------------------
+# Tests for the best-effort overall deadline (FIX 4)
+# ---------------------------------------------------------------------------
+class TestRunWithDeadline:
+    """_run_with_deadline: success / timeout / orphan tracking / no leak."""
+
+    def test_success_returns_result(self):
+        ok, result = debug_utils._run_with_deadline(lambda: 42,
+                                                    timeout=5,
+                                                    component='c',
+                                                    resource='r')
+        assert ok is True
+        assert result == 42
+
+    def test_timeout_records_error_and_orphan(self):
+        """On timeout: (False, None), a partial-failure error, and the still-
+        running op registered in orphans (worker is not killed)."""
+        release = threading.Event()
+        errors: List[Dict[str, Any]] = []
+        orphans: List[Dict[str, Any]] = []
+        try:
+            ok, result = debug_utils._run_with_deadline(release.wait,
+                                                        timeout=0.05,
+                                                        component='comp',
+                                                        resource='res',
+                                                        errors=errors,
+                                                        orphans=orphans)
+            assert ok is False
+            assert result is None
+            assert len(errors) == 1
+            assert errors[0]['component'] == 'comp'
+            assert len(orphans) == 1
+            assert orphans[0]['resource'] == 'res'
+            # The worker thread is orphaned, still running (not killed).
+            assert not orphans[0]['future'].done()
+        finally:
+            release.set()  # let the orphaned worker exit promptly
+
+    def test_non_timeout_exception_propagates(self):
+        """A non-timeout error from fn propagates (each call site keeps its own
+        handling); the finally still shuts the executor down."""
+
+        def boom():
+            raise ValueError('boom')
+
+        with pytest.raises(ValueError, match='boom'):
+            debug_utils._run_with_deadline(boom,
+                                           timeout=5,
+                                           component='c',
+                                           resource='r')
+
+    def test_log_stragglers_warns_running_skips_done(self, monkeypatch):
+        running: concurrent.futures.Future = concurrent.futures.Future()
+        done: concurrent.futures.Future = concurrent.futures.Future()
+        done.set_result(None)
+        orphans = [
+            {
+                'component': 'still',
+                'resource': 'running',
+                'future': running,
+                'started': time.monotonic() - 2,
+            },
+            {
+                'component': 'already',
+                'resource': 'done',
+                'future': done,
+                'started': time.monotonic() - 2,
+            },
+        ]
+        calls = []
+        monkeypatch.setattr(debug_utils.logger, 'warning',
+                            lambda *a, **k: calls.append(a))
+        debug_utils._log_timed_out_stragglers(orphans)
+        # Exactly one warning, for the still-running op; the done one is skipped.
+        assert len(calls) == 1
+        assert 'still' in calls[0] and 'running' in calls[0]
+
+
+class TestOverallDeadlineHelpers:
+    """Unit tests for the small deadline/budget helpers."""
+
+    def test_no_deadline_is_noop(self):
+        assert debug_utils._remaining_budget(None) is None
+        assert debug_utils._deadline_exceeded(None) is False
+        # With no deadline the per-op timeout is unchanged.
+        assert debug_utils._bounded_timeout(120, None) == 120
+
+    def test_remaining_budget_and_exceeded(self):
+        future = time.monotonic() + 100
+        assert debug_utils._remaining_budget(future) > 0
+        assert debug_utils._deadline_exceeded(future) is False
+
+        past = time.monotonic() - 1
+        assert debug_utils._remaining_budget(past) <= 0
+        assert debug_utils._deadline_exceeded(past) is True
+
+    def test_bounded_timeout_clamps_to_remaining(self):
+        # A generous deadline leaves the fixed timeout untouched.
+        assert debug_utils._bounded_timeout(120, time.monotonic() + 1000) == 120
+        # A tight deadline clamps the fixed timeout down.
+        assert debug_utils._bounded_timeout(120, time.monotonic() + 5) <= 5
+
+
+class TestOverallDeadlineDump:
+    """End-to-end tests that the overall deadline yields a partial dump and
+    that the default (no deadline) path is unchanged."""
+
+    _CROSSLINK_FNS = (
+        '_get_managed_jobs_from_clusters',
+        '_populate_recent_context',
+        '_get_managed_jobs_from_requests',
+        '_get_job_clusters_from_managed_jobs',
+        '_get_requests_from_clusters',
+        '_get_requests_from_managed_jobs',
+        '_get_clusters_from_requests',
+        '_get_clusters_from_managed_jobs',
+    )
+    _SECTION_FNS = (
+        '_dump_server_info',
+        '_dump_kube_contexts_info',
+        '_dump_request_id_info',
+        '_dump_cluster_info',
+        '_dump_managed_job_info',
+    )
+
+    @contextlib.contextmanager
+    def _patched_dump(self, tmp_path):
+        """Patch all cross-link + section helpers; yield the section mocks."""
+        with contextlib.ExitStack() as stack:
+            for fn in self._CROSSLINK_FNS:
+                stack.enter_context(mock.patch(f'sky.utils.debug_utils.{fn}'))
+            section_mocks = {
+                fn:
+                stack.enter_context(mock.patch(f'sky.utils.debug_utils.{fn}'))
+                for fn in self._SECTION_FNS
+            }
+            stack.enter_context(
+                mock.patch('sky.utils.debug_utils.DEBUG_DUMP_DIR',
+                           str(tmp_path / 'debug_dumps')))
+            yield section_mocks
+
+    @staticmethod
+    def _read_errors(zip_path):
+        with zipfile.ZipFile(zip_path, 'r') as zf:
+            name = next(n for n in zf.namelist() if n.endswith('errors.json'))
+            return json.loads(zf.read(name))
+
+    def test_past_deadline_skips_sections_but_still_zips(self, tmp_path):
+        """An already-passed overall_deadline (e.g. the caller spent the whole
+        budget queueing) skips every section with its own recorded reason, yet
+        still produces a real (partial) zip. Exercises the real wall-clock ->
+        monotonic conversion + >=0 clamp, no internal mocking."""
+        with self._patched_dump(tmp_path) as section_mocks:
+            result = debug_utils.create_debug_dump(
+                cluster_names=['c'], overall_deadline=time.time() - 1)
+
+        # A partial zip is still produced and returned.
+        assert result.exists()
+        assert zipfile.is_zipfile(result)
+
+        # No section ran (all were skipped before starting).
+        for fn, m in section_mocks.items():
+            assert not m.called, f'{fn} should have been skipped'
+
+        # Every section got its own skip record.
+        errors = self._read_errors(result)
+        skip_records = [
+            e for e in errors
+            if e.get('error') == 'Skipped: overall debug-dump deadline '
+            'exceeded.'
+        ]
+        assert len(skip_records) == len(self._SECTION_FNS)
+        assert all(e['resource'] == 'section' for e in skip_records)
+
+    def test_no_deadline_runs_all_sections(self, tmp_path):
+        """overall_deadline=None == unchanged behavior: every section runs and
+        nothing is skipped."""
+        with self._patched_dump(tmp_path) as section_mocks:
+            result = debug_utils.create_debug_dump(cluster_names=['c'],
+                                                   overall_deadline=None)
+
+        assert result.exists()
+        for fn, m in section_mocks.items():
+            assert m.call_count == 1, f'{fn} should have run exactly once'
+
+        errors = self._read_errors(result)
+        skip_records = [
+            e for e in errors
+            if e.get('error', '').startswith('Skipped: overall debug-dump')
+        ]
+        assert not skip_records
+
+    def test_future_deadline_runs_all_sections(self, tmp_path):
+        """A generous future overall_deadline must not spuriously skip: every
+        section runs when there is budget left."""
+        with self._patched_dump(tmp_path) as section_mocks:
+            result = debug_utils.create_debug_dump(
+                cluster_names=['c'], overall_deadline=time.time() + 3600)
+
+        assert result.exists()
+        for fn, m in section_mocks.items():
+            assert m.call_count == 1, f'{fn} should have run exactly once'

@@ -308,6 +308,23 @@ def test_concurrent_context_isolation(monkeypatch, api_func):
         os.unlink(config_file)
 
 
+def test_get_api_client_requests_gzip(monkeypatch):
+    """The API client advertises gzip so the server compresses responses.
+
+    Requesting ``Accept-Encoding: gzip`` lets the API server compress large
+    LIST responses (e.g. nodes/pods on big clusters); urllib3 transparently
+    decompresses them. This substantially cuts transfer time on high-latency
+    or low-bandwidth connections to the API server.
+    """
+    config_file = _create_test_kubeconfig(num_contexts=1)
+    try:
+        monkeypatch.setattr(kubernetes, '_get_config_file', lambda: config_file)
+        client = kubernetes._get_api_client('context-0')  # pylint: disable=protected-access
+        assert client.default_headers.get('Accept-Encoding') == 'gzip'
+    finally:
+        os.unlink(config_file)
+
+
 def test_urllib3_log_suppression_survives_client_construction(monkeypatch):
     """API getters suppress urllib3 warnings with rare setLevel() calls.
 
@@ -318,16 +335,19 @@ def test_urllib3_log_suppression_survives_client_construction(monkeypatch):
       just once per process.
     - Pre-Python-3.13 fork deadlock
       (https://github.com/python/cpython/pull/109462): Logger.setLevel()
-      acquires logging's process-wide lock, so the adaptor must not call it
-      on every API call — only when a client construction reset the level.
+      AND logging.getLogger() both acquire logging's process-wide lock, so
+      the adaptor must call neither on every API call — setLevel() only
+      when a client construction reset the level, and getLogger() only at
+      decoration time.
     """
     api_client_mock = MagicMock()
+    urllib3_logger = logging.getLogger('urllib3')
 
     def stomping_get_api_client(context=None):
         # Mimic kubernetes.client.Configuration.__init__, which resets the
         # urllib3 logger to WARNING (via the `debug` property setter) every
         # time a client is constructed.
-        logging.getLogger('urllib3').setLevel(logging.WARNING)
+        urllib3_logger.setLevel(logging.WARNING)
         return api_client_mock
 
     monkeypatch.setattr(kubernetes, '_get_api_client', stomping_get_api_client)
@@ -342,7 +362,6 @@ def test_urllib3_log_suppression_survives_client_construction(monkeypatch):
         lambda api_client=None: SimpleNamespace(api_client=api_client),
     )
 
-    urllib3_logger = logging.getLogger('urllib3')
     original_level = urllib3_logger.level
     original_set_level = urllib3_logger.setLevel
     original_set_level(logging.NOTSET)
@@ -355,9 +374,22 @@ def test_urllib3_log_suppression_survives_client_construction(monkeypatch):
 
     monkeypatch.setattr(urllib3_logger, 'setLevel', counting_set_level)
 
+    # logging.getLogger() also acquires logging's process-wide lock on
+    # Python < 3.13, so API calls must not resolve the urllib3 logger anew
+    # each time — the adaptor resolves it once at decoration time.
+    real_get_logger = logging.getLogger
+    resolved_names = []
+
+    def counting_get_logger(name=None):
+        resolved_names.append(name)
+        return real_get_logger(name)
+
+    monkeypatch.setattr(logging, 'getLogger', counting_get_logger)
+
     try:
         annotations.clear_request_level_cache()
         kubernetes.core_api()
+        assert 'urllib3' not in resolved_names
 
         # Despite the construction-time reset to WARNING, warnings must be
         # suppressed on the child loggers urllib3 actually emits through

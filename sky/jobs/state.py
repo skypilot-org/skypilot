@@ -727,6 +727,12 @@ _SPOT_STATUS_TO_COLOR = {
     ManagedJobStatus.DEPRECATED_SUBMITTED: colorama.Fore.BLUE,
 }
 
+# Machine-readable code stored on RECOVERING job events that were triggered
+# by the user job exiting non-zero (as opposed to preemption / infra failures,
+# whose codes come from ExternalClusterFailure). Consumed by dashboard event
+# styling; do not rename without updating consumers.
+USER_JOB_FAILURE_EVENT_CODE = 'USER_JOB_FAILURE'
+
 
 class RecoverySource(enum.Enum):
     """Why a managed job entered the RECOVERING status.
@@ -1835,6 +1841,99 @@ def get_status_counts_by_workspace_user_cloud(
     with orm.Session(engine) as session:
         rows = session.execute(query).fetchall()
     return [(row[0], row[1], row[2], str(row[3]), int(row[4])) for row in rows]
+
+
+def get_recovery_event_counts_by_source_workspace(
+) -> List[Tuple[str, Optional[str], int]]:
+    """Return RECOVERING job_events counts grouped by source/workspace.
+
+    Each tuple is (recovery_source, workspace, count). Counts the
+    RECOVERING events currently retained in ``job_events``; the table
+    has a retention window (see the job-event retention daemon), so the
+    numbers are NOT monotone — rows aging out decrease them. Consumers
+    that want rates must window with ``delta`` and clamp, never
+    ``increase``.
+
+    Rows written before the ``recovery_source`` column existed carry
+    NULL and are excluded: user-facing consumers treat NULL as FAILURE
+    for back-compat, but the metric only counts classified recoveries
+    (the ambiguity ages out with the retention window anyway).
+
+    Used by the Prometheus collector to emit per-source labeled gauges.
+    """
+    query = sqlalchemy.select(
+        job_events_table.c.recovery_source,
+        job_info_table.c.workspace,
+        sqlalchemy.func.count().label('cnt'),  # pylint: disable=not-callable
+    ).select_from(
+        job_events_table.outerjoin(
+            job_info_table,
+            job_events_table.c.spot_job_id == job_info_table.c.spot_job_id,
+        )).where(
+            job_events_table.c.new_status == ManagedJobStatus.RECOVERING.value,
+            job_events_table.c.recovery_source.isnot(None),
+        ).group_by(
+            job_events_table.c.recovery_source,
+            job_info_table.c.workspace,
+        )
+
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
+        rows = session.execute(query).fetchall()
+    return [(str(row[0]), row[1], int(row[2])) for row in rows]
+
+
+def get_active_emergency_recovery_episodes(
+    now: float,
+    window_seconds: float,
+    limit: int,
+) -> List[Tuple[int, Optional[str], Optional[str], int]]:
+    """Return jobs currently inside an active emergency-recovery episode.
+
+    Each tuple is (spot_job_id, job_name, workspace,
+    emergency_recovery_count). A job qualifies while its most recent
+    emergency attempt is younger than *window_seconds* (the same window
+    the controller uses to reset the retry budget — an episode "ends"
+    after that much quiet) AND at least one of its tasks is
+    non-terminal: a job that reached a terminal status should stop
+    reporting immediately instead of lingering for the rest of the
+    window.
+
+    Ordered by attempt count (highest first) with a deterministic
+    tiebreak (oldest last-attempt first, then job id) so that when a
+    caller truncates to *limit*, the surviving set is stable across
+    calls — an unstable order would rotate which jobs a capped metric
+    reports, flapping alerts built on it.
+    """
+    cutoff = now - window_seconds
+    terminal_values = [
+        status.value for status in ManagedJobStatus.terminal_statuses()
+    ]
+    non_terminal_exists = sqlalchemy.exists().where(
+        spot_table.c.spot_job_id == job_info_table.c.spot_job_id,
+        spot_table.c.status.notin_(terminal_values),
+    )
+    query = sqlalchemy.select(
+        job_info_table.c.spot_job_id,
+        job_info_table.c.name,
+        job_info_table.c.workspace,
+        job_info_table.c.emergency_recovery_count,
+    ).where(
+        job_info_table.c.last_emergency_recovery_at.isnot(None),
+        job_info_table.c.last_emergency_recovery_at >= cutoff,
+        job_info_table.c.emergency_recovery_count.isnot(None),
+        job_info_table.c.emergency_recovery_count > 0,
+        non_terminal_exists,
+    ).order_by(
+        job_info_table.c.emergency_recovery_count.desc(),
+        job_info_table.c.last_emergency_recovery_at.asc(),
+        job_info_table.c.spot_job_id.asc(),
+    ).limit(limit)
+
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
+        rows = session.execute(query).fetchall()
+    return [(int(row[0]), row[1], row[2], int(row[3])) for row in rows]
 
 
 def get_managed_jobs_with_filters(
@@ -2980,9 +3079,15 @@ async def set_recovering_async(
     callback_func: AsyncCallbackType,
     external_failures: Optional[List[ExternalClusterFailure]] = None,
     cluster_event_reason: Optional[str] = None,
+    user_job_failure_reason: Optional[str] = None,
     recovery_source: RecoverySource = RecoverySource.FAILURE,
 ):
     """Set the task to recovering state, and update the job duration.
+
+    user_job_failure_reason is set when the recovery was triggered by the
+    user job exiting non-zero on a healthy cluster (max_restarts_on_errors /
+    recover_on_exit_codes), so the event tells the user their program
+    failed instead of claiming the cluster was preempted.
 
     recovery_source records why the job is recovering (defaults to FAILURE,
     i.e. preemption/failure). It is stored on the RECOVERING job event so
@@ -2998,6 +3103,9 @@ async def set_recovering_async(
     if external_failures:
         code = '; '.join(f.code for f in external_failures)
         reason = '; '.join(f.reason for f in external_failures)
+    elif user_job_failure_reason:
+        code = USER_JOB_FAILURE_EVENT_CODE
+        reason = user_job_failure_reason
     elif cluster_event_reason:
         reason = cluster_event_reason
     else:
@@ -3357,8 +3465,15 @@ async def set_failed_async(
     override_terminal: bool = False,
 ):
     """Set an entire job or task to failed."""
+    # FAILED / FAILED_SETUP mean the user's own program (or setup command)
+    # failed, as opposed to controller / infra / resource failures. Stamp the
+    # machine-readable code so consumers (e.g. dashboard event styling) can
+    # attribute the failure without parsing the reason text.
+    code = (USER_JOB_FAILURE_EVENT_CODE
+            if failure_type in (ManagedJobStatus.FAILED,
+                                ManagedJobStatus.FAILED_SETUP) else None)
     await add_job_event_async(job_id, task_id, failure_type,
-                              f'Job failed: {failure_reason}')
+                              f'Job failed: {failure_reason}', code)
     assert failure_type.is_failed(), failure_type
     end_time = time.time() if end_time is None else end_time
 
@@ -3492,8 +3607,6 @@ def update_links(job_id: int, task_id: Optional[int], links: Dict[str,
 async def set_cancelling_async(job_id: int, callback_func: AsyncCallbackType):
     """Set tasks in the job as cancelling, if they are in non-terminal
     states."""
-    await add_job_event_async(job_id, None, ManagedJobStatus.CANCELLING,
-                              'Job is cancelling')
 
     async def _op(session):
         result = await session.execute(
@@ -3509,6 +3622,13 @@ async def set_cancelling_async(job_id: int, callback_func: AsyncCallbackType):
 
     updated = await _retry_session(_op)
     if updated:
+        # Only record the event when a task actually transitioned; the
+        # controller also calls this on already-terminal jobs (e.g. right
+        # after a task fails), and unconditionally writing the event made
+        # every failed job's event log end with a spurious
+        # CANCELLING/CANCELLED pair.
+        await add_job_event_async(job_id, None, ManagedJobStatus.CANCELLING,
+                                  'Job is cancelling')
         logger.info('Cancelling the job...')
         await callback_func('CANCELLING')
     else:
@@ -3517,8 +3637,6 @@ async def set_cancelling_async(job_id: int, callback_func: AsyncCallbackType):
 
 async def set_cancelled_async(job_id: int, callback_func: AsyncCallbackType):
     """Set tasks in the job as cancelled, if they are in CANCELLING state."""
-    await add_job_event_async(job_id, None, ManagedJobStatus.CANCELLED,
-                              'Job has been cancelled')
 
     async def _op(session):
         result = await session.execute(
@@ -3540,6 +3658,10 @@ async def set_cancelled_async(job_id: int, callback_func: AsyncCallbackType):
 
     updated = await _retry_session(_op)
     if updated:
+        # Only record the event when a task actually transitioned; see
+        # set_cancelling_async for why.
+        await add_job_event_async(job_id, None, ManagedJobStatus.CANCELLED,
+                                  'Job has been cancelled')
         logger.info('Job cancelled.')
         await callback_func('CANCELLED')
     else:

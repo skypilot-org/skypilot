@@ -263,6 +263,14 @@ def _format_provision_failure_blocks(
 # Number of seconds to wait locking the cluster before communicating with user.
 _CLUSTER_LOCK_TIMEOUT = 5.0
 
+# When a provision request cannot get the cluster lock within
+# _CLUSTER_LOCK_TIMEOUT and runs on an API server executor, it is parked as
+# WAITING (releasing the executor worker) until the lock is observed to be
+# acquirable, instead of holding the worker blocked on the lock for the whole
+# duration of the conflicting operation. This gap is the fallback reschedule
+# backoff when waiting on the lock condition fails (e.g. a database glitch).
+_CLUSTER_LOCK_RETRY_GAP_SECONDS = 30
+
 
 def _is_message_too_long(returncode: int,
                          output: Optional[str] = None,
@@ -1233,6 +1241,12 @@ class RetryingVmProvisioner(object):
                 usage_lib.messages.usage.update_final_cluster_status(
                     status_lib.ClusterStatus.INIT)
 
+                # Capture the task YAML.
+                user_specified_task_config = None
+                if task is not None:
+                    user_specified_task_config = task.to_yaml_config(
+                        use_user_specified_yaml=True)
+
                 # This sets the status to INIT (even for a normal, UP cluster).
                 global_user_state.add_or_update_cluster(
                     cluster_name,
@@ -1241,6 +1255,7 @@ class RetryingVmProvisioner(object):
                     ready=False,
                     is_managed=self._is_managed,
                     provision_log_path=log_abs_path,
+                    task_config=user_specified_task_config,
                 )
 
                 # Add cluster event for actual provisioning start.
@@ -3124,6 +3139,21 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         # a job (detach_setup, default).
         self._setup_cmd = None
 
+    @staticmethod
+    def _inline_command_quote_levels(handle: CloudVmRayResourceHandle) -> int:
+        # SSHCommandRunner quotes for the remote login shell and local shell.
+        quote_levels = 2
+        if isinstance(handle.launched_resources.cloud, clouds.Slurm):
+            # SlurmCommandRunner adds an srun bash -c shell.
+            quote_levels += 1
+            cluster_info = handle.cached_cluster_info
+            if (cluster_info is not None and
+                    cluster_info.provider_config is not None and
+                    cluster_info.provider_config.get('slurm_user') is not None):
+                # SlurmLoginNodeCommandRunner adds the su --command shell.
+                quote_levels += 1
+        return quote_levels
+
     # --- Implementation of Backend APIs ---
 
     def register_info(self, **kwargs) -> None:
@@ -3297,6 +3327,11 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 (e.g., cluster name invalid) or a region/zone throwing
                 resource unavailability.
             exceptions.CommandError: any ssh command error.
+            exceptions.ExecutionPausedError: when running on an API server
+                executor worker and the cluster lock is held by another
+                operation: the request is parked as WAITING (releasing the
+                worker) and re-enqueued once the lock is observed to be
+                acquirable, instead of blocking on the lock.
             RuntimeError: raised when 'rsync' is not installed.
             # TODO(zhwu): complete the list of exceptions.
         """
@@ -3319,7 +3354,55 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                               retry_until_up,
                                               skip_unnecessary_provisioning,
                                               resize)
-            except locks.LockTimeout:
+            except locks.LockTimeout as e:
+                # When running a server request that the scheduler can park and
+                # resume, release the worker instead of holding it blocked on
+                # the cluster lock: raising ExecutionPausedError marks the
+                # request WAITING and re-enqueues it once the attached
+                # condition observes the lock to be acquirable.
+                #
+                # The request context is the sole gate on purpose: it is
+                # exactly "a scheduler manages this request and can park and
+                # resume it". Launches issued by the jobs controller park too.
+                # The controller always launches through the SDK
+                # (recovery_strategy), so its launches run as scheduler-managed
+                # requests on whichever API server serves them: under
+                # consolidation that is the shared API server, where blocking
+                # on the lock pins one executor worker per contender (e.g.
+                # duplicate launch requests for the same cluster after
+                # controller retries) and starves the worker pool at scale;
+                # on a dedicated controller, it is the controller's local API
+                # server, where parking is equally safe -- the controller
+                # explicitly supports parked launch requests (see
+                # _wait_for_parked_request in recovery_strategy), since
+                # admission-wait pauses already park its launches via this
+                # same mechanism. Only callers with no request context (no
+                # scheduler to hand the pause to) keep the blocking behavior
+                # below.
+                #
+                # Note on expected impact: in a healthy system controller
+                # launches should rarely contend on their own cluster lock at
+                # all -- the controller runs one launch attempt per job and
+                # reattaches to an in-flight or parked request on restart
+                # rather than submitting a duplicate, and a holder whose
+                # process died releases the lock (advisory locks are
+                # session-scoped). Parking here is consistency and defense in
+                # depth: when a bug does produce concurrent launches for one
+                # cluster (observed in practice), the losers release their
+                # workers instead of blocking one worker each for the
+                # duration of the holder's operation.
+                if common_utils.is_in_request_context():
+                    raise exceptions.ExecutionPausedError(
+                        f'Cluster {cluster_name!r} is locked by another '
+                        'operation (e.g. launch, start, stop, autostop or '
+                        'teardown).',
+                        hint=('Waiting for the other operation to finish; '
+                              'will resume once the cluster lock is '
+                              'released. Check concurrent requests: '
+                              f'sky api status -v | grep {cluster_name}'),
+                        retry_wait_seconds=_CLUSTER_LOCK_RETRY_GAP_SECONDS,
+                        continue_condition=locks.LockAcquirableCondition(
+                            lock_id)) from e
                 if not communicated_with_user:
                     rich_utils.force_update_status(
                         ux_utils.spinner_message('Launching - blocked by ' +
@@ -3993,8 +4076,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 _dump_final_script(setup_script,
                                    constants.PERSISTENT_SETUP_SCRIPT_PATH)
 
-            if (detach_setup or
-                    backend_utils.is_command_length_over_limit(encoded_script)):
+            if (detach_setup or backend_utils.is_command_length_over_limit(
+                    encoded_script,
+                    quote_levels=self._inline_command_quote_levels(handle))):
                 _dump_final_script(setup_script)
                 create_script_code = 'true'
             else:
@@ -4213,7 +4297,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                         user_id=managed_job_user_id,
                         execution=execution)
 
-                if backend_utils.is_command_length_over_limit(codegen):
+                if backend_utils.is_command_length_over_limit(
+                        codegen,
+                        quote_levels=self._inline_command_quote_levels(handle)):
                     _dump_code_to_file(codegen)
                     queue_job_request = jobsv1_pb2.QueueJobRequest(
                         job_id=job_id,
@@ -4236,7 +4322,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 use_legacy = True
 
         if use_legacy:
-            if backend_utils.is_command_length_over_limit(job_submit_cmd):
+            if backend_utils.is_command_length_over_limit(
+                    job_submit_cmd,
+                    quote_levels=self._inline_command_quote_levels(handle)):
                 _dump_code_to_file(codegen)
                 job_submit_cmd = f'{mkdir_code} && {code}'
 
