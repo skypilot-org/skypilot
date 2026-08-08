@@ -1794,7 +1794,12 @@ def get_config_schema():
             },
             'bucket': {
                 'type': 'string',
-                'pattern': '^(https|s3|gs|r2|cos)://.+',
+                # Keep in sync with the URL prefixes `StoreType` understands
+                # (`StoreType.store_prefix()`). `controller_utils` resolves
+                # this value with `StoreType.get_fields_from_store_url()`, so
+                # every prefix that resolver accepts has to validate here.
+                'pattern': ('^(https|s3|gs|r2|cos|oci|nebius|cw|vastdata|hf)'
+                            '://.+'),
                 'required': [],
             },
             'force_disable_cloud_bucket': {
