@@ -33,6 +33,42 @@ def test_get_kubernetes_nodes():
             utils.get_kubernetes_nodes(context='test')
 
 
+def test_get_kubernetes_node_info_capacity_vs_allocatable():
+    """A device-plugin withdrawal must be visible in the node info.
+
+    When the device plugin marks devices unhealthy (e.g. after an XID error),
+    kubelet keeps them in status.capacity but drops them from
+    status.allocatable. `total` must report the physical count with
+    allocatable alongside — deriving total from allocatable would shrink the
+    node's reported size in lockstep with the failure, hiding it — and
+    `accelerators_available` must be measured against allocatable so
+    withdrawn devices never count as free.
+    """
+    node = mock.MagicMock()
+    node.metadata.name = 'degraded-node'
+    node.metadata.labels = {'skypilot.co/accelerator': 'h100'}
+    node.status.capacity = {'nvidia.com/gpu': '8'}
+    node.status.allocatable = {'nvidia.com/gpu': '5'}
+    node.is_ready.return_value = True
+    node.is_cordoned.return_value = False
+    node.get_taints.return_value = []
+
+    with mock.patch('sky.provision.kubernetes.utils.get_kubernetes_nodes',
+                   return_value=[node]), \
+         mock.patch('sky.provision.kubernetes.utils.'
+                   'get_allocated_resources_by_node',
+                   return_value=({'degraded-node': 3}, {})), \
+         mock.patch('sky.provision.kubernetes.utils.get_gpu_resource_key',
+                    return_value='nvidia.com/gpu'):
+        node_info = utils.get_kubernetes_node_info()
+
+    info = node_info.node_info_dict['degraded-node']
+    assert info.total['accelerator_count'] == 8
+    assert info.total['accelerator_allocatable'] == 5
+    # 5 allocatable - 3 requested; the 3 withdrawn devices are not free.
+    assert info.free['accelerators_available'] == 2
+
+
 def test_get_kubernetes_node_info():
     """Tests get_kubernetes_node_info function."""
     # Mock node and pod objects
