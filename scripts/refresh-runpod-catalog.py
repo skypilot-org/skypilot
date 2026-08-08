@@ -13,6 +13,7 @@ from typing import Any
 
 import runpod
 from runpod.api import graphql
+
 from sky.catalog import common as catalog_common
 from sky.catalog.data_fetchers import fetch_runpod
 
