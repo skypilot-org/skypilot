@@ -1639,12 +1639,22 @@ class TestYamlSpecs:
 @pytest.mark.no_nebius  # Nebius does not support K80s
 @pytest.mark.no_hyperbolic  # Hyperbolic only supports one GPU type per instance
 @pytest.mark.no_seeweb  # Seeweb does not support K80s
-def test_multiple_accelerators_ordered():
+def test_multiple_accelerators_ordered(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
     test = smoke_tests_utils.Test(
         'multiple-accelerators-ordered',
         [
-            f'sky launch -y -c {name} tests/test_yamls/test_multiple_accelerators_ordered.yaml | grep "Using user-specified accelerators list"',
+            # Pin the lane's cloud: the task YAML has no infra, so an
+            # unpinned launch is optimized across every enabled cloud and
+            # can land on one whose provisioning queues instead of failing
+            # over (e.g. a busy Slurm partition), hanging the test until
+            # timeout. Autodown (-i 10 --down) backstops cluster cleanup:
+            # teardown is skipped when the CI job is killed mid-launch, and
+            # the abandoned cluster otherwise provisions later and sits UP
+            # holding a GPU indefinitely.
+            f'sky launch -y -c {name} --infra {generic_cloud} -i 10 --down '
+            f'tests/test_yamls/test_multiple_accelerators_ordered.yaml | '
+            f'grep "Using user-specified accelerators list"',
             f'sky logs {name} 1 --status',  # Ensure the job succeeded.
         ],
         f'sky down -y {name}',
