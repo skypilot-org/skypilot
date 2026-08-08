@@ -988,7 +988,8 @@ class StrategyExecutor:
                                     # try and avoid a resource leak. Clouds
                                     # without autodown support get no failsafe
                                     # rather than a failed precheck.
-                                    autodown = _autodown_is_supported(self.dag)
+                                    autodown = await asyncio.to_thread(
+                                        _autodown_is_supported, self.dag)
                                     request_id = await asyncio.to_thread(
                                         sdk.launch,
                                         self.dag,
