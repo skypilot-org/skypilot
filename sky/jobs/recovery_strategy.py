@@ -15,6 +15,7 @@ import typing
 from typing import Any, Callable, Coroutine, Dict, List, Optional, Set
 
 from sky import backends
+from sky import clouds
 from sky import dag as dag_lib
 from sky import exceptions
 from sky import global_user_state
@@ -70,6 +71,43 @@ def _is_oom_failure(exception: Exception) -> bool:
     """Whether `exception` indicates an out-of-memory pod termination."""
     message = common_utils.format_exception(exception).lower()
     return any(sig in message for sig in _OOM_FAILURE_SIGNATURES)
+
+
+def _autodown_is_supported(dag: 'dag_lib.Dag') -> bool:
+    """Whether the worker cluster's autodown failsafe can be requested.
+
+    Autodown on the ephemeral worker cluster is only a failsafe against a
+    resource leak if the controller dies; the normal path tears the cluster
+    down explicitly. Requesting it adds ``CloudImplementationFeatures.AUTODOWN``
+    to the launch's required features, which normally just narrows the
+    candidates to the clouds that implement autodown. When *every* candidate
+    is on a cloud that does not, that leaves nothing to fail over to and the
+    failsafe turns a launchable job into a provisioning precheck failure --
+    drop the failsafe rather than the job.
+
+    A resources candidate that leaves the cloud open counts as supporting
+    autodown, since the feature check can still resolve it to a cloud that
+    does.
+    """
+    for task in dag.tasks:
+        if not any(
+                _resources_support_autodown(candidate)
+                for candidate in task.resources):
+            return False
+    return True
+
+
+def _resources_support_autodown(candidate: 'resources.Resources') -> bool:
+    """Whether autodown can be requested for a single resources candidate."""
+    cloud = candidate.cloud
+    if cloud is None:
+        return True
+    try:
+        cloud.check_features_are_supported(
+            candidate, {clouds.CloudImplementationFeatures.AUTODOWN})
+    except exceptions.NotSupportedError:
+        return False
+    return True
 
 
 ENV_VARS_TO_CLEAR = [
@@ -952,18 +990,22 @@ class StrategyExecutor:
                             try:
                                 if reattach_request_id is None:
                                     extra_ctx = self.extra_launch_context()
+                                    # We expect to tear down the cluster as
+                                    # soon as the job is finished. However, in
+                                    # case the controller dies, set autodown to
+                                    # try and avoid a resource leak. Clouds
+                                    # without autodown support get no failsafe
+                                    # rather than a failed precheck.
+                                    autodown = await asyncio.to_thread(
+                                        _autodown_is_supported, self.dag)
                                     request_id = await asyncio.to_thread(
                                         sdk.launch,
                                         self.dag,
                                         cluster_name=self.cluster_name,
-                                        # We expect to tear down the cluster as
-                                        # soon as the job is finished. However,
-                                        # in case the controller dies, set
-                                        # autodown to try and avoid a resource
-                                        # leak.
                                         idle_minutes_to_autostop=(
-                                            _AUTODOWN_MINUTES),
-                                        down=True,
+                                            _AUTODOWN_MINUTES
+                                            if autodown else None),
+                                        down=autodown,
                                         _is_launched_by_jobs_controller=True,
                                         _file_mounts_blob_id=(
                                             self.file_mounts_blob_id),

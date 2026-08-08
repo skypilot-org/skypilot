@@ -5,6 +5,9 @@ from unittest import mock
 
 import pytest
 
+import sky
+from sky import clouds
+from sky import dag as dag_lib
 from sky import exceptions
 from sky.jobs import recovery_strategy
 from sky.jobs import scheduler as scheduler_module
@@ -30,6 +33,53 @@ def test_is_oom_failure_is_case_insensitive():
 def test_is_oom_failure_false_for_unrelated():
     assert recovery_strategy._is_oom_failure(
         RuntimeError('/bin/bash: line 1: conda: command not found')) is False
+
+
+# ---------------------------------------------------------------------------
+# Worker-cluster autodown failsafe (skipped on clouds without autodown, so the
+# failsafe cannot turn a launchable job into a failed precheck).
+# ---------------------------------------------------------------------------
+
+
+def _dag_with(*infras):
+    dag = dag_lib.Dag()
+    dag.add(sky.Task().set_resources(
+        {sky.Resources(infra=infra) for infra in infras}))
+    return dag
+
+
+def test_autodown_is_supported_for_cloud_that_implements_it():
+    assert recovery_strategy._autodown_is_supported(_dag_with('aws')) is True
+
+
+def test_autodown_is_not_supported_when_the_pinned_cloud_rejects_it():
+    # Verda lists AUTODOWN in _CLOUD_UNSUPPORTED_FEATURES.
+    with pytest.raises(exceptions.NotSupportedError):
+        clouds.Verda.check_features_are_supported(
+            sky.Resources(infra='verda'),
+            {clouds.CloudImplementationFeatures.AUTODOWN})
+    assert recovery_strategy._autodown_is_supported(_dag_with('verda')) is False
+
+
+def test_autodown_is_kept_when_one_candidate_cloud_supports_it():
+    # With a supporting candidate left to fail over to, requesting autodown
+    # only narrows the candidates -- it does not fail the launch -- so the
+    # failsafe is worth keeping.
+    assert recovery_strategy._autodown_is_supported(_dag_with('aws',
+                                                              'verda')) is True
+
+
+def test_autodown_is_dropped_when_no_candidate_cloud_supports_it():
+    assert recovery_strategy._autodown_is_supported(
+        _dag_with('verda', 'verda/FIN-01')) is False
+
+
+def test_autodown_is_supported_when_no_cloud_is_pinned():
+    # An open cloud choice keeps the current behaviour: the requested feature
+    # narrows the candidates rather than failing the launch outright.
+    dag = dag_lib.Dag()
+    dag.add(sky.Task())
+    assert recovery_strategy._autodown_is_supported(dag) is True
 
 
 # ---------------------------------------------------------------------------
@@ -271,6 +321,42 @@ def _patch_launch_environment(monkeypatch):
     return types.SimpleNamespace(sdk_launch=sdk_launch,
                                  set_restarting=set_restarting,
                                  set_backoff_pending=set_backoff_pending)
+
+
+@pytest.mark.asyncio
+async def test_launch_requests_autodown_on_a_supporting_cloud(monkeypatch):
+    """The leak failsafe stays on where the cloud implements autodown."""
+    executor = _make_launch_executor()
+    executor.dag = _dag_with('aws')
+    patches = _patch_launch_environment(monkeypatch)
+    executor._await_launch_request = mock.AsyncMock(return_value=None)
+
+    assert await executor._launch(max_retry=1, raise_on_failure=True) == 123.45
+
+    kwargs = patches.sdk_launch.call_args.kwargs
+    assert kwargs['down'] is True
+    assert kwargs['idle_minutes_to_autostop'] == (
+        recovery_strategy._AUTODOWN_MINUTES)
+
+
+@pytest.mark.asyncio
+async def test_launch_skips_autodown_on_a_cloud_without_it(monkeypatch):
+    """Autodown must not be requested on a cloud that cannot do it.
+
+    Otherwise the failsafe adds AUTODOWN to the launch's required features and
+    the job fails prechecks on that cloud instead of running.
+    """
+    executor = _make_launch_executor()
+    executor.dag = _dag_with('verda')
+    patches = _patch_launch_environment(monkeypatch)
+    executor._await_launch_request = mock.AsyncMock(return_value=None)
+
+    assert await executor._launch(max_retry=1, raise_on_failure=True) == 123.45
+
+    kwargs = patches.sdk_launch.call_args.kwargs
+    assert kwargs['down'] is False
+    # Left unset rather than flipped to autostop, which Verda also rejects.
+    assert kwargs['idle_minutes_to_autostop'] is None
 
 
 @pytest.mark.asyncio
