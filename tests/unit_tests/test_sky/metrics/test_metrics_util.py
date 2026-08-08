@@ -669,61 +669,100 @@ def test_add_cluster_name_label_does_not_block_the_event_loop():
     # Big enough that inline stamping would be clearly visible as a stall.
     text = '\n'.join(
         f'metric_{i}{{label="value{i}"}} {i}' for i in range(200_000))
-    served = []
+    wakeups = []
 
     async def main():
         stop = asyncio.Event()
 
         async def loop_consumer():
-            # Stands in for the /metrics handler: needs the loop to
-            # wake it up promptly.
+            # Stands in for the /metrics handler: needs the loop to wake
+            # it up promptly. Record when it actually ran so the test can
+            # assert on the worst stall rather than merely that it ran.
             while not stop.is_set():
                 await asyncio.sleep(0)
-                served.append(1)
+                wakeups.append(time.monotonic())
                 await asyncio.sleep(0.001)
 
         consumer = asyncio.create_task(loop_consumer())
         await asyncio.sleep(0.05)
-        served.clear()
+        wakeups.clear()
         result = await utils.add_cluster_name_label(text, 'ctx-a')
         stop.set()
         await consumer
-        return result
+        return result, [b - a for a, b in zip(wakeups, wakeups[1:])]
 
-    result = asyncio.run(main())
-    # The loop kept running while the payload was rewritten.
-    assert served, 'event loop was starved for the whole stamping duration'
+    result, gaps = asyncio.run(main())
+    # The property that matters is not "the loop ran at least once" but
+    # "the loop was never unavailable for long": a stamp that yielded
+    # once and then held the loop for the rest of the payload is exactly
+    # the bug this guards against, and would pass a bare truthiness check.
+    assert gaps, 'event loop was starved for the whole stamping duration'
+    assert max(gaps) < 1.0, (
+        f'event loop stalled for {max(gaps):.2f}s during stamping')
     # ...and the output is still correct.
     first = result.split('\n', 1)[0]
     assert first == 'metric_0{cluster="ctx-a",label="value0"} 0'
 
 
-def test_add_cluster_name_label_prefilter_matches_regex():
-    """The cheap substring pre-filter never changes the verdict.
+def test_add_cluster_name_label_stops_when_caller_gives_up():
+    """A cancelled stamp must not keep rewriting a discarded payload.
+
+    Python cannot kill the worker thread, so when the caller's deadline
+    fires the thread would otherwise run to completion -- holding its
+    pool slot and taking GIL turns from the contexts that can still make
+    their deadline. It has to stop cooperatively instead.
+    """
+    text = '\n'.join(
+        f'metric_{i}{{label="value{i}"}} {i}' for i in range(400_000))
+    finished = threading.Event()
+    real_stamp = utils._stamp_cluster_label  # pylint: disable=protected-access
+
+    def tracked(metrics_text, context, cancelled=None):
+        out = real_stamp(metrics_text, context, cancelled)
+        finished.set()  # only reached if the loop ran to the end
+        return out
+
+    async def main():
+        with mock.patch.object(utils, '_stamp_cluster_label', tracked):
+            task = asyncio.create_task(
+                utils.add_cluster_name_label(text, 'ctx-a'))
+            # Let the thread get going, then give up on it.
+            await asyncio.sleep(0.05)
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+        # Give the abandoned thread ample time to finish if it were going
+        # to; the point is that it should have bailed out instead.
+        await asyncio.sleep(2.0)
+
+    asyncio.run(main())
+    assert not finished.is_set(), (
+        'stamping thread ran to completion after the caller gave up')
+
+
+@pytest.mark.parametrize(
+    'line,expect_stamped',
+    [
+        ('foo{cluster="x"} 1', False),  # labeled -> left alone
+        ('foo{bar="1",cluster="x"} 1',
+         False),  # labeled, not first -> left alone
+        ('foo{my_cluster="x"} 1', True),  # suffix only -> must still stamp
+        ('foo{clusterish="x"} 1', True),  # prefix only -> must still stamp
+        ('foo{bar="baz"} 1', True),  # unlabeled -> stamp
+        ('foo{} 1', True),  # no labels -> stamp
+    ])
+def test_prefilter_does_not_change_stamping(line, expect_stamped):
+    """The cheap substring pre-filter never changes what gets stamped.
 
     Stamping skips already-labeled lines via a literal `cluster="` test
-    before the regex. The literal is a necessary condition for the regex,
-    so the two must agree on every line — including the tricky cases the
-    regex exists to get right (a `cluster` suffix on another label name).
+    before the regex. The literal is a necessary condition for the
+    regex, so the pair must behave exactly like the regex alone --
+    including on the near-misses the regex exists to reject. Driven
+    through the real function so that weakening the condition (e.g.
+    `and` -> `or`) actually fails.
     """
-    cases = [
-        'foo{cluster="x"} 1',  # labeled -> skip
-        'foo{bar="1",cluster="x"} 1',  # labeled, not first -> skip
-        'foo{my_cluster="x"} 1',  # suffix only -> must still stamp
-        'foo{clusterish="x"} 1',  # prefix only -> must still stamp
-        'foo{bar="baz"} 1',  # unlabeled -> stamp
-        'foo{} 1',  # no labels -> stamp
-    ]
-    for line in cases:
-        brace_start = line.find('{')
-        brace_end = line.rfind('}')
-        labels = line[brace_start + 1:brace_end]
-        regex_hit = bool(utils._CLUSTER_LABEL_RE.search(labels))  # pylint: disable=protected-access
-        prefilter = utils._CLUSTER_LABEL_LITERAL in labels  # pylint: disable=protected-access
-        # The pre-filter may only ever be a superset of the regex.
-        assert regex_hit <= prefilter, line
-        # Combined verdict (what the code actually evaluates) == regex.
-        assert (prefilter and regex_hit) == regex_hit, line
+    out = asyncio.run(utils.add_cluster_name_label(line, 'ctx-a'))
+    assert (out != line) == expect_stamped, out
 
 
 def test_add_cluster_name_label_skips_already_labeled():
