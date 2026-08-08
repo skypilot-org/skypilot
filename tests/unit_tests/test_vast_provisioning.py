@@ -253,6 +253,54 @@ def test_wait_for_instances_ready_treats_null_as_pending(monkeypatch):
     assert ready_instances['instance-1']['ssh_port'] == 22
 
 
+def test_wait_for_instances_ready_treats_resumed_stopped_as_pending(
+        monkeypatch):
+    instances = [
+        {
+            'instance-1': _instance('instance-1', 'STOPPED')
+        },
+        {
+            'instance-1': _instance('instance-1', 'RUNNING', ssh_port=22)
+        },
+    ]
+    monkeypatch.setattr(vast_instance, '_filter_instances',
+                        lambda *_args, **_kwargs: instances.pop(0))
+    monkeypatch.setattr(vast_instance.time, 'monotonic', lambda: 0)
+    monkeypatch.setattr(vast_instance.time, 'sleep', lambda _seconds: None)
+
+    ready_instances = vast_instance._wait_for_instances_ready(
+        'test',
+        expected_count=1,
+        deadline=30,
+        created_instance_ids=[],
+        resumed_instance_ids=['instance-1'])
+
+    assert ready_instances['instance-1']['ssh_port'] == 22
+
+
+def test_run_instances_returns_resumed_instance_ids(monkeypatch):
+    configuration = _provision_config()
+    configuration.resume_stopped_nodes = True
+    stopped_instance = _instance('instance-1', 'STOPPED')
+    monkeypatch.setattr(
+        vast_instance, '_wait_for_no_pending_instances',
+        lambda *_args, **_kwargs: {'instance-1': stopped_instance})
+    start = mock.Mock()
+    monkeypatch.setattr(vast_utils, 'start', start)
+    monkeypatch.setattr(
+        vast_instance, '_wait_for_instances_ready', lambda *_args, **_kwargs:
+        {'instance-1': _instance('instance-1', 'RUNNING', ssh_port=22)})
+    monkeypatch.setattr(
+        vast_utils, 'list_instances',
+        lambda: {'instance-1': _instance('instance-1', 'RUNNING', ssh_port=22)})
+
+    record = vast_instance.run_instances('US', 'test', 'test', configuration)
+
+    start.assert_called_once_with('instance-1')
+    assert record.resumed_instance_ids == ['instance-1']
+    assert record.created_instance_ids == []
+
+
 @pytest.mark.parametrize('status',
                          ['EXITED', 'STOPPED', 'FROZEN', 'UNKNOWN', 'OFFLINE'])
 def test_wait_for_instances_ready_fails_for_terminal_or_lost_host(

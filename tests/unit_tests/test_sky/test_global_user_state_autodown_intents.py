@@ -775,7 +775,7 @@ def test_migration_021_schema_version_and_downgrade(tmp_path, monkeypatch):
     migration_module = importlib.import_module(
         'sky.schemas.db.global_user_state.021_add_autodown_intents')
 
-    assert migration_utils.GLOBAL_USER_STATE_VERSION == '021'
+    assert migration_utils.GLOBAL_USER_STATE_VERSION == '022'
     assert migration_module.revision == '021'
     assert migration_module.down_revision == '020'
     inspector = sqlalchemy.inspect(engine)

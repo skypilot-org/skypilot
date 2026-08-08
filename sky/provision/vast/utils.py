@@ -226,10 +226,6 @@ def launch(name: str,
     gpu_name = instance_type.split('-')[1].replace('_', ' ')
     num_gpus = int(instance_type.split('-')[0].replace('x', ''))
 
-    # The optimizer's catalog region is descriptive metadata, not a user
-    # placement requirement. Final selection searches the live marketplace
-    # without inheriting that stale catalog location.
-    del region
     query = [
         'chunked=true',
         'georegion=true',
@@ -238,6 +234,8 @@ def launch(name: str,
         f'gpu_name="{gpu_name}"',
         f'cpu_ram>="{cpu_ram}"',
     ]
+    if region and region.lower() != 'any':
+        query.insert(2, f'geolocation="{region[-2:].upper()}"')
     if secure_only:
         query.append('datacenter=true')
         query.append('hosting_type>=1')

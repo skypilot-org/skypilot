@@ -1,7 +1,7 @@
 """Vast instance provisioning."""
 from pathlib import Path
 import time
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 from sky import exceptions
 from sky import sky_logging
@@ -80,8 +80,11 @@ def _provisioning_error(
 
 
 def _wait_for_instances_ready(
-        cluster_name_on_cloud: str, expected_count: int, deadline: float,
-        created_instance_ids: List[str]) -> Dict[str, Any]:
+        cluster_name_on_cloud: str,
+        expected_count: int,
+        deadline: float,
+        created_instance_ids: List[str],
+        resumed_instance_ids: Optional[List[str]] = None) -> Dict[str, Any]:
     """Wait until every requested Vast instance is running and SSH-ready.
 
     Vast reports ``NULL`` while a contract is being created and ``LOADING``
@@ -90,12 +93,16 @@ def _wait_for_instances_ready(
     container states and missing host heartbeats fail immediately; keeping a
     SkyPilot provision call blocked cannot make those states recover.
     """
+    resumed_instance_id_set: Set[str] = set(resumed_instance_ids or [])
+    resumable_statuses = frozenset(('EXITED', 'STOPPED', 'FROZEN'))
     while True:
         instances = _filter_instances(cluster_name_on_cloud, None)
         failed_instances = {
             instance_id: instance
             for instance_id, instance in instances.items()
-            if instance['status'] in _FAILED_PROVISIONING_STATUSES
+            if (instance['status'] in _FAILED_PROVISIONING_STATUSES and
+                not (instance_id in resumed_instance_id_set and
+                     instance['status'] in resumable_statuses))
         }
         if failed_instances:
             raise _provisioning_error('failed', failed_instances,
@@ -319,8 +326,10 @@ def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
     head_instance_id = _get_head_instance_id(running_instances)
     stopped_instances = status_filter(instances,
                                       ['EXITED', 'STOPPED', 'FROZEN'])
+    resumed_instance_ids = []
 
     if config.resume_stopped_nodes and stopped_instances:
+        resumed_instance_ids = list(stopped_instances)
         for instance in stopped_instances.values():
             utils.start(instance['id'])
 
@@ -390,7 +399,8 @@ def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
             _wait_for_instances_ready(cluster_name_on_cloud,
                                       expected_count=config.count,
                                       deadline=deadline,
-                                      created_instance_ids=created_instance_ids)
+                                      created_instance_ids=created_instance_ids,
+                                      resumed_instance_ids=resumed_instance_ids)
             break
         except exceptions.VastProvisioningError:
             if not created_instance_ids:
@@ -426,7 +436,7 @@ def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
                                   region=region,
                                   zone=None,
                                   head_instance_id=head_instance_id,
-                                  resumed_instance_ids=[],
+                                  resumed_instance_ids=resumed_instance_ids,
                                   created_instance_ids=created_instance_ids)
 
 

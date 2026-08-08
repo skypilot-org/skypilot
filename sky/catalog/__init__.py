@@ -17,6 +17,7 @@ CloudFilter = Optional[Union[List[str], str]]
 
 
 def _map_clouds_catalog(clouds: CloudFilter, method_name: str, *args, **kwargs):
+    skip_catalog_fetch_errors = kwargs.pop('_skip_catalog_fetch_errors', False)
     if clouds is None:
         clouds = list(constants.ALL_CLOUDS)
 
@@ -28,6 +29,8 @@ def _map_clouds_catalog(clouds: CloudFilter, method_name: str, *args, **kwargs):
     single = isinstance(clouds, str)
     if single:
         clouds = [clouds]  # type: ignore
+    skip_catalog_fetch_errors = (skip_catalog_fetch_errors and not single and
+                                 len(clouds) > 1)
 
     def _execute_catalog_method(cloud: str):
         try:
@@ -43,14 +46,22 @@ def _map_clouds_catalog(clouds: CloudFilter, method_name: str, *args, **kwargs):
             raise AttributeError(
                 f'Module "{cloud}_catalog" does not '
                 f'implement the "{method_name}" method') from None
-        return method(*args, **kwargs)
+        try:
+            return method(*args, **kwargs)
+        except Exception as exc:  # pylint: disable=broad-except
+            from sky.catalog import common as catalog_common
+            if not isinstance(exc, catalog_common.CatalogFetchError):
+                raise
+            if not skip_catalog_fetch_errors:
+                raise
+            return None
 
     results = subprocess_utils.run_in_parallel(_execute_catalog_method,
                                                args=list(clouds),
                                                num_threads=len(clouds))
     if single:
         return results[0]
-    return results
+    return [result for result in results if result is not None]
 
 
 @fallback_to_default_catalog
@@ -72,9 +83,16 @@ def list_accelerators(
     Returns: A dictionary of canonical accelerator names mapped to a list
     of instance type offerings. See usage in cli.py.
     """
-    results = _map_clouds_catalog(clouds, 'list_accelerators', gpus_only,
-                                  name_filter, region_filter, quantity_filter,
-                                  case_sensitive, all_regions, require_price)
+    results = _map_clouds_catalog(clouds,
+                                  'list_accelerators',
+                                  gpus_only,
+                                  name_filter,
+                                  region_filter,
+                                  quantity_filter,
+                                  case_sensitive,
+                                  all_regions,
+                                  require_price,
+                                  _skip_catalog_fetch_errors=True)
     if not isinstance(results, list):
         results = [results]
     ret: Dict[str,
@@ -104,7 +122,8 @@ def list_accelerator_counts(
                                   region_filter,
                                   quantity_filter,
                                   all_regions=False,
-                                  require_price=False)
+                                  require_price=False,
+                                  _skip_catalog_fetch_errors=True)
     if not isinstance(results, list):
         results = [results]
     accelerator_counts: Dict[str, Set[float]] = collections.defaultdict(set)

@@ -751,8 +751,14 @@ def _get_credential_provider_allowlist(
     task: Optional['task_lib.Task'],
     compute_cloud: clouds.Cloud,
     remote_identity: str,
-) -> Set[Union[clouds.Cloud, str]]:
+    cluster_name: str,
+) -> Optional[Set[Union[clouds.Cloud, str]]]:
     """Returns providers whose local credentials are required on a cluster."""
+    if (controller_utils.Controllers.from_name(cluster_name,
+                                               expect_exact_match=False)
+            is not None):
+        return None
+
     allowed_clouds: Set[Union[clouds.Cloud, str]] = set()
     if remote_identity == schemas.RemoteIdentityOptions.LOCAL_CREDENTIALS.value:
         allowed_clouds.add(compute_cloud)
@@ -809,16 +815,58 @@ def _get_credential_provider_allowlist(
     return allowed_clouds
 
 
+def _get_credential_provider_excludelist(
+    cluster_name: str,
+    region: Optional[str],
+    override_configs: Optional[Dict[str, Any]] = None,
+) -> Set[clouds.Cloud]:
+    """Returns providers whose local credentials must not be mounted."""
+    excluded_clouds: Set[clouds.Cloud] = set()
+    for cloud_name, cloud in registry.CLOUD_REGISTRY.items():
+        remote_identity = skypilot_config.get_effective_workspace_region_config(
+            cloud=cloud_name.lower(),
+            region=region,
+            keys=('remote_identity',),
+            default_value=None,
+            override_configs=override_configs)
+        if isinstance(remote_identity, list):
+            remote_identity = next(
+                (list(profile.values())[0]
+                 for profile in remote_identity
+                 if fnmatch.fnmatchcase(cluster_name,
+                                        list(profile.keys())[0])), None)
+        if remote_identity == schemas.RemoteIdentityOptions.NO_UPLOAD.value:
+            excluded_clouds.add(cloud)
+
+    allowed_contexts = skypilot_config.get_workspace_cloud('kubernetes').get(
+        'allowed_contexts', None)
+    if allowed_contexts is None:
+        allowed_contexts = skypilot_config.get_effective_region_config(
+            cloud='kubernetes',
+            region=None,
+            keys=('allowed_contexts',),
+            default_value=None)
+    is_controller = controller_utils.Controllers.from_name(
+        cluster_name, expect_exact_match=False) is not None
+    if allowed_contexts is None or not is_controller:
+        excluded_clouds.update({clouds.Kubernetes(), clouds.SSH()})
+    return excluded_clouds
+
+
 def _get_credential_file_mounts(
     task: Optional['task_lib.Task'],
     compute_cloud: clouds.Cloud,
     remote_identity: str,
+    cluster_name: str,
+    region: Optional[str],
+    override_configs: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, str]:
     """Returns scoped cloud credentials plus independent logging credentials."""
     credentials = sky_check.get_cloud_credential_file_mounts(
-        excluded_clouds=None,
+        excluded_clouds=_get_credential_provider_excludelist(
+            cluster_name, region, override_configs),
         allowed_clouds=_get_credential_provider_allowlist(
-            task, compute_cloud, remote_identity))
+            task, compute_cloud, remote_identity, cluster_name))
 
     logging_agent = logs.get_logging_agent()
     if logging_agent:
@@ -951,8 +999,9 @@ def write_cluster_config(
                 f'{skypilot_config.loaded_config_path!r} for {cloud}, but it '
                 'is not supported by this cloud. Remove the config or set: '
                 '`remote_identity: LOCAL_CREDENTIALS`.')
-    credentials = _get_credential_file_mounts(task, cloud,
-                                              credential_remote_identity)
+    credentials = _get_credential_file_mounts(
+        task, cloud, credential_remote_identity, cluster_name, region.name,
+        to_provision.cluster_config_overrides)
 
     private_key_path, _ = auth_utils.get_or_generate_keys()
     auth_config = {'ssh_private_key': private_key_path}

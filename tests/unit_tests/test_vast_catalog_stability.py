@@ -12,6 +12,7 @@ from sky.catalog import common
 from sky.catalog import vast_catalog
 from sky.clouds import vast as vast_cloud
 from sky.provision.vast import utils as vast_utils
+from sky.resources import Resources
 from sky.utils import annotations
 
 _VALID_VAST_CATALOG_CSV = """InstanceType,AcceleratorName,AcceleratorCount,vCPUs,MemoryGiB,GpuInfo,Price,SpotPrice,Region
@@ -119,6 +120,21 @@ small,,0,2,4,,0.1,0.1,any
         vast_catalog._catalog_df()
 
 
+def test_vast_feasible_resources_reports_catalog_fetch_failure(monkeypatch):
+    monkeypatch.setattr(
+        vast_catalog,
+        'get_instance_type_for_accelerator',
+        mock.Mock(side_effect=common.CatalogFetchError('catalog offline')),
+    )
+
+    feasible_resources = vast_cloud.Vast()._get_feasible_launchable_resources(
+        Resources(cloud=vast_cloud.Vast(), accelerators={'A100': 1}))
+
+    assert feasible_resources.resources_list == []
+    assert feasible_resources.hint is not None
+    assert 'catalog offline' in feasible_resources.hint
+
+
 def test_live_search_without_capacity_raises_typed_resource_error(monkeypatch):
     client = mock.Mock(spec=["search_offers"])
     client.search_offers.return_value = []
@@ -128,7 +144,27 @@ def test_live_search_without_capacity_raises_typed_resource_error(monkeypatch):
         vast_utils.launch(
             name="test-head",
             instance_type="1x-A100-4-8192",
-            region="stale-catalog-region",
+            region="US",
+            disk_size=30,
+            image_name="vastai/base:0.0.2",
+            ports=None,
+            preemptible=True,
+            secure_only=False,
+        )
+
+    assert 'geolocation="US"' in client.search_offers.call_args.kwargs["query"]
+
+
+def test_live_search_any_region_does_not_add_geolocation_filter(monkeypatch):
+    client = mock.Mock(spec=["search_offers"])
+    client.search_offers.return_value = []
+    monkeypatch.setattr(vast_utils.vast, "vast", lambda: client)
+
+    with pytest.raises(exceptions.VastOfferUnavailableError):
+        vast_utils.launch(
+            name="test-head",
+            instance_type="1x-A100-4-8192",
+            region="any",
             disk_size=30,
             image_name="vastai/base:0.0.2",
             ports=None,
