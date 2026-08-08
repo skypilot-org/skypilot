@@ -64,6 +64,17 @@ class NodeInfo(NamedTuple):
     partition: str
 
 
+class JobGresInfo(NamedTuple):
+    """Per-node GRES allocation of a running job from squeue."""
+    job_id: str
+    job_name: str
+    # The user who submitted the job (squeue %u).
+    user: str
+    # The job's per-node GRES request (squeue %b, TRES_PER_NODE), e.g.
+    # 'gres/gpu:h100:4'.
+    gres_str: str
+
+
 def _parse_maxtime(line: str) -> Optional[int]:
     """Parse the maximum time a job can run from the scontrol output."""
     maxtime_match = _MAXTIME_REGEX.search(line)
@@ -129,6 +140,7 @@ class SlurmClient:
         ssh_proxy_jump: Optional[str] = None,
         is_inside_slurm_cluster: bool = False,
         identities_only: Optional[bool] = None,
+        slurm_user: Optional[str] = None,
     ):
         """Initialize SlurmClient.
 
@@ -144,6 +156,8 @@ class SlurmClient:
             identities_only: If True, only use the specified identity file and
                 don't try ssh-agent keys. If None, defaults to False (allows
                 ssh-agent fallback for backward compatibility).
+            slurm_user: Unix user to run remote Slurm commands as. None runs
+                commands as the SSH user.
         """
         self.ssh_host = ssh_host
         self.ssh_port = ssh_port
@@ -165,7 +179,7 @@ class SlurmClient:
             assert ssh_user is not None
             # If user has IdentitiesOnly=yes in their config, respect it by
             # NOT disabling IdentitiesOnly. Otherwise, allow ssh-agent fallback.
-            self._runner = command_runner.SSHCommandRunner(
+            self._runner = command_runner.SlurmLoginNodeCommandRunner(
                 (ssh_host, ssh_port),
                 ssh_user,
                 ssh_key,
@@ -173,6 +187,7 @@ class SlurmClient:
                 ssh_proxy_jump=ssh_proxy_jump,
                 enable_interactive_auth=True,
                 disable_identities_only=not identities_only,
+                slurm_user=slurm_user,
             )
 
     def _run_slurm_cmd(self, cmd: str) -> Tuple[int, str, str]:
@@ -391,6 +406,50 @@ class SlurmClient:
                 nodes_to_gres.setdefault(node, []).append(gres_str)
 
         return nodes_to_gres
+
+    def get_all_jobs_info(self) -> Dict[str, List[JobGresInfo]]:
+        """Get id, name, user and GRES of all running jobs, grouped by node.
+
+        Like ``get_all_jobs_gres`` but keeps the job identity, so callers can
+        attribute per-node GPU allocations to specific jobs. A multi-node job
+        appears in the list of every node it runs on, each time with its
+        per-node GRES request (squeue's ``%b``, TRES_PER_NODE). Jobs without
+        GRES (``%b`` empty or ``N/A``) are skipped.
+
+        Returns:
+            Dict mapping node_name -> list of JobGresInfo for jobs on that
+            node.
+        """
+        cmd = (f'squeue -h --states=running,completing '
+               f'-o "%i{SEP}%j{SEP}%u{SEP}%N{SEP}%b"')
+        rc, stdout, stderr = self._run_slurm_cmd(cmd)
+        subprocess_utils.handle_returncode(rc,
+                                           cmd,
+                                           'Failed to get all jobs info.',
+                                           stderr=f'{stdout}\n{stderr}',
+                                           stream_logs=False)
+
+        nodes_to_jobs: Dict[str, List[JobGresInfo]] = {}
+        for line in stdout.splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            parts = line.split(SEP)
+            if len(parts) != 5:
+                # We should never reach here, but just in case.
+                continue
+            job_id, job_name, user, nodelist_str, gres_str = parts
+            if not gres_str or gres_str == 'N/A':
+                continue
+
+            job_info = JobGresInfo(job_id=job_id,
+                                   job_name=job_name,
+                                   user=user,
+                                   gres_str=gres_str)
+            for node in hostlist.expand_hostlist(nodelist_str):
+                nodes_to_jobs.setdefault(node, []).append(job_info)
+
+        return nodes_to_jobs
 
     def get_job_state(self, job_id: str) -> Optional[str]:
         """Get the state of a Slurm job.

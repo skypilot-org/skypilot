@@ -1,4 +1,5 @@
-{% set user = ssh_user if image_id is none else 'root' %}
+{% set host_user = slurm_user | default(ssh_user, true) %}
+{% set user = host_user if image_id is none else 'root' %}
 {% set has_image = image_id is not none %}
 cluster_name: {{cluster_name_on_cloud}}
 
@@ -14,6 +15,9 @@ provider:
   cluster: "{{slurm_cluster}}"
   partition: "{{slurm_partition}}"
   provision_timeout: {{provision_timeout}}
+{% if slurm_user is defined and slurm_user is not none %}
+  slurm_user: {{slurm_user | tojson}}
+{% endif %}
 
   ssh:
     hostname: {{ssh_hostname}}

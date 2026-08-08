@@ -263,6 +263,59 @@ To restrict which clusters SkyPilot can use, add the following to your ``~/.sky/
         - mycluster2
 
 
+.. _slurm-submit-as-user:
+
+Submitting as authenticated users
+---------------------------------
+
+A shared SkyPilot API server can connect to Slurm with one privileged SSH
+credential while owning each job under the authenticated user's Unix account.
+Enable this behavior in the API server's configuration:
+
+.. code-block:: yaml
+
+    slurm:
+      submit_as_user: true
+
+Configure each Slurm host entry with the shared SSH user and private key. The
+SSH user must be ``root`` or have passwordless ``sudo`` permission to run
+``su``:
+
+.. code-block:: text
+
+    Host mycluster
+        HostName login.mycluster.myorg.com
+        User slurm-admin
+        IdentityFile ~/.ssh/slurm_admin
+
+SkyPilot maps the authenticated username to the portion before ``@``. For
+example, ``alice@example.com`` maps to the Unix account ``alice``. The account
+must already exist on the Slurm login and compute nodes. SkyPilot submits,
+queries, and cancels the user's allocations, runs host commands, transfers
+files, and starts host SSH sessions as that user. Container commands and SSH
+sessions run as root inside the container, while the Slurm allocation remains
+owned by the mapped user. An invalid or missing account, a sudo password
+prompt, or denied sudo permission causes the operation to fail instead of
+falling back to the SSH user.
+
+Cluster-wide inventory and observability run as the shared SSH user configured
+in ``~/.slurm/config``. That user must have permission to view the required
+Slurm node, partition, and job information.
+
+To enable the behavior for one cluster, set it under ``cluster_configs``:
+
+.. code-block:: yaml
+
+    slurm:
+      cluster_configs:
+        mycluster:
+          submit_as_user: true
+
+The per-cluster value overrides the global value. See
+:ref:`slurm.submit_as_user <config-yaml-slurm-submit-as-user>` for the full
+configuration reference.
+
+
 .. _slurm-pricing:
 
 Configuring pricing
@@ -494,9 +547,11 @@ FAQs
 
 * **Which user are jobs submitted as?**
 
-  Jobs are submitted using your own Slurm username (the ``User`` specified in your ``~/.slurm/config``).
-  This means your jobs appear under your username in ``squeue``, count against your quotas, and respect
-  your existing permissions.
+  By default, jobs are submitted as the ``User`` in ``~/.slurm/config``. With
+  :ref:`submit as user <slurm-submit-as-user>` enabled, SkyPilot instead uses
+  the Unix account mapped from the authenticated username. Jobs appear under
+  that account in ``squeue``, count against its quotas, and use its
+  permissions.
 
 * **Can I use multiple Slurm clusters?**
 

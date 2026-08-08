@@ -282,16 +282,26 @@ def sdk():
     return _sdk(None, default_cred_path)
 
 
+def _user_agent_prefix() -> str:
+    # Import locally to avoid a circular import while sky is initialized.
+    # pylint: disable=import-outside-toplevel
+    from sky import __version__
+    return f'skypilot/{__version__}'
+
+
 @annotations.lru_cache(scope='request')
 def _sdk(token: Optional[str], cred_path: Optional[str]):
     # Exactly one of token or cred_path must be provided
     assert (token is None) != (cred_path is None), (token, cred_path)
     if token is not None:
-        return nebius.sdk.SDK(credentials=token, domain=api_domain())
+        return nebius.sdk.SDK(credentials=token,
+                              domain=api_domain(),
+                              user_agent_prefix=_user_agent_prefix())
     if cred_path is not None:
         return nebius.sdk.SDK(
             credentials_file_name=os.path.expanduser(cred_path),
             domain=api_domain(),
+            user_agent_prefix=_user_agent_prefix(),
         )
     raise ValueError('Either token or credentials file path must be provided')
 

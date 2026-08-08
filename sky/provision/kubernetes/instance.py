@@ -797,6 +797,18 @@ def _wait_for_pods_to_schedule(namespace, context, new_nodes, timeout: int,
                     nop_if_duplicate=True,
                 )
             last_gated_pod_names = gated_pod_names
+            # Keep refreshing the spinner while gated. The message set above
+            # is written once, on entering the gated state; the admission
+            # wait that follows can last hours, and it is exactly the phase
+            # where live feedback (e.g. the workload's position in the
+            # queue) is most useful. Skipping the per-poll update would
+            # freeze the spinner on that static message for the whole wait.
+            _update_spinner_message(iteration=iteration,
+                                    pods=pods,
+                                    context=context,
+                                    namespace=namespace,
+                                    cluster_name_on_cloud=cluster_name_on_cloud,
+                                    cluster_name=cluster_name)
             iteration += 1
             time.sleep(1)
             continue

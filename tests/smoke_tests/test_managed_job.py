@@ -1006,7 +1006,7 @@ def test_managed_jobs_pipeline_recovery_aws(aws_config_region):
             f'diff /tmp/{name}-run-ids /tmp/{name}-run-ids-new',
             f'cat /tmp/{name}-run-ids | sed -n 2p | grep `cat /tmp/{name}-run-id`',
         ],
-        f'sky jobs cancel -y -n {name} && {smoke_tests_utils.down_cluster_for_cloud_cmd(name)}',
+        f'sky jobs cancel -y -n {name}; {smoke_tests_utils.down_cluster_for_cloud_cmd(name)}',
         env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
         timeout=25 * 60,
     )
@@ -1538,23 +1538,25 @@ def test_managed_jobs_storage(generic_cloud: str):
             'azure': storage_lib.StoreType.AZURE,
             'nebius': storage_lib.StoreType.NEBIUS,
         }
-        # A remote API server may have only a subset of storage clouds
-        # enabled (e.g. the shared GKE API server only enables AWS), and
+        # An API server may have only a subset of storage clouds enabled, and
         # specifying a store whose cloud is disabled on the server fails the
-        # job at FAILED_PRECHECKS. Only pin stores whose cloud is enabled on
-        # the server.
-        if smoke_tests_utils.is_remote_server_test():
-            enabled_storage_cloud_names = {
-                str(cloud).lower()
-                for cloud in smoke_tests_utils.get_enabled_cloud_storages()
-            }
-            pinned_stores = {
-                store_str: store_type
-                for store_str, store_type in pinned_stores.items()
-                if store_type.to_cloud().lower() in enabled_storage_cloud_names
-            }
-            assert pinned_stores, ('No object store enabled on the API server: '
-                                   f'{enabled_storage_cloud_names}')
+        # job at FAILED_PRECHECKS. Only pin stores whose cloud is enabled.
+        #
+        # This applies to a local API server too, not just a remote one: the
+        # set of enabled storage clouds is a property of the server, not of how
+        # the test reaches it. Gating this filter on remote-server runs left
+        # local runs pinning stores that the server could not serve.
+        enabled_storage_cloud_names = {
+            str(cloud).lower()
+            for cloud in smoke_tests_utils.get_enabled_cloud_storages()
+        }
+        pinned_stores = {
+            store_str: store_type
+            for store_str, store_type in pinned_stores.items()
+            if store_type.to_cloud().lower() in enabled_storage_cloud_names
+        }
+        assert pinned_stores, ('No object store enabled on the API server: '
+                               f'{enabled_storage_cloud_names}')
         # For Azure, the bucket lands in the configured storage account when
         # the API server shares the client config, or in the default per-user
         # account (AzureBlobStore's default region) when a remote API server
@@ -1998,6 +2000,82 @@ def test_managed_jobs_pod_config_ray_node_container(generic_cloud: str):
         f'sky jobs cancel -y -n {name}',
         env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
         timeout=20 * 60)
+    smoke_tests_utils.run_one_test(test)
+
+
+# Only run this test on Kubernetes since this test relies on
+# kubernetes.pod_config
+@pytest.mark.kubernetes
+@pytest.mark.managed_jobs
+def test_managed_jobs_task_pod_config_not_self_merged(generic_cloud: str):
+    """The controller must not overlay the task's pod_config onto itself.
+
+    Before launching, the controller adds two pod annotations to the task's
+    resources. It used to do so by passing the task's whole config as the
+    override, merging the config with itself: that duplicated every list
+    without a patch merge key and failed outright on an empty
+    imagePullSecrets. The task config
+    (tests/test_yamls/test_k8s_pod_config_image_pull_secrets.yaml) carries
+    both, and the server config sets an imagePullSecrets entry so the
+    task-level empty list has something to clear.
+    """
+    name = smoke_tests_utils.get_cluster_name()
+    task_yaml = 'tests/test_yamls/test_k8s_pod_config_image_pull_secrets.yaml'
+    # Look the pod up by the annotation the controller stamps, so a lost
+    # annotation fails this step too. The cloud-cmd helper pod carries no such
+    # annotation, so it can never match.
+    check_pod_spec_cmd = (
+        f"pod=$(kubectl get pods -o custom-columns=NAME:.metadata.name,ANN:.metadata.annotations.skypilot-managed-job-name --no-headers | awk -v n=\"{name}\" '$NF==n{{print $1}}' | sed -n 1p) && "
+        'echo "pod=$pod" && test -n "$pod" && '
+        # Appended by the merge, so a self-merge would list it twice.
+        'tolerations=$(kubectl get pod $pod -o jsonpath="{.spec.tolerations[*].key}") && '
+        'echo "tolerations=$tolerations" && '
+        'test "$(echo "$tolerations" | tr " " "\\n" | '
+        'grep -c skypilot-smoke-image-pull-secrets)" = "1" && '
+        # The task's empty list must win over the server config.
+        'secrets=$(kubectl get pod $pod -o jsonpath="{.spec.imagePullSecrets}") && '
+        'echo "imagePullSecrets=$secrets" && '
+        '! echo "$secrets" | grep -q absent-regcred')
+    test = smoke_tests_utils.Test(
+        'managed_jobs_task_pod_config_not_self_merged',
+        [
+            smoke_tests_utils.launch_cluster_for_cloud_cmd(generic_cloud, name),
+            # The task sleeps 60 so the job is still RUNNING when we look at
+            # its pod (same workaround as test_managed_jobs_env_isolation).
+            f'sky jobs launch -n {name} --infra {generic_cloud} '
+            f'{smoke_tests_utils.LOW_RESOURCE_ARG} -y -d {task_yaml}',
+            smoke_tests_utils.
+            get_cmd_wait_until_managed_job_status_contains_matching_job_name(
+                job_name=f'{name}',
+                job_status=[sky.ManagedJobStatus.RUNNING],
+                timeout=600
+                if smoke_tests_utils.is_remote_server_test() else 120),
+            f'sky jobs logs -n {name} --no-follow | '
+            'grep "image_pull_secrets_check: ok"',
+            smoke_tests_utils.run_cloud_cmd_on_cluster(name,
+                                                       cmd=check_pod_spec_cmd),
+            smoke_tests_utils.
+            get_cmd_wait_until_managed_job_status_contains_matching_job_name(
+                job_name=f'{name}',
+                job_status=[sky.ManagedJobStatus.SUCCEEDED],
+                timeout=600
+                if smoke_tests_utils.is_remote_server_test() else 120),
+        ],
+        f'sky jobs cancel -y -n {name}; '
+        f'{smoke_tests_utils.down_cluster_for_cloud_cmd(name)}',
+        env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
+        timeout=25 * 60,
+        config_dict={
+            'kubernetes': {
+                'pod_config': {
+                    'spec': {
+                        'imagePullSecrets': [{
+                            'name': f'{name}-absent-regcred'
+                        }]
+                    }
+                }
+            }
+        })
     smoke_tests_utils.run_one_test(test)
 
 
@@ -2874,6 +2952,69 @@ def test_job_group_basic(generic_cloud: str):
 
 @pytest.mark.managed_jobs
 @pytest.mark.kubernetes
+def test_job_group_inter_connection_false(generic_cloud: str):
+    """JobGroup with inter_connection: false skips all networking machinery.
+
+    Tasks must start without the peer-hostname wait and succeed; the
+    networking wait banner must not appear in the task logs.
+    """
+    name = smoke_tests_utils.get_cluster_name()
+    yaml_path = _render_job_group_yaml(
+        'tests/test_job_groups/smoke_inter_connection_false.yaml', name,
+        generic_cloud)
+
+    get_job_id_cmd = (f'sky jobs queue | grep {name} | head -1 | '
+                      f'awk \'{{print $1}}\'')
+    test = smoke_tests_utils.Test(
+        'job_group_inter_connection_false',
+        [
+            f'sky jobs launch {yaml_path} -y -d',
+            smoke_tests_utils.
+            get_cmd_wait_until_managed_job_status_contains_matching_job_name(
+                job_name=name,
+                job_status=[sky.ManagedJobStatus.SUCCEEDED],
+                timeout=360),
+            f'sky jobs logs $({get_job_id_cmd}) --no-follow | '
+            f'grep "JOB-A-DONE"',
+            # No networking machinery: the wait banner must not appear.
+            f'! sky jobs logs $({get_job_id_cmd}) --no-follow | '
+            f'grep "Waiting for network setup"',
+        ],
+        f'sky jobs cancel -y -n {name}',
+        env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
+        timeout=15 * 60,
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.managed_jobs
+@pytest.mark.kubernetes
+def test_job_group_inter_connection_non_k8s_pin_error(generic_cloud: str):
+    """inter_connection: true + a non-Kubernetes infra pin fails at
+    submission with an error naming the contradicting job, without
+    launching anything."""
+    name = smoke_tests_utils.get_cluster_name()
+    yaml_path = _render_job_group_yaml(
+        'tests/test_job_groups/smoke_inter_connection_pin_error.yaml', name,
+        generic_cloud)
+
+    test = smoke_tests_utils.Test(
+        'job_group_inter_connection_non_k8s_pin_error',
+        [
+            f'sky jobs launch {yaml_path} -y 2>&1 | '
+            f'grep "pins non-Kubernetes infra"',
+            # Nothing was submitted.
+            f'! sky jobs queue | grep {name}',
+        ],
+        f'sky jobs cancel -y -n {name} || true',
+        env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
+        timeout=5 * 60,
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.managed_jobs
+@pytest.mark.kubernetes
 def test_job_group_cancelled_logs(generic_cloud: str):
     """Test that logs are accessible for all tasks after a job group is cancelled."""
     name = smoke_tests_utils.get_cluster_name()
@@ -2987,6 +3128,99 @@ def test_job_group_networking_custom_image(generic_cloud: str, image_id: str):
         f'sky jobs cancel -y -n {name}',
         env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
         timeout=15 * 60,
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.managed_jobs
+@pytest.mark.kubernetes
+def test_job_group_networking_recovery():
+    """In-group networking re-establishes after a task is preempted.
+
+    Deletes one task's pod mid-run and asserts, via epoch-tagged connect
+    logs from both tasks, that after recovery (a) the surviving peer
+    reaches the recovered task's new pod, and (b) the recovered task's
+    fresh pod gets networking set up again and reaches its peer.
+    """
+    name = smoke_tests_utils.get_cluster_name()
+    # Task names become the managed cluster names (and the
+    # `skypilot-cluster-name` pod annotation the deletion command greps),
+    # so they must be unique per test run in a shared namespace.
+    suffix = name.replace('-', '')[-8:]
+    srv_task = f'srv{suffix}'
+    png_task = f'png{suffix}'
+    yaml_path = _render_job_group_yaml(
+        'tests/test_job_groups/smoke_networking_recovery.yaml',
+        name,
+        'kubernetes',
+        suffix=suffix)
+
+    get_job_id_cmd = (f'sky jobs queue | grep {name} | head -1 | '
+                      f'awk \'{{print $1}}\'')
+    delete_server_pod_cmd = (
+        'kubectl get pods -l skypilot-cluster-name --no-headers '
+        '-o custom-columns="NAME:.metadata.name,'
+        'CLUSTER:.metadata.annotations.skypilot-cluster-name" | '
+        f'grep -- "{srv_task}-" | grep -v -- "-cloud-cmd" | '
+        'awk \'{print $1}\' | head -1 | xargs kubectl delete pod')
+
+    def wait_connect_after(task: str, epoch_file: str, timeout: int) -> str:
+        """Poll a task's logs for a CONNECT_OK whose epoch is newer than
+        the recorded pod-deletion epoch (pre-deletion lines don't count)."""
+        return (
+            f'DEL=$(cat {epoch_file}); END=$(($(date +%s) + {timeout})); '
+            f'until sky jobs logs $({get_job_id_cmd}) {task} --no-follow | '
+            'grep -o "epoch=[0-9]*" | cut -d= -f2 | '
+            'awk -v t="$DEL" \'$1 > t\' | grep -q .; do '
+            'if [ $(date +%s) -gt $END ]; then '
+            f'echo "Timed out waiting for post-recovery connect from {task}"; '
+            'exit 1; fi; sleep 15; done; '
+            f'echo "{task} reconnected post-recovery"')
+
+    epoch_file = f'/tmp/{name}-del-epoch'
+    test = smoke_tests_utils.Test(
+        'job_group_networking_recovery',
+        [
+            smoke_tests_utils.launch_cluster_for_cloud_cmd('kubernetes', name),
+            f'sky jobs launch {yaml_path} -y -d',
+            smoke_tests_utils.
+            get_cmd_wait_until_managed_job_status_contains_matching_job_name(
+                job_name=name,
+                job_status=[sky.ManagedJobStatus.RUNNING],
+                timeout=300),
+            # Initial connectivity before the preemption, so the recovery
+            # assertions below measure re-establishment, not first setup.
+            (f'END=$(($(date +%s) + 240)); '
+             f'until sky jobs logs $({get_job_id_cmd}) {png_task} '
+             '--no-follow | grep -q CONNECT_OK; do '
+             'if [ $(date +%s) -gt $END ]; then '
+             'echo "Timed out waiting for initial connectivity"; exit 1; fi; '
+             'sleep 10; done'),
+            # Record the deletion epoch, then preempt the server task's pod.
+            f'date +%s | tee {epoch_file}',
+            smoke_tests_utils.run_cloud_cmd_on_cluster(
+                name, cmd=delete_server_pod_cmd),
+            smoke_tests_utils.
+            get_cmd_wait_until_managed_job_status_contains_matching_job_name(
+                job_name=name,
+                job_status=[sky.ManagedJobStatus.RECOVERING],
+                timeout=managed_jobs_utils.JOB_STATUS_CHECK_GAP_SECONDS * 3,
+                gap_seconds=2),
+            smoke_tests_utils.
+            get_cmd_wait_until_managed_job_status_contains_matching_job_name(
+                job_name=name,
+                job_status=[sky.ManagedJobStatus.RUNNING],
+                timeout=300),
+            # Surviving peer reaches the recovered task's NEW pod.
+            wait_connect_after(png_task, epoch_file, timeout=300),
+            # Recovered task's fresh pod got networking set up again
+            # (its wait script passed and it resolves its peer).
+            wait_connect_after(srv_task, epoch_file, timeout=300),
+        ],
+        (f'sky jobs cancel -y -n {name}; '
+         f'{smoke_tests_utils.down_cluster_for_cloud_cmd(name)}'),
+        env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
+        timeout=30 * 60,
     )
     smoke_tests_utils.run_one_test(test)
 

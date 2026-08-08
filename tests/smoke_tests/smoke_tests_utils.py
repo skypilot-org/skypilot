@@ -1025,7 +1025,8 @@ _CLOUD_CMD_CLUSTER_NAME_SUFFIX = '-cloud-cmd'
 #         run_cloud_cmd_on_cluster('mytest-cluster', 'aws ec2 describe-instances'),
 #         # ... commands for the test ...
 #     ],
-#     f'sky down -y mytest-cluster && {down_cluster_for_cloud_cmd('mytest-cluster')}',
+#     chain_teardown('sky down -y mytest-cluster',
+#                    down_cluster_for_cloud_cmd('mytest-cluster')),
 # )
 def launch_cluster_for_cloud_cmd(cloud: str,
                                  test_cluster_name: str,
@@ -1166,6 +1167,24 @@ def down_cluster_for_cloud_cmd(test_cluster_name: str,
         return 'true'
     else:
         return f'sky down -y {cluster_name}'
+
+
+def chain_teardown(*cmds: str) -> str:
+    """Chains teardown steps so a failing one does not skip the others.
+
+    Chaining with `&&` stops at the first failure and leaks whatever the later
+    steps would have cleaned up (typically the cloud-cmd helper cluster);
+    chaining with `;` hides failures because only the last exit code survives.
+    Here every step runs and the chain still exits non-zero if any failed.
+    """
+    parts = ['__teardown_rc=0']
+    for cmd in cmds:
+        # Strip trailing semicolons: `{ cmd; ; }` is a bash syntax error.
+        parts.append(f'{{ {cmd.strip().rstrip(";")}; }} || __teardown_rc=1')
+    parts.append('exit $__teardown_rc')
+    # Run in a subshell so the final `exit` cannot terminate an outer shell,
+    # e.g. when a chain is used as a step of another chain.
+    return f'( {"; ".join(parts)} )'
 
 
 def extract_default_aws_credentials():
@@ -1487,7 +1506,31 @@ def get_enabled_cloud_storages() -> List[clouds.Cloud]:
                 except ValueError:
                     pass
         return enabled_clouds
-    return [clouds.AWS()]
+    # Local API server: the client shares the server's state, so the cached
+    # enabled-storage-clouds list is authoritative and cheaper than shelling
+    # out to `sky check`.
+    #
+    # Do not hardcode a cloud here. Callers use this to decide which object
+    # stores are usable, so a wrong answer is wrong in both directions: too
+    # narrow silently drops real store coverage, too wide pins a store whose
+    # cloud is disabled and fails the job at FAILED_PRECHECKS.
+    #
+    # Imported lazily: smoke_tests_utils is imported by every test module,
+    # including the limited-dependency lane, and sky.data.storage pulls in the
+    # optional cloud storage SDKs.
+    from sky.data import storage as storage_lib
+    enabled_clouds = []
+    for cloud_name in (
+            storage_lib.get_cached_enabled_storage_cloud_names_or_refresh()):
+        try:
+            cloud_obj = registry.CLOUD_REGISTRY.from_str(cloud_name)
+        except ValueError:
+            # Non-cloud object stores (R2, CoreWeave, VAST, HuggingFace) are
+            # not in the cloud registry.
+            continue
+        if cloud_obj is not None:
+            enabled_clouds.append(cloud_obj)
+    return enabled_clouds
 
 
 def write_blob(file: BinaryIO, total_size: int):

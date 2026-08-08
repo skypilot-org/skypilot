@@ -270,11 +270,15 @@ class TestOptimizeJobGroup:
         dag = MagicMock(spec=dag_lib.Dag)
         dag.is_job_group = MagicMock(return_value=True)
         dag.name = 'test-job-group'
+        dag.inter_connection = None
+        dag.inter_connection_enabled = MagicMock(return_value=True)
 
         task1 = MagicMock(spec=task_lib.Task)
         task1.name = 'task-1'
+        task1.resources = []
         task2 = MagicMock(spec=task_lib.Task)
         task2.name = 'task-2'
+        task2.resources = []
         dag.tasks = [task1, task2]
 
         return dag
@@ -354,6 +358,8 @@ class TestOptimizeSameInfra:
         """Test that missing resources raises ResourcesUnavailableError."""
         dag = MagicMock(spec=dag_lib.Dag)
         dag.name = 'test-job-group'
+        dag.inter_connection = None
+        dag.inter_connection_enabled = MagicMock(return_value=True)
         task = MagicMock(spec=task_lib.Task)
         task.name = 'task-1'
         dag.tasks = [task]
@@ -375,9 +381,15 @@ class TestOptimizeSameInfra:
 
     def test_optimize_same_infra_fallback_when_no_common_infra(
             self, mock_aws_cloud):
-        """Test fallback to independent optimization when no common infra."""
+        """No common infra + inter_connection: false -> independent placement.
+
+        With inter_connection enabled (the default) the same situation is an
+        error instead; see TestInterConnectionPlacement.
+        """
         dag = MagicMock(spec=dag_lib.Dag)
         dag.name = 'test-job-group'
+        dag.inter_connection = False
+        dag.inter_connection_enabled = MagicMock(return_value=False)
 
         task1 = MagicMock(spec=task_lib.Task)
         task1.name = 'task-1'
@@ -422,6 +434,8 @@ class TestOptimizeSameInfra:
         """Test that _optimize_same_infra sets best_resources on tasks."""
         dag = MagicMock(spec=dag_lib.Dag)
         dag.name = 'test-job-group'
+        dag.inter_connection = None
+        dag.inter_connection_enabled = MagicMock(return_value=True)
 
         task1 = MagicMock(spec=task_lib.Task)
         task1.name = 'task-1'
@@ -455,6 +469,458 @@ class TestOptimizeSameInfra:
             # Both tasks should have best_resources set
             assert task1.best_resources == resources
             assert task2.best_resources == resources
+
+
+class TestInterConnectionPlacement:
+    """Tests for inter_connection-aware JobGroup placement."""
+
+    @pytest.fixture
+    def mock_k8s_cloud(self):
+        cloud = MagicMock(spec=clouds.Kubernetes)
+        cloud.__str__ = MagicMock(return_value='Kubernetes')
+        cloud.__repr__ = MagicMock(return_value='Kubernetes')
+        cloud.__hash__ = MagicMock(return_value=hash('Kubernetes'))
+        cloud.__eq__ = lambda self, other: str(other) == 'Kubernetes'
+        return cloud
+
+    @pytest.fixture
+    def mock_aws_cloud(self):
+        cloud = MagicMock(spec=clouds.AWS)
+        cloud.__str__ = MagicMock(return_value='AWS')
+        cloud.__repr__ = MagicMock(return_value='AWS')
+        cloud.__hash__ = MagicMock(return_value=hash('AWS'))
+        cloud.__eq__ = lambda self, other: str(other) == 'AWS'
+        return cloud
+
+    def _make_resources(self, cloud, region, cost=1.0):
+        resources = MagicMock(spec=resources_lib.Resources)
+        resources.cloud = cloud
+        resources.region = region
+        resources.get_cost = MagicMock(return_value=cost)
+        return resources
+
+    def _make_dag(self, tasks, inter_connection):
+        dag = MagicMock(spec=dag_lib.Dag)
+        dag.is_job_group = MagicMock(return_value=True)
+        dag.name = 'test-job-group'
+        dag.inter_connection = inter_connection
+        dag.inter_connection_enabled = MagicMock(
+            return_value=inter_connection is not False)
+        dag.tasks = tasks
+        return dag
+
+    def _make_task(self, name, resources=None):
+        task = MagicMock(spec=task_lib.Task)
+        task.name = name
+        task.resources = resources if resources is not None else []
+        task.estimate_runtime = MagicMock(return_value=3600)
+        task.num_nodes = 1
+        return task
+
+    def test_required_filters_candidates_to_kubernetes(self, mock_k8s_cloud,
+                                                       mock_aws_cloud):
+        """inter_connection: true places on k8s even when AWS is cheaper."""
+        k8s_res = self._make_resources(mock_k8s_cloud, 'ctx-a', cost=5.0)
+        aws_res = self._make_resources(mock_aws_cloud, 'us-east-1', cost=1.0)
+
+        task1 = self._make_task('task-1')
+        task2 = self._make_task('task-2')
+        dag = self._make_dag([task1, task2], inter_connection=True)
+
+        def mock_fill(task, blocked_resources, quiet):
+            return ({'any': [k8s_res, aws_res]}, None, None, None)
+
+        with patch('sky.optimizer._fill_in_launchable_resources',
+                   side_effect=mock_fill):
+            optimizer.Optimizer._optimize_same_infra(
+                dag,
+                minimize=common.OptimizeTarget.COST,
+                blocked_resources=None,
+                quiet=True)
+
+        # AWS is cheaper but must not be chosen: networking requires k8s.
+        assert task1.best_resources == k8s_res
+        assert task2.best_resources == k8s_res
+
+    def test_required_no_kubernetes_candidates_raises(self, mock_aws_cloud):
+        """inter_connection: true with no feasible k8s placement errors."""
+        aws_res = self._make_resources(mock_aws_cloud, 'us-east-1')
+        task = self._make_task('task-1')
+        dag = self._make_dag([task], inter_connection=True)
+
+        def mock_fill(task, blocked_resources, quiet):
+            return ({'any': [aws_res]}, None, None, None)
+
+        with patch('sky.optimizer._fill_in_launchable_resources',
+                   side_effect=mock_fill):
+            with pytest.raises(
+                    exceptions.ResourcesUnavailableError) as exc_info:
+                optimizer.Optimizer._optimize_same_infra(
+                    dag,
+                    minimize=common.OptimizeTarget.COST,
+                    blocked_resources=None,
+                    quiet=True)
+        assert 'no feasible Kubernetes placement' in str(exc_info.value)
+
+    def test_required_non_k8s_pin_error_names_pins(self, mock_aws_cloud):
+        """Explicit true + a job pinning only non-k8s infra: rejected by
+        the spec-level pin validation, before any catalog work, with an
+        error naming the contradicting pins."""
+        aws_res = self._make_resources(mock_aws_cloud, 'us-east-1')
+        task = self._make_task('task-1', [aws_res])
+        dag = self._make_dag([task], inter_connection=True)
+
+        # No catalog mocking: the contradiction is knowable from the
+        # spec alone and must be rejected before placement runs.
+        with pytest.raises(exceptions.ResourcesUnavailableError) as exc_info:
+            optimizer.Optimizer.optimize_job_group(dag, quiet=True)
+        assert 'pins non-Kubernetes infra' in str(exc_info.value)
+        assert 'task-1' in str(exc_info.value)
+
+    def test_enabled_no_common_infra_raises(self, mock_k8s_cloud):
+        """Default (unset) + empty intersection fails fast, never spreads."""
+        res_a = self._make_resources(mock_k8s_cloud, 'ctx-a')
+        res_b = self._make_resources(mock_k8s_cloud, 'ctx-b')
+        task1 = self._make_task('task-1')
+        task2 = self._make_task('task-2')
+        dag = self._make_dag([task1, task2], inter_connection=None)
+
+        def mock_fill(task, blocked_resources, quiet):
+            res = res_a if task == task1 else res_b
+            return ({'any': [res]}, None, None, None)
+
+        with patch('sky.optimizer._fill_in_launchable_resources',
+                   side_effect=mock_fill):
+            with pytest.raises(
+                    exceptions.ResourcesUnavailableError) as exc_info:
+                optimizer.Optimizer._optimize_same_infra(
+                    dag,
+                    minimize=common.OptimizeTarget.COST,
+                    blocked_resources=None,
+                    quiet=True)
+        assert 'No single infrastructure' in str(exc_info.value)
+        assert 'inter_connection: false' in str(exc_info.value)
+
+    def test_unset_placed_off_kubernetes_degrades(self, mock_aws_cloud):
+        """Unset group whose best common infra is non-k8s: warn + degrade.
+
+        The degradation is persisted on the dag so the controller (which
+        reads the serialized dag) skips all networking machinery.
+        """
+        res = self._make_resources(mock_aws_cloud, 'us-east-1')
+        task1 = self._make_task('task-1')
+        task2 = self._make_task('task-2')
+        dag = self._make_dag([task1, task2], inter_connection=None)
+
+        def mock_fill(task, blocked_resources, quiet):
+            return ({'any': [res]}, None, None, None)
+
+        with patch('sky.optimizer._fill_in_launchable_resources',
+                   side_effect=mock_fill):
+            optimizer.Optimizer._optimize_same_infra(
+                dag,
+                minimize=common.OptimizeTarget.COST,
+                blocked_resources=None,
+                quiet=True)
+
+        assert dag.inter_connection is False
+        assert task1.best_resources == res
+        assert task2.best_resources == res
+
+    def test_false_still_prefers_colocation(self, mock_k8s_cloud):
+        """`inter_connection: false` permits spreading, it does not ask for
+        it: when a common context exists, the group is still co-located
+        there and independent placement is not used."""
+        shared = self._make_resources(mock_k8s_cloud, 'ctx-shared')
+        task1 = self._make_task('task-1')
+        task2 = self._make_task('task-2')
+        dag = self._make_dag([task1, task2], inter_connection=False)
+
+        def mock_fill(task, blocked_resources, quiet):
+            return ({'any': [shared]}, None, None, None)
+
+        with patch('sky.optimizer._fill_in_launchable_resources',
+                   side_effect=mock_fill):
+            with patch.object(optimizer.Optimizer,
+                              '_optimize_independent') as mock_independent:
+                optimizer.Optimizer._optimize_same_infra(
+                    dag,
+                    minimize=common.OptimizeTarget.COST,
+                    blocked_resources=None,
+                    quiet=True)
+                mock_independent.assert_not_called()
+
+        assert task1.best_resources == shared
+        assert task2.best_resources == shared
+
+    def test_mixed_pin_narrows_group_to_pinned_context(self, mock_k8s_cloud):
+        """k8s/blah + k8s + k8s: everyone lands on blah, hard-pinned."""
+        res_blah = self._make_resources(mock_k8s_cloud, 'ctx-blah')
+        res_other = self._make_resources(mock_k8s_cloud, 'ctx-other', cost=0.1)
+
+        pinned = self._make_task('pinned', [res_blah])
+        flex1 = self._make_task('flex1')
+        flex2 = self._make_task('flex2')
+        dag = self._make_dag([pinned, flex1, flex2], inter_connection=True)
+
+        def mock_fill(task, blocked_resources, quiet):
+            if task == pinned:
+                # The region pin constrains candidate generation: no
+                # candidates outside ctx-blah exist for this task.
+                return ({'any': [res_blah]}, None, None, None)
+            return ({'any': [res_blah, res_other]}, None, None, None)
+
+        with patch('sky.optimizer._fill_in_launchable_resources',
+                   side_effect=mock_fill):
+            optimizer.Optimizer._optimize_same_infra(
+                dag,
+                minimize=common.OptimizeTarget.COST,
+                blocked_resources=None,
+                quiet=True)
+
+        # ctx-other is cheaper, but the pin narrows the intersection to
+        # ctx-blah: every task must land there, hard-pinned.
+        for task in (pinned, flex1, flex2):
+            assert task.best_resources.region == 'ctx-blah'
+            task.set_resources_override.assert_called_once()
+
+    def test_mixed_pin_infeasible_fails_fast(self, mock_k8s_cloud):
+        """k8s/blah + a task infeasible on blah: error, no fallthrough."""
+        res_blah = self._make_resources(mock_k8s_cloud, 'ctx-blah')
+        res_other = self._make_resources(mock_k8s_cloud, 'ctx-other')
+
+        pinned = self._make_task('pinned', [res_blah])
+        other_only = self._make_task('other-only')
+        dag = self._make_dag([pinned, other_only], inter_connection=True)
+
+        def mock_fill(task, blocked_resources, quiet):
+            if task == pinned:
+                return ({'any': [res_blah]}, None, None, None)
+            return ({'any': [res_other]}, None, None, None)
+
+        with patch('sky.optimizer._fill_in_launchable_resources',
+                   side_effect=mock_fill):
+            with pytest.raises(
+                    exceptions.ResourcesUnavailableError) as exc_info:
+                optimizer.Optimizer._optimize_same_infra(
+                    dag,
+                    minimize=common.OptimizeTarget.COST,
+                    blocked_resources=None,
+                    quiet=True)
+        assert 'No single infrastructure' in str(exc_info.value)
+
+    def test_pins_conflict_routes_to_independent_placement(
+            self, mock_k8s_cloud):
+        """optimize_job_group consults the pin validation and routes a
+        cross-infra verdict to independent placement."""
+        task1 = self._make_task('task-1',
+                                [self._make_resources(mock_k8s_cloud, 'ctx-a')])
+        task2 = self._make_task('task-2',
+                                [self._make_resources(mock_k8s_cloud, 'ctx-b')])
+        dag = self._make_dag([task1, task2], inter_connection=False)
+
+        with patch.object(optimizer.Optimizer,
+                          '_optimize_independent') as mock_independent, \
+             patch.object(optimizer.Optimizer,
+                          '_optimize_same_infra') as mock_same_infra:
+            mock_independent.return_value = dag
+            optimizer.Optimizer.optimize_job_group(dag, quiet=True)
+            mock_independent.assert_called_once()
+            mock_same_infra.assert_not_called()
+
+
+class TestValidateInterConnectionPins:
+    """Direct truth-table tests for _validate_inter_connection_pins.
+
+    Spec-level only: scenario (pins x inter_connection) -> verdict
+    (place independently?), error, or persisted degradation. No catalog
+    or placement machinery involved.
+    """
+
+    @pytest.fixture
+    def k8s(self):
+        cloud = MagicMock(spec=clouds.Kubernetes)
+        cloud.__str__ = MagicMock(return_value='Kubernetes')
+        return cloud
+
+    @pytest.fixture
+    def aws(self):
+        cloud = MagicMock(spec=clouds.AWS)
+        cloud.__str__ = MagicMock(return_value='AWS')
+        return cloud
+
+    def _res(self, cloud, region):
+        res = MagicMock(spec=resources_lib.Resources)
+        res.cloud = cloud
+        res.region = region
+        return res
+
+    def _dag(self, task_specs, inter_connection):
+        """task_specs: dict of task name -> list of (cloud, region)."""
+        dag = MagicMock(spec=dag_lib.Dag)
+        dag.name = 'g'
+        dag.inter_connection = inter_connection
+        tasks = []
+        for name, options in task_specs.items():
+            task = MagicMock(spec=task_lib.Task)
+            task.name = name
+            task.resources = [self._res(c, r) for c, r in options]
+            tasks.append(task)
+        dag.tasks = tasks
+        return dag
+
+    def _validate(self, dag):
+        return optimizer._validate_inter_connection_pins(dag, quiet=True)
+
+    def test_no_pins_no_verdict(self, k8s):
+        dag = self._dag({'a': [(None, None)], 'b': [(None, None)]}, None)
+        assert self._validate(dag) is False
+
+    def test_true_with_non_k8s_pin_raises(self, aws):
+        dag = self._dag({'a': [(aws, 'us-east-1')]}, True)
+        with pytest.raises(exceptions.ResourcesUnavailableError,
+                           match='pins non-Kubernetes infra'):
+            self._validate(dag)
+
+    def test_unset_with_non_k8s_pin_alone_is_fine(self, aws):
+        """A lone non-k8s pin with unset is not a conflict; degradation
+        (if the group lands off k8s) happens later, at placement."""
+        dag = self._dag({'a': [(aws, 'us-east-1')], 'b': [(None, None)]}, None)
+        assert self._validate(dag) is False
+        assert dag.inter_connection is None
+
+    def test_region_conflict_true_raises(self, k8s):
+        dag = self._dag({'a': [(k8s, 'ctx-a')], 'b': [(k8s, 'ctx-b')]}, True)
+        with pytest.raises(exceptions.ResourcesUnavailableError,
+                           match='no common option'):
+            self._validate(dag)
+
+    def test_region_conflict_unset_degrades(self, k8s):
+        dag = self._dag({'a': [(k8s, 'ctx-a')], 'b': [(k8s, 'ctx-b')]}, None)
+        assert self._validate(dag) is True
+        assert dag.inter_connection is False
+
+    def test_region_conflict_false_allowed(self, k8s):
+        dag = self._dag({'a': [(k8s, 'ctx-a')], 'b': [(k8s, 'ctx-b')]}, False)
+        assert self._validate(dag) is True
+        assert dag.inter_connection is False
+
+    def test_cloud_conflict_unset_degrades(self, k8s, aws):
+        dag = self._dag({'a': [(k8s, 'ctx-a')], 'b': [(aws, None)]}, None)
+        assert self._validate(dag) is True
+        assert dag.inter_connection is False
+
+    def test_partial_pinning_conflict(self, k8s):
+        """Conflict detection works when only some tasks are pinned."""
+        dag = self._dag(
+            {
+                'a': [(k8s, 'ctx-a')],
+                'b': [(k8s, 'ctx-b')],
+                'c': [(k8s, None)]
+            }, False)
+        assert self._validate(dag) is True
+
+    def test_overlapping_any_of_not_a_conflict(self, k8s):
+        dag = self._dag(
+            {
+                'a': [(k8s, 'ctx-a'), (k8s, 'ctx-b')],
+                'b': [(k8s, 'ctx-a'), (k8s, 'ctx-b')]
+            }, True)
+        assert self._validate(dag) is False
+
+    def test_disjoint_any_of_is_a_conflict(self, k8s):
+        dag = self._dag(
+            {
+                'a': [(k8s, 'ctx-a'), (k8s, 'ctx-b')],
+                'b': [(k8s, 'ctx-c'), (k8s, 'ctx-d')]
+            }, True)
+        with pytest.raises(exceptions.ResourcesUnavailableError,
+                           match='no common option'):
+            self._validate(dag)
+
+    def test_cross_cloud_any_of_with_common_option(self, k8s, aws):
+        dag = self._dag(
+            {
+                'a': [(k8s, 'ctx-a'), (aws, 'us-east-1')],
+                'b': [(aws, 'us-east-1')]
+            }, False)
+        assert self._validate(dag) is False
+
+    def test_unpinned_option_defuses_conflict(self, k8s, aws):
+        dag = self._dag(
+            {
+                'a': [(k8s, 'ctx-a'), (None, None)],
+                'b': [(aws, None)]
+            }, False)
+        assert self._validate(dag) is False
+
+    def test_cloud_pin_and_context_pin_same_cloud(self, k8s):
+        dag = self._dag({'a': [(k8s, None)], 'b': [(k8s, 'ctx-a')]}, True)
+        assert self._validate(dag) is False
+
+
+class TestGetTaskPinSets:
+    """Direct tests for per-task pin-set extraction (OR semantics).
+
+    A task only has an exactly-enumerable constraint set at a granularity
+    when EVERY resource option is pinned at that granularity.
+    """
+
+    def _task(self, options):
+        task = MagicMock(spec=task_lib.Task)
+        task.name = 't'
+        task.resources = options
+        return task
+
+    def _res(self, cloud_str, region):
+        res = MagicMock(spec=resources_lib.Resources)
+        if cloud_str is None:
+            res.cloud = None
+        else:
+            cloud = MagicMock()
+            cloud.__str__ = MagicMock(return_value=cloud_str)
+            res.cloud = cloud
+        res.region = region
+        return res
+
+    def test_fully_pinned_single_option(self):
+        cloud_pins, infra_pins = optimizer._get_task_pin_sets(
+            self._task([self._res('Kubernetes', 'ctx-a')]))
+        assert cloud_pins == {'Kubernetes'}
+        assert infra_pins == {'Kubernetes/ctx-a'}
+
+    def test_any_of_fully_pinned_across_clouds(self):
+        cloud_pins, infra_pins = optimizer._get_task_pin_sets(
+            self._task([
+                self._res('Kubernetes', 'ctx-a'),
+                self._res('AWS', 'us-east-1'),
+            ]))
+        assert cloud_pins == {'Kubernetes', 'AWS'}
+        assert infra_pins == {'Kubernetes/ctx-a', 'AWS/us-east-1'}
+
+    def test_mixed_region_and_cloud_only_options(self):
+        cloud_pins, infra_pins = optimizer._get_task_pin_sets(
+            self._task([
+                self._res('Kubernetes', 'ctx-a'),
+                self._res('Kubernetes', None),
+            ]))
+        # Exactly enumerable at cloud granularity, flexible within it.
+        assert cloud_pins == {'Kubernetes'}
+        assert infra_pins is None
+
+    def test_option_without_cloud_makes_task_fully_flexible(self):
+        cloud_pins, infra_pins = optimizer._get_task_pin_sets(
+            self._task([
+                self._res('Kubernetes', 'ctx-a'),
+                self._res(None, None),
+            ]))
+        assert cloud_pins is None
+        assert infra_pins is None
+
+    def test_no_resource_options(self):
+        cloud_pins, infra_pins = optimizer._get_task_pin_sets(self._task([]))
+        assert cloud_pins is None
+        assert infra_pins is None
 
 
 class TestModuleLevelOptimizeJobGroup:
@@ -757,3 +1223,135 @@ class TestPrintJobGroupPlan:
             # (no "Best plan:" message)
             for call in mock_logger.info.call_args_list:
                 assert 'Best plan' not in str(call)
+
+
+class TestSelectBestInfraDistinctCloudInstances:
+    """Regression tests for cloud-keyed candidate lookups with real clouds.
+
+    Production builds each task's candidate dict with its own Cloud
+    instances. Before Cloud.__eq__/__hash__ existed, the value lookup
+    `cloud in candidates` in _select_best_infra failed for every task
+    except the one whose instance _find_common_infras happened to reuse,
+    so every common infra was skipped as invalid and the fallback
+    returned an arbitrary member of an unordered set. Observed in the
+    wild: a 2-task group placed on paid AWS while free Kubernetes
+    capacity was listed under "Other available common infras".
+
+    The mock-cloud fixtures elsewhere in this file wire up __eq__ on the
+    mocks and share one instance across tasks, which is exactly why they
+    could not catch this; these tests use real cloud objects and fresh
+    instances per task on purpose.
+    """
+
+    def _res(self, cloud, region, cost):
+        res = MagicMock(spec=resources_lib.Resources)
+        res.cloud = cloud
+        res.region = region
+        res.get_cost = MagicMock(return_value=cost)
+        return res
+
+    def _task(self, name):
+        task = MagicMock(spec=task_lib.Task)
+        task.name = name
+        task.time_estimator_func = None
+        task.num_nodes = 1
+        return task
+
+    def _candidates_for_task(self):
+        """Fresh cloud instances every call, as in production."""
+        return {
+            clouds.Kubernetes(): [
+                self._res(clouds.Kubernetes(), 'ctx-dev', cost=0.0)
+            ],
+            clouds.AWS(): [self._res(clouds.AWS(), 'ap-northeast-1', cost=8.6)],
+        }
+
+    def test_free_kubernetes_beats_paid_aws_across_instances(self):
+        task1, task2 = self._task('a'), self._task('b')
+        task_candidates = {
+            task1: self._candidates_for_task(),
+            task2: self._candidates_for_task(),
+        }
+
+        common_infras = optimizer.Optimizer._find_common_infras(task_candidates)
+        as_names = {(str(c), r) for c, r in common_infras}
+        assert as_names == {('Kubernetes', 'ctx-dev'),
+                            ('AWS', 'ap-northeast-1')}
+
+        cloud, region = optimizer.Optimizer._select_best_infra(
+            common_infras, task_candidates, [task1, task2], minimize_cost=True)
+        assert str(cloud) == 'Kubernetes'
+        assert region == 'ctx-dev'
+
+    def test_select_best_infra_tie_break_ignores_input_order(self):
+        """Equal-score options (the norm on k8s: every context costs 0.0)
+        must tie-break deterministically, not by whatever order the
+        common-infra set intersection happened to iterate in."""
+        task1, task2 = self._task('a'), self._task('b')
+
+        def candidates():
+            return {
+                clouds.Kubernetes(): [
+                    self._res(clouds.Kubernetes(), 'ctx-a', cost=0.0),
+                    self._res(clouds.Kubernetes(), 'ctx-b', cost=0.0),
+                ],
+            }
+
+        task_candidates = {task1: candidates(), task2: candidates()}
+        k8s = clouds.Kubernetes()
+        forward = [(k8s, 'ctx-a'), (k8s, 'ctx-b')]
+        reverse = [(k8s, 'ctx-b'), (k8s, 'ctx-a')]
+
+        picks = {
+            optimizer.Optimizer._select_best_infra(order,
+                                                   task_candidates,
+                                                   [task1, task2],
+                                                   minimize_cost=True)[1]
+            for order in (forward, reverse)
+        }
+        assert picks == {'ctx-a'}
+
+    def test_optimize_same_infra_end_to_end_distinct_instances(self):
+        """Full _optimize_same_infra pass with per-task cloud instances:
+        the group must land on the free Kubernetes context, not AWS, and
+        the unset inter_connection must NOT degrade (placement is k8s)."""
+        dag = MagicMock(spec=dag_lib.Dag)
+        dag.name = 'g'
+        dag.inter_connection = None
+        dag.inter_connection_enabled = MagicMock(return_value=True)
+
+        task1, task2 = self._task('a'), self._task('b')
+        task1.estimate_runtime = MagicMock(return_value=3600)
+        task2.estimate_runtime = MagicMock(return_value=3600)
+        dag.tasks = [task1, task2]
+
+        per_task_k8s_res = {}
+
+        def mock_fill(task, blocked_resources, quiet):
+            # _fill_in_launchable_resources is called once PER TASK and
+            # returns that task's launchable candidates across ALL clouds
+            # (a Dict[Resources, List[Resources]]; the code under test only
+            # reads the value lists). Each task gets BOTH a free k8s option
+            # and a paid AWS option - AWS is a viable common infra that
+            # must lose - with fresh Cloud instances per call, as in
+            # production.
+            k8s_res = self._res(clouds.Kubernetes(), 'ctx-dev', cost=0.0)
+            aws_res = self._res(clouds.AWS(), 'ap-northeast-1', cost=8.6)
+            # Remember each task's own k8s candidate: Step 4 must assign
+            # THIS task's instance back to it, not another task's.
+            per_task_k8s_res[task.name] = k8s_res
+            requested = MagicMock(spec=resources_lib.Resources)
+            return ({requested: [k8s_res, aws_res]}, None, None, None)
+
+        with patch('sky.optimizer._fill_in_launchable_resources',
+                   side_effect=mock_fill):
+            optimizer.Optimizer._optimize_same_infra(
+                dag,
+                minimize=common.OptimizeTarget.COST,
+                blocked_resources=None,
+                quiet=True)
+
+        assert task1.best_resources is per_task_k8s_res['a']
+        assert task2.best_resources is per_task_k8s_res['b']
+        # k8s placement: the unset default must survive undegraded.
+        assert dag.inter_connection is None

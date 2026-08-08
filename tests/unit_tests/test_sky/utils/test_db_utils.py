@@ -122,6 +122,8 @@ class TestGetEngine:
         # Ensure we're not in server mode by default
         monkeypatch.delenv('IS_SKYPILOT_SERVER', raising=False)
         monkeypatch.delenv('SKYPILOT_DB_CONNECTION_URI', raising=False)
+        monkeypatch.delenv('SKYPILOT_DB_POOL_HOSTPORT', raising=False)
+        monkeypatch.delenv('SKYPILOT_DB_POOL_CONNECTION_URI', raising=False)
 
     def test_sqlite_sync_engine_creation(self, tmp_path, monkeypatch):
         """Test SQLite sync engine is created correctly."""
@@ -238,6 +240,51 @@ class TestGetEngine:
             assert call_args[1]['pool_pre_ping'] is True
             assert call_args[1]['pool_recycle'] == 1800
             assert engine == mock_engine
+
+    def test_postgres_no_pool_engine_is_nullpool_with_bounded_connect(
+            self, monkeypatch):
+        """no_pool returns a NullPool engine with a bounded connect phase,
+        even when a pool size is configured (which would otherwise pick
+        QueuePool)."""
+        monkeypatch.setenv('IS_SKYPILOT_SERVER', 'true')
+        monkeypatch.setenv('SKYPILOT_DB_CONNECTION_URI',
+                           'postgresql://user:pass@localhost/db')
+        db_utils.set_max_connections(10)
+
+        with mock.patch('sqlalchemy.create_engine') as mock_create:
+            mock_create.return_value = mock.MagicMock()
+
+            db_utils.get_engine(None, direct=True, no_pool=True)
+
+            mock_create.assert_called_once()
+            call_args = mock_create.call_args
+            assert call_args[1]['poolclass'] == sqlalchemy.NullPool
+            assert call_args[1]['connect_args'] == {
+                'connect_timeout': db_utils._NO_POOL_CONNECT_TIMEOUT_SECONDS
+            }
+
+    def test_postgres_no_pool_direct_bypasses_pooler_and_default_engine(
+            self, monkeypatch):
+        """no_pool+direct connects to the direct URI (not the pooler rewrite)
+        and is cached separately from the default engine, so the two never
+        share pool state."""
+        monkeypatch.setenv('IS_SKYPILOT_SERVER', 'true')
+        monkeypatch.setenv('SKYPILOT_DB_CONNECTION_URI',
+                           'postgresql://user:pass@h:5432/db')
+        monkeypatch.setenv('SKYPILOT_DB_POOL_HOSTPORT', '127.0.0.1:6432')
+        db_utils.set_max_connections(10)
+
+        default = db_utils.get_engine(None)
+        nopool = db_utils.get_engine(None, direct=True, no_pool=True)
+
+        assert nopool is not default
+        # The default engine routes through the pooler; no_pool goes direct.
+        assert '127.0.0.1:6432' in str(default.url)
+        assert 'h:5432' in str(nopool.url)
+        assert isinstance(nopool.pool, sqlalchemy.NullPool)
+        # Both are cached: repeat calls return the same objects.
+        assert db_utils.get_engine(None) is default
+        assert db_utils.get_engine(None, direct=True, no_pool=True) is nopool
 
     def test_postgres_sync_engine_queuepool_max_overflow_calculation(
             self, monkeypatch):
@@ -441,3 +488,171 @@ class TestGetEngine:
             # Parent directory should be created
             expected_dir = runtime_dir / '.sky'
             assert expected_dir.exists()
+
+    def test_pool_hostport_rewrites_default_engine(self, monkeypatch):
+        """With a pooler configured, the default engine uses the pooled URI."""
+        monkeypatch.setenv('IS_SKYPILOT_SERVER', 'true')
+        monkeypatch.setenv('SKYPILOT_DB_CONNECTION_URI',
+                           'postgresql://user:pass@10.0.0.5:5432/db')
+        monkeypatch.setenv('SKYPILOT_DB_POOL_HOSTPORT', '127.0.0.1:6432')
+        db_utils.set_max_connections(1)
+
+        with mock.patch('sqlalchemy.create_engine') as mock_create:
+            mock_create.return_value = mock.MagicMock()
+            db_utils.get_engine(db_name='ignored')
+
+            assert mock_create.call_args[0][0] == (
+                'postgresql://user:pass@127.0.0.1:6432/db')
+
+    def test_direct_bypasses_pooler(self, monkeypatch):
+        """direct=True keeps the raw URI even when a pooler is configured."""
+        monkeypatch.setenv('IS_SKYPILOT_SERVER', 'true')
+        monkeypatch.setenv('SKYPILOT_DB_CONNECTION_URI',
+                           'postgresql://user:pass@10.0.0.5:5432/db')
+        monkeypatch.setenv('SKYPILOT_DB_POOL_HOSTPORT', '127.0.0.1:6432')
+        db_utils.set_max_connections(1)
+
+        with mock.patch('sqlalchemy.create_engine') as mock_create:
+            mock_create.return_value = mock.MagicMock()
+            db_utils.get_engine(db_name='ignored', direct=True)
+
+            assert mock_create.call_args[0][0] == (
+                'postgresql://user:pass@10.0.0.5:5432/db')
+
+    def test_pooled_and_direct_engines_cached_separately(self, monkeypatch):
+        """Pooled and direct engines are distinct entries in the cache."""
+        monkeypatch.setenv('IS_SKYPILOT_SERVER', 'true')
+        monkeypatch.setenv('SKYPILOT_DB_CONNECTION_URI',
+                           'postgresql://user:pass@10.0.0.5:5432/db')
+        monkeypatch.setenv('SKYPILOT_DB_POOL_HOSTPORT', '127.0.0.1:6432')
+        db_utils.set_max_connections(1)
+
+        with mock.patch('sqlalchemy.create_engine') as mock_create:
+            mock_create.side_effect = lambda *a, **k: mock.MagicMock()
+            pooled = db_utils.get_engine(db_name='ignored')
+            direct = db_utils.get_engine(db_name='ignored', direct=True)
+
+            # Two distinct conn strings -> two engines, two create calls.
+            assert mock_create.call_count == 2
+            assert pooled is not direct
+
+    def test_no_pooler_direct_equals_pooled(self, monkeypatch):
+        """Without a pooler, direct and default resolve to the same engine."""
+        monkeypatch.setenv('IS_SKYPILOT_SERVER', 'true')
+        monkeypatch.setenv('SKYPILOT_DB_CONNECTION_URI',
+                           'postgresql://user:pass@10.0.0.5:5432/db')
+        db_utils.set_max_connections(1)
+
+        with mock.patch('sqlalchemy.create_engine') as mock_create:
+            mock_create.side_effect = lambda *a, **k: mock.MagicMock()
+            default = db_utils.get_engine(db_name='ignored')
+            direct = db_utils.get_engine(db_name='ignored', direct=True)
+
+            assert mock_create.call_count == 1
+            assert default is direct
+
+    def test_direct_engine_uses_nullpool_when_pooler_configured(
+            self, monkeypatch):
+        """With a pooler, the direct engine is NullPool (no idle backend);
+        the pooled engine stays QueuePool."""
+        monkeypatch.setenv('IS_SKYPILOT_SERVER', 'true')
+        monkeypatch.setenv('SKYPILOT_DB_CONNECTION_URI',
+                           'postgresql://user:pass@10.0.0.5:5432/db')
+        monkeypatch.setenv('SKYPILOT_DB_POOL_HOSTPORT', '127.0.0.1:6432')
+        db_utils.set_max_connections(1)
+
+        pools = {}
+
+        def rec(conn, **kw):
+            pools[conn] = kw.get('poolclass')
+            return mock.MagicMock()
+
+        with mock.patch('sqlalchemy.create_engine', side_effect=rec):
+            db_utils.get_engine(db_name='ignored')  # pooled
+            db_utils.get_engine(db_name='ignored', direct=True)  # direct
+
+        assert pools['postgresql://user:pass@127.0.0.1:6432/db'] == (
+            sqlalchemy.pool.QueuePool)
+        assert pools['postgresql://user:pass@10.0.0.5:5432/db'] == (
+            sqlalchemy.NullPool)
+
+    def test_direct_engine_uses_queuepool_when_no_pooler(self, monkeypatch):
+        """Without a pooler, direct=True keeps QueuePool (no separate engine);
+        order-independent — creating the direct one first must not force
+        NullPool onto the shared engine."""
+        monkeypatch.setenv('IS_SKYPILOT_SERVER', 'true')
+        monkeypatch.setenv('SKYPILOT_DB_CONNECTION_URI',
+                           'postgresql://user:pass@10.0.0.5:5432/db')
+        db_utils.set_max_connections(1)
+
+        with mock.patch('sqlalchemy.create_engine') as mock_create:
+            mock_create.side_effect = lambda *a, **k: mock.MagicMock()
+            db_utils.get_engine(db_name='ignored', direct=True)
+            assert mock_create.call_args[1]['poolclass'] == (
+                sqlalchemy.pool.QueuePool)
+
+
+class TestConnStringResolution:
+    """Tests for _rewrite_hostport and _resolve_conn_string."""
+
+    @pytest.fixture(autouse=True)
+    def clear_env(self, monkeypatch):
+        monkeypatch.delenv('IS_SKYPILOT_SERVER', raising=False)
+        monkeypatch.delenv('SKYPILOT_DB_CONNECTION_URI', raising=False)
+        monkeypatch.delenv('SKYPILOT_DB_POOL_HOSTPORT', raising=False)
+        monkeypatch.delenv('SKYPILOT_DB_POOL_CONNECTION_URI', raising=False)
+
+    def test_rewrite_preserves_userinfo_dbname_query(self):
+        out = db_utils._rewrite_hostport(
+            'postgresql://u:p%40ss@10.0.0.5:5432/staging-db?sslmode=require',
+            '127.0.0.1:6432')
+        assert out == (
+            'postgresql://u:p%40ss@127.0.0.1:6432/staging-db?sslmode=require')
+
+    def test_rewrite_no_userinfo(self):
+        out = db_utils._rewrite_hostport('postgresql://10.0.0.5:5432/db',
+                                         '127.0.0.1:6432')
+        assert out == 'postgresql://127.0.0.1:6432/db'
+
+    def test_rewrite_no_explicit_port(self):
+        out = db_utils._rewrite_hostport('postgresql://u:p@host/db',
+                                         '127.0.0.1:6432')
+        assert out == 'postgresql://u:p@127.0.0.1:6432/db'
+
+    def test_rewrite_non_postgres_is_noop(self):
+        uri = 'sqlite:////var/lib/sky/state.db'
+        assert db_utils._rewrite_hostport(uri, '127.0.0.1:6432') == uri
+
+    def test_resolve_none_when_not_server(self, monkeypatch):
+        monkeypatch.setenv('SKYPILOT_DB_CONNECTION_URI',
+                           'postgresql://u:p@h:5432/db')
+        assert db_utils._resolve_conn_string(direct=False) is None
+        assert db_utils._resolve_conn_string(direct=True) is None
+
+    def test_resolve_direct_when_no_pooler(self, monkeypatch):
+        monkeypatch.setenv('IS_SKYPILOT_SERVER', 'true')
+        monkeypatch.setenv('SKYPILOT_DB_CONNECTION_URI',
+                           'postgresql://u:p@h:5432/db')
+        assert db_utils._resolve_conn_string(
+            direct=False) == 'postgresql://u:p@h:5432/db'
+
+    def test_resolve_rewrites_hostport(self, monkeypatch):
+        monkeypatch.setenv('IS_SKYPILOT_SERVER', 'true')
+        monkeypatch.setenv('SKYPILOT_DB_CONNECTION_URI',
+                           'postgresql://u:p@h:5432/db')
+        monkeypatch.setenv('SKYPILOT_DB_POOL_HOSTPORT', '127.0.0.1:6432')
+        assert db_utils._resolve_conn_string(
+            direct=False) == 'postgresql://u:p@127.0.0.1:6432/db'
+        # direct always bypasses the pooler.
+        assert db_utils._resolve_conn_string(
+            direct=True) == 'postgresql://u:p@h:5432/db'
+
+    def test_resolve_full_override_wins(self, monkeypatch):
+        monkeypatch.setenv('IS_SKYPILOT_SERVER', 'true')
+        monkeypatch.setenv('SKYPILOT_DB_CONNECTION_URI',
+                           'postgresql://u:p@h:5432/db')
+        monkeypatch.setenv('SKYPILOT_DB_POOL_HOSTPORT', '127.0.0.1:6432')
+        monkeypatch.setenv('SKYPILOT_DB_POOL_CONNECTION_URI',
+                           'postgresql://u:p@pooler:6432/db')
+        assert db_utils._resolve_conn_string(
+            direct=False) == 'postgresql://u:p@pooler:6432/db'

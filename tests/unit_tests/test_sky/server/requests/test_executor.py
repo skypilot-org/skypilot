@@ -5,6 +5,7 @@ import functools
 import os
 import pathlib
 import queue as queue_lib
+import threading
 import time
 from typing import List
 from unittest import mock
@@ -1385,3 +1386,68 @@ def test_resolution_log_silent_for_bare_launch_without_prefix(
     assert not [m for m in info_calls if 'Using workspace' in m], (
         f'bare `launch` (without prefix) must not match the whitelist; '
         f'got: {info_calls}')
+
+
+def _reset_thread_executors():
+    """Drop both cached per-process executors so each test starts clean."""
+    # pylint: disable=protected-access
+    executor._REQUEST_THREAD_EXECUTOR = None
+    executor._AUTH_THREAD_EXECUTOR = None
+
+
+def test_auth_and_request_executors_are_distinct():
+    _reset_thread_executors()
+    try:
+        request_executor = executor.get_request_thread_executor()
+        auth_executor = executor.get_auth_thread_executor()
+        assert request_executor is not auth_executor
+        assert request_executor.name != auth_executor.name
+        # Each getter still memoizes per process.
+        assert executor.get_request_thread_executor() is request_executor
+        assert executor.get_auth_thread_executor() is auth_executor
+    finally:
+        _reset_thread_executors()
+
+
+def test_saturating_request_executor_does_not_block_auth():
+    """The point of the split: streaming work filling the request executor
+    must not make authentication fail.
+
+    Before the split both shared one pool, so enough long-lived streams
+    starved the auth lookups that run on every request and the server
+    answered 503 to traffic that had nothing to do with streaming.
+    """
+    _reset_thread_executors()
+    release = threading.Event()
+    futures = []
+    try:
+        # Shrink the request pool for the duration: what matters is that it
+        # reaches *its* limit, not how big that limit is. Filling the real 128
+        # would spawn 128 threads inside a test worker, which under `pytest
+        # -n` starves the whole run -- enough to push neighbouring tests past
+        # their own timeouts.
+        with mock.patch.object(executor, '_REQUEST_THREADS_LIMIT', 4):
+            request_executor = executor.get_request_thread_executor()
+        auth_executor = executor.get_auth_thread_executor()
+        assert request_executor.max_workers == 4
+
+        # Fill the request executor to its limit with tasks that do not finish,
+        # standing in for in-flight log streams.
+        for _ in range(request_executor.max_workers):
+            futures.append(request_executor.submit(release.wait, 10))
+
+        # It is now full: one more task is rejected.
+        with pytest.raises(exceptions.ConcurrentWorkerExhaustedError):
+            request_executor.submit(release.wait, 10)
+
+        # Auth is unaffected and still serves requests.
+        assert auth_executor.submit(lambda: 'ok').result(timeout=5) == 'ok'
+        assert auth_executor.check_available() >= 0
+    finally:
+        release.set()
+        for fut in futures:
+            try:
+                fut.result(timeout=5)
+            except Exception:  # pylint: disable=broad-except
+                pass
+        _reset_thread_executors()

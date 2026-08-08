@@ -23,9 +23,41 @@ from sky.server import common as server_common
 from sky.skylet import constants
 from sky.utils import common_utils
 
+# Check that `sky storage delete` removed the bucket AND that it stays
+# removed. Two lessons baked in (root-caused via CloudTrail, see #10353):
+#   1. The managed-job controller's post-job cleanup used to re-create the
+#      just-deleted bucket a few seconds after deletion (construct() on the
+#      task's storage mounts auto-creates missing buckets). A one-shot
+#      existence check right after delete races ahead of the recreation and
+#      false-passes, silently leaking the bucket. So after the bucket is
+#      first observed gone, hold the assertion open for another 60s and fail
+#      if it reappears.
+#   2. Use `get-bucket-location` rather than `head-bucket`: cross-region
+#      head-bucket keeps returning a redirect the CLI reports as success for
+#      a window after deletion, and this check may run on a cloud-cmd
+#      cluster whose default region differs from the bucket's.
 _CHECK_AWS_BUCKET_DOESNT_EXIST = (
-    'aws s3api head-bucket --bucket {bucket_name} 2>/dev/null && exit 1 || exit 0'
-)
+    'start=$SECONDS; '
+    'while aws s3api get-bucket-location --bucket {bucket_name} '
+    '>/dev/null 2>&1; do '
+    'if (( SECONDS - start > 120 )); then '
+    'echo "Bucket {bucket_name} still exists 120s after deletion"; '
+    'aws sts get-caller-identity || true; '
+    'aws s3api get-bucket-location --bucket {bucket_name} || true; '
+    'exit 1; fi; '
+    'echo "Bucket {bucket_name} still resolves, waiting..."; sleep 5; '
+    'done; '
+    'echo "Bucket {bucket_name} gone; verifying it stays gone '
+    '(no recreation)..."; '
+    'for i in 1 2 3 4 5 6; do '
+    'sleep 10; '
+    'if aws s3api get-bucket-location --bucket {bucket_name} '
+    '>/dev/null 2>&1; then '
+    'echo "Bucket {bucket_name} REAPPEARED after deletion (recreated at '
+    '+$((SECONDS-start))s)"; exit 1; fi; '
+    'done; '
+    'echo "Bucket {bucket_name} confirmed deleted and not recreated."; '
+    'exit 0')
 
 
 @pytest.mark.no_remote_server

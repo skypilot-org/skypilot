@@ -21,15 +21,19 @@ setup: |
         exit 0
     fi
     cd data && \
-    # `--timeout=30` is wget's inactivity (read) timeout: catches stalls.
-    # `timeout 90s` is a hard wallclock cap: catches slow-but-steady mirrors
-    # (the toronto host has dipped to ~350 KB/s, which would never trip
-    # --timeout but would blow the 360s SETTING_UP budget). Together they
-    # ensure `||` actually fires and the wayback fallback gets used.
-    (timeout 90s wget -c --quiet --timeout=30 --tries=2 https://www.cs.toronto.edu/~kriz/cifar-10-python.tar.gz \
-        || timeout 120s wget --quiet --timeout=30 --tries=2 -O cifar-10-python.tar.gz \
-            "https://web.archive.org/web/20241225200100im_/https://www.cs.toronto.edu/~kriz/cifar-10-python.tar.gz")
-    tar -xvzf cifar-10-python.tar.gz
+    # CIFAR-10 is served from a SkyPilot-maintained GCS mirror because the
+    # upstream host (cs.toronto.edu) is often slow or unavailable. The md5
+    # check guards against truncated downloads (a truncated file can leave
+    # wget exiting 0, which would otherwise skip the fallback and fail in tar).
+    CIFAR_MD5=c58f30108f718f92721af3b95e74349a
+    cifar_ok() { echo "${CIFAR_MD5}  cifar-10-python.tar.gz" | md5sum -c --status; }
+    timeout 90s wget -c --quiet --timeout=30 --tries=2 https://storage.googleapis.com/skypilot-example-data/datasets/cifar-10-python.tar.gz || true
+    if ! cifar_ok; then
+        rm -f cifar-10-python.tar.gz
+        timeout 120s wget --quiet --timeout=30 --tries=2 https://www.cs.toronto.edu/~kriz/cifar-10-python.tar.gz
+        cifar_ok
+    fi
+    tar -xzf cifar-10-python.tar.gz
 
 run: |
     source .venv/bin/activate

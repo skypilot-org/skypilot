@@ -1421,7 +1421,19 @@ def cancel_jobs_by_id(job_ids: Optional[List[int]],
         if job_status is None:
             logger.info(f'Job {job_id} not found. Skipped.')
             continue
-        elif job_status.is_terminal():
+
+        # Workspace isolation is a permission check and is independent of job
+        # status: a job outside the caller's active workspace must not be acted
+        # on (or have its state revealed) whether it is pending, running, or
+        # already terminal. Enforce it first, before any status-based handling
+        # (terminal skip / PENDING short-circuit / signal) below. Kept after the
+        # existence check above because a missing job has no workspace to check.
+        job_workspace = managed_job_state.get_workspace(job_id)
+        if current_workspace is not None and job_workspace != current_workspace:
+            wrong_workspace_job_ids.append(job_id)
+            continue
+
+        if job_status.is_terminal():
             logger.info(f'Job {job_id} is already in terminal state '
                         f'{job_status.value}. Skipped.')
             continue
@@ -1433,11 +1445,6 @@ def cancel_jobs_by_id(job_ids: Optional[List[int]],
                 continue
 
         update_managed_jobs_statuses(job_id)
-
-        job_workspace = managed_job_state.get_workspace(job_id)
-        if current_workspace is not None and job_workspace != current_workspace:
-            wrong_workspace_job_ids.append(job_id)
-            continue
 
         if managed_job_state.is_legacy_controller_process(job_id):
             # The job is running on a legacy single-job controller process.
@@ -1996,6 +2003,19 @@ def stream_logs_by_id(
                             None,
                             follow=False,
                             tail=tail if tail is not None else 0)
+                        if returncode is None:
+                            # Not cluster-addressed: runtimes whose forwarded
+                            # records carry the managed-job identity instead of
+                            # an on-cluster job id (e.g. bare-pod runtimes with
+                            # no per-job log files) are read back directly by
+                            # (job_id, task_id). Readers without managed-job
+                            # addressing return None again and we fall through
+                            # to the terminal-state message.
+                            returncode = log_reader.read_managed_job_logs(
+                                job_id,
+                                task_id,
+                                follow=False,
+                                tail=tail if tail is not None else 0)
                     except Exception as e:  # pylint: disable=broad-except
                         # Surface the failure (streamed to the user via the
                         # request's stdout redirection) and fall through to the

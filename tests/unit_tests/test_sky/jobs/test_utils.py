@@ -6,6 +6,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from sky import exceptions
+from sky.jobs import constants as managed_job_constants
 from sky.jobs import state as managed_job_state
 from sky.jobs import utils as jobs_utils
 
@@ -1451,6 +1452,7 @@ class TestStreamLogsByIdExternalStoreFallback:
 
         fake_reader = MagicMock()
         fake_reader.read_cluster_job_logs.return_value = None
+        fake_reader.read_managed_job_logs.return_value = None
         self._patch_logs(monkeypatch, fake_reader)
         monkeypatch.setattr(jobs_utils, 'generate_managed_job_cluster_name',
                             lambda name, jid: f'sky-managed-{jid}-{name}')
@@ -1459,6 +1461,49 @@ class TestStreamLogsByIdExternalStoreFallback:
 
         fake_reader.read_cluster_job_logs.assert_called_once()
         assert 'external log store' in msg
+
+    def test_managed_job_addressing_fallback(self, monkeypatch):
+        # The cluster-addressed read finds nothing (e.g. a runtime whose
+        # forwarded records carry the managed-job identity instead of an
+        # on-cluster job id); the reader is then consulted by (job_id,
+        # task_id) and its success is reported like a streamed log.
+        task_info = [(0, 'mytask', managed_job_state.ManagedJobStatus.SUCCEEDED,
+                      None, None)]
+        self._patch_terminal_job(monkeypatch, task_info)
+
+        fake_reader = MagicMock()
+        fake_reader.read_cluster_job_logs.return_value = None
+        fake_reader.read_managed_job_logs.return_value = 0
+        self._patch_logs(monkeypatch, fake_reader)
+        monkeypatch.setattr(jobs_utils, 'generate_managed_job_cluster_name',
+                            lambda name, jid: f'sky-managed-{jid}-{name}')
+
+        _, code = jobs_utils.stream_logs_by_id(5, follow=False, tail=None)
+
+        fake_reader.read_managed_job_logs.assert_called_once_with(5,
+                                                                  0,
+                                                                  follow=False,
+                                                                  tail=0)
+        assert code == exceptions.JobExitCode.from_managed_job_status(
+            managed_job_state.ManagedJobStatus.SUCCEEDED)
+
+    def test_managed_job_addressing_not_consulted_on_cluster_hit(
+            self, monkeypatch):
+        # A successful cluster-addressed read must not trigger a second,
+        # managed-job-addressed store query.
+        task_info = [(0, 'mytask', managed_job_state.ManagedJobStatus.SUCCEEDED,
+                      None, None)]
+        self._patch_terminal_job(monkeypatch, task_info)
+
+        fake_reader = MagicMock()
+        fake_reader.read_cluster_job_logs.return_value = 0
+        self._patch_logs(monkeypatch, fake_reader)
+        monkeypatch.setattr(jobs_utils, 'generate_managed_job_cluster_name',
+                            lambda name, jid: f'sky-managed-{jid}-{name}')
+
+        jobs_utils.stream_logs_by_id(5, follow=False, tail=None)
+
+        fake_reader.read_managed_job_logs.assert_not_called()
 
     def test_reader_exception_is_logged_and_falls_through(self, monkeypatch):
         # A reader error must not crash sky jobs logs; it falls through to the
@@ -1557,3 +1602,95 @@ class TestTryToGetJobEndTime:
         monkeypatch.setattr(jobs_utils, 'get_job_timestamp', _raise)
         with pytest.raises(ValueError):
             jobs_utils.try_to_get_job_end_time(MagicMock(), 'cluster', 1)
+
+
+class TestCancelJobsByIdWorkspaceScoping:
+    """cancel_jobs_by_id must only cancel jobs in the active workspace.
+
+    Regression guard for the existing workspace isolation on managed-job
+    cancel: a non-terminal job whose workspace differs from the caller's
+    active workspace must be skipped, not cancelled. Combined with the
+    active-workspace write gate on the server, this is what prevents a
+    non-member from cancelling another workspace's jobs.
+    """
+
+    def _setup(self, monkeypatch, tmp_path, job_workspace, status=None):
+        if status is None:
+            status = managed_job_state.ManagedJobStatus.RUNNING
+        monkeypatch.setattr(managed_job_state, 'get_status',
+                            lambda job_id: status)
+        monkeypatch.setattr(managed_job_state, 'get_workspace',
+                            lambda job_id: job_workspace)
+        monkeypatch.setattr(jobs_utils, 'update_managed_jobs_statuses',
+                            lambda job_id: None)
+        monkeypatch.setattr(managed_job_state, 'is_legacy_controller_process',
+                            lambda job_id: False)
+        # Track PENDING short-circuit cancellations.
+        pending_cancel = MagicMock(return_value=True)
+        monkeypatch.setattr(managed_job_state, 'set_pending_cancelled',
+                            pending_cancel)
+        # Redirect the cancel signal file to a temp dir so the "cancelled"
+        # path is hermetic and observable via the file's presence.
+        monkeypatch.setattr(managed_job_constants, 'CONSOLIDATED_SIGNAL_PATH',
+                            str(tmp_path))
+        return pending_cancel
+
+    def test_running_job_in_other_workspace_is_skipped(self, monkeypatch,
+                                                       tmp_path):
+        self._setup(monkeypatch, tmp_path, job_workspace='ws-b')
+        msg = jobs_utils.cancel_jobs_by_id([5], current_workspace='ws-a')
+        assert 'not in the active workspace' in msg
+        assert "'ws-a'" in msg
+        assert 'scheduled to be cancelled' not in msg
+        # Revert check: if the workspace skip is removed, the cancel signal
+        # would be written for the out-of-workspace job.
+        assert not (tmp_path / '5').exists()
+
+    def test_running_job_in_active_workspace_is_cancelled(
+            self, monkeypatch, tmp_path):
+        # Counterpart: same job, matching workspace -> actually cancelled.
+        self._setup(monkeypatch, tmp_path, job_workspace='ws-a')
+        msg = jobs_utils.cancel_jobs_by_id([5], current_workspace='ws-a')
+        assert 'scheduled to be cancelled' in msg
+        assert (tmp_path / '5').exists()
+
+    def test_pending_job_in_other_workspace_is_not_cancelled(
+            self, monkeypatch, tmp_path):
+        # PENDING jobs must also be workspace-gated: the workspace check runs
+        # before the PENDING set_pending_cancelled short-circuit.
+        pending_cancel = self._setup(
+            monkeypatch,
+            tmp_path,
+            job_workspace='ws-b',
+            status=managed_job_state.ManagedJobStatus.PENDING)
+        msg = jobs_utils.cancel_jobs_by_id([5], current_workspace='ws-a')
+        assert 'not in the active workspace' in msg
+        assert 'scheduled to be cancelled' not in msg
+        # Revert check: before moving the workspace check above the PENDING
+        # branch, this would have been cancelled via set_pending_cancelled.
+        pending_cancel.assert_not_called()
+
+    def test_pending_job_in_active_workspace_is_cancelled(
+            self, monkeypatch, tmp_path):
+        pending_cancel = self._setup(
+            monkeypatch,
+            tmp_path,
+            job_workspace='ws-a',
+            status=managed_job_state.ManagedJobStatus.PENDING)
+        msg = jobs_utils.cancel_jobs_by_id([5], current_workspace='ws-a')
+        assert 'scheduled to be cancelled' in msg
+        pending_cancel.assert_called_once_with(5)
+
+    def test_terminal_job_in_other_workspace_is_denied_not_status_skipped(
+            self, monkeypatch, tmp_path):
+        # The workspace check is status-independent: even a terminal job in
+        # another workspace is reported as out-of-workspace, not silently
+        # skipped as "terminal". Guards the check's placement at the top of
+        # the loop (before the terminal-status branch).
+        self._setup(monkeypatch,
+                    tmp_path,
+                    job_workspace='ws-b',
+                    status=managed_job_state.ManagedJobStatus.SUCCEEDED)
+        msg = jobs_utils.cancel_jobs_by_id([5], current_workspace='ws-a')
+        assert 'not in the active workspace' in msg
+        assert 'terminal' not in msg

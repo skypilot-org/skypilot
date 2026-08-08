@@ -188,6 +188,19 @@ SKY_APISERVER_REQUEST_DURATION_SECONDS = prom.Histogram(
     buckets=_LATENCY_BUCKETS,
 )
 
+# Time clients spend fetching an async request result via /api/get, broken out
+# by request name. /api/get long-polls until the request reaches a terminal
+# state, so this is the client-observed end-to-end latency of that request type.
+# The name label lets bounded request types (status/queue/...) be monitored
+# separately from inherently unbounded ones (launch/exec/...), which the single
+# path-labeled SKY_APISERVER_REQUEST_DURATION_SECONDS series conflates.
+SKY_APISERVER_REQUEST_GET_DURATION_SECONDS = prom.Histogram(
+    'sky_apiserver_request_get_duration_seconds',
+    'Time spent in /api/get fetching a request result, by request name',
+    ['name', 'status'],
+    buckets=_LATENCY_BUCKETS,
+)
+
 # Aggregated across all worker processes — the prometheus_client multiprocess
 # collector sums per-process histograms automatically. For per-process
 # visibility, see SKY_APISERVER_EVENT_LOOP_LAG_MAX_SECONDS below.

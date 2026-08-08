@@ -8,14 +8,32 @@ from unittest.mock import patch
 
 import pytest
 
+from sky import clouds
 from sky import exceptions
 from sky import resources
 from sky import task
+from sky.backends import backend_utils
 from sky.backends import cloud_vm_ray_backend
 from sky.backends.cloud_vm_ray_backend import CloudVmRayResourceHandle
 from sky.backends.cloud_vm_ray_backend import SSHTunnelInfo
 from sky.utils import locks
 from sky.utils import status_lib
+
+
+def test_command_length_accounts_for_slurm_user_quoting():
+    command = "a'b" * 5000
+    assert not backend_utils.is_command_length_over_limit(command)
+    assert backend_utils.is_command_length_over_limit(command, quote_levels=4)
+
+    handle = MagicMock()
+    handle.launched_resources.cloud = clouds.Slurm()
+    handle.cached_cluster_info.provider_config = {'slurm_user': 'alice'}
+    assert cloud_vm_ray_backend.CloudVmRayBackend._inline_command_quote_levels(
+        handle) == 4
+
+    handle.cached_cluster_info.provider_config = {}
+    assert cloud_vm_ray_backend.CloudVmRayBackend._inline_command_quote_levels(
+        handle) == 3
 
 
 class TestCloudVmRayBackendTaskRedaction:

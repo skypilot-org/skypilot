@@ -3197,6 +3197,21 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         # a job (detach_setup, default).
         self._setup_cmd = None
 
+    @staticmethod
+    def _inline_command_quote_levels(handle: CloudVmRayResourceHandle) -> int:
+        # SSHCommandRunner quotes for the remote login shell and local shell.
+        quote_levels = 2
+        if isinstance(handle.launched_resources.cloud, clouds.Slurm):
+            # SlurmCommandRunner adds an srun bash -c shell.
+            quote_levels += 1
+            cluster_info = handle.cached_cluster_info
+            if (cluster_info is not None and
+                    cluster_info.provider_config is not None and
+                    cluster_info.provider_config.get('slurm_user') is not None):
+                # SlurmLoginNodeCommandRunner adds the su --command shell.
+                quote_levels += 1
+        return quote_levels
+
     # --- Implementation of Backend APIs ---
 
     def register_info(self, **kwargs) -> None:
@@ -4119,8 +4134,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 _dump_final_script(setup_script,
                                    constants.PERSISTENT_SETUP_SCRIPT_PATH)
 
-            if (detach_setup or
-                    backend_utils.is_command_length_over_limit(encoded_script)):
+            if (detach_setup or backend_utils.is_command_length_over_limit(
+                    encoded_script,
+                    quote_levels=self._inline_command_quote_levels(handle))):
                 _dump_final_script(setup_script)
                 create_script_code = 'true'
             else:
@@ -4339,7 +4355,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                         user_id=managed_job_user_id,
                         execution=execution)
 
-                if backend_utils.is_command_length_over_limit(codegen):
+                if backend_utils.is_command_length_over_limit(
+                        codegen,
+                        quote_levels=self._inline_command_quote_levels(handle)):
                     _dump_code_to_file(codegen)
                     queue_job_request = jobsv1_pb2.QueueJobRequest(
                         job_id=job_id,
@@ -4362,7 +4380,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 use_legacy = True
 
         if use_legacy:
-            if backend_utils.is_command_length_over_limit(job_submit_cmd):
+            if backend_utils.is_command_length_over_limit(
+                    job_submit_cmd,
+                    quote_levels=self._inline_command_quote_levels(handle)):
                 _dump_code_to_file(codegen)
                 job_submit_cmd = f'{mkdir_code} && {code}'
 
