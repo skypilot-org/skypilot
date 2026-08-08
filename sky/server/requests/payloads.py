@@ -25,9 +25,10 @@ sky.server.versions module for more details.
 """
 import os
 import typing
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
 from sky import admin_policy
+from sky import resources as resources_lib
 from sky import serve
 from sky import sky_logging
 from sky import skypilot_config
@@ -329,6 +330,14 @@ class LaunchBody(RequestBody):
     # continue to return the 2-tuple, so it is safe for new clients to
     # set against any server.
     include_credentials: bool = False
+    # Resources that must NOT be picked for this launch, as a list of
+    # per-resource YAML configs (see Resources.to_yaml_config). Used by the
+    # managed jobs controller's EAGER_NEXT_REGION recovery to exclude the
+    # preempted region. Task.blocked_resources is runtime-only state and is
+    # not part of the task YAML spec, so it is carried here explicitly and
+    # re-attached to the task in to_kwargs(). Old servers ignore this field
+    # via Pydantic ``extra='ignore'`` and launch without blocking.
+    blocked_resources: Optional[List[Dict[str, Any]]] = None
 
     def to_kwargs(self) -> Dict[str, Any]:
 
@@ -343,6 +352,20 @@ class LaunchBody(RequestBody):
         backend = backend_cls() if backend_cls is not None else None
         kwargs['task'] = dag
         kwargs['backend'] = backend
+        # Re-attach blocked resources onto the deserialized task(s):
+        # Task.blocked_resources is not part of the task YAML spec, so it is
+        # carried in this request body instead of in the serialized dag (see
+        # the field comment above). The backend reads task.blocked_resources
+        # when provisioning and excludes matching candidates.
+        blocked_resources_config = kwargs.pop('blocked_resources')
+        if blocked_resources_config:
+            blocked: Set[resources_lib.Resources] = set()
+            for blocked_config in blocked_resources_config:
+                # A plain per-resource config yields a single-element set.
+                blocked.update(
+                    resources_lib.Resources.from_yaml_config(blocked_config))
+            for task in dag.tasks:
+                task.blocked_resources = blocked
         kwargs['_quiet_optimizer'] = kwargs.pop('quiet_optimizer')
         kwargs['_is_launched_by_jobs_controller'] = kwargs.pop(
             'is_launched_by_jobs_controller')
