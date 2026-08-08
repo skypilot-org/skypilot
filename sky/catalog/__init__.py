@@ -49,7 +49,7 @@ def _map_clouds_catalog(clouds: CloudFilter, method_name: str, *args, **kwargs):
         try:
             return method(*args, **kwargs)
         except Exception as exc:  # pylint: disable=broad-except
-            from sky.catalog import common as catalog_common
+            from sky.catalog import common as catalog_common  # pylint: disable=import-outside-toplevel
             if not isinstance(exc, catalog_common.CatalogFetchError):
                 raise
             if not skip_catalog_fetch_errors:
