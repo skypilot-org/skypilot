@@ -139,6 +139,18 @@ OPTIMIZER_ARGS=(
    --adam-beta1 0.9
    --adam-beta2 0.98
 )
+# Keep optimizer state (Adam moments + fp32 master weights, ~12 of the trainer's
+# ~16 bytes/param) in host RAM instead of GPU memory. Long multi-turn rollouts
+# can spike activation memory past the headroom a 4-GPU trainer has left with
+# optimizer state on-device; offloading roughly halves per-GPU static memory and
+# keeps long runs comfortably inside the ceiling. Requires the large `memory:`
+# request on the trainer task (the states live on the host). Set
+# OPTIMIZER_OFFLOAD=0 to keep optimizer state on-GPU.
+[ "${OPTIMIZER_OFFLOAD:-1}" = "1" ] && OPTIMIZER_ARGS+=(
+   --optimizer-cpu-offload
+   --overlap-cpu-optimizer-d2h-h2d
+   --use-precision-aware-optimizer
+)
 
 # wandb is OPT-IN via WANDB_API_KEY: unset => empty WANDB_ARGS => run stays
 # fully disabled (never breaks a run for a missing key). slime derives the

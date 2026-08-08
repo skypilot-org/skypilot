@@ -492,7 +492,9 @@ def set_preferred_workspace(preferred: Optional[str]) -> Dict[str, Any]:
     """
     response = server_common.make_authenticated_request(
         'POST', '/users/me/workspace', json={'preferred': preferred})
-    response.raise_for_status()
+    # Render a permission denial (setting a workspace the user cannot access)
+    # as a clean message rather than a raw HTTPError traceback.
+    server_common.handle_request_error(response)
     return response.json()
 
 
@@ -547,7 +549,9 @@ def get_user_workspace(requested: Optional[str] = None) -> Dict[str, Any]:
     if requested is not None:
         url += f'?requested={urlparse.quote(requested)}'
     response = server_common.make_authenticated_request('GET', url)
-    response.raise_for_status()
+    # Render a permission denial (querying a workspace the user cannot access)
+    # as a clean message rather than a raw HTTPError traceback.
+    server_common.handle_request_error(response)
     return response.json()
 
 
@@ -796,6 +800,9 @@ def launch(
 
     Other exceptions may be raised depending on the backend.
     """
+    if (dryrun or _is_launched_by_jobs_controller or
+            _is_launched_by_sky_serve_controller):
+        usage_lib.skip_scarf_ping_for_current_operation()
     if resize and cluster_name is None:
         with ux_utils.print_exception_no_traceback():
             raise ValueError(
@@ -1119,6 +1126,8 @@ def exec(  # pylint: disable=redefined-builtin
         sky.exceptions.NotSupportedError: if the specified cluster is a
           controller that does not support this operation.
     """
+    if dryrun:
+        usage_lib.skip_scarf_ping_for_current_operation()
     dag = dag_utils.convert_entrypoint_to_dag(task)
     validate(dag, workdir_only=True)
     dag, file_mounts_blob_id = client_common.upload_mounts_to_api_server(
@@ -2512,7 +2521,19 @@ def stream_and_get(
                  None),
         stream=True)
     if response.status_code in [404, 400]:
-        detail = response.json().get('detail')
+        # ``response`` is a streaming request; on some pooled connections the
+        # small error body cannot be read back and raises a
+        # ChunkedEncodingError. Read the detail defensively and fall back to a
+        # status-based message so the user gets a clean error, not a traceback.
+        detail = None
+        try:
+            detail = response.json().get('detail')
+        except Exception:  # pylint: disable=broad-except
+            pass
+        if not detail:
+            detail = ('the request or log path was not found or is not '
+                      'accessible' if response.status_code == 404 else
+                      'the request was invalid')
         with ux_utils.print_exception_no_traceback():
             raise exceptions.ClientError(f'Failed to stream logs: {detail}')
     stream_request_id: Optional[server_common.RequestId[

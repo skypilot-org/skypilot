@@ -3,6 +3,7 @@
 from contextlib import suppress
 import os
 import select
+import shlex
 import socket
 import subprocess
 import tempfile
@@ -350,6 +351,138 @@ class TestSSHCommandRunnerInteractiveAuth:
             handler_thread.join(timeout=2)
             if os.path.exists(log_path):
                 os.unlink(log_path)
+
+
+class TestSlurmCommandRunnerUserImpersonation:
+
+    @staticmethod
+    def _login_runner(slurm_user, ssh_user='root'):
+        return command_runner.SlurmLoginNodeCommandRunner(
+            node=('login.example.com', 22),
+            ssh_user=ssh_user,
+            ssh_private_key=None,
+            slurm_user=slurm_user)
+
+    @staticmethod
+    def _slurm_runner(slurm_user, ssh_user='root'):
+        return command_runner.SlurmCommandRunner(
+            node=('login.example.com', 22),
+            ssh_user=ssh_user,
+            ssh_private_key=None,
+            sky_dir='/home/alice/.sky_clusters/test',
+            skypilot_runtime_dir='/tmp/test',
+            job_id='123',
+            slurm_node='node-1',
+            container_args=None,
+            slurm_user=slurm_user)
+
+    def test_wrap_command_as_user(self):
+        command = 'echo "$HOME" && printf %s "a b"'
+
+        wrapped = command_runner.wrap_command_as_user(command, 'alice')
+
+        assert shlex.split(wrapped) == [
+            'su', '--login', '--shell', '/bin/bash', '--command', command, '--',
+            'alice'
+        ]
+
+    def test_login_node_run_as_user(self):
+        runner = self._login_runner('alice')
+        with mock.patch.object(command_runner.SSHCommandRunner,
+                               'run',
+                               autospec=True,
+                               return_value=(0, '', '')) as mock_run:
+            runner.run('squeue --me', require_outputs=True)
+
+        remote_command = mock_run.call_args.args[1]
+        assert shlex.split(remote_command) == [
+            'su', '--login', '--shell', '/bin/bash', '--command', 'squeue --me',
+            '--', 'alice'
+        ]
+
+    def test_login_node_run_as_user_with_sudo(self):
+        runner = self._login_runner('alice', ssh_user='ubuntu')
+        with mock.patch.object(command_runner.SSHCommandRunner,
+                               'run',
+                               autospec=True,
+                               return_value=(0, '', '')) as mock_run:
+            runner.run('squeue --me', require_outputs=True)
+
+        remote_command = mock_run.call_args.args[1]
+        assert shlex.split(remote_command) == [
+            'sudo', '--non-interactive', '--', 'su', '--login', '--shell',
+            '/bin/bash', '--command', 'squeue --me', '--', 'alice'
+        ]
+
+    def test_login_node_sudo_failure_propagates(self):
+        runner = self._login_runner('alice', ssh_user='ubuntu')
+        with mock.patch.object(
+                command_runner.SSHCommandRunner,
+                'run',
+                autospec=True,
+                return_value=(1, '',
+                              'sudo: a password is required')) as mock_run:
+            result = runner.run('squeue --me', require_outputs=True)
+
+        assert result == (1, '', 'sudo: a password is required')
+        assert mock_run.call_count == 1
+
+    def test_login_node_run_unchanged_when_disabled(self):
+        runner = self._login_runner(None, ssh_user='ubuntu')
+        with mock.patch.object(command_runner.SSHCommandRunner,
+                               'run',
+                               autospec=True,
+                               return_value=(0, '', '')) as mock_run:
+            runner.run('squeue --me', require_outputs=True)
+
+        assert mock_run.call_args.args[1] == 'squeue --me'
+
+    def test_login_node_rsync_as_user(self):
+        runner = self._login_runner('alice', ssh_user='ubuntu')
+        with mock.patch.object(command_runner.SSHCommandRunner,
+                               'rsync',
+                               autospec=True) as mock_rsync:
+            runner.rsync('/tmp/source', '~/.sky/file', up=True)
+
+        remote_command = mock_rsync.call_args.kwargs['remote_rsync_command']
+        assert shlex.split(remote_command) == [
+            'sudo', '--non-interactive', '--', 'su', '--login', '--shell',
+            '/bin/bash', '--command', 'exec rsync "$@"', '--', 'alice', 'rsync'
+        ]
+
+    def test_srun_as_user(self):
+        runner = self._slurm_runner('alice', ssh_user='ubuntu')
+        with mock.patch.object(command_runner.SSHCommandRunner,
+                               'run',
+                               autospec=True,
+                               return_value=0) as mock_run:
+            runner.run('whoami')
+
+        remote_command = shlex.split(mock_run.call_args.args[1])
+        assert remote_command[:8] == [
+            'sudo', '--non-interactive', '--', 'su', '--login', '--shell',
+            '/bin/bash', '--command'
+        ]
+        assert remote_command[9:] == ['--', 'alice']
+        assert remote_command[8].startswith('srun --unbuffered')
+        assert 'whoami' in remote_command[8]
+
+    def test_srun_rsync_as_user(self):
+        runner = self._slurm_runner('alice', ssh_user='ubuntu')
+        with mock.patch.object(command_runner.SSHCommandRunner,
+                               'rsync',
+                               autospec=True) as mock_rsync:
+            runner.rsync('/tmp/source', '~/file', up=True)
+
+        remote_command = mock_rsync.call_args.kwargs['remote_rsync_command']
+        argv = shlex.split(remote_command)
+        assert argv[:8] == [
+            'sudo', '--non-interactive', '--', 'su', '--login', '--shell',
+            '/bin/bash', '--command'
+        ]
+        assert argv[8].startswith('exec srun --unbuffered')
+        assert argv[8].endswith('rsync "$@"')
+        assert argv[9:] == ['--', 'alice', 'rsync']
 
 
 def test_kubernetes_runner_adds_container_flag_to_kubectl_exec() -> None:

@@ -8,6 +8,7 @@ import unittest.mock as mock
 import fastapi
 import pytest
 
+from sky.server.server import _SA_LAST_USED_UPDATE_INTERVAL_SECONDS
 from sky.server.server import BearerTokenMiddleware
 from sky.skylet import constants
 
@@ -291,7 +292,85 @@ class TestBearerTokenMiddleware:
             assert base_mock_request.state.auth_user.name == 'test-service-account'
             # last_used must be updated with the DB row's token_id, not
             # the JWT's.
-            mock_update_last_used.assert_called_once_with('token_db_id_456')
+            mock_update_last_used.assert_called_once_with(
+                'token_db_id_456', _SA_LAST_USED_UPDATE_INTERVAL_SECONDS)
+
+    @pytest.mark.asyncio
+    async def test_fresh_last_used_skips_update(self, middleware,
+                                                base_mock_request,
+                                                mock_call_next, mock_token_row):
+        """A row whose last_used_at is fresh must NOT be re-written.
+
+        The write UPDATEs the token's single row, so per-request writes from
+        a concurrent fleet sharing one token serialize on the row lock and
+        can exhaust the auth executor; the middleware throttles the write to
+        once per _SA_LAST_USED_UPDATE_INTERVAL_SECONDS per token.
+        """
+        base_mock_request.headers = {'authorization': 'Bearer sky_valid_token'}
+        mock_token_row['last_used_at'] = int(time.time()) - 1
+
+        mock_payload = {
+            'sub': 'sa-123456',
+            'name': 'test-service-account',
+            'token_id': 'token_123'
+        }
+        mock_user_info = mock.Mock()
+        mock_user_info.name = 'test-service-account'
+
+        with mock.patch.dict(
+                os.environ,
+            {constants.ENV_VAR_ENABLE_SERVICE_ACCOUNTS: 'true'}), \
+                mock.patch('sky.users.token_service.token_service') as mock_token_service, \
+                mock.patch('sky.global_user_state.get_service_account_token_by_hash') as mock_get_by_hash, \
+                mock.patch('sky.global_user_state.get_user') as mock_get_user, \
+                mock.patch('sky.global_user_state.update_service_account_token_last_used') as mock_update_last_used:
+
+            mock_token_service.verify_token.return_value = mock_payload
+            mock_get_by_hash.return_value = mock_token_row
+            mock_get_user.return_value = mock_user_info
+
+            response = await middleware.dispatch(base_mock_request,
+                                                 mock_call_next)
+
+            # Authentication still succeeds; only the write is skipped.
+            assert response.status_code == 200
+            assert base_mock_request.state.auth_user.id == 'sa-123456'
+            mock_update_last_used.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_stale_last_used_is_updated(self, middleware,
+                                              base_mock_request, mock_call_next,
+                                              mock_token_row):
+        """A row whose last_used_at is older than the interval IS re-written."""
+        base_mock_request.headers = {'authorization': 'Bearer sky_valid_token'}
+        mock_token_row['last_used_at'] = int(time.time()) - 3600
+
+        mock_payload = {
+            'sub': 'sa-123456',
+            'name': 'test-service-account',
+            'token_id': 'token_123'
+        }
+        mock_user_info = mock.Mock()
+        mock_user_info.name = 'test-service-account'
+
+        with mock.patch.dict(
+                os.environ,
+            {constants.ENV_VAR_ENABLE_SERVICE_ACCOUNTS: 'true'}), \
+                mock.patch('sky.users.token_service.token_service') as mock_token_service, \
+                mock.patch('sky.global_user_state.get_service_account_token_by_hash') as mock_get_by_hash, \
+                mock.patch('sky.global_user_state.get_user') as mock_get_user, \
+                mock.patch('sky.global_user_state.update_service_account_token_last_used') as mock_update_last_used:
+
+            mock_token_service.verify_token.return_value = mock_payload
+            mock_get_by_hash.return_value = mock_token_row
+            mock_get_user.return_value = mock_user_info
+
+            response = await middleware.dispatch(base_mock_request,
+                                                 mock_call_next)
+
+            assert response.status_code == 200
+            mock_update_last_used.assert_called_once_with(
+                'token_db_id_456', _SA_LAST_USED_UPDATE_INTERVAL_SECONDS)
 
     @pytest.mark.asyncio
     async def test_missing_user_id_in_token(self, middleware, base_mock_request,

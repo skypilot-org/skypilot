@@ -20,22 +20,58 @@ Design Goals:
 """
 import asyncio
 import base64
+import dataclasses
+import functools
 import os
 import tempfile
 import textwrap
 import traceback
 import typing
-from typing import List, Optional, Tuple
+from typing import Awaitable, Callable, List, Optional, Tuple
 
 from sky import clouds as sky_clouds
 from sky import sky_logging
 from sky.utils import command_runner
+from sky.utils import common_utils
 
 if typing.TYPE_CHECKING:
     from sky import task as task_lib
     from sky.backends import cloud_vm_ray_backend
 
 logger = sky_logging.init_logger(__name__)
+
+# Per-node networking setup runs with its own retry budget: each node
+# retries independently (no barrier between nodes), so one flaky SSH
+# connection or slow node never blocks -- or fails -- the whole group.
+_SETUP_MAX_ATTEMPTS = 3
+_SETUP_ATTEMPT_TIMEOUT_SECONDS = 60.0
+_SETUP_RETRY_INITIAL_BACKOFF_SECONDS = 5.0
+
+
+@dataclasses.dataclass(frozen=True)
+class SetupFailure:
+    """A node whose networking setup failed after its retry budget.
+
+    task_name is carried separately from node_label so callers can tell
+    failures on a specific task's own nodes from failures on its peers.
+    """
+    task_name: str
+    node_label: str
+    reason: str
+
+
+@dataclasses.dataclass(frozen=True)
+class _NodeSetupSpec:
+    """One node's networking setup work.
+
+    make_attempt is a factory rather than a coroutine, so each retry can
+    build a fresh attempt (a coroutine cannot be awaited twice).
+    """
+    make_attempt: Callable[[], Awaitable[bool]]
+    task_name: str
+    node_label: str
+    setup_type: str
+
 
 # ============================================================================
 # Layer 2: JobAddressResolver - Address resolution abstraction
@@ -229,15 +265,25 @@ def generate_inline_networking_setup_script(
     updater_script = generate_k8s_dns_updater_script(dns_mappings,
                                                      job_group_name)
     encoded_script = base64.b64encode(updater_script.encode()).decode()
-    process_id = f'skypilot-jobgroup-dns-updater-{job_group_name}'
-    script_path = f'/tmp/{process_id}.sh'
-    log_path = f'/tmp/{process_id}.log'
+    updater_process_name = f'skypilot-jobgroup-dns-updater-{job_group_name}'
+    script_path = f'/tmp/{updater_process_name}.sh'
+    log_path = f'/tmp/{updater_process_name}.log'
+    # Must match the PID file path written by the updater script in
+    # generate_k8s_dns_updater_script.
+    pid_file = f'/tmp/{updater_process_name}.pid'
     marker_file = get_network_ready_marker_path(job_group_name)
+    # The start is guarded by the updater's PID file: task restarts
+    # (max_restarts_on_errors) re-run task.run on the same cluster, and an
+    # unconditional start would stack a duplicate updater per restart.
     return textwrap.dedent(f"""\
-        # Start JobGroup DNS updater inside the task runtime.
-        echo '{encoded_script}' | base64 -d > {script_path}
-        chmod +x {script_path}
-        (nohup {script_path} < /dev/null > {log_path} 2>&1 &) || true
+        # Start JobGroup DNS updater inside the task runtime (skipped if
+        # one is already running).
+        if ! ([ -f {pid_file} ] &&
+              kill -0 "$(cat {pid_file})" 2> /dev/null); then
+          echo '{encoded_script}' | base64 -d > {script_path}
+          chmod +x {script_path}
+          (nohup {script_path} < /dev/null > {log_path} 2>&1 &) || true
+        fi
         touch {marker_file}
         """).strip()
 
@@ -355,6 +401,11 @@ def generate_k8s_dns_updater_script(dns_mappings: List[Tuple[str, str]],
         MAPPINGS="{mapping_pairs}"
         MARKER="# SkyPilot JobGroup K8s entries"
 
+        # Record our PID so the controller can check liveness (and skip
+        # starting a duplicate updater) without pgrep, whose -f pattern
+        # would match the checking shell's own command line.
+        echo $$ > "/tmp/skypilot-jobgroup-dns-updater-{job_group_name}.pid"
+
         echo "$(date '+%Y-%m-%d %H:%M:%S') [INFO] Starting DNS updater for {job_group_name}"
         echo "$(date '+%Y-%m-%d %H:%M:%S') [INFO] Monitoring mappings: $MAPPINGS"
 
@@ -427,11 +478,11 @@ async def _start_k8s_dns_updater_on_node(
                                                      job_group_name)
 
     # Note: job_group_name is validated at YAML load time to be shell-safe
-    # (alphanumeric, hyphens, underscores only - see dag_utils.py:477-485)
-    # This ensures the process_id is safe for use in pgrep patterns and paths
-    process_id = f'skypilot-jobgroup-dns-updater-{job_group_name}'
-    script_path = f'/tmp/{process_id}.sh'
-    log_path = f'/tmp/{process_id}.log'
+    # (alphanumeric, hyphens, underscores only - see dag_utils.py:477-485),
+    # so updater_process_name is safe to embed in shell commands and paths.
+    updater_process_name = f'skypilot-jobgroup-dns-updater-{job_group_name}'
+    script_path = f'/tmp/{updater_process_name}.sh'
+    log_path = f'/tmp/{updater_process_name}.log'
 
     loop = asyncio.get_running_loop()
 
@@ -455,17 +506,34 @@ async def _start_k8s_dns_updater_on_node(
         finally:
             os.remove(local_script_path)
 
-        # Make executable and run in background, then verify it started.
+        # Start the updater only if one is not already alive. This makes
+        # re-pushes (post-recovery refreshes) safe on healthy surviving
+        # nodes: their running updater is left untouched (restarting it
+        # would open a window with no updater at all if the restart
+        # failed), and repeated pushes never accumulate duplicate updater
+        # processes. Liveness is checked via the PID file the updater
+        # writes on startup -- NOT pgrep -f, whose pattern would match
+        # this very command line (it contains the script path) and always
+        # report "running".
         # Uses nohup with a subshell to fully detach from kubectl exec.
-        # After a brief sleep, pgrep confirms the process is running.
-        # Use 0.5s sleep to ensure process is visible on loaded systems.
-        # Also create the marker file to signal networking setup is initiated.
+        # The 0.5s sleep gives a newly started updater time to write its
+        # PID file on loaded systems.
+        # Also create the marker file to signal networking setup is
+        # initiated.
         marker_file = get_network_ready_marker_path(job_group_name)
-        run_cmd = (f'chmod +x {script_path} && '
+        # Must match the PID file path written by the updater script in
+        # generate_k8s_dns_updater_script.
+        pid_file = f'/tmp/{updater_process_name}.pid'
+        # Edge case: if the updater died and the OS recycled its PID for an
+        # unrelated process, this reports alive and we skip a needed restart.
+        alive_check = (f'[ -f {pid_file} ] && '
+                       f'kill -0 "$(cat {pid_file})" 2> /dev/null')
+        run_cmd = (f'if {alive_check}; then touch {marker_file}; else '
+                   f'chmod +x {script_path} && '
                    f'(nohup {script_path} < /dev/null > {log_path} 2>&1 &) && '
                    f'sleep 0.5 && '
-                   f'pgrep -f "{process_id}" > /dev/null && '
-                   f'touch {marker_file}')
+                   f'{alive_check} && '
+                   f'touch {marker_file}; fi')
         logger.info(f'Starting DNS updater in background (log: {log_path})...')
         returncode, _, stderr = await loop.run_in_executor(
             None,
@@ -487,6 +555,62 @@ async def _start_k8s_dns_updater_on_node(
         return False
 
 
+async def _setup_node_with_retries(
+    make_attempt: Callable[[], Awaitable[bool]],
+    node_label: str,
+    setup_type: str,
+) -> Optional[str]:
+    """Run one node's networking setup with its own retry budget.
+
+    Each node retries independently -- there is no barrier between nodes,
+    so a slow or flaky node never delays the others' retries. A fresh
+    attempt coroutine is built per try (a coroutine cannot be awaited
+    twice), with a per-attempt timeout and jittered exponential backoff
+    between tries.
+
+    Args:
+        make_attempt: Zero-arg factory building one attempt coroutine
+            that resolves to True on success.
+        node_label: '{task_name}-{node_idx}', for logs and failure
+            reporting.
+        setup_type: Human-readable setup kind ('K8s DNS updater' or
+            '/etc/hosts').
+
+    Returns:
+        None on success; a short failure reason after the retry budget
+        is exhausted. Never raises.
+    """
+    backoff = common_utils.Backoff(
+        initial_backoff=_SETUP_RETRY_INITIAL_BACKOFF_SECONDS)
+    reason = f'{setup_type} failed'
+    for attempt in range(1, _SETUP_MAX_ATTEMPTS + 1):
+        try:
+            ok = await asyncio.wait_for(make_attempt(),
+                                        timeout=_SETUP_ATTEMPT_TIMEOUT_SECONDS)
+            if ok:
+                if attempt > 1:
+                    logger.info(f'{setup_type} succeeded on {node_label} '
+                                f'(attempt {attempt}/{_SETUP_MAX_ATTEMPTS})')
+                return None
+            # The attempt logged its own error details.
+            reason = f'{setup_type} failed'
+        except asyncio.TimeoutError:
+            reason = (f'{setup_type} timed out after '
+                      f'{_SETUP_ATTEMPT_TIMEOUT_SECONDS:.0f}s')
+        except Exception as e:  # pylint: disable=broad-except
+            reason = (f'{setup_type} raised: '
+                      f'{common_utils.format_exception(e)}')
+        if attempt < _SETUP_MAX_ATTEMPTS:
+            delay = backoff.current_backoff()
+            logger.warning(f'{reason} on {node_label} (attempt '
+                           f'{attempt}/{_SETUP_MAX_ATTEMPTS}); retrying in '
+                           f'{delay:.1f}s')
+            await asyncio.sleep(delay)
+    logger.error(f'{reason} on {node_label}; giving up after '
+                 f'{_SETUP_MAX_ATTEMPTS} attempts')
+    return reason
+
+
 class NetworkConfigurator:
     """Configures network infrastructure for JobGroups.
 
@@ -500,7 +624,7 @@ class NetworkConfigurator:
         job_group_name: str,
         tasks_handles: List[Tuple[
             'task_lib.Task', 'cloud_vm_ray_backend.CloudVmRayResourceHandle']],
-    ) -> bool:
+    ) -> List[SetupFailure]:
         """Set up network configuration for JobGroup.
 
         Args:
@@ -508,7 +632,8 @@ class NetworkConfigurator:
             tasks_handles: List of (Task, ResourceHandle) tuples.
 
         Returns:
-            True if all configuration succeeded, False otherwise.
+            Empty list when every node succeeded; otherwise one
+            SetupFailure per node that failed after its retry budget.
         """
         return await NetworkConfigurator._inject_etc_hosts(
             job_group_name, tasks_handles)
@@ -518,19 +643,24 @@ class NetworkConfigurator:
         job_group_name: str,
         tasks_handles: List[Tuple[
             'task_lib.Task', 'cloud_vm_ray_backend.CloudVmRayResourceHandle']],
-    ) -> bool:
+    ) -> List[SetupFailure]:
         """Inject /etc/hosts entries for all clusters in the JobGroup.
 
         This maps the unified hostname format to actual addresses:
         - K8s: Write DNS mappings file for skylet's HostUpdater
         - SSH: Inject static internal IPs
 
+        Every node runs with its own retry budget (see
+        _setup_node_with_retries); a node that still fails is reported
+        in the result rather than aborting the other nodes.
+
         Args:
             job_group_name: Name of the JobGroup.
             tasks_handles: List of (Task, ResourceHandle) tuples for all jobs.
 
         Returns:
-            True if all injections succeeded, False otherwise.
+            Empty list when every node succeeded; otherwise one
+            SetupFailure per node that failed after its retry budget.
         """
         logger.info(f'Setting up networking on all {len(tasks_handles)} jobs')
 
@@ -539,71 +669,74 @@ class NetworkConfigurator:
         k8s_dns_mappings = _generate_k8s_dns_mappings(job_group_name,
                                                       tasks_handles)
 
-        # Each entry: (coroutine, task_name, node_idx, is_k8s)
-        setup_tasks: List[Tuple] = []
+        setup_specs: List[_NodeSetupSpec] = []
+        failures: List[SetupFailure] = []
         for task, handle in tasks_handles:
             if handle is None:
+                # The cluster is in transition (e.g., a peer that is
+                # itself mid-recovery). Not a failure: its own recovery
+                # re-runs networking setup once it is back up.
+                logger.warning(f'No handle for {task.name}; skipping its '
+                               'networking setup')
                 continue
 
+            task_name = str(task.name)
             is_k8s = _is_kubernetes(handle)
             try:
                 runners = handle.get_command_runners()
             except Exception as e:  # pylint: disable=broad-except
                 logger.warning(
-                    f'Failed to get command runners for {task.name}: {e}')
+                    f'Failed to get command runners for {task_name}: {e}')
+                failures.append(
+                    SetupFailure(task_name=task_name,
+                                 node_label=task_name,
+                                 reason=f'failed to get command runners: {e}'))
                 continue
 
             for node_idx, runner in enumerate(runners):
+                node_label = f'{task_name}-{node_idx}'
                 if is_k8s:
-                    coro = _start_k8s_dns_updater_on_node(
-                        runner, k8s_dns_mappings, job_group_name)
-                    setup_tasks.append((coro, task.name, node_idx, True))
+                    setup_specs.append(
+                        _NodeSetupSpec(make_attempt=functools.partial(
+                            _start_k8s_dns_updater_on_node, runner,
+                            k8s_dns_mappings, job_group_name),
+                                       task_name=task_name,
+                                       node_label=node_label,
+                                       setup_type='K8s DNS updater'))
                 else:
                     # ssh_hosts_content is always truthy (has header comment)
                     assert ssh_hosts_content, 'unreachable'
-                    coro = _inject_hosts_on_node(runner, ssh_hosts_content,
-                                                 job_group_name)
-                    setup_tasks.append((coro, task.name, node_idx, False))
-                logger.debug(
-                    f'Queued networking setup for {task.name}-{node_idx}')
+                    setup_specs.append(
+                        _NodeSetupSpec(make_attempt=functools.partial(
+                            _inject_hosts_on_node, runner, ssh_hosts_content,
+                            job_group_name),
+                                       task_name=task_name,
+                                       node_label=node_label,
+                                       setup_type='/etc/hosts'))
+                logger.debug(f'Queued networking setup for {node_label}')
 
-        if not setup_tasks:
+        if not setup_specs and not failures:
             logger.warning('No nodes to set up networking')
-            return True
+            return []
 
-        coroutines = [entry[0] for entry in setup_tasks]
-        logger.info(f'Setting up networking on {len(coroutines)} nodes...')
-        try:
-            results = await asyncio.wait_for(asyncio.gather(
-                *coroutines, return_exceptions=True),
-                                             timeout=60.0)
-        except asyncio.TimeoutError:
-            logger.error('Networking setup timed out after 60 seconds')
-            return False
+        logger.info(f'Setting up networking on {len(setup_specs)} nodes...')
+        # _setup_node_with_retries never raises, so a plain gather is safe.
+        results = await asyncio.gather(*[
+            _setup_node_with_retries(spec.make_attempt, spec.node_label,
+                                     spec.setup_type) for spec in setup_specs
+        ])
+        node_failures: List[SetupFailure] = [
+            SetupFailure(task_name=spec.task_name,
+                         node_label=spec.node_label,
+                         reason=reason)
+            for spec, reason in zip(setup_specs, results)
+            if reason is not None
+        ]
+        failures.extend(node_failures)
 
-        success_count = 0
-        for i, result in enumerate(results):
-            if result is True:
-                success_count += 1
-                continue
-
-            # Log error details for failed tasks
-            _, task_name, node_idx, is_k8s = setup_tasks[i]
-            setup_type = 'K8s DNS updater' if is_k8s else '/etc/hosts'
-            node_label = f'{task_name}-{node_idx}'
-
-            if isinstance(result, Exception):
-                tb_str = ''.join(
-                    traceback.format_exception(type(result), result,
-                                               result.__traceback__))
-                logger.error(
-                    f'{setup_type} failed on {node_label}: {result}\n{tb_str}')
-            else:
-                logger.error(f'{setup_type} failed on {node_label}')
-
-        logger.info(
-            f'Hosts injection: {success_count}/{len(results)} succeeded')
-        return success_count == len(results)
+        logger.info(f'Networking setup: {len(results) - len(node_failures)}/'
+                    f'{len(results)} nodes succeeded')
+        return failures
 
 
 # ============================================================================
@@ -615,19 +748,22 @@ async def setup_job_group_networking(
     job_group_name: str,
     tasks_handles: List[Tuple['task_lib.Task',
                               'cloud_vm_ray_backend.CloudVmRayResourceHandle']],
-) -> bool:
+) -> List[SetupFailure]:
     """Set up networking for all tasks in a JobGroup.
 
-    This is the main entry point for JobGroup networking setup.
+    This is the main entry point for JobGroup networking setup. Each
+    node is set up with its own retry budget; nodes that still fail are
+    reported in the result so callers can decide how to surface them.
 
     Args:
         job_group_name: Name of the JobGroup.
         tasks_handles: List of (Task, ResourceHandle) tuples for each task.
 
     Returns:
-        True if setup succeeded, False otherwise.
+        Empty list when every node succeeded; otherwise one SetupFailure
+        per node that failed after its retry budget.
     """
-    logger.info(f'Setting up networking for JobGroup: {job_group_name}')
+    logger.info(f'Setting up networking for Job Group: {job_group_name}')
     return await NetworkConfigurator.setup(job_group_name, tasks_handles)
 
 
@@ -658,6 +794,11 @@ def generate_wait_for_networking_script(job_group_name: str,
     1. Wait for the networking ready marker file (created by Phase 3)
     2. Wait for all hostnames to be resolvable
 
+    If networking is not ready after the wait, the script fails the job
+    (exit 1). It is only injected when the job group requires in-group
+    networking (``inter_connection`` enabled, the default), so continuing
+    without networking is never correct here.
+
     Args:
         job_group_name: Name of the JobGroup.
         other_job_names: List of other task names in the group to wait for.
@@ -678,16 +819,15 @@ def generate_wait_for_networking_script(job_group_name: str,
     marker_file = get_network_ready_marker_path(job_group_name)
     updater_log = (f'/tmp/skypilot-jobgroup-dns-updater-'
                    f'{job_group_name}.log')
-    updater_process = f'skypilot-jobgroup-dns-updater-{job_group_name}'
+    # Must match the PID file path written by the updater script in
+    # generate_k8s_dns_updater_script.
+    updater_pid_file = (f'/tmp/skypilot-jobgroup-dns-updater-'
+                        f'{job_group_name}.pid')
 
-    # TODO(zhwu): The current handling is not robust against the case where
-    # network setup fails. The job will continue but may get stuck if it
-    # depends on networking. We should make the job group automatically
-    # recover (e.g., re-trigger network setup or restart the job) if the
-    # network fails to initialize properly.
     wait_script = textwrap.dedent(f"""
-        # Wait for JobGroup networking to be ready (best-effort, non-blocking)
-        # If networking fails, we continue anyway to allow job group recovery
+        # Wait for JobGroup networking to be ready. This job group requires
+        # in-group networking (inter_connection), so failure to initialize
+        # networking fails the job.
         echo "[SkyPilot] Waiting for network setup..."
         NETWORK_READY=true
 
@@ -699,8 +839,7 @@ def generate_wait_for_networking_script(job_group_name: str,
         echo "[SkyPilot] Waiting for networking initialization marker..."
         while [ ! -f "$MARKER_FILE" ]; do
           if [ $MARKER_ELAPSED -ge $MARKER_WAIT ]; then
-            echo "[SkyPilot] Warning: Networking setup not initiated after ${{MARKER_ELAPSED}}s"
-            echo "[SkyPilot] Continuing without full network setup (job group may recover later)"
+            echo "[SkyPilot] Error: Networking setup not initiated after ${{MARKER_ELAPSED}}s"
             NETWORK_READY=false
             break
           fi
@@ -720,13 +859,12 @@ def generate_wait_for_networking_script(job_group_name: str,
           MAX_WAIT=300  # 5 minutes
           ELAPSED=0
           UPDATER_LOG="{updater_log}"
-          UPDATER_PROCESS="{updater_process}"
+          UPDATER_PID_FILE="{updater_pid_file}"
           for hostname in $HOSTNAMES; do
             while ! getent hosts "$hostname" >/dev/null 2>&1; do
               if [ $ELAPSED -ge $MAX_WAIT ]; then
-                echo "[SkyPilot] Warning: Network setup timed out for \\"$hostname\\" after ${{ELAPSED}}s"
-                echo "[SkyPilot] DNS updater running: $(pgrep -f "$UPDATER_PROCESS" > /dev/null && echo 'yes' || echo 'no')"
-                echo "[SkyPilot] Continuing without full network setup (job group may recover later)"
+                echo "[SkyPilot] Error: Network setup timed out for \\"$hostname\\" after ${{ELAPSED}}s"
+                echo "[SkyPilot] DNS updater running: $([ -f "$UPDATER_PID_FILE" ] && kill -0 "$(cat "$UPDATER_PID_FILE")" 2>/dev/null && echo 'yes' || echo 'no')"
                 NETWORK_READY=false
                 break 2  # Break out of both loops
               fi
@@ -744,6 +882,10 @@ def generate_wait_for_networking_script(job_group_name: str,
 
         if [ "$NETWORK_READY" = "true" ]; then
           echo "[SkyPilot] Network is ready!"
+        else
+          echo "[SkyPilot] Error: this job group requires in-group networking (inter_connection is enabled) but networking failed to initialize; failing the job."
+          echo "[SkyPilot] If tasks in this job group do not need to reach each other by hostname, set 'inter_connection: false' in the job group header."
+          exit 1
         fi
     """)
 

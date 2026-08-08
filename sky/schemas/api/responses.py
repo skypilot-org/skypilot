@@ -1,7 +1,7 @@
 """Responses for the API server."""
 
 import enum
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import pydantic
 
@@ -236,7 +236,12 @@ class ManagedJobRecord(ResponseBaseModel):
     current_cluster_name: Optional[str] = None
     cluster_name_on_cloud: Optional[str] = None
     job_id_on_pool_cluster: Optional[int] = None
-    accelerators: Optional[Dict[str, int]] = None
+    # Accelerator counts can be fractional (e.g. ``{'L4': 0.125}``) since
+    # SkyPilot supports fractional GPU requests, so mirror the
+    # ``Resources.accelerators`` type here. Narrowing this to ``int`` made
+    # the Jobs Dashboard reject every record whenever any job used a
+    # fractional GPU.
+    accelerators: Optional[Dict[str, Union[int, float]]] = None
     labels: Optional[Dict[str, str]] = None
     links: Optional[Dict[str, str]] = None
     # Node names for dashboard display (comma-separated)
