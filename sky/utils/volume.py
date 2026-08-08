@@ -154,7 +154,7 @@ class VolumeMount:
             size = resources_utils.parse_memory_resource(size_config,
                                                          'size',
                                                          allow_rounding=True)
-            if size == '0':
+            if int(size) < 1:
                 raise ValueError('Size must be no less than 1Gi')
         except ValueError as e:
             raise ValueError(
