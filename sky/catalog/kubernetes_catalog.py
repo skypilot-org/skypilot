@@ -244,6 +244,16 @@ def _list_accelerators(
                 accelerator_count = (
                     kubernetes_utils.get_node_accelerator_count(
                         context, node.status.allocatable))
+                # Physical device count for the TOTAL column: capacity keeps
+                # devices the device plugin has withdrawn from scheduling,
+                # matching get_kubernetes_node_info's total so the show-gpus
+                # summary and the per-node rows agree on degraded nodes. The
+                # requestable-quantity ladder and availability stay
+                # allocatable-based - only schedulable devices can be
+                # requested.
+                accelerator_capacity = max(
+                    kubernetes_utils.get_node_accelerator_count(
+                        context, node.status.capacity), accelerator_count)
 
                 if accelerator_count > 0:
                     # TPUs are counted in a different way compared to GPUs.
@@ -264,10 +274,10 @@ def _list_accelerators(
                             accelerators_qtys.add(
                                 (accelerator_name, accelerator_count))
 
-                if accelerator_count >= min_quantity_filter:
+                if accelerator_capacity >= min_quantity_filter:
                     quantized_count = (
                         min_quantity_filter *
-                        (accelerator_count // min_quantity_filter))
+                        (accelerator_capacity // min_quantity_filter))
                     if accelerator_name not in total_accelerators_capacity:
                         total_accelerators_capacity[
                             accelerator_name] = quantized_count

@@ -69,6 +69,34 @@ def test_get_kubernetes_node_info_capacity_vs_allocatable():
     assert info.free['accelerators_available'] == 2
 
 
+def test_get_kubernetes_node_info_available_clamped_at_zero():
+    """Pods admitted before a withdrawal can hold more devices than remain
+    allocatable; available must clamp at 0 rather than go negative (a -1
+    would collide with the no-permission sentinel)."""
+    node = mock.MagicMock()
+    node.metadata.name = 'fully-withdrawn'
+    node.metadata.labels = {'skypilot.co/accelerator': 'h100'}
+    node.status.capacity = {'nvidia.com/gpu': '8'}
+    node.status.allocatable = {'nvidia.com/gpu': '0'}
+    node.is_ready.return_value = True
+    node.is_cordoned.return_value = False
+    node.get_taints.return_value = []
+
+    with mock.patch('sky.provision.kubernetes.utils.get_kubernetes_nodes',
+                   return_value=[node]), \
+         mock.patch('sky.provision.kubernetes.utils.'
+                   'get_allocated_resources_by_node',
+                   return_value=({'fully-withdrawn': 3}, {})), \
+         mock.patch('sky.provision.kubernetes.utils.get_gpu_resource_key',
+                    return_value='nvidia.com/gpu'):
+        node_info = utils.get_kubernetes_node_info()
+
+    info = node_info.node_info_dict['fully-withdrawn']
+    assert info.total['accelerator_count'] == 8
+    assert info.total['accelerator_allocatable'] == 0
+    assert info.free['accelerators_available'] == 0
+
+
 def test_get_kubernetes_node_info():
     """Tests get_kubernetes_node_info function."""
     # Mock node and pod objects

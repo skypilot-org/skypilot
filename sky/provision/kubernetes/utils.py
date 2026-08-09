@@ -4666,8 +4666,11 @@ def get_kubernetes_node_info(
             allocated_qty = allocated_qty_by_node[node.metadata.name]
             # Available is measured against allocatable, not capacity —
             # withdrawn devices cannot be scheduled and must not be counted
-            # as free.
-            accelerators_available = accelerator_allocatable - allocated_qty
+            # as free. Clamped at 0: pods admitted before a withdrawal can
+            # keep more devices than remain allocatable, and a negative value
+            # would collide with the -1 "no permission to list pods" sentinel.
+            accelerators_available = max(
+                0, accelerator_allocatable - allocated_qty)
 
         # Exclude multi-host TPUs from being processed.
         # TODO(Doyoung): Remove the logic when adding support for
