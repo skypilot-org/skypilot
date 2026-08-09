@@ -4444,6 +4444,16 @@ def get_kubernetes_node_info(
     number of GPUs available on the node and the number of free GPUs on the
     node.
 
+    `total` reports the node's physical accelerator count
+    (`status.capacity`, which keeps devices the device plugin has marked
+    unhealthy) with `accelerator_allocatable` (`status.allocatable`, what
+    the scheduler may actually place on) alongside. The two only diverge
+    when the device plugin has withdrawn devices — e.g. after an XID error
+    or a lost kubelet registration — and `accelerator_count -
+    accelerator_allocatable` is exactly the withdrawn count. Deriving the
+    total from allocatable instead would shrink a node's reported size in
+    lockstep with such failures, making them invisible.
+
     If the user does not have sufficient permissions to list pods in all
     namespaces, the function will return free GPUs as -1.
 
@@ -4503,12 +4513,14 @@ def get_kubernetes_node_info(
     else:
         label_keys = lf.get_label_keys()
 
-    # Check if all nodes have no accelerators to avoid fetching pods
+    # Check if all nodes have no accelerators to avoid fetching pods.
+    # Capacity is checked as well as allocatable so a node whose devices are
+    # all temporarily withdrawn by the device plugin still counts as an
+    # accelerator node.
     has_accelerator_nodes = False
     for node in nodes:
-        accelerator_count = get_node_accelerator_count(context,
-                                                       node.status.allocatable)
-        if accelerator_count > 0:
+        if (get_node_accelerator_count(context, node.status.allocatable) > 0 or
+                get_node_accelerator_count(context, node.status.capacity) > 0):
             has_accelerator_nodes = True
             break
 
@@ -4571,8 +4583,16 @@ def get_kubernetes_node_info(
                         node_ip = address.address
                         break
 
-        accelerator_count = get_node_accelerator_count(context,
-                                                       node.status.allocatable)
+        accelerator_allocatable = get_node_accelerator_count(
+            context, node.status.allocatable)
+        # The physical count: status.capacity keeps devices the device plugin
+        # has marked unhealthy and withdrawn from scheduling, while
+        # status.allocatable drops them. max() is defensive — capacity should
+        # never be below allocatable, but a node mid-transition must not
+        # report fewer total accelerators than it can schedule.
+        accelerator_count = max(
+            get_node_accelerator_count(context, node.status.capacity),
+            accelerator_allocatable)
 
         # Parse CPU and memory from node capacity
         cpu_count = None
@@ -4621,7 +4641,10 @@ def get_kubernetes_node_info(
             node_info_dict[node.metadata.name] = models.KubernetesNodeInfo(
                 name=node.metadata.name,
                 accelerator_type=accelerator_name,
-                total={'accelerator_count': 0},
+                total={
+                    'accelerator_count': 0,
+                    'accelerator_allocatable': 0
+                },
                 free={'accelerators_available': 0},
                 ip_address=node_ip,
                 cpu_count=cpu_count,
@@ -4641,7 +4664,13 @@ def get_kubernetes_node_info(
             accelerators_available = -1
         else:
             allocated_qty = allocated_qty_by_node[node.metadata.name]
-            accelerators_available = accelerator_count - allocated_qty
+            # Available is measured against allocatable, not capacity —
+            # withdrawn devices cannot be scheduled and must not be counted
+            # as free. Clamped at 0: pods admitted before a withdrawal can
+            # keep more devices than remain allocatable, and a negative value
+            # would collide with the -1 "no permission to list pods" sentinel.
+            accelerators_available = max(
+                0, accelerator_allocatable - allocated_qty)
 
         # Exclude multi-host TPUs from being processed.
         # TODO(Doyoung): Remove the logic when adding support for
@@ -4653,7 +4682,10 @@ def get_kubernetes_node_info(
         node_info_dict[node.metadata.name] = models.KubernetesNodeInfo(
             name=node.metadata.name,
             accelerator_type=accelerator_name,
-            total={'accelerator_count': int(accelerator_count)},
+            total={
+                'accelerator_count': int(accelerator_count),
+                'accelerator_allocatable': int(accelerator_allocatable)
+            },
             free={'accelerators_available': int(accelerators_available)},
             ip_address=node_ip,
             cpu_count=cpu_count,
