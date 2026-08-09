@@ -48,7 +48,10 @@ from sky.utils import yaml_utils
 # manual termination with aws ec2 does not accidentally terminate other clusters
 # for the different managed jobs launch with the same job name but a
 # different job id.
-test_id = str(uuid.uuid4())[-2:]
+# 4 chars: on a long-lived API server the jobs table accumulates every past
+# run of a test, so 2 chars (256 possible names per test) collides with an
+# older same-named job roughly N_history/256 of the time.
+test_id = str(uuid.uuid4())[-4:]
 
 LAMBDA_GPU_TYPE = 'A100'
 LAMBDA_TYPE = f'--infra lambda --gpus {LAMBDA_GPU_TYPE}'
@@ -1544,22 +1547,38 @@ def write_blob(file: BinaryIO, total_size: int):
     file.flush()
 
 
-def wait_for_managed_job_status_sdk(job_name: str,
-                                    target_statuses: list,
-                                    timeout: int = 360) -> dict:
+def wait_for_managed_job_status_sdk(job_name: Optional[str] = None,
+                                    target_statuses: Optional[list] = None,
+                                    timeout: int = 360,
+                                    job_id: Optional[int] = None) -> dict:
     """Wait for a managed job to reach one of the target statuses.
+
+    Identify the job by ``job_id`` where possible: job names are not unique,
+    so on a long-lived API server a name-based wait can match a terminal
+    job left over from an earlier run of the same test and return before
+    the current job has even started. When only ``job_name`` is given, the
+    newest exactly-matching job is tracked for the same reason.
 
     Returns the job record when the status is reached.
     """
+    assert target_statuses, 'target_statuses must be non-empty'
+    assert (job_id is None) != (job_name is None), (
+        'Exactly one of job_id or job_name must be provided.')
     start_time = time.time()
     while time.time() - start_time < timeout:
         jobs_list = sky.get(
-            sky.jobs.queue_v2(refresh=False, fields=['job_name', 'status']))[0]
-        for job in jobs_list:
-            if job['job_name'] == job_name:
-                if job['status'] in target_statuses:
-                    return job
-            print(f'Job {job_name} status: {job["status"]}')
+            sky.jobs.queue_v2(refresh=False,
+                              job_ids=None if job_id is None else [job_id],
+                              fields=['job_id', 'job_name', 'status']))[0]
+        if job_id is None:
+            matches = [j for j in jobs_list if j['job_name'] == job_name]
+        else:
+            matches = jobs_list
+        if matches:
+            job = max(matches, key=lambda j: j['job_id'])
+            if job['status'] in target_statuses:
+                return job
+            print(f'Job {job_name or job_id} status: {job["status"]}')
         time.sleep(5)
-    raise TimeoutError(
-        f'Timeout waiting for job {job_name} to reach {target_statuses}')
+    raise TimeoutError(f'Timeout waiting for job {job_name or job_id} to reach '
+                       f'{target_statuses}')
