@@ -202,8 +202,17 @@ spec:
             fieldRef:
               fieldPath: status.podIP
         {{- end }}
+        {{- if .Values.apiService.command }}
+        command:
+          {{- toYaml .Values.apiService.command | nindent 10 }}
+        {{- else }}
         # Use tini as the init process
         command: ["tini", "--"]
+        {{- end }}
+        {{- if .Values.apiService.args }}
+        args:
+          {{- toYaml .Values.apiService.args | nindent 10 }}
+        {{- else }}
         # Start API server in foreground (if supported) to:
         # 1. Bypass the healthz check of `sky api start`, let kubernetes probes manage the lifecycle directly.
         # 2. Capture all logs in container to stdout/stderr, bypass in-container log file overhead.
@@ -322,6 +331,7 @@ spec:
           fi
           {{- end }}
           {{- end }}
+        {{- end }}
         ports:
         - containerPort: 46580
         {{- if not .Values.apiService.devMode.enabled }}

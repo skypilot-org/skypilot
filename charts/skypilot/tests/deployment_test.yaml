@@ -1318,3 +1318,76 @@ tests:
       - matchRegex:
           path: spec.template.spec.containers[0].args[2]
           pattern: "exec sky api start .*--host=::"
+
+  # Verifies the API container keeps the current startup command and shell
+  # arguments when command and args overrides are unset.
+  - it: should use the built-in API command and args by default
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].command
+          value:
+            - tini
+            - --
+      - equal:
+          path: spec.template.spec.containers[0].args[0]
+          value: /bin/sh
+      - equal:
+          path: spec.template.spec.containers[0].args[1]
+          value: -c
+
+  # Verifies a replacement command is rendered while the default startup
+  # arguments remain available when args is unset.
+  - it: should override the API container command independently
+    set:
+      apiService.command:
+        - /bin/bash
+        - /app/entrypoint.sh
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].command
+          value:
+            - /bin/bash
+            - /app/entrypoint.sh
+      - equal:
+          path: spec.template.spec.containers[0].args[0]
+          value: /bin/sh
+      - equal:
+          path: spec.template.spec.containers[0].args[1]
+          value: -c
+
+  # Verifies replacement arguments are rendered while the default tini
+  # command remains available when command is unset.
+  - it: should override the API container args independently
+    set:
+      apiService.args:
+        - --some-option
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].command
+          value:
+            - tini
+            - --
+      - equal:
+          path: spec.template.spec.containers[0].args
+          value:
+            - --some-option
+
+  # Verifies a custom entrypoint and its arguments replace both container
+  # fields without retaining the generated SkyPilot startup script.
+  - it: should override the API container command and args together
+    set:
+      apiService.command:
+        - /bin/bash
+        - /app/entrypoint.sh
+      apiService.args:
+        - --some-option
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].command
+          value:
+            - /bin/bash
+            - /app/entrypoint.sh
+      - equal:
+          path: spec.template.spec.containers[0].args
+          value:
+            - --some-option

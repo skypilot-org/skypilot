@@ -36,6 +36,8 @@ Below is the available helm value keys and the default value of each key:
   :ref:`fullnameOverride <helm-values-fullnameOverride>`: null
   :ref:`apiService <helm-values-apiService>`:
     :ref:`image <helm-values-apiService-image>`: berkeleyskypilot/skypilot-nightly:latest
+    :ref:`command <helm-values-apiService-command>`: null
+    :ref:`args <helm-values-apiService-args>`: null
     :ref:`upgradeStrategy <helm-values-apiService-upgradeStrategy>`: Recreate
     :ref:`replicas <helm-values-apiService-replicas>`: 1
     :ref:`host <helm-values-apiService-host>`: "0.0.0.0"
@@ -402,6 +404,46 @@ To use a nightly build, find the desired nightly version on `pypi <https://pypi.
     # Replace 1.0.0.devYYYYMMDD with the desired nightly version
     image: berkeleyskypilot/skypilot-nightly:1.0.0.devYYYYMMDD
 
+
+.. _helm-values-apiService-command:
+
+``apiService.command``
+^^^^^^^^^^^^^^^^^^^^^^
+
+Kubernetes command for the API server container. Set a non-empty string list
+to replace the chart's default ``["tini", "--"]`` command. When unset, the
+chart retains that default; this does not inherit the image ``ENTRYPOINT``.
+
+Default: ``null``
+
+.. code-block:: yaml
+
+  apiService:
+    command:
+      - /bin/bash
+      - /app/entrypoint.sh
+
+.. _helm-values-apiService-args:
+
+``apiService.args``
+^^^^^^^^^^^^^^^^^^^
+
+Kubernetes arguments for the API server container. Set a non-empty string list
+to replace the chart's generated startup script. Replacing it also bypasses
+``preDeployHook``, SkyPilot configuration initialization, dev-mode handling,
+and the chart's ``sky api start`` command; include required setup in the
+replacement command or arguments. When unset, the generated script is kept.
+
+Default: ``null``
+
+.. code-block:: yaml
+
+  apiService:
+    command:
+      - /bin/bash
+      - /app/entrypoint.sh
+    args:
+      - --some-option
 
 .. _helm-values-apiService-imagePullPolicy:
 
