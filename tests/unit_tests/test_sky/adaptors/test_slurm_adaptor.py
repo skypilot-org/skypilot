@@ -1,10 +1,42 @@
 """Unit tests for Slurm adaptor."""
 
+import json
+import os
 import unittest.mock as mock
 
 import pytest
 
 from sky.adaptors import slurm
+
+# Payloads captured from `squeue --jobs <id> --json` and
+# `scontrol show node <hostlist> --json` on a Slurm 25.05.3 cluster
+# (data_parser/v0.0.43), for a running 2-node job. Node names, addresses and
+# user identities are anonymized, and the (unparsed) per-node core allocation
+# of the squeue payload is elided.
+_TESTDATA_DIR = os.path.join(os.path.dirname(__file__), 'testdata', 'slurm')
+
+
+def _load_fixture(name: str):
+    with open(os.path.join(_TESTDATA_DIR, name), 'r', encoding='utf-8') as f:
+        return json.load(f)
+
+
+def _squeue_json(**overrides) -> str:
+    """The squeue fixture, with fields of the single job overridden."""
+    payload = _load_fixture('squeue_jobs.json')
+    payload['jobs'][0].update(overrides)
+    return json.dumps(payload)
+
+
+def _scontrol_json(addresses=None, names=None) -> str:
+    """The scontrol fixture, with node addresses/names optionally replaced."""
+    payload = _load_fixture('scontrol_nodes.json')
+    for i, node in enumerate(payload['nodes']):
+        if addresses is not None:
+            node['address'] = addresses[i]
+        if names is not None:
+            node['name'] = names[i]
+    return json.dumps(payload)
 
 
 class TestGetPartitions:
@@ -270,17 +302,211 @@ class TestSlurmClientInit:
         assert isinstance(client._runner, command_runner.SSHCommandRunner)
 
 
-class TestGetJobNodes:
-    """Test SlurmClient.get_job_nodes()."""
+def _make_client() -> slurm.SlurmClient:
+    return slurm.SlurmClient(
+        ssh_host='localhost',
+        ssh_port=22,
+        ssh_user='root',
+        ssh_key=None,
+    )
+
+
+class TestGetJobNodesJson:
+    """Test SlurmClient.get_job_nodes() on the `--json` path."""
 
     def test_get_job_nodes_returns_nodes_and_ips(self):
         """Test that get_job_nodes returns parsed nodes and IPs."""
-        client = slurm.SlurmClient(
-            ssh_host='localhost',
-            ssh_port=22,
-            ssh_user='root',
-            ssh_key=None,
-        )
+        client = _make_client()
+
+        with mock.patch.object(client._runner, 'run') as mock_run:
+            mock_run.side_effect = [
+                (0, _squeue_json(), ''),
+                (0, _scontrol_json(), ''),
+            ]
+
+            nodes, node_ips = client.get_job_nodes('935')
+
+            assert nodes == ['node-001', 'node-002']
+            assert node_ips == ['10.0.0.1', '10.0.0.2']
+            assert mock_run.call_count == 2
+            commands = [call[0][0] for call in mock_run.call_args_list]
+            assert commands[0] == 'squeue --jobs 935 --json'
+            # The compact hostlist expression is passed to scontrol as is.
+            assert commands[1] == "scontrol show node 'node-[001-002]' --json"
+            assert client._json_output_supported is True
+
+    def test_get_job_nodes_ordering_independent_of_scontrol(self):
+        """Test that the ordering follows the job's hostlist expansion."""
+        client = _make_client()
+
+        with mock.patch.object(client._runner, 'run') as mock_run:
+            mock_run.side_effect = [
+                (0, _squeue_json(), ''),
+                # scontrol returns the nodes in the opposite order.
+                (0,
+                 _scontrol_json(names=['node-002', 'node-001'],
+                                addresses=['10.0.0.2', '10.0.0.1']), ''),
+            ]
+
+            nodes, node_ips = client.get_job_nodes('935')
+
+            assert nodes == ['node-001', 'node-002']
+            assert node_ips == ['10.0.0.1', '10.0.0.2']
+
+    def test_get_job_nodes_resolves_hostnames_via_login_node(self):
+        """Test hostnames are resolved via getent ahostsv4 on the login node."""
+        client = _make_client()
+
+        with mock.patch.object(client._runner, 'run') as mock_run:
+            mock_run.side_effect = [
+                (0, _squeue_json(), ''),
+                # NodeAddr is a hostname instead of an IP.
+                (0, _scontrol_json(addresses=['worker-1', 'worker-10']), ''),
+                # Resolve loop output (hostname ip per line).
+                (0, 'worker-1 10.20.30.1\nworker-10 10.20.30.10', ''),
+            ]
+
+            nodes, node_ips = client.get_job_nodes('935')
+
+            assert nodes == ['node-001', 'node-002']
+            assert node_ips == ['10.20.30.1', '10.20.30.10']
+
+            # Verify a single resolution call was made (not 1 per node).
+            assert mock_run.call_count == 3
+            resolve_call = mock_run.call_args_list[2][0][0]
+            assert 'for h in worker-1 worker-10' in resolve_call
+            assert 'getent ahostsv4' in resolve_call
+
+    def test_get_job_nodes_hostname_resolution_failure(self):
+        """Test error handling when hostname resolution fails."""
+        client = _make_client()
+
+        # One hostname resolves, one fails (getent returns empty)
+        resolve_output = (f'worker-1 10.20.30.1\n'
+                          f'worker-10 {slurm._UNRESOLVED_HOSTNAME_MARKER}')
+
+        with mock.patch.object(client._runner, 'run') as mock_run:
+            mock_run.side_effect = [
+                (0, _squeue_json(), ''),
+                (0, _scontrol_json(addresses=['worker-1', 'worker-10']), ''),
+                (0, resolve_output, ''),
+            ]
+
+            with pytest.raises(RuntimeError,
+                               match='Failed to resolve hostnames'):
+                client.get_job_nodes('935')
+
+    def test_get_job_nodes_job_terminated(self):
+        """Test that a job that squeue no longer lists raises."""
+        client = _make_client()
+
+        with mock.patch.object(client._runner, 'run') as mock_run:
+            mock_run.return_value = (0, json.dumps({'jobs': []}), '')
+
+            with pytest.raises(RuntimeError, match='No nodes found for job'):
+                client.get_job_nodes('935')
+
+    def test_get_job_nodes_invalid_job_id(self):
+        """Test that a job ID slurmctld no longer knows about raises."""
+        client = _make_client()
+
+        with mock.patch.object(client._runner, 'run') as mock_run:
+            mock_run.return_value = (
+                1, '', 'slurm_load_jobs error: Invalid job id specified')
+
+            with pytest.raises(RuntimeError, match='No nodes found for job'):
+                client.get_job_nodes('935')
+
+    def test_get_job_nodes_pending_job(self):
+        """Test that a pending job (no nodes allocated yet) raises."""
+        client = _make_client()
+
+        with mock.patch.object(client._runner, 'run') as mock_run:
+            mock_run.return_value = (0,
+                                     _squeue_json(nodes='',
+                                                  job_state=['PENDING']), '')
+
+            with pytest.raises(RuntimeError, match='No nodes found for job'):
+                client.get_job_nodes('935')
+
+    def test_get_job_nodes_missing_node_address(self):
+        """Test that a node scontrol does not report raises."""
+        client = _make_client()
+
+        payload = _load_fixture('scontrol_nodes.json')
+        # scontrol silently omits nodes it does not know about.
+        payload['nodes'] = payload['nodes'][:1]
+
+        with mock.patch.object(client._runner, 'run') as mock_run:
+            mock_run.side_effect = [
+                (0, _squeue_json(), ''),
+                (0, json.dumps(payload), ''),
+            ]
+
+            with pytest.raises(RuntimeError,
+                               match=r'did not report an address.*node-002'):
+                client.get_job_nodes('935')
+
+    def test_get_job_nodes_malformed_json_does_not_fall_back(self):
+        """Test that malformed JSON raises instead of using the text path."""
+        client = _make_client()
+
+        with mock.patch.object(client._runner, 'run') as mock_run:
+            mock_run.return_value = (0, 'not json', '')
+
+            with pytest.raises(RuntimeError,
+                               match='Failed to parse the JSON output'):
+                client.get_job_nodes('935')
+
+            assert mock_run.call_count == 1
+            assert client._json_output_supported is None
+
+    def test_get_job_nodes_missing_nodes_field(self):
+        """Test that an unexpected squeue schema raises."""
+        client = _make_client()
+
+        payload = _load_fixture('squeue_jobs.json')
+        del payload['jobs'][0]['nodes']
+
+        with mock.patch.object(client._runner, 'run') as mock_run:
+            mock_run.return_value = (0, json.dumps(payload), '')
+
+            with pytest.raises(RuntimeError, match="no 'nodes' field"):
+                client.get_job_nodes('935')
+
+    def test_get_job_nodes_falls_back_when_json_unsupported(self):
+        """Test the fallback to the text path on Slurm versions w/o --json."""
+        client = _make_client()
+
+        with mock.patch.object(client._runner, 'run') as mock_run:
+            mock_run.side_effect = [
+                (1, '', "squeue: unrecognized option '--json'"),
+                (0, 'node1 10.0.0.1\nnode2 10.0.0.2', ''),
+            ]
+
+            nodes, node_ips = client.get_job_nodes('935')
+
+            assert nodes == ['node1', 'node2']
+            assert node_ips == ['10.0.0.1', '10.0.0.2']
+            assert client._json_output_supported is False
+
+        # The verdict is cached: the next call goes straight to the text path.
+        with mock.patch.object(client._runner, 'run') as mock_run:
+            mock_run.return_value = (0, 'node1 10.0.0.1\nnode2 10.0.0.2', '')
+
+            client.get_job_nodes('935')
+
+            assert mock_run.call_count == 1
+            assert '--json' not in mock_run.call_args_list[0][0][0]
+
+
+class TestGetJobNodesText:
+    """Test SlurmClient.get_job_nodes() on the text-parsing fallback path."""
+
+    def test_get_job_nodes_returns_nodes_and_ips(self):
+        """Test that get_job_nodes returns parsed nodes and IPs."""
+        client = _make_client()
+        client._json_output_supported = False
 
         with mock.patch.object(client._runner, 'run') as mock_run:
             mock_run.return_value = (0, 'node1 10.0.0.1\nnode2 10.0.0.2', '')
@@ -293,12 +519,8 @@ class TestGetJobNodes:
 
     def test_get_job_nodes_resolves_hostnames_via_login_node(self):
         """Test hostnames are resolved via getent ahostsv4 on the login node."""
-        client = slurm.SlurmClient(
-            ssh_host='localhost',
-            ssh_port=22,
-            ssh_user='root',
-            ssh_key=None,
-        )
+        client = _make_client()
+        client._json_output_supported = False
 
         with mock.patch.object(client._runner, 'run') as mock_run:
             mock_run.side_effect = [
@@ -322,13 +544,8 @@ class TestGetJobNodes:
 
     def test_get_job_nodes_hostname_resolution_failure(self):
         """Test error handling when hostname resolution fails."""
-
-        client = slurm.SlurmClient(
-            ssh_host='localhost',
-            ssh_port=22,
-            ssh_user='root',
-            ssh_key=None,
-        )
+        client = _make_client()
+        client._json_output_supported = False
 
         # One hostname resolves, one fails (getent returns empty)
         resolve_output = (f'worker-1 10.20.30.1\n'
@@ -344,6 +561,17 @@ class TestGetJobNodes:
 
             with pytest.raises(RuntimeError,
                                match='Failed to resolve hostnames'):
+                client.get_job_nodes('12345')
+
+    def test_get_job_nodes_no_nodes(self):
+        """Test that empty output raises."""
+        client = _make_client()
+        client._json_output_supported = False
+
+        with mock.patch.object(client._runner, 'run') as mock_run:
+            mock_run.return_value = (0, '', '')
+
+            with pytest.raises(RuntimeError, match='No nodes found for job'):
                 client.get_job_nodes('12345')
 
 
