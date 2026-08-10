@@ -4095,18 +4095,18 @@ class TestKubernetesDetectNetworkType(unittest.TestCase):
                         })
         mock_get_nodes.return_value = [mock_node]
 
-        result = kubernetes.Kubernetes._detect_network_type(
-            context='test-context',
-            network_tier=resources_utils.NetworkTier.BEST,
-            k8s_acc_label_key='nvidia.com/gpu.product',
-            k8s_resource_key='nvidia.com/gpu',
-            acc_count=8)
+        with patch('sky.skypilot_config.get_effective_region_config',
+                   return_value=None):
+            result = kubernetes.Kubernetes._detect_network_type(
+                context='test-context',
+                network_tier=resources_utils.NetworkTier.BEST,
+                k8s_acc_label_key='nvidia.com/gpu.product',
+                k8s_resource_key='nvidia.com/gpu',
+                acc_count=8)
 
-        # Should return AWS_EFA type but without efa_count metadata
         self.assertEqual(
             result,
-            (kubernetes_utils.KubernetesHighPerformanceNetworkType.AWS_EFA,
-             None))
+            (kubernetes_utils.KubernetesHighPerformanceNetworkType.NONE, None))
 
     @patch('sky.provision.kubernetes.utils.get_kubernetes_nodes')
     def test_aws_efa_detection_node_without_gpu_label(self, mock_get_nodes):
@@ -4158,11 +4158,9 @@ class TestKubernetesDetectNetworkType(unittest.TestCase):
             k8s_resource_key='nvidia.com/gpu',
             acc_count=8)
 
-        # EFA count is 0, so AWS_EFA is still returned but without efa_count metadata
         self.assertEqual(
             result,
-            (kubernetes_utils.KubernetesHighPerformanceNetworkType.AWS_EFA,
-             None))
+            (kubernetes_utils.KubernetesHighPerformanceNetworkType.NONE, None))
 
 
 class TestKubernetesCheckSingleContextForwardsCloud(unittest.TestCase):
@@ -4311,6 +4309,17 @@ class TestDetectNetworkTypeEfaScaleFromZero(unittest.TestCase):
             net, kubernetes.KubernetesHighPerformanceNetworkType.AWS_EFA)
         self.assertIsNotNone(meta)
         self.assertEqual(meta['efa_count'], 32)
+
+    def test_matching_gpu_without_efa_uses_catalog(self):
+        node = self._node(
+            {
+                **self._AWS_SYSTEM_NODE_LABELS,
+                'nvidia.com/gpu.product': 'H100',
+            }, {'nvidia.com/gpu': '8'})
+        net, meta = self._detect([node], 8, 'H100', derived_efa=32)
+        self.assertEqual(
+            net, kubernetes.KubernetesHighPerformanceNetworkType.AWS_EFA)
+        self.assertEqual(meta, {'efa_count': 32})
 
     def test_cold_aws_node_no_autoscaler_gets_no_efa(self):
         # A static cluster (no autoscaler) with no GPU node can never schedule
