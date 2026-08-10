@@ -5,9 +5,6 @@
        storage mounts / ephemeral ~/.sky / env below key off this rather than
        storage.enabled alone. */ -}}
 {{- $statePersist := or .Values.storage.enabled .Values.storage.existingClaim -}}
-{{- if and (not .Values.apiService.command) .Values.apiService.args (hasPrefix "-" (first .Values.apiService.args)) }}
-{{- fail "apiService.args without apiService.command must begin with an executable because the default command is [\"tini\", \"--\"]. Set apiService.command to provide option-only args." }}
-{{- end }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -205,17 +202,8 @@ spec:
             fieldRef:
               fieldPath: status.podIP
         {{- end }}
-        {{- if .Values.apiService.command }}
-        command:
-          {{- toYaml .Values.apiService.command | nindent 10 }}
-        {{- else }}
         # Use tini as the init process
         command: ["tini", "--"]
-        {{- end }}
-        {{- if .Values.apiService.args }}
-        args:
-          {{- toYaml .Values.apiService.args | nindent 10 }}
-        {{- else }}
         # Start API server in foreground (if supported) to:
         # 1. Bypass the healthz check of `sky api start`, let kubernetes probes manage the lifecycle directly.
         # 2. Capture all logs in container to stdout/stderr, bypass in-container log file overhead.
@@ -291,6 +279,9 @@ spec:
           # developer can drive `sky api start` / `sky api stop` via kubectl exec.
           exec tail -f /dev/null
           {{- else }}
+          {{- if .Values.apiService.preStartHook }}
+          {{ .Values.apiService.preStartHook | nindent 10 }}
+          {{- end }}
           # Optional log mirror: when $SKYPILOT_SERVER_LOG_MIRROR_DIR is set,
           # also write server stdout/stderr to a per-pod, per-boot file under
           # <dir>/<HOSTNAME>/server-<UTC_ISO>.log. Survives local logrotate
@@ -334,7 +325,6 @@ spec:
           fi
           {{- end }}
           {{- end }}
-        {{- end }}
         ports:
         - containerPort: 46580
         {{- if not .Values.apiService.devMode.enabled }}

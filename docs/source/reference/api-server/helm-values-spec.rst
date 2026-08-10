@@ -36,8 +36,6 @@ Below is the available helm value keys and the default value of each key:
   :ref:`fullnameOverride <helm-values-fullnameOverride>`: null
   :ref:`apiService <helm-values-apiService>`:
     :ref:`image <helm-values-apiService-image>`: berkeleyskypilot/skypilot-nightly:latest
-    :ref:`command <helm-values-apiService-command>`: null
-    :ref:`args <helm-values-apiService-args>`: null
     :ref:`upgradeStrategy <helm-values-apiService-upgradeStrategy>`: Recreate
     :ref:`replicas <helm-values-apiService-replicas>`: 1
     :ref:`host <helm-values-apiService-host>`: "0.0.0.0"
@@ -55,6 +53,7 @@ Below is the available helm value keys and the default value of each key:
 
       # echo "Installing admin policy"
       # pip install git+https://github.com/michaelvll/admin-policy-examples
+    :ref:`preStartHook <helm-values-apiService-preStartHook>`: null
     :ref:`config <helm-values-apiService-config>`: null
     :ref:`dbConnectionSecretName <helm-values-apiService-dbConnectionSecretName>`: null
     :ref:`dbConnectionString <helm-values-apiService-dbConnectionString>`: null
@@ -405,51 +404,6 @@ To use a nightly build, find the desired nightly version on `pypi <https://pypi.
     image: berkeleyskypilot/skypilot-nightly:1.0.0.devYYYYMMDD
 
 
-.. _helm-values-apiService-command:
-
-``apiService.command``
-^^^^^^^^^^^^^^^^^^^^^^
-
-Kubernetes command for the API server container. Set a non-empty string list
-to replace the chart's default ``["tini", "--"]`` command. When unset, the
-chart retains that default; this does not inherit the image ``ENTRYPOINT``.
-
-Default: ``null``
-
-.. code-block:: yaml
-
-  apiService:
-    command:
-      - /bin/bash
-      - /app/entrypoint.sh
-
-.. _helm-values-apiService-args:
-
-``apiService.args``
-^^^^^^^^^^^^^^^^^^^
-
-Kubernetes arguments for the API server container. Set a non-empty string list
-to replace the chart's generated startup script. Replacing it also bypasses
-``preDeployHook``, SkyPilot configuration initialization, dev-mode handling,
-and the chart's ``sky api start`` command; include required setup in the
-replacement command or arguments. When unset, the generated script is kept.
-When ``apiService.command`` is unset, the default ``["tini", "--"]`` command
-executes the first ``args`` item; therefore an args-only override must begin
-with an executable, for example ``/app/entrypoint.sh``. Option-only args such
-as ``["--some-option"]`` are rejected; set ``apiService.command`` when the
-custom process needs those arguments.
-
-Default: ``null``
-
-.. code-block:: yaml
-
-  apiService:
-    command:
-      - /bin/bash
-      - /app/entrypoint.sh
-    args:
-      - --some-option
-
 .. _helm-values-apiService-imagePullPolicy:
 
 ``apiService.imagePullPolicy``
@@ -616,6 +570,30 @@ Default: see the yaml below.
       # Uncomment the following lines to install the admin policy
       # echo "Installing admin policy"
       # pip install git+https://github.com/michaelvll/admin-policy-examples
+
+.. _helm-values-apiService-preStartHook:
+
+``apiService.preStartHook``
+^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Shell commands to run after SkyPilot initializes configuration and credentials,
+but before the API server starts. Use this for an entrypoint-style custom setup
+script that must run in the API container. The hook must exit successfully and
+must not use ``exec``: the chart retains ``tini`` and its final ``sky api
+start`` command for signal handling, health checks, logging, and normal API
+startup. The hook is not run when dev mode is enabled because that mode does
+not start the API server.
+
+Use :ref:`apiService.preDeployHook <helm-values-apiService-preDeployHook>` for
+commands that must run before SkyPilot configuration initialization.
+
+Default: ``null``
+
+.. code-block:: yaml
+
+  apiService:
+    preStartHook: |-
+      /app/custom-startup.sh --custom-option
 
 .. _helm-values-apiService-config:
 

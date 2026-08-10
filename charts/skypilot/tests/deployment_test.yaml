@@ -1335,70 +1335,18 @@ tests:
           path: spec.template.spec.containers[0].args[1]
           value: -c
 
-  # Verifies a replacement command is rendered while the default startup
-  # arguments remain available when args is unset.
-  - it: should override the API container command independently
+  # Verifies custom startup work runs after SkyPilot initialization and before
+  # the chart-owned API server process starts, without replacing tini.
+  - it: should run the pre-start hook before the official API server command
     set:
-      apiService.command:
-        - /bin/bash
-        - /app/entrypoint.sh
-    asserts:
-      - equal:
-          path: spec.template.spec.containers[0].command
-          value:
-            - /bin/bash
-            - /app/entrypoint.sh
-      - equal:
-          path: spec.template.spec.containers[0].args[0]
-          value: /bin/sh
-      - equal:
-          path: spec.template.spec.containers[0].args[1]
-          value: -c
-
-  # Verifies an args-only override starts an executable through the default
-  # tini command when command is unset.
-  - it: should override the API container args independently
-    set:
-      apiService.args:
-        - /app/entrypoint.sh
-        - --some-option
+      apiService.preStartHook: |-
+        echo "Custom pre-start hook"
     asserts:
       - equal:
           path: spec.template.spec.containers[0].command
           value:
             - tini
             - --
-      - equal:
-          path: spec.template.spec.containers[0].args
-          value:
-            - /app/entrypoint.sh
-            - --some-option
-
-  # Prevents option-only args from reaching tini without a command to exec.
-  - it: should reject option-only API container args without a command
-    set:
-      apiService.args:
-        - --some-option
-    asserts:
-      - failedTemplate:
-          errorMessage: "apiService.args without apiService.command must begin with an executable because the default command is [\"tini\", \"--\"]. Set apiService.command to provide option-only args."
-
-  # Verifies a custom entrypoint and its arguments replace both container
-  # fields without retaining the generated SkyPilot startup script.
-  - it: should override the API container command and args together
-    set:
-      apiService.command:
-        - /bin/bash
-        - /app/entrypoint.sh
-      apiService.args:
-        - --some-option
-    asserts:
-      - equal:
-          path: spec.template.spec.containers[0].command
-          value:
-            - /bin/bash
-            - /app/entrypoint.sh
-      - equal:
-          path: spec.template.spec.containers[0].args
-          value:
-            - --some-option
+      - matchRegex:
+          path: spec.template.spec.containers[0].args[2]
+          pattern: '(?s)initialize_configmap_sync_on_startup.*Custom pre-start hook.*exec sky api start'

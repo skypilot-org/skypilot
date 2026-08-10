@@ -14,29 +14,11 @@
                         "null"
                     ]
                 },
-                "args": {
-                    "type": [
-                        "array",
-                        "null"
-                    ],
-                    "items": {
-                        "type": "string"
-                    }
-                },
                 "authUserHeaderName": {
                     "type": [
                         "string",
                         "null"
                     ]
-                },
-                "command": {
-                    "type": [
-                        "array",
-                        "null"
-                    ],
-                    "items": {
-                        "type": "string"
-                    }
                 },
                 "config": {
                     "type": [
@@ -182,6 +164,12 @@
                 },
                 "preDeployHook": {
                     "type": "string"
+                },
+                "preStartHook": {
+                    "type": [
+                        "string",
+                        "null"
+                    ]
                 },
                 "readinessProbe": {
                     "type": [
