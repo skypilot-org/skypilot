@@ -4102,7 +4102,8 @@ class TestKubernetesDetectNetworkType(unittest.TestCase):
                 network_tier=resources_utils.NetworkTier.BEST,
                 k8s_acc_label_key='nvidia.com/gpu.product',
                 k8s_resource_key='nvidia.com/gpu',
-                acc_count=8)
+                acc_count=8,
+                acc_type='H100')
 
         self.assertEqual(
             result,
@@ -4151,12 +4152,15 @@ class TestKubernetesDetectNetworkType(unittest.TestCase):
             })
         mock_get_nodes.return_value = [mock_node]
 
-        result = kubernetes.Kubernetes._detect_network_type(
-            context='test-context',
-            network_tier=resources_utils.NetworkTier.BEST,
-            k8s_acc_label_key='nvidia.com/gpu.product',
-            k8s_resource_key='nvidia.com/gpu',
-            acc_count=8)
+        with patch('sky.skypilot_config.get_effective_region_config',
+                   return_value=None):
+            result = kubernetes.Kubernetes._detect_network_type(
+                context='test-context',
+                network_tier=resources_utils.NetworkTier.BEST,
+                k8s_acc_label_key='nvidia.com/gpu.product',
+                k8s_resource_key='nvidia.com/gpu',
+                acc_count=8,
+                acc_type='H100')
 
         self.assertEqual(
             result,
