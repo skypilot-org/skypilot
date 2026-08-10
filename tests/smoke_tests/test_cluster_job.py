@@ -662,14 +662,18 @@ def test_kubernetes_large_job_submit_uploads_driver():
             f'sky logs {name} 1 | grep submitted-from-rank-0',
             f'sky logs {name} 1 | grep submitted-from-rank-1',
             f'sky logs {name} 1 | grep DRIVER_UPLOADED',
-            # Raising the limit above the driver size puts the next submit back
-            # on the inline path. Same cluster, same task -- only the limit
-            # differs, so a failure here means the limit is not being consulted.
-            f'sky exec {name} '
+            # Raising the limit above the driver size puts the same submit back
+            # on the inline path. What that looks like depends on the cluster:
+            # with nothing capping request URLs the inline attempt succeeds and
+            # the driver arrives written by `echo`; behind a proxy that caps
+            # them the request is rejected and the submit fails. Either one
+            # shows the limit was consulted -- what must not happen is a third
+            # upload. `2>&1` matters: the submit failure is on stderr, and
+            # without it the grep would see nothing and pass silently.
+            f'out=$(sky exec {name} '
             f'--config kubernetes.max_inline_command_length=1000000 '
-            f'{task_yaml}',
-            f'sky logs {name} 2 --status',
-            f'sky logs {name} 2 | grep DRIVER_INLINED',
+            f'{task_yaml} 2>&1 || true); '
+            f'echo "$out" | grep -E "DRIVER_INLINED|Failed to submit job"',
         ],
         f'sky down -y {name}; rm -f {task_yaml}',
         timeout=20 * 60,
