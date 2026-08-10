@@ -8,6 +8,7 @@ import pytest
 
 from sky import global_user_state
 from sky import models
+from sky.adaptors import kubernetes
 from sky.provision import constants
 from sky.provision.kubernetes import config as config_lib
 from sky.provision.kubernetes import constants as k8s_constants
@@ -1756,7 +1757,7 @@ class TestGetAllVolumesErrors:
             config={'namespace': 'my-namespace'},
         )
 
-        errors = k8s_volume.get_all_volumes_errors([config])
+        errors, _ = k8s_volume.get_all_volumes_errors([config])
 
         assert errors.get('test-vol') is None
 
@@ -1799,7 +1800,7 @@ class TestGetAllVolumesErrors:
             config={'namespace': 'my-namespace'},
         )
 
-        errors = k8s_volume.get_all_volumes_errors([config])
+        errors, _ = k8s_volume.get_all_volumes_errors([config])
 
         assert 'test-vol' in errors
         assert errors['test-vol'] is not None
@@ -1845,7 +1846,7 @@ class TestGetAllVolumesErrors:
             config={'namespace': 'my-namespace'},
         )
 
-        errors = k8s_volume.get_all_volumes_errors([config])
+        errors, _ = k8s_volume.get_all_volumes_errors([config])
 
         assert 'test-vol' in errors
         assert 'access mode mismatch' in errors['test-vol'].lower()
@@ -1893,7 +1894,7 @@ class TestGetAllVolumesErrors:
             config={'namespace': 'my-namespace'},
         )
 
-        errors = k8s_volume.get_all_volumes_errors([config])
+        errors, _ = k8s_volume.get_all_volumes_errors([config])
 
         # Should be None for WaitForFirstConsumer
         assert errors.get('test-vol') is None
@@ -1937,7 +1938,7 @@ class TestGetAllVolumesErrors:
             config={'namespace': 'my-namespace'},
         )
 
-        errors = k8s_volume.get_all_volumes_errors([config])
+        errors, _ = k8s_volume.get_all_volumes_errors([config])
 
         # Should be None when storage class read fails
         assert errors.get('test-vol') is None
@@ -1976,7 +1977,7 @@ class TestGetAllVolumesErrors:
             config={'namespace': 'my-namespace'},
         )
 
-        errors = k8s_volume.get_all_volumes_errors([config])
+        errors, _ = k8s_volume.get_all_volumes_errors([config])
 
         # Should be None when storage class read fails
         assert errors.get('test-vol') is None
@@ -2007,7 +2008,7 @@ class TestGetAllVolumesErrors:
             config={'namespace': 'my-namespace'},
         )
 
-        errors = k8s_volume.get_all_volumes_errors([config])
+        errors, _ = k8s_volume.get_all_volumes_errors([config])
 
         assert 'test-vol' in errors
         assert 'Lost' in errors['test-vol']
@@ -2035,9 +2036,150 @@ class TestGetAllVolumesErrors:
             config={'namespace': 'my-namespace'},
         )
 
-        # Should not raise, just return empty dict
-        errors = k8s_volume.get_all_volumes_errors([config])
+        # Should not raise. The volume must be reported as failed rather than
+        # simply omitted -- an omitted volume reads as healthy to the caller.
+        errors, failed = k8s_volume.get_all_volumes_errors([config])
         assert errors == {}
+        assert failed == {'test-vol'}
+
+    def test_hostpath_volume_reported_clean(self):
+        """hostPath volumes have no PVC, but they still have to appear in the
+        result -- a caller cannot tell "omitted" from "unknown"."""
+        config = models.VolumeConfig(
+            _version=1,
+            name='test-vol',
+            type='k8s-hostpath',
+            cloud='kubernetes',
+            region='my-context',
+            zone=None,
+            name_on_cloud='test-vol',
+            size='10',
+            config={'host_path': '/mnt/data'},
+        )
+
+        errors, failed = k8s_volume.get_all_volumes_errors([config])
+
+        assert errors == {'test-vol': None}
+        assert failed == set()
+
+    @patch('sky.provision.kubernetes.volume._get_context_namespace')
+    @patch('sky.adaptors.kubernetes.core_api')
+    def test_pvc_deleted_outside_skypilot_reports_error(self, mock_core_api,
+                                                        mock_get_context):
+        """A registered volume whose PVC is gone must not read as healthy."""
+        mock_get_context.return_value = ('my-context', 'my-namespace')
+
+        empty_list = Mock()
+        empty_list.items = []
+        mock_core_api.return_value.list_namespaced_persistent_volume_claim.return_value = empty_list
+
+        not_found = kubernetes.api_exception()(status=404, reason='Not Found')
+        mock_core_api.return_value.read_namespaced_persistent_volume_claim.side_effect = not_found
+
+        config = models.VolumeConfig(
+            _version=1,
+            name='test-vol',
+            type='k8s-pvc',
+            cloud='kubernetes',
+            region='my-context',
+            zone=None,
+            name_on_cloud='test-pvc',
+            size='10',
+            config={'namespace': 'my-namespace'},
+        )
+
+        errors, failed = k8s_volume.get_all_volumes_errors([config])
+
+        assert 'test-vol' not in failed
+        assert errors['test-vol'] is not None
+        assert 'no longer exists' in errors['test-vol']
+
+    @patch('sky.provision.kubernetes.volume._get_context_namespace')
+    @patch('sky.adaptors.kubernetes.core_api')
+    def test_unlabelled_pvc_is_read_directly(self, mock_core_api,
+                                             mock_get_context):
+        """use_existing PVCs lack the skypilot label, so the listing misses
+        them; a direct read must still find and evaluate them."""
+        mock_get_context.return_value = ('my-context', 'my-namespace')
+
+        empty_list = Mock()
+        empty_list.items = []
+        mock_core_api.return_value.list_namespaced_persistent_volume_claim.return_value = empty_list
+
+        adopted_pvc = MockPVC('adopted-pvc', 'my-namespace')
+        adopted_pvc.status.phase = 'Bound'
+        mock_core_api.return_value.read_namespaced_persistent_volume_claim.return_value = adopted_pvc
+
+        config = models.VolumeConfig(
+            _version=1,
+            name='test-vol',
+            type='k8s-pvc',
+            cloud='kubernetes',
+            region='my-context',
+            zone=None,
+            name_on_cloud='adopted-pvc',
+            size='10',
+            config={
+                'namespace': 'my-namespace',
+                'use_existing': True
+            },
+        )
+
+        errors, failed = k8s_volume.get_all_volumes_errors([config])
+
+        assert failed == set()
+        assert errors['test-vol'] is None
+
+    @patch('sky.provision.kubernetes.volume.kubernetes_utils.get_pvc_events')
+    @patch('sky.provision.kubernetes.volume._get_context_namespace')
+    @patch('sky.adaptors.kubernetes.core_api')
+    @patch('sky.adaptors.kubernetes.storage_api')
+    def test_pvc_pending_immediate_surfaces_csi_message(self, mock_storage_api,
+                                                        mock_core_api,
+                                                        mock_get_context,
+                                                        mock_get_events):
+        """The provisioner's rejection reason is what identifies the fault,
+        so it has to reach the error message verbatim."""
+        mock_get_context.return_value = ('my-context', 'my-namespace')
+
+        mock_pvc = MockPVC('test-pvc', 'my-namespace')
+        mock_pvc.status.phase = 'Pending'
+        mock_pvc.spec.storage_class_name = 'standard'
+
+        mock_pvc_list = Mock()
+        mock_pvc_list.items = [mock_pvc]
+        mock_core_api.return_value.list_namespaced_persistent_volume_claim.return_value = mock_pvc_list
+
+        mock_pv_list = Mock()
+        mock_pv_list.items = []
+        mock_core_api.return_value.list_persistent_volume.return_value = mock_pv_list
+
+        mock_storage_class = Mock()
+        mock_storage_class.volume_binding_mode = 'Immediate'
+        mock_storage_api.return_value.read_storage_class.return_value = mock_storage_class
+
+        event = Mock()
+        event.type = 'Warning'
+        event.reason = 'ProvisioningFailed'
+        event.message = 'requested size is below the 1Ti minimum'
+        mock_get_events.return_value = [event]
+
+        config = models.VolumeConfig(
+            _version=1,
+            name='test-vol',
+            type='k8s-pvc',
+            cloud='kubernetes',
+            region='my-context',
+            zone=None,
+            name_on_cloud='test-pvc',
+            size='1000',
+            config={'namespace': 'my-namespace'},
+        )
+
+        errors, _ = k8s_volume.get_all_volumes_errors([config])
+
+        assert 'ProvisioningFailed' in errors['test-vol']
+        assert 'below the 1Ti minimum' in errors['test-vol']
 
 
 class TestFindPVCByNameOrLabel:

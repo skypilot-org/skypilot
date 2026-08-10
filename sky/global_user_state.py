@@ -3040,6 +3040,7 @@ def add_volume(
     status: status_lib.VolumeStatus,
     is_ephemeral: bool = False,
     creation_yaml: Optional[str] = None,
+    error_message: Optional[str] = None,
 ) -> None:
     engine = _db_manager.get_engine()
     volume_launched_at = int(time.time())
@@ -3072,6 +3073,7 @@ def add_volume(
             status=status.value,
             is_ephemeral=int(is_ephemeral),
             creation_yaml=creation_yaml,
+            error_message=error_message,
         )
         do_update_stmt = insert_stmnt.on_conflict_do_nothing()
         session.execute(do_update_stmt)
