@@ -17,7 +17,6 @@ import threading
 import time
 from typing import (Any, Callable, Dict, Iterable, List, Optional, Tuple, Type,
                     Union)
-import urllib.parse
 import uuid
 
 import colorama
@@ -1596,7 +1595,7 @@ class KubernetesCommandRunner(CommandRunner):
         """
         # Only one quote layer survives to kubectl's argv: the outer one this
         # runner adds is consumed by the local shell.
-        return len(urllib.parse.quote(shlex.quote(command), safe=''))
+        return len(shlex.quote(shlex.quote(command)))
 
     def max_inline_command_length(self) -> int:
         # Unlike a shell transport, the ceiling here belongs to whatever proxy
