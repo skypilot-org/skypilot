@@ -4,8 +4,8 @@ import tempfile
 import unittest
 from unittest import mock
 
-from sky.utils.kubernetes import config_map_utils
 from sky.utils import config_utils
+from sky.utils.kubernetes import config_map_utils
 
 
 class TestConfigMapSync(unittest.TestCase):
