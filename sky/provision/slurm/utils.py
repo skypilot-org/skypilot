@@ -1429,9 +1429,17 @@ def srun_sshd_command(
     # because we override the home directory in SlurmCommandRunner.run.
     user_home_ssh_dir = f'~{unix_user}/.ssh'
 
-    # TODO(kevin): SSH sessions don't inherit Slurm env vars (SLURM_*, CUDA_*,
-    # etc.) because sshd/dropbear spawns a fresh shell. Fix by capturing env
-    # to a file and sourcing it.
+    # Slurm sets accelerator visibility variables on the process launched by
+    # srun. SSH servers build a fresh environment for child sessions, so these
+    # variables need to be forwarded explicitly. Keep this list limited to
+    # values whose syntax is safe in an sshd SetEnv directive.
+    accelerator_env_vars = (
+        'CUDA_VISIBLE_DEVICES',
+        'ROCR_VISIBLE_DEVICES',
+        'ZE_AFFINITY_MASK',
+        'GPU_DEVICE_ORDINAL',
+    )
+    accelerator_env_var_names = ' '.join(accelerator_env_vars)
 
     if is_container_image:
         # Dropbear + socat bridge for container mode.
@@ -1449,7 +1457,9 @@ def srun_sshd_command(
             'ss -tln | awk \'{print $4}\' | grep -q ":$PORT$" || break; '
             'done; '
             # Start dropbear and wait for it to bind
-            '"$DROPBEAR" -F -s -R -p "127.0.0.1:$PORT" & '
+            # Dropbear normally rebuilds the child environment too. -e passes
+            # the environment injected by Slurm into the SSH session.
+            '"$DROPBEAR" -e -F -s -R -p "127.0.0.1:$PORT" & '
             'DROPBEAR_PID=$!; '
             'trap "kill $DROPBEAR_PID 2>/dev/null" EXIT; '
             'for i in $(seq 1 50); do '
@@ -1480,16 +1490,12 @@ def srun_sshd_command(
             ssh_bootstrap_cmd,
         ])
 
-    # Non-container: OpenSSH sshd
-    return shlex.join([
-        'srun',
-        '--quiet',
-        '--unbuffered',
-        '--overlap',
-        '--jobid',
-        job_id,
-        '-w',
-        target_node,
+    # Non-container: OpenSSH sshd. Build one SetEnv directive because sshd uses
+    # only the first value of a keyword supplied multiple times. The allowlist
+    # covers NVIDIA, AMD, and Intel accelerator visibility variables emitted
+    # by Slurm's GRES plugins. Skip unexpected values instead of allowing them
+    # to alter sshd's configuration parser input.
+    sshd_command = shlex.join([
         '/usr/sbin/sshd',
         '-i',  # Uses stdin/stdout
         '-e',  # Writes errors to stderr
@@ -1510,4 +1516,27 @@ def srun_sshd_command(
         'UsePAM=no',
         '-o',
         f'AcceptEnv={constants.SKY_CLUSTER_NAME_ENV_VAR_KEY}',
+    ])
+    ssh_bootstrap_cmd = (
+        'SSHD_SET_ENV=; '
+        f'for NAME in {accelerator_env_var_names}; do '
+        'if declare -p "$NAME" &>/dev/null; then VALUE=${!NAME}; '
+        'case "$VALUE" in *[!a-zA-Z0-9_.,:/@%+=-]*) continue;; esac; '
+        'SSHD_SET_ENV+="${SSHD_SET_ENV:+ }$NAME=$VALUE"; fi; done; '
+        f'set -- {sshd_command}; '
+        '[[ -z $SSHD_SET_ENV ]] || '
+        'set -- "$@" -o "SetEnv=$SSHD_SET_ENV"; exec "$@"')
+
+    return shlex.join([
+        'srun',
+        '--quiet',
+        '--unbuffered',
+        '--overlap',
+        '--jobid',
+        job_id,
+        '-w',
+        target_node,
+        '/bin/bash',
+        '-c',
+        ssh_bootstrap_cmd,
     ])

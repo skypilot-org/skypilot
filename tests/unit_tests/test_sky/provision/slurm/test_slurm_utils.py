@@ -1,4 +1,9 @@
 """Unit tests for sky.provision.slurm.utils."""
+import json
+import os
+import shlex
+import subprocess
+import sys
 from unittest import mock
 
 import pytest
@@ -6,6 +11,66 @@ import pytest
 from sky import exceptions
 from sky.adaptors import slurm as slurm_adaptor
 from sky.provision.slurm import utils
+
+
+class TestSrunSshdCommand:
+    """Tests for accelerator environment forwarding through SSH."""
+
+    def test_openssh_forwards_accelerator_environment(self):
+        command = utils.srun_sshd_command(
+            job_id='123',
+            target_node='node-1',
+            unix_user='alice',
+            cluster_name_on_cloud='cluster',
+            is_container_image=False,
+        )
+
+        args = shlex.split(command)
+        assert args[:8] == [
+            'srun', '--quiet', '--unbuffered', '--overlap', '--jobid', '123',
+            '-w', 'node-1'
+        ]
+        assert args[8:10] == ['/bin/bash', '-c']
+        bootstrap = args[10]
+        assert 'CUDA_VISIBLE_DEVICES' in bootstrap
+        assert 'ROCR_VISIBLE_DEVICES' in bootstrap
+        assert 'ZE_AFFINITY_MASK' in bootstrap
+        assert 'GPU_DEVICE_ORDINAL' in bootstrap
+        assert 'SetEnv=$SSHD_SET_ENV' in bootstrap
+        assert 'exec "$@"' in bootstrap
+
+        # Execute the bootstrap with sshd replaced by an argv probe. This
+        # verifies that values injected by srun become one SetEnv directive
+        # and that unsafe values cannot alter sshd configuration arguments.
+        probe = shlex.join([
+            sys.executable, '-c',
+            'import json,sys; print(json.dumps(sys.argv[1:]))'
+        ])
+        bootstrap = bootstrap.replace('/usr/sbin/sshd', probe, 1)
+        env = {
+            **os.environ,
+            'CUDA_VISIBLE_DEVICES': '4,5',
+            'ROCR_VISIBLE_DEVICES': 'unsafe value',
+        }
+        result = subprocess.run(['/bin/bash', '-c', bootstrap],
+                                env=env,
+                                check=True,
+                                capture_output=True,
+                                text=True)
+        sshd_args = json.loads(result.stdout)
+        assert sshd_args[-2:] == ['-o', 'SetEnv=CUDA_VISIBLE_DEVICES=4,5']
+
+    def test_dropbear_forwards_srun_environment(self):
+        command = utils.srun_sshd_command(
+            job_id='123',
+            target_node='node-1',
+            unix_user='alice',
+            cluster_name_on_cloud='cluster',
+            is_container_image=True,
+        )
+
+        bootstrap = shlex.split(command)[-1]
+        assert '"$DROPBEAR" -e -F -s -R' in bootstrap
 
 
 class TestFormatSlurmDuration:
