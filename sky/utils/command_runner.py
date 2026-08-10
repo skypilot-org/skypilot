@@ -1604,7 +1604,7 @@ class KubernetesCommandRunner(CommandRunner):
         # nginx-ingress defaults to about the same for request line plus
         # headers. Half of that leaves room for the path, the remaining query
         # parameters and the headers.
-        default = 100 * 1024
+        default = 32 * 1024
         limit = skypilot_config.get_effective_region_config(
             cloud='kubernetes',
             region=self.context,
