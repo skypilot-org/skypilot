@@ -12,7 +12,15 @@ import os
 import re
 from typing import Any, Dict, List, Optional
 
+from google.protobuf import any_pb2
 from nebius.api.nebius.billing.v1 import OfferType
+
+try:
+    # nebius >= 0.4 generates its own google.protobuf wrappers; the module
+    # does not exist on the 0.3.x SDK generation.
+    from nebius.api.google.protobuf import Any as _SdkAny
+except ImportError:
+    _SdkAny = None
 
 from sky.adaptors import nebius
 from sky.adaptors.nebius import billing
@@ -85,16 +93,26 @@ def _format_decimal(value: decimal.Decimal) -> str:
 
 
 def _pack_any(message: Any) -> Any:
-    """Packs a protobuf message into google.protobuf.Any."""
-    # pylint: disable=import-outside-toplevel
-    from google.protobuf import any_pb2
-
-    # Nebius SDK message classes wrap the underlying protobuf object in
-    # __pb2_message__; plain protobuf messages can be packed directly.
-    message = getattr(message, '__pb2_message__', message)
-    any_message = any_pb2.Any()
-    any_message.Pack(message)
-    return any_message
+    """Packs an SDK message into a protobuf Any across SDK generations."""
+    # nebius 0.3.x message classes wrap the underlying protobuf object in
+    # __pb2_message__; pack it into a plain protobuf Any, which the 0.3.x
+    # ResourceSpec accepts directly.
+    pb2_message = getattr(message, '__pb2_message__', None)
+    if pb2_message is not None:
+        any_message = any_pb2.Any()
+        any_message.Pack(pb2_message)
+        return any_message
+    # nebius >= 0.4.3 messages own their protobuf state directly (no wrapped
+    # pb2 object) and must be packed into the SDK's own Any wrapper: the new
+    # generation's ResourceSpec rejects a plain protobuf Any.
+    if _SdkAny is None:
+        raise TypeError(
+            'Cannot pack Nebius SDK message of type '
+            f'{type(message)!r}: the installed nebius SDK exposes neither '
+            '__pb2_message__ nor the nebius.api.google.protobuf.Any wrapper.')
+    return _SdkAny(
+        type_url=f'type.googleapis.com/{type(message).__PROTO_FULL_NAME__}',
+        value=message.SerializeToString())
 
 
 def _make_create_instance_request(parent_id: str, platform_name: str,

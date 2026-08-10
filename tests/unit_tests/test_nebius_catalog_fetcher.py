@@ -6,6 +6,11 @@ from types import SimpleNamespace
 from google.protobuf import empty_pb2
 import pytest
 
+# The nebius SDK requires Python >= 3.10, so `[all]` installs exclude it on
+# older interpreters and fetch_nebius cannot even be imported there.
+pytest.importorskip('nebius')
+
+# pylint: disable=wrong-import-position
 from sky.catalog.data_fetchers import fetch_nebius
 
 _FILTER_AGGREGATION_UNIT_HOUR = 'FILTER_AGGREGATION_UNIT_HOUR'
@@ -33,6 +38,7 @@ async def _awaitable_response(response):
 class _FakeFilterAggregationUnit(_Proto):
     """Fake billing filter with the SDK enum namespace."""
 
+    # pylint: disable-next=invalid-name
     FilterAggregationUnitValue = SimpleNamespace(
         FILTER_AGGREGATION_UNIT_HOUR=_FILTER_AGGREGATION_UNIT_HOUR)
 
@@ -40,6 +46,7 @@ class _FakeFilterAggregationUnit(_Proto):
 class _FakePreemptibleSpec(_Proto):
     """Fake compute preemptible spec with the SDK enum namespace."""
 
+    # pylint: disable-next=invalid-name
     PreemptionPolicy = SimpleNamespace(STOP=_PREEMPTIBLE_ON_PREEMPTION_STOP)
 
 
@@ -50,15 +57,17 @@ def _response(cost='1.25',
     if not include_total_costs:
         return _Proto(total_costs=[])
 
+    # Real nebius SDK message wrappers expose which_field_in_oneof (not
+    # protobuf's WhichOneof), so the fakes mimic that API.
     total_cost = _Proto(aggregation_unit=_Proto(unit=unit))
     if cost_type == 'general':
         total_cost.general = _Proto(total=_Proto(cost=cost))
-        total_cost.WhichOneof = lambda _: 'general'
+        total_cost.which_field_in_oneof = lambda _: 'general'
     elif cost_type == 'range':
         total_cost.range = _Proto()
-        total_cost.WhichOneof = lambda _: 'range'
+        total_cost.which_field_in_oneof = lambda _: 'range'
     elif cost_type == 'unset':
-        total_cost.WhichOneof = lambda _: None
+        total_cost.which_field_in_oneof = lambda _: None
 
     return _Proto(total_costs=[total_cost])
 
@@ -108,9 +117,8 @@ def _install_fake_nebius_modules(monkeypatch, responses):
     monkeypatch.setattr(fetch_nebius, 'billing', lambda: fake_billing)
     monkeypatch.setattr(fetch_nebius, 'compute', lambda: fake_compute)
     monkeypatch.setattr(fetch_nebius, 'nebius_common', lambda: fake_common)
-    monkeypatch.setattr(fetch_nebius.nebius, 'sdk', lambda: object())
-    monkeypatch.setattr(fetch_nebius, '_pack_any',
-                        lambda message: _PackedAny(message))
+    monkeypatch.setattr(fetch_nebius.nebius, 'sdk', object)
+    monkeypatch.setattr(fetch_nebius, '_pack_any', _PackedAny)
 
     return FakeCalculatorServiceClient
 
@@ -124,6 +132,26 @@ def test_pack_any_packs_wrapped_protobuf_message():
     unpacked = empty_pb2.Empty()
     assert packed.type_url == 'type.googleapis.com/google.protobuf.Empty'
     assert packed.Unpack(unpacked)
+
+
+class _NewGenerationMessage:
+    """Mimics nebius >= 0.4.3 messages: no __pb2_message__ wrapper."""
+
+    # pylint: disable-next=invalid-name
+    __PROTO_FULL_NAME__ = 'google.protobuf.Empty'
+
+    def SerializeToString(self):  # pylint: disable=invalid-name
+        return empty_pb2.Empty().SerializeToString()
+
+
+def test_pack_any_packs_new_generation_message():
+    if fetch_nebius._SdkAny is None:
+        pytest.skip('installed nebius SDK predates the 0.4.x Any wrapper')
+
+    packed = fetch_nebius._pack_any(_NewGenerationMessage())
+
+    assert packed.type_url == 'type.googleapis.com/google.protobuf.Empty'
+    assert packed.value == empty_pb2.Empty().SerializeToString()
 
 
 def test_estimate_platforms_uses_billing_v1_request_shape(monkeypatch):
@@ -141,6 +169,7 @@ def test_estimate_platforms_uses_billing_v1_request_shape(monkeypatch):
     assert presets[0].spot_price == decimal.Decimal('1.23')
     assert len(service_cls.requests) == 2
 
+    # pylint: disable-next=unbalanced-tuple-unpacking
     regular_request, spot_request = service_cls.requests
     for request in (regular_request, spot_request):
         hour_filter = (
