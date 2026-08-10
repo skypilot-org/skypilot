@@ -1351,9 +1351,6 @@ def apply_cli_config(cli_config: Optional[List[str]]) -> Dict[str, Any]:
 def update_api_server_config_no_lock(config: config_utils.Config) -> None:
     """Dumps the new config to a file and syncs to ConfigMap if in Kubernetes.
 
-    Raises a ``ValueError`` when the Helm ConfigMap is configured as the
-    authoritative source for the API server config.
-
     Args:
         config: The config to save and sync.
     """
@@ -1365,12 +1362,6 @@ def update_api_server_config_no_lock(config: config_utils.Config) -> None:
     if not is_running_pytest() and os.environ.get(
             constants.ENV_VAR_IS_SKYPILOT_SERVER) is None:
         raise ValueError('This function can only be called by the API Server.')
-
-    if os.environ.get(constants.SKYPILOT_API_SERVER_CONFIG_AUTHORITATIVE,
-                      'false').lower() == 'true':
-        raise ValueError('Cannot update the API server config when '
-                         'apiService.configAuthoritative is enabled. Update '
-                         'apiService.config through Helm instead.')
 
     # Capture the currently persisted config before it is overwritten, for
     # save validators and post-save hooks (to_dict() returns a fresh copy).

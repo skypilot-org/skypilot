@@ -597,6 +597,8 @@ When enabled, the API server copies ``apiService.config`` to ``~/.sky/config.yam
 
 Configuration updates through the API server or dashboard are rejected while this option is enabled. Update ``apiService.config`` through Helm instead. Helm changes roll the API server Deployment; the default ``Recreate`` strategy causes a brief interruption during the rollout.
 
+This option cannot be combined with :ref:`apiService.dbConnectionSecretName <helm-values-apiService-dbConnectionSecretName>` or :ref:`apiService.dbConnectionString <helm-values-apiService-dbConnectionString>`. External-database deployments store the SkyPilot configuration in the database and should leave this option disabled.
+
 When disabled, an existing configuration on the persistent volume remains the source of truth. ``apiService.config`` is used only to initialize an empty persistent volume, preserving the default behavior for configurations managed through the SkyPilot dashboard.
 
 Default: ``false``
