@@ -1178,3 +1178,26 @@ class TestInlineCommandLimit:
         assert limit('tight-proxy') == 2048
         assert limit('other-ctx') == 8192
         assert limit(None) == 8192
+
+    def test_kubernetes_limit_for_ssh_node_pool(self, monkeypatch, tmp_path):
+        # SSH node pools run through this runner but are configured under their
+        # own cloud, keyed by the pool name without the `ssh-` context prefix.
+        config = tmp_path / 'config.yaml'
+        config.write_text('kubernetes:\n'
+                          '  max_inline_command_length: 8192\n'
+                          'ssh:\n'
+                          '  max_inline_command_length: 20480\n'
+                          '  context_configs:\n'
+                          '    mypool:\n'
+                          '      max_inline_command_length: 4096\n')
+        monkeypatch.setenv('SKYPILOT_GLOBAL_CONFIG', str(config))
+        skypilot_config.reload_config()
+
+        def limit(context):
+            return command_runner.KubernetesCommandRunner(
+                (('ns', context), 'pod')).max_inline_command_length()
+
+        assert limit('ssh-mypool') == 4096
+        assert limit('ssh-other') == 20480
+        # A real Kubernetes context still reads the kubernetes block.
+        assert limit('gke-x') == 8192

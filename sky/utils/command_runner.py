@@ -34,6 +34,7 @@ from sky.utils import context_utils
 from sky.utils import control_master_utils
 from sky.utils import env_options
 from sky.utils import git as git_utils
+from sky.utils import infra_utils
 from sky.utils import interactive_utils
 from sky.utils import subprocess_utils
 from sky.utils import timeline
@@ -1605,9 +1606,13 @@ class KubernetesCommandRunner(CommandRunner):
         # headers. Half of that leaves room for the path, the remaining query
         # parameters and the headers.
         default = 32 * 1024
+        # An SSH node pool runs through this runner too, but is configured
+        # under its own cloud and without the `ssh-` prefix on its name.
+        context, cloud_str = infra_utils.get_cleaned_context_and_cloud_str(
+            self.context)
         limit = skypilot_config.get_effective_region_config(
-            cloud='kubernetes',
-            region=self.context,
+            cloud=cloud_str,
+            region=context,
             keys=('max_inline_command_length',),
             default_value=default)
         return limit

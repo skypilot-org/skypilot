@@ -1539,6 +1539,16 @@ _CONTEXT_CONFIG_SCHEMA_MINIMAL = {
     'provision_timeout': {
         'type': 'integer',
     },
+    'max_inline_command_length': {
+        # Largest command, in bytes of request URL, that SkyPilot will inline
+        # into a `kubectl exec` instead of uploading as a file. Lower this if a
+        # proxy in front of the Kubernetes API rejects large requests; the only
+        # cost of a lower value is an extra file upload per job submission.
+        # Lives here rather than in the Kubernetes-only schema so SSH node
+        # pools, which run through the same runner, can set it too.
+        'type': 'integer',
+        'minimum': 1024,
+    },
     'custom_metadata': {
         'type': 'object',
         'required': [],
@@ -1696,14 +1706,6 @@ _CONTEXT_CONFIG_SCHEMA_KUBERNETES = {
             'type': 'number',
             'minimum': 1,
         }],
-    },
-    'max_inline_command_length': {
-        # Largest command, in bytes of request URL, that SkyPilot will inline
-        # into a `kubectl exec` instead of uploading as a file. Lower this if a
-        # proxy in front of the Kubernetes API rejects large requests; the only
-        # cost of a lower value is an extra file upload per job submission.
-        'type': 'integer',
-        'minimum': 1024,
     },
     'pricing': _PRICING_SCHEMA,
     'auto_mounts': {
