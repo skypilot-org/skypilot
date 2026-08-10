@@ -1048,6 +1048,8 @@ def write_cluster_config(
         if auto_mounts_config:
             home_dir = kubernetes_utils.DEFAULT_HOME_DIRECTORY
             attached_auto_mount_volumes: Set[str] = set()
+            current_user_hash = common_utils.get_current_user().id
+            active_workspace = skypilot_config.get_active_workspace()
             for entry in auto_mounts_config:
                 volume_name = entry['volume_name']
                 mount_paths = entry.get('mount_paths', [])
@@ -1057,6 +1059,19 @@ def write_cluster_config(
                         f'Auto-mount volume {volume_name!r} not found in '
                         f'SkyPilot volume DB. Skipping. '
                         f'Create it with: sky volumes apply')
+                    continue
+                scope = entry.get('scope',
+                                  volume_utils.AutoMountScope.GLOBAL.value)
+                if not volume_utils.auto_mount_in_scope(
+                        scope,
+                        volume_user_hash=record['user_hash'],
+                        volume_workspace=record['workspace'],
+                        current_user_hash=current_user_hash,
+                        active_workspace=active_workspace):
+                    logger.debug(f'Auto-mount volume {volume_name!r} has scope '
+                                 f'{scope!r} and does not apply to this launch '
+                                 f'(user {current_user_hash!r}, workspace '
+                                 f'{active_workspace!r}). Skipping.')
                     continue
                 volume_config = record['handle']
                 # Only hostPath and ReadWriteMany PVC volumes support
