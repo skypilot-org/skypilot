@@ -229,6 +229,72 @@ def test_slurm_codegen_with_container():
                                     testdata_dir=SLURM_TESTDATA_DIR)
 
 
+def _build_slurm_task_code(srun_extra_args: str = '') -> str:
+    """Drive SlurmCodeGen through a minimal task to inspect the generated code."""
+    codegen = task_codegen.SlurmCodeGen(
+        slurm_job_id='12345',
+        container_name=None,
+        srun_extra_args=srun_extra_args,
+    )
+    codegen.add_prologue(job_id=2)
+    codegen.add_setup(
+        1,
+        resources_dict={'CPU': 1.0},
+        stable_cluster_internal_ips=['10.0.0.1'],
+        env_vars={},
+        log_dir='/sky/logs',
+        setup_cmd=None,
+    )
+    codegen.add_task(
+        1,
+        bash_script='echo hello',
+        task_name='hello',
+        resources_dict={'CPU': 1.0},
+        log_dir='/sky/logs/tasks',
+        env_vars={},
+    )
+    codegen.add_epilogue()
+    return codegen.build()
+
+
+def test_slurm_codegen_preserves_slurm_job_id():
+    """SLURM_JOB_ID must be re-exported after the env strip.
+
+    Several SPANK plugins (notably AWS HyperPod's spank_auto_resume.so) call
+    getenv("SLURM_JOB_ID") in slurm_spank_local_user_init to detect "am I
+    inside an existing allocation?". Without re-exporting it after stripping
+    SLURM_*, those plugins reject the srun even though --jobid is passed.
+    """
+    code = _build_slurm_task_code()
+    # The strip still runs.
+    assert "unset $(env | awk -F= '/^SLURM_/ && $1 !~ /^SLURM_CONF/" in code
+    # And SLURM_JOB_ID is re-exported with the configured job id.
+    assert 'export SLURM_JOB_ID=12345' in code
+    # Sanity: the previously problematic vars are NOT re-exported.
+    assert 'export SLURM_CPU_BIND' not in code
+    assert 'export SLURM_NNODES' not in code
+    assert 'export SLURM_NODELIST' not in code
+
+
+def test_slurm_codegen_threads_srun_extra_args():
+    """srun_extra_args from slurm.srun_options must be appended to run_flags."""
+    code = _build_slurm_task_code(srun_extra_args='--auto-resume=1')
+    # The run-section srun has --exclusive followed by the extra args.
+    assert '--exclusive --auto-resume=1' in code
+
+
+def test_slurm_codegen_empty_srun_extra_args_is_default():
+    """Default empty srun_extra_args must not break the run_flags string."""
+    code = _build_slurm_task_code(srun_extra_args='')
+    # The flag-concatenation pattern --exclusive --<something>= must not
+    # appear when no options are configured. (Bare "--auto-resume" appears
+    # in the explanatory comment in task_codegen.py, so we look for the
+    # composed form instead.)
+    assert '--exclusive --auto-resume' not in code
+    # And the run srun still has --exclusive.
+    assert '--exclusive' in code
+
+
 class TestRcloneFlushScript:
     """Unit tests for the rclone flush script output format."""
 
