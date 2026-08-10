@@ -2947,10 +2947,36 @@ def _clear_api_server_config() -> None:
         skypilot_config.reload_config()
 
 
+def _clear_service_account_token() -> None:
+    """Clears only the service account token from the config file."""
+    config_path = pathlib.Path(
+        skypilot_config.get_user_config_path()).expanduser()
+    with filelock.FileLock(config_path.with_suffix('.lock')):
+        if not config_path.exists():
+            return
+
+        config = skypilot_config.get_user_config()
+        config = dict(config)
+        if 'service_account_token' not in config.get('api_server', {}):
+            # Nothing to clear; leave the config file untouched.
+            return
+        del config['api_server']['service_account_token']
+
+        yaml_utils.dump_yaml(str(config_path), config)
+        skypilot_config.reload_config()
+
+
 def _validate_endpoint(endpoint: Optional[str]) -> str:
     """Validate and normalize the endpoint URL."""
     if endpoint is None:
-        endpoint = click.prompt('Enter your SkyPilot API server endpoint')
+        # Offer the endpoint we would overwrite as the default, so that
+        # re-logging into the same server is just a press of Enter. We read the
+        # user config instead of the merged config, since the user config file
+        # is the one we write the endpoint back to.
+        default_endpoint = skypilot_config.get_user_config().get_nested(
+            ('api_server', 'endpoint'), None)
+        endpoint = click.prompt('Enter your SkyPilot API server endpoint',
+                                default=default_endpoint)
     # Check endpoint is a valid URL
     if (endpoint is not None and not endpoint.startswith('http://') and
             not endpoint.startswith('https://')):
@@ -2958,15 +2984,52 @@ def _validate_endpoint(endpoint: Optional[str]) -> str:
     return endpoint.rstrip('/')
 
 
-def _check_endpoint_in_env_var(is_login: bool) -> None:
-    # If the user has set the endpoint via the environment variable, we should
-    # not do anything as we can't disambiguate between the env var and the
-    # config file.
-    """Check if the endpoint is set in the environment variable."""
+def _resolve_login_endpoint(endpoint: Optional[str]) -> Tuple[str, bool]:
+    """Resolves which endpoint `api_login` should authenticate against.
+
+    Args:
+        endpoint: The endpoint explicitly requested by the user, if any.
+
+    Returns:
+        A tuple of the endpoint to log into, and whether it came from the
+        environment variable, in which case it must not be persisted to the
+        config file.
+    """
+    env_endpoint = os.environ.get(constants.SKY_API_SERVER_URL_ENV_VAR)
+    if not env_endpoint:
+        return _validate_endpoint(endpoint), False
+
+    env_endpoint = env_endpoint.rstrip('/')
+    if endpoint is not None and endpoint.rstrip('/') != env_endpoint:
+        # Two different explicit endpoints; we cannot tell which one the user
+        # meant, and logging into one of them would leave the other in effect.
+        with ux_utils.print_exception_no_traceback():
+            raise RuntimeError(
+                f'Cannot log into {endpoint}: the endpoint is already set to '
+                f'{env_endpoint} by the environment variable '
+                f'{constants.SKY_API_SERVER_URL_ENV_VAR}. Either drop the '
+                '--endpoint flag to log into the endpoint from the environment '
+                f'variable, or run unset {constants.SKY_API_SERVER_URL_ENV_VAR}'
+                ' to clear the environment variable.')
+
+    # The environment variable takes precedence over the config file for every
+    # command, so it is already the effective endpoint; we only need to
+    # authenticate against it.
+    click.secho(
+        f'Using endpoint from {constants.SKY_API_SERVER_URL_ENV_VAR}: '
+        f'{env_endpoint}',
+        fg='yellow')
+    return _validate_endpoint(env_endpoint), True
+
+
+def _check_endpoint_in_env_var() -> None:
+    """Rejects logout when the endpoint is set in the environment variable."""
+    # Logging out clears the endpoint and credentials from the config file, but
+    # the environment variable would still point all commands at a server, so
+    # there is nothing sensible to clear.
     if constants.SKY_API_SERVER_URL_ENV_VAR in os.environ:
         with ux_utils.print_exception_no_traceback():
-            action = 'login to' if is_login else 'logout of'
-            raise RuntimeError(f'Cannot {action} API server when the endpoint '
+            raise RuntimeError('Cannot logout of API server when the endpoint '
                                'is set via the environment variable. Run unset '
                                f'{constants.SKY_API_SERVER_URL_ENV_VAR} to '
                                'clear the environment variable.')
@@ -3127,10 +3190,10 @@ def api_login(endpoint: Optional[str] = None,
     Returns:
         None
     """
-    _check_endpoint_in_env_var(is_login=True)
-
-    # Validate and normalize endpoint
-    endpoint = _validate_endpoint(endpoint)
+    # Resolve, validate and normalize the endpoint. `from_env` means the
+    # endpoint came from the environment variable, which already takes
+    # precedence over the config file, so the config file must be left alone.
+    endpoint, from_env = _resolve_login_endpoint(endpoint)
 
     def _show_logged_in_message(
             endpoint: str, dashboard_url: str, user: Optional[Dict[str, Any]],
@@ -3171,8 +3234,10 @@ def api_login(endpoint: Optional[str] = None,
             raise ValueError('Invalid service account token format. '
                              'Token must start with "sky_"')
 
-        # Save both endpoint and token to config in a single operation
-        _save_config_updates(endpoint=endpoint,
+        # Save both endpoint and token to config in a single operation. When
+        # the endpoint comes from the environment variable, save the token
+        # only, so the configured endpoint is left as-is.
+        _save_config_updates(endpoint=None if from_env else endpoint,
                              service_account_token=service_account_token)
 
         # Test the authentication by checking server health
@@ -3205,7 +3270,14 @@ def api_login(endpoint: Optional[str] = None,
     # Save endpoint and clear any residual service account token before the
     # first health check, so it uses cookie-based auth and the server can
     # correctly return NEEDS_AUTH when SSO is required.
-    _save_config_updates(endpoint=endpoint)
+    if from_env:
+        # Do not touch the configured endpoint, but still drop the residual
+        # service account token: it is not scoped to an endpoint, so it would
+        # otherwise be sent to the endpoint we are logging into and mask the
+        # NEEDS_AUTH response the SSO flow depends on.
+        _clear_service_account_token()
+    else:
+        _save_config_updates(endpoint=endpoint)
     server_status, api_server_info = server_common.check_server_healthy(
         endpoint)
     if server_status == server_common.ApiServerStatus.NEEDS_AUTH or relogin:
@@ -3343,7 +3415,7 @@ def api_logout() -> None:
     """Logout of the API server.
 
     Clears all cookies and settings stored in ~/.sky/config.yaml"""
-    _check_endpoint_in_env_var(is_login=False)
+    _check_endpoint_in_env_var()
 
     if server_common.is_api_server_local():
         with ux_utils.print_exception_no_traceback():

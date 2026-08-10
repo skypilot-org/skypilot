@@ -18,6 +18,7 @@ from sky.client import sdk as client_sdk
 from sky.server import common as server_common
 from sky.server import rest as server_rest
 from sky.server.constants import API_COOKIE_FILE_ENV_VAR
+from sky.skylet import constants
 from sky.utils import common as common_utils
 
 
@@ -312,6 +313,226 @@ def test_api_login(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
             mock.call("http://localhost:8080"),
             mock.call("http://localhost:8080")
         ])
+
+
+def _mock_healthy_check():
+    """Returns a mock of check_server_healthy that reports a healthy server."""
+    mock_check = mock.patch('sky.server.common.check_server_healthy')
+    return mock_check
+
+
+def test_api_login_with_env_endpoint(monkeypatch: pytest.MonkeyPatch,
+                                     tmp_path: Path):
+    """Login uses the env var endpoint and does not write it to the config."""
+    config_path = tmp_path / "config.yaml"
+    monkeypatch.setattr('sky.skypilot_config.get_user_config_path',
+                        lambda: str(config_path))
+    env_endpoint = "http://env.skypilot.co"
+    monkeypatch.setenv(constants.SKY_API_SERVER_URL_ENV_VAR, env_endpoint + '/')
+
+    with _mock_healthy_check() as mock_check:
+        mock_check.return_value = (
+            server_common.ApiServerStatus.HEALTHY,
+            server_common.ApiServerInfo(
+                status=server_common.ApiServerStatus.HEALTHY,
+                basic_auth_enabled=False))
+        client_sdk.api_login()
+
+    # Logged into the endpoint from the env var, with the trailing slash
+    # stripped.
+    mock_check.assert_has_calls(
+        [mock.call(env_endpoint),
+         mock.call(env_endpoint)])
+    # The env var already takes precedence for every command, so the endpoint
+    # must not be persisted to the config file.
+    config = skypilot_config.get_user_config()
+    assert 'endpoint' not in config.get('api_server', {})
+
+
+def test_api_login_env_endpoint_keeps_config_endpoint(
+        monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+    """An env var login leaves an existing configured endpoint untouched."""
+    config_path = tmp_path / "config.yaml"
+    monkeypatch.setattr('sky.skypilot_config.get_user_config_path',
+                        lambda: str(config_path))
+    config_endpoint = "http://config.skypilot.co"
+    env_endpoint = "http://env.skypilot.co"
+
+    with _mock_healthy_check() as mock_check:
+        mock_check.return_value = (
+            server_common.ApiServerStatus.HEALTHY,
+            server_common.ApiServerInfo(
+                status=server_common.ApiServerStatus.HEALTHY,
+                basic_auth_enabled=False))
+        # First login without the env var, which configures the endpoint.
+        client_sdk.api_login(config_endpoint)
+        assert skypilot_config.get_user_config(
+        )['api_server']['endpoint'] == config_endpoint
+
+        # Then login again with the env var set.
+        monkeypatch.setenv(constants.SKY_API_SERVER_URL_ENV_VAR, env_endpoint)
+        client_sdk.api_login()
+
+    # The configured endpoint is preserved, so unsetting the env var falls back
+    # to the server the user logged into earlier.
+    assert skypilot_config.get_user_config(
+    )['api_server']['endpoint'] == config_endpoint
+    mock_check.assert_called_with(env_endpoint)
+
+
+def test_api_login_env_endpoint_with_conflicting_flag(
+        monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+    """`-e` pointing elsewhere than the env var is ambiguous, so it errors."""
+    config_path = tmp_path / "config.yaml"
+    monkeypatch.setattr('sky.skypilot_config.get_user_config_path',
+                        lambda: str(config_path))
+    monkeypatch.setenv(constants.SKY_API_SERVER_URL_ENV_VAR,
+                       "http://env.skypilot.co")
+
+    with pytest.raises(RuntimeError, match='already set to'):
+        client_sdk.api_login("http://other.skypilot.co")
+
+
+def test_api_login_env_endpoint_with_matching_flag(
+        monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+    """`-e` matching the env var is not ambiguous, so login proceeds.
+
+    `sky api info` suggests `sky api login --relogin -e <endpoint>` with the
+    endpoint it resolved, which can be the one from the env var.
+    """
+    config_path = tmp_path / "config.yaml"
+    monkeypatch.setattr('sky.skypilot_config.get_user_config_path',
+                        lambda: str(config_path))
+    endpoint = "http://env.skypilot.co"
+    monkeypatch.setenv(constants.SKY_API_SERVER_URL_ENV_VAR, endpoint)
+
+    with _mock_healthy_check() as mock_check:
+        mock_check.return_value = (
+            server_common.ApiServerStatus.HEALTHY,
+            server_common.ApiServerInfo(
+                status=server_common.ApiServerStatus.HEALTHY,
+                basic_auth_enabled=False))
+        client_sdk.api_login(endpoint + '/')
+
+    mock_check.assert_called_with(endpoint)
+    # Still treated as an env var login, so nothing is written to the config.
+    config = skypilot_config.get_user_config()
+    assert 'endpoint' not in config.get('api_server', {})
+
+
+def test_api_login_env_endpoint_clears_residual_sa_token(
+        monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+    """An env var login clears the residual sa token, but keeps the endpoint.
+
+    The sa token is not scoped to an endpoint, so leaving it in the config
+    would authenticate the health check against the env var endpoint and mask
+    the NEEDS_AUTH response that the SSO flow depends on.
+    """
+    config_path = tmp_path / "config.yaml"
+    monkeypatch.setattr('sky.skypilot_config.get_user_config_path',
+                        lambda: str(config_path))
+    config_endpoint = "http://config.skypilot.co"
+
+    with _mock_healthy_check() as mock_check:
+        mock_check.return_value = (
+            server_common.ApiServerStatus.HEALTHY,
+            server_common.ApiServerInfo(
+                status=server_common.ApiServerStatus.HEALTHY,
+                basic_auth_enabled=False))
+        client_sdk.api_login(config_endpoint,
+                             service_account_token="sky_test_token")
+    assert skypilot_config.get_user_config(
+    )['api_server']['service_account_token'] == 'sky_test_token'
+
+    monkeypatch.setenv(constants.SKY_API_SERVER_URL_ENV_VAR,
+                       "http://env.skypilot.co")
+    sa_token_at_health_check = []
+
+    def _capture_check_server_healthy(endpoint):
+        del endpoint  # Unused.
+        sa_token_at_health_check.append(
+            skypilot_config.get_nested(('api_server', 'service_account_token'),
+                                       default_value=None))
+        raise StopIteration  # Abort to inspect captured state
+
+    with mock.patch('sky.server.common.check_server_healthy',
+                    side_effect=_capture_check_server_healthy):
+        with pytest.raises(StopIteration):
+            client_sdk.api_login()
+
+    assert sa_token_at_health_check[0] is None
+    config = skypilot_config.get_user_config()
+    assert 'service_account_token' not in config.get('api_server', {})
+    # Only the token is dropped; the configured endpoint is kept.
+    assert config['api_server']['endpoint'] == config_endpoint
+
+
+def test_api_login_env_endpoint_with_sa_token_keeps_config_endpoint(
+        monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+    """Login with a token and the env var set saves the token, not the endpoint.
+    """
+    config_path = tmp_path / "config.yaml"
+    monkeypatch.setattr('sky.skypilot_config.get_user_config_path',
+                        lambda: str(config_path))
+    config_endpoint = "http://config.skypilot.co"
+    env_endpoint = "http://env.skypilot.co"
+    monkeypatch.setenv(constants.SKY_API_SERVER_URL_ENV_VAR, env_endpoint)
+    config_path.write_text(f'api_server:\n  endpoint: {config_endpoint}\n')
+    skypilot_config.reload_config()
+
+    with _mock_healthy_check() as mock_check:
+        mock_check.return_value = (
+            server_common.ApiServerStatus.HEALTHY,
+            server_common.ApiServerInfo(
+                status=server_common.ApiServerStatus.HEALTHY,
+                basic_auth_enabled=False))
+        client_sdk.api_login(service_account_token="sky_test_token")
+
+    mock_check.assert_called_with(env_endpoint)
+    config = skypilot_config.get_user_config()
+    assert config['api_server']['service_account_token'] == 'sky_test_token'
+    assert config['api_server']['endpoint'] == config_endpoint
+
+
+def test_api_login_prompt_defaults_to_config_endpoint(
+        monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+    """Without `-e` or the env var, the prompt defaults to the config endpoint.
+    """
+    config_path = tmp_path / "config.yaml"
+    monkeypatch.setattr('sky.skypilot_config.get_user_config_path',
+                        lambda: str(config_path))
+    monkeypatch.delenv(constants.SKY_API_SERVER_URL_ENV_VAR, raising=False)
+    config_endpoint = "http://config.skypilot.co"
+    config_path.write_text(f'api_server:\n  endpoint: {config_endpoint}\n')
+    skypilot_config.reload_config()
+
+    prompt_kwargs = {}
+
+    def _fake_prompt(text, **kwargs):
+        del text  # Unused.
+        prompt_kwargs.update(kwargs)
+        # click.prompt returns the default when the user just presses Enter.
+        return kwargs['default']
+
+    monkeypatch.setattr('click.prompt', _fake_prompt)
+    with _mock_healthy_check() as mock_check:
+        mock_check.return_value = (
+            server_common.ApiServerStatus.HEALTHY,
+            server_common.ApiServerInfo(
+                status=server_common.ApiServerStatus.HEALTHY,
+                basic_auth_enabled=False))
+        client_sdk.api_login()
+
+    assert prompt_kwargs['default'] == config_endpoint
+    mock_check.assert_called_with(config_endpoint)
+
+
+def test_api_logout_with_env_endpoint(monkeypatch: pytest.MonkeyPatch):
+    """Logout still errors out when the endpoint is set via the env var."""
+    monkeypatch.setenv(constants.SKY_API_SERVER_URL_ENV_VAR,
+                       "http://env.skypilot.co")
+    with pytest.raises(RuntimeError, match='Cannot logout of API server'):
+        client_sdk.api_logout()
 
 
 def test_api_login_user_hash_token(monkeypatch: pytest.MonkeyPatch,
