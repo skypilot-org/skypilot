@@ -1605,7 +1605,7 @@ class KubernetesCommandRunner(CommandRunner):
         # nginx-ingress defaults to about the same for request line plus
         # headers. Half of that leaves room for the path, the remaining query
         # parameters and the headers.
-        default = 32 * 1024
+        default = 100 * 1024
         # An SSH node pool runs through this runner too, but is configured
         # under its own cloud and without the `ssh-` prefix on its name.
         context, cloud_str = infra_utils.get_cleaned_context_and_cloud_str(
