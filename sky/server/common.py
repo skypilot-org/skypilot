@@ -18,6 +18,7 @@ import time
 import typing
 from typing import (Any, Callable, cast, Dict, Generic, List, Literal, Optional,
                     Tuple, TypeVar, Union)
+import urllib.parse
 from urllib.request import Request
 import uuid
 
@@ -499,6 +500,50 @@ def get_server_url(host: Optional[str] = None) -> str:
         constants.SKY_API_SERVER_URL_ENV_VAR,
         skypilot_config.get_nested(('api_server', 'endpoint'), endpoint))
     return url.rstrip('/')
+
+
+# Shown in place of a basic-auth password when a server URL is printed for
+# humans to read (banners, status lines). Chosen to be obviously not a real
+# password so nobody mistakes it for one.
+_REDACTED_PASSWORD = '<redacted>'
+
+
+def redact_url_password(url: str) -> str:
+    """Masks the basic-auth password embedded in a server URL, if any.
+
+    An API server endpoint can be configured with inline basic-auth
+    credentials, e.g. ``http://user:password@host:8080``. Echoing that URL
+    verbatim leaks the password into the terminal, logs, and -- when sky is
+    driven by an agent -- the agent's transcript. Use this only for the
+    human-readable places that display the URL; keep the real URL for anything
+    that has to connect or that the user needs to copy back into a command.
+
+    The username, scheme, host, port and path are preserved so the output is
+    still useful; only the password is replaced. Strings that are not URLs, or
+    URLs without a password, are returned unchanged.
+    """
+    try:
+        parsed = urllib.parse.urlsplit(url)
+        if not parsed.password:
+            return url
+        # urlsplit does not validate the port; SplitResult.port only raises
+        # when it is read, so keep that read inside the guard too.
+        port = parsed.port
+    except ValueError:
+        # Not something urlsplit can make sense of; leave it untouched rather
+        # than risk mangling it.
+        return url
+
+    # urlsplit strips the brackets off an IPv6 literal, so add them back when
+    # rebuilding the authority or the ':port' becomes ambiguous.
+    host = parsed.hostname or ''
+    if is_ipv6_host(host):
+        host = f'[{host}]'
+    netloc = f'{parsed.username or ""}:{_REDACTED_PASSWORD}@{host}'
+    if port is not None:
+        netloc += f':{port}'
+    return urllib.parse.urlunsplit(
+        (parsed.scheme, netloc, parsed.path, parsed.query, parsed.fragment))
 
 
 # Wildcard bind addresses (0.0.0.0 / ::) are valid to *bind* but are not
