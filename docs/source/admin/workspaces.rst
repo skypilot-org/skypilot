@@ -143,7 +143,11 @@ To apply the configuration, follow the following steps:
             --set apiService.configAuthoritative=true \
             --set-file apiService.config=/your/path/to/config.yaml
 
-      To change workspace configuration, update the config file and run the same command again. The ``configAuthoritative`` setting is required for Helm to replace an existing config on the persistent volume. The API server will reload the new configuration automatically with no downtime. For more details, refer to :ref:`Setting the SkyPilot config in Helm Deployment <sky-api-server-config>`.
+      To change workspace configuration, update the config file and run the same command again. The ``configAuthoritative`` setting is required for Helm to replace an existing config on the persistent volume. Helm will roll the API server Deployment so the new configuration is loaded. With the default ``Recreate`` strategy, expect a brief interruption while the new pod starts; configure ``RollingUpdate`` if you need to avoid that interruption and can meet its database and storage requirements. For more details, refer to :ref:`Setting the SkyPilot config in Helm Deployment <sky-api-server-config>`.
+
+      .. warning::
+
+         With ``configAuthoritative`` enabled, Helm values are the source of truth. Workspace configuration updates through the dashboard are rejected; update the local config file and run Helm again instead. Do not use this mode for dashboard-managed workspaces.
 
    .. tab-item:: VM Deployment or Local API Server
 

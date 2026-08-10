@@ -144,7 +144,7 @@ The upgraded API server is ready to serve requests after the pod becomes running
 
 .. note::
 
-    By default, ``apiService.config`` is ignored during an upgrade when a config already exists on the persistent volume. To make Helm values authoritative for a GitOps deployment, set :ref:`apiService.configAuthoritative <helm-values-apiService-configAuthoritative>` to ``true``. Otherwise, update your SkyPilot config through the dashboard as described :ref:`here <sky-api-server-config>`.
+    By default, ``apiService.config`` is ignored during an upgrade when a config already exists on the persistent volume. To make Helm values authoritative for a GitOps deployment, set :ref:`apiService.configAuthoritative <helm-values-apiService-configAuthoritative>` to ``true``. In authoritative mode, update the config through Helm rather than the dashboard. Otherwise, update your SkyPilot config through the dashboard as described :ref:`here <sky-api-server-config>`.
 
 
 Step 3: Verify the upgrade

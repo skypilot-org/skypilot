@@ -1341,7 +1341,7 @@ To modify your SkyPilot config, use the SkyPilot dashboard: ``http://<api-server
 
     .. note::
 
-        By default, ``apiService.config`` is ignored during a ``helm upgrade`` if there is an existing config, due to the potential accidental loss of existing config. Use the SkyPilot dashboard instead. For GitOps deployments where the Helm values are the source of truth, set :ref:`apiService.configAuthoritative <helm-values-apiService-configAuthoritative>` to ``true`` together with a non-empty ``apiService.config``. This overwrites the persistent-volume config every time the API server starts, so do not enable it for configurations managed through the dashboard.
+        By default, ``apiService.config`` is ignored during a ``helm upgrade`` if there is an existing config, due to the potential accidental loss of existing config. Use the SkyPilot dashboard instead. For GitOps deployments where the Helm values are the source of truth, set :ref:`apiService.configAuthoritative <helm-values-apiService-configAuthoritative>` to ``true`` together with a non-empty ``apiService.config``. This overwrites the persistent-volume config every time the API server starts and rejects dashboard updates, so do not enable it for configurations managed through the dashboard.
 
     .. note::
 

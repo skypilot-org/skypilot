@@ -690,6 +690,10 @@ SKYPILOT_ROLLING_UPDATE_ENABLED = 'SKYPILOT_ROLLING_UPDATE_ENABLED'
 # This enables persistence of managed job logs and file mounts across rolling
 # updates.
 SKYPILOT_API_SERVER_STORAGE_ENABLED = 'SKYPILOT_API_SERVER_STORAGE_ENABLED'
+# Environment variable that is set to 'true' when the Helm ConfigMap is the
+# authoritative source for the API server config.
+SKYPILOT_API_SERVER_CONFIG_AUTHORITATIVE = (
+    'SKYPILOT_API_SERVER_CONFIG_AUTHORITATIVE')
 
 SERVE_OVERRIDE_CONCURRENT_LAUNCHES = (
     f'{SKYPILOT_ENV_VAR_PREFIX}SERVE_OVERRIDE_CONCURRENT_LAUNCHES')

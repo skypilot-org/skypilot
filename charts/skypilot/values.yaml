@@ -120,6 +120,7 @@ apiService:
   config: null
   # When true, copy apiService.config to ~/.sky/config.yaml on every API server start.
   # This makes the ConfigMap authoritative and is useful when Helm values are managed by GitOps.
+  # API server config updates are rejected; update this value through Helm instead.
   # When false, an existing config on the persistent volume remains authoritative.
   # @schema type: [boolean]
   configAuthoritative: false

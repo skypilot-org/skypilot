@@ -1334,6 +1334,17 @@ tests:
           pattern: "initialize_configmap_sync_on_startup"
       - notExists:
           path: spec.template.metadata.annotations["checksum/config"]
+      - notContains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: SKYPILOT_API_SERVER_CONFIG_AUTHORITATIVE
+
+  - it: should keep the authoritative environment unset by default
+    asserts:
+      - notContains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: SKYPILOT_API_SERVER_CONFIG_AUTHORITATIVE
 
   - it: should require config when authoritative mode is enabled
     set:
@@ -1351,6 +1362,11 @@ tests:
     asserts:
       - exists:
           path: spec.template.metadata.annotations["checksum/config"]
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: SKYPILOT_API_SERVER_CONFIG_AUTHORITATIVE
+            value: "true"
       - matchRegex:
           path: spec.template.spec.containers[0].args[2]
           pattern: "cp /var/skypilot/config/config.yaml /root/.sky/config.yaml"

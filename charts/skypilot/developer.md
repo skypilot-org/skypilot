@@ -25,10 +25,12 @@ starts. Keep it disabled when configuration is managed through the dashboard.
 - **Poor persistence:** Config is not persisted across Kubernetes clusters 
   and backing up is difficult
 
-**Note:** SkyPilot syncs config back to ConfigMap for user convenience, but 
-ConfigMap may not always be in sync with PVC (e.g., user `helm upgrade` with a
-new configMap). Sync occurs when config changes are made through the workspace
-API.
+**Note:** In the default mode, SkyPilot syncs config back to ConfigMap for user
+convenience, but ConfigMap may not always be in sync with PVC (e.g., user
+`helm upgrade` with a new configMap). Sync occurs when config changes are made
+through the workspace API. In authoritative mode, API server config updates are
+rejected and the ConfigMap is never patched at runtime; update the Helm values
+instead.
 
 **TODO:** Provide API to get config directly from API server to eliminate 
 ConfigMap dependency.

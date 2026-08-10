@@ -178,6 +178,10 @@ spec:
         - name: SKYPILOT_API_SERVER_STORAGE_ENABLED
           value: "true"
         {{- end }}
+        {{- if .Values.apiService.configAuthoritative }}
+        - name: SKYPILOT_API_SERVER_CONFIG_AUTHORITATIVE
+          value: "true"
+        {{- end }}
         {{- if .Values.apiService.metrics.enabled }}
         - name: SKY_API_SERVER_METRICS_ENABLED
           value: "true"

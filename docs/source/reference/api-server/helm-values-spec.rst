@@ -595,6 +595,8 @@ Default: ``null``
 
 When enabled, the API server copies ``apiService.config`` to ``~/.sky/config.yaml`` every time the API server starts. This makes the ConfigMap the source of truth and is useful when Helm values are managed by GitOps. Any existing configuration on the persistent volume is overwritten. ``apiService.config`` must be set to a non-empty value when this option is enabled.
 
+Configuration updates through the API server or dashboard are rejected while this option is enabled. Update ``apiService.config`` through Helm instead. Helm changes roll the API server Deployment; the default ``Recreate`` strategy causes a brief interruption during the rollout.
+
 When disabled, an existing configuration on the persistent volume remains the source of truth. ``apiService.config`` is used only to initialize an empty persistent volume, preserving the default behavior for configurations managed through the SkyPilot dashboard.
 
 Default: ``false``
