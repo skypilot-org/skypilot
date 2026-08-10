@@ -3429,8 +3429,12 @@ def test_job_group_primary_auxiliary(generic_cloud: str):
                 # transitioning when we check
                 f's=$({smoke_tests_utils.GET_JOB_QUEUE} | grep -A 2 {name}); '
                 f'echo "$s"; echo "$s" | grep replay-buffer | grep -E "CANCELLING|CANCELLED"',
-                # Verify logs show the termination delay message
-                f'sky jobs logs --controller -n {name} --no-follow | '
+                # Verify logs show the termination delay message. Resolve the
+                # job id first: `-n` errors out on an API server that retains
+                # an older same-named job from a previous run of this test.
+                f'JOB_ID=$(sky jobs queue | grep {name} | head -1 | '
+                f'awk \'{{print $1}}\'); '
+                f'sky jobs logs --controller "$JOB_ID" --no-follow | '
                 f'grep -E "Waiting.*before terminating|Terminating auxiliary"',
             ],
             f'sky jobs cancel -y -n {name}',
@@ -3551,25 +3555,36 @@ def test_managed_job_node_names_single_node(generic_cloud: str):
             task.set_resources(
                 sky.Resources(infra=generic_cloud,
                               **smoke_tests_utils.LOW_RESOURCE_PARAM))
+            job_id = None
             try:
-                sky.stream_and_get(sky.jobs.launch(task, name=name))
+                # Track the job by id, not name: an API server shared across
+                # runs may retain an older SUCCEEDED job with the same name.
+                job_ids, _ = sky.stream_and_get(sky.jobs.launch(task,
+                                                                name=name))
+                assert job_ids, 'jobs.launch returned no job ids'
+                job_id = job_ids[0]
                 # Wait for job to be running and node_names to be populated
                 # Use longer timeout to account for controller startup
-                job = smoke_tests_utils.wait_for_managed_job_status_sdk(
-                    name, [sky.ManagedJobStatus.SUCCEEDED], timeout=400)
+                smoke_tests_utils.wait_for_managed_job_status_sdk(
+                    job_id=job_id,
+                    target_statuses=[sky.ManagedJobStatus.SUCCEEDED],
+                    timeout=400)
                 # Give time for node_names to be populated after launch
                 time.sleep(10)
                 # Re-fetch to get updated node_names
                 jobs_list = sky.get(
                     sky.jobs.queue_v2(refresh=False,
-                                      fields=['job_name', 'node_names']))[0]
-                job = [j for j in jobs_list if j['job_name'] == name][0]
-                node_names = job['node_names']
+                                      job_ids=[job_id],
+                                      fields=['job_id', 'node_names']))[0]
+                node_names = jobs_list[0]['node_names']
                 assert node_names, (f'node_names should not be empty, '
                                     f'got: {node_names}')
                 print(f'node_names: {node_names}')
             finally:
-                sky.jobs.cancel(name=name)
+                if job_id is not None:
+                    sky.jobs.cancel(job_ids=[job_id])
+                else:
+                    sky.jobs.cancel(name=name)
 
 
 @pytest.mark.managed_jobs
@@ -3585,20 +3600,28 @@ def test_managed_job_node_names_multi_node(generic_cloud: str):
             task.set_resources(
                 sky.Resources(infra=generic_cloud,
                               **smoke_tests_utils.LOW_RESOURCE_PARAM))
+            job_id = None
             try:
-                sky.stream_and_get(sky.jobs.launch(task, name=name))
+                # Track the job by id, not name: an API server shared across
+                # runs may retain an older SUCCEEDED job with the same name.
+                job_ids, _ = sky.stream_and_get(sky.jobs.launch(task,
+                                                                name=name))
+                assert job_ids, 'jobs.launch returned no job ids'
+                job_id = job_ids[0]
                 # Wait for job to be running
                 # Use longer timeout to account for controller startup
-                job = smoke_tests_utils.wait_for_managed_job_status_sdk(
-                    name, [sky.ManagedJobStatus.SUCCEEDED], timeout=400)
+                smoke_tests_utils.wait_for_managed_job_status_sdk(
+                    job_id=job_id,
+                    target_statuses=[sky.ManagedJobStatus.SUCCEEDED],
+                    timeout=400)
                 # Give time for node_names to be populated after launch
                 time.sleep(10)
                 # Re-fetch to get updated node_names
                 jobs_list = sky.get(
                     sky.jobs.queue_v2(refresh=False,
-                                      fields=['job_name', 'node_names']))[0]
-                job = [j for j in jobs_list if j['job_name'] == name][0]
-                node_names = job['node_names']
+                                      job_ids=[job_id],
+                                      fields=['job_id', 'node_names']))[0]
+                node_names = jobs_list[0]['node_names']
                 assert node_names, (f'node_names should not be empty, '
                                     f'got: {node_names}')
                 nodes = node_names.split(',')
@@ -3606,7 +3629,10 @@ def test_managed_job_node_names_multi_node(generic_cloud: str):
                                          f'got {len(nodes)}: {nodes}')
                 print(f'node_names: {node_names} ({len(nodes)} nodes)')
             finally:
-                sky.jobs.cancel(name=name)
+                if job_id is not None:
+                    sky.jobs.cancel(job_ids=[job_id])
+                else:
+                    sky.jobs.cancel(name=name)
 
 
 @pytest.mark.managed_jobs
