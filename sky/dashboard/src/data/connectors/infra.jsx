@@ -465,6 +465,11 @@ export async function getContextGPUData(context) {
 
         const gpuName = nodeData['accelerator_type'] || '-';
         const totalCount = nodeData['total']?.['accelerator_count'] || 0;
+        // Schedulable count: total comes from status.capacity (keeps devices
+        // the device plugin withdrew), while pods can only be placed against
+        // allocatable. Older servers don't send the key - fall back to total.
+        const allocatableCount =
+          nodeData['total']?.['accelerator_allocatable'] ?? totalCount;
         const freeCount = nodeData['free']?.['accelerators_available'] || 0;
         const isNodeNotReady = isNodeNotReadyForGpus(nodeData);
 
@@ -502,7 +507,7 @@ export async function getContextGPUData(context) {
           if (isNodeNotReady) {
             gpuToData[gpuName].gpu_not_ready += totalCount;
           }
-          gpuToData[gpuName].gpu_requestable_qty_per_node = totalCount;
+          gpuToData[gpuName].gpu_requestable_qty_per_node = allocatableCount;
         }
       }
     }
@@ -595,6 +600,10 @@ async function getKubernetesGPUsFromContexts(contextNames) {
 
           const gpuName = nodeData['accelerator_type'] || '-';
           const totalCount = nodeData['total']?.['accelerator_count'] || 0;
+          // See getContextGPUData: requestable must reflect allocatable, not
+          // physical capacity, on nodes with withdrawn devices.
+          const allocatableCount =
+            nodeData['total']?.['accelerator_allocatable'] ?? totalCount;
           const freeCount = nodeData['free']?.['accelerators_available'] || 0;
           const isNodeNotReady = isNodeNotReadyForGpus(nodeData);
 
@@ -614,7 +623,7 @@ async function getKubernetesGPUsFromContexts(contextNames) {
             if (isNodeNotReady) {
               gpuToData[gpuName].gpu_not_ready += totalCount;
             }
-            gpuToData[gpuName].gpu_requestable_qty_per_node = totalCount;
+            gpuToData[gpuName].gpu_requestable_qty_per_node = allocatableCount;
           }
         }
         perContextGPUsData[context] = Object.values(gpuToData);

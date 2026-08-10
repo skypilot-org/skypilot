@@ -802,6 +802,39 @@ class TestAutoMountsSchema:
         common_utils.validate_schema(config, schemas.get_config_schema(),
                                      'Invalid config: ')
 
+    def test_auto_mounts_valid_scopes(self):
+        """Test auto_mounts accepts personal/workspace/global scopes."""
+        for scope in ['personal', 'workspace', 'global']:
+            config = {
+                'kubernetes': {
+                    'auto_mounts': [{
+                        'volume_name': 'my-volume',
+                        'mount_paths': ['~/.cache/uv'],
+                        'scope': scope,
+                    }],
+                },
+            }
+            common_utils.validate_schema(config, schemas.get_config_schema(),
+                                         'Invalid config: ')
+
+    def test_auto_mounts_invalid_scope_rejected(self):
+        """Test auto_mounts rejects unknown scope values."""
+        from sky import exceptions as sky_exceptions
+        for bad_scope in ['team', 'Personal', 'GLOBAL', '']:
+            config = {
+                'kubernetes': {
+                    'auto_mounts': [{
+                        'volume_name': 'my-volume',
+                        'mount_paths': ['~/.cache/uv'],
+                        'scope': bad_scope,
+                    }],
+                },
+            }
+            with pytest.raises(sky_exceptions.InvalidSkyPilotConfigError):
+                common_utils.validate_schema(config,
+                                             schemas.get_config_schema(),
+                                             'Invalid config: ')
+
     def test_auto_mounts_additional_properties_rejected(self):
         """Test auto_mounts rejects unknown properties."""
         from sky import exceptions as sky_exceptions

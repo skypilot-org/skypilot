@@ -1452,6 +1452,7 @@ class TestStreamLogsByIdExternalStoreFallback:
 
         fake_reader = MagicMock()
         fake_reader.read_cluster_job_logs.return_value = None
+        fake_reader.read_managed_job_logs.return_value = None
         self._patch_logs(monkeypatch, fake_reader)
         monkeypatch.setattr(jobs_utils, 'generate_managed_job_cluster_name',
                             lambda name, jid: f'sky-managed-{jid}-{name}')
@@ -1460,6 +1461,50 @@ class TestStreamLogsByIdExternalStoreFallback:
 
         fake_reader.read_cluster_job_logs.assert_called_once()
         assert 'external log store' in msg
+
+    def test_managed_job_addressing_fallback(self, monkeypatch):
+        # The cluster-addressed read finds nothing (e.g. a runtime whose
+        # forwarded records carry the managed-job identity instead of an
+        # on-cluster job id); the reader is then consulted by (job_id,
+        # task_id) and its success is reported like a streamed log.
+        task_info = [(0, 'mytask', managed_job_state.ManagedJobStatus.SUCCEEDED,
+                      None, None)]
+        self._patch_terminal_job(monkeypatch, task_info)
+
+        fake_reader = MagicMock()
+        fake_reader.read_cluster_job_logs.return_value = None
+        fake_reader.read_managed_job_logs.return_value = 0
+        self._patch_logs(monkeypatch, fake_reader)
+        monkeypatch.setattr(jobs_utils, 'generate_managed_job_cluster_name',
+                            lambda name, jid: f'sky-managed-{jid}-{name}')
+
+        _, code = jobs_utils.stream_logs_by_id(5, follow=False, tail=None)
+
+        # task_name rides along: a managed job id is unique only within one API
+        # server, so a reader needs it to narrow a store shared by several
+        # deployments.
+        fake_reader.read_managed_job_logs.assert_called_once_with(
+            5, 0, task_name='mytask', follow=False, tail=0)
+        assert code == exceptions.JobExitCode.from_managed_job_status(
+            managed_job_state.ManagedJobStatus.SUCCEEDED)
+
+    def test_managed_job_addressing_not_consulted_on_cluster_hit(
+            self, monkeypatch):
+        # A successful cluster-addressed read must not trigger a second,
+        # managed-job-addressed store query.
+        task_info = [(0, 'mytask', managed_job_state.ManagedJobStatus.SUCCEEDED,
+                      None, None)]
+        self._patch_terminal_job(monkeypatch, task_info)
+
+        fake_reader = MagicMock()
+        fake_reader.read_cluster_job_logs.return_value = 0
+        self._patch_logs(monkeypatch, fake_reader)
+        monkeypatch.setattr(jobs_utils, 'generate_managed_job_cluster_name',
+                            lambda name, jid: f'sky-managed-{jid}-{name}')
+
+        jobs_utils.stream_logs_by_id(5, follow=False, tail=None)
+
+        fake_reader.read_managed_job_logs.assert_not_called()
 
     def test_reader_exception_is_logged_and_falls_through(self, monkeypatch):
         # A reader error must not crash sky jobs logs; it falls through to the

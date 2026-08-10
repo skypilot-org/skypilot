@@ -40,6 +40,56 @@ class VolumeType(enum.Enum):
 EPHEMERAL_VOLUME_TYPES = [VolumeType.PVC.value]
 
 
+class AutoMountScope(enum.Enum):
+    """Scope of an auto_mounts config entry.
+
+    Controls whose launches an auto-mount volume is mounted onto,
+    mirroring the personal/workspace/global scopes used by secrets.
+    """
+    # Mount only on launches by the user who owns the volume.
+    PERSONAL = 'personal'
+    # Mount only on launches in the volume's workspace.
+    WORKSPACE = 'workspace'
+    # Mount on every launch (default; the original auto_mounts behavior).
+    GLOBAL = 'global'
+
+    @classmethod
+    def supported_scopes(cls) -> list:
+        """Return list of supported scope values."""
+        return [s.value for s in cls]
+
+
+def auto_mount_in_scope(scope: str, volume_user_hash: Optional[str],
+                        volume_workspace: Optional[str],
+                        current_user_hash: Optional[str],
+                        active_workspace: Optional[str]) -> bool:
+    """Whether an auto-mount entry applies to the current launch.
+
+    Args:
+        scope: The entry's scope ('personal', 'workspace', or 'global').
+        volume_user_hash: user_hash of the volume record (its owner).
+        volume_workspace: workspace of the volume record.
+        current_user_hash: user hash of the user performing the launch.
+        active_workspace: workspace the launch is running in.
+
+    Returns:
+        True if the volume should be auto-mounted onto this launch.
+
+    Raises:
+        ValueError: if scope is not a supported scope value.
+    """
+    if scope == AutoMountScope.GLOBAL.value:
+        return True
+    if scope == AutoMountScope.PERSONAL.value:
+        return (volume_user_hash is not None and
+                volume_user_hash == current_user_hash)
+    if scope == AutoMountScope.WORKSPACE.value:
+        return (volume_workspace is not None and
+                volume_workspace == active_workspace)
+    raise ValueError(f'Invalid auto-mount scope {scope!r}. Supported '
+                     f'scopes: {AutoMountScope.supported_scopes()}')
+
+
 @dataclass
 class VolumeInfo:
     """Represents volume info."""
