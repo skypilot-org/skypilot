@@ -13,6 +13,7 @@ import click
 import pytest
 import requests
 
+from sky import exceptions
 from sky import skypilot_config
 from sky.client import sdk as client_sdk
 from sky.server import common as server_common
@@ -420,47 +421,81 @@ def test_api_login_env_endpoint_with_matching_flag(
     assert 'endpoint' not in config.get('api_server', {})
 
 
-def test_api_login_env_endpoint_clears_residual_sa_token(
-        monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
-    """An env var login clears the residual sa token, but keeps the endpoint.
-
-    The sa token is not scoped to an endpoint, so leaving it in the config
-    would authenticate the health check against the env var endpoint and mask
-    the NEEDS_AUTH response that the SSO flow depends on.
-    """
-    config_path = tmp_path / "config.yaml"
-    monkeypatch.setattr('sky.skypilot_config.get_user_config_path',
-                        lambda: str(config_path))
-    config_endpoint = "http://config.skypilot.co"
-
+def _login_with_sa_token(endpoint: str, token: str = "sky_test_token") -> None:
+    """Logs in with a service account token, so the config file holds one."""
     with _mock_healthy_check() as mock_check:
         mock_check.return_value = (
             server_common.ApiServerStatus.HEALTHY,
             server_common.ApiServerInfo(
                 status=server_common.ApiServerStatus.HEALTHY,
                 basic_auth_enabled=False))
-        client_sdk.api_login(config_endpoint,
-                             service_account_token="sky_test_token")
+        client_sdk.api_login(endpoint, service_account_token=token)
     assert skypilot_config.get_user_config(
-    )['api_server']['service_account_token'] == 'sky_test_token'
+    )['api_server']['service_account_token'] == token
+
+
+def test_api_login_env_endpoint_hides_sa_token_from_health_check(
+        monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+    """The residual sa token is hidden in memory, not deleted, during login.
+
+    The token is not scoped to an endpoint, so leaving it visible would
+    authenticate the health check against the env var endpoint and mask the
+    NEEDS_AUTH response that the SSO flow depends on. Deleting it from the
+    config file instead would destroy the configured endpoint's credential even
+    when the login never completes.
+    """
+    config_path = tmp_path / "config.yaml"
+    monkeypatch.setattr('sky.skypilot_config.get_user_config_path',
+                        lambda: str(config_path))
+    config_endpoint = "http://config.skypilot.co"
+    _login_with_sa_token(config_endpoint)
 
     monkeypatch.setenv(constants.SKY_API_SERVER_URL_ENV_VAR,
                        "http://env.skypilot.co")
     sa_token_at_health_check = []
 
-    def _capture_check_server_healthy(endpoint):
-        del endpoint  # Unused.
+    def _unreachable_server(endpoint):
         sa_token_at_health_check.append(
             skypilot_config.get_nested(('api_server', 'service_account_token'),
                                        default_value=None))
-        raise StopIteration  # Abort to inspect captured state
+        raise exceptions.ApiServerConnectionError(endpoint)
 
     with mock.patch('sky.server.common.check_server_healthy',
-                    side_effect=_capture_check_server_healthy):
-        with pytest.raises(StopIteration):
+                    side_effect=_unreachable_server):
+        with pytest.raises(exceptions.ApiServerConnectionError):
             client_sdk.api_login()
 
+    # Hidden from the health check...
     assert sa_token_at_health_check[0] is None
+    # ...but still on disk, since the login never completed.
+    config = skypilot_config.get_user_config()
+    assert config['api_server']['service_account_token'] == 'sky_test_token'
+    assert config['api_server']['endpoint'] == config_endpoint
+
+
+def test_api_login_env_endpoint_clears_residual_sa_token_on_success(
+        monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+    """A completed login removes the residual sa token from disk.
+
+    The cookies it saved are the credential for that endpoint from now on, and
+    the token would be sent in their place.
+    """
+    config_path = tmp_path / "config.yaml"
+    monkeypatch.setattr('sky.skypilot_config.get_user_config_path',
+                        lambda: str(config_path))
+    config_endpoint = "http://config.skypilot.co"
+    _login_with_sa_token(config_endpoint)
+
+    monkeypatch.setenv(constants.SKY_API_SERVER_URL_ENV_VAR,
+                       "http://env.skypilot.co")
+    with _mock_healthy_check() as mock_check:
+        mock_check.return_value = (
+            server_common.ApiServerStatus.HEALTHY,
+            server_common.ApiServerInfo(
+                status=server_common.ApiServerStatus.HEALTHY,
+                basic_auth_enabled=False))
+        client_sdk.api_login()
+
     config = skypilot_config.get_user_config()
     assert 'service_account_token' not in config.get('api_server', {})
     # Only the token is dropped; the configured endpoint is kept.
@@ -525,6 +560,75 @@ def test_api_login_prompt_defaults_to_config_endpoint(
 
     assert prompt_kwargs['default'] == config_endpoint
     mock_check.assert_called_with(config_endpoint)
+
+
+def test_api_login_redacts_password_in_endpoint(monkeypatch: pytest.MonkeyPatch,
+                                                tmp_path: Path, capsys):
+    """Neither the warning nor the conflict error may echo an inline password."""
+    config_path = tmp_path / "config.yaml"
+    monkeypatch.setattr('sky.skypilot_config.get_user_config_path',
+                        lambda: str(config_path))
+    monkeypatch.setenv(constants.SKY_API_SERVER_URL_ENV_VAR,
+                       "http://user:sup3rsecret@env.skypilot.co")
+
+    # The conflict error mentions both endpoints.
+    with pytest.raises(RuntimeError) as exc_info:
+        client_sdk.api_login("http://user:al5osecret@other.skypilot.co")
+    assert 'sup3rsecret' not in str(exc_info.value)
+    assert 'al5osecret' not in str(exc_info.value)
+
+    # And so does the warning on the happy path.
+    with _mock_healthy_check() as mock_check:
+        mock_check.return_value = (
+            server_common.ApiServerStatus.HEALTHY,
+            server_common.ApiServerInfo(
+                status=server_common.ApiServerStatus.HEALTHY,
+                basic_auth_enabled=False))
+        client_sdk.api_login()
+    warning = [
+        line for line in capsys.readouterr().out.splitlines()
+        if 'Using endpoint from' in line
+    ]
+    assert len(warning) == 1
+    assert 'sup3rsecret' not in warning[0]
+    # Note: the "Logged into ..." line and the dashboard URL still show the
+    # endpoint verbatim, which predates this change and is deliberate -- the
+    # dashboard URL is meant to be opened, so it needs its credentials.
+    # The real endpoint is still the one we authenticate against.
+    mock_check.assert_called_with("http://user:sup3rsecret@env.skypilot.co")
+
+
+def test_api_login_writes_the_config_file_it_reads(
+        monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+    """The endpoint is written to the config file that is actually in effect.
+
+    Reads honor SKYPILOT_GLOBAL_CONFIG, so writing the default path instead
+    would leave the endpoint in a file nobody reads.
+    """
+    default_path = tmp_path / "default.yaml"
+    override_path = tmp_path / "override.yaml"
+    override_path.write_text(
+        'api_server:\n  endpoint: http://old.skypilot.co\n')
+    monkeypatch.setattr('sky.skypilot_config.get_user_config_path',
+                        lambda: str(default_path))
+    monkeypatch.setenv(skypilot_config.ENV_VAR_GLOBAL_CONFIG,
+                       str(override_path))
+    skypilot_config.reload_config()
+
+    new_endpoint = "http://new.skypilot.co"
+    with _mock_healthy_check() as mock_check:
+        mock_check.return_value = (
+            server_common.ApiServerStatus.HEALTHY,
+            server_common.ApiServerInfo(
+                status=server_common.ApiServerStatus.HEALTHY,
+                basic_auth_enabled=False))
+        client_sdk.api_login(new_endpoint)
+
+    assert 'endpoint: http://new.skypilot.co' in override_path.read_text()
+    # The default path is not touched, so it cannot shadow the override later.
+    assert not default_path.exists()
+    assert skypilot_config.get_user_config(
+    )['api_server']['endpoint'] == new_endpoint
 
 
 def test_api_logout_with_env_endpoint(monkeypatch: pytest.MonkeyPatch):

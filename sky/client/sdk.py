@@ -10,6 +10,7 @@ Usage example:
     statuses = sky.get(request_id)
 
 """
+import contextlib
 from http import cookiejar
 import json
 import logging
@@ -2897,11 +2898,38 @@ def api_server_logs(follow: bool = True, tail: Optional[int] = None) -> None:
         stream_and_get(log_path=constants.API_SERVER_LOGS, tail=tail)
 
 
+def _writable_user_config_path() -> pathlib.Path:
+    """Returns the user config file that reads and writes should both use.
+
+    Reads go through `skypilot_config.get_user_config()`, which honors
+    `SKYPILOT_GLOBAL_CONFIG`, while `get_user_config_path()` always points at
+    the default path. Writing the default path while reading the overridden one
+    lands the change in a file nobody reads, and overwrites the default path
+    with a copy of the overridden config. So write wherever we read, unless
+    that file is not writable -- a config baked into a read-only image, say --
+    in which case fall back to the default path so login still works.
+    """
+    config_path = pathlib.Path(
+        skypilot_config.resolve_user_config_path() or
+        skypilot_config.get_user_config_path()).expanduser()
+    default_path = pathlib.Path(
+        skypilot_config.get_user_config_path()).expanduser()
+    if config_path == default_path:
+        return default_path
+    if os.access(config_path, os.W_OK):
+        return config_path
+    logger.warning(
+        f'{config_path} is not writable, saving to {default_path} instead. '
+        'It will only take effect once '
+        f'{skypilot_config.ENV_VAR_GLOBAL_CONFIG} '
+        'is unset.')
+    return default_path
+
+
 def _save_config_updates(endpoint: Optional[str] = None,
                          service_account_token: Optional[str] = None) -> None:
     """Save endpoint and/or service account token to config file."""
-    config_path = pathlib.Path(
-        skypilot_config.get_user_config_path()).expanduser()
+    config_path = _writable_user_config_path()
     with filelock.FileLock(config_path.with_suffix('.lock')):
         if not config_path.exists():
             config_path.touch()
@@ -2930,8 +2958,7 @@ def _save_config_updates(endpoint: Optional[str] = None,
 
 def _clear_api_server_config() -> None:
     """Clear endpoint and service account token from config file."""
-    config_path = pathlib.Path(
-        skypilot_config.get_user_config_path()).expanduser()
+    config_path = _writable_user_config_path()
     with filelock.FileLock(config_path.with_suffix('.lock')):
         if not config_path.exists():
             return
@@ -2949,8 +2976,7 @@ def _clear_api_server_config() -> None:
 
 def _clear_service_account_token() -> None:
     """Clears only the service account token from the config file."""
-    config_path = pathlib.Path(
-        skypilot_config.get_user_config_path()).expanduser()
+    config_path = _writable_user_config_path()
     with filelock.FileLock(config_path.with_suffix('.lock')):
         if not config_path.exists():
             return
@@ -2964,6 +2990,31 @@ def _clear_service_account_token() -> None:
 
         yaml_utils.dump_yaml(str(config_path), config)
         skypilot_config.reload_config()
+    click.secho(
+        f'Removed the service account token from {config_path}: it is not '
+        'scoped to an endpoint, so it would be sent instead of the credentials '
+        'obtained by this login.',
+        fg='yellow')
+
+
+@contextlib.contextmanager
+def _without_service_account_token() -> Iterator[None]:
+    """Hides the configured service account token from this process.
+
+    While a token is configured, every request authenticates with it and the
+    cookie jar is never consulted at all (see
+    `server_common._prepare_authenticated_request_params`), so the server cannot
+    report NEEDS_AUTH and the OAuth flow would be skipped. Popping the token for
+    the duration of the login achieves that without touching the config file, so
+    a login that never completes -- an unreachable server, say -- leaves the
+    token where it was.
+    """
+    config = skypilot_config.to_dict()
+    # Pop rather than set to None, so that the mutated config still validates if
+    # something reloads it while the override is active.
+    config.pop_nested(('api_server', 'service_account_token'), None)
+    with skypilot_config.replace_skypilot_config(config):
+        yield
 
 
 def _validate_endpoint(endpoint: Optional[str]) -> str:
@@ -3005,19 +3056,22 @@ def _resolve_login_endpoint(endpoint: Optional[str]) -> Tuple[str, bool]:
         # meant, and logging into one of them would leave the other in effect.
         with ux_utils.print_exception_no_traceback():
             raise RuntimeError(
-                f'Cannot log into {endpoint}: the endpoint is already set to '
-                f'{env_endpoint} by the environment variable '
-                f'{constants.SKY_API_SERVER_URL_ENV_VAR}. Either drop the '
-                '--endpoint flag to log into the endpoint from the environment '
-                f'variable, or run unset {constants.SKY_API_SERVER_URL_ENV_VAR}'
-                ' to clear the environment variable.')
+                'Cannot log into '
+                f'{server_common.redact_url_password(endpoint)}: the endpoint '
+                'is already set to '
+                f'{server_common.redact_url_password(env_endpoint)} by the '
+                f'environment variable {constants.SKY_API_SERVER_URL_ENV_VAR}. '
+                'Either drop the --endpoint flag to log into the endpoint from '
+                'the environment variable, or run unset '
+                f'{constants.SKY_API_SERVER_URL_ENV_VAR} to clear the '
+                'environment variable.')
 
     # The environment variable takes precedence over the config file for every
     # command, so it is already the effective endpoint; we only need to
     # authenticate against it.
     click.secho(
         f'Using endpoint from {constants.SKY_API_SERVER_URL_ENV_VAR}: '
-        f'{env_endpoint}',
+        f'{server_common.redact_url_password(env_endpoint)}',
         fg='yellow')
     return _validate_endpoint(env_endpoint), True
 
@@ -3237,6 +3291,21 @@ def api_login(endpoint: Optional[str] = None,
         # Save both endpoint and token to config in a single operation. When
         # the endpoint comes from the environment variable, save the token
         # only, so the configured endpoint is left as-is.
+        if from_env:
+            # The token is not scoped to an endpoint, so it will also be used
+            # for the configured endpoint once the environment variable is
+            # unset. Say so rather than silently pairing a credential with a
+            # server it was not issued for.
+            config_endpoint = skypilot_config.get_nested(
+                ('api_server', 'endpoint'), None)
+            if config_endpoint is not None and config_endpoint.rstrip(
+                    '/') != endpoint:
+                click.secho(
+                    'Note: the token is saved for any endpoint, so it will '
+                    'also be used for '
+                    f'{server_common.redact_url_password(config_endpoint)} '
+                    f'once {constants.SKY_API_SERVER_URL_ENV_VAR} is unset.',
+                    fg='yellow')
         _save_config_updates(endpoint=None if from_env else endpoint,
                              service_account_token=service_account_token)
 
@@ -3270,143 +3339,158 @@ def api_login(endpoint: Optional[str] = None,
     # Save endpoint and clear any residual service account token before the
     # first health check, so it uses cookie-based auth and the server can
     # correctly return NEEDS_AUTH when SSO is required.
-    if from_env:
-        # Do not touch the configured endpoint, but still drop the residual
-        # service account token: it is not scoped to an endpoint, so it would
-        # otherwise be sent to the endpoint we are logging into and mask the
-        # NEEDS_AUTH response the SSO flow depends on.
-        _clear_service_account_token()
-    else:
-        _save_config_updates(endpoint=endpoint)
-    server_status, api_server_info = server_common.check_server_healthy(
-        endpoint)
-    if server_status == server_common.ApiServerStatus.NEEDS_AUTH or relogin:
-        # We detected an auth proxy, so go through the auth proxy cookie flow.
-        token: Optional[str] = None
-
-        # Try methods in order:
-        # 1. New polling-based flow - only on servers >= API v30
-        # 2. Old localhost callback flow
-        # 3. Manual token entry
-        remote_api_version = versions.get_remote_api_version()
-        if remote_api_version is not None and remote_api_version >= 30:
-            token = _try_polling_auth(endpoint, no_browser=no_browser)
-
-        if token is None:
-            # Polling auth not available or failed, try localhost callback
-            token = _try_localhost_callback_auth(endpoint,
-                                                 no_browser=no_browser)
-
-        if token is None:
-            # All automatic methods failed, fall back to manual entry
-            token = _try_manual_token_entry(endpoint)
-
-        if not token:
-            with ux_utils.print_exception_no_traceback():
-                raise ValueError('Authentication failed.')
-
-        # Parse the token.
-        # b64decode will ignore invalid characters, but does some length and
-        # padding checks.
-        try:
-            data = base64.b64decode(token)
-        except binascii.Error as e:
-            raise ValueError(f'Malformed token: {token}') from e
-        try:
-            json_data = json.loads(data)
-        except (json.JSONDecodeError, UnicodeDecodeError) as e:
-            raise ValueError(f'Malformed token data: {data!r}') from e
-        if not isinstance(json_data, dict):
-            raise ValueError(f'Malformed token JSON: {json_data}')
-
-        if json_data.get('v') == 1:
-            user_hash = json_data.get('user')
-            cookie_dict = json_data['cookies']
-        elif 'v' not in json_data:
-            user_hash = None
-            cookie_dict = json_data
+    with contextlib.ExitStack() as stack:
+        residual_token: Optional[str] = None
+        if from_env:
+            # Leave the config file alone: the endpoint from the environment
+            # variable is already in effect, and the configured endpoint still
+            # needs its own credential. The residual token only has to be out of
+            # the way for the requests this login makes, so hide it in memory
+            # and remove it from disk once the login has actually succeeded.
+            residual_token = skypilot_config.get_nested(
+                ('api_server', 'service_account_token'), None)
+            if residual_token is not None:
+                stack.enter_context(_without_service_account_token())
         else:
-            raise ValueError(f'Unsupported token version: {json_data.get("v")}')
+            _save_config_updates(endpoint=endpoint)
+        server_status, api_server_info = server_common.check_server_healthy(
+            endpoint)
+        if server_status == server_common.ApiServerStatus.NEEDS_AUTH or relogin:
+            # We detected an auth proxy, so go through the auth proxy
+            # cookie flow.
+            token: Optional[str] = None
 
-        parsed_url = urlparse.urlparse(endpoint)
-        cookie_jar = cookiejar.MozillaCookieJar()
-        for (name, value) in cookie_dict.items():
-            # dict keys in JSON must be strings
-            assert isinstance(name, str)
-            if not isinstance(value, str):
-                raise ValueError('Malformed token - bad key/value: '
-                                 f'{name}: {value}')
+            # Try methods in order:
+            # 1. New polling-based flow - only on servers >= API v30
+            # 2. Old localhost callback flow
+            # 3. Manual token entry
+            remote_api_version = versions.get_remote_api_version()
+            if remote_api_version is not None and remote_api_version >= 30:
+                token = _try_polling_auth(endpoint, no_browser=no_browser)
 
-            # See CookieJar._cookie_from_cookie_tuple
-            # oauth2proxy default is Max-Age 604800
-            expires = int(time.time()) + 604800
-            domain = str(parsed_url.hostname)
-            domain_initial_dot = domain.startswith('.')
-            secure = parsed_url.scheme == 'https'
-            if not domain_initial_dot:
-                domain = '.' + domain
+            if token is None:
+                # Polling auth not available or failed, try localhost callback
+                token = _try_localhost_callback_auth(endpoint,
+                                                     no_browser=no_browser)
 
-            cookie_jar.set_cookie(
-                cookiejar.Cookie(
-                    version=0,
-                    name=name,
-                    value=value,
-                    port=None,
-                    port_specified=False,
-                    domain=domain,
-                    domain_specified=True,
-                    domain_initial_dot=domain_initial_dot,
-                    path='',
-                    path_specified=False,
-                    secure=secure,
-                    expires=expires,
-                    discard=False,
-                    comment=None,
-                    comment_url=None,
-                    rest=dict(),
-                ))
+            if token is None:
+                # All automatic methods failed, fall back to manual entry
+                token = _try_manual_token_entry(endpoint)
 
-        # Now that the cookies are parsed, save them to the cookie jar.
-        server_common.set_api_cookie_jar(cookie_jar)
-
-        # Set the user hash in the local file.
-        # If the server already has a token for this user set it to the local
-        # file, otherwise use the new user hash.
-        if (api_server_info.user is not None and
-                api_server_info.user.get('id') is not None):
-            _set_user_hash(api_server_info.user.get('id'))
-        else:
-            _set_user_hash(user_hash)
-    else:
-        # Check if basic auth is enabled
-        if api_server_info.basic_auth_enabled:
-            if api_server_info.user is None:
+            if not token:
                 with ux_utils.print_exception_no_traceback():
-                    raise ValueError(
-                        'Basic auth is enabled but no valid user is found')
+                    raise ValueError('Authentication failed.')
 
-        # Set the user hash in the local file.
-        if api_server_info.user is not None:
-            _set_user_hash(api_server_info.user.get('id'))
+            # Parse the token.
+            # b64decode will ignore invalid characters, but does some length and
+            # padding checks.
+            try:
+                data = base64.b64decode(token)
+            except binascii.Error as e:
+                raise ValueError(f'Malformed token: {token}') from e
+            try:
+                json_data = json.loads(data)
+            except (json.JSONDecodeError, UnicodeDecodeError) as e:
+                raise ValueError(f'Malformed token data: {data!r}') from e
+            if not isinstance(json_data, dict):
+                raise ValueError(f'Malformed token JSON: {json_data}')
 
-    dashboard_url = server_common.get_dashboard_url(endpoint)
+            if json_data.get('v') == 1:
+                user_hash = json_data.get('user')
+                cookie_dict = json_data['cookies']
+            elif 'v' not in json_data:
+                user_hash = None
+                cookie_dict = json_data
+            else:
+                raise ValueError(
+                    f'Unsupported token version: {json_data.get("v")}')
 
-    # see https://github.com/python/mypy/issues/5107 on why
-    # typing is disabled on this line
-    server_common.get_api_server_status_response.cache_clear()  # type: ignore
-    # After successful authentication, check server health again to get user
-    # identity
-    server_status, final_api_server_info = server_common.check_server_healthy(
-        endpoint)
-    # Sync local user hash from the authenticated health check response.
-    # This is the final source of truth for the user's identity on this
-    # server, ensuring the local hash matches regardless of which auth
-    # method was used earlier in the flow.
-    if (final_api_server_info.user is not None and
-            final_api_server_info.user.get('id') is not None):
-        _set_user_hash(final_api_server_info.user.get('id'))
-    _show_logged_in_message(endpoint, dashboard_url, final_api_server_info.user,
-                            server_status)
+            parsed_url = urlparse.urlparse(endpoint)
+            cookie_jar = cookiejar.MozillaCookieJar()
+            for (name, value) in cookie_dict.items():
+                # dict keys in JSON must be strings
+                assert isinstance(name, str)
+                if not isinstance(value, str):
+                    raise ValueError('Malformed token - bad key/value: '
+                                     f'{name}: {value}')
+
+                # See CookieJar._cookie_from_cookie_tuple
+                # oauth2proxy default is Max-Age 604800
+                expires = int(time.time()) + 604800
+                domain = str(parsed_url.hostname)
+                domain_initial_dot = domain.startswith('.')
+                secure = parsed_url.scheme == 'https'
+                if not domain_initial_dot:
+                    domain = '.' + domain
+
+                cookie_jar.set_cookie(
+                    cookiejar.Cookie(
+                        version=0,
+                        name=name,
+                        value=value,
+                        port=None,
+                        port_specified=False,
+                        domain=domain,
+                        domain_specified=True,
+                        domain_initial_dot=domain_initial_dot,
+                        path='',
+                        path_specified=False,
+                        secure=secure,
+                        expires=expires,
+                        discard=False,
+                        comment=None,
+                        comment_url=None,
+                        rest=dict(),
+                    ))
+
+            # Now that the cookies are parsed, save them to the cookie jar.
+            server_common.set_api_cookie_jar(cookie_jar)
+
+            # Set the user hash in the local file.
+            # If the server already has a token for this user set it to
+            # the local file, otherwise use the new user hash.
+            if (api_server_info.user is not None and
+                    api_server_info.user.get('id') is not None):
+                _set_user_hash(api_server_info.user.get('id'))
+            else:
+                _set_user_hash(user_hash)
+        else:
+            # Check if basic auth is enabled
+            if api_server_info.basic_auth_enabled:
+                if api_server_info.user is None:
+                    with ux_utils.print_exception_no_traceback():
+                        raise ValueError(
+                            'Basic auth is enabled but no valid user is found')
+
+            # Set the user hash in the local file.
+            if api_server_info.user is not None:
+                _set_user_hash(api_server_info.user.get('id'))
+
+        dashboard_url = server_common.get_dashboard_url(endpoint)
+
+        # see https://github.com/python/mypy/issues/5107 on why
+        # typing is disabled on this line
+        server_common.get_api_server_status_response.cache_clear(
+        )  # type: ignore
+        # After successful authentication, check server health again to
+        # get user identity
+        server_status, final_api_server_info = (
+            server_common.check_server_healthy(endpoint))
+        # Sync local user hash from the authenticated health check response.
+        # This is the final source of truth for the user's identity on this
+        # server, ensuring the local hash matches regardless of which auth
+        # method was used earlier in the flow.
+        if (final_api_server_info.user is not None and
+                final_api_server_info.user.get('id') is not None):
+            _set_user_hash(final_api_server_info.user.get('id'))
+        _show_logged_in_message(endpoint, dashboard_url,
+                                final_api_server_info.user, server_status)
+
+    if residual_token is not None:
+        # The login succeeded, so the cookies it saved are the credential for
+        # this endpoint from now on. Drop the token, which would otherwise be
+        # sent in their place. Anything that failed above leaves it untouched.
+        _clear_service_account_token()
 
 
 @usage_lib.entrypoint
