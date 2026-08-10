@@ -162,6 +162,12 @@ Defining workspaces in UI
 
 Equivalently, you can also define workspaces in the UI.
 
+.. note::
+
+   The UI can create and edit workspaces only when ``apiService.configAuthoritative``
+   is disabled. When Helm values are authoritative, API and dashboard workspace
+   updates are rejected; edit ``apiService.config`` and run Helm again instead.
+
 The SkyPilot UI (``sky dashboard``) has a **Workspaces** page that shows all configured workspaces.
 
 .. image:: ../images/workspaces/overview.png
