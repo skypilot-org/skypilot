@@ -63,7 +63,6 @@ COPY . /skypilot
 
 RUN cd /skypilot && \
     install -d -m 0755 /image-tools && \
-    install -m 0755 scripts/skypilot-server-entrypoint.sh /image-tools/skypilot-server-entrypoint.sh && \
     install -m 0755 scripts/refresh-runpod-catalog.py /image-tools/refresh-runpod-catalog.py
 
 RUN cd /skypilot && \
