@@ -163,14 +163,23 @@ async def _estimate_platforms_async(
         spot_requests.append(spot_req)
 
     normal, spot = await asyncio.gather(
-        asyncio.gather(*normal_requests),
-        asyncio.gather(*spot_requests),
+        asyncio.gather(*normal_requests, return_exceptions=True),
+        asyncio.gather(*spot_requests, return_exceptions=True),
     )
 
     # wait all futures to complete and collect results
     result = []
     for (platform, preset, _, _), normal, spot in zip(futures, normal, spot):
         platform_name = platform.metadata.name
+        if isinstance(normal, BaseException) or isinstance(spot, BaseException):
+            # The billing calculator may have no SKU for a platform/preset
+            # (e.g. a newly listed platform that is not priced yet), which
+            # fails the estimate request with INVALID_ARGUMENT. Skip such
+            # presets instead of failing the whole catalog fetch.
+            error = normal if isinstance(normal, BaseException) else spot
+            logger.warning('Skipping preset %s_%s in %s: %s', platform_name,
+                           preset.name, region, error)
+            continue
         result.append(
             PresetInfo(
                 region=region,
