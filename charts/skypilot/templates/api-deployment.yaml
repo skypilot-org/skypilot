@@ -5,6 +5,9 @@
        storage mounts / ephemeral ~/.sky / env below key off this rather than
        storage.enabled alone. */ -}}
 {{- $statePersist := or .Values.storage.enabled .Values.storage.existingClaim -}}
+{{- if and .Values.apiService.configAuthoritative (not .Values.apiService.config) }}
+{{- fail "apiService.config must be set when apiService.configAuthoritative is true" }}
+{{- end }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -38,6 +41,9 @@ spec:
   template:
     metadata:
       annotations:
+        {{- if .Values.apiService.configAuthoritative }}
+        checksum/config: {{ .Values.apiService.config | sha256sum }}
+        {{- end }}
         {{- if .Values.apiService.metrics.enabled }}
         {{- if .Values.prometheus.useDedicatedScrapeConfig }}
         skypilot.co/scrape: "true"
@@ -227,6 +233,11 @@ spec:
             rm /root/.sky/config.yaml
           fi
           # Initialize the SkyPilot config.
+          {{- if .Values.apiService.configAuthoritative }}
+          # The ConfigMap is the source of truth for deployments that manage
+          # apiService.config through Helm or GitOps.
+          cp /var/skypilot/config/config.yaml /root/.sky/config.yaml
+          {{- else }}
           if [ -s /root/.sky/config.yaml ]; then
             # If the config.yaml is not empty, sync the PVC config to ConfigMap
             python3 -c "from sky.utils.kubernetes import config_map_utils; config_map_utils.initialize_configmap_sync_on_startup('~/.sky/config.yaml')"
@@ -235,6 +246,7 @@ spec:
             # user specified config.
             cp /var/skypilot/config/config.yaml /root/.sky/config.yaml
           fi
+          {{- end }}
           {{- if .Values.apiService.sshNodePools }}
           mkdir -p /root/.sky
           echo "Linking ssh_node_pools.yaml from secret to /root/.sky/ssh_node_pools.yaml"

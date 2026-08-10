@@ -8,6 +8,11 @@
 the API server. Instead, we provide instructions for updating config 
 (see: https://docs.skypilot.co/en/latest/reference/api-server/api-server-admin-deploy.html#setting-the-skypilot-config).
 
+For GitOps deployments, `apiService.configAuthoritative: true` opts into
+using the ConfigMap as the source of truth. It requires a non-empty
+`apiService.config` and overwrites the PVC copy whenever the API server
+starts. Keep it disabled when configuration is managed through the dashboard.
+
 ### Why PVC?
 - **Fast:** Immediate reflection of config changes
 - **Unified:** Consistent with non-Kubernetes deployments  

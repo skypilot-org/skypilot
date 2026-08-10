@@ -140,9 +140,10 @@ To apply the configuration, follow the following steps:
          helm upgrade --install $RELEASE_NAME skypilot/skypilot-nightly --devel \
             --namespace $NAMESPACE \
             --reuse-values \
+            --set apiService.configAuthoritative=true \
             --set-file apiService.config=/your/path/to/config.yaml
 
-      To change workspace configuration, update the config file and run the same command again. The API server will reload the new configuration automatically with no downtime. For more details, refer to :ref:`Setting the SkyPilot config in Helm Deployment <sky-api-server-config>`.
+      To change workspace configuration, update the config file and run the same command again. The ``configAuthoritative`` setting is required for Helm to replace an existing config on the persistent volume. The API server will reload the new configuration automatically with no downtime. For more details, refer to :ref:`Setting the SkyPilot config in Helm Deployment <sky-api-server-config>`.
 
    .. tab-item:: VM Deployment or Local API Server
 

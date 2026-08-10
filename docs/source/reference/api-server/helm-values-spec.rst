@@ -54,6 +54,7 @@ Below is the available helm value keys and the default value of each key:
       # echo "Installing admin policy"
       # pip install git+https://github.com/michaelvll/admin-policy-examples
     :ref:`config <helm-values-apiService-config>`: null
+    :ref:`configAuthoritative <helm-values-apiService-configAuthoritative>`: false
     :ref:`dbConnectionSecretName <helm-values-apiService-dbConnectionSecretName>`: null
     :ref:`dbConnectionString <helm-values-apiService-dbConnectionString>`: null
     :ref:`sshNodePools <helm-values-apiService-sshNodePools>`: null
@@ -586,6 +587,22 @@ Default: ``null``
       allowed_clouds:
         - aws
         - gcp
+
+.. _helm-values-apiService-configAuthoritative:
+
+``apiService.configAuthoritative``
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+When enabled, the API server copies ``apiService.config`` to ``~/.sky/config.yaml`` every time the API server starts. This makes the ConfigMap the source of truth and is useful when Helm values are managed by GitOps. Any existing configuration on the persistent volume is overwritten. ``apiService.config`` must be set to a non-empty value when this option is enabled.
+
+When disabled, an existing configuration on the persistent volume remains the source of truth. ``apiService.config`` is used only to initialize an empty persistent volume, preserving the default behavior for configurations managed through the SkyPilot dashboard.
+
+Default: ``false``
+
+.. code-block:: yaml
+
+  apiService:
+    configAuthoritative: true
 
 .. _helm-values-apiService-dbConnectionSecretName:
 

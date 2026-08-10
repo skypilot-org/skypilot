@@ -26,6 +26,9 @@
                         "null"
                     ]
                 },
+                "configAuthoritative": {
+                    "type": "boolean"
+                },
                 "dbConnectionSecretName": {
                     "type": [
                         "string",
