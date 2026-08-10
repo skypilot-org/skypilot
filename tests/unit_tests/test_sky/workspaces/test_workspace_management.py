@@ -47,12 +47,22 @@ class TestWorkspaceManagement(unittest.TestCase):
     @mock.patch.dict(
         os.environ,
         {constants.SKYPILOT_API_SERVER_CONFIG_AUTHORITATIVE: 'true'})
-    def test_workspace_config_update_rejected_before_permission_changes(self):
+    @mock.patch('sky.skypilot_config.update_api_server_config_no_lock')
+    def test_workspace_config_update_rejected_before_permission_changes(
+            self, mock_update_no_lock):
         """Test authoritative mode rejects updates before policy mutation."""
+        permission_changes = []
+
+        def modifier_fn(workspaces):
+            permission_changes.append('changed')
+            workspaces.clear()
+
         with self.assertRaisesRegex(ValueError,
                                     'apiService.configAuthoritative'):
-            core._update_workspaces_config(
-                lambda workspaces: workspaces.clear())
+            core._update_workspaces_config(modifier_fn)
+
+        self.assertEqual(permission_changes, [])
+        mock_update_no_lock.assert_not_called()
 
     @mock.patch('sky.skypilot_config.get_skypilot_config_lock')
     @mock.patch('sky.skypilot_config.reload_config')
