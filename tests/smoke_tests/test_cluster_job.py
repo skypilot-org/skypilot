@@ -1348,9 +1348,32 @@ def test_task_labels_kubernetes():
 @pytest.mark.kubernetes
 def test_services_on_kubernetes():
     name = smoke_tests_utils.get_cluster_name()
+    # The check runs from inside the cloud-cmd helper pod, which shares the
+    # namespace with the cluster under test, so the helper's own Services must
+    # be excluded. Resolve the helper by its *on-cloud* name instead of
+    # matching a literal '-cloud-cmd' in the Service name: the helper's display
+    # name '<name>-cloud-cmd' is longer than the budget left by Kubernetes'
+    # 42-char cluster-name limit minus the user hash, so
+    # make_cluster_name_on_cloud() truncates it to '<name>-clou-<hash>' and the
+    # suffix never reaches the Service name. Only the pod *annotation* keeps
+    # the full cluster name (labels have a length limit); Service labels carry
+    # the truncated on-cloud name, which is what the exclusion must match.
+    # With no helper (local API server) the command runs on the test driver and
+    # there is nothing to exclude.
+    resolve_helper = (
+        'helper=$(kubectl get pods -o custom-columns='
+        "':metadata.labels.skypilot-cluster-name"
+        ",:metadata.annotations.skypilot-cluster-name' --no-headers | "
+        'awk -v n=' + shlex.quote(f'{name}-cloud-cmd') +
+        " '$2==n {print $1; exit}')")
     service_check = smoke_tests_utils.run_cloud_cmd_on_cluster(
-        name,
-        f'services=$(kubectl get svc -o name | grep -F {name} | grep -v -- "-cloud-cmd" || true); '
+        name, f'{resolve_helper}; '
+        'if [ -n "$helper" ]; then '
+        'services=$(kubectl get svc -l "skypilot-cluster-name!=$helper" '
+        f'-o name | grep -F {name} || true); '
+        'else '
+        f'services=$(kubectl get svc -o name | grep -F {name} || true); '
+        'fi; '
         'echo "[$services]"; '
         'if [ -n "$services" ]; then echo "services found"; exit 1; else echo "services not found"; fi'
     )
