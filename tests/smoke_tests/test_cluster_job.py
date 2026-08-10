@@ -601,12 +601,36 @@ def test_kubernetes_non_debian_image(image, pkg_mgr, num_nodes):
 # The driver is only ever written to the head, so this runs on every node and
 # reports from whichever one has it -- rather than assuming the scheduler placed
 # the probe on the head.
-_HOW_DRIVER_ARRIVED = (
-    'f=~/.sky/sky_app/sky_job_$SKYPILOT_INTERNAL_JOB_ID; '
-    'if [ -f "$f" ]; then '
-    'mode=$(stat -c %a "$f"); echo "driver mode: $mode"; '
-    'case "$mode" in *00) echo DRIVER_UPLOADED;; *) echo DRIVER_INLINED;; esac; '
-    'fi')
+_HOW_DRIVER_ARRIVED = ('f=~/.sky/sky_app/sky_job_$SKYPILOT_INTERNAL_JOB_ID; '
+                       'if [ -f "$f" ]; then '
+                       'mode=$(stat -c %a "$f"); echo "driver mode: $mode"; '
+                       'case "$mode" in *00) echo DRIVER_UPLOADED;; '
+                       '*) echo DRIVER_INLINED;; esac; '
+                       'fi')
+
+
+def _large_run_task_yaml(path: str) -> None:
+    """Write a 2-node task whose run script is deliberately large.
+
+    The driver SkyPilot generates grows with the run script, and the size of
+    that driver is the whole subject of this test -- a trivial task would leave
+    the interesting range untested. ~16 KB of inert comments puts the request
+    comfortably past what a proxy in front of the Kubernetes API accepts, while
+    staying well under the OS command line limit so the inline path is still a
+    thing the runner could choose.
+    """
+    padding = '\n'.join('  # ' + 'p' * 76 for _ in range(16 * 1024 // 79))
+    with open(path, 'w', encoding='utf-8') as f:
+        f.write(
+            textwrap.dedent(f"""\
+            num_nodes: 2
+            resources:
+              cpus: 2+
+              memory: 4+
+            run: |
+              echo submitted-from-rank-$SKYPILOT_NODE_RANK
+              {_HOW_DRIVER_ARRIVED}
+            """) + padding + '\n')
 
 
 @pytest.mark.kubernetes
@@ -619,39 +643,35 @@ def test_kubernetes_large_job_submit_uploads_driver():
     sizes the inline/upload decision against the request URL for Kubernetes and
     uploads anything larger.
 
-    Even a trivial task generates a driver well past that limit, so the upload
-    path is what a normal multi-node launch takes. Raising
-    `kubernetes.max_inline_command_length` puts the same submit back on the
-    inline path, which both proves the limit is what decides and keeps the
-    inline path covered.
+    Every submit here carries a large run script, so the driver is firmly in the
+    range the decision is about. Raising `kubernetes.max_inline_command_length`
+    puts the same submit back on the inline path, which both proves the limit is
+    what decides and keeps the inline path covered.
     """
     name = smoke_tests_utils.get_cluster_name()
+    task_yaml = os.path.join(tempfile.gettempdir(), f'{name}-large-run.yaml')
+    _large_run_task_yaml(task_yaml)
     test = smoke_tests_utils.Test(
         'kubernetes_large_job_submit_uploads_driver',
         [
             # A normal multi-node launch: the driver exceeds the Kubernetes
             # limit, so it must be uploaded rather than inlined -- and the job
             # must still run on every node.
-            f'sky launch -y -c {name} --infra kubernetes --num-nodes 2 '
-            f'{smoke_tests_utils.LOW_RESOURCE_ARG} '
-            f'\'echo submitted-from-rank-$SKYPILOT_NODE_RANK\'',
+            f'sky launch -y -c {name} --infra kubernetes {task_yaml}',
             f'sky logs {name} 1 --status',
             f'sky logs {name} 1 | grep submitted-from-rank-0',
             f'sky logs {name} 1 | grep submitted-from-rank-1',
-            f'sky exec {name} --num-nodes 2 '
-            f'{shlex.quote(_HOW_DRIVER_ARRIVED)}',
-            f'sky logs {name} 2 --status',
-            f'sky logs {name} 2 | grep DRIVER_UPLOADED',
+            f'sky logs {name} 1 | grep DRIVER_UPLOADED',
             # Raising the limit above the driver size puts the next submit back
             # on the inline path. Same cluster, same task -- only the limit
             # differs, so a failure here means the limit is not being consulted.
-            f'sky exec {name} --num-nodes 2 '
+            f'sky exec {name} '
             f'--config kubernetes.max_inline_command_length=1000000 '
-            f'{shlex.quote(_HOW_DRIVER_ARRIVED)}',
-            f'sky logs {name} 3 --status',
-            f'sky logs {name} 3 | grep DRIVER_INLINED',
+            f'{task_yaml}',
+            f'sky logs {name} 2 --status',
+            f'sky logs {name} 2 | grep DRIVER_INLINED',
         ],
-        f'sky down -y {name}',
+        f'sky down -y {name}; rm -f {task_yaml}',
         timeout=20 * 60,
     )
     smoke_tests_utils.run_one_test(test)
