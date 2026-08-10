@@ -204,6 +204,16 @@ _EXCEPTION_MSG_AND_RETURNCODE_FOR_DUMP_INLINE_SCRIPT = [
     ('request-uri too large', 1),
     ('request header fields too large', 1),
     ('400 bad request', 1),  # CloudFlare 400 error
+    # A proxy that rejects an oversized request without a body: `kubectl` has no
+    # message to print, so it renders a bare `Error from server: `. Narrow by
+    # construction -- a real apiserver error reads `Error from server (Reason):`
+    # and so never contains the colon straight after `server`.
+    ('error from server:', 1),
+    # The request was large enough that the connection went away before any
+    # status could be written.
+    ('error dialing backend', 1),
+    ('unexpected eof', 1),
+    ('connection reset by peer', 1),
 ]
 
 _RESOURCES_UNAVAILABLE_LOG = (
@@ -3139,21 +3149,6 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         # a job (detach_setup, default).
         self._setup_cmd = None
 
-    @staticmethod
-    def _inline_command_quote_levels(handle: CloudVmRayResourceHandle) -> int:
-        # SSHCommandRunner quotes for the remote login shell and local shell.
-        quote_levels = 2
-        if isinstance(handle.launched_resources.cloud, clouds.Slurm):
-            # SlurmCommandRunner adds an srun bash -c shell.
-            quote_levels += 1
-            cluster_info = handle.cached_cluster_info
-            if (cluster_info is not None and
-                    cluster_info.provider_config is not None and
-                    cluster_info.provider_config.get('slurm_user') is not None):
-                # SlurmLoginNodeCommandRunner adds the su --command shell.
-                quote_levels += 1
-        return quote_levels
-
     # --- Implementation of Backend APIs ---
 
     def register_info(self, **kwargs) -> None:
@@ -4076,9 +4071,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 _dump_final_script(setup_script,
                                    constants.PERSISTENT_SETUP_SCRIPT_PATH)
 
-            if (detach_setup or backend_utils.is_command_length_over_limit(
-                    encoded_script,
-                    quote_levels=self._inline_command_quote_levels(handle))):
+            if (detach_setup or
+                    runner.is_command_length_over_limit(encoded_script)):
                 _dump_final_script(setup_script)
                 create_script_code = 'true'
             else:
@@ -4297,9 +4291,10 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                         user_id=managed_job_user_id,
                         execution=execution)
 
-                if backend_utils.is_command_length_over_limit(
-                        codegen,
-                        quote_levels=self._inline_command_quote_levels(handle)):
+                # Not a runner check: the codegen rides in a gRPC message here,
+                # so neither shell quoting nor a request URL is involved. This
+                # is just a size cap above which uploading is cheaper.
+                if backend_utils.is_command_length_over_limit(codegen):
                     _dump_code_to_file(codegen)
                     queue_job_request = jobsv1_pb2.QueueJobRequest(
                         job_id=job_id,
@@ -4322,9 +4317,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 use_legacy = True
 
         if use_legacy:
-            if backend_utils.is_command_length_over_limit(
-                    job_submit_cmd,
-                    quote_levels=self._inline_command_quote_levels(handle)):
+            head_runner = handle.get_command_runners()[0]
+            if head_runner.is_command_length_over_limit(job_submit_cmd):
                 _dump_code_to_file(codegen)
                 job_submit_cmd = f'{mkdir_code} && {code}'
 

@@ -589,6 +589,74 @@ def test_kubernetes_non_debian_image(image, pkg_mgr, num_nodes):
     smoke_tests_utils.run_one_test(test)
 
 
+# How the job driver reached the pod, read off the file's permissions:
+#   600 -- rsync'd in from a NamedTemporaryFile, i.e. the upload path
+#   644 -- written by `echo <script> > file` under the default umask, i.e.
+#          inlined into the `kubectl exec` command
+# This is the only difference observable from inside the pod, and it is what
+# makes the assertions below non-vacuous: both paths produce a working job, so
+# without checking which one ran, the test would pass even if the size decision
+# were ignored entirely.
+# Each job reads its own driver, via the job id SkyPilot exports into the task.
+# The driver is only ever written to the head, so this runs on every node and
+# reports from whichever one has it -- rather than assuming the scheduler placed
+# the probe on the head.
+_HOW_DRIVER_ARRIVED = (
+    'f=~/.sky/sky_app/sky_job_$SKYPILOT_INTERNAL_JOB_ID; '
+    'if [ -f "$f" ]; then '
+    'mode=$(stat -c %a "$f"); echo "driver mode: $mode"; '
+    'case "$mode" in *00) echo DRIVER_UPLOADED;; *) echo DRIVER_INLINED;; esac; '
+    'fi')
+
+
+@pytest.mark.kubernetes
+def test_kubernetes_large_job_submit_uploads_driver():
+    """A job whose driver is too big for the exec request URL still submits.
+
+    `kubectl exec` carries its command as URL query parameters, so an inlined
+    job driver travels in the request URI, percent-encoded. Proxies in front of
+    the Kubernetes API cap that far below the OS command line limit, so SkyPilot
+    sizes the inline/upload decision against the request URL for Kubernetes and
+    uploads anything larger.
+
+    Even a trivial task generates a driver well past that limit, so the upload
+    path is what a normal multi-node launch takes. Raising
+    `kubernetes.max_inline_command_length` puts the same submit back on the
+    inline path, which both proves the limit is what decides and keeps the
+    inline path covered.
+    """
+    name = smoke_tests_utils.get_cluster_name()
+    test = smoke_tests_utils.Test(
+        'kubernetes_large_job_submit_uploads_driver',
+        [
+            # A normal multi-node launch: the driver exceeds the Kubernetes
+            # limit, so it must be uploaded rather than inlined -- and the job
+            # must still run on every node.
+            f'sky launch -y -c {name} --infra kubernetes --num-nodes 2 '
+            f'{smoke_tests_utils.LOW_RESOURCE_ARG} '
+            f'\'echo submitted-from-rank-$SKYPILOT_NODE_RANK\'',
+            f'sky logs {name} 1 --status',
+            f'sky logs {name} 1 | grep submitted-from-rank-0',
+            f'sky logs {name} 1 | grep submitted-from-rank-1',
+            f'sky exec {name} --num-nodes 2 '
+            f'{shlex.quote(_HOW_DRIVER_ARRIVED)}',
+            f'sky logs {name} 2 --status',
+            f'sky logs {name} 2 | grep DRIVER_UPLOADED',
+            # Raising the limit above the driver size puts the next submit back
+            # on the inline path. Same cluster, same task -- only the limit
+            # differs, so a failure here means the limit is not being consulted.
+            f'sky exec {name} --num-nodes 2 '
+            f'--config kubernetes.max_inline_command_length=1000000 '
+            f'{shlex.quote(_HOW_DRIVER_ARRIVED)}',
+            f'sky logs {name} 3 --status',
+            f'sky logs {name} 3 | grep DRIVER_INLINED',
+        ],
+        f'sky down -y {name}',
+        timeout=20 * 60,
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
 @pytest.mark.slurm
 def test_docker_preinstalled_package_slurm_sqsh(generic_cloud: str):
     """Test local .sqsh container images on Slurm (both absolute and relative paths)."""

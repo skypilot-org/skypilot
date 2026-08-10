@@ -1697,6 +1697,14 @@ _CONTEXT_CONFIG_SCHEMA_KUBERNETES = {
             'minimum': 1,
         }],
     },
+    'max_inline_command_length': {
+        # Largest command, in bytes of request URL, that SkyPilot will inline
+        # into a `kubectl exec` instead of uploading as a file. Lower this if a
+        # proxy in front of the Kubernetes API rejects large requests; the only
+        # cost of a lower value is an extra file upload per job submission.
+        'type': 'integer',
+        'minimum': 1024,
+    },
     'pricing': _PRICING_SCHEMA,
     'auto_mounts': {
         'type': 'array',

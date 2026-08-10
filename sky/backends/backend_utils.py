@@ -295,7 +295,14 @@ def _caller_is_viewer() -> bool:
 
 
 def is_command_length_over_limit(command: str, quote_levels: int = 2) -> bool:
-    """Check if the quoted command exceeds the inline command limit."""
+    """Check if the quoted command exceeds the local command line limit.
+
+    For a command SkyPilot is about to *transmit* to a cluster, use
+    ``CommandRunner.is_command_length_over_limit`` instead: the ceiling there
+    belongs to the runner's transport, which for Kubernetes is a request URL
+    rather than a shell. This function is the plain local-shell check, and is
+    called from generated code that runs on the cluster.
+    """
     for _ in range(quote_levels):
         command = shlex.quote(command)
     return len(command) > _MAX_INLINE_SCRIPT_LENGTH
