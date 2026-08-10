@@ -5,6 +5,9 @@
        storage mounts / ephemeral ~/.sky / env below key off this rather than
        storage.enabled alone. */ -}}
 {{- $statePersist := or .Values.storage.enabled .Values.storage.existingClaim -}}
+{{- if and (not .Values.apiService.command) .Values.apiService.args (hasPrefix "-" (first .Values.apiService.args)) }}
+{{- fail "apiService.args without apiService.command must begin with an executable because the default command is [\"tini\", \"--\"]. Set apiService.command to provide option-only args." }}
+{{- end }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:

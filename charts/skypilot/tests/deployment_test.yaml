@@ -1355,11 +1355,12 @@ tests:
           path: spec.template.spec.containers[0].args[1]
           value: -c
 
-  # Verifies replacement arguments are rendered while the default tini
-  # command remains available when command is unset.
+  # Verifies an args-only override starts an executable through the default
+  # tini command when command is unset.
   - it: should override the API container args independently
     set:
       apiService.args:
+        - /app/entrypoint.sh
         - --some-option
     asserts:
       - equal:
@@ -1370,7 +1371,17 @@ tests:
       - equal:
           path: spec.template.spec.containers[0].args
           value:
+            - /app/entrypoint.sh
             - --some-option
+
+  # Prevents option-only args from reaching tini without a command to exec.
+  - it: should reject option-only API container args without a command
+    set:
+      apiService.args:
+        - --some-option
+    asserts:
+      - failedTemplate:
+          errorMessage: "apiService.args without apiService.command must begin with an executable because the default command is [\"tini\", \"--\"]. Set apiService.command to provide option-only args."
 
   # Verifies a custom entrypoint and its arguments replace both container
   # fields without retaining the generated SkyPilot startup script.

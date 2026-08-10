@@ -433,6 +433,11 @@ to replace the chart's generated startup script. Replacing it also bypasses
 ``preDeployHook``, SkyPilot configuration initialization, dev-mode handling,
 and the chart's ``sky api start`` command; include required setup in the
 replacement command or arguments. When unset, the generated script is kept.
+When ``apiService.command`` is unset, the default ``["tini", "--"]`` command
+executes the first ``args`` item; therefore an args-only override must begin
+with an executable, for example ``/app/entrypoint.sh``. Option-only args such
+as ``["--some-option"]`` are rejected; set ``apiService.command`` when the
+custom process needs those arguments.
 
 Default: ``null``
 
