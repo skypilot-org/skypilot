@@ -595,7 +595,7 @@ Default: ``null``
 
 When enabled, the API server copies ``apiService.config`` to ``~/.sky/config.yaml`` every time the API server starts. This makes the ConfigMap the source of truth and is useful when Helm values are managed by GitOps. Any existing configuration on the persistent volume is overwritten. ``apiService.config`` must be set to a non-empty value when this option is enabled.
 
-Configuration updates through the API server or dashboard are rejected while this option is enabled. Update ``apiService.config`` through Helm instead. Helm changes roll the API server Deployment; the default ``Recreate`` strategy causes a brief interruption during the rollout.
+Configuration updates through the API server or dashboard are rejected while this option is enabled. Update ``apiService.config`` through Helm instead. Helm changes roll the API server Deployment. Authoritative mode must use the default ``Recreate`` strategy, which causes a brief interruption during the rollout. ``RollingUpdate`` is not supported because it requires an external database, while authoritative mode cannot be combined with an external database.
 
 This option cannot be combined with :ref:`apiService.dbConnectionSecretName <helm-values-apiService-dbConnectionSecretName>` or :ref:`apiService.dbConnectionString <helm-values-apiService-dbConnectionString>`. External-database deployments store the SkyPilot configuration in the database and should leave this option disabled.
 
