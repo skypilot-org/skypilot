@@ -47,8 +47,8 @@ class PresetInfo:
         accelerator_name (str | None): The name of the accelerator
             (e.g., "H100"), or None if no accelerator.
         price_hourly (decimal.Decimal): The hourly price of the preset.
-        spot_price (decimal.Decimal): The spot (preemptible) price
-            of the preset.
+        spot_price (decimal.Decimal | None): The spot (preemptible) price
+            of the preset, or None if the preset has no spot price.
     """
 
     region: str
@@ -62,7 +62,7 @@ class PresetInfo:
     accelerator_manufacturer: Optional[str]
     accelerator_name: Optional[str]
     price_hourly: decimal.Decimal
-    spot_price: decimal.Decimal
+    spot_price: Optional[decimal.Decimal]
 
 
 def _format_decimal(value: decimal.Decimal) -> str:
@@ -171,15 +171,19 @@ async def _estimate_platforms_async(
     result = []
     for (platform, preset, _, _), normal, spot in zip(futures, normal, spot):
         platform_name = platform.metadata.name
-        if isinstance(normal, BaseException) or isinstance(spot, BaseException):
+        if isinstance(normal, BaseException):
             # The billing calculator may have no SKU for a platform/preset
             # (e.g. a newly listed platform that is not priced yet), which
             # fails the estimate request with INVALID_ARGUMENT. Skip such
             # presets instead of failing the whole catalog fetch.
-            error = normal if isinstance(normal, BaseException) else spot
             logger.warning('Skipping preset %s_%s in %s: %s', platform_name,
-                           preset.name, region, error)
+                           preset.name, region, normal)
             continue
+        if isinstance(spot, BaseException):
+            # Keep presets that have an on-demand price but no spot SKU;
+            # the catalog supports an empty spot price.
+            logger.warning('No spot price for preset %s_%s in %s: %s',
+                           platform_name, preset.name, region, spot)
         result.append(
             PresetInfo(
                 region=region,
@@ -196,7 +200,8 @@ async def _estimate_platforms_async(
                 if platform_name.startswith('gpu-') else '',
                 price_hourly=decimal.Decimal(
                     normal.hourly_cost.general.total.cost),
-                spot_price=decimal.Decimal(spot.hourly_cost.general.total.cost),
+                spot_price=None if isinstance(spot, BaseException) else
+                decimal.Decimal(spot.hourly_cost.general.total.cost),
             ))
     return result
 
@@ -326,6 +331,7 @@ def _get_all_platform_prices(
     regions_map = _get_regions_map()
 
     presets = []
+    total_presets = 0
 
     for region_code in sorted(regions_map.keys()):
         project_id = PARENT_ID_TEMPLATE.format(region_code)
@@ -338,11 +344,23 @@ def _get_all_platform_prices(
             logger.warning('No platforms found in region %s', region)
             continue
 
+        total_presets += sum(
+            len(platform.spec.presets) for platform in platforms)
         presets.extend(
             estimate_platforms(platforms=platforms,
                                parent_id=project_id,
                                region=region,
                                offer_types=offer_types))
+
+    # Skipping the occasional unpriceable preset is fine, but a large
+    # fraction of failures indicates a systemic problem (e.g. expired
+    # credentials or a billing service outage). Fail loudly in that case
+    # instead of silently publishing a mostly-empty catalog.
+    num_failed = total_presets - len(presets)
+    if total_presets and num_failed * 2 > total_presets:
+        raise RuntimeError(f'Failed to price {num_failed} out of '
+                           f'{total_presets} presets; refusing to write a '
+                           'mostly-empty catalog.')
 
     return presets
 
@@ -358,6 +376,9 @@ def main() -> None:
 
     # Fetch presets and estimate
     presets = _get_all_platform_prices()
+    if not presets:
+        raise RuntimeError('No presets were collected; refusing to '
+                           'overwrite the catalog with an empty file.')
 
     # Write CSV
     write_preset_prices(presets, output_file)
