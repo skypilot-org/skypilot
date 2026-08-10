@@ -1368,10 +1368,9 @@ def update_api_server_config_no_lock(config: config_utils.Config) -> None:
 
     if os.environ.get(constants.SKYPILOT_API_SERVER_CONFIG_AUTHORITATIVE,
                       'false').lower() == 'true':
-        raise ValueError(
-            'Cannot update the API server config when '
-            'apiService.configAuthoritative is enabled. Update '
-            'apiService.config through Helm instead.')
+        raise ValueError('Cannot update the API server config when '
+                         'apiService.configAuthoritative is enabled. Update '
+                         'apiService.config through Helm instead.')
 
     # Capture the currently persisted config before it is overwritten, for
     # save validators and post-save hooks (to_dict() returns a fresh copy).

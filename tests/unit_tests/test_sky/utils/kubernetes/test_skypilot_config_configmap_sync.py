@@ -175,14 +175,12 @@ class TestConfigMapSync(unittest.TestCase):
         """Test that Helm-authoritative config rejects API updates."""
         from sky import skypilot_config
 
-        with mock.patch.dict(
-                os.environ,
-                {
-                    constants.ENV_VAR_IS_SKYPILOT_SERVER: 'true',
-                    constants.SKYPILOT_API_SERVER_CONFIG_AUTHORITATIVE: 'true'
-                }):
-            with self.assertRaisesRegex(
-                    ValueError, 'apiService.configAuthoritative'):
+        with mock.patch.dict(os.environ, {
+                constants.ENV_VAR_IS_SKYPILOT_SERVER: 'true',
+                constants.SKYPILOT_API_SERVER_CONFIG_AUTHORITATIVE: 'true'
+        }):
+            with self.assertRaisesRegex(ValueError,
+                                        'apiService.configAuthoritative'):
                 skypilot_config.update_api_server_config_no_lock(
                     config_utils.Config({'test': 'value'}))
 
