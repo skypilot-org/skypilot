@@ -2101,7 +2101,20 @@ class JobController:
                                 task_is_resuming))
             sync_task_ids.append(task_id)
 
-        sync_results = await asyncio.gather(*sync_coros)
+        try:
+            sync_results = await asyncio.gather(*sync_coros,
+                                                return_exceptions=True)
+            for sync_result in sync_results:
+                if isinstance(sync_result, BaseException):
+                    raise sync_result
+        except Exception as e:
+            # This is the last frame that knows every member cluster by name:
+            # the generic handlers this would otherwise escape to (emergency
+            # recovery) release at most one task's cluster, stranding the
+            # rest of the just-launched group.
+            logger.error(f'Failed to sync Job Group task states: {e}')
+            await self._cleanup_job_group_clusters(cluster_names)
+            raise
 
         # Build handles list from sync results
         handles: List[
@@ -2110,6 +2123,8 @@ class JobController:
             ] * len(tasks)
         for i, handle in enumerate(sync_results):
             task_id = sync_task_ids[i]
+            # Narrowed above: any BaseException in sync_results was raised.
+            assert not isinstance(handle, BaseException)
             handles[task_id] = handle
 
         # Phase 3: Set up networking
@@ -2394,13 +2409,21 @@ class JobController:
 
     async def _cleanup_job_group_clusters(
             self, cluster_names: typing.List[typing.Optional[str]]) -> None:
-        """Clean up all clusters in a JobGroup."""
-        for cluster_name in cluster_names:
-            if cluster_name is not None:
-                try:
-                    await self._cleanup_cluster(cluster_name)
-                except Exception as e:  # pylint: disable=broad-except
-                    logger.warning(f'Failed to cleanup {cluster_name}: {e}')
+        """Clean up all clusters in a JobGroup, in parallel.
+
+        Best-effort per cluster: one cluster's failure must not skip the
+        others' teardown, so failures are logged and swallowed.
+        """
+
+        async def cleanup_one(cluster_name: str) -> None:
+            try:
+                await self._cleanup_cluster(cluster_name)
+            except Exception as e:  # pylint: disable=broad-except
+                logger.warning(f'Failed to cleanup {cluster_name}: {e}')
+
+        await asyncio.gather(*(cleanup_one(cluster_name)
+                               for cluster_name in cluster_names
+                               if cluster_name is not None))
 
     async def run(self):
         """Run controller logic and handle exceptions.
