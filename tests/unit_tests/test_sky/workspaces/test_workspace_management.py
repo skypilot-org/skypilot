@@ -45,9 +45,8 @@ class TestWorkspaceManagement(unittest.TestCase):
         shutil.rmtree(self.temp_dir)
 
     @mock.patch.dict(
-        os.environ, {
-            constants.SKYPILOT_API_SERVER_CONFIG_AUTHORITATIVE: 'true'
-        })
+        os.environ,
+        {constants.SKYPILOT_API_SERVER_CONFIG_AUTHORITATIVE: 'true'})
     def test_workspace_config_update_rejected_before_permission_changes(self):
         """Test authoritative mode rejects updates before policy mutation."""
         with self.assertRaisesRegex(ValueError,

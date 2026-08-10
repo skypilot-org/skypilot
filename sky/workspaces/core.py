@@ -1,7 +1,7 @@
 """Workspace management core."""
 
-import os
 from dataclasses import dataclass
+import os
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 
 from sky import check as sky_check
@@ -34,10 +34,9 @@ def _reject_authoritative_config_update() -> None:
     """Reject dashboard/API config writes in Helm-authoritative mode."""
     if os.environ.get(constants.SKYPILOT_API_SERVER_CONFIG_AUTHORITATIVE,
                       'false').lower() == 'true':
-        raise ValueError(
-            'Cannot update the API server config when '
-            'apiService.configAuthoritative is enabled. Update '
-            'apiService.config through Helm instead.')
+        raise ValueError('Cannot update the API server config when '
+                         'apiService.configAuthoritative is enabled. Update '
+                         'apiService.config through Helm instead.')
 
 
 @dataclass
