@@ -204,16 +204,6 @@ _EXCEPTION_MSG_AND_RETURNCODE_FOR_DUMP_INLINE_SCRIPT = [
     ('request-uri too large', 1),
     ('request header fields too large', 1),
     ('400 bad request', 1),  # CloudFlare 400 error
-    # A proxy that rejects an oversized request without a body: `kubectl` has no
-    # message to print, so it renders a bare `Error from server: `. Narrow by
-    # construction -- a real apiserver error reads `Error from server (Reason):`
-    # and so never contains the colon straight after `server`.
-    ('error from server:', 1),
-    # The request was large enough that the connection went away before any
-    # status could be written.
-    ('error dialing backend', 1),
-    ('unexpected eof', 1),
-    ('connection reset by peer', 1),
 ]
 
 _RESOURCES_UNAVAILABLE_LOG = (

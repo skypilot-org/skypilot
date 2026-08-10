@@ -484,24 +484,13 @@ class TestIsMessageTooLong:
             (1,
              'error: unable to upgrade connection: <html><body><h1>400 Bad request</h1>',
              True),
-            # A proxy that rejects an oversized request without a body leaves
-            # kubectl nothing to print, so it renders a bare `Error from
-            # server: `. Real apiserver errors name a reason in parentheses and
-            # so never contain the colon straight after `server`.
-            (1, 'Error from server: ', True),
-            (1, 'Error from server (NotFound): pods "sky-abc" not found',
-             False),
-            (1, 'Error from server (BadRequest): container is not valid',
-             False),
-            (1, 'Error from server (Forbidden): pods "x" is forbidden', False),
-            # The request was large enough that the connection went away before
-            # any status could be written.
-            (1,
-             'error: unable to upgrade connection: error dialing backend: EOF',
-             True),
-            (1, 'unexpected EOF', True),
-            (1, 'read tcp 10.0.0.1:443: connection reset by peer', True),
-            (255, 'Error from server: ', False),
+            # Signatures are matched as bare substrings against the whole
+            # setup log, which is user output, so generic network-failure text
+            # must not be in the table: a user script printing it and exiting 1
+            # would have its setup re-run from the top.
+            (1, 'read tcp 10.0.0.1:443: connection reset by peer', False),
+            (1, 'gzip: unexpected EOF', False),
+            (1, 'Error from server: ', False),
             # Case insensitivity
             (255, 'TOO LONG', True),
             (1, 'REQUEST HEADER FIELDS TOO LARGE', True),
