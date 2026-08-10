@@ -1716,6 +1716,17 @@ _CONTEXT_CONFIG_SCHEMA_KUBERNETES = {
                     },
                     'minItems': 1,
                 },
+                # Whose launches this auto-mount applies to, mirroring the
+                # personal/workspace/global scopes used by secrets:
+                # - personal: only launches by the volume's owner
+                # - workspace: only launches in the volume's workspace
+                # - global: every launch (default; original behavior)
+                # Values must match volume.AutoMountScope (not imported here
+                # to avoid a circular import).
+                'scope': {
+                    'type': 'string',
+                    'enum': ['personal', 'workspace', 'global'],
+                },
             },
         },
     },
