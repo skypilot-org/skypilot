@@ -80,6 +80,20 @@ The above is achieved by configuring the following section in the config file:
              allowed_contexts:
                - node-pool-1
                - node-pool-2
+             # Workspace-level default namespace (optional). Applies to every
+             # context in `allowed_contexts` that does not set its own
+             # `context_configs.<ctx>.namespace` below.
+             namespace: team-a-namespace
+             # Service account the pods run as (optional). A plain string sets
+             # the same service account for every context; a mapping selects
+             # one per context. See "Per-workspace cloud identity" below.
+             remote_identity: team-a-service-account
+             # Per-workspace per-context overrides (optional). Lets a single
+             # shared context target a different namespace per workspace and
+             # takes precedence over the workspace-level `namespace` above.
+             context_configs:
+               node-pool-1:
+                 namespace: team-a-node-pool-1-namespace
 
            gcp:
              disabled: false
@@ -87,6 +101,10 @@ The above is achieved by configuring the following section in the config file:
              capabilities:
                - compute
                - storage
+             # Credential mode only (enum): LOCAL_CREDENTIALS, SERVICE_ACCOUNT,
+             # or NO_UPLOAD. Unlike AWS/Kubernetes, a specific service account
+             # email cannot be pinned per workspace.
+             remote_identity: SERVICE_ACCOUNT
 
            aws:
              disabled: false
@@ -94,6 +112,10 @@ The above is achieved by configuring the following section in the config file:
              capabilities:
                - compute
                - storage
+             # IAM role (service account) attached to launched EC2 instances
+             # (optional). A plain string applies to all clusters; a list of
+             # {cluster-name-glob: role} mappings selects per cluster name.
+             remote_identity: skypilot-team-a-v1
 
            nebius:
              disabled: false
@@ -150,6 +172,75 @@ To view or edit a workspace's definition, click on a workspace's **Edit** button
    :alt: SkyPilot dashboard workspaces edit
 
 
+
+.. _workspaces-remote-identity:
+
+Per-workspace cloud identity
+----------------------------
+
+Each workspace can run its compute under its own cloud identity by setting
+``remote_identity`` in the workspace's cloud block. This is the per-workspace
+equivalent of the global :ref:`remote_identity <config-yaml-aws-remote-identity>`
+and is typically used to give each team an IAM role / service account scoped to
+only that team's resources (e.g., per-team S3 buckets).
+
+.. code-block:: yaml
+
+   workspaces:
+     team-a:
+       aws:
+         # IAM role (service account) attached to launched EC2 instances.
+         remote_identity: skypilot-team-a-v1
+       kubernetes:
+         # Service account the pods run as (IRSA on EKS, Workload Identity on
+         # GKE). A plain string applies to all contexts.
+         remote_identity: team-a-service-account
+     team-b:
+       aws:
+         remote_identity: skypilot-team-b-v1
+
+What ``remote_identity`` controls per cloud:
+
+* **AWS** — the IAM role (service account) attached to launched EC2 instances.
+  Accepts a plain string, or a list of ``{cluster-name-glob: role}`` mappings.
+* **Kubernetes** — the ``serviceAccountName`` set on the pod. Accepts a plain
+  string (applied to every context) or a ``{context: service-account}`` mapping.
+* **GCP** — credential *mode* only: one of ``LOCAL_CREDENTIALS``,
+  ``SERVICE_ACCOUNT``, or ``NO_UPLOAD``. Unlike AWS and Kubernetes, GCP cannot
+  pin a specific service account email per workspace; the VM uses the default
+  SkyPilot service account.
+
+.. _workspaces-remote-identity-precedence:
+
+Resolution order
+~~~~~~~~~~~~~~~~~
+
+``remote_identity`` is resolved workspace-first: the workspace block is fully
+consulted before any global config. From highest to lowest priority:
+
+#. Workspace, per-context/region — **only for clouds that support it**
+   (Kubernetes/SSH via ``context_configs.<ctx>``; Nebius/OCI via
+   ``region_configs.<region>``):
+   ``workspaces.<ws>.<cloud>.context_configs.<ctx>.remote_identity``
+#. Workspace, cloud-level: ``workspaces.<ws>.<cloud>.remote_identity``
+#. Global, per-context/region (same clouds as step 1):
+   ``<cloud>.context_configs.<ctx>.remote_identity``
+#. Global, cloud-level: ``<cloud>.remote_identity``
+#. Default: ``LOCAL_CREDENTIALS`` (AWS/GCP) or ``SERVICE_ACCOUNT`` (Kubernetes)
+
+AWS and GCP are neither context- nor region-keyed, so steps 1 and 3 do not
+apply to them — only the cloud-level value (steps 2 and 4) and the default are
+consulted.
+
+.. note::
+
+   Scope outranks specificity. For a cloud that *does* have a per-context tier
+   (e.g. Kubernetes), a cloud-level workspace value (step 2) shadows a *more
+   specific* global per-context value (step 3): a plain
+   ``workspaces.team-a.kubernetes.remote_identity`` overrides a global
+   ``kubernetes.context_configs.<ctx>.remote_identity`` for that workspace. If
+   you need a context-specific identity to survive inside a workspace, set it
+   under that workspace's own ``context_configs``.
 
 Setting the active workspace
 ----------------------------
@@ -244,6 +335,34 @@ users who cannot access the workspace, they cannot see/access/operate on the wor
 
    The ``allowed_users`` field can be a list of user names or IDs. Note, if you
    have multiple users with the same name, you need to specify the user IDs instead.
+
+Service accounts in private workspaces
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+:ref:`Service accounts <service-accounts>` can be added to ``allowed_users`` to
+let automation (CI, scripts, etc.) launch into a private workspace. List the
+service account by its token name, just like a human user:
+
+.. code-block:: yaml
+
+   workspaces:
+     private-ws:
+       private: true
+       allowed_users:
+         - alice@example.com
+         - my-service-account        # service account token name
+
+.. important::
+
+   A newly created service account is assigned the **default role**, which is
+   ``admin`` unless you set ``rbac.default_role: user``. **Admins can access
+   every workspace**, so adding an admin service account to ``allowed_users``
+   has no scoping effect.
+
+   To restrict a service account to specific workspaces, first assign it the
+   ``user`` role (in the dashboard's **Users** page under the service accounts
+   tab, or via the ``/service-account-tokens/update-role`` API), then add it to
+   the ``allowed_users`` of the workspaces it should reach.
 
 User management
 ----------------

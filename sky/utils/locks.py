@@ -8,7 +8,7 @@ import hashlib
 import logging
 import os
 import time
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 import filelock
 import psycopg2
@@ -18,6 +18,7 @@ from sky import global_user_state
 from sky.skylet import runtime_utils
 from sky.utils import common_utils
 from sky.utils.db import db_utils
+from sky.utils.db import retries as db_retries
 
 logger = logging.getLogger(__name__)
 
@@ -202,14 +203,33 @@ class PostgresLock(DistributedLock):
         # Take first 8 bytes and convert to int, ensure positive 64-bit
         return int.from_bytes(hash_digest[:8], 'big') & ((1 << 63) - 1)
 
+    @db_retries.retry
     def _get_connection(self) -> sqlalchemy.pool.PoolProxiedConnection:
         """Get database connection."""
-        engine = global_user_state.initialize_and_get_db()
+        # Session-scoped advisory locks hold one connection across their whole
+        # lifetime, which is unsafe through a transaction-mode pooler (the
+        # backend can change between statements). Use a direct engine so the
+        # lock connection bypasses any configured pooler; when none is
+        # configured this is the same engine global_user_state uses.
+        engine = db_utils.get_engine(None, direct=True)
         if engine.dialect.name != db_utils.SQLAlchemyDialect.POSTGRESQL.value:
             raise ValueError('PostgresLock requires PostgreSQL database. '
                              f'Current dialect: {engine.dialect.name}')
-        # Borrow a dedicated connection from the pool.
-        return engine.raw_connection()
+        # Borrow a dedicated connection from the pool. Idempotent under
+        # retry: raw_connection() either returns a checked-out conn or
+        # raises with nothing taken — no partial state, no leak.
+        connection = engine.raw_connection()
+        # Advisory locks are session-scoped: they need no transaction and
+        # persist until explicitly released or the session ends. Without
+        # autocommit, the first lock query implicitly opens a transaction
+        # that stays open for the entire lock hold, leaving the session
+        # 'idle in transaction' — tying up a pooled connection in a state
+        # that can exhaust the pool and, if the session ever holds a
+        # snapshot or xid, pin the vacuum horizon. Autocommit for the
+        # lifetime of the checkout; _close_connection restores the default
+        # before the connection is returned to the pool.
+        connection.driver_connection.autocommit = True
+        return connection
 
     def acquire(self, blocking: bool = True) -> AcquireReturnProxy:
         """Acquire the postgres advisory lock."""
@@ -269,9 +289,13 @@ class PostgresLock(DistributedLock):
             cursor.execute(f'SELECT {unlock_func}(%s)', (self._lock_key,))
             self._connection.commit()
             self._acquired = False
-        except psycopg2.OperationalError as e:
+        except psycopg2.DatabaseError as e:
             # Lost connection to the database, likely the lock is force unlocked
-            # by other routines.
+            # by other routines. Catch `DatabaseError` (parent of
+            # `OperationalError`) — psycopg2 raises bare `DatabaseError` for
+            # some connection-closed cases (`server closed the connection
+            # unexpectedly`) which a narrower `OperationalError` catch would
+            # miss.
             logger.debug(f'Failed to release postgres lock {self.lock_id}: {e}')
             connection_lost = True
         finally:
@@ -339,7 +363,18 @@ class PostgresLock(DistributedLock):
                 if invalidate:
                     self._connection.invalidate()
                 else:
-                    self._connection.close()
+                    # Restore the default transactional mode before the
+                    # connection is returned to the pool: other borrowers
+                    # expect a non-autocommit connection. If the restore
+                    # fails (typically a dead connection), invalidate
+                    # instead of returning an autocommit-mode connection
+                    # to the pool.
+                    try:
+                        self._connection.driver_connection.autocommit = False
+                    except Exception:  # pylint: disable=broad-except
+                        self._connection.invalidate()
+                    else:
+                        self._connection.close()
             except Exception as e:  # pylint: disable=broad-except
                 if invalidate:
                     logger.debug(
@@ -351,6 +386,40 @@ class PostgresLock(DistributedLock):
     def is_locked(self) -> bool:
         """Check if the postgres advisory lock is acquired."""
         return self._acquired
+
+    def is_session_alive(self) -> bool:
+        """Return True if the underlying PG session can still run queries.
+
+        Callers that hold a long-lived advisory lock (held for the lifetime of
+        a daemon/leader process, not just one transaction) need a way to
+        detect that the underlying session has been killed without an
+        exception propagating into their code path: RDS maintenance restarts,
+        NLB idle-timeout, ``idle_in_transaction_session_timeout``,
+        manual ``pg_terminate_backend``, network partitions.  All of these
+        free the advisory lock server-side while ``self._acquired`` stays
+        ``True`` locally, leaving the holder unaware that another replica
+        could now hold the same lock.
+
+        This method exposes a cheap ``SELECT 1`` probe on the very connection
+        that holds the lock so the holder can detect the loss and react
+        (typically by exiting and letting the orchestrator restart it).
+
+        Returns ``False`` if the lock was never acquired, if the connection
+        is missing, or if the probe raises any exception.  Returns ``True``
+        only when the probe succeeds.
+        """
+        if not self._acquired or self._connection is None:
+            return False
+        try:
+            cursor = self._connection.cursor()
+            try:
+                cursor.execute('SELECT 1')
+                cursor.fetchone()
+            finally:
+                cursor.close()
+            return True
+        except Exception:  # pylint: disable=broad-except
+            return False
 
 
 def get_lock(lock_id: str,
@@ -414,3 +483,42 @@ def _detect_lock_type() -> str:
         pass
 
     return 'filelock'
+
+
+class LockAcquirableCondition:
+    """Resume a paused request once a distributed lock looks acquirable.
+
+    Implements the ``wait()`` continue-condition contract consumed by the
+    request scheduler for ``exceptions.ExecutionPausedError`` (duck-typed via
+    that error's ``continue_condition`` field, so no base class is needed).
+
+    Probes the lock with a non-blocking acquire (released immediately on
+    success) instead of a blocking acquire: with the postgres backend a
+    blocking acquire would pin a pooled database connection per parked request
+    for the whole wait and could not interleave cancellation checks. The
+    momentary acquire is a probe, not a reservation -- the resumed request
+    re-acquires the lock itself and parks again if another contender wins the
+    race. Instances are pickled onto the exception, so state stays picklable.
+    """
+
+    def __init__(self, lock_id: str, poll_interval_seconds: float = 5.0):
+        self._lock_id = lock_id
+        self._poll_interval_seconds = poll_interval_seconds
+
+    def wait(self, *, is_cancelled: Callable[[], bool],
+             fallback_wait_seconds: float) -> bool:
+        """Block until the lock is acquirable; return False if cancelled."""
+        # There is no better signal than the probe itself; on probe errors
+        # (e.g. a database glitch) the exception propagates to the scheduler,
+        # which falls back to a fixed ``fallback_wait_seconds`` backoff.
+        del fallback_wait_seconds
+        while True:
+            if is_cancelled():
+                return False
+            try:
+                with get_lock(self._lock_id).acquire(blocking=False):
+                    pass  # Acquirable; release immediately and resume.
+                return True
+            except LockTimeout:
+                pass
+            time.sleep(self._poll_interval_seconds)

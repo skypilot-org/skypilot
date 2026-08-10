@@ -755,3 +755,396 @@ class TestResolveDynamicRoute:
             result = server._resolve_dynamic_route(str(d), 'cron')
         assert result is not None
         assert result.endswith('[...path].html')
+
+
+# --- Tests for serve_dashboard _next/ asset handling ---
+
+
+@pytest.mark.asyncio
+async def test_serve_dashboard_missing_next_asset_returns_404_no_store(
+        tmp_path):
+    """Missing _next/ asset 404s with Cache-Control: no-store, not index.html."""
+    d = _build_dashboard_tree(tmp_path)
+    request = mock.MagicMock(spec=fastapi.Request)
+
+    with mock.patch.object(server_constants, 'DASHBOARD_DIR', str(d)):
+        with pytest.raises(fastapi.HTTPException) as exc_info:
+            await server.serve_dashboard(
+                request, full_path='_next/static/chunks/missing-abc123.js')
+
+    assert exc_info.value.status_code == 404
+    assert exc_info.value.headers.get('Cache-Control') == 'no-store'
+
+
+@pytest.mark.asyncio
+async def test_serve_dashboard_client_route_falls_back_to_index(tmp_path):
+    """Client-side routes (no extension) fall through to index.html, not 404."""
+    d = _build_dashboard_tree(tmp_path)
+    request = mock.MagicMock(spec=fastapi.Request)
+
+    with mock.patch.object(server_constants, 'DASHBOARD_DIR', str(d)), \
+         mock.patch('sky.server.server._serve_html_with_nonce',
+                    return_value=fastapi.responses.HTMLResponse(
+                        content='<html/>', status_code=200)):
+        response = await server.serve_dashboard(request, full_path='clusters')
+
+    assert response.status_code == 200
+
+
+def _api_get_dummy_entrypoint():
+    """Module-level entrypoint so Request.encode() can pickle it."""
+    pass
+
+
+def test_api_get_endpoint_serializes_request_payload(monkeypatch):
+    """/api/get returns a JSON-serialized RequestPayload over the wire.
+
+    Guards the response serialization path: after removing the deprecated
+    ORJSONResponse response_class, FastAPI must natively serialize the
+    returned Pydantic RequestPayload model into valid JSON.
+    """
+    from fastapi.testclient import TestClient
+
+    from sky.server.requests import payloads
+    from sky.server.requests import requests as requests_lib
+
+    created_at = 1234567890.0
+    request = requests_lib.Request(
+        request_id='test-req-123',
+        name='test-request',
+        entrypoint=_api_get_dummy_entrypoint,
+        request_body=payloads.RequestBody(),
+        status=requests_lib.RequestStatus.SUCCEEDED,
+        created_at=created_at,
+        user_id='user-123',
+    )
+
+    async def fake_expand(request_id):
+        return request_id
+
+    async def fake_status(request_id, include_msg=False):
+        return requests_lib.StatusWithMsg(
+            status=requests_lib.RequestStatus.SUCCEEDED)
+
+    async def fake_get_request(request_id):
+        return request
+
+    monkeypatch.setattr(server, 'get_expanded_request_id', fake_expand)
+    monkeypatch.setattr(requests_lib, 'get_request_status_async', fake_status)
+    monkeypatch.setattr(requests_lib, 'get_request_async', fake_get_request)
+
+    client = TestClient(server.app)
+    response = client.get('/api/get', params={'request_id': 'test-req-123'})
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data['request_id'] == 'test-req-123'
+    assert data['name'] == 'test-request'
+    assert data['status'] == 'SUCCEEDED'
+    assert data['created_at'] == created_at
+    assert data['user_id'] == 'user-123'
+
+
+def _make_interrupted_request(with_error: bool):
+    from sky import exceptions
+    from sky.server.requests import payloads
+    from sky.server.requests import requests as requests_lib
+
+    request = requests_lib.Request(
+        request_id='interrupted-req',
+        name='test-request',
+        entrypoint=_api_get_dummy_entrypoint,
+        request_body=payloads.RequestBody(),
+        status=requests_lib.RequestStatus.CANCELLED,
+        created_at=1234567890.0,
+        user_id='user-123',
+        should_retry=True,
+    )
+    if with_error:
+        request.set_error(
+            exceptions.RequestInterruptedError(
+                'Request was interrupted by an API server restart.'))
+    return request
+
+
+def _mount_api_get_request(monkeypatch, request):
+    from sky.server.requests import requests as requests_lib
+
+    async def fake_expand(request_id):
+        return request_id
+
+    async def fake_status(request_id, include_msg=False):
+        return requests_lib.StatusWithMsg(
+            status=requests_lib.RequestStatus.CANCELLED)
+
+    async def fake_get_request(request_id):
+        return request
+
+    monkeypatch.setattr(server, 'get_expanded_request_id', fake_expand)
+    monkeypatch.setattr(requests_lib, 'get_request_status_async', fake_status)
+    monkeypatch.setattr(requests_lib, 'get_request_async', fake_get_request)
+
+
+def test_api_get_interrupted_request_returns_terminal_error(monkeypatch):
+    """/api/get surfaces the stored error of an interrupted request.
+
+    Interrupted requests are terminal (the server does not re-execute them
+    after a restart), so /api/get must return the stored error instead of a
+    retryable 503 -- otherwise clients keep polling /api/get forever while
+    the request will never produce a result.
+    """
+    from fastapi.testclient import TestClient
+
+    from sky import exceptions
+    from sky.server.requests import payloads
+    from sky.server.requests import requests as requests_lib
+
+    request = _make_interrupted_request(with_error=True)
+    _mount_api_get_request(monkeypatch, request)
+
+    client = TestClient(server.app)
+    response = client.get('/api/get', params={'request_id': 'interrupted-req'})
+
+    assert response.status_code == 500
+    # The client SDK decodes the detail payload and raises the error object;
+    # verify it round-trips to RequestInterruptedError.
+    payload = payloads.RequestPayload(**response.json()['detail'])
+    decoded = requests_lib.Request.decode(payload)
+    error = decoded.get_error()
+    assert error is not None
+    assert isinstance(error['object'], exceptions.RequestInterruptedError)
+
+
+def test_api_get_interrupted_request_without_error_synthesizes_error(
+        monkeypatch):
+    """Interrupted rows without a stored error get a synthesized one.
+
+    Rows written by servers that predate the stored-error behavior —
+    including the draining side of the rolling update that ships it — carry
+    bare should_retry. /api/get synthesizes the same terminal error at read
+    time so those rows stop 503ing immediately on deploy.
+    """
+    from fastapi.testclient import TestClient
+
+    from sky import exceptions
+    from sky.server.requests import payloads
+    from sky.server.requests import requests as requests_lib
+
+    request = _make_interrupted_request(with_error=False)
+    _mount_api_get_request(monkeypatch, request)
+
+    client = TestClient(server.app)
+    response = client.get('/api/get', params={'request_id': 'interrupted-req'})
+
+    assert response.status_code == 500
+    payload = payloads.RequestPayload(**response.json()['detail'])
+    decoded = requests_lib.Request.decode(payload)
+    error = decoded.get_error()
+    assert error is not None
+    assert isinstance(error['object'], exceptions.RequestInterruptedError)
+
+
+def test_dashboard_config_endpoint_serializes_external_links(monkeypatch):
+    """/dashboard_config returns JSON-serialized dashboard settings.
+
+    Guards the response serialization path after removing the deprecated
+    ORJSONResponse response_class: FastAPI must natively serialize the
+    returned dict into valid JSON.
+    """
+    from fastapi.testclient import TestClient
+
+    from sky import skypilot_config
+
+    monkeypatch.setattr(
+        skypilot_config, 'get_nested', lambda keys, default: [{
+            'label': 'Grafana',
+            'regex': 'https://grafana.example.com/.*'
+        }, {
+            'label': 'Ray Dashboard',
+            'url': 'https://ray.internal.example.com/dashboard/${cluster_name}'
+        }, {
+            'label': 'Malformed entry without regex or url',
+        }])
+    monkeypatch.setattr(server, '_get_local_contexts',
+                        lambda: ['kind-local-named'])
+
+    client = TestClient(server.app)
+    response = client.get('/dashboard_config')
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data == {
+        'external_links': [{
+            'label': 'Grafana',
+            'regex': 'https://grafana.example.com/.*'
+        }, {
+            'label': 'Ray Dashboard',
+            'url': 'https://ray.internal.example.com/dashboard/${cluster_name}'
+        }],
+        'local_contexts': ['kind-local-named'],
+    }
+
+
+def test_dashboard_config_endpoint_sanitizes_scope(monkeypatch):
+    """/dashboard_config passes through valid scopes and drops bad ones.
+
+    Unknown scope values are filtered out and a scope with no valid values
+    left (or of the wrong type) is omitted entirely, so the dashboard only
+    ever sees recognized scopes.
+    """
+    from fastapi.testclient import TestClient
+
+    from sky import skypilot_config
+
+    monkeypatch.setattr(
+        skypilot_config, 'get_nested', lambda keys, default: [{
+            'label': 'Ray Dashboard',
+            'url': 'https://ray.internal.example.com/dashboard/${cluster_name}',
+            'scope': ['cluster'],
+        }, {
+            'label': 'Experiment Platform',
+            'url': 'https://exp.internal.example.com/jobs/${job_id}',
+            'scope': ['jobs', 'not-a-page'],
+        }, {
+            'label': 'Grafana',
+            'regex': 'https://grafana.example.com/.*',
+            'scope': ['not-a-page'],
+        }, {
+            'label': 'Wiki',
+            'url': 'https://wiki.internal.example.com',
+            'scope': 'cluster',
+        }])
+    monkeypatch.setattr(server, '_get_local_contexts', lambda: [])
+
+    client = TestClient(server.app)
+    response = client.get('/dashboard_config')
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data['external_links'] == [{
+        'label': 'Ray Dashboard',
+        'url': 'https://ray.internal.example.com/dashboard/${cluster_name}',
+        'scope': ['cluster'],
+    }, {
+        'label': 'Experiment Platform',
+        'url': 'https://exp.internal.example.com/jobs/${job_id}',
+        'scope': ['jobs'],
+    }, {
+        'label': 'Grafana',
+        'regex': 'https://grafana.example.com/.*',
+    }, {
+        'label': 'Wiki',
+        'url': 'https://wiki.internal.example.com',
+    }]
+
+
+def test_dashboard_config_endpoint_omits_local_contexts_on_failure(monkeypatch):
+    """A broken local-context detection must not break /dashboard_config.
+
+    The key is omitted (rather than returned as []) so the dashboard can
+    distinguish "detection failed, use the in-cluster default" from
+    "there are genuinely no local contexts".
+    """
+    from fastapi.testclient import TestClient
+
+    from sky import skypilot_config
+
+    monkeypatch.setattr(skypilot_config, 'get_nested',
+                        lambda keys, default: default)
+
+    def _boom():
+        raise RuntimeError('kubeconfig exploded')
+
+    monkeypatch.setattr(server, '_get_local_contexts', _boom)
+
+    client = TestClient(server.app)
+    response = client.get('/dashboard_config')
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data == {'external_links': []}
+    assert 'local_contexts' not in data
+
+
+# --- Tests for _prune_sky_logs (~/sky_logs GC) ---
+
+
+def _touch_dir(path: pathlib.Path, mtime: float) -> pathlib.Path:
+    path.mkdir(parents=True, exist_ok=True)
+    (path / 'provision.log').write_text('log')
+    os.utime(path, (mtime, mtime))
+    return path
+
+
+def _touch_file(path: pathlib.Path, mtime: float) -> pathlib.Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text('log')
+    os.utime(path, (mtime, mtime))
+    return path
+
+
+@pytest.fixture
+def _no_provision_log_paths(monkeypatch):
+    monkeypatch.setattr(server.global_user_state,
+                        'get_all_cluster_provision_log_paths', lambda: [])
+
+
+def test_prune_sky_logs_removes_only_expired_provision_dirs(
+        tmp_path, monkeypatch, _no_provision_log_paths):
+    """Old sky-* dirs are pruned; fresh ones and non sky-* dirs are kept."""
+    monkeypatch.setattr(constants, 'SKY_LOGS_DIRECTORY', str(tmp_path))
+    now = 1_000_000.0
+    old = _touch_dir(tmp_path / 'sky-2020-01-01-00-00-00-000000', now - 10_000)
+    fresh = _touch_dir(tmp_path / 'sky-2020-01-02-00-00-00-000000', now - 100)
+    job_dir = _touch_dir(tmp_path / '1-my-job', now - 10_000)
+    api_dir = _touch_dir(tmp_path / 'api_server', now - 10_000)
+
+    removed = server._prune_sky_logs(cutoff=now - 5_000)
+
+    assert removed == 1
+    assert not old.exists()
+    assert fresh.exists()
+    assert job_dir.exists()
+    assert api_dir.exists()
+
+
+def test_prune_sky_logs_keeps_live_cluster_provision_dirs(
+        tmp_path, monkeypatch):
+    """Expired dirs referenced by an existing cluster survive the sweep."""
+    monkeypatch.setattr(constants, 'SKY_LOGS_DIRECTORY', str(tmp_path))
+    now = 1_000_000.0
+    live = _touch_dir(tmp_path / 'sky-2020-01-01-00-00-00-000000', now - 10_000)
+    orphan = _touch_dir(tmp_path / 'sky-2020-01-01-11-11-11-111111',
+                        now - 10_000)
+    monkeypatch.setattr(server.global_user_state,
+                        'get_all_cluster_provision_log_paths',
+                        lambda: [str(live / 'provision.log')])
+
+    removed = server._prune_sky_logs(cutoff=now - 5_000)
+
+    assert removed == 1
+    assert live.exists()
+    assert not orphan.exists()
+
+
+def test_prune_sky_logs_removes_expired_file_upload_logs(
+        tmp_path, monkeypatch, _no_provision_log_paths):
+    """Old ~/sky_logs/file_uploads/*.log files are pruned by mtime."""
+    monkeypatch.setattr(constants, 'SKY_LOGS_DIRECTORY', str(tmp_path))
+    now = 1_000_000.0
+    old_log = _touch_file(tmp_path / 'file_uploads' / 'sky-old.log',
+                          now - 10_000)
+    fresh_log = _touch_file(tmp_path / 'file_uploads' / 'sky-fresh.log',
+                            now - 100)
+
+    removed = server._prune_sky_logs(cutoff=now - 5_000)
+
+    assert removed == 1
+    assert not old_log.exists()
+    assert fresh_log.exists()
+
+
+def test_prune_sky_logs_missing_dir_is_noop(tmp_path, monkeypatch):
+    monkeypatch.setattr(constants, 'SKY_LOGS_DIRECTORY',
+                        str(tmp_path / 'does-not-exist'))
+    assert server._prune_sky_logs(cutoff=1_000_000.0) == 0

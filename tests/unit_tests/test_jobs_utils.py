@@ -9,6 +9,7 @@ import pytest
 from sky.backends import cloud_vm_ray_backend
 from sky.exceptions import ClusterDoesNotExist
 from sky.jobs import utils
+from sky.skylet import job_lib
 
 # String path for mock.patch — can't use the constant directly because
 # mock.patch needs the dotted path to the attribute being patched.
@@ -104,9 +105,9 @@ async def test_get_job_status_timeout(mock_get_handle, mock_logger):
         f'Expected timeout around {timeout_override}s, '
         f'but took {elapsed_time}s')
 
-    # Verify only one attempt was made (no retry in get_job_status)
-    # === Checking the job status... ===
-    assert mock_logger.info.call_count == 1
+    # No status logline is emitted when the fetch fails - the caller logs the
+    # transient error reason instead.
+    assert mock_logger.info.call_count == 0
 
 
 @pytest.mark.asyncio
@@ -135,8 +136,166 @@ async def test_get_job_status_returns_error_reason_on_failure(
     assert error_reason is not None, 'Expected error reason on failure'
     assert 'timed out' in error_reason
 
-    # Verify only one attempt was made (no retry in get_job_status)
-    assert mock_logger.info.call_count == 1
+    # No status logline is emitted when the fetch fails - the caller logs the
+    # transient error reason instead.
+    assert mock_logger.info.call_count == 0
+
+
+def _info_messages(mock_logger):
+    """The messages passed to logger.info(), in order."""
+    return [call.args[0] for call in mock_logger.info.call_args_list]
+
+
+@mock.patch('sky.jobs.utils.logger')
+def test_job_status_logger_collapses_repeats(mock_logger):
+    """Repeated statuses are logged once, then flushed with a count."""
+    status_logger = utils.JobStatusLogger()
+    for _ in range(5):
+        status_logger.log('Job status: JobStatus.RUNNING')
+
+    assert _info_messages(mock_logger) == ['Job status: JobStatus.RUNNING']
+
+    # The last occurrence of the run is kept, so the time the status was last
+    # observed is still recoverable from the log.
+    status_logger.flush()
+    messages = _info_messages(mock_logger)
+    assert len(messages) == 2
+    assert messages[1].startswith('Job status: JobStatus.RUNNING (unchanged '
+                                  'for ')
+    assert '5 checks' in messages[1]
+
+    # Nothing left to flush.
+    status_logger.flush()
+    assert len(_info_messages(mock_logger)) == 2
+
+
+@mock.patch('sky.jobs.utils.logger')
+def test_job_status_logger_flushes_on_status_change(mock_logger):
+    """A new status flushes the previous run before being logged."""
+    status_logger = utils.JobStatusLogger()
+    status_logger.log('Job status: JobStatus.SETTING_UP')
+    for _ in range(3):
+        status_logger.log('Job status: JobStatus.RUNNING')
+    status_logger.log('Job status: JobStatus.FAILED')
+
+    messages = _info_messages(mock_logger)
+    assert messages[0] == 'Job status: JobStatus.SETTING_UP'
+    assert messages[1] == 'Job status: JobStatus.RUNNING'
+    assert '3 checks' in messages[2]
+    assert messages[3] == 'Job status: JobStatus.FAILED'
+    assert len(messages) == 4
+
+
+@mock.patch('sky.jobs.utils.logger')
+def test_job_status_logger_logs_nothing_mid_run(mock_logger):
+    """An unchanged status is never re-emitted while the run is open."""
+    status_logger = utils.JobStatusLogger()
+    for _ in range(500):
+        status_logger.log('Job status: JobStatus.RUNNING')
+
+    assert _info_messages(mock_logger) == ['Job status: JobStatus.RUNNING']
+
+
+@mock.patch('sky.jobs.utils.logger')
+def test_job_status_logger_flush_is_idempotent(mock_logger):
+    """Flushing an already-flushed run does not repeat the tail line."""
+    status_logger = utils.JobStatusLogger()
+    for _ in range(3):
+        status_logger.log('Job status: JobStatus.RUNNING')
+
+    # reset() flushes; the polling loop exiting then flushes again.
+    status_logger.reset()
+    status_logger.flush()
+
+    messages = _info_messages(mock_logger)
+    assert len(messages) == 2
+    assert '3 checks' in messages[1]
+
+
+@mock.patch('sky.jobs.utils.logger')
+def test_job_status_logger_single_observation_not_repeated(mock_logger):
+    """A run seen exactly once is not followed by a redundant tail line."""
+    status_logger = utils.JobStatusLogger()
+    status_logger.log('Job status: JobStatus.RUNNING')
+    status_logger.flush()
+
+    assert _info_messages(mock_logger) == ['Job status: JobStatus.RUNNING']
+
+
+@mock.patch('sky.jobs.utils.logger')
+def test_job_status_logger_reset(mock_logger):
+    """After a reset, an identical status is logged in full again."""
+    status_logger = utils.JobStatusLogger()
+    status_logger.log('Job status: JobStatus.RUNNING')
+    status_logger.log('Job status: JobStatus.RUNNING')
+    status_logger.reset()
+    status_logger.log('Job status: JobStatus.RUNNING')
+
+    messages = _info_messages(mock_logger)
+    assert messages[0] == 'Job status: JobStatus.RUNNING'
+    assert '2 checks' in messages[1]
+    assert messages[2] == 'Job status: JobStatus.RUNNING'
+    assert len(messages) == 3
+
+
+@pytest.mark.asyncio
+@mock.patch('sky.jobs.utils.logger')
+@mock.patch('sky.global_user_state.get_handle_from_cluster_name')
+async def test_get_job_status_collapses_repeats(mock_get_handle, mock_logger):
+    """get_job_status routes its result through the status logger."""
+    mock_handle = mock.MagicMock(
+        spec=cloud_vm_ray_backend.CloudVmRayResourceHandle)
+    mock_get_handle.return_value = mock_handle
+
+    mock_backend = mock.MagicMock(spec=cloud_vm_ray_backend.CloudVmRayBackend)
+    mock_backend.get_job_status.return_value = {1: job_lib.JobStatus.RUNNING}
+
+    status_logger = utils.JobStatusLogger()
+    for _ in range(4):
+        job_status, error_reason = await utils.get_job_status(
+            backend=mock_backend,
+            cluster_name='test-cluster',
+            job_id=1,
+            status_logger=status_logger)
+        assert job_status == job_lib.JobStatus.RUNNING
+        assert error_reason is None
+
+    assert _info_messages(mock_logger) == [
+        f'Job status: {job_lib.JobStatus.RUNNING}'
+    ]
+
+    mock_backend.get_job_status.return_value = {1: job_lib.JobStatus.SUCCEEDED}
+    await utils.get_job_status(backend=mock_backend,
+                               cluster_name='test-cluster',
+                               job_id=1,
+                               status_logger=status_logger)
+
+    messages = _info_messages(mock_logger)
+    assert len(messages) == 3
+    assert '4 checks' in messages[1]
+    assert messages[2] == f'Job status: {job_lib.JobStatus.SUCCEEDED}'
+
+
+@pytest.mark.asyncio
+@mock.patch('sky.jobs.utils.logger')
+@mock.patch('sky.global_user_state.get_handle_from_cluster_name')
+async def test_get_job_status_logs_every_poll_without_logger(
+        mock_get_handle, mock_logger):
+    """Without a status logger, every poll result is logged."""
+    mock_handle = mock.MagicMock(
+        spec=cloud_vm_ray_backend.CloudVmRayResourceHandle)
+    mock_get_handle.return_value = mock_handle
+
+    mock_backend = mock.MagicMock(spec=cloud_vm_ray_backend.CloudVmRayBackend)
+    mock_backend.get_job_status.return_value = {1: job_lib.JobStatus.RUNNING}
+
+    for _ in range(3):
+        await utils.get_job_status(backend=mock_backend,
+                                   cluster_name='test-cluster',
+                                   job_id=1)
+
+    assert _info_messages(mock_logger) == (
+        [f'Job status: {job_lib.JobStatus.RUNNING}'] * 3)
 
 
 @mock.patch('sky.utils.controller_utils.warn_jobs_consolidation_mode_intent')
@@ -223,6 +382,116 @@ def test_terminate_cluster_graceful_no_timeout(mock_set_internal,
     mock_sky_down.assert_called_once_with('test-cluster',
                                           graceful=True,
                                           graceful_timeout=None)
+
+
+@mock.patch('sky.jobs.utils.global_user_state.get_cluster_from_name')
+@mock.patch('sky.core.down')
+@mock.patch('sky.usage.usage_lib.messages.usage.set_internal')
+def test_terminate_cluster_pins_active_workspace_from_cluster_record(
+        mock_set_internal, mock_sky_down, mock_get_cluster) -> None:
+    """Controller-side callers (cancel/recovery teardown) run with the
+    daemon-process workspace context, which falls back to 'default'.
+    Without pinning, `_check_owner_identity_with_record` raises
+    `ClusterOwnerIdentityMismatchError` for any cluster whose recorded
+    workspace is not 'default'.
+
+    This test pins the cluster row to workspace 'team-a' and asserts the
+    active workspace during the `core.down` call is 'team-a'.
+    """
+    from sky import skypilot_config
+    mock_get_cluster.return_value = {
+        'name': 'test-cluster',
+        'workspace': 'team-a',
+    }
+
+    observed_workspace = []
+
+    def _record_workspace(*args, **kwargs):
+        observed_workspace.append(skypilot_config.get_active_workspace())
+
+    mock_sky_down.side_effect = _record_workspace
+
+    utils.terminate_cluster('test-cluster')
+
+    mock_get_cluster.assert_called_once_with('test-cluster')
+    assert observed_workspace == [
+        'team-a'
+    ], (f'Expected active workspace to be pinned to the cluster row '
+        f"workspace 'team-a' during core.down, got: {observed_workspace}")
+
+
+@mock.patch('sky.jobs.utils.global_user_state.get_cluster_from_name')
+@mock.patch('sky.core.down')
+@mock.patch('sky.usage.usage_lib.messages.usage.set_internal')
+def test_terminate_cluster_no_record_skips_workspace_pin(
+        mock_set_internal, mock_sky_down, mock_get_cluster) -> None:
+    """If the cluster row is already gone, there is no workspace to pin
+    — `core.down` will raise `ClusterDoesNotExist` and we return. The
+    function must NOT crash trying to enter
+    `local_active_workspace_ctx(None)`.
+    """
+    mock_get_cluster.return_value = None
+    mock_sky_down.side_effect = ClusterDoesNotExist('test-cluster')
+
+    # Must not raise.
+    utils.terminate_cluster('test-cluster')
+
+    mock_get_cluster.assert_called_once_with('test-cluster')
+    mock_sky_down.assert_called_once()
+
+
+@mock.patch('sky.jobs.utils.global_user_state.get_cluster_from_name')
+@mock.patch('sky.jobs.utils.time.sleep'
+           )  # Don't actually sleep between retries.
+@mock.patch('sky.core.down')
+@mock.patch('sky.usage.usage_lib.messages.usage.set_internal')
+def test_terminate_cluster_retry_reenters_workspace_ctx(
+        mock_set_internal, mock_sky_down, mock_sleep, mock_get_cluster) -> None:
+    """`skypilot_config.local_active_workspace_ctx` is implemented with
+    `@contextlib.contextmanager` (a generator), which can only be
+    entered ONCE per instance. If the retry loop reuses a single
+    `workspace_ctx` instance across attempts, the second `with` raises
+    `RuntimeError` ("generator didn't yield" / "already executed") and
+    masks the real underlying failure.
+
+    The fix is to construct a fresh ctx per retry attempt inside the
+    loop. This test exercises that: cluster row carries a non-default
+    workspace (so the live ctx path, not `nullcontext()`, is taken),
+    and `core.down` is set to fail twice then succeed. Without the
+    fix, the second iteration raises `RuntimeError` from the spent
+    generator and the function crashes. With the fix, all three
+    iterations construct a fresh ctx and the function completes.
+
+    Revert check: lift `workspace_ctx = ...` back outside the
+    `while True:` loop → the second retry raises `RuntimeError` →
+    test fails."""
+    from sky import skypilot_config
+    mock_get_cluster.return_value = {
+        'name': 'test-cluster',
+        'workspace': 'team-a',
+    }
+
+    observed = []
+
+    def _fail_twice_then_succeed(*args, **kwargs):
+        observed.append(skypilot_config.get_active_workspace())
+        if len(observed) < 3:
+            raise ValueError(f'transient error {len(observed)}')
+
+    mock_sky_down.side_effect = _fail_twice_then_succeed
+
+    # Must complete without RuntimeError (which would arise from
+    # re-entering a spent @contextlib.contextmanager generator).
+    utils.terminate_cluster('test-cluster')
+
+    assert mock_sky_down.call_count == 3
+    # Every attempt must see the pinned workspace, not just the first.
+    # If the ctx were a no-op on retries (e.g. wrong restore order),
+    # this would record 'default' on attempts 2 and 3.
+    assert observed == ['team-a', 'team-a', 'team-a'], observed
+    # Single DB lookup outside the loop is sufficient — cluster
+    # workspace is immutable.
+    mock_get_cluster.assert_called_once_with('test-cluster')
 
 
 def test_cancel_signal_file_no_graceful():
@@ -677,16 +946,62 @@ class TestCollectDebugDumpManifestParallel:
         cluster_idx = (job_id - 1) // 10
         return f'cluster-{cluster_idx}', job_id
 
-    def _mock_get_cluster_from_name(self, cluster_name):
-        return {
-            'name': cluster_name,
-            'cluster_hash': f'hash-{cluster_name}',
-            'handle': None,
-        }
+    def _mock_get_cluster_dump_data(self, cluster_name):
+        return [('cluster_info.json', {'name': cluster_name})]
 
-    @mock.patch('sky.jobs.utils.debug_dump_helpers.get_cluster_events_data')
-    @mock.patch('sky.jobs.utils.debug_dump_helpers.serialize_cluster_record')
-    @mock.patch('sky.jobs.utils.global_user_state.get_cluster_from_name')
+    @mock.patch('sky.jobs.utils.global_user_state'
+                '.get_cluster_history_provision_log_path')
+    @mock.patch('sky.jobs.utils.debug_dump_helpers.get_cluster_dump_data')
+    @mock.patch('sky.jobs.utils.managed_job_state.get_pool_submit_info')
+    @mock.patch('sky.jobs.utils.managed_job_state'
+                '.get_all_task_ids_names_statuses_logs')
+    @mock.patch('sky.jobs.utils.managed_job_state.get_job_events')
+    @mock.patch('sky.jobs.utils.managed_job_state.get_managed_job_tasks')
+    @mock.patch('sky.jobs.utils.debug_dump_helpers.redact_task_yaml')
+    def test_multi_task_job_collects_all_task_clusters(
+        self,
+        mock_redact,
+        mock_get_tasks,
+        mock_get_events,
+        mock_get_task_ids,
+        mock_get_pool,
+        mock_cluster_dump_data,
+        mock_provision_log_path,
+    ):
+        """A multi-task (pipeline) job launches one cluster per task; the
+        manifest should collect all of them, not just the first task's."""
+        mock_redact.side_effect = lambda y: y
+        mock_get_tasks.side_effect = self._mock_get_managed_job_tasks
+        mock_get_events.side_effect = self._mock_get_job_events
+        # Two tasks with distinct names -> two generated cluster names.
+        mock_get_task_ids.return_value = [
+            (0, 'pipe-0', 'SUCCEEDED', None, None),
+            (1, 'pipe-1', 'RUNNING', None, None),
+        ]
+        mock_get_pool.return_value = (None, None)  # not a pool job
+        mock_cluster_dump_data.side_effect = self._mock_get_cluster_dump_data
+        mock_provision_log_path.return_value = None
+
+        result = utils.collect_debug_dump_manifest([1])
+
+        cluster_paths = [
+            p['relative_path']
+            for p in result['inline_data']
+            if '/clusters/' in p['relative_path']
+        ]
+        expected_names = {
+            utils.generate_managed_job_cluster_name('pipe-0', 1),
+            utils.generate_managed_job_cluster_name('pipe-1', 1),
+        }
+        found_names = {
+            p.split('/clusters/')[1].split('/')[0] for p in cluster_paths
+        }
+        assert found_names == expected_names
+        assert len(result['errors']) == 0
+
+    @mock.patch('sky.jobs.utils.global_user_state'
+                '.get_cluster_history_provision_log_path')
+    @mock.patch('sky.jobs.utils.debug_dump_helpers.get_cluster_dump_data')
     @mock.patch('sky.jobs.utils.managed_job_state.get_pool_submit_info')
     @mock.patch('sky.jobs.utils.managed_job_state'
                 '.get_all_task_ids_names_statuses_logs')
@@ -700,9 +1015,8 @@ class TestCollectDebugDumpManifestParallel:
         mock_get_events,
         mock_get_task_ids,
         mock_get_pool,
-        mock_get_cluster,
-        mock_serialize,
-        mock_cluster_events,
+        mock_cluster_dump_data,
+        mock_provision_log_path,
     ):
         """All jobs collected, cluster info deduplicated, no data lost."""
         mock_redact.side_effect = lambda y: y
@@ -711,9 +1025,8 @@ class TestCollectDebugDumpManifestParallel:
         mock_get_task_ids.side_effect = (
             self._mock_get_all_task_ids_names_statuses_logs)
         mock_get_pool.side_effect = self._mock_get_pool_submit_info
-        mock_get_cluster.side_effect = self._mock_get_cluster_from_name
-        mock_serialize.side_effect = lambda r: {'name': r['name']}
-        mock_cluster_events.return_value = []
+        mock_cluster_dump_data.side_effect = self._mock_get_cluster_dump_data
+        mock_provision_log_path.return_value = None
 
         job_ids = list(range(1, self.NUM_JOBS + 1))
         result = utils.collect_debug_dump_manifest(job_ids)
@@ -740,9 +1053,9 @@ class TestCollectDebugDumpManifestParallel:
         # No errors
         assert len(result['errors']) == 0
 
-    @mock.patch('sky.jobs.utils.debug_dump_helpers.get_cluster_events_data')
-    @mock.patch('sky.jobs.utils.debug_dump_helpers.serialize_cluster_record')
-    @mock.patch('sky.jobs.utils.global_user_state.get_cluster_from_name')
+    @mock.patch('sky.jobs.utils.global_user_state'
+                '.get_cluster_history_provision_log_path')
+    @mock.patch('sky.jobs.utils.debug_dump_helpers.get_cluster_dump_data')
     @mock.patch('sky.jobs.utils.managed_job_state.get_pool_submit_info')
     @mock.patch('sky.jobs.utils.managed_job_state'
                 '.get_all_task_ids_names_statuses_logs')
@@ -756,9 +1069,8 @@ class TestCollectDebugDumpManifestParallel:
         mock_get_events,
         mock_get_task_ids,
         mock_get_pool,
-        mock_get_cluster,
-        mock_serialize,
-        mock_cluster_events,
+        mock_cluster_dump_data,
+        mock_provision_log_path,
     ):
         """A failing job doesn't break collection for other jobs."""
         mock_redact.side_effect = lambda y: y
@@ -773,9 +1085,8 @@ class TestCollectDebugDumpManifestParallel:
         mock_get_task_ids.side_effect = (
             self._mock_get_all_task_ids_names_statuses_logs)
         mock_get_pool.side_effect = self._mock_get_pool_submit_info
-        mock_get_cluster.side_effect = self._mock_get_cluster_from_name
-        mock_serialize.side_effect = lambda r: {'name': r['name']}
-        mock_cluster_events.return_value = []
+        mock_cluster_dump_data.side_effect = self._mock_get_cluster_dump_data
+        mock_provision_log_path.return_value = None
 
         job_ids = list(range(1, self.NUM_JOBS + 1))
         result = utils.collect_debug_dump_manifest(job_ids)
@@ -791,3 +1102,365 @@ class TestCollectDebugDumpManifestParallel:
             if p['relative_path'].endswith('/job_info.json')
         ]
         assert len(job_info_items) == len(ok_jobs)
+
+
+class TestControllerSystemLogScoping:
+    """Scope managed_jobs/controller_system/*.log to the controllers that
+    actually ran the requested jobs.
+
+    The unscoped behavior (glob controller_*.log) dragged thousands of
+    unrelated controller-process logs into every dump.
+    """
+
+    _UUID_A = '4cfc2dc5-5b4e-47eb-a517-079aa7ba6757'
+    _UUID_B = '276636dc-a8dd-4210-86f1-31f43b4f9d05'
+
+    @staticmethod
+    def _job_log_head(uuids):
+        lines = [
+            'Starting job loop for 1',
+            '  log_file=/tmp/1.log',
+            '  pool=None',
+        ]
+        for u in uuids:
+            lines.append(f'From controller {u}')
+            lines.append('  pid=27476')
+        return '\n'.join(lines) + '\n'
+
+    def _setup_logs_dir(self, tmpdir, jobid_log_contents, controller_uuids):
+        """Build a fake controller logs dir.
+
+        ``jobid_log_contents`` maps job_id -> string content for <jobid>.log.
+        ``controller_uuids`` is the iterable of controller UUIDs whose
+        ``controller_<uuid>.log`` should exist on disk.
+        """
+        for jid, content in jobid_log_contents.items():
+            (pathlib.Path(tmpdir) / f'{jid}.log').write_text(content)
+        for u in controller_uuids:
+            (pathlib.Path(tmpdir) / f'controller_{u}.log').write_text('hi')
+        return str(tmpdir)
+
+    def test_extracts_single_uuid(self):
+        """One "From controller" line → UUID set with one element."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            self._setup_logs_dir(tmpdir,
+                                 {1: self._job_log_head([self._UUID_A])}, [])
+            with mock.patch(
+                    'sky.jobs.utils.managed_job_constants'
+                    '.JOBS_CONTROLLER_LOGS_DIR', tmpdir):
+                with mock.patch(
+                        'sky.jobs.utils.managed_job_state'
+                        '.get_managed_job_tasks',
+                        return_value=[]):
+                    with mock.patch(
+                            'sky.jobs.utils.managed_job_state'
+                            '.get_job_events',
+                            return_value=[]):
+                        with mock.patch(
+                                'sky.jobs.utils.managed_job_state'
+                                '.get_all_task_ids_names_statuses_logs',
+                                return_value=[]):
+                            with mock.patch(
+                                    'sky.jobs.utils.managed_job_state'
+                                    '.get_pool_submit_info',
+                                    return_value=(None, None)):
+                                _, _, _, _, uuids = (
+                                    utils._collect_job_debug_manifest(1))
+        assert uuids == {self._UUID_A}
+
+    def test_extracts_multiple_uuids_for_ha_recovered_job(self):
+        """An HA-recovered job has multiple "From controller" lines."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            self._setup_logs_dir(
+                tmpdir, {1: self._job_log_head([self._UUID_A, self._UUID_B])},
+                [])
+            with mock.patch(
+                    'sky.jobs.utils.managed_job_constants'
+                    '.JOBS_CONTROLLER_LOGS_DIR', tmpdir):
+                with mock.patch(
+                        'sky.jobs.utils.managed_job_state'
+                        '.get_managed_job_tasks',
+                        return_value=[]):
+                    with mock.patch(
+                            'sky.jobs.utils.managed_job_state'
+                            '.get_job_events',
+                            return_value=[]):
+                        with mock.patch(
+                                'sky.jobs.utils.managed_job_state'
+                                '.get_all_task_ids_names_statuses_logs',
+                                return_value=[]):
+                            with mock.patch(
+                                    'sky.jobs.utils.managed_job_state'
+                                    '.get_pool_submit_info',
+                                    return_value=(None, None)):
+                                _, _, _, _, uuids = (
+                                    utils._collect_job_debug_manifest(1))
+        assert uuids == {self._UUID_A, self._UUID_B}
+
+    def test_extracts_ha_recovery_uuid_far_from_head(self):
+        """HA recovery appends a second "From controller …" line after
+        an arbitrary amount of intervening output (the per-job log is
+        opened in append mode at sky/utils/context.py:146). A 16 KB-only
+        head read would miss it; the scan must traverse the whole file.
+        """
+        gap_bytes = 200 * 1024  # 200 KB of intervening status output
+        content = (
+            f'Starting job loop for 1\nFrom controller {self._UUID_A}\n'
+            # Realistic-ish filler: many short status lines.
+            + ('Status check: still running\n' * (gap_bytes // 28)) +
+            f'=== Recovery ===\nFrom controller {self._UUID_B}\n')
+        with tempfile.TemporaryDirectory() as tmpdir:
+            (pathlib.Path(tmpdir) / '1.log').write_text(content)
+            assert (pathlib.Path(tmpdir) / '1.log').stat().st_size > 16 * 1024
+            with mock.patch(
+                    'sky.jobs.utils.managed_job_constants'
+                    '.JOBS_CONTROLLER_LOGS_DIR', tmpdir):
+                with mock.patch(
+                        'sky.jobs.utils.managed_job_state'
+                        '.get_managed_job_tasks',
+                        return_value=[]):
+                    with mock.patch(
+                            'sky.jobs.utils.managed_job_state'
+                            '.get_job_events',
+                            return_value=[]):
+                        with mock.patch(
+                                'sky.jobs.utils.managed_job_state'
+                                '.get_all_task_ids_names_statuses_logs',
+                                return_value=[]):
+                            with mock.patch(
+                                    'sky.jobs.utils.managed_job_state'
+                                    '.get_pool_submit_info',
+                                    return_value=(None, None)):
+                                _, _, _, _, uuids = (
+                                    utils._collect_job_debug_manifest(1))
+        assert uuids == {self._UUID_A, self._UUID_B}
+
+    def test_missing_job_log_returns_empty_set(self):
+        """No <jobid>.log → empty UUID set, no exception."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with mock.patch(
+                    'sky.jobs.utils.managed_job_constants'
+                    '.JOBS_CONTROLLER_LOGS_DIR', tmpdir):
+                with mock.patch(
+                        'sky.jobs.utils.managed_job_state'
+                        '.get_managed_job_tasks',
+                        return_value=[]):
+                    with mock.patch(
+                            'sky.jobs.utils.managed_job_state'
+                            '.get_job_events',
+                            return_value=[]):
+                        with mock.patch(
+                                'sky.jobs.utils.managed_job_state'
+                                '.get_all_task_ids_names_statuses_logs',
+                                return_value=[]):
+                            with mock.patch(
+                                    'sky.jobs.utils.managed_job_state'
+                                    '.get_pool_submit_info',
+                                    return_value=(None, None)):
+                                _, _, errs, _, uuids = (
+                                    utils._collect_job_debug_manifest(1))
+        assert uuids == set()
+        assert errs == []
+
+    def test_collect_controller_system_with_empty_uuids_emits_no_files(self):
+        """Empty relevant_uuids must NOT fall back to globbing the dir.
+
+        This is the regression we are fixing — globbing dragged in 8 000+
+        unrelated controller process logs.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            self._setup_logs_dir(tmpdir, {}, [self._UUID_A, self._UUID_B])
+            file_paths: list = []
+            errors: list = []
+            with mock.patch(
+                    'sky.jobs.utils.managed_job_constants'
+                    '.JOBS_CONTROLLER_LOGS_DIR', tmpdir):
+                utils._collect_controller_system_log_paths(
+                    file_paths, errors, set())
+        assert file_paths == []
+        assert errors == []
+
+    def test_collect_controller_system_filters_to_relevant_uuids(self):
+        """Only UUIDs in the relevant set become file_paths entries.
+
+        ``relevant_uuids`` includes a UUID that isn't on disk → silently
+        skipped. The on-disk-but-not-relevant UUID is also skipped.
+        """
+        missing_uuid = '00000000-0000-0000-0000-000000000000'
+        with tempfile.TemporaryDirectory() as tmpdir:
+            self._setup_logs_dir(tmpdir, {},
+                                 [self._UUID_A, self._UUID_B])  # both on disk
+            file_paths: list = []
+            errors: list = []
+            with mock.patch(
+                    'sky.jobs.utils.managed_job_constants'
+                    '.JOBS_CONTROLLER_LOGS_DIR', tmpdir):
+                utils._collect_controller_system_log_paths(
+                    file_paths, errors, {self._UUID_A, missing_uuid})
+        # Only the on-disk + relevant UUID survives.
+        rel_paths = sorted(p['relative_path'] for p in file_paths)
+        assert rel_paths == [
+            f'managed_jobs/controller_system/controller_{self._UUID_A}.log'
+        ]
+        assert errors == []
+
+
+class TestParseSubmitLogJobRanges:
+    """Inverse of sky.jobs.server.core._job_ids_to_str (kept as intervals)."""
+
+    def test_single_id(self):
+        assert utils._parse_submit_log_job_ranges('584') == [(584, 584)]
+
+    def test_inclusive_range(self):
+        assert utils._parse_submit_log_job_ranges('580-583') == [(580, 583)]
+
+    def test_mixed_singletons_and_ranges(self):
+        assert utils._parse_submit_log_job_ranges('1,5-7,10') == [(1, 1),
+                                                                  (5, 7),
+                                                                  (10, 10)]
+
+    def test_large_range_is_not_expanded(self):
+        # A huge range must stay a single interval, never expand to a set of
+        # ints (that would risk OOM on a malicious/fat-fingered filename).
+        assert utils._parse_submit_log_job_ranges('1-100000000') == [
+            (1, 100000000)
+        ]
+
+    def test_malformed_raises(self):
+        with pytest.raises(ValueError):
+            utils._parse_submit_log_job_ranges('not-an-int')
+
+    def test_inverted_range_raises(self):
+        with pytest.raises(ValueError):
+            utils._parse_submit_log_job_ranges('588-580')
+
+
+class TestControllerSubmitLogScoping:
+    """Scope managed_jobs/controller_submit_logs/submit-job-*.log to the
+    submissions whose job-id set includes a requested job (mirrors the
+    controller_system scoping; avoids dragging a long-lived controller's
+    entire submission history into every dump).
+    """
+
+    def _setup(self, tmpdir, filenames):
+        """Create ``<tmpdir>/managed_jobs/<filename>`` for each filename."""
+        mj_dir = pathlib.Path(tmpdir) / 'managed_jobs'
+        mj_dir.mkdir()
+        for name in filenames:
+            (mj_dir / name).write_text('Started 9 controllers\n')
+
+    def _run(self, tmpdir, job_ids):
+        file_paths: list = []
+        errors: list = []
+        with mock.patch('sky.jobs.utils.constants.SKY_LOGS_DIRECTORY', tmpdir):
+            utils._collect_controller_submit_log_paths(file_paths, errors,
+                                                       job_ids)
+        return file_paths, errors
+
+    def test_includes_only_submissions_with_a_requested_job(self):
+        """A singleton match and a range that *contains* the job both count;
+        an unrelated submission is excluded."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            self._setup(
+                tmpdir,
+                [
+                    'submit-job-584.log',
+                    'submit-job-580-588.log',  # range contains 584
+                    'submit-job-999.log',  # unrelated
+                ])
+            file_paths, errors = self._run(tmpdir, [584])
+        rel = sorted(p['relative_path'] for p in file_paths)
+        assert rel == [
+            'managed_jobs/controller_submit_logs/submit-job-580-588.log',
+            'managed_jobs/controller_submit_logs/submit-job-584.log',
+        ]
+        assert errors == []
+
+    def test_empty_job_ids_collects_nothing(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            self._setup(tmpdir, ['submit-job-1.log'])
+            file_paths, errors = self._run(tmpdir, [])
+        assert file_paths == []
+        assert errors == []
+
+    def test_missing_dir_is_noop(self):
+        """No managed_jobs dir (controller never submitted) is benign."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            file_paths, errors = self._run(tmpdir, [1])
+        assert file_paths == []
+        assert errors == []
+
+    def test_unparseable_filename_skipped_with_warning(self):
+        """A filename that doesn't parse is skipped with a warning, not an
+        errors-list entry (it's not a collection failure)."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            self._setup(tmpdir, [
+                'submit-job-weird.log',
+                'submit-job-7.log',
+            ])
+            with mock.patch('sky.jobs.utils.logger') as mock_logger:
+                file_paths, errors = self._run(tmpdir, [7])
+        rel = [p['relative_path'] for p in file_paths]
+        assert rel == ['managed_jobs/controller_submit_logs/submit-job-7.log']
+        assert errors == []
+        # The unparseable name is surfaced, not silently dropped.
+        assert mock_logger.warning.call_count == 1
+        assert 'submit-job-weird.log' in mock_logger.warning.call_args[0][0]
+
+
+class TestCleanupExpiredApiAccessTokens:
+    """Unit tests for the expired managed-job token sweep."""
+
+    @staticmethod
+    def _token(token_id: str, name: str, expires_at):
+        return {
+            'token_id': token_id,
+            'token_name': name,
+            'expires_at': expires_at,
+        }
+
+    @mock.patch('sky.global_user_state.delete_service_account_token')
+    @mock.patch('sky.global_user_state.'
+                'get_expired_service_account_tokens_by_name_prefix')
+    def test_deletes_only_managed_job_shaped_names(self, mock_get_expired,
+                                                   mock_delete_token):
+        now = int(time.time())
+        mock_get_expired.return_value = [
+            # Looks like a real managed-job token: prefix + 8 hex suffix.
+            self._token('tok-a', 'managed-job-myjob-abcdef01', now - 60),
+            # Multi-segment job name, still ends in 8 hex chars.
+            self._token('tok-b', 'managed-job-bench-burst-0028-fea61234',
+                        now - 60),
+            # Prefix matches but the suffix isn't 8 hex chars: skip.
+            self._token('tok-c', 'managed-job-user-named-something', now - 60),
+            # Suffix is 8 chars but contains non-hex letters: skip.
+            self._token('tok-d', 'managed-job-foo-zzzzzzzz', now - 60),
+        ]
+
+        removed = utils.cleanup_expired_api_access_tokens()
+
+        assert removed == 2
+        deleted_tokens = sorted(
+            c.args[0] for c in mock_delete_token.call_args_list)
+        assert deleted_tokens == ['tok-a', 'tok-b']
+
+    @mock.patch('sky.global_user_state.delete_service_account_token')
+    @mock.patch('sky.global_user_state.'
+                'get_expired_service_account_tokens_by_name_prefix')
+    def test_token_delete_failure_is_skipped(self, mock_get_expired,
+                                             mock_delete_token):
+        now = int(time.time())
+        mock_get_expired.return_value = [
+            self._token('tok-a', 'managed-job-myjob-abcdef01', now - 60),
+        ]
+        mock_delete_token.side_effect = RuntimeError('db down')
+
+        # Token revocation failed: report zero so the next sweep can retry.
+        removed = utils.cleanup_expired_api_access_tokens()
+        assert removed == 0
+
+    @mock.patch('sky.global_user_state.'
+                'get_expired_service_account_tokens_by_name_prefix')
+    def test_no_expired_tokens_is_noop(self, mock_get_expired):
+        mock_get_expired.return_value = []
+        assert utils.cleanup_expired_api_access_tokens() == 0

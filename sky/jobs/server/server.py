@@ -13,6 +13,7 @@ from sky.server.requests import executor
 from sky.server.requests import payloads
 from sky.server.requests import request_names
 from sky.server.requests import requests as api_requests
+from sky.server.requests import role_filter
 from sky.skylet import constants
 from sky.utils import common
 
@@ -58,8 +59,11 @@ async def launch(request: fastapi.Request,
 # For backwards compatibility
 # TODO(hailong): Remove before 0.12.0.
 @router.post('/queue')
-async def queue(request: fastapi.Request,
-                jobs_queue_body: payloads.JobsQueueBody) -> None:
+async def queue(
+    request: fastapi.Request,
+    jobs_queue_body: payloads.JobsQueueBody = fastapi.Depends(
+        role_filter.force_viewer_jobs_queue_body),
+) -> None:
     needs_long = _controller_refresh_need_long(jobs_queue_body.refresh)
     await executor.schedule_request_async(
         request_id=request.state.request_id,
@@ -74,8 +78,11 @@ async def queue(request: fastapi.Request,
 
 
 @router.post('/queue/v2')
-async def queue_v2(request: fastapi.Request,
-                   jobs_queue_body_v2: payloads.JobsQueueV2Body) -> None:
+async def queue_v2(
+    request: fastapi.Request,
+    jobs_queue_body_v2: payloads.JobsQueueV2Body = fastapi.Depends(
+        role_filter.force_viewer_jobs_queue_v2_body),
+) -> None:
     needs_long = _controller_refresh_need_long(jobs_queue_body_v2.refresh)
     await executor.schedule_request_async(
         request_id=request.state.request_id,
@@ -121,8 +128,10 @@ async def cancel(request: fastapi.Request,
 
 @router.post('/logs')
 async def logs(
-    request: fastapi.Request, jobs_logs_body: payloads.JobsLogsBody,
-    background_tasks: fastapi.BackgroundTasks
+    request: fastapi.Request,
+    background_tasks: fastapi.BackgroundTasks,
+    jobs_logs_body: payloads.JobsLogsBody = fastapi.Depends(
+        role_filter.force_viewer_jobs_logs_body),
 ) -> fastapi.responses.StreamingResponse:
     schedule_type = api_requests.ScheduleType.SHORT
     if _controller_refresh_need_long(jobs_logs_body.refresh):
@@ -163,8 +172,10 @@ async def logs(
 
 @router.post('/download_logs')
 async def download_logs(
-        request: fastapi.Request,
-        jobs_download_logs_body: payloads.JobsDownloadLogsBody) -> None:
+    request: fastapi.Request,
+    jobs_download_logs_body: payloads.JobsDownloadLogsBody = fastapi.Depends(
+        role_filter.force_viewer_jobs_download_logs_body),
+) -> None:
     user_hash = jobs_download_logs_body.env_vars[constants.USER_ID_ENV_VAR]
     logs_dir_on_api_server = pathlib.Path(
         bs.get_blob_storage().download_tmp_dir(user_hash))

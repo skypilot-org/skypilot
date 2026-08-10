@@ -1,5 +1,6 @@
 import importlib
 import os
+import pickle
 from typing import Dict
 from unittest import mock
 
@@ -36,6 +37,53 @@ def test_get_reservations_available_resources():
     r.get_reservations_available_resources()
     mock_cloud.get_reservations_available_resources.assert_called_once_with(
         "instance_type", "region", "zone", set())
+
+
+def test_get_cost_without_region_uses_joint_regional_price():
+    """get_cost() with no region must not mix per-component minimums.
+
+    The cheapest instance price and the cheapest accelerator price can live in
+    different regions; the cost estimate must be the cheapest joint price a
+    single region offers, not the (unachievable) sum of the two minimums.
+    """
+    instance_prices = {'cheap-instance-region': 8.0, 'cheap-accel-region': 9.0}
+    accel_prices = {'cheap-instance-region': 47.0, 'cheap-accel-region': 26.0}
+
+    mock_cloud = mock.Mock()
+    mock_cloud.instance_type_to_hourly_cost.side_effect = (
+        lambda instance_type, use_spot, region, zone: instance_prices[region])
+    mock_cloud.accelerators_to_hourly_cost.side_effect = (
+        lambda accelerators, use_spot, region, zone: accel_prices[region])
+
+    r = Resources(cloud=mock_cloud,
+                  instance_type='instance_type',
+                  accelerators={'A100': 16})
+    regions = [
+        clouds.Region(name=region_name) for region_name in instance_prices
+    ]
+    with mock.patch.object(Resources,
+                           'get_valid_regions_for_launchable',
+                           return_value=regions):
+        # Cheapest joint price is cheap-accel-region: 9 + 26 = 35, cheaper
+        # than cheap-instance-region (8 + 47 = 55) and than the region-mixed
+        # sum of minimums (8 + 26 = 34), which no region offers.
+        assert r.get_cost(3600) == 35.0
+
+
+def test_get_cost_with_region_prices_that_region():
+    mock_cloud = mock.Mock()
+    mock_cloud.instance_type_to_hourly_cost.return_value = 8.0
+    mock_cloud.accelerators_to_hourly_cost.return_value = 26.0
+    mock_cloud.validate_region_zone.return_value = ('some-region', None)
+    r = Resources(cloud=mock_cloud,
+                  instance_type='instance_type',
+                  accelerators={'A100': 16},
+                  region='some-region')
+    assert r.get_cost(3600) == 34.0
+    mock_cloud.instance_type_to_hourly_cost.assert_called_once_with(
+        'instance_type', False, 'some-region', None)
+    mock_cloud.accelerators_to_hourly_cost.assert_called_once_with(
+        {'A100': 16}, False, 'some-region', None)
 
 
 def _run_label_test(allowed_labels: Dict[str, str],
@@ -294,7 +342,6 @@ def test_aws_make_deploy_variables_ssh_user(*mocks) -> None:
         'accelerators': {
             'A10': 1
         },
-        'disk_size': 256,
     }),
     ({
         'infra': 'gcp/*/us-east1-b',
@@ -310,7 +357,6 @@ def test_aws_make_deploy_variables_ssh_user(*mocks) -> None:
         'labels': {
             'key': 'value'
         },
-        'disk_size': 256,
     }),
 ])
 def test_to_yaml_and_load(resources_kwargs, expected_yaml_config):
@@ -472,16 +518,13 @@ def test_resources_any_of_dump_in_serve_version_bump():
             'accelerators': {
                 'H200': 1
             },
-            'disk_size': 256,
         },
         {
-            'disk_size': 256,
             'accelerators': {
                 'H100': 1
             },
         },
         {
-            'disk_size': 256,
             'accelerators': {
                 'L4': 4
             },
@@ -492,16 +535,13 @@ def test_resources_any_of_dump_in_serve_version_bump():
             'accelerators': {
                 'H100': 1
             },
-            'disk_size': 256,
         },
         {
             'accelerators': {
                 'L4': 4
             },
-            'disk_size': 256,
         },
         {
-            'disk_size': 256,
             'accelerators': {
                 'H200': 1
             },
@@ -656,6 +696,134 @@ def test_kubernetes_image_id_formats_in_resources(enable_all_clouds):
             clouds.Kubernetes), (f'Loaded cloud type mismatch for {input_id}')
 
 
+def test_image_id_dual_cloud_and_docker():
+    """image_id can carry both a cloud VM image and a docker image.
+
+    Uses the reserved 'docker' key alongside a region-keyed AMI. See the
+    AMI-missing-driver-for-B300 motivation (PR #9759): users want to boot a
+    custom AMI (correct NVIDIA driver) and still run their own container.
+    """
+    r = Resources(cloud='aws',
+                  image_id={
+                      'us-east-1': 'ami-0abcdef',
+                      'docker': 'myimage:latest',
+                  })
+    # The docker image is split out and stored separately.
+    assert r.extract_docker_image() == 'myimage:latest'
+    # The public image_id / get_cloud_image_id only expose the cloud image.
+    assert r.get_cloud_image_id() == {'us-east-1': 'ami-0abcdef'}
+    assert r.image_id == {'us-east-1': 'ami-0abcdef'}
+    # Both features are required (regression: was an elif, dropping IMAGE_ID).
+    features = {f.value for f in r.get_required_cloud_features()}
+    assert 'docker_image' in features
+    assert 'image_id' in features
+
+
+def test_image_id_docker_key_strips_prefix():
+    """A 'docker:' prefix on the reserved docker key is stripped."""
+    r = Resources(cloud='aws',
+                  image_id={
+                      'us-east-1': 'ami-0abcdef',
+                      'docker': 'docker:myimage:latest',
+                  })
+    assert r.extract_docker_image() == 'myimage:latest'
+    assert r.get_cloud_image_id() == {'us-east-1': 'ami-0abcdef'}
+
+
+def test_image_id_docker_key_only():
+    """A dict with only the 'docker' key behaves like docker:-only."""
+    r = Resources(cloud='aws', image_id={'docker': 'myimage:latest'})
+    assert r.extract_docker_image() == 'myimage:latest'
+    assert r.get_cloud_image_id() is None
+    assert r.image_id is None
+
+
+def test_image_id_ambiguous_docker_spec_rejected():
+    """docker key + a docker:-prefixed region value is ambiguous -> error."""
+    with pytest.raises(ValueError, match='only one mechanism'):
+        Resources(cloud='aws',
+                  image_id={
+                      'us-east-1': 'docker:img1',
+                      'docker': 'img2',
+                  })
+
+
+@pytest.mark.parametrize(
+    'image_id, expected_docker, expected_cloud',
+    [
+        # Legacy docker:-prefixed string: no separate cloud image.
+        ('docker:myimage:latest', 'myimage:latest', None),
+        # Legacy region-agnostic docker dict.
+        ({
+            None: 'docker:myimage:latest'
+        }, 'myimage:latest', None),
+    ])
+def test_image_id_legacy_docker_formats_unchanged(image_id, expected_docker,
+                                                  expected_cloud):
+    """Existing docker: image_id formats keep their old semantics."""
+    r = Resources(cloud='aws', image_id=image_id)
+    assert r.extract_docker_image() == expected_docker
+    assert r.get_cloud_image_id() == expected_cloud
+
+
+def test_image_id_legacy_ami_unchanged():
+    """A plain AMI image_id is unaffected by the docker-key support."""
+    r = Resources(cloud='aws', region='us-east-1', image_id='ami-12345')
+    assert r.extract_docker_image() is None
+    assert r.get_cloud_image_id() == {'us-east-1': 'ami-12345'}
+    assert r._docker_image is None
+
+
+def test_image_id_dual_yaml_round_trip():
+    """to_yaml_config / from_yaml_config preserves both images."""
+    r = Resources(cloud='aws',
+                  image_id={
+                      'us-east-1': 'ami-0abcdef',
+                      'docker': 'myimage:latest',
+                  })
+    config = r.to_yaml_config()
+    assert config['image_id'] == {
+        'us-east-1': 'ami-0abcdef',
+        'docker': 'myimage:latest',
+    }
+    loaded = list(Resources.from_yaml_config(config))[0]
+    assert loaded.extract_docker_image() == 'myimage:latest'
+    assert loaded.get_cloud_image_id() == {'us-east-1': 'ami-0abcdef'}
+
+
+def test_image_id_dual_copy_preserves_both():
+    """Resources.copy() keeps both the cloud image and the docker image."""
+    r = Resources(cloud='aws',
+                  image_id={
+                      'us-east-1': 'ami-0abcdef',
+                      'docker': 'myimage:latest',
+                  })
+    copied = r.copy()
+    assert copied.extract_docker_image() == 'myimage:latest'
+    assert copied.get_cloud_image_id() == {'us-east-1': 'ami-0abcdef'}
+
+
+def test_image_id_dual_pickle_round_trip():
+    """Pickling preserves both images, and old pickles migrate cleanly."""
+    r = Resources(cloud='aws',
+                  image_id={
+                      'us-east-1': 'ami-0abcdef',
+                      'docker': 'myimage:latest',
+                  })
+    unpickled = pickle.loads(pickle.dumps(r))
+    assert unpickled.extract_docker_image() == 'myimage:latest'
+    assert unpickled.get_cloud_image_id() == {'us-east-1': 'ami-0abcdef'}
+
+    # Simulate an object pickled before _VERSION 34 (no _docker_image attr).
+    legacy = Resources(cloud='aws', region='us-east-1', image_id='ami-12345')
+    state = dict(legacy.__dict__)
+    state.pop('_docker_image', None)
+    state['_version'] = 33
+    migrated = Resources.__new__(Resources)
+    migrated.__setstate__(state)
+    assert migrated._docker_image is None
+
+
 def test_network_tier_basic():
     """Test basic network tier functionality and validation."""
     # Test with no network_tier specified (defaults to None)
@@ -771,6 +939,37 @@ def test_network_tier_copy():
     r_override = r.copy(network_tier='standard')
     assert r_override.network_tier == resources_utils.NetworkTier.STANDARD
     assert r_override.cpus == '4'  # Other properties preserved
+
+
+@pytest.mark.parametrize('value', [True, 2.0])
+def test_set_pod_resource_limits_task_config_override(value):
+    """set_pod_resource_limits in a task-level config block must survive.
+
+    Regression test for https://github.com/skypilot-org/skypilot/issues/9785:
+    the field was silently dropped by Resources.copy() (invoked during the
+    launch/optimize flow) because it was missing from
+    OVERRIDEABLE_CONFIG_KEYS_IN_TASK.
+    """
+    overrides = {'kubernetes': {'set_pod_resource_limits': value}}
+    r = Resources(infra='kubernetes',
+                  cpus=2,
+                  memory=8,
+                  _cluster_config_overrides=overrides)
+    assert r.cluster_config_overrides == overrides
+
+    # copy() is called during the launch/optimize flow; the override must be
+    # preserved rather than silently stripped.
+    r_copy = r.copy()
+    assert r_copy.cluster_config_overrides == overrides
+
+    # The read path used by make_deploy_resources_variables must see it.
+    read = skypilot_config.get_effective_workspace_region_config(
+        cloud='kubernetes',
+        region=None,
+        keys=('set_pod_resource_limits',),
+        default_value=False,
+        override_configs=r_copy.cluster_config_overrides)
+    assert read == value
 
 
 def test_network_tier_repr():
@@ -1170,7 +1369,6 @@ def test_priority_with_ordered():
             'A10': 1
         },
         'priority': 400,
-        'disk_size': 256,
     }),
     ({
         'cpus': 4,
@@ -1180,7 +1378,6 @@ def test_priority_with_ordered():
         'cpus': '4',
         'memory': '8+',
         'priority': 0,
-        'disk_size': 256,
     }),
     ({
         'cpus': 2,
@@ -1188,7 +1385,6 @@ def test_priority_with_ordered():
     }, {
         'cpus': '2',
         'priority': 1000,
-        'disk_size': 256,
     }),
 ])
 def test_priority_to_yaml_and_load(resources_kwargs, expected_yaml_config):

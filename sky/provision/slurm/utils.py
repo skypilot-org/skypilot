@@ -18,6 +18,7 @@ from sky.skylet import constants
 from sky.utils import annotations
 from sky.utils import common_utils
 from sky.utils import gpu_names
+from sky.utils import subprocess_utils
 from sky.utils.db import kv_cache
 
 logger = sky_logging.init_logger(__name__)
@@ -25,6 +26,7 @@ logger = sky_logging.init_logger(__name__)
 DEFAULT_SLURM_PATH = '~/.slurm/config'
 
 _VAR_PATTERN = re.compile(r'\$(\w+|\{[^}]*\})')
+_SLURM_USER_PATTERN = re.compile(r'^[a-z_][a-z0-9_.-]*$')
 
 SLURM_MARKER_FILE = '.sky_slurm_cluster'
 SLURM_CONTAINER_MARKER_FILE = '.sky_slurm_container'
@@ -32,8 +34,18 @@ SLURM_CONTAINER_MARKER_FILE = '.sky_slurm_container'
 # Regex pattern for parsing GPU GRES strings.
 # Format: 'gpu[:acc_type]:acc_count(optional_extra_info)'
 # Examples: 'gpu:8', 'gpu:H100:8', 'gpu:nvidia_h100_80gb_hbm3:8(S:0-1)'
-_GRES_GPU_PATTERN = re.compile(r'\bgpu:(?:(?P<type>[^:(]+):)?(?P<count>\d+)',
-                               re.IGNORECASE)
+# Also accepts '=' as the count separator to handle TRES-style strings
+# that appear in some Slurm outputs (e.g. squeue %b can return
+# 'gres/gpu=1' or 'gres/gpu:h100=2').
+_GRES_GPU_PATTERN = re.compile(
+    r'\bgpu[:=](?:(?P<type>[^:=(,]+)[:=])?(?P<count>\d+)', re.IGNORECASE)
+
+# Regex pattern for parsing GPU entries in TRES strings from
+# `scontrol show node` (CfgTRES/AllocTRES), e.g.
+# 'cpu=64,mem=800G,billing=64,gres/gpu=8' or typed entries such as
+# 'gres/gpu=8,gres/gpu:h100=8'.
+_TRES_GPU_PATTERN = re.compile(
+    r'(?:^|,)gres/gpu(?::(?P<type>[^=,]+))?=(?P<count>\d+)', re.IGNORECASE)
 
 _SLURM_NODES_INFO_CACHE_TTL = 30 * 60
 # Proctrack type is highly unlikely to change.
@@ -74,6 +86,24 @@ def get_gpu_type_and_count(gres_str: str) -> Tuple[Optional[str], int]:
     return match.group('type'), int(match.group('count'))
 
 
+def get_gpu_count_from_tres(tres_str: str) -> int:
+    """Parses the GPU count from a TRES string (CfgTRES/AllocTRES).
+
+    A TRES string may contain both an untyped total (``gres/gpu=8``) and
+    typed entries (``gres/gpu:h100=8``). The untyped total is preferred;
+    if only typed entries are present, their counts are summed.
+
+    Returns:
+        The GPU count. If no GPU entry is found, returns 0.
+    """
+    typed_total = 0
+    for match in _TRES_GPU_PATTERN.finditer(tres_str):
+        if match.group('type') is None:
+            return int(match.group('count'))
+        typed_total += int(match.group('count'))
+    return typed_total
+
+
 def pyxis_container_name(cluster_name_on_cloud: str) -> str:
     """Get the pyxis container name that gets passed to --container-name."""
     return cluster_name_on_cloud
@@ -88,6 +118,27 @@ def get_slurm_ssh_config() -> SSHConfig:
     slurm_config_path = os.path.expanduser(DEFAULT_SLURM_PATH)
     slurm_config = SSHConfig.from_path(slurm_config_path)
     return slurm_config
+
+
+def get_submit_user(cluster_name: str) -> Optional[str]:
+    """Return the current SkyPilot user's Unix account for Slurm submission."""
+    enabled = skypilot_config.get_effective_region_config(
+        cloud='slurm',
+        region=cluster_name,
+        keys=('submit_as_user',),
+        default_value=False)
+    if not enabled:
+        return None
+
+    user_name = common_utils.get_current_user_name()
+    submit_user = user_name.split('@', 1)[0]
+    if _SLURM_USER_PATTERN.fullmatch(submit_user) is None:
+        raise ValueError(
+            'Cannot derive a valid Unix user from SkyPilot user '
+            f'{user_name!r}. Slurm submit users must start with a lowercase '
+            'letter or "_" '
+            'and contain only lowercase letters, digits, "_", ".", or "-".')
+    return submit_user
 
 
 def get_identity_file(ssh_config_dict: Dict[str, Any]) -> Optional[str]:
@@ -109,14 +160,16 @@ def get_identities_only(ssh_config_dict: Dict[str, Any]) -> bool:
 
 @annotations.lru_cache(scope='request')
 def get_slurm_nodes_info(cluster: str) -> List[slurm.NodeInfo]:
-    cache_key = f'slurm:nodes_info:{cluster}'
+    ssh_config = get_slurm_ssh_config()
+    ssh_config_dict = ssh_config.lookup(cluster)
+    slurm_user = get_submit_user(cluster)
+    command_user = slurm_user or ssh_config_dict['user']
+    cache_key = f'slurm:nodes_info:{cluster}:{command_user}'
     cached = kv_cache.get_cache_entry(cache_key)
     if cached is not None:
         logger.debug(f'Slurm nodes info found in cache ({cache_key})')
         return [slurm.NodeInfo(**item) for item in json.loads(cached)]
 
-    ssh_config = get_slurm_ssh_config()
-    ssh_config_dict = ssh_config.lookup(cluster)
     client = slurm.SlurmClient(
         ssh_config_dict['hostname'],
         int(ssh_config_dict.get('port', 22)),
@@ -125,6 +178,7 @@ def get_slurm_nodes_info(cluster: str) -> List[slurm.NodeInfo]:
         ssh_proxy_command=ssh_config_dict.get('proxycommand', None),
         ssh_proxy_jump=ssh_config_dict.get('proxyjump', None),
         identities_only=get_identities_only(ssh_config_dict),
+        slurm_user=slurm_user,
     )
     nodes_info = client.info_nodes()
 
@@ -162,6 +216,7 @@ def get_proctrack_type(cluster: str) -> Optional[str]:
         ssh_proxy_command=ssh_config_dict.get('proxycommand', None),
         ssh_proxy_jump=ssh_config_dict.get('proxyjump', None),
         identities_only=get_identities_only(ssh_config_dict),
+        slurm_user=get_submit_user(cluster),
     )
     proctrack_type = client.get_proctrack_type()
 
@@ -183,7 +238,7 @@ def _check_cluster_feature(
     check_fn: Callable[[slurm.SlurmClient], bool],
     cache_ttl: int,
 ) -> bool:
-    """Check if a feature is available on a Slurm cluster, with caching.
+    """Check if a feature is available to a Slurm user, with caching.
 
     Args:
         cluster: Name of the Slurm cluster.
@@ -192,15 +247,17 @@ def _check_cluster_feature(
             the feature is available.
         cache_ttl: Time-to-live for the cache entry in seconds.
     """
-    cache_key = f'slurm:{feature_name}_enabled:{cluster}'
+    ssh_config = get_slurm_ssh_config()
+    ssh_config_dict = ssh_config.lookup(cluster)
+    slurm_user = get_submit_user(cluster)
+    command_user = slurm_user or ssh_config_dict['user']
+    cache_key = f'slurm:{feature_name}_enabled:{cluster}:{command_user}'
     cached = kv_cache.get_cache_entry(cache_key)
     if cached is not None:
         logger.debug(f'Slurm {feature_name} check found in cache '
                      f'({cache_key})')
         return cached == 'true'
 
-    ssh_config = get_slurm_ssh_config()
-    ssh_config_dict = ssh_config.lookup(cluster)
     client = slurm.SlurmClient(
         ssh_config_dict['hostname'],
         int(ssh_config_dict.get('port', 22)),
@@ -209,6 +266,7 @@ def _check_cluster_feature(
         ssh_proxy_command=ssh_config_dict.get('proxycommand', None),
         ssh_proxy_jump=ssh_config_dict.get('proxyjump', None),
         identities_only=get_identities_only(ssh_config_dict),
+        slurm_user=slurm_user,
     )
     enabled = check_fn(client)
 
@@ -227,8 +285,8 @@ def check_pyxis_enabled(cluster: str) -> bool:
     """Check if the Pyxis SPANK plugin is installed on a Slurm cluster.
 
     Pyxis is required for Docker container support on Slurm. This function
-    caches the result per cluster since the plugin availability is unlikely
-    to change frequently.
+    caches the result per cluster and command user since the plugin
+    availability is unlikely to change frequently.
     """
     return _check_cluster_feature(cluster, 'pyxis',
                                   lambda c: c.check_pyxis_enabled(),
@@ -239,8 +297,8 @@ def check_fuse_enabled(cluster: str) -> bool:
     """Check if FUSE is available on a Slurm cluster.
 
     FUSE is required for storage mounting (MOUNT/MOUNT_CACHED modes) via
-    tools like goofys and rclone. This function caches the result per
-    cluster since FUSE availability is unlikely to change frequently.
+    tools like goofys and rclone. This function caches the result per cluster
+    and command user since FUSE availability is unlikely to change frequently.
     """
     return _check_cluster_feature(cluster, 'fuse',
                                   lambda c: c.check_fuse_enabled(),
@@ -268,6 +326,7 @@ def get_select_type_parameters(cluster: str) -> Optional[str]:
         ssh_proxy_command=ssh_config_dict.get('proxycommand', None),
         ssh_proxy_jump=ssh_config_dict.get('proxyjump', None),
         identities_only=get_identities_only(ssh_config_dict),
+        slurm_user=get_submit_user(cluster),
     )
     value = client.get_select_type_parameters()
 
@@ -484,6 +543,7 @@ def get_cluster_default_partition(cluster_name: str) -> Optional[str]:
         ssh_proxy_command=ssh_config_dict.get('proxycommand', None),
         ssh_proxy_jump=ssh_config_dict.get('proxyjump', None),
         identities_only=get_identities_only(ssh_config_dict),
+        slurm_user=get_submit_user(cluster_name),
     )
 
     return client.get_default_partition()
@@ -941,24 +1001,56 @@ def resolve_gres_gpu_type(
     return chosen
 
 
-def _get_slurm_node_info_list(
-        slurm_cluster_name: Optional[str] = None) -> List[Dict[str, Any]]:
+@annotations.lru_cache(scope='request')
+def _get_all_jobs_gres(
+        slurm_client: 'slurm.SlurmClient') -> Dict[str, List[str]]:
+    """Request-scoped cached wrapper around SlurmClient.get_all_jobs_gres().
+
+    Fetched lazily: `squeue` is only queried when at least one node falls
+    back to job-level GPU accounting (see _get_slurm_node_info_list), and
+    at most once per client instance.
+    """
+    return slurm_client.get_all_jobs_gres()
+
+
+def _parse_int_or_none(value: Optional[str]) -> Optional[int]:
+    """Parse an int from an scontrol attribute value; None on N/A/garbage."""
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except ValueError:
+        return None
+
+
+def _parse_float_or_none(value: Optional[str]) -> Optional[float]:
+    """Parse a float from an scontrol attribute value; None on N/A/garbage."""
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except ValueError:
+        return None
+
+
+def _get_slurm_node_info_list(slurm_cluster_name: str) -> List[Dict[str, Any]]:
     """Gathers detailed information about each node in the Slurm cluster.
+
+    Args:
+        slurm_cluster_name: The Slurm cluster to query. Must be a host defined
+            in the Slurm SSH config (~/.slurm/config).
 
     Raises:
         FileNotFoundError: If the Slurm configuration file does not exist.
-        ValueError: If no Slurm cluster name is found in the Slurm
-                    configuration file.
+        KeyError: If the cluster's entry in the Slurm configuration file is
+            missing a required field, e.g. `User`.
+        exceptions.CommandError: If a Slurm command fails on the cluster, e.g.
+            because the login node is unreachable.
     """
     # 1. Get node state and GRES using sinfo
 
     # can raise FileNotFoundError if config file does not exist.
     slurm_config = get_slurm_ssh_config()
-    if slurm_cluster_name is None:
-        slurm_cluster_names = clouds.Slurm.existing_allowed_clusters()
-        if not slurm_cluster_names:
-            return []
-        slurm_cluster_name = slurm_cluster_names[0]
     slurm_config_dict = slurm_config.lookup(slurm_cluster_name)
     logger.debug(f'Slurm config dict: {slurm_config_dict}')
     slurm_client = slurm.SlurmClient(
@@ -969,6 +1061,9 @@ def _get_slurm_node_info_list(
         ssh_proxy_command=slurm_config_dict.get('proxycommand', None),
         ssh_proxy_jump=slurm_config_dict.get('proxyjump', None),
         identities_only=get_identities_only(slurm_config_dict),
+        # The SSH transport identity gives cluster-wide inventory callers one
+        # consistent view of monitoring and capacity data.
+        slurm_user=None,
     )
     node_infos = slurm_client.info_nodes()
 
@@ -978,10 +1073,20 @@ def _get_slurm_node_info_list(
             f'No nodes found?')
         return []
 
+    # Best-effort enrichment with per-node scontrol attributes (CPU/memory
+    # allocation from the scheduler plus actual load/free-memory sampled
+    # by slurmd) — sinfo's format codes cannot express these. A failure
+    # here must not break basic node info.
+    try:
+        node_details_by_name = slurm_client.get_all_node_details()
+    except Exception as e:  # pylint: disable=broad-except
+        logger.debug(f'Could not fetch scontrol node details on cluster '
+                     f'{slurm_cluster_name}: {e}')
+        node_details_by_name = {}
+
     # 2. Process each node, aggregating partitions per node
     slurm_nodes_info: Dict[str, Dict[str, Any]] = {}
 
-    nodes_to_jobs_gres = slurm_client.get_all_jobs_gres()
     for node_info in node_infos:
         node_name = node_info.node
         state = node_info.state
@@ -1000,28 +1105,73 @@ def _get_slurm_node_info_list(
             else:
                 node_gpu_type = 'GPU'
 
-        # Get allocated GPUs
+        # Per-node scontrol attributes (fetched once above); empty when
+        # scontrol was unavailable.
+        details = node_details_by_name.get(node_name, {})
+
+        # Get allocated GPUs.
+        # Node-level TRES accounting (AllocTRES from `scontrol show node`)
+        # is the preferred source for allocated GPUs: job-level
+        # `squeue -o "%b"` can be `N/A` even when the job has allocated
+        # GPUs (e.g. jobs requesting GPUs via --tres-per-task), or can use
+        # GRES formats the parser does not recognize, causing free GPUs to
+        # be overestimated.
+        # See https://github.com/skypilot-org/skypilot/issues/10283.
         allocated_gpus = 0
-        # TODO(zhwu): move to enum
-        if state in ('alloc', 'mix', 'drain', 'drng', 'drained', 'resv',
-                     'comp'):
-            jobs_gres = nodes_to_jobs_gres.get(node_name, [])
-            if jobs_gres:
-                for job_line in jobs_gres:
-                    _, job_gpu_count = get_gpu_type_and_count(job_line)
-                    allocated_gpus += job_gpu_count
-            elif state == 'alloc':
-                # If no GRES info found but node is fully allocated,
-                # assume all GPUs are in use.
-                allocated_gpus = total_gpus
-        elif state == 'idle':
-            allocated_gpus = 0
+        use_tres = False
+        if details and total_gpus > 0:
+            # Only trust AllocTRES if the cluster actually tracks
+            # gres/gpu in TRES: on clusters that do not project GRES
+            # into TRES, CfgTRES reports 0 GPUs while sinfo %G reports
+            # the real count, and AllocTRES would silently under-report
+            # the allocation.
+            cfg_tres = details.get('CfgTRES', '')
+            alloc_tres = details.get('AllocTRES', '')
+            if get_gpu_count_from_tres(cfg_tres) >= total_gpus:
+                allocated_gpus = get_gpu_count_from_tres(alloc_tres)
+                use_tres = True
+        if not use_tres and total_gpus > 0:
+            # Fall back to job-level accounting via squeue.
+            # TODO(zhwu): move to enum
+            if state in ('alloc', 'mix', 'drain', 'drng', 'drained', 'resv',
+                         'comp'):
+                jobs_gres = _get_all_jobs_gres(slurm_client).get(node_name, [])
+                if jobs_gres:
+                    for job_line in jobs_gres:
+                        _, job_gpu_count = get_gpu_type_and_count(job_line)
+                        allocated_gpus += job_gpu_count
+                elif state == 'alloc':
+                    # If no GRES info found but node is fully allocated,
+                    # assume all GPUs are in use.
+                    allocated_gpus = total_gpus
+            elif state == 'idle':
+                allocated_gpus = 0
 
         free_gpus = total_gpus - allocated_gpus if state not in ('down',
                                                                  'drain',
                                                                  'drng',
                                                                  'maint') else 0
         free_gpus = max(0, free_gpus)
+
+        # CPU/memory allocation + sampled usage from scontrol. All of
+        # these are None when scontrol was unavailable or reported N/A
+        # (e.g. on down nodes).
+        cpu_alloc = _parse_int_or_none(details.get('CPUAlloc'))
+        cpu_tot = _parse_int_or_none(details.get('CPUTot'))
+        free_vcpus = None
+        if cpu_alloc is not None and cpu_tot is not None:
+            free_vcpus = max(0, cpu_tot - cpu_alloc)
+        # scontrol reports memory in MB.
+        alloc_mem_mb = _parse_int_or_none(details.get('AllocMem'))
+        real_mem_mb = _parse_int_or_none(details.get('RealMemory'))
+        free_alloc_memory_gb = None
+        if alloc_mem_mb is not None and real_mem_mb is not None:
+            free_alloc_memory_gb = round(
+                max(0, real_mem_mb - alloc_mem_mb) / 1024.0, 2)
+        free_mem_mb = _parse_int_or_none(details.get('FreeMem'))
+        free_memory_gb = (round(free_mem_mb /
+                                1024.0, 2) if free_mem_mb is not None else None)
+        cpu_load = _parse_float_or_none(details.get('CPULoad'))
 
         slurm_nodes_info[node_name] = {
             'node_name': node_name,
@@ -1033,6 +1183,14 @@ def _get_slurm_node_info_list(
             'free_gpus': free_gpus,
             'vcpu_count': node_info.cpus,
             'memory_gb': round(node_info.memory_gb, 2),
+            # Scheduler-allocation view: CPUs / memory not reserved by
+            # jobs on this node.
+            'free_vcpus': free_vcpus,
+            'free_alloc_memory_gb': free_alloc_memory_gb,
+            # Sampled-usage view: slurmd-reported load average and free
+            # OS memory.
+            'cpu_load': cpu_load,
+            'free_memory_gb': free_memory_gb,
         }
 
     for node_info in slurm_nodes_info.values():
@@ -1042,20 +1200,81 @@ def _get_slurm_node_info_list(
     return list(slurm_nodes_info.values())
 
 
-def slurm_node_info(
-        slurm_cluster_name: Optional[str] = None) -> List[Dict[str, Any]]:
-    """Gets detailed information for each node in the Slurm cluster.
+def slurm_cluster_names() -> List[str]:
+    """Gets the names of the Slurm clusters this server is configured with.
+
+    Derived from ~/.slurm/config and the ``allowed_clusters`` config alone —
+    nothing here contacts a login node, so a cluster that is currently
+    unreachable is still reported. Callers that need node or GPU data still
+    have to query the cluster itself.
 
     Returns:
-        List[Dict[str, Any]]: A list of dictionaries, each containing node info.
+        List[str]: The configured and allowed Slurm cluster names.
     """
-    try:
-        node_list = _get_slurm_node_info_list(
-            slurm_cluster_name=slurm_cluster_name)
-    except (FileNotFoundError, RuntimeError, exceptions.NotSupportedError) as e:
-        logger.debug(f'Could not retrieve Slurm node info: {e}')
+    return clouds.Slurm.existing_allowed_clusters()
+
+
+def slurm_node_info(
+        slurm_cluster_name: Optional[str] = None) -> List[Dict[str, Any]]:
+    """Gets detailed information for each node in the Slurm cluster(s).
+
+    Args:
+        slurm_cluster_name: The Slurm cluster to query. If None, node info
+            is aggregated across all existing allowed Slurm clusters.
+
+    Returns:
+        List[Dict[str, Any]]: One dictionary per node with keys:
+            node_name, slurm_cluster_name, partition (comma-joined),
+            node_state, gpu_type, total_gpus, free_gpus, vcpu_count,
+            memory_gb, and the scontrol-derived enrichment fields
+            free_vcpus / free_alloc_memory_gb (scheduler allocation) and
+            cpu_load / free_memory_gb (slurmd-sampled usage) — the
+            enrichment fields are None when scontrol is unavailable or
+            reports N/A.
+
+    Raises:
+        exceptions.CommandError: If a single cluster is explicitly requested
+            and querying it fails. Failures are never raised when aggregating
+            across clusters, so that one unreachable cluster does not hide the
+            nodes of the reachable ones.
+    """
+    if slurm_cluster_name is not None:
+        # An explicitly requested cluster propagates query failures, so that
+        # callers can tell an unreachable cluster apart from a cluster with no
+        # nodes. `sky show-gpus` and the dashboard's per-cluster GPU tile rely
+        # on this to report the cluster as failed instead of empty, see
+        # `core.realtime_slurm_gpu_availability`.
+        try:
+            return _get_slurm_node_info_list(
+                slurm_cluster_name=slurm_cluster_name)
+        except (FileNotFoundError, RuntimeError,
+                exceptions.NotSupportedError) as e:
+            logger.debug(f'Could not retrieve Slurm node info: {e}')
+            return []
+
+    clusters_to_query = clouds.Slurm.existing_allowed_clusters()
+    if not clusters_to_query:
         return []
-    return node_list
+
+    def _query_cluster(cluster_name: str) -> List[Dict[str, Any]]:
+        try:
+            return _get_slurm_node_info_list(slurm_cluster_name=cluster_name)
+        except Exception as e:  # pylint: disable=broad-except
+            # Best-effort aggregation: an unreachable login node raises
+            # exceptions.CommandError and a malformed ~/.slurm/config entry
+            # raises KeyError. run_in_parallel re-raises the first exception,
+            # so anything escaping here would drop every cluster's nodes.
+            logger.warning(
+                f'Skipping Slurm cluster {cluster_name!r} while collecting '
+                f'node info: {common_utils.format_exception(e)}')
+            return []
+
+    node_info_lists = subprocess_utils.run_in_parallel(_query_cluster,
+                                                       clusters_to_query)
+    return [
+        node_info for node_info_list in node_info_lists
+        for node_info in node_info_list
+    ]
 
 
 def is_inside_slurm_cluster() -> bool:
@@ -1093,18 +1312,19 @@ def get_partition_info(cluster_name: str,
     return get_partition_infos(cluster_name=cluster_name).get(partition_name)
 
 
-# Cache the partitions for 1 hour, we do not expect the
-# partitions to change frequently.
-@annotations.ttl_cache(scope='global', timer=time.time, maxsize=10, ttl=60 * 60)
 def get_partition_infos(cluster_name: str) -> Dict[str, slurm.SlurmPartition]:
-    """Get the partition information for a Slurm cluster.
+    """Get the partition information visible to the current Slurm user."""
+    return _get_partition_infos(cluster_name, get_submit_user(cluster_name))
 
-    Args:
-        cluster_name: Name of the Slurm cluster.
 
-    Returns:
-        List of partition information.
-    """
+# Cache the partitions for 1 hour, we do not expect them to change frequently.
+@annotations.ttl_cache(scope='global',
+                       timer=time.time,
+                       maxsize=128,
+                       ttl=60 * 60)
+def _get_partition_infos(
+        cluster_name: str,
+        slurm_user: Optional[str]) -> Dict[str, slurm.SlurmPartition]:
     try:
         slurm_config = SSHConfig.from_path(
             os.path.expanduser(DEFAULT_SLURM_PATH))
@@ -1118,6 +1338,7 @@ def get_partition_infos(cluster_name: str) -> Dict[str, slurm.SlurmPartition]:
             ssh_proxy_command=slurm_config_dict.get('proxycommand', None),
             ssh_proxy_jump=slurm_config_dict.get('proxyjump', None),
             identities_only=get_identities_only(slurm_config_dict),
+            slurm_user=slurm_user,
         )
 
         partitions_info = client.get_partitions_info()
@@ -1154,6 +1375,32 @@ def format_slurm_duration(duration_seconds: Optional[int]) -> str:
     minutes = (duration_seconds % 3600) // 60
     seconds = duration_seconds % 60
     return f'{days}-{hours:02}:{minutes:02}:{seconds:02}'
+
+
+# Accepted sbatch --time formats:
+#   m, m:s, h:m:s, d-h, d-h:m, d-h:m:s
+# See: https://slurm.schedmd.com/sbatch.html#OPT_time
+_TIME_FORMAT_RE = re.compile(
+    r'\d+|\d+:\d+|\d+:\d+:\d+|\d+-\d+|\d+-\d+:\d+|\d+-\d+:\d+:\d+')
+
+
+def validate_sbatch_time(value: str) -> None:
+    """Validate that a user-supplied sbatch --time value is well-formed.
+
+    Reject malformed values up front (at config-load / directive-build time)
+    rather than letting `sbatch` reject the directive at submit time, which
+    yields a less actionable error.
+
+    Raises:
+        ValueError: If the value does not match a Slurm-accepted time format.
+    """
+    # Use fullmatch (not match) so trailing whitespace or newlines are
+    # rejected — `$` would match before a final newline due to Python's
+    # MULTILINE default and let `'5\n'` slip through.
+    if not _TIME_FORMAT_RE.fullmatch(value):
+        raise ValueError(
+            f'Invalid slurm.sbatch_options.time {value!r}. '
+            'Accepted formats: m, m:s, h:m:s, d-h, d-h:m, d-h:m:s.')
 
 
 def srun_sshd_command(

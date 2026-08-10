@@ -32,6 +32,14 @@ def generate_images():
     Each prompt produces one PNG image.
     """
     # pylint: disable=import-outside-toplevel
+    # Remote functions run in a fresh Python namespace (sky/batch/utils.py),
+    # so re-import os here. pool.yaml's `envs:` are not propagated to the
+    # task submitted by Dataset.map(), so HF_HUB_DISABLE_XET must be set
+    # on the worker process — HuggingFace's Xet CDN returns frequent 403s
+    # to AWS workers and stalls Stable Diffusion weight downloads. The
+    # legacy LFS path works reliably; setdefault keeps user overrides.
+    import os
+    os.environ.setdefault('HF_HUB_DISABLE_XET', '1')
     from diffusers import StableDiffusionPipeline
     import torch
 

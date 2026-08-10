@@ -7,6 +7,20 @@ from sky.adaptors import coreweave
 from sky.data import data_utils
 
 
+class TestIsAzContainerEndpoint:
+    """Tests for is_az_container_endpoint function."""
+
+    def test_bare_storage_account_url_returns_false(self):
+        """Bare storage-account URL (no container) must return False."""
+        assert not data_utils.is_az_container_endpoint(
+            'https://myaccount.blob.core.windows.net')
+
+    def test_valid_container_url_returns_true(self):
+        """URL with a container name must return True."""
+        assert data_utils.is_az_container_endpoint(
+            'https://myaccount.blob.core.windows.net/mycontainer')
+
+
 class TestSplitCoreweavePath:
     """Tests for split_coreweave_path function."""
 

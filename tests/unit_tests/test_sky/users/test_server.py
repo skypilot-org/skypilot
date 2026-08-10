@@ -1,5 +1,6 @@
 """Unit tests for the users server endpoints."""
 
+import contextlib
 import hashlib
 from unittest import mock
 
@@ -13,6 +14,7 @@ from sky.skylet import constants
 from sky.users import rbac
 from sky.users import server
 from sky.utils import common
+from sky.utils import common_utils
 
 
 class TestGetUserType:
@@ -123,6 +125,67 @@ def mock_request():
     return request
 
 
+class TestDefaultRoleFreshness:
+    """Main-process sync handlers must reload config before resolving
+    `rbac.default_role`, so an admin's runtime change to the default role takes
+    effect without an API-server restart.
+
+    Each test seeds a stale in-memory default ('user') and makes a reload pick up
+    the fresh value ('viewer'). Reverting the handler's `safe_reload_config()`
+    call makes the assertion see the stale 'user' and fail.
+    """
+
+    def _patch_common(self, monkeypatch, state):
+
+        def fake_reload():
+            state['role'] = 'viewer'
+
+        monkeypatch.setattr(server.skypilot_config, 'safe_reload_config',
+                            fake_reload)
+        monkeypatch.setattr(server.rbac, 'get_default_role',
+                            lambda: state['role'])
+        monkeypatch.setattr(server.rbac, 'get_supported_roles',
+                            lambda: ['admin', 'user', 'viewer'])
+        monkeypatch.setattr(server.global_user_state, 'get_user_by_name',
+                            lambda name: None)
+        monkeypatch.setattr(server.global_user_state, 'add_or_update_user',
+                            lambda user, **kwargs: True)
+        monkeypatch.setattr(server.server_common.crypt_ctx, 'hash',
+                            lambda pw: 'hashed')
+        monkeypatch.setattr(server, '_user_lock',
+                            lambda user_id: contextlib.nullcontext())
+
+    def test_user_create_reloads_before_resolving_default_role(
+            self, monkeypatch):
+        state = {'role': 'user'}
+        self._patch_common(monkeypatch, state)
+        captured = {}
+        monkeypatch.setattr(server.permission.permission_service, 'update_role',
+                            lambda user_id, role: captured.update(role=role))
+
+        server.user_create(
+            payloads.UserCreateBody(username='alice', password='pw'))
+
+        assert captured['role'] == 'viewer'
+
+    def test_user_import_reloads_before_resolving_default_role(
+            self, monkeypatch):
+        state = {'role': 'user'}
+        self._patch_common(monkeypatch, state)
+        # Password is plain text -> handler hashes it (identify returns None).
+        monkeypatch.setattr(server.server_common.crypt_ctx, 'identify',
+                            lambda pw: None)
+        captured = []
+        monkeypatch.setattr(server.permission.permission_service, 'update_role',
+                            lambda user_id, role: captured.append(role))
+
+        # CSV row leaves role empty -> falls back to the default role.
+        csv_content = 'username,password,role\nalice,pw,\n'
+        server.user_import(payloads.UserImportBody(csv_content=csv_content))
+
+        assert captured == ['viewer']
+
+
 class TestUsersEndpoints:
     """Test class for users server endpoints."""
 
@@ -174,10 +237,12 @@ class TestUsersEndpoints:
 
         # Verify function calls
         mock_get_all_users.assert_called_once()
-        # Should call get_users_for_role for each supported role
-        assert mock_get_users_for_role.call_count == 2  # admin and user roles
+        # Should call get_users_for_role for each supported role:
+        # admin, user, viewer.
+        assert mock_get_users_for_role.call_count == 3
         mock_get_users_for_role.assert_any_call('admin')
         mock_get_users_for_role.assert_any_call('user')
+        mock_get_users_for_role.assert_any_call('viewer')
 
     @mock.patch('sky.global_user_state.get_all_users')
     @mock.patch('sky.users.permission.permission_service.get_users_for_role')
@@ -196,7 +261,7 @@ class TestUsersEndpoints:
         assert result == []
         mock_get_all_users.assert_called_once()
         # Should still call get_users_for_role for each supported role even with no users
-        assert mock_get_users_for_role.call_count == 2  # admin and user roles
+        assert mock_get_users_for_role.call_count == 3  # admin, user, viewer
 
     @mock.patch('sky.users.permission.permission_service.get_user_roles')
     @pytest.mark.asyncio
@@ -556,15 +621,17 @@ class TestUsersEndpoints:
     @mock.patch('sky.users.permission.permission_service.delete_user')
     @pytest.mark.asyncio
     async def test_user_delete_success(self, mock_delete_user_role,
-                                       mock_delete_user, mock_get_user):
+                                       mock_delete_user, mock_get_user,
+                                       mock_request):
         """Test successful POST /users/delete endpoint."""
         # Setup
         test_user = models.User(id='test_user', name='Test User')
         mock_get_user.return_value = test_user
+        mock_request.state.auth_user = None
         delete_body = payloads.UserDeleteBody(user_id='test_user')
 
         # Execute
-        result = server.user_delete(delete_body)
+        result = server.user_delete(mock_request, delete_body)
 
         # Verify
         assert result is None
@@ -574,15 +641,17 @@ class TestUsersEndpoints:
 
     @mock.patch('sky.global_user_state.get_user')
     @pytest.mark.asyncio
-    async def test_user_delete_user_not_found(self, mock_get_user):
+    async def test_user_delete_user_not_found(self, mock_get_user,
+                                              mock_request):
         """Test POST /users/delete endpoint with non-existent user."""
         # Setup
         mock_get_user.return_value = None
+        mock_request.state.auth_user = None
         delete_body = payloads.UserDeleteBody(user_id='nonexistent_user')
 
         # Execute & Verify
         with pytest.raises(fastapi.HTTPException) as exc_info:
-            server.user_delete(delete_body)
+            server.user_delete(mock_request, delete_body)
         assert exc_info.value.status_code == 400
         assert 'does not exist' in str(exc_info.value.detail)
         mock_get_user.assert_called_once_with('nonexistent_user')
@@ -837,14 +906,16 @@ class TestUsersEndpoints:
     async def test_user_delete_forbidden_internal_users(self,
                                                         mock_delete_user_role,
                                                         mock_delete_user,
-                                                        mock_get_user):
+                                                        mock_get_user,
+                                                        mock_request):
         """Test POST /users/delete endpoint forbidden for internal users."""
+        mock_request.state.auth_user = None
         # Internal server user
         server_user = models.User(id=common.SERVER_ID, name='Server User')
         mock_get_user.return_value = server_user
         delete_body = payloads.UserDeleteBody(user_id=common.SERVER_ID)
         with pytest.raises(fastapi.HTTPException) as exc_info:
-            server.user_delete(delete_body)
+            server.user_delete(mock_request, delete_body)
         assert exc_info.value.status_code == 400
         assert 'Cannot delete internal API server user' in str(
             exc_info.value.detail)
@@ -855,7 +926,7 @@ class TestUsersEndpoints:
         delete_body = payloads.UserDeleteBody(
             user_id=constants.SKYPILOT_SYSTEM_USER_ID)
         with pytest.raises(fastapi.HTTPException) as exc_info:
-            server.user_delete(delete_body)
+            server.user_delete(mock_request, delete_body)
         assert exc_info.value.status_code == 400
         assert 'Cannot delete internal API server user' in str(
             exc_info.value.detail)
@@ -1134,3 +1205,35 @@ charlie,pw789,user
         assert result['total_processed'] == 2
         assert len(result['parse_errors']) == 1
         assert 'Line 3: Invalid number of columns' in result['parse_errors'][0]
+
+
+class TestUserContextIsolation:
+    """The sync user handlers run under @context.contextual.
+
+    They must set the request user in their own per-request context (so
+    workspace/RBAC resolution sees the caller) without leaking it into the
+    process-global context after the handler returns. user_delete is the
+    simplest of the four (get_user_workspace/user_update/user_batch_update
+    share the same @context.contextual + set_current_user pattern).
+    """
+
+    def test_user_delete_user_context_is_isolated_and_not_leaked(self):
+        user = models.User(id='u-alice', name='alice')
+        request = mock.MagicMock()
+        request.state.auth_user = user
+
+        captured = {}
+
+        def _capture(user_id):
+            # Runs inside the handler's context; current user must be ours.
+            captured['inside'] = common_utils.get_current_user().id
+
+        before = common_utils.get_current_user().id
+        with mock.patch.object(server, '_delete_user', side_effect=_capture):
+            server.user_delete(
+                request=request,
+                user_delete_body=payloads.UserDeleteBody(user_id='u-bob'))
+        after = common_utils.get_current_user().id
+
+        assert captured['inside'] == 'u-alice'  # set inside the context
+        assert after == before  # no leak after the handler returns

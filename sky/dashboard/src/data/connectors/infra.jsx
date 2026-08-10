@@ -7,6 +7,23 @@ import dashboardCache from '@/lib/cache';
 import { buildContextStatsKeyFromCloud } from '@/utils/infraUtils';
 
 /**
+ * Returns true iff `nodeData` (a `KubernetesNodeInfo`-shaped object from
+ * the API) should be excluded from free-GPU availability counts — i.e.,
+ * it's not ready, cordoned, or carries at least one taint that the
+ * configured `kubernetes.pod_config.spec.tolerations` does NOT tolerate.
+ * Taints with `tolerated: true` (set by the backend for matching
+ * tolerations) don't suppress availability.
+ */
+function isNodeNotReadyForGpus(nodeData) {
+  const isReady = nodeData['is_ready'] !== false;
+  const isCordoned = nodeData['is_cordoned'] === true;
+  const isTainted = (nodeData['taints'] || []).some(
+    (t) => t && t.tolerated !== true
+  );
+  return !isReady || isCordoned || isTainted;
+}
+
+/**
  * Fast function to get just the list of enabled clouds (without counts).
  * Used for progressive loading - display cloud rows immediately, then overlay counts.
  */
@@ -64,7 +81,9 @@ export async function getEnabledCloudsList() {
 
 export async function getCloudInfrastructure(forceRefresh = false) {
   const { getClusters } = await import('@/data/connectors/clusters');
-  const { getManagedJobs } = await import('@/data/connectors/jobs');
+  const { getManagedJobs, MANAGED_JOBS_SUMMARY_ARGS } = await import(
+    '@/data/connectors/jobs'
+  );
   const { getWorkspaces, getEnabledCloudsBatch } = await import(
     '@/data/connectors/workspaces'
   );
@@ -72,9 +91,9 @@ export async function getCloudInfrastructure(forceRefresh = false) {
   try {
     // Fetch jobs, clusters, and workspaces in parallel for better performance
     const [jobsResult, clustersResult, workspacesData] = await Promise.all([
-      // Use shared cache key (no field filtering) - preloader uses same args
+      // Shared cache key — must match the preloader's args exactly
       dashboardCache
-        .get(getManagedJobs, [{ allUsers: true, skipFinished: true }])
+        .get(getManagedJobs, [MANAGED_JOBS_SUMMARY_ARGS])
         .catch((error) => {
           console.error('Error fetching managed jobs:', error);
           return { jobs: [] };
@@ -188,6 +207,25 @@ export async function getCloudInfrastructure(forceRefresh = false) {
 export async function getGPUs() {
   // Legacy function - now redirects to workspace-aware infrastructure
   return await getWorkspaceInfrastructure();
+}
+
+/**
+ * Whether a Kubernetes context's node list is filtered by an `allowed_nodes`
+ * config. Drives the infra-page hint/badge that warn not all nodes in the
+ * context are shown, so a missing node isn't mistaken for a bug. Falls back to
+ * `{ configured: false }` on any error so the hint fails closed (no banner)
+ * rather than showing a misleading one.
+ */
+export async function getAllowedNodesConfig(context) {
+  try {
+    const response = await apiClient.get(
+      `/kubernetes/allowed_nodes?k8s_context=${encodeURIComponent(context)}`
+    );
+    if (!response.ok) return { configured: false };
+    return await response.json();
+  } catch {
+    return { configured: false };
+  }
 }
 
 // New workspace-aware infrastructure fetching function
@@ -428,14 +466,7 @@ export async function getContextGPUData(context) {
         const gpuName = nodeData['accelerator_type'] || '-';
         const totalCount = nodeData['total']?.['accelerator_count'] || 0;
         const freeCount = nodeData['free']?.['accelerators_available'] || 0;
-        const isReady = nodeData['is_ready'] !== false;
-        // Check if node is cordoned (defaults to false for backward compatibility)
-        const isCordoned = nodeData['is_cordoned'] === true;
-        // Check if node has taints (defaults to empty for backward compatibility)
-        const taints = nodeData['taints'] || [];
-        const isTainted = taints.length > 0;
-        // Node is considered not ready if it's not ready, cordoned, or tainted
-        const isNodeNotReady = !isReady || isCordoned || isTainted;
+        const isNodeNotReady = isNodeNotReadyForGpus(nodeData);
 
         // Per-node data - use same field names as original getKubernetesGPUsFromContexts
         perNodeGPUs.push({
@@ -443,9 +474,9 @@ export async function getContextGPUData(context) {
           gpu_name: gpuName,
           gpu_total: totalCount,
           gpu_free: freeCount,
-          is_ready: isReady,
-          is_cordoned: isCordoned,
-          taints: taints,
+          is_ready: nodeData['is_ready'] !== false,
+          is_cordoned: nodeData['is_cordoned'] === true,
+          taints: nodeData['taints'] || [],
           context: context,
           ip_address: nodeData['ip_address'] || null,
           cpu_count: nodeData['cpu_count'] ?? null,
@@ -565,15 +596,7 @@ async function getKubernetesGPUsFromContexts(contextNames) {
           const gpuName = nodeData['accelerator_type'] || '-';
           const totalCount = nodeData['total']?.['accelerator_count'] || 0;
           const freeCount = nodeData['free']?.['accelerators_available'] || 0;
-          // Check if node is ready (defaults to true for backward compatibility)
-          const isReady = nodeData['is_ready'] !== false;
-          // Check if node is cordoned (defaults to false for backward compatibility)
-          const isCordoned = nodeData['is_cordoned'] === true;
-          // Check if node has taints (defaults to empty for backward compatibility)
-          const taints = nodeData['taints'] || [];
-          const isTainted = taints.length > 0;
-          // Node is considered not ready if it's not ready, cordoned, or tainted
-          const isNodeNotReady = !isReady || isCordoned || isTainted;
+          const isNodeNotReady = isNodeNotReadyForGpus(nodeData);
 
           if (totalCount > 0) {
             if (!gpuToData[gpuName]) {
@@ -1147,6 +1170,35 @@ async function getSlurmPerNodeGPUs() {
   }
 }
 
+// The clusters in ~/.slurm/config, which the server answers without
+// contacting any login node. Independent of the GPU and node queries, so it is
+// fetched alongside them rather than before them: a cluster that is
+// unreachable still comes back here after those two report nothing for it.
+async function getSlurmClusterNames() {
+  try {
+    const response = await apiClient.post(`/slurm_cluster_names`, {});
+    if (!response.ok) {
+      const msg = `Failed to get slurm cluster names with status ${response.status}`;
+      throw new Error(msg);
+    }
+    const id = response.headers.get('X-Skypilot-Request-ID');
+    if (!id) {
+      const msg = 'No request ID received from server for slurm cluster names';
+      throw new Error(msg);
+    }
+    const fetchedData = await apiClient.get(`/api/get?request_id=${id}`);
+    if (!fetchedData.ok) {
+      const msg = `Failed to get slurm cluster names result with status ${fetchedData.status}`;
+      throw new Error(msg);
+    }
+    const data = await fetchedData.json();
+    return data.return_value ? JSON.parse(data.return_value) : [];
+  } catch (error) {
+    console.error('Error fetching Slurm cluster names:', error);
+    return [];
+  }
+}
+
 // Export Slurm infrastructure fetching for parallel loading
 export async function getSlurmInfrastructure() {
   return await getSlurmServiceGPUs();
@@ -1154,8 +1206,10 @@ export async function getSlurmInfrastructure() {
 
 async function getSlurmServiceGPUs() {
   try {
-    // Fetch cluster GPUs and node GPUs in parallel for better performance
-    const [clusterGPUsRaw, nodeGPUsRaw] = await Promise.all([
+    // Fetch the configured cluster names, cluster GPUs and node GPUs in
+    // parallel — none of the three depends on another.
+    const [clusterNames, clusterGPUsRaw, nodeGPUsRaw] = await Promise.all([
+      getSlurmClusterNames(),
       getSlurmClusterGPUs(),
       getSlurmPerNodeGPUs(),
     ]);
@@ -1217,6 +1271,7 @@ async function getSlurmServiceGPUs() {
     }
 
     return {
+      slurmClusterNames: clusterNames,
       allSlurmGPUs: Object.values(allSlurmGPUs).sort((a, b) =>
         a.gpu_name.localeCompare(b.gpu_name)
       ),
@@ -1235,6 +1290,7 @@ async function getSlurmServiceGPUs() {
   } catch (error) {
     console.error('Error fetching Slurm GPUs:', error);
     return {
+      slurmClusterNames: [],
       allSlurmGPUs: [],
       perClusterSlurmGPUs: [],
       perNodeSlurmGPUs: [],

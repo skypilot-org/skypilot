@@ -1,6 +1,9 @@
 """Tests for SkyServiceSpec, specifically pool configuration validation."""
+import pickle
+
 import pytest
 
+from sky.serve import constants as serve_constants
 from sky.serve import service_spec
 
 
@@ -164,3 +167,102 @@ class TestPoolConfiguration:
 
         assert spec.min_replicas == 3
         assert spec.max_replicas == 3
+
+
+class TestReadinessProbeConfiguration:
+    """Test readiness probe configuration parsing."""
+
+    def test_readiness_probe_uses_default_endpoint_probe_interval(self):
+        spec = service_spec.SkyServiceSpec.from_yaml_config({
+            'readiness_probe': '/',
+        })
+
+        assert (spec.endpoint_probe_interval_seconds ==
+                serve_constants.DEFAULT_ENDPOINT_PROBE_INTERVAL_SECONDS)
+        assert spec.consecutive_failure_threshold_timeout is None
+
+    def test_readiness_probe_accepts_probe_overrides(self):
+        spec = service_spec.SkyServiceSpec.from_yaml_config({
+            'readiness_probe': {
+                'path': '/health',
+                'endpoint_probe_interval_seconds': 7,
+                'consecutive_failure_threshold_timeout': 45,
+            },
+        })
+
+        assert spec.endpoint_probe_interval_seconds == 7
+        assert spec.consecutive_failure_threshold_timeout == 45
+
+    def test_unpickle_old_spec_backfills_new_probe_fields(self):
+        spec = service_spec.SkyServiceSpec.from_yaml_config({
+            'readiness_probe': {
+                'path': '/health',
+            },
+            'replicas': 1,
+        })
+        del spec._endpoint_probe_interval_seconds
+        del spec._lb_stream_timeout_seconds
+        del spec._consecutive_failure_threshold_timeout
+
+        restored = pickle.loads(pickle.dumps(spec))
+
+        assert (restored.endpoint_probe_interval_seconds ==
+                serve_constants.DEFAULT_ENDPOINT_PROBE_INTERVAL_SECONDS)
+        assert (restored.lb_stream_timeout_seconds ==
+                serve_constants.DEFAULT_LB_STREAM_TIMEOUT)
+        assert restored.consecutive_failure_threshold_timeout is None
+
+
+class TestLoadBalancerConfiguration:
+
+    def test_default_load_balancer_settings(self):
+        spec = service_spec.SkyServiceSpec.from_yaml_config({})
+        assert (spec.lb_stream_timeout_seconds ==
+                serve_constants.DEFAULT_LB_STREAM_TIMEOUT)
+
+    def test_to_yaml_config_omits_default_new_fields_for_compatibility(self):
+        spec = service_spec.SkyServiceSpec.from_yaml_config({
+            'readiness_probe': {
+                'path': '/health',
+            },
+            'replicas': 1,
+        })
+
+        config = spec.to_yaml_config()
+
+        assert 'load_balancer' not in config
+        assert 'endpoint_probe_interval_seconds' not in config[
+            'readiness_probe']
+        assert 'consecutive_failure_threshold_timeout' not in config[
+            'readiness_probe']
+
+    def test_load_balancer_stream_timeout_seconds_override(self):
+
+        spec = service_spec.SkyServiceSpec.from_yaml_config({
+            'load_balancer': {
+                'stream_timeout_seconds': 240,
+            },
+        })
+
+        assert spec.lb_stream_timeout_seconds == 240
+
+    def test_to_yaml_config_keeps_non_default_new_fields(self):
+        spec = service_spec.SkyServiceSpec.from_yaml_config({
+            'readiness_probe': {
+                'path': '/health',
+                'endpoint_probe_interval_seconds': 7,
+                'consecutive_failure_threshold_timeout': 45,
+            },
+            'load_balancer': {
+                'stream_timeout_seconds': 240,
+            },
+            'replicas': 1,
+        })
+
+        config = spec.to_yaml_config()
+
+        assert (
+            config['readiness_probe']['endpoint_probe_interval_seconds'] == 7)
+        assert (config['readiness_probe']
+                ['consecutive_failure_threshold_timeout'] == 45)
+        assert config['load_balancer']['stream_timeout_seconds'] == 240

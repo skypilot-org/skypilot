@@ -1130,10 +1130,16 @@ def test_skyserve_https(generic_cloud: str):
                 f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; '
                 'output=$(curl $endpoint -k); echo $output; '
                 'echo $output | grep "Hi, SkyPilot here"',
-                # Self signed certificate should fail without -k.
+                # Self-signed certificate should fail TLS verification
+                # without -k. Assert exit code 60 (CURLE_PEER_FAILED_VERIFICATION)
+                # rather than the human-readable message text — curl/OpenSSL
+                # have changed the message wording across versions (e.g.
+                # "self-signed certificate" on curl<=7.x, "unable to obtain
+                # common name from peer certificate" on curl 8.18+ when the
+                # cert has an empty subject).
                 f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; '
-                'output=$(curl $endpoint 2>&1); echo $output; '
-                'echo $output | grep -E "self[ -]signed certificate"',
+                'output=$(curl $endpoint 2>&1); rc=$?; echo "$output"; '
+                '[ $rc -eq 60 ]',
                 # curl with wrong schema (http) should fail.
                 f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; '
                 'http_endpoint="${endpoint/https:/http:}"; '
@@ -1184,7 +1190,11 @@ def test_user_dependencies(generic_cloud: str):
     test = smoke_tests_utils.Test(
         'user-dependencies',
         [
-            f'sky launch -y -c {name} --infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} "pip install ray>2.11; ray start --head"',
+            # conda is not installed by default; opt in via a temporary config
+            # (it is not a task-YAML-overridable key) so the later
+            # different_default_conda_env.yaml step can `conda create`. Set at
+            # first launch so conda is present cluster-wide.
+            f'sky launch -y -c {name} --infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} --config provision.install_conda=true "pip install ray>2.11; ray start --head"',
             f'sky logs {name} 1 --status',
             f'sky exec {name} "echo hi"',
             f'sky logs {name} 2 --status',

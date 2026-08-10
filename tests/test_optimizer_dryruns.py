@@ -96,7 +96,7 @@ def _test_resources_launch(*resources_args,
 
 
 def test_resources_aws(enable_all_clouds):
-    _test_resources_launch(infra='aws', instance_type='p3.2xlarge')
+    _test_resources_launch(infra='aws', instance_type='g4dn.xlarge')
 
 
 def test_resources_azure(enable_all_clouds):
@@ -141,10 +141,10 @@ def test_partial_tpu(enable_all_clouds):
     _test_resources_launch(accelerators='tpu-v3-8')
 
 
-def test_partial_v100(enable_all_clouds):
-    _test_resources_launch(sky.AWS(), accelerators='V100')
-    _test_resources_launch(sky.AWS(), accelerators='V100', use_spot=True)
-    _test_resources_launch(sky.AWS(), accelerators={'V100': 8})
+def test_partial_t4(enable_all_clouds):
+    _test_resources_launch(sky.AWS(), accelerators='T4')
+    _test_resources_launch(sky.AWS(), accelerators='T4', use_spot=True)
+    _test_resources_launch(sky.AWS(), accelerators={'T4': 8})
 
 
 def test_invalid_cloud_tpu(enable_all_clouds):
@@ -201,6 +201,47 @@ def test_instance_type_mismatches_memory(enable_all_clouds):
         assert 'does not have the requested memory' in str(e.value)
 
 
+def test_invalid_disk_size(enable_all_clouds):
+    # disk_size must be a positive integer; 0 and negative values were
+    # previously accepted silently and surfaced only at provision time.
+    for bad_size in [0, -1, -100]:
+        with pytest.raises(ValueError) as e:
+            _test_resources(sky.AWS(), disk_size=bad_size)
+        assert 'disk_size' in str(e.value)
+        assert 'positive' in str(e.value)
+
+
+def test_invalid_accelerator_count(enable_all_clouds):
+    # Accelerator counts must be positive. Zero or negative counts were
+    # previously accepted and produced either a misleading "catalog does
+    # not contain" error or (on Kubernetes) a silently-launched pod with
+    # zero GPUs. Test both AWS and Kubernetes paths since the original
+    # bug report was specifically about the Kubernetes zero-GPU pod.
+    for cloud in [sky.AWS(), sky.Kubernetes()]:
+        for bad_accel in ['V100:0', 'V100:-1', {'V100': 0}, {'V100': -2}]:
+            with pytest.raises(ValueError) as e:
+                _test_resources(cloud, accelerators=bad_accel)
+            assert 'positive' in str(e.value).lower()
+
+
+def test_ports_comma_separated(enable_all_clouds):
+    # A string like '8000,9000' was previously passed through as a single
+    # "port", producing an unhelpful range-format error. Split on commas
+    # before validating so the common CLI form works.
+    r = _make_resources(sky.AWS(), ports='8000,9000')
+    assert sorted(r.ports) == ['8000', '9000']
+
+
+def test_ports_comma_separated_with_bad_entry(enable_all_clouds):
+    # '8000,9000,abc' should still error, but name the offending entry
+    # rather than printing the whole string as one bad port.
+    with pytest.raises(ValueError) as e:
+        _make_resources(sky.AWS(), ports='8000,9000,abc')
+    # The error should reference the actual bad token, not the full string.
+    assert 'abc' in str(e.value)
+    assert '8000,9000,abc' not in str(e.value)
+
+
 def test_instance_type_matches_cpus(enable_all_clouds):
     _test_resources_launch(sky.AWS(), instance_type='c6i.8xlarge', cpus=32)
     _test_resources_launch(sky.Azure(),
@@ -243,7 +284,7 @@ def test_instance_type_from_cpu_memory(enable_all_clouds, capfd):
     assert 'r6i.2xlarge' in stdout  # AWS, 8 vCPUs, 64 GB memory
     assert 'Standard_E8s_v5' in stdout  # Azure, 8 vCPUs, 64 GB memory
     assert 'n4-highmem-8' in stdout  # GCP, 8 vCPUs, 64 GB memory
-    assert 'gpu_1x_a10' in stdout  # Lambda, 30 vCPUs, 200 GB memory
+    assert 'gpu_1x_a6000' in stdout  # Lambda, 14 vCPUs, 100 GB memory
 
     _test_resources_launch(cpus='4+', memory='4+')
     stdout, _ = capfd.readouterr()
@@ -279,10 +320,10 @@ def test_instance_type_from_cpu_memory(enable_all_clouds, capfd):
 
 def test_instance_type_mistmatches_accelerators(enable_all_clouds):
     bad_instance_and_accs = [
-        # Actual: V100
-        ('p3.2xlarge', 'K80'),
+        # Actual: T4
+        ('g4dn.xlarge', 'K80'),
         # Actual: None
-        ('m4.2xlarge', 'V100'),
+        ('m4.2xlarge', 'T4'),
     ]
     for instance, acc in bad_instance_and_accs:
         with pytest.raises(exceptions.ResourcesMismatchError) as e:
@@ -305,15 +346,15 @@ def test_instance_type_mistmatches_accelerators(enable_all_clouds):
 
     with pytest.raises(exceptions.ResourcesMismatchError) as e:
         _test_resources_launch(sky.AWS(),
-                               instance_type='p3.16xlarge',
-                               accelerators={'V100': 1})
+                               instance_type='g4dn.12xlarge',
+                               accelerators={'T4': 1})
         assert 'Infeasible resource demands found' in str(e.value)
 
 
 def test_instance_type_matches_accelerators(enable_all_clouds):
     _test_resources_launch(sky.AWS(),
-                           instance_type='p3.2xlarge',
-                           accelerators='V100')
+                           instance_type='g4dn.xlarge',
+                           accelerators='T4')
     _test_resources_launch(sky.GCP(),
                            instance_type='n1-standard-2',
                            accelerators='V100')
@@ -330,8 +371,8 @@ def test_instance_type_matches_accelerators(enable_all_clouds):
                            accelerators={'H100': 8})
 
     _test_resources_launch(sky.AWS(),
-                           instance_type='p3.16xlarge',
-                           accelerators={'V100': 8})
+                           instance_type='g4dn.metal',
+                           accelerators={'T4': 8})
 
 
 def test_invalid_instance_type(enable_all_clouds):
@@ -345,8 +386,8 @@ def test_infer_cloud_from_instance_type(enable_all_clouds):
     # AWS instances
     _test_resources(instance_type='m5.12xlarge', expected_cloud=sky.AWS())
     _test_resources_launch(instance_type='m5.12xlarge')
-    _test_resources(instance_type='p3.8xlarge', expected_cloud=sky.AWS())
-    _test_resources_launch(instance_type='p3.8xlarge')
+    _test_resources(instance_type='g4dn.12xlarge', expected_cloud=sky.AWS())
+    _test_resources_launch(instance_type='g4dn.12xlarge')
     _test_resources(instance_type='g4dn.2xlarge', expected_cloud=sky.AWS())
     _test_resources_launch(instance_type='g4dn.2xlarge')
     # GCP instances

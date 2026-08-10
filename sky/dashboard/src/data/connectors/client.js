@@ -1,14 +1,36 @@
 'use client';
 
 import { getErrorMessageFromResponse } from '@/data/utils';
-import { ENDPOINT } from './constants';
+import {
+  API_VERSION_HEADER,
+  CLIENT_API_VERSION,
+  CLIENT_VERSION,
+  ENDPOINT,
+  VERSION_HEADER,
+} from './constants';
+
+// The server's APIVersionMiddleware uses these headers to (a) negotiate
+// protocol compatibility and (b) populate the `_remote_api_version`
+// ContextVar that `prepare_request_async` reads to tag worker-side
+// request bodies with the client's API version. Both headers MUST be
+// sent together — `_check_version_compatibility` returns None and skips
+// the ContextVar write if either is missing, which would silently
+// degrade the dashboard back to old-client behavior on every queued
+// request.
+function withVersionHeader(headers) {
+  return {
+    [API_VERSION_HEADER]: CLIENT_API_VERSION,
+    [VERSION_HEADER]: CLIENT_VERSION,
+    ...(headers || {}),
+  };
+}
 
 // Cache for current user info
 let cachedUserInfo = null;
 let userInfoPromise = null;
 
 // Fetch and cache the current user info
-async function getCurrentUserInfo() {
+export async function getCurrentUserInfo() {
   if (cachedUserInfo) {
     return cachedUserInfo;
   }
@@ -20,7 +42,9 @@ async function getCurrentUserInfo() {
   userInfoPromise = (async () => {
     try {
       const baseUrl = window.location.origin;
-      const response = await fetch(`${baseUrl}/internal/dashboard/users/role`);
+      const response = await fetch(`${baseUrl}/internal/dashboard/users/role`, {
+        headers: withVersionHeader({}),
+      });
       if (response.ok) {
         const data = await response.json();
         cachedUserInfo = {
@@ -77,11 +101,11 @@ export const apiClient = {
     // Call a skypilot API and get the result
     const headers =
       method === 'POST'
-        ? {
+        ? withVersionHeader({
             'Content-Type': 'application/json',
             ...(options.headers || {}),
-          }
-        : { ...(options.headers || {}) };
+          })
+        : withVersionHeader(options.headers || {});
 
     const baseUrl = window.location.origin;
     const fullUrl = `${baseUrl}${ENDPOINT}${path}`;
@@ -126,7 +150,8 @@ export const apiClient = {
       }
 
       const fetchedData = await fetch(
-        `${baseUrl}${ENDPOINT}/api/get?request_id=${id}`
+        `${baseUrl}${ENDPOINT}/api/get?request_id=${id}`,
+        { headers: withVersionHeader({}) }
       );
 
       // Handle all error status codes (4xx, 5xx, etc.)
@@ -147,10 +172,10 @@ export const apiClient = {
 
   // Helper method for POST requests
   post: async (path, body, options = {}) => {
-    const headers = {
+    const headers = withVersionHeader({
       'Content-Type': 'application/json',
       ...(options.headers || {}),
-    };
+    });
 
     const baseUrl = window.location.origin;
     const fullUrl = `${baseUrl}${ENDPOINT}${path}`;
@@ -189,6 +214,6 @@ export const apiClient = {
   get: async (path) => {
     const baseUrl = window.location.origin;
     const fullUrl = `${baseUrl}${ENDPOINT}${path}`;
-    return await fetch(fullUrl);
+    return await fetch(fullUrl, { headers: withVersionHeader({}) });
   },
 };

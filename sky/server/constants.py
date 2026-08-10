@@ -3,6 +3,7 @@
 import os
 
 from sky.skylet import constants
+from sky.skylet import runtime_utils
 
 # pylint: disable=line-too-long
 # The SkyPilot API version that the code currently use.
@@ -10,7 +11,7 @@ from sky.skylet import constants
 # based on version info is needed.
 # For more details and code guidelines, refer to:
 # https://docs.skypilot.co/en/latest/developers/CONTRIBUTING.html#backward-compatibility-guidelines
-API_VERSION = 49  # sky batch column in managed jobs
+API_VERSION = 56  # resize field on LaunchBody
 
 # The minimum peer API version that the code should still work with.
 # Notes (dev):
@@ -45,8 +46,39 @@ MIN_SSH_REDIRECT_PROTOCOL_VERSION = 47
 # Minimum API version that supports Sky Batch (sky.batch module).
 MIN_BATCH_API_VERSION = 49
 
+# Minimum API version that supports bundling cluster credentials with the
+# launch response. Lets the CLI skip the follow-up /status round-trip that
+# only exists to fetch credentials for SSH config setup.
+MIN_LAUNCH_CREDENTIALS_API_VERSION = 50
+
+# Servers >= this version omit the bulky pickled `handle` from each replica
+# in serve/pool status responses, shipping pre-computed `infra` /
+# `resources_str` / `resources_str_full` strings instead. Older clients are
+# still served the full handle on the wire so existing SDK code that reads
+# `record['handle']` keeps working.
+MIN_LAZY_REPLICA_HANDLE_API_VERSION = 51
+
 # Minimum ReplicaInfo._VERSION that supports Sky Batch workers.
 MIN_BATCH_REPLICA_INFO_VERSION = 3
+
+# Minimum server API version that exposes /users/me/workspace and runs the
+# server-side launch-path resolver when the client does not specify an
+# active workspace. Older servers don't have the endpoint and fall back to
+# the literal 'default' workspace, so the client must skip features that
+# depend on per-user preferred workspace when talking to such servers.
+MIN_PREFERRED_WORKSPACE_API_VERSION = 53
+
+# Minimum server API version that supports filtering the managed jobs queue by
+# submission time (submitted_after / submitted_before, surfaced as the CLI
+# --since / --after / --before flags). Older servers silently ignore these
+# fields, so the client warns and shows all jobs.
+MIN_JOBS_SUBMITTED_AT_FILTER_API_VERSION = 54
+
+# Servers >= this version may report the WAITING request status (a request
+# parked off its worker while waiting for a retry/resume condition). Older
+# clients don't know the value and would crash parsing it, so the server
+# downgrades WAITING to RUNNING on the wire for clients below this version.
+MIN_WAITING_STATUS_API_VERSION = 55
 
 # Prefix for API request names.
 REQUEST_NAME_PREFIX = 'sky.'
@@ -55,8 +87,10 @@ MIN_AVAIL_MEM_GB = 2
 MIN_AVAIL_MEM_GB_CONSOLIDATION_MODE = 4
 # Default encoder/decoder handler name.
 DEFAULT_HANDLER_NAME = 'default'
-# The path to the API request database.
-API_SERVER_REQUEST_DB_PATH = '~/.sky/api_server/requests.db'
+# The path to the API request database. Anchored at SKY_RUNTIME_DIR when set,
+# so that multiple API servers on one machine keep separate request state.
+API_SERVER_REQUEST_DB_PATH = runtime_utils.runtime_tilde_path(
+    '~/.sky/api_server/requests.db')
 
 # The interval (seconds) for the cluster status to be refreshed in the
 # background.
@@ -118,8 +152,10 @@ ON_BOOT_CHECK_REQUEST_ID = 'skypilot-server-on-boot-check'
 
 # Request logs are stored in ~/.sky/api_server/request_logs/ to avoid NFS
 # performance issues in Kubernetes deployments where ~/sky_logs/ may be on
-# shared storage.
-REQUEST_LOG_PATH_PREFIX = '~/.sky/api_server/request_logs'
+# shared storage. Anchored at SKY_RUNTIME_DIR when set, since this dir is
+# wiped on every server startup.
+REQUEST_LOG_PATH_PREFIX = runtime_utils.runtime_tilde_path(
+    '~/.sky/api_server/request_logs')
 
 # Default maximum size of a daemon log file before rotation (bytes).
 # When a daemon log exceeds this threshold, it is backed up to .log.1 and
@@ -127,6 +163,17 @@ REQUEST_LOG_PATH_PREFIX = '~/.sky/api_server/request_logs'
 # Configurable via api_server.daemon_log_max_bytes in ~/.sky/config.yaml.
 DEFAULT_DAEMON_LOG_MAX_BYTES = 128 * 1024 * 1024  # 128 MB
 
+# Default retention for per-operation artifacts under ~/sky_logs on the API
+# server. Configurable via api_server.logs_retention_hours; negative disables.
+DEFAULT_LOGS_RETENTION_HOURS = 720  # 30 days
+
 # Interval for the server-side heartbeat daemon that sends plugin metrics
 # to Loki (e.g., GPU inventory from billing plugin).
 SERVER_HEARTBEAT_INTERVAL_SECONDS = 600  # 10 minutes
+
+# Interval for the daemon that sweeps expired managed-job API access tokens
+# from the service_account_tokens table. These tokens are normally revoked
+# by the jobs controller on completion, but the daemon ensures any tokens
+# that leak (e.g., due to controller crash mid-cleanup) are eventually
+# removed once their TTL has passed.
+EXPIRED_TOKEN_CLEANUP_DAEMON_INTERVAL_SECONDS = 3600  # 1 hour

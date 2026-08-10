@@ -38,6 +38,14 @@
                         "null"
                     ]
                 },
+                "devMode": {
+                    "type": "object",
+                    "properties": {
+                        "enabled": {
+                            "type": "boolean"
+                        }
+                    }
+                },
                 "enableServiceAccounts": {
                     "type": "boolean"
                 },
@@ -70,6 +78,13 @@
                     "items": {
                         "type": "object"
                     }
+                },
+                "host": {
+                    "type": "string",
+                    "enum": [
+                        "0.0.0.0",
+                        "::"
+                    ]
                 },
                 "image": {
                     "type": "string"
@@ -144,6 +159,9 @@
                 "nodeSelector": {
                     "type": "object"
                 },
+                "persistSSHConfig": {
+                    "type": "boolean"
+                },
                 "preDeployHook": {
                     "type": "string"
                 },
@@ -183,6 +201,26 @@
                 },
                 "resources": {
                     "type": "object"
+                },
+                "rollingUpdate": {
+                    "type": [
+                        "object",
+                        "null"
+                    ],
+                    "properties": {
+                        "maxSurge": {
+                            "type": [
+                                "integer",
+                                "string"
+                            ]
+                        },
+                        "maxUnavailable": {
+                            "type": [
+                                "integer",
+                                "string"
+                            ]
+                        }
+                    }
                 },
                 "serveServerLog": {
                     "type": "boolean"
@@ -691,6 +729,12 @@
                                     "type": "string"
                                 }
                             },
+                            "resourceNames": {
+                                "type": "array",
+                                "items": {
+                                    "type": "string"
+                                }
+                            },
                             "resources": {
                                 "type": "array",
                                 "items": {
@@ -808,8 +852,14 @@
                 "annotations": {
                     "type": "object"
                 },
+                "clientsSubPath": {
+                    "type": "string"
+                },
                 "enabled": {
                     "type": "boolean"
+                },
+                "existingClaim": {
+                    "type": "string"
                 },
                 "selector": {
                     "type": "object"

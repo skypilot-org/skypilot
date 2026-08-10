@@ -208,6 +208,15 @@ Admin CLI
    :nested: full
 
 
+Workspace CLI
+-------------
+
+.. _sky-workspace:
+.. click:: sky.client.cli.command:workspace
+   :prog: sky workspace
+   :nested: full
+
+
 GPUs CLI
 --------
 

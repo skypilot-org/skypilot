@@ -1,275 +1,194 @@
 #!/usr/bin/env python3
-"""Benchmark worker — runs workload scripts and records per-operation timing.
+"""Benchmark worker — runs one or more load generators on a worker VM.
 
-This runs on each worker VM. The controller (benchmark_ctl.py) launches
-multiple workers and collects their JSON results.
+Three generator types can run concurrently from a single config file:
 
-Can also be used standalone for single-machine benchmarking.
+  * shell      — bash workload scripts (workloads/basic.sh) emitting
+                 ##BENCH_START/END markers
+  * qps        — open-loop Python QPS engine
+  * long_conn  — concurrent long-lived ssh / sky logs sessions
 
-Usage:
+Usage (config-driven):
+    python benchmark_worker.py --config /path/to/bench_config.yaml -w 0
+
+Legacy usage (synthesised single shell generator, kept for backward compat):
     python benchmark_worker.py -t 4 -r 2 -s workloads/basic.sh --cloud aws
-    python benchmark_worker.py -t 1 -r 1 -s workloads/light.sh --cloud kubernetes
 """
+from __future__ import annotations
 
 import argparse
-import concurrent.futures
 import json
 import os
-import random
-import re
-import signal
 import sys
-import threading
 import time
 from typing import Any, Dict, List, Optional
-import uuid
+
+# Local imports (this file lives in tests/load_tests/, so the package is
+# importable as `generators` from this dir).
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+from config import BenchmarkConfig  # noqa: E402
+from config import load_config
+from generators import GeneratorBase  # noqa: E402
+from generators import LongConnGenerator
+from generators import QpsGenerator
+from generators import ShellGenerator
+from generators import SshBenchGenerator
+from generators.base import WorkerContext  # noqa: E402
 
 
-def _parse_bench_markers(log_path: str) -> List[Dict[str, Any]]:
-    """Parse ##BENCH_START / ##BENCH_END markers from a log file.
-
-    Returns a list of operation dicts:
-        [{"name": "sky_launch", "duration_s": 45.2, "exit_code": 0,
-          "start_ts": 1712..., "end_ts": 1712...}, ...]
-    """
-    starts: Dict[str, float] = {}
-    operations: List[Dict[str, Any]] = []
-    start_re = re.compile(r'^##BENCH_START\s+(\S+)\s+([\d.]+)')
-    end_re = re.compile(r'^##BENCH_END\s+(\S+)\s+(\d+)\s+([\d.]+)')
-
-    try:
-        with open(log_path, 'r', encoding='utf-8', errors='replace') as f:
-            for line in f:
-                m = start_re.match(line)
-                if m:
-                    starts[m.group(1)] = float(m.group(2))
-                    continue
-                m = end_re.match(line)
-                if m:
-                    name = m.group(1)
-                    exit_code = int(m.group(2))
-                    end_ts = float(m.group(3))
-                    start_ts = starts.pop(name, end_ts)
-                    operations.append({
-                        'name': name,
-                        'duration_s': round(end_ts - start_ts, 3),
-                        'exit_code': exit_code,
-                        'start_ts': start_ts,
-                        'end_ts': end_ts,
-                    })
-    except FileNotFoundError:
-        pass
-    return operations
+def _make_generators(cfg: BenchmarkConfig,
+                     ctx: WorkerContext) -> List[GeneratorBase]:
+    gens: List[GeneratorBase] = []
+    for spec in cfg.generators:
+        if spec.type == 'shell':
+            gens.append(ShellGenerator(spec, ctx))
+        elif spec.type == 'qps':
+            gens.append(QpsGenerator(spec, ctx))
+        elif spec.type == 'long_conn':
+            gens.append(LongConnGenerator(spec, ctx))
+        elif spec.type == 'ssh_bench':
+            gens.append(SshBenchGenerator(spec, ctx))
+        else:
+            raise ValueError(f'unknown generator type: {spec.type}')
+    return gens
 
 
-def _run_workload(script: str, env: Dict[str, str], log_path: str,
-                  timeout: int) -> Dict[str, Any]:
-    """Run a workload script, return structured result with per-op timing.
+def run_worker(cfg: BenchmarkConfig, worker_id: int, output_dir: str,
+               num_workers: int) -> Dict[str, Any]:
+    os.makedirs(output_dir, exist_ok=True)
+    victims = [
+        v for v in os.environ.get('BENCHMARK_VICTIM_CLUSTERS', '').split(',')
+        if v
+    ]
+    ctx = WorkerContext(
+        worker_id=worker_id,
+        num_workers=num_workers,
+        output_dir=output_dir,
+        target_cloud=cfg.target.cloud,
+        victim_clusters=victims,
+        duration_s=cfg.duration_s,
+    )
+    gens = _make_generators(cfg, ctx)
 
-    Uses start_new_session + killpg to ensure all child processes are
-    cleaned up on timeout (fixes the "never finishes" issue with
-    subprocess.run when background processes inherit the pipe).
-    """
-    start_time = time.time()
-    exit_code = -1
-    error_msg: Optional[str] = None
+    print(
+        f'[worker {worker_id}] starting {len(gens)} generators '
+        f'(victims={victims}, duration={cfg.duration_s}s)',
+        flush=True)
+    t0 = time.time()
+    for g in gens:
+        g.start()
 
-    try:
-        import subprocess
-        with open(log_path, 'w') as log_f:
-            proc = subprocess.Popen(
-                ['bash', script],
-                stdout=log_f,
-                stderr=subprocess.STDOUT,
-                env=env,
-                start_new_session=True,
-            )
-            try:
-                proc.wait(timeout=timeout)
-                exit_code = proc.returncode
-            except subprocess.TimeoutExpired:
-                # Kill entire process group
-                try:
-                    os.killpg(proc.pid, signal.SIGTERM)
-                except OSError:
-                    pass
-                time.sleep(3)
-                try:
-                    os.killpg(proc.pid, signal.SIGKILL)
-                except OSError:
-                    pass
-                proc.wait(timeout=10)
-                exit_code = -1
-                error_msg = f'timeout after {timeout}s'
-    except Exception as e:
-        error_msg = str(e)
+    # Termination policy:
+    #   - "Driver" generators decide when the worker can exit. Today:
+    #       * shell generators (always drivers: the script runs to end)
+    #       * ssh_bench generators with finite per-op total_connections
+    #         (drive when their attempt budget is exhausted)
+    #   - Non-driver generators (qps, long_conn, unbounded ssh_bench)
+    #     keep running until ALL drivers finish; duration_s is only a
+    #     lower bound in that case.
+    #   - If there are no drivers, cfg.duration_s is the fence.
+    def _is_driver(g):
+        if g.spec.type == 'shell':
+            return True
+        if g.spec.type == 'ssh_bench' and getattr(g, 'is_bounded', False):
+            return True
+        return False
 
-    duration = round(time.time() - start_time, 3)
-    operations = _parse_bench_markers(log_path)
+    drivers = [g for g in gens if _is_driver(g)]
+    non_drivers = [g for g in gens if not _is_driver(g)]
 
-    result: Dict[str, Any] = {
-        'duration_s': duration,
-        'exit_code': exit_code,
-        'success': exit_code == 0,
-        'log_file': log_path,
-        'operations': operations,
-    }
-    if error_msg:
-        result['error'] = error_msg
-    return result
-
-
-class BenchmarkWorker:
-
-    def __init__(self,
-                 threads: int,
-                 repeats: int,
-                 script: str,
-                 cloud: str,
-                 output_dir: str,
-                 worker_id: int,
-                 timeout: int,
-                 phases: Optional[List[str]] = None):
-        self.threads = threads
-        self.repeats = repeats
-        self.cloud = cloud
-        self.output_dir = output_dir
-        self.worker_id = worker_id
-        self.timeout = timeout
-        # Phases that the workload script supports (shuffled per thread).
-        self.phases = phases or ['cluster', 'jobs']
-
-        # Resolve script path relative to this file's directory
-        base = os.path.dirname(os.path.abspath(__file__))
-        self.script = os.path.join(base, script)
-        if not os.path.exists(self.script):
-            # Also try absolute / cwd-relative
-            if os.path.exists(script):
-                self.script = os.path.abspath(script)
-            else:
-                raise FileNotFoundError(f'Workload script not found: {script}')
-
-        os.makedirs(output_dir, exist_ok=True)
-
-    def _make_env(self, thread_id: int, repeat_id: int,
-                  unique_id: str) -> Dict[str, str]:
-        # Shuffle phase order per thread so concurrent workers hit
-        # different API endpoints at the same time.
-        phases = list(self.phases)
-        random.shuffle(phases)
-        env = os.environ.copy()
-        env.update({
-            'BENCHMARK_UNIQUE_ID': unique_id,
-            'BENCHMARK_CLOUD': self.cloud,
-            'BENCHMARK_THREAD_ID': str(thread_id),
-            'BENCHMARK_REPEAT_ID': str(repeat_id),
-            'BENCHMARK_WORKER_ID': str(self.worker_id),
-            'BENCHMARK_PHASE_ORDER': ','.join(phases),
-        })
-        return env
-
-    def _run_thread(self, thread_id: int) -> List[Dict[str, Any]]:
-        results = []
-        for repeat_id in range(self.repeats):
-            uid = f'w{self.worker_id}-t{thread_id}-r{repeat_id}-{uuid.uuid4().hex[:6]}'
-            log_path = os.path.join(
-                self.output_dir,
-                f'w{self.worker_id}_t{thread_id}_r{repeat_id}.log')
-            env = self._make_env(thread_id, repeat_id, uid)
-
-            phase_order = env.get('BENCHMARK_PHASE_ORDER', '')
+    if drivers:
+        for g in drivers:
+            g.wait()
+        elapsed = time.time() - t0
+        remaining = cfg.duration_s - elapsed
+        if non_drivers and remaining > 0:
             print(
-                f'[worker {self.worker_id}] thread {thread_id} '
-                f'repeat {repeat_id} starting (id={uid}, '
-                f'phases={phase_order})',
+                f'[worker {worker_id}] drivers done in {elapsed:.1f}s; '
+                f'waiting {remaining:.1f}s more to reach duration_s',
                 flush=True)
-
-            result = _run_workload(self.script, env, log_path, self.timeout)
-            result.update({
-                'worker_id': self.worker_id,
-                'thread_id': thread_id,
-                'repeat_id': repeat_id,
-                'unique_id': uid,
-                'workload': os.path.basename(self.script),
-            })
-            results.append(result)
-
-            status = 'OK' if result['success'] else 'FAIL'
-            ops = len(result['operations'])
+            time.sleep(remaining)
+        elif non_drivers:
             print(
-                f'[worker {self.worker_id}] thread {thread_id} '
-                f'repeat {repeat_id} {status} '
-                f'({result["duration_s"]:.1f}s, {ops} ops)',
+                f'[worker {worker_id}] drivers done in {elapsed:.1f}s; '
+                f'duration_s already elapsed — stopping',
                 flush=True)
-        return results
+    elif non_drivers:
+        # No driver — let non-driver generators run for duration_s.
+        print(
+            f'[worker {worker_id}] no driver generator; '
+            f'running non-drivers for {cfg.duration_s}s',
+            flush=True)
+        time.sleep(cfg.duration_s)
 
-    def run(self) -> List[Dict[str, Any]]:
-        all_results: List[Dict[str, Any]] = []
-        lock = threading.Lock()
+    print(f'[worker {worker_id}] stopping generators', flush=True)
+    for g in gens:
+        try:
+            g.stop()
+        except Exception as e:  # noqa: BLE001
+            print(f'[worker {worker_id}] gen {g.name} stop error: {e}',
+                  file=sys.stderr,
+                  flush=True)
 
-        with concurrent.futures.ThreadPoolExecutor(
-                max_workers=self.threads) as pool:
-            futures = {
-                pool.submit(self._run_thread, tid): tid
-                for tid in range(self.threads)
+    # Assemble combined results.
+    shell_records: List[Dict[str, Any]] = []
+    generator_results: Dict[str, Any] = {}
+    for g in gens:
+        recs = g.records()
+        summary = g.summarize()
+        if g.spec.type == 'shell':
+            shell_records.extend(recs)
+            generator_results[g.name] = {
+                'type': g.spec.type,
+                'summary': summary,
             }
-            for fut in concurrent.futures.as_completed(futures):
-                tid = futures[fut]
-                try:
-                    thread_results = fut.result()
-                    with lock:
-                        all_results.extend(thread_results)
-                except Exception as e:
-                    print(
-                        f'[worker {self.worker_id}] thread {tid} '
-                        f'crashed: {e}',
-                        file=sys.stderr,
-                        flush=True)
+        else:
+            generator_results[g.name] = {
+                'type': g.spec.type,
+                'summary': summary,
+                'records': recs,
+            }
 
-        # Write JSON results
-        results_path = os.path.join(self.output_dir,
-                                    f'results_w{self.worker_id}.json')
-        with open(results_path, 'w') as f:
-            json.dump(all_results, f, indent=2)
-        print(f'[worker {self.worker_id}] results written to {results_path}',
-              flush=True)
-        return all_results
+    combined = {
+        'worker_id': worker_id,
+        'shell_results': shell_records,
+        'generator_results': generator_results,
+        'wall_clock_s': round(time.time() - t0, 2),
+    }
+    out_path = os.path.join(output_dir, f'results_w{worker_id}.json')
+    with open(out_path, 'w') as f:
+        json.dump(combined, f, indent=2)
+    print(f'[worker {worker_id}] results written to {out_path}', flush=True)
+    return combined
 
 
-def print_summary(results: List[Dict[str, Any]]) -> None:
-    """Print a quick summary table for a single worker."""
-    from collections import defaultdict
-    op_stats: Dict[str, List] = defaultdict(list)
-    for r in results:
-        for op in r.get('operations', []):
-            op_stats[op['name']].append(op)
-
-    total = len(results)
-    ok = sum(1 for r in results if r['success'])
+def _print_summary(combined: Dict[str, Any]) -> None:
     print(f'\n{"="*60}')
-    print(f'Worker summary: {ok}/{total} runs succeeded')
+    print(f'Worker {combined["worker_id"]} summary')
     print(f'{"="*60}')
-
-    if op_stats:
-        print(f'{"Operation":<25} {"N":>4} {"OK%":>6} '
-              f'{"P50":>7} {"P95":>7} {"Max":>7}')
-        print('-' * 60)
-        for name in sorted(op_stats):
-            ops = op_stats[name]
-            n = len(ops)
-            ok_pct = sum(1 for o in ops if o['exit_code'] == 0) / n * 100
-            durs = sorted(o['duration_s'] for o in ops)
-            p50 = durs[int(n * 0.5)] if n else 0
-            p95 = durs[min(int(n * 0.95), n - 1)] if n else 0
-            mx = durs[-1] if durs else 0
-            print(f'{name:<25} {n:>4} {ok_pct:>5.0f}% '
-                  f'{p50:>6.1f}s {p95:>6.1f}s {mx:>6.1f}s')
+    for name, gr in combined['generator_results'].items():
+        print(f'  [{gr["type"]}] {name}: {json.dumps(gr["summary"])}')
     print()
 
 
 def main():
     parser = argparse.ArgumentParser(
-        description='Benchmark worker: run workload scripts and record timing')
+        description='Benchmark worker: run load generators per config')
+    parser.add_argument('--config',
+                        type=str,
+                        default=None,
+                        help='Path to bench config YAML')
+    parser.add_argument('-w', '--worker-id', type=int, default=0)
+    parser.add_argument('-o',
+                        '--output-dir',
+                        type=str,
+                        default='benchmark_results')
+    parser.add_argument('--num-workers',
+                        type=int,
+                        default=1,
+                        help='Total workers in the run (for QPS splitting)')
+    # Legacy flags (synth single shell generator).
     parser.add_argument('-t', '--threads', type=int, default=4)
     parser.add_argument('-r', '--repeats', type=int, default=1)
     parser.add_argument('-s',
@@ -277,40 +196,41 @@ def main():
                         type=str,
                         default='workloads/basic.sh')
     parser.add_argument('-c', '--cloud', type=str, default='aws')
-    parser.add_argument('-o',
-                        '--output-dir',
-                        type=str,
-                        default='benchmark_results')
-    parser.add_argument('-w', '--worker-id', type=int, default=0)
-    parser.add_argument('--timeout',
-                        type=int,
-                        default=3600,
-                        help='Per-workload timeout in seconds (default: 3600)')
-    parser.add_argument('--phases',
-                        type=str,
-                        default='cluster,jobs',
-                        help='Comma-separated phases to shuffle '
-                        '(default: cluster,jobs)')
+    parser.add_argument('--timeout', type=int, default=3600)
+    parser.add_argument('--phases', type=str, default='cluster,jobs')
     parser.add_argument('--check',
                         action='store_true',
                         help='Exit non-zero on any failure')
     args = parser.parse_args()
 
-    worker = BenchmarkWorker(
-        threads=args.threads,
-        repeats=args.repeats,
-        script=args.script,
-        cloud=args.cloud,
-        output_dir=args.output_dir,
-        worker_id=args.worker_id,
-        timeout=args.timeout,
-        phases=[p.strip() for p in args.phases.split(',')],
-    )
-    results = worker.run()
-    print_summary(results)
+    if args.config:
+        cfg = load_config(args.config)
+    else:
+        cfg = load_config(
+            None,
+            target_endpoint='http://unused-in-worker',  # worker doesn't relogin
+            service_account_token=None,
+            cloud=args.cloud,
+            worker_cloud=args.cloud,
+            worker_cpus=8,
+            worker_image=None,
+            workers_count=args.num_workers,
+            threads_per_worker=args.threads,
+            repeats=args.repeats,
+            workload=args.script,
+            phases=args.phases,
+            timeout=args.timeout,
+            output_dir=args.output_dir,
+            reuse=False,
+            cleanup=True,
+        )
+    combined = run_worker(cfg, args.worker_id, args.output_dir,
+                          args.num_workers)
+    _print_summary(combined)
 
     if args.check:
-        failed = sum(1 for r in results if not r['success'])
+        failed = sum(
+            1 for r in combined['shell_results'] if not r.get('success'))
         if failed:
             print(f'{failed} runs failed', file=sys.stderr)
             sys.exit(1)

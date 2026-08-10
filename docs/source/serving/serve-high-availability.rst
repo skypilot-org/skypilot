@@ -17,4 +17,4 @@ To enable high availability for Sky Serve, simply set the ``high_availability`` 
           cloud: kubernetes
         high_availability: true
 
-This will deploy the controller as a Kubernetes Deployment with persistent storage, allowing automatic recovery on failures. For prerequisites, setup steps, and recovery behavior, see the detailed page: :ref:`high-availability-controller`.
+This will deploy the controller as a Kubernetes Deployment with persistent storage, allowing automatic recovery on failures.

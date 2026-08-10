@@ -1,0 +1,768 @@
+{
+  "auth": {
+    "ssh_private_key": "~/.ssh/sky-key",
+    "ssh_user": "sky"
+  },
+  "available_node_types": {
+    "ray_head_default": {
+      "node_config": {
+        "apiVersion": "v1",
+        "deployment_spec": {
+          "apiVersion": "apps/v1",
+          "kind": "Deployment",
+          "metadata": {
+            "name": "sky-cluster-abc123-deployment",
+            "namespace": "default"
+          },
+          "spec": {
+            "replicas": 1,
+            "selector": {
+              "matchLabels": {
+                "app": "sky-cluster-abc123"
+              }
+            },
+            "template": {
+              "metadata": null,
+              "spec": {
+                "initContainers": [
+                  {
+                    "args": "<omitted>",
+                    "command": "<omitted>",
+                    "image": "us-docker.pkg.dev/skypilot-oss/skypilot/skypilot:latest",
+                    "name": "init-copy-home",
+                    "volumeMounts": [
+                      {
+                        "mountPath": "/mnt/home",
+                        "name": "sky-persistent"
+                      }
+                    ]
+                  }
+                ],
+                "securityContext": {
+                  "fsGroup": 1000
+                }
+              }
+            }
+          }
+        },
+        "kind": "Pod",
+        "metadata": {
+          "annotations": {
+            "networking.gke.io/default-interface": "eth0",
+            "networking.gke.io/interfaces": "[\n  {\"interfaceName\":\"eth0\",\"network\":\"default\"},\n  {\"interfaceName\":\"eth1\",\"network\":\"gvnic-1\"},\n  {\"interfaceName\":\"eth2\",\"network\":\"rdma-0\"},\n  {\"interfaceName\":\"eth3\",\"network\":\"rdma-1\"},\n  {\"interfaceName\":\"eth4\",\"network\":\"rdma-2\"},\n  {\"interfaceName\":\"eth5\",\"network\":\"rdma-3\"},\n  {\"interfaceName\":\"eth6\",\"network\":\"rdma-4\"},\n  {\"interfaceName\":\"eth7\",\"network\":\"rdma-5\"},\n  {\"interfaceName\":\"eth8\",\"network\":\"rdma-6\"},\n  {\"interfaceName\":\"eth9\",\"network\":\"rdma-7\"}\n]\n",
+            "skypilot-user": "testuser",
+            "skypilot-workspace": "default"
+          },
+          "labels": {
+            "app": "sky-cluster-abc123",
+            "parent": "skypilot",
+            "skypilot-binpack": "gpu",
+            "skypilot-cluster": "sky-cluster-abc123",
+            "skypilot-user": "testuser"
+          }
+        },
+        "pvc_spec": {
+          "apiVersion": "v1",
+          "kind": "PersistentVolumeClaim",
+          "metadata": {
+            "name": "sky-cluster-abc123-sky-persistent",
+            "namespace": "default"
+          },
+          "spec": {
+            "accessModes": [
+              "ReadWriteOnce"
+            ],
+            "resources": {
+              "requests": {
+                "storage": "256Gi"
+              }
+            },
+            "storageClassName": "standard-rwo"
+          }
+        },
+        "spec": {
+          "affinity": {
+            "nodeAffinity": {
+              "requiredDuringSchedulingIgnoredDuringExecution": {
+                "nodeSelectorTerms": [
+                  {
+                    "matchExpressions": [
+                      {
+                        "key": "skypilot.co/accelerator",
+                        "operator": "In",
+                        "values": [
+                          "H100"
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
+            },
+            "podAffinity": {
+              "preferredDuringSchedulingIgnoredDuringExecution": [
+                {
+                  "podAffinityTerm": {
+                    "labelSelector": {
+                      "matchExpressions": [
+                        {
+                          "key": "skypilot-binpack",
+                          "operator": "In",
+                          "values": [
+                            "gpu"
+                          ]
+                        }
+                      ]
+                    },
+                    "topologyKey": "kubernetes.io/hostname"
+                  },
+                  "weight": 1
+                }
+              ]
+            },
+            "podAntiAffinity": {
+              "requiredDuringSchedulingIgnoredDuringExecution": [
+                {
+                  "labelSelector": {
+                    "matchLabels": {
+                      "skypilot-cluster": "sky-cluster-abc123"
+                    }
+                  },
+                  "topologyKey": "kubernetes.io/hostname"
+                }
+              ]
+            }
+          },
+          "automountServiceAccountToken": true,
+          "containers": [
+            {
+              "args": "<omitted>",
+              "command": "<omitted>",
+              "env": [
+                {
+                  "name": "SKYPILOT_RAY_NODE_IP",
+                  "valueFrom": {
+                    "fieldRef": {
+                      "fieldPath": "status.podIP"
+                    }
+                  }
+                },
+                {
+                  "name": "SKYPILOT_POD_NODE_TYPE",
+                  "valueFrom": {
+                    "fieldRef": {
+                      "fieldPath": "metadata.labels['ray-node-type']"
+                    }
+                  }
+                },
+                {
+                  "name": "SKYPILOT_POD_NAME",
+                  "valueFrom": {
+                    "fieldRef": {
+                      "fieldPath": "metadata.name"
+                    }
+                  }
+                },
+                {
+                  "name": "SKYPILOT_POD_UID",
+                  "valueFrom": {
+                    "fieldRef": {
+                      "fieldPath": "metadata.uid"
+                    }
+                  }
+                },
+                {
+                  "name": "SKYPILOT_POD_CPU_CORE_LIMIT",
+                  "valueFrom": {
+                    "resourceFieldRef": {
+                      "containerName": "ray-node",
+                      "resource": "requests.cpu"
+                    }
+                  }
+                },
+                {
+                  "name": "SKYPILOT_POD_MEMORY_BYTES_LIMIT",
+                  "valueFrom": {
+                    "resourceFieldRef": {
+                      "containerName": "ray-node",
+                      "resource": "requests.memory"
+                    }
+                  }
+                },
+                {
+                  "name": "RAY_memory_monitor_refresh_ms",
+                  "value": "0"
+                },
+                {
+                  "name": "SKYPILOT_IN_CLUSTER_CONTEXT_NAME",
+                  "value": "my-k8s-context"
+                },
+                {
+                  "name": "SKYPILOT_HOST_NETWORK",
+                  "value": "1"
+                },
+                {
+                  "name": "SKYPILOT_RAY_PORTS_CONFIGMAP_NAME",
+                  "value": "sky-cluster-abc123-ray-ports"
+                },
+                {
+                  "name": "SKYPILOT_RAY_PORTS_CONFIGMAP_NAMESPACE",
+                  "value": "default"
+                },
+                {
+                  "name": "BUILDKIT_HOST",
+                  "value": "unix:///run/buildkit/buildkitd.sock"
+                },
+                {
+                  "name": "LD_LIBRARY_PATH",
+                  "value": "/usr/local/nvidia/lib64"
+                },
+                {
+                  "name": "NCCL_NET",
+                  "value": "gIB"
+                },
+                {
+                  "name": "NCCL_CROSS_NIC",
+                  "value": "0"
+                },
+                {
+                  "name": "NCCL_NET_GDR_LEVEL",
+                  "value": "PIX"
+                },
+                {
+                  "name": "NCCL_P2P_NET_CHUNKSIZE",
+                  "value": "131072"
+                },
+                {
+                  "name": "NCCL_NVLS_CHUNKSIZE",
+                  "value": "524288"
+                },
+                {
+                  "name": "NCCL_IB_ADAPTIVE_ROUTING",
+                  "value": "1"
+                },
+                {
+                  "name": "NCCL_IB_QPS_PER_CONNECTION",
+                  "value": "4"
+                },
+                {
+                  "name": "NCCL_IB_TC",
+                  "value": "52"
+                },
+                {
+                  "name": "NCCL_IB_FIFO_TC",
+                  "value": "84"
+                },
+                {
+                  "name": "NCCL_TUNER_CONFIG_PATH",
+                  "value": "/usr/local/gib/configs/tuner_config_a4.txtpb"
+                }
+              ],
+              "image": "us-docker.pkg.dev/skypilot-oss/skypilot/skypilot:latest",
+              "imagePullPolicy": "Always",
+              "lifecycle": {
+                "preStop": {
+                  "exec": {
+                    "command": "<omitted>"
+                  }
+                }
+              },
+              "name": "ray-node",
+              "resources": {
+                "limits": {
+                  "nvidia.com/gpu": 8
+                },
+                "requests": {
+                  "cpu": 4,
+                  "memory": "16G",
+                  "nvidia.com/gpu": 8
+                }
+              },
+              "securityContext": {
+                "capabilities": {
+                  "add": [
+                    "IPC_LOCK"
+                  ]
+                }
+              },
+              "volumeMounts": [
+                {
+                  "mountPath": "/dev/shm",
+                  "name": "dshm"
+                },
+                {
+                  "mountPath": "/usr/local/nvidia",
+                  "name": "library-dir-host"
+                },
+                {
+                  "mountPath": "/usr/local/gib",
+                  "name": "gib"
+                },
+                {
+                  "mountPath": "/sky-persistent",
+                  "name": "sky-persistent"
+                },
+                {
+                  "mountPath": "/run/buildkit",
+                  "name": "buildkit-sock"
+                }
+              ]
+            },
+            {
+              "args": "<omitted>",
+              "image": "moby/buildkit:v0.28.0-rootless",
+              "name": "buildkitd",
+              "securityContext": {
+                "appArmorProfile": {
+                  "type": "Unconfined"
+                },
+                "runAsGroup": 1000,
+                "runAsUser": 1000,
+                "seccompProfile": {
+                  "type": "Unconfined"
+                }
+              },
+              "volumeMounts": [
+                {
+                  "mountPath": "/run/buildkit",
+                  "name": "buildkit-sock"
+                }
+              ]
+            }
+          ],
+          "dnsPolicy": "ClusterFirstWithHostNet",
+          "restartPolicy": "Always",
+          "serviceAccountName": "skypilot-service-account",
+          "terminationGracePeriodSeconds": 300,
+          "volumes": [
+            {
+              "emptyDir": {
+                "medium": "Memory"
+              },
+              "name": "dshm"
+            },
+            {
+              "name": "sky-persistent",
+              "persistentVolumeClaim": {
+                "claimName": "sky-cluster-abc123-sky-persistent"
+              }
+            },
+            {
+              "hostPath": {
+                "path": "/home/kubernetes/bin/nvidia"
+              },
+              "name": "library-dir-host"
+            },
+            {
+              "hostPath": {
+                "path": "/home/kubernetes/bin/gib"
+              },
+              "name": "gib"
+            },
+            {
+              "emptyDir": {},
+              "name": "buildkit-sock"
+            }
+          ]
+        }
+      }
+    }
+  },
+  "cluster_name": "sky-cluster-abc123",
+  "file_mounts": {
+    "/tmp/sky_wheels/WHEELHASH": "/tmp/local_wheel.whl",
+    "~/.sky/sky_ray.yml": "/tmp/sky_ray.yml"
+  },
+  "head_node_type": "ray_head_default",
+  "idle_timeout_minutes": 60,
+  "max_workers": 3,
+  "provider": {
+    "autoscaler_cluster_role": {
+      "apiVersion": "rbac.authorization.k8s.io/v1",
+      "kind": "ClusterRole",
+      "metadata": {
+        "labels": {
+          "parent": "skypilot"
+        },
+        "name": "skypilot-service-account-cluster-role"
+      },
+      "rules": [
+        {
+          "apiGroups": [
+            ""
+          ],
+          "resources": [
+            "nodes"
+          ],
+          "verbs": [
+            "get",
+            "list",
+            "watch"
+          ]
+        },
+        {
+          "apiGroups": [
+            ""
+          ],
+          "resources": [
+            "namespaces"
+          ],
+          "verbs": [
+            "get",
+            "list",
+            "watch",
+            "create"
+          ]
+        },
+        {
+          "apiGroups": [
+            "rbac.authorization.k8s.io"
+          ],
+          "resources": [
+            "clusterroles",
+            "clusterrolebindings"
+          ],
+          "verbs": [
+            "get",
+            "list",
+            "watch",
+            "create",
+            "update",
+            "patch",
+            "delete"
+          ]
+        },
+        {
+          "apiGroups": [
+            "node.k8s.io"
+          ],
+          "resources": [
+            "runtimeclasses"
+          ],
+          "verbs": [
+            "get",
+            "list",
+            "watch"
+          ]
+        },
+        {
+          "apiGroups": [
+            "networking.k8s.io"
+          ],
+          "resources": [
+            "ingressclasses"
+          ],
+          "verbs": [
+            "get",
+            "list",
+            "watch"
+          ]
+        }
+      ]
+    },
+    "autoscaler_cluster_role_binding": {
+      "apiVersion": "rbac.authorization.k8s.io/v1",
+      "kind": "ClusterRoleBinding",
+      "metadata": {
+        "labels": {
+          "parent": "skypilot"
+        },
+        "name": "skypilot-service-account-cluster-role-binding"
+      },
+      "roleRef": {
+        "apiGroup": "rbac.authorization.k8s.io",
+        "kind": "ClusterRole",
+        "name": "skypilot-service-account-cluster-role"
+      },
+      "subjects": [
+        {
+          "kind": "ServiceAccount",
+          "name": "skypilot-service-account"
+        }
+      ]
+    },
+    "autoscaler_ingress_role": {
+      "apiVersion": "rbac.authorization.k8s.io/v1",
+      "kind": "Role",
+      "metadata": {
+        "labels": {
+          "parent": "skypilot"
+        },
+        "name": "skypilot-service-account-ingress-role",
+        "namespace": "ingress-nginx"
+      },
+      "rules": [
+        {
+          "apiGroups": [
+            ""
+          ],
+          "resources": [
+            "services"
+          ],
+          "verbs": [
+            "list",
+            "get",
+            "watch"
+          ]
+        },
+        {
+          "apiGroups": [
+            "rbac.authorization.k8s.io"
+          ],
+          "resources": [
+            "roles",
+            "rolebindings"
+          ],
+          "verbs": [
+            "get",
+            "list",
+            "watch",
+            "patch"
+          ]
+        }
+      ]
+    },
+    "autoscaler_ingress_role_binding": {
+      "apiVersion": "rbac.authorization.k8s.io/v1",
+      "kind": "RoleBinding",
+      "metadata": {
+        "labels": {
+          "parent": "skypilot"
+        },
+        "name": "skypilot-service-account-ingress-role-binding",
+        "namespace": "ingress-nginx"
+      },
+      "roleRef": {
+        "apiGroup": "rbac.authorization.k8s.io",
+        "kind": "Role",
+        "name": "skypilot-service-account-ingress-role"
+      },
+      "subjects": [
+        {
+          "kind": "ServiceAccount",
+          "name": "skypilot-service-account"
+        }
+      ]
+    },
+    "autoscaler_role": {
+      "apiVersion": "rbac.authorization.k8s.io/v1",
+      "kind": "Role",
+      "metadata": {
+        "labels": {
+          "parent": "skypilot"
+        },
+        "name": "skypilot-service-account-role"
+      },
+      "rules": [
+        {
+          "apiGroups": [
+            "*"
+          ],
+          "resources": [
+            "*"
+          ],
+          "verbs": [
+            "*"
+          ]
+        }
+      ]
+    },
+    "autoscaler_role_binding": {
+      "apiVersion": "rbac.authorization.k8s.io/v1",
+      "kind": "RoleBinding",
+      "metadata": {
+        "labels": {
+          "parent": "skypilot"
+        },
+        "name": "skypilot-service-account-role-binding"
+      },
+      "roleRef": {
+        "apiGroup": "rbac.authorization.k8s.io",
+        "kind": "Role",
+        "name": "skypilot-service-account-role"
+      },
+      "subjects": [
+        {
+          "kind": "ServiceAccount",
+          "name": "skypilot-service-account"
+        }
+      ]
+    },
+    "autoscaler_service_account": {
+      "apiVersion": "v1",
+      "kind": "ServiceAccount",
+      "metadata": {
+        "labels": {
+          "parent": "skypilot"
+        },
+        "name": "skypilot-service-account"
+      }
+    },
+    "autoscaler_skypilot_system_role": {
+      "apiVersion": "rbac.authorization.k8s.io/v1",
+      "kind": "Role",
+      "metadata": {
+        "labels": {
+          "parent": "skypilot"
+        },
+        "name": "skypilot-system-service-account-role",
+        "namespace": "skypilot-system"
+      },
+      "rules": [
+        {
+          "apiGroups": [
+            "*"
+          ],
+          "resources": [
+            "*"
+          ],
+          "verbs": [
+            "*"
+          ]
+        }
+      ]
+    },
+    "autoscaler_skypilot_system_role_binding": {
+      "apiVersion": "rbac.authorization.k8s.io/v1",
+      "kind": "RoleBinding",
+      "metadata": {
+        "labels": {
+          "parent": "skypilot"
+        },
+        "name": "skypilot-system-service-account-role-binding",
+        "namespace": "skypilot-system"
+      },
+      "roleRef": {
+        "apiGroup": "rbac.authorization.k8s.io",
+        "kind": "Role",
+        "name": "skypilot-system-service-account-role"
+      },
+      "subjects": [
+        {
+          "kind": "ServiceAccount",
+          "name": "skypilot-service-account"
+        }
+      ]
+    },
+    "context": "my-k8s-context",
+    "docker_config": {
+      "cache_volume": "buildkit-cache",
+      "mode": "build"
+    },
+    "fuse_device_required": false,
+    "module": "sky.provision.kubernetes",
+    "namespace": "default",
+    "networking_mode": "portforward",
+    "port_mode": "portforward",
+    "region": "kubernetes",
+    "services": [
+      {
+        "apiVersion": "v1",
+        "kind": "Service",
+        "metadata": {
+          "labels": {
+            "parent": "skypilot",
+            "skypilot-cluster": "sky-cluster-abc123",
+            "skypilot-cluster-name": "sky-cluster-abc123",
+            "skypilot-user": "testuser"
+          },
+          "name": "sky-cluster-abc123-head-ssh"
+        },
+        "spec": {
+          "ports": [
+            {
+              "port": 22,
+              "protocol": "TCP",
+              "targetPort": 22
+            }
+          ],
+          "selector": {
+            "component": "sky-cluster-abc123-head"
+          }
+        }
+      },
+      {
+        "apiVersion": "v1",
+        "kind": "Service",
+        "metadata": {
+          "labels": {
+            "parent": "skypilot",
+            "skypilot-cluster": "sky-cluster-abc123",
+            "skypilot-cluster-name": "sky-cluster-abc123",
+            "skypilot-user": "testuser"
+          },
+          "name": "sky-cluster-abc123-head"
+        },
+        "spec": {
+          "clusterIP": "None",
+          "selector": {
+            "component": "sky-cluster-abc123-head"
+          }
+        }
+      },
+      {
+        "apiVersion": "v1",
+        "kind": "Service",
+        "metadata": {
+          "labels": {
+            "parent": "skypilot",
+            "skypilot-cluster": "sky-cluster-abc123",
+            "skypilot-cluster-name": "sky-cluster-abc123",
+            "skypilot-user": "testuser"
+          },
+          "name": "sky-cluster-abc123-worker1"
+        },
+        "spec": {
+          "clusterIP": "None",
+          "selector": {
+            "component": "sky-cluster-abc123-worker1"
+          }
+        }
+      },
+      {
+        "apiVersion": "v1",
+        "kind": "Service",
+        "metadata": {
+          "labels": {
+            "parent": "skypilot",
+            "skypilot-cluster": "sky-cluster-abc123",
+            "skypilot-cluster-name": "sky-cluster-abc123",
+            "skypilot-user": "testuser"
+          },
+          "name": "sky-cluster-abc123-worker2"
+        },
+        "spec": {
+          "clusterIP": "None",
+          "selector": {
+            "component": "sky-cluster-abc123-worker2"
+          }
+        }
+      },
+      {
+        "apiVersion": "v1",
+        "kind": "Service",
+        "metadata": {
+          "labels": {
+            "parent": "skypilot",
+            "skypilot-cluster": "sky-cluster-abc123",
+            "skypilot-cluster-name": "sky-cluster-abc123",
+            "skypilot-user": "testuser"
+          },
+          "name": "sky-cluster-abc123-worker3"
+        },
+        "spec": {
+          "clusterIP": "None",
+          "selector": {
+            "component": "sky-cluster-abc123-worker3"
+          }
+        }
+      }
+    ],
+    "skypilot_system_namespace": "skypilot-system",
+    "timeout": 600,
+    "type": "external",
+    "use_internal_ips": true
+  },
+  "setup_commands": "<omitted>",
+  "upscaling_speed": 3
+}

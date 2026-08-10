@@ -4,6 +4,12 @@ import os
 LOG_URL = os.environ.get('SKYPILOT_USAGE_LOG_URL',
                          'https://usage-v2.skypilot.co')
 
+# Scarf (https://scarf.sh) analytics gateway, receiving a fire-and-forget
+# ping with the entrypoint name and SkyPilot version. See
+# usage_lib._maybe_start_scarf_ping.
+SCARF_GATEWAY_URL = os.environ.get('SKYPILOT_SCARF_GATEWAY_URL',
+                                   'https://ossapi.skypilot.ai/sky-launch')
+
 USAGE_MESSAGE_SCHEMA_VERSION = 1
 PRIVACY_POLICY_PATH = '~/.sky/privacy_policy'
 

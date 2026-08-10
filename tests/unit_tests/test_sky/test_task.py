@@ -87,6 +87,18 @@ def test_validate_file_mounts():
         }
         task_obj.expand_and_validate_file_mounts()
 
+        # Test relative destinations (resolved against ~/sky_workdir).
+        task_obj.file_mounts = {
+            'relative_dir': d,
+            './dotslash_relative_dir': d,
+        }
+        task_obj.expand_and_validate_file_mounts()
+
+        # Test trailing-slash destinations are still rejected.
+        task_obj.file_mounts = {'/remote/': d}
+        with pytest.raises(ValueError, match='cannot end with a slash'):
+            task_obj.expand_and_validate_file_mounts()
+
 
 def test_to_yaml_config_without_envs():
     """Test to_yaml_config() with no environment variables."""
@@ -380,13 +392,37 @@ def test_from_yaml_config_secrets_type_conversion():
     assert task.get_plaintext_secrets(task_obj.secrets)['EMPTY_KEY'] == ''
 
 
-def test_from_yaml_config_secrets_validation():
-    """Test validation of secrets during YAML parsing."""
-    # Test None secret value
+def test_from_yaml_config_null_secret_becomes_managed_ref():
+    """A null secret value (no inline value) becomes a managed secret ref.
+
+    It is resolved at launch time (CLI ``--secret`` override or a managed
+    secrets provider) rather than rejected during YAML parsing.
+    """
     config = {'run': 'echo hello', 'secrets': {'API_KEY': None}}
 
-    with pytest.raises(ValueError, match='Secret variable.*is None'):
-        task.Task.from_yaml_config(config)
+    task_obj = task.Task.from_yaml_config(config)
+
+    assert task_obj.secrets == {}
+    refs = task_obj.managed_secret_refs
+    assert len(refs) == 1
+    assert refs[0].name == 'API_KEY'
+    assert refs[0].scope_override is None
+
+
+def test_from_yaml_config_null_or_empty_secrets_section():
+    """A null/empty ``secrets:`` section parses cleanly (no crash)."""
+    # ``secrets:`` with no value parses to None in YAML.
+    task_obj = task.Task.from_yaml_config({
+        'run': 'echo hello',
+        'secrets': None
+    })
+    assert task_obj.secrets == {}
+    assert not task_obj.managed_secret_refs
+
+    # Empty dict form.
+    task_obj = task.Task.from_yaml_config({'run': 'echo hello', 'secrets': {}})
+    assert task_obj.secrets == {}
+    assert not task_obj.managed_secret_refs
 
 
 def test_task_initialization_with_secrets():
@@ -454,19 +490,26 @@ def test_from_yaml_config_null_secrets_with_override():
     assert task_obj.envs == {'PUBLIC_VAR': 'public-value'}
 
 
-def test_from_yaml_config_null_secrets_without_override_fails():
-    """Test that null secrets without override fail appropriately."""
+def test_from_yaml_config_null_secrets_without_override_become_managed_refs():
+    """Without a CLI override, a null secret parses into a managed ref.
+
+    The value is resolved at launch time; enforcement of a missing value
+    moved from parse time to resolution time.
+    """
     config = {
-        'name': 'test-null-fail',
+        'name': 'test-null-managed-ref',
         'run': 'echo hello',
         'secrets': {
             'API_KEY': None
         }
     }
 
-    # Should fail without override
-    with pytest.raises(ValueError, match="Secret variable 'API_KEY' is None"):
-        task.Task.from_yaml_config(config)
+    task_obj = task.Task.from_yaml_config(config)
+
+    assert task_obj.secrets == {}
+    refs = task_obj.managed_secret_refs
+    assert len(refs) == 1
+    assert refs[0].name == 'API_KEY'
 
 
 def test_from_yaml_config_partial_null_secrets_override():

@@ -1,0 +1,23 @@
+resources:
+  cloud: kubernetes
+
+config:
+  kubernetes:
+    pod_config:
+      spec:
+        containers:
+          - name: ray-node
+            env:
+              - name: TEST_POD_CONFIG_ENV
+                value: ray-node-pod-config-merged
+            volumeMounts:
+              - name: smoke-pod-config-vol
+                mountPath: /smoke-pod-config-mount
+        volumes:
+          - name: smoke-pod-config-vol
+            emptyDir: {}
+
+run: |
+  echo "pod_env_check: $TEST_POD_CONFIG_ENV"
+  test -d /smoke-pod-config-mount && echo "mount_check: ok"
+  sleep 60

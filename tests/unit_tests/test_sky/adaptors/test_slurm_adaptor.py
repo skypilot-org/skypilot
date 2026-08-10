@@ -384,6 +384,73 @@ class TestGetAllJobsGres:
             assert result['node06'] == ['gpu:h100:2']
 
 
+class TestGetAllJobsInfo:
+    """Test SlurmClient.get_all_jobs_info()."""
+
+    def test_get_all_jobs_info_expansion(self):
+        """Multi-node jobs fan out to every node, keeping job identity."""
+        client = slurm.SlurmClient(
+            ssh_host='localhost',
+            ssh_port=22,
+            ssh_user='root',
+            ssh_key=None,
+        )
+
+        squeue_output = (
+            f'101{slurm.SEP}train a{slurm.SEP}alice{slurm.SEP}node01'
+            f'{slurm.SEP}gpu:h100:4\n'
+            f'102{slurm.SEP}cpu-only{slurm.SEP}bob{slurm.SEP}node01'
+            f'{slurm.SEP}N/A\n'
+            f'103{slurm.SEP}pretrain{slurm.SEP}bob{slurm.SEP}node[02-03]'
+            f'{slurm.SEP}gpu:h100:2\n'
+            f'malformed line without separators\n')
+
+        with mock.patch.object(client._runner, 'run') as mock_run:
+            mock_run.return_value = (0, squeue_output, '')
+
+            result = client.get_all_jobs_info()
+
+            mock_run.assert_called_once_with(
+                f'squeue -h --states=running,completing '
+                f'-o "%i{slurm.SEP}%j{slurm.SEP}%u{slurm.SEP}%N{slurm.SEP}%b"',
+                require_outputs=True,
+                separate_stderr=True,
+                stream_logs=False,
+            )
+
+            # Job 102 (no GRES) and the malformed line are skipped.
+            assert set(result.keys()) == {'node01', 'node02', 'node03'}
+            assert result['node01'] == [
+                slurm.JobGresInfo(job_id='101',
+                                  job_name='train a',
+                                  user='alice',
+                                  gres_str='gpu:h100:4')
+            ]
+            # Multi-node job 103 appears on both nodes with the same
+            # per-node GRES.
+            for node in ('node02', 'node03'):
+                assert result[node] == [
+                    slurm.JobGresInfo(job_id='103',
+                                      job_name='pretrain',
+                                      user='bob',
+                                      gres_str='gpu:h100:2')
+                ]
+
+    def test_get_all_jobs_info_empty_queue(self):
+        """Empty squeue output yields an empty mapping."""
+        client = slurm.SlurmClient(
+            ssh_host='localhost',
+            ssh_port=22,
+            ssh_user='root',
+            ssh_key=None,
+        )
+
+        with mock.patch.object(client._runner, 'run') as mock_run:
+            mock_run.return_value = (0, '', '')
+
+            assert client.get_all_jobs_info() == {}
+
+
 class TestParseMaxtime:
     """Test _parse_maxtime()."""
 
@@ -452,6 +519,69 @@ class TestParseMaxtime:
         assert result is None
 
 
+class TestParseDefaultTime:
+    """Test _parse_default_time()."""
+
+    def test_parse_default_time_none(self):
+        """DefaultTime=NONE returns None."""
+        line = 'PartitionName=dev DefaultTime=NONE MaxTime=UNLIMITED'
+        result = slurm._parse_default_time(line)
+        assert result is None
+
+    def test_parse_default_time_unlimited(self):
+        """DefaultTime=UNLIMITED returns None (no useful default)."""
+        line = 'PartitionName=dev DefaultTime=UNLIMITED MaxTime=UNLIMITED'
+        result = slurm._parse_default_time(line)
+        assert result is None
+
+    def test_parse_default_time_hms(self):
+        """Returns the raw hh:mm:ss string verbatim."""
+        line = 'PartitionName=dev DefaultTime=01:00:00 MaxTime=12:00:00'
+        result = slurm._parse_default_time(line)
+        assert result == '01:00:00'
+
+    def test_parse_default_time_with_days(self):
+        line = 'PartitionName=dev DefaultTime=2-00:00:00 MaxTime=7-00:00:00'
+        result = slurm._parse_default_time(line)
+        assert result == '2-00:00:00'
+
+    def test_parse_default_time_no_match(self):
+        line = 'PartitionName=dev MaxTime=12:00:00'
+        result = slurm._parse_default_time(line)
+        assert result is None
+
+
+class TestGetPartitionsInfoDefaultTime:
+    """Verify get_partitions_info() populates the default_time field."""
+
+    def test_populates_default_time(self):
+        client = slurm.SlurmClient(
+            ssh_host='localhost',
+            ssh_port=22,
+            ssh_user='root',
+            ssh_key=None,
+        )
+
+        mock_output = ('PartitionName=cpu Default=YES DefaultTime=01:00:00 '
+                       'MaxTime=UNLIMITED\n'
+                       'PartitionName=gpu Default=NO DefaultTime=NONE '
+                       'MaxTime=02:00:00')
+
+        with mock.patch.object(client._runner, 'run') as mock_run:
+            mock_run.return_value = (0, mock_output, '')
+            result = client.get_partitions_info()
+
+        assert len(result) == 2
+        assert result[0].name == 'cpu'
+        assert result[0].is_default is True
+        assert result[0].maxtime is None  # UNLIMITED
+        assert result[0].default_time == '01:00:00'
+        assert result[1].name == 'gpu'
+        assert result[1].is_default is False
+        assert result[1].maxtime == 7200
+        assert result[1].default_time is None
+
+
 class TestGetProctrackType:
     """Test SlurmClient.get_proctrack_type()."""
 
@@ -505,3 +635,63 @@ class TestGetProctrackType:
             result = client.get_proctrack_type()
 
             assert result is None
+
+
+class TestGetAllNodeDetails:
+    """Test SlurmClient.get_all_node_details()."""
+
+    def test_parses_one_line_per_node(self):
+        client = slurm.SlurmClient(
+            ssh_host='localhost',
+            ssh_port=22,
+            ssh_user='root',
+            ssh_key=None,
+        )
+
+        mock_output = (
+            'NodeName=node1 Arch=x86_64 CPUAlloc=8 CPUEfctv=72 CPUTot=72 '
+            'CPULoad=3.50 Gres=gpu:gh200:1 RealMemory=430080 AllocMem=102400 '
+            'FreeMem=421339 State=MIXED Partitions=all,gh200\n'
+            'NodeName=node2 Arch=x86_64 CPUAlloc=0 CPUEfctv=2 CPUTot=2 '
+            'CPULoad=N/A Gres=(null) RealMemory=14000 AllocMem=0 FreeMem=N/A '
+            'State=DOWN* Partitions=dev\n')
+
+        with mock.patch.object(client._runner, 'run') as mock_run:
+            mock_run.return_value = (0, mock_output, '')
+
+            result = client.get_all_node_details()
+            mock_run.assert_called_once_with(
+                'scontrol show node -o',
+                require_outputs=True,
+                separate_stderr=True,
+                stream_logs=False,
+            )
+
+        assert set(result.keys()) == {'node1', 'node2'}
+        assert result['node1']['CPUAlloc'] == '8'
+        assert result['node1']['CPUTot'] == '72'
+        assert result['node1']['CPULoad'] == '3.50'
+        assert result['node1']['AllocMem'] == '102400'
+        assert result['node1']['FreeMem'] == '421339'
+        assert result['node1']['State'] == 'MIXED'
+        assert result['node2']['CPULoad'] == 'N/A'
+        assert result['node2']['FreeMem'] == 'N/A'
+
+    def test_skips_blank_lines_and_lines_without_node_name(self):
+        client = slurm.SlurmClient(
+            ssh_host='localhost',
+            ssh_port=22,
+            ssh_user='root',
+            ssh_key=None,
+        )
+
+        mock_output = ('\n'
+                       'NodeName=node1 CPUTot=8\n'
+                       '   \n'
+                       'Arch=x86_64 CPUTot=4\n')
+
+        with mock.patch.object(client._runner, 'run') as mock_run:
+            mock_run.return_value = (0, mock_output, '')
+            result = client.get_all_node_details()
+
+        assert list(result.keys()) == ['node1']

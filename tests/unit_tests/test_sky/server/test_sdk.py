@@ -16,6 +16,7 @@ import requests
 from sky import skypilot_config
 from sky.client import sdk as client_sdk
 from sky.server import common as server_common
+from sky.server import rest as server_rest
 from sky.server.constants import API_COOKIE_FILE_ENV_VAR
 from sky.utils import common as common_utils
 
@@ -128,6 +129,44 @@ def test_api_info_with_cookie_file(set_api_cookie_jar):
             assert response["version"] is not None
             assert mock_make_request.call_count == 1
             assert mock_make_request.call_args[0] == ('GET', '/api/health')
+
+
+@pytest.mark.parametrize(
+    'deploy,host,expected_host',
+    [
+        # Deploy always binds a wildcard for remote access.
+        (True, '127.0.0.1', '0.0.0.0'),
+        (True, 'localhost', '0.0.0.0'),
+        (True, '0.0.0.0', '0.0.0.0'),
+        # Any IPv6 host under deploy binds the IPv6 wildcard.
+        (True, '::', '::'),
+        (True, '::1', '::'),
+        # A full-length IPv6 literal (no '::') is still detected; the deploy
+        # override runs before allowlist validation, so '::' passes.
+        (True, '2001:db8:0:0:0:0:0:1', '::'),
+        # Non-deploy leaves the host untouched.
+        (False, '127.0.0.1', '127.0.0.1'),
+        (False, '::1', '::1'),
+    ])
+def test_api_start_host_resolution(deploy, host, expected_host):
+    """api_start resolves/validates the bind host and forwards it to start."""
+    with mock.patch('sky.server.common.is_api_server_local',
+                    return_value=True), \
+         mock.patch('sky.server.common.check_server_healthy_or_start_fn'
+                   ) as mock_start:
+        client_sdk.api_start(deploy=deploy, host=host)
+    assert mock_start.call_count == 1
+    # check_server_healthy_or_start_fn(deploy, host, foreground, ...)
+    assert mock_start.call_args[0][1] == expected_host
+
+
+def test_api_start_rejects_invalid_host():
+    """api_start rejects hosts outside the local allowlist."""
+    with mock.patch('sky.server.common.is_api_server_local',
+                    return_value=True), \
+         mock.patch('sky.server.common.check_server_healthy_or_start_fn'):
+        with pytest.raises(ValueError, match='Invalid host'):
+            client_sdk.api_start(deploy=False, host='192.168.1.5')
 
 
 def test_api_login(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
@@ -332,7 +371,9 @@ def test_api_login_user_hash_needs_auth(monkeypatch: pytest.MonkeyPatch,
             'cookies': {}
         }).encode('utf-8')).decode('utf-8')
 
-    with mock.patch('sky.server.common.check_server_healthy') as mock_check:
+    with mock.patch('sky.server.common.check_server_healthy') as mock_check, \
+         mock.patch('sky.server.versions.get_remote_api_version',
+                    return_value=None):
         # On first call, return needs auth.
         first_return_value = (
             server_common.ApiServerStatus.NEEDS_AUTH,
@@ -392,7 +433,9 @@ def test_api_login_user_hash_needs_auth_both(monkeypatch: pytest.MonkeyPatch,
             'cookies': {}
         }).encode('utf-8')).decode('utf-8')
 
-    with mock.patch('sky.server.common.check_server_healthy') as mock_check:
+    with mock.patch('sky.server.common.check_server_healthy') as mock_check, \
+         mock.patch('sky.server.versions.get_remote_api_version',
+                    return_value=None):
         # On first call, return needs auth.
         first_return_value = (
             server_common.ApiServerStatus.NEEDS_AUTH,
@@ -493,7 +536,7 @@ def test_api_login_clears_residual_sa_token(monkeypatch: pytest.MonkeyPatch,
 
     # Step 1: Login with service account token. This writes the sa token
     # into config and sets local user hash to the sa user.
-    sa_user = {'id': sa_user_hash, 'name': 'hailong'}
+    sa_user = {'id': sa_user_hash, 'name': 'alice'}
     with mock.patch('sky.server.common.check_server_healthy') as mock_check:
         mock_check.return_value = (
             server_common.ApiServerStatus.HEALTHY,
@@ -610,8 +653,9 @@ def test_api_login_user_hash_fail(monkeypatch: pytest.MonkeyPatch,
 class MockRetryContext:
     """Mock retry context for testing resumable functionality."""
 
-    def __init__(self, line_processed: int = 0):
+    def __init__(self, line_processed: int = 0, progress_count: int = 0):
         self.line_processed = line_processed
+        self.progress_count = progress_count
 
 
 def test_stream_response_non_resumable():
@@ -788,6 +832,112 @@ def test_stream_response_resumable_with_none_lines():
                 assert result == "test_result"
 
 
+def test_stream_response_non_resumable_reports_progress():
+    """Non-resumable streams should still bump retry_context.progress_count
+    so retry_transient_errors can detect forward progress and reset its
+    consecutive-failure counter. Regression test for the
+    test_cli_auto_retry failure on `sky jobs logs --controller --tail 1000`,
+    where retries exhausted because the decorator was inspecting
+    line_processed (only updated by resumable streams) instead of
+    progress_count.
+    """
+    test_lines = ['Line 1\n', 'Line 2\n', 'Line 3\n']
+    mock_response = mock.MagicMock()
+    output_stream = io.StringIO()
+    retry_context = MockRetryContext(line_processed=0, progress_count=0)
+
+    with mock.patch('sky.utils.rich_utils.decode_rich_status') as mock_decode:
+        mock_decode.return_value = test_lines
+        with mock.patch('sky.server.rest.get_retry_context') as mock_get_ctx:
+            mock_get_ctx.return_value = retry_context
+            with mock.patch('sky.client.sdk.get') as mock_get:
+                mock_get.return_value = "test_result"
+
+                client_sdk.stream_response(request_id="test_request_id",
+                                           response=mock_response,
+                                           output_stream=output_stream,
+                                           resumable=False)
+
+                # All lines should have been printed, since this is a
+                # non-resumable stream (no skipping based on line_processed).
+                assert output_stream.getvalue() == "Line 1\nLine 2\nLine 3\n"
+                # progress_count should have been incremented per line so
+                # the retry decorator sees forward progress.
+                assert retry_context.progress_count == 3
+                # line_processed must remain 0 for non-resumable streams;
+                # it is reserved for resume bookkeeping.
+                assert retry_context.line_processed == 0
+
+
+def test_stream_response_resumable_retry_skips_replayed_lines():
+    """Integration test: ``retry_transient_errors`` + resumable
+    ``stream_response`` together must (1) not double-print lines that the
+    server replays after a mid-stream disconnect, and (2) advance both
+    ``progress_count`` and ``line_processed`` correctly across attempts.
+
+    Scenario: first attempt prints lines 1-2 then the connection breaks
+    with ``ChunkedEncodingError``. The decorator retries; on the second
+    attempt the server replays lines 1-5 from the start. Lines 1-2 must be
+    skipped via ``line_processed``, lines 3-5 must be printed exactly once.
+    """
+    output_stream = io.StringIO()
+    decode_call_count = 0
+
+    def decode_side_effect(_response, relay_rich_status=False):
+        nonlocal decode_call_count
+        decode_call_count += 1
+        if decode_call_count == 1:
+            # First attempt: emit 2 lines, then disconnect.
+            yield 'Line 1\n'
+            yield 'Line 2\n'
+            raise requests.exceptions.ChunkedEncodingError('disconnected')
+        # Retry attempt: server replays from line 1, emits all 5 lines.
+        yield 'Line 1\n'
+        yield 'Line 2\n'
+        yield 'Line 3\n'
+        yield 'Line 4\n'
+        yield 'Line 5\n'
+
+    @server_rest.retry_transient_errors(max_retries=3, initial_backoff=0.01)
+    def streaming_call():
+        mock_response = mock.MagicMock()
+        return client_sdk.stream_response(request_id='test_request_id',
+                                          response=mock_response,
+                                          output_stream=output_stream,
+                                          resumable=True)
+
+    captured_context = {}
+
+    def get_ctx_passthrough():
+        ctx = server_rest._RETRY_CONTEXT.get()
+        if ctx is not None:
+            captured_context['ctx'] = ctx
+        return ctx
+
+    with mock.patch('sky.utils.rich_utils.decode_rich_status',
+                    side_effect=decode_side_effect):
+        with mock.patch('sky.client.sdk.get') as mock_get:
+            mock_get.return_value = 'final_result'
+            with mock.patch('sky.client.sdk.rest.get_retry_context',
+                            side_effect=get_ctx_passthrough):
+                with mock.patch('time.sleep'):
+                    result = streaming_call()
+
+    # Each line printed exactly once despite the replay.
+    assert output_stream.getvalue() == (
+        'Line 1\nLine 2\nLine 3\nLine 4\nLine 5\n')
+    # Two attempts total: one failure + one success.
+    assert decode_call_count == 2
+    # Final result is forwarded from get(request_id).
+    assert result == 'final_result'
+    # line_processed tracks distinct lines (high-water mark for resumable
+    # skip-ahead). progress_count tracks total wire-level messages received
+    # across all attempts: 2 from the first attempt + 5 from the retry = 7.
+    ctx = captured_context['ctx']
+    assert ctx.line_processed == 5
+    assert ctx.progress_count == 7
+
+
 def test_stream_response_no_request_id():
     """Test stream_response when request_id is None."""
     test_lines = ['Line 1\n', 'Line 2\n']
@@ -828,3 +978,40 @@ def test_get_request_id():
     mock_response.reason = 'OK'
     request_id = server_common.get_request_id(mock_response)
     assert request_id == 'test_request_id'
+
+
+def _interrupted_entrypoint():
+    """Module-level entrypoint so Request.encode() can pickle it."""
+
+
+def test_get_interrupted_request_raises_request_interrupted_error():
+    """sdk.get() rebuilds the server's 500 payload into
+    RequestInterruptedError — not a generic RuntimeError — so callers (and
+    the retry decorator) can react to the interruption specifically."""
+    from sky import exceptions
+    from sky.server.requests import payloads as requests_payloads
+    from sky.server.requests import requests as requests_lib
+
+    request = requests_lib.Request(request_id='interrupted-req',
+                                   name='sky.launch',
+                                   entrypoint=_interrupted_entrypoint,
+                                   request_body=requests_payloads.RequestBody(),
+                                   status=requests_lib.RequestStatus.CANCELLED,
+                                   created_at=0.0,
+                                   user_id='user-123',
+                                   should_retry=True)
+    request.set_error(
+        exceptions.RequestInterruptedError(
+            'Request was interrupted by an API server restart.'))
+
+    with mock.patch('sky.server.common.make_authenticated_request'
+                   ) as mock_make_request:
+        mock_response = mock.Mock()
+        mock_response.status_code = 500
+        mock_response.json.return_value = {
+            'detail': request.encode().model_dump()
+        }
+        mock_make_request.return_value = mock_response
+
+        with pytest.raises(exceptions.RequestInterruptedError):
+            client_sdk.get('interrupted-req')

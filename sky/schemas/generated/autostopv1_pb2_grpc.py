@@ -31,7 +31,19 @@ if _version_not_supported:
 
 
 class AutostopServiceStub(object):
-    """Missing associated documentation comment in .proto file."""
+    """NOTE on naming. ``AutostopService`` predates the generalized
+    lifecycle-hooks framework. It is logically ``LifecycleService`` now
+    — ``SetAutostop`` carries both the autostop config AND the cluster's
+    hooks list. The naming is kept for wire-format back-compat: renaming
+    a gRPC service or RPC method is a wire-format break against every
+    pre-existing skylet running on disk. A future PR can:
+    1. Introduce a parallel ``SetHooks`` RPC alongside ``SetAutostop``,
+    2. Have new clients prefer ``SetHooks`` when ``SKYLET_LIB_VERSION``
+    indicates support,
+    3. Mark ``SetAutostopRequest.hooks`` / ``clear_hooks`` reserved
+    once the minimum supported skylet version reaches that floor.
+    Until then, hooks ride on ``SetAutostop`` and the naming stays.
+    """
 
     def __init__(self, channel):
         """Constructor.
@@ -52,10 +64,26 @@ class AutostopServiceStub(object):
 
 
 class AutostopServiceServicer(object):
-    """Missing associated documentation comment in .proto file."""
+    """NOTE on naming. ``AutostopService`` predates the generalized
+    lifecycle-hooks framework. It is logically ``LifecycleService`` now
+    — ``SetAutostop`` carries both the autostop config AND the cluster's
+    hooks list. The naming is kept for wire-format back-compat: renaming
+    a gRPC service or RPC method is a wire-format break against every
+    pre-existing skylet running on disk. A future PR can:
+    1. Introduce a parallel ``SetHooks`` RPC alongside ``SetAutostop``,
+    2. Have new clients prefer ``SetHooks`` when ``SKYLET_LIB_VERSION``
+    indicates support,
+    3. Mark ``SetAutostopRequest.hooks`` / ``clear_hooks`` reserved
+    once the minimum supported skylet version reaches that floor.
+    Until then, hooks ride on ``SetAutostop`` and the naming stays.
+    """
 
     def SetAutostop(self, request, context):
         """Set autostop configuration for the cluster.
+
+        NOTE: also carries the cluster's lifecycle-hooks list (the
+        ``hooks`` / ``clear_hooks`` fields on the request). This is a
+        wire-compat shim — see the comment on the service above.
         """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -89,7 +117,19 @@ def add_AutostopServiceServicer_to_server(servicer, server):
 
  # This class is part of an EXPERIMENTAL API.
 class AutostopService(object):
-    """Missing associated documentation comment in .proto file."""
+    """NOTE on naming. ``AutostopService`` predates the generalized
+    lifecycle-hooks framework. It is logically ``LifecycleService`` now
+    — ``SetAutostop`` carries both the autostop config AND the cluster's
+    hooks list. The naming is kept for wire-format back-compat: renaming
+    a gRPC service or RPC method is a wire-format break against every
+    pre-existing skylet running on disk. A future PR can:
+    1. Introduce a parallel ``SetHooks`` RPC alongside ``SetAutostop``,
+    2. Have new clients prefer ``SetHooks`` when ``SKYLET_LIB_VERSION``
+    indicates support,
+    3. Mark ``SetAutostopRequest.hooks`` / ``clear_hooks`` reserved
+    once the minimum supported skylet version reaches that floor.
+    Until then, hooks ride on ``SetAutostop`` and the naming stays.
+    """
 
     @staticmethod
     def SetAutostop(request,

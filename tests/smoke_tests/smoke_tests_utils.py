@@ -221,6 +221,33 @@ def get_cmd_wait_until_cluster_is_not_found(cluster_name: str, timeout: int):
                                                    timeout=timeout)
 
 
+_WAIT_UNTIL_VOLUME_IS_NOT_FOUND = (
+    # A while loop to wait until a volume no longer appears in
+    # `sky volumes ls`, or timeout. `sky volumes delete` tears down the backing
+    # storage asynchronously, so a single `sky volumes ls` right after the
+    # delete can still list the volume; poll instead of checking once.
+    'start_time=$SECONDS; '
+    'while true; do '
+    'vols=$(sky volumes ls); '
+    'if ! echo "$vols" | grep -q "{volume_name}"; then '
+    '  echo "Volume {volume_name} successfully removed."; break; '
+    'fi; '
+    'if (( $SECONDS - $start_time > {timeout} )); then '
+    '  echo "$vols"; '
+    '  echo "Timeout after {timeout} seconds waiting for volume '
+    '{volume_name} to be removed"; exit 1; '
+    'fi; '
+    'echo "Waiting for volume {volume_name} to be removed..."; '
+    'sleep 5; '
+    'done')
+
+
+def get_cmd_wait_until_volume_is_not_found(volume_name: str,
+                                           timeout: int = 120):
+    return _WAIT_UNTIL_VOLUME_IS_NOT_FOUND.format(volume_name=volume_name,
+                                                  timeout=timeout)
+
+
 _WAIT_UNTIL_JOB_STATUS_CONTAINS_MATCHING_JOB_ID = (
     # A while loop to wait until the job status
     # contains certain status, with timeout.
@@ -291,20 +318,51 @@ def get_cmd_wait_until_job_status_contains_matching_job_name(
 
 # Managed job functions
 
-_WAIT_UNTIL_MANAGED_JOB_STATUS_CONTAINS_MATCHING_JOB_NAME = _WAIT_UNTIL_JOB_STATUS_CONTAINS_MATCHING_JOB_NAME.replace(
-    'sky queue {cluster_name}', 'sky jobs queue').replace(
-        'awk "\\$2 == \\"{job_name}\\"',
-        'awk "\\$2 == \\"{job_name}\\" || \\$3 == \\"{job_name}\\"').replace(
-            _ALL_JOB_STATUSES, _ALL_MANAGED_JOB_STATUSES)
+# Unlike `sky queue`, the `sky jobs queue` table has a variable number of
+# leading columns: the TASK column can be empty and a WORKSPACE column is
+# rendered whenever the displayed jobs span more than one workspace (see
+# `format_job_table` in sky/jobs/utils.py). Both shift the position of the
+# NAME column, so we match {job_name} in *any* column via an awk loop rather
+# than a fixed column index. This keeps the wait robust regardless of which
+# columns the server renders (e.g. on a shared server where jobs from
+# multiple workspaces are listed and the WORKSPACE column appears).
+_WAIT_UNTIL_MANAGED_JOB_STATUS_CONTAINS_MATCHING_JOB_NAME = (
+    'start_time=$SECONDS; '
+    'while true; do '
+    'if (( $SECONDS - $start_time > {timeout} )); then '
+    '  echo "Timeout after {timeout} seconds waiting for job status \'{job_status}\'"; exit 1; '
+    'fi; '
+    'current_queue=$(sky jobs queue); '
+    'current_status=$(echo "$current_queue" | '
+    r'awk "{{name_found=0; '
+    r'for (i=1; i<=NF; i++) if (\$i == \"{job_name}\") name_found=1; '
+    r'if (name_found) for (i=1; i<=NF; i++) if (\$i ~ /^(' +
+    _ALL_MANAGED_JOB_STATUSES + r')$/) print \$i}}"); '
+    'found=0; '
+    'while read -r line; do '
+    '  if [[ "$line" =~ {job_status} ]]; then '
+    '    echo "Target job status {job_status} reached."; '
+    '    found=1; '
+    '    break; '
+    '  fi; '
+    'done <<< "$current_status"; '
+    'if [ "$found" -eq 1 ]; then break; fi; '
+    'echo "Waiting for job status to contain {job_status}, current status: $current_status"; '
+    'echo "Current queue: $current_queue"; '
+    'sleep {gap_seconds}; '
+    'done')
 
 
 def get_cmd_wait_until_managed_job_status_contains_matching_job_name(
-        job_name: str, job_status: Sequence[sky.ManagedJobStatus],
-        timeout: int):
+        job_name: str,
+        job_status: Sequence[sky.ManagedJobStatus],
+        timeout: int,
+        gap_seconds: int = 10):
     return _WAIT_UNTIL_MANAGED_JOB_STATUS_CONTAINS_MATCHING_JOB_NAME.format(
         job_name=job_name,
         job_status=_statuses_to_str(job_status),
-        timeout=timeout)
+        timeout=timeout,
+        gap_seconds=gap_seconds)
 
 
 _WAIT_UNTIL_PIPELINE_TASK_STATUS = (
@@ -433,6 +491,29 @@ def is_eks_cluster() -> bool:
                             stdout=subprocess.DEVNULL,
                             stderr=subprocess.DEVNULL)
     return result.returncode == 0
+
+
+def kubectl_for_cluster(cluster_name: str) -> str:
+    """``kubectl --context <ctx>`` with <ctx> resolved at *shell* runtime
+    to the kubeconfig context that contains a pod for ``cluster_name``.
+
+    Smoke pipelines fall into two shapes:
+
+    * Single-context (kind-based): only ``kind-skypilot`` exists, so the
+      discovery loop short-circuits on the first iteration.
+    * Multi-context (shared-GKE): the runner has the API server's
+      cluster as current-context and the workload cluster as a second
+      entry; the loop picks the one that actually owns the pod.
+
+    The returned string is meant to be interpolated into an f-string
+    command, e.g. ``f'{kubectl_for_cluster(name)} delete pod foo'``.
+    The context lookup runs at command-execution time (not test-collection
+    time), so it sees the pod created by an earlier ``sky launch`` step.
+    """
+    return (
+        f'kubectl --context "$(for c in $(kubectl config get-contexts -o name); '
+        f'do kubectl --context "$c" get pods -o name 2>/dev/null '
+        f'| grep -q {cluster_name} && echo "$c" && break; done)"')
 
 
 def get_replica_cluster_name_on_gcp(name: str, replica_id: int) -> str:
@@ -763,13 +844,13 @@ def run_one_test(test: Test, check_sky_status: bool = True) -> None:
 
 
 def get_aws_region_for_quota_failover() -> Optional[str]:
-    candidate_regions = AWS.regions_with_offering(instance_type='p3.16xlarge',
+    candidate_regions = AWS.regions_with_offering(instance_type='p4d.24xlarge',
                                                   accelerators=None,
                                                   use_spot=True,
                                                   region=None,
                                                   zone=None)
     original_resources = sky.Resources(infra='aws',
-                                       instance_type='p3.16xlarge',
+                                       instance_type='p4d.24xlarge',
                                        use_spot=True)
 
     # Filter the regions with proxy command in ~/.sky/config.yaml.
@@ -825,9 +906,9 @@ VALIDATE_LAUNCH_OUTPUT = (
     # ├── Waiting for task resources on 1 node.
     # └── Job started. Streaming logs... (Ctrl-C to exit log streaming; job will not be killed)
     # (setup pid=1277) running setup
-    # (min, pid=1277) # conda environments:
-    # (min, pid=1277) #
-    # (min, pid=1277) base                  *  /opt/conda
+    # (min, pid=1277) Package    Version
+    # (min, pid=1277) ---------- -------
+    # (min, pid=1277) pip        24.0
     # (min, pid=1277)
     # (min, pid=1277) task run finish
     # ✓ Job finished (status: SUCCEEDED).
@@ -869,6 +950,25 @@ VALIDATE_LAUNCH_OUTPUT_NO_PG_CONN_CLOSED_ERROR = (
     ' && echo "==Validating no pg conn closed error==" && '
     '! echo "$s" | grep -i "psycopg2.InterfaceError: connection already closed"'
 )
+
+# Asserts that the raylet's soft nofile limit was raised. SkyPilot targets
+# 1048576, but a host whose hard limit is lower cannot reach it (raising a hard
+# limit requires CAP_SYS_RESOURCE, which containers usually lack), so the
+# expected value is min(1048576, hard limit).
+_CHECK_RAYLET_NOFILE_LIMIT = (
+    "pid=$(pgrep -f 'raylet/raylet --raylet_socket_name'); "
+    'soft=$(prlimit --nofile --pid=$pid --noheadings --output=SOFT); '
+    'hard=$(prlimit --nofile --pid=$pid --noheadings --output=HARD); '
+    'expected=1048576; '
+    'if [ "$hard" != unlimited ] && [ "$hard" -lt 1048576 ]; then '
+    'expected=$hard; fi; '
+    'echo "raylet $pid nofile: soft=$soft hard=$hard expected=$expected"; '
+    '[ "$soft" = "$expected" ]')
+
+
+def get_check_raylet_nofile_limit_cmd(cluster_name: str) -> str:
+    """Returns a `sky exec` checking the raylet's open files limit."""
+    return f'sky exec {cluster_name} {shlex.quote(_CHECK_RAYLET_NOFILE_LIMIT)}'
 
 
 def get_disk_size_and_validate_launch_output(generic_cloud: str):
@@ -945,17 +1045,104 @@ def launch_cluster_for_cloud_cmd(cloud: str,
         )
 
 
+def k8s_landed_context_file(name: str) -> str:
+    return f'/tmp/sky-smoke-k8s-context-{name}'
+
+
+def resolve_k8s_context_cmd(name: str) -> str:
+    """Resolve, once on the API-connected test driver, the kubeconfig context
+    the cluster landed on, and persist it so the cloud-cmd cluster can be pinned
+    to the same context. For Kubernetes a cluster's ``region`` is its context.
+
+    On a multi-context API server the cluster may land on any context. The
+    cloud-cmd helper is a regular (non-controller) cluster, so by default it
+    uses the Kubernetes SERVICE_ACCOUNT remote_identity: its ``kubectl`` runs
+    with the helper pod's own in-cluster credentials, which only reach the
+    helper's own cluster (the API server's multi-context kubeconfig is uploaded
+    only to controller clusters). Pinning the helper to the target's context
+    puts both on the same cluster, so the helper's ``kubectl`` can see the
+    target's resources.
+    """
+    # Write the context from within Python rather than redirecting stdout:
+    # importing sky may emit logs to stdout (e.g. LOG_TO_STDOUT=1), which would
+    # otherwise contaminate the captured value. A missing cluster or context
+    # raises, failing the step loudly rather than writing an empty context that
+    # would silently leave the cloud-cmd cluster unpinned.
+    resolve = (f"import sky; "
+               f"clusters = sky.get(sky.status(['{name}'])); "
+               f"ctx = clusters[0].region; "
+               f"open('{k8s_landed_context_file(name)}', 'w').write(ctx)")
+    return f'python -c {shlex.quote(resolve)}'
+
+
+def launch_cloud_cmd_on_landed_context(name: str) -> str:
+    """Launch the cloud-cmd cluster pinned to the context the target cluster
+    landed on (see :func:`resolve_k8s_context_cmd`), so its in-cluster kubectl
+    shares the target cluster.
+    """
+    return launch_cluster_for_cloud_cmd(
+        f'kubernetes/$(cat {k8s_landed_context_file(name)})', name)
+
+
+def resolve_cloud_cmd_k8s_context_cmd(test_cluster_name: str) -> str:
+    """Resolve+persist the context the cloud-cmd helper landed on, so a later
+    ``sky launch`` can be pinned to the same context (the inverse of
+    :func:`launch_cloud_cmd_on_landed_context`, which pins the helper to an
+    existing target). Use when a test mutates cluster state *via the helper*
+    (e.g. ``kubectl create`` a pod) and then launches a real cluster that must
+    land on that same context to interact with it.
+
+    No-op when the API server is local: there is no cloud-cmd helper
+    (see :func:`launch_cluster_for_cloud_cmd`) and only one context exists, so
+    the subsequent launch is already co-located.
+    """
+    if server_common.is_api_server_local() and not is_remote_server_test():
+        return 'true'
+    return resolve_k8s_context_cmd(test_cluster_name +
+                                   _CLOUD_CMD_CLUSTER_NAME_SUFFIX)
+
+
+def cloud_cmd_landed_k8s_infra(test_cluster_name: str) -> str:
+    """``--infra`` value that pins a ``sky launch`` to the cloud-cmd helper's
+    landed context on a remote/multi-context server (paired with
+    :func:`resolve_cloud_cmd_k8s_context_cmd`), or plain ``kubernetes`` locally
+    (single context, no helper).
+    """
+    if server_common.is_api_server_local() and not is_remote_server_test():
+        return 'kubernetes'
+    return (
+        'kubernetes/$(cat '
+        f'{k8s_landed_context_file(test_cluster_name + _CLOUD_CMD_CLUSTER_NAME_SUFFIX)})'
+    )
+
+
 def run_cloud_cmd_on_cluster(test_cluster_name: str,
                              cmd: str,
                              envs: Set[str] = None,
                              timeout: int = 180,
-                             skip_remote_server_check: bool = False) -> str:
-    """Run the cloud command on the remote cluster for cloud commands."""
+                             skip_remote_server_check: bool = False,
+                             setup_cmd: Optional[str] = None) -> str:
+    """Run the cloud command on the remote cluster for cloud commands.
+
+    Args:
+        setup_cmd: Optional command to prepare the remote cloud-cmd cluster
+            (e.g. installing cloud CLIs into the SkyPilot runtime venv). Only
+            run when `cmd` targets the remote cluster: when the API server is
+            local, `cmd` runs verbatim on the local machine, where the
+            runtime venv does not exist and the local environment is assumed
+            to already have the cloud dependencies.
+    """
     cluster_name = test_cluster_name + _CLOUD_CMD_CLUSTER_NAME_SUFFIX
     if not skip_remote_server_check and sky.server.common.is_api_server_local(
     ) and not is_remote_server_test():
         return cmd
     else:
+        if setup_cmd is not None:
+            # Group `cmd` so that a setup failure fails the whole command
+            # instead of falling through to any `||` branches in `cmd`.
+            # Strip trailing semicolons from `cmd` first: `;;` inside the
+            # group is a bash syntax error.
+            cmd = f'{setup_cmd} && {{ {cmd.rstrip().rstrip(";")}; }}'
         cmd = f'{constants.ACTIVATE_SKY_REMOTE_PYTHON_ENV} && {cmd}'
         wait_for_cluster_up = get_cmd_wait_until_cluster_status_contains(
             cluster_name=cluster_name,
@@ -1133,10 +1320,10 @@ def get_dashboard_cluster_status_request_id() -> str:
 
 def get_dashboard_jobs_queue_request_id() -> str:
     """Get the jobs queue from the dashboard."""
-    body = payloads.JobsQueueBody(all_users=True,)
+    body = payloads.JobsQueueV2Body(all_users=True, limit=1000)
     response = server_common.make_authenticated_request(
         'POST',
-        '/internal/dashboard/jobs/queue',
+        '/internal/dashboard/jobs/queue/v2',
         json=json.loads(body.model_dump_json()),
         server_url=get_api_server_url())
     return server_common.get_request_id(response)
@@ -1323,7 +1510,8 @@ def wait_for_managed_job_status_sdk(job_name: str,
     """
     start_time = time.time()
     while time.time() - start_time < timeout:
-        jobs_list = sky.get(sky.jobs.queue(refresh=False))
+        jobs_list = sky.get(
+            sky.jobs.queue_v2(refresh=False, fields=['job_name', 'status']))[0]
         for job in jobs_list:
             if job['job_name'] == job_name:
                 if job['status'] in target_statuses:

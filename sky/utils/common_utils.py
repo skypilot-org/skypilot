@@ -31,8 +31,6 @@ from sky import models
 from sky import sky_logging
 from sky.adaptors import common as adaptors_common
 from sky.skylet import constants
-from sky.usage import constants as usage_constants
-from sky.utils import annotations
 from sky.utils import context
 from sky.utils import ux_utils
 from sky.utils import validator
@@ -81,20 +79,6 @@ class ProcessStatus(enum.Enum):
     FAILED = 'FAILED'
 
 
-@annotations.lru_cache(scope='request')
-def get_usage_run_id() -> str:
-    """Returns a unique run id for each 'run'.
-
-    A run is defined as the lifetime of a process that has imported `sky`
-    and has called its CLI or programmatic APIs. For example, two successive
-    `sky launch` are two runs.
-    """
-    usage_run_id = os.getenv(usage_constants.USAGE_RUN_ID_ENV_VAR)
-    if usage_run_id is not None:
-        return usage_run_id
-    return str(uuid.uuid4())
-
-
 def is_valid_user_hash(user_hash: Optional[str]) -> bool:
     if user_hash is None:
         return False
@@ -107,7 +91,10 @@ def is_valid_user_hash(user_hash: Optional[str]) -> bool:
 def generate_user_hash() -> str:
     """Generates a unique user-machine specific hash."""
     hash_str = user_and_hostname_hash()
-    user_hash = hashlib.md5(hash_str.encode()).hexdigest()[:USER_HASH_LENGTH]
+    # MD5 only derives a stable machine-specific identifier, not a security
+    # use.
+    user_hash = hashlib.md5(
+        hash_str.encode(), usedforsecurity=False).hexdigest()[:USER_HASH_LENGTH]
     if not is_valid_user_hash(user_hash):
         # A fallback in case the hash is invalid.
         user_hash = uuid.uuid4().hex[:USER_HASH_LENGTH]
@@ -122,6 +109,10 @@ def get_git_commit(path: Optional[str] = None) -> Optional[str]:
                                 cwd=path,
                                 check=True)
         return result.stdout.strip()
+    except FileNotFoundError as error:
+        if error.filename == 'git':
+            return None
+        raise
     except subprocess.CalledProcessError:
         return None
 
@@ -313,7 +304,9 @@ def make_cluster_name_on_cloud(display_name: str,
     if truncate_cluster_name.endswith('-'):
         truncate_cluster_name = truncate_cluster_name.rstrip('-')
     assert truncate_cluster_name_length > 0, (cluster_name_on_cloud, max_length)
-    display_name_hash = hashlib.md5(display_name.encode()).hexdigest()
+    # MD5 only derives a short suffix for the cluster name, not a security use.
+    display_name_hash = hashlib.md5(display_name.encode(),
+                                    usedforsecurity=False).hexdigest()
     # Use base36 to reduce the length of the hash.
     display_name_hash = base36_encode(display_name_hash)
     return (f'{truncate_cluster_name}'
@@ -406,6 +399,20 @@ def get_current_request_id() -> str:
     if value is not None:
         return value
     return 'dummy-request-id'
+
+
+def is_in_request_context() -> bool:
+    """Whether this code runs inside a server-side request execution.
+
+    The API server sets the request context (see ``set_request_context``) for
+    the duration of a request running on an executor worker; it is unset for
+    in-process callers with no request scheduler (e.g. a client, or the jobs
+    controller launching in-process). Long-blocking backend paths use this to
+    decide whether raising ``exceptions.ExecutionRetryableError`` will be
+    handled by the scheduler (parked as WAITING and rescheduled) rather than
+    propagating to a caller that cannot reschedule it.
+    """
+    return context.get_context_var(_REQUEST_ID_KEY) is not None
 
 
 def get_current_command() -> str:
@@ -666,7 +673,9 @@ def user_and_hostname_hash() -> str:
     The reason is AWS security group names are derived from this string, and
     thus changing the SG name makes these clusters unrecognizable.
     """
-    hostname_hash = hashlib.md5(socket.gethostname().encode()).hexdigest()[-4:]
+    # MD5 only derives a short hostname suffix, not a security use.
+    hostname_hash = hashlib.md5(socket.gethostname().encode(),
+                                usedforsecurity=False).hexdigest()[-4:]
     return f'{getpass.getuser()}-{hostname_hash}'
 
 
@@ -977,14 +986,23 @@ def get_cleaned_username(username: str = '') -> str:
     return username
 
 
-def fill_template(template_name: str, variables: Dict[str, Any],
+def fill_template(template_ref: str, variables: Dict[str, Any],
                   output_path: str) -> None:
-    """Create a file from a Jinja template and return the filename."""
-    assert template_name.endswith('.j2'), template_name
-    root_dir = os.path.dirname(os.path.dirname(__file__))
-    template_path = os.path.join(root_dir, 'templates', template_name)
+    """Create a file from a Jinja template.
+
+    ``template_ref`` is either a bare filename (resolved against
+    ``sky/templates/``) or an absolute path. Plugins ship their own
+    templates inside their package and pass an absolute path so they
+    don't have to write into SkyPilot's tree.
+    """
+    assert template_ref.endswith('.j2'), template_ref
+    if os.path.isabs(template_ref):
+        template_path = template_ref
+    else:
+        root_dir = os.path.dirname(os.path.dirname(__file__))
+        template_path = os.path.join(root_dir, 'templates', template_ref)
     if not os.path.exists(template_path):
-        raise FileNotFoundError(f'Template "{template_name}" does not exist.')
+        raise FileNotFoundError(f'Template "{template_ref}" does not exist.')
     with open(template_path, 'r', encoding='utf-8') as fin:
         template = fin.read()
     output_path = os.path.abspath(os.path.expanduser(output_path))

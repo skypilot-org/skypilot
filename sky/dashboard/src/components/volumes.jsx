@@ -17,11 +17,18 @@ import {
   TableHead,
   TableBody,
   TableCell,
+  EmptyTableState,
 } from '@/components/ui/table';
+import {
+  isForceEmpty,
+  getPersistedPageSize,
+  persistPageSize,
+} from '@/lib/utils';
 import { getVolumes, deleteVolume } from '@/data/connectors/volumes';
 import { REFRESH_INTERVALS } from '@/lib/config';
 import { sortData } from '@/data/utils';
 import { RotateCwIcon, Trash2Icon, AlertTriangleIcon } from 'lucide-react';
+import { VolumeIcon } from '@/components/elements/icons';
 import { useMobile } from '@/hooks/useMobile';
 import { Card } from '@/components/ui/card';
 import {
@@ -37,6 +44,11 @@ import Link from 'next/link';
 import { useRouter } from 'next/router';
 import { TimestampWithTooltip, LastUpdatedTimestamp } from '@/components/utils';
 import { StatusBadge } from '@/components/elements/StatusBadge';
+import {
+  FilterDropdown,
+  Filters,
+  filterData,
+} from '@/components/shared/FilterSystem';
 import { PluginSlot } from '@/plugins/PluginSlot';
 import { usePluginComponents, useTableColumns } from '@/plugins/PluginProvider';
 import dashboardCache from '@/lib/cache';
@@ -44,6 +56,23 @@ import cachePreloader from '@/lib/cache-preloader';
 import { trackVolumeAction } from '@/lib/analytics';
 
 const REFRESH_INTERVAL = REFRESH_INTERVALS.REFRESH_INTERVAL;
+
+const VOLUMES_PAGE_SIZE_OPTIONS = [10, 30, 50, 100, 200];
+const VOLUMES_PAGE_SIZE_STORAGE_KEY = 'skypilot-volumes-page-size';
+
+// Properties offered by the filter dropdown. `value` keys into `valueList` for
+// the typeahead; `label` is what lands in `filter.property`, which
+// `evaluateCondition` lowercases to look up the field on each volume.
+const PROPERTY_OPTIONS = [
+  { label: 'Name', value: 'name' },
+  { label: 'Status', value: 'status' },
+  { label: 'Infra', value: 'infra' },
+  { label: 'Type', value: 'type' },
+  { label: 'User', value: 'user' },
+];
+
+// Filters are kept in local state only, so there is nothing to sync to the URL.
+const noopUpdateURLParams = () => {};
 
 export function Volumes() {
   const router = useRouter();
@@ -185,7 +214,7 @@ export function Volumes() {
 
   return (
     <>
-      <div className="flex items-center justify-between mb-4 h-5">
+      <div className="flex items-center justify-between mb-4 min-h-[20px]">
         <div className="text-base flex items-center">
           {hasPluginTabs ? (
             <>
@@ -461,6 +490,7 @@ function VolumesTable({
   preloadingComplete,
 }) {
   const [data, setData] = useState([]);
+  const [filters, setFilters] = useState([]);
   const [sortConfig, setSortConfig] = useState({
     key: null,
     direction: 'ascending',
@@ -468,7 +498,15 @@ function VolumesTable({
   const [loading, setLocalLoading] = useState(false);
   const [isInitialLoad, setIsInitialLoad] = useState(true);
   const [currentPage, setCurrentPage] = useState(1);
-  const [pageSize, setPageSize] = useState(10);
+  // Restore the last "rows per page" choice persisted in localStorage,
+  // falling back to the default of 10.
+  const [pageSize, setPageSize] = useState(() =>
+    getPersistedPageSize(
+      VOLUMES_PAGE_SIZE_STORAGE_KEY,
+      VOLUMES_PAGE_SIZE_OPTIONS,
+      10
+    )
+  );
 
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -492,10 +530,36 @@ function VolumesTable({
     }
   }, [setLoading, onDataChange]);
 
+  // Suggestions shown in the filter dropdown, keyed by PROPERTY_OPTIONS value.
+  const valueList = useMemo(() => {
+    const uniq = (getValue) => [
+      ...new Set(data.map(getValue).filter((value) => value && value !== '-')),
+    ];
+    return {
+      name: uniq((volume) => volume.name),
+      status: uniq((volume) => volume.status),
+      infra: uniq((volume) => volume.infra),
+      type: uniq((volume) => volume.type),
+      user: uniq((volume) => volume.user_name),
+    };
+  }, [data]);
+
+  const filteredData = useMemo(() => {
+    if (filters.length === 0) {
+      return data;
+    }
+    // `User` filters against `user_name`; alias it so the shared filter can
+    // resolve the property name to a field.
+    return filterData(
+      data.map((volume) => ({ ...volume, user: volume.user_name })),
+      filters
+    );
+  }, [data, filters]);
+
   // Use useMemo to compute sorted data
   const sortedData = useMemo(() => {
-    return sortData(data, sortConfig.key, sortConfig.direction);
-  }, [data, sortConfig]);
+    return sortData(filteredData, sortConfig.key, sortConfig.direction);
+  }, [filteredData, sortConfig]);
 
   // Expose fetchData to parent component
   useEffect(() => {
@@ -529,10 +593,10 @@ function VolumesTable({
     };
   }, [refreshInterval, fetchData, preloadingComplete]);
 
-  // Reset to first page when data changes
+  // Reset to first page when the data or the active filters change
   useEffect(() => {
     setCurrentPage(1);
-  }, [data.length]);
+  }, [data.length, filters]);
 
   const requestSort = (key) => {
     let direction = 'ascending';
@@ -567,6 +631,8 @@ function VolumesTable({
   const handlePageSizeChange = (e) => {
     const newSize = parseInt(e.target.value, 10);
     setPageSize(newSize);
+    // Remember the choice so it sticks across reloads.
+    persistPageSize(VOLUMES_PAGE_SIZE_STORAGE_KEY, newSize);
     setCurrentPage(1); // Reset to first page when changing page size
   };
 
@@ -734,6 +800,27 @@ function VolumesTable({
 
   return (
     <div>
+      <div className="flex items-center justify-between mb-2">
+        <div className="w-full sm:w-auto max-w-xl">
+          <FilterDropdown
+            propertyList={PROPERTY_OPTIONS}
+            valueList={valueList}
+            setFilters={setFilters}
+            updateURLParams={noopUpdateURLParams}
+            placeholder="Filter volumes"
+          />
+        </div>
+      </div>
+      {filters.length > 0 && (
+        <div className="mb-2">
+          <Filters
+            filters={filters}
+            setFilters={setFilters}
+            updateURLParams={noopUpdateURLParams}
+          />
+        </div>
+      )}
+
       <Card>
         <div className="overflow-x-auto rounded-lg">
           <Table className="min-w-full">
@@ -757,7 +844,7 @@ function VolumesTable({
                     </div>
                   </TableCell>
                 </TableRow>
-              ) : paginatedData.length > 0 ? (
+              ) : paginatedData.length > 0 && !isForceEmpty() ? (
                 paginatedData.map((volume) => (
                   <TableRow key={volume.name}>
                     {visibleColumns.map((col) =>
@@ -768,14 +855,20 @@ function VolumesTable({
                   </TableRow>
                 ))
               ) : (
-                <TableRow>
-                  <TableCell
-                    colSpan={totalColSpan}
-                    className="text-center py-6 text-gray-500"
-                  >
-                    No volumes found
-                  </TableCell>
-                </TableRow>
+                <EmptyTableState
+                  colSpan={totalColSpan}
+                  icon={<VolumeIcon className="w-5 h-5" />}
+                  title={
+                    filters.length > 0
+                      ? 'No matching volumes'
+                      : 'No volumes found'
+                  }
+                  description={
+                    filters.length > 0
+                      ? 'Try removing or loosening a filter'
+                      : 'Create a volume to mount storage in your clusters and jobs'
+                  }
+                />
               )}
             </TableBody>
           </Table>
@@ -783,7 +876,7 @@ function VolumesTable({
       </Card>
 
       {/* Pagination controls */}
-      {data.length > 0 && (
+      {sortedData.length > 0 && (
         <div className="flex justify-end items-center py-2 px-4 text-sm text-gray-700">
           <div className="flex items-center space-x-4">
             <div className="flex items-center">
@@ -818,8 +911,8 @@ function VolumesTable({
               </div>
             </div>
             <div>
-              {startIndex + 1} – {Math.min(endIndex, data.length)} of{' '}
-              {data.length}
+              {startIndex + 1} – {Math.min(endIndex, sortedData.length)} of{' '}
+              {sortedData.length}
             </div>
             <div className="flex items-center space-x-2">
               <Button

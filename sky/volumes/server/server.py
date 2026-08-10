@@ -9,6 +9,7 @@ from sky.server.requests import executor
 from sky.server.requests import payloads
 from sky.server.requests import request_names
 from sky.server.requests import requests as requests_lib
+from sky.server.requests import role_filter
 from sky.utils import registry
 from sky.utils import volume as volume_utils
 from sky.volumes.server import core
@@ -19,12 +20,17 @@ router = fastapi.APIRouter()
 
 
 @router.get('')
-async def volume_list(request: fastapi.Request, refresh: bool = False) -> None:
+async def volume_list(
+    request: fastapi.Request,
+    refresh: bool = fastapi.Depends(role_filter.force_viewer_volume_refresh),
+) -> None:
     """Gets the volumes.
 
     Args:
         refresh: If True, refresh volume state from cloud APIs before returning.
             If False (default), return cached data from the database.
+            For viewer-role callers this is forced to False by
+            `role_filter.force_viewer_volume_refresh`.
     """
     request_body = payloads.VolumeListBody(refresh=refresh)
     await executor.schedule_request_async(
@@ -46,7 +52,11 @@ async def volume_delete(request: fastapi.Request,
         request_name=request_names.RequestName.VOLUME_DELETE,
         request_body=volume_delete_body,
         func=core.volume_delete,
-        schedule_type=requests_lib.ScheduleType.LONG,
+        # Volume delete is a lightweight, bounded operation (e.g. a single
+        # K8s PVC delete API call, capped by kubernetes.API_TIMEOUT). Use the
+        # SHORT queue so it is not starved behind long-running LONG requests
+        # like cluster launches.
+        schedule_type=requests_lib.ScheduleType.SHORT,
         auth_user=request.state.auth_user,
     )
 
@@ -123,6 +133,10 @@ async def volume_apply(request: fastapi.Request,
         request_name=request_names.RequestName.VOLUME_APPLY,
         request_body=volume_apply_body,
         func=core.volume_apply,
-        schedule_type=requests_lib.ScheduleType.LONG,
+        # Volume apply is a lightweight, bounded operation (e.g. a few K8s PVC
+        # read/create API calls, each capped by kubernetes.API_TIMEOUT). Use
+        # the SHORT queue so it is not starved behind long-running LONG
+        # requests like cluster launches.
+        schedule_type=requests_lib.ScheduleType.SHORT,
         auth_user=request.state.auth_user,
     )
