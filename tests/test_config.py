@@ -15,7 +15,9 @@ from sky.server.requests import payloads
 from sky.sky_logging import INFO
 from sky.skylet import constants
 from sky.utils import annotations
+from sky.utils import common_utils
 from sky.utils import config_utils
+from sky.utils import schemas
 from sky.utils import yaml_utils
 
 DISK_ENCRYPTED = True
@@ -2031,8 +2033,8 @@ class TestRemoveQueueNameFromConfig:
                     ('workspaces', 'ws1', 'kubernetes', 'context_configs',
                      'ctx2', 'quota', 'queue'),
                 ]:
-                    assert current.get_nested(
-                        keys, 'NOT_SET') is None, (f'Expected None at {keys}')
+                    assert current.get_nested(keys, 'NOT_SET') == 'NOT_SET', (
+                        f'Expected {keys} to be removed')
 
     def test_noop_when_no_queue_name_set(self):
         """No error when queue name keys are absent."""
@@ -2093,7 +2095,8 @@ class TestRemoveQueueNameFromConfig:
              mock.patch.object(skypilot_config, 'to_dict', return_value=cfg):
             with skypilot_config.remove_queue_name_from_config():
                 current = skypilot_config.to_dict()
-                # Both the original and extra key should be None everywhere.
+                # Both the original and extra key should be removed
+                # everywhere.
                 for keys in [
                     ('kubernetes', 'kueue', 'local_queue_name'),
                     ('kubernetes', 'custom', 'queue'),
@@ -2107,8 +2110,42 @@ class TestRemoveQueueNameFromConfig:
                     ('workspaces', 'ws1', 'kubernetes', 'context_configs',
                      'ctx2', 'custom', 'queue'),
                 ]:
-                    assert current.get_nested(
-                        keys, 'NOT_SET') is None, (f'Expected None at {keys}')
+                    assert current.get_nested(keys, 'NOT_SET') == 'NOT_SET', (
+                        f'Expected {keys} to be removed')
+
+    def test_mutated_config_passes_schema_validation(self):
+        """Regression: removal must not leave `null` values behind.
+
+        Setting the queue keys to None instead of popping them produced a
+        mutated config that fails schema validation (`quota.queue` and
+        `kueue.local_queue_name` require strings), breaking anything that
+        reloads the config while the override is active.
+        """
+        cfg = _make_config({
+            'kubernetes': {
+                'quota': {
+                    'queue': 'root-quota-q'
+                },
+                'context_configs': {
+                    'ctx1': {
+                        'kueue': {
+                            'local_queue_name': 'ctx1-q'
+                        },
+                        'quota': {
+                            'queue': 'ctx1-quota-q'
+                        }
+                    }
+                }
+            },
+        })
+        with mock.patch.object(skypilot_config, 'to_dict', return_value=cfg):
+            with skypilot_config.remove_queue_name_from_config():
+                current = skypilot_config.to_dict()
+                # Must not raise.
+                common_utils.validate_schema(dict(current),
+                                             schemas.get_config_schema(),
+                                             'Invalid mutated config: ',
+                                             skip_none=False)
 
 
 class _BodyError(Exception):
