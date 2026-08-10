@@ -1451,15 +1451,29 @@ def srun_sshd_command(
             'DROPBEAR=$(command -v dropbear); '
             'if [ -z "$DROPBEAR" ]; then '
             'echo "dropbear not found" >&2; exit 1; fi; '
+            # -e was added in Dropbear 2022.83. Existing images can provide an
+            # older binary in PATH, so preserve the old SSH behavior when the
+            # installed server does not advertise environment forwarding.
+            'DROPBEAR_ENV_FLAG=(); '
+            'if "$DROPBEAR" -h 2>&1 | '
+            'grep -Eq -- \'(^|[[:space:]])-e([[:space:]]|$)\'; then '
+            'DROPBEAR_ENV_FLAG=(-e); fi; '
+            # Dropbear -e forwards its entire environment. Start it with only
+            # the accelerator variables so proxy-step SLURM_* variables and
+            # unrelated submit-side values do not leak into SSH sessions.
+            'DROPBEAR_ENV=(); '
+            f'for NAME in {accelerator_env_var_names}; do '
+            'if declare -p "$NAME" &>/dev/null; then '
+            'DROPBEAR_ENV+=("$NAME=${!NAME}"); fi; done; '
             # Find a free port in the ephemeral range
             'while :; do '
             'PORT=$((30000 + RANDOM % 30000)); '
             'ss -tln | awk \'{print $4}\' | grep -q ":$PORT$" || break; '
             'done; '
             # Start dropbear and wait for it to bind
-            # Dropbear normally rebuilds the child environment too. -e passes
-            # the environment injected by Slurm into the SSH session.
-            '"$DROPBEAR" -e -F -s -R -p "127.0.0.1:$PORT" & '
+            'env -i "${DROPBEAR_ENV[@]}" "$DROPBEAR" '
+            '"${DROPBEAR_ENV_FLAG[@]}" -F -s -R '
+            '-p "127.0.0.1:$PORT" & '
             'DROPBEAR_PID=$!; '
             'trap "kill $DROPBEAR_PID 2>/dev/null" EXIT; '
             'for i in $(seq 1 50); do '

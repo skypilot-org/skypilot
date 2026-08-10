@@ -60,7 +60,7 @@ class TestSrunSshdCommand:
         sshd_args = json.loads(result.stdout)
         assert sshd_args[-2:] == ['-o', 'SetEnv=CUDA_VISIBLE_DEVICES=4,5']
 
-    def test_dropbear_forwards_srun_environment(self):
+    def test_dropbear_forwards_only_accelerator_environment(self):
         command = utils.srun_sshd_command(
             job_id='123',
             target_node='node-1',
@@ -70,7 +70,12 @@ class TestSrunSshdCommand:
         )
 
         bootstrap = shlex.split(command)[-1]
-        assert '"$DROPBEAR" -e -F -s -R' in bootstrap
+        assert '"$DROPBEAR" -h 2>&1' in bootstrap
+        assert 'DROPBEAR_ENV_FLAG=(-e)' in bootstrap
+        assert 'env -i "${DROPBEAR_ENV[@]}" "$DROPBEAR"' in bootstrap
+        assert '"${DROPBEAR_ENV_FLAG[@]}" -F -s -R' in bootstrap
+        assert ('for NAME in CUDA_VISIBLE_DEVICES ROCR_VISIBLE_DEVICES'
+                in bootstrap)
 
 
 class TestFormatSlurmDuration:
