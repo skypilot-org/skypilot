@@ -1115,13 +1115,15 @@ class TestDownloadLogAndStreamLoggingAgentGate:
                 controller, JobController))
         return controller
 
-    def _run(self, agent_configured, reader):
+    def _run(self, agent_configured, reader, undelivered_reason=None):
         controller = self._make_controller()
         handle = MagicMock()
         with patch('sky.jobs.controller.logs.is_logging_agent_configured',
                    return_value=agent_configured), \
              patch('sky.jobs.controller.logs.get_log_reader',
                    return_value=reader), \
+             patch('sky.jobs.controller.LogDeliverySource.undelivered_reason',
+                   return_value=undelivered_reason), \
              patch('sky.jobs.controller.managed_job_state') as mock_state, \
              patch('sky.jobs.controller.managed_job_runtime') as mock_runtime, \
              patch('sky.jobs.controller.controller_utils') as mock_cutils:
@@ -1148,6 +1150,24 @@ class TestDownloadLogAndStreamLoggingAgentGate:
     def test_downloads_when_no_logging_agent(self):
         _, _, mock_cutils = self._run(agent_configured=False, reader=None)
         mock_cutils.download_and_stream_job_log.assert_called_once()
+
+    def test_downloads_when_delivery_source_reports_undelivered(self):
+        # Agent and reader are configured, but the component operating the
+        # agent knows it never delivered this cluster's logs -> the local copy
+        # is the only copy that will exist, so it must be kept.
+        _, _, mock_cutils = self._run(
+            agent_configured=True,
+            reader=MagicMock(),
+            undelivered_reason='logging agent was not deployed on the cluster')
+        mock_cutils.download_and_stream_job_log.assert_called_once()
+
+    def test_skips_download_when_delivery_source_confirms(self):
+        # A registered source with no evidence against delivery must not
+        # change the skip behavior.
+        _, _, mock_cutils = self._run(agent_configured=True,
+                                      reader=MagicMock(),
+                                      undelivered_reason=None)
+        mock_cutils.download_and_stream_job_log.assert_not_called()
 
 
 class TestJobGroupResumeDoesNotReissueStarting:
