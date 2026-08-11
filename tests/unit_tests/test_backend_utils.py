@@ -19,6 +19,7 @@ from sky.exceptions import ClusterNotUpError
 from sky.resources import Resources
 from sky.utils import common
 from sky.utils import common_utils
+from sky.utils import controller_utils
 from sky.utils import registry
 from sky.utils import schemas
 from sky.utils import status_lib
@@ -73,7 +74,8 @@ def test_runpod_no_upload_task_mounts_no_provider_credentials(monkeypatch):
     allowed_clouds = backend_utils._get_credential_provider_allowlist(
         task=task,
         compute_cloud=credential_clouds['runpod'],
-        remote_identity=schemas.RemoteIdentityOptions.NO_UPLOAD.value)
+        remote_identity=schemas.RemoteIdentityOptions.NO_UPLOAD.value,
+        cluster_name='ordinary-cluster')
     credentials = sky_check.get_cloud_credential_file_mounts(
         excluded_clouds=None, allowed_clouds=allowed_clouds)
 
@@ -208,7 +210,8 @@ def test_runpod_no_upload_s3_file_mount_includes_only_aws_credentials(
     allowed_clouds = backend_utils._get_credential_provider_allowlist(
         task=task,
         compute_cloud=credential_clouds['runpod'],
-        remote_identity=schemas.RemoteIdentityOptions.NO_UPLOAD.value)
+        remote_identity=schemas.RemoteIdentityOptions.NO_UPLOAD.value,
+        cluster_name='ordinary-cluster')
     credentials = sky_check.get_cloud_credential_file_mounts(
         excluded_clouds=None, allowed_clouds=allowed_clouds)
 
@@ -227,7 +230,8 @@ def test_runpod_no_upload_gcs_file_mount_includes_only_gcp_credentials(
     allowed_clouds = backend_utils._get_credential_provider_allowlist(
         task=task,
         compute_cloud=credential_clouds['runpod'],
-        remote_identity=schemas.RemoteIdentityOptions.NO_UPLOAD.value)
+        remote_identity=schemas.RemoteIdentityOptions.NO_UPLOAD.value,
+        cluster_name='ordinary-cluster')
     credentials = sky_check.get_cloud_credential_file_mounts(
         excluded_clouds=None, allowed_clouds=allowed_clouds)
 
@@ -250,7 +254,8 @@ def test_runpod_no_upload_unknown_file_mount_url_mounts_no_credentials(
     allowed_clouds = backend_utils._get_credential_provider_allowlist(
         task=task,
         compute_cloud=credential_clouds['runpod'],
-        remote_identity=schemas.RemoteIdentityOptions.NO_UPLOAD.value)
+        remote_identity=schemas.RemoteIdentityOptions.NO_UPLOAD.value,
+        cluster_name='ordinary-cluster')
     credentials = sky_check.get_cloud_credential_file_mounts(
         excluded_clouds=None, allowed_clouds=allowed_clouds)
 
@@ -270,7 +275,8 @@ def test_credential_allowlist_mounts_selected_compute_and_storage(monkeypatch):
     allowed_clouds = backend_utils._get_credential_provider_allowlist(
         task=task,
         compute_cloud=credential_clouds['aws'],
-        remote_identity=schemas.RemoteIdentityOptions.LOCAL_CREDENTIALS.value)
+        remote_identity=schemas.RemoteIdentityOptions.LOCAL_CREDENTIALS.value,
+        cluster_name='ordinary-cluster')
     credentials = sky_check.get_cloud_credential_file_mounts(
         excluded_clouds=None, allowed_clouds=allowed_clouds)
 
@@ -289,7 +295,8 @@ def test_credential_allowlist_infers_storage_provider_from_source_url():
     allowed_clouds = backend_utils._get_credential_provider_allowlist(
         task=task,
         compute_cloud=clouds.AWS(),
-        remote_identity=schemas.RemoteIdentityOptions.SERVICE_ACCOUNT.value)
+        remote_identity=schemas.RemoteIdentityOptions.SERVICE_ACCOUNT.value,
+        cluster_name='ordinary-cluster')
 
     assert clouds.cloud_in_iterable(clouds.GCP(), allowed_clouds)
     assert not clouds.cloud_in_iterable(clouds.AWS(), allowed_clouds)
@@ -311,7 +318,8 @@ def test_nonlocal_compute_identity_does_not_regain_unrelated_credentials(
     allowed_clouds = backend_utils._get_credential_provider_allowlist(
         task=task,
         compute_cloud=credential_clouds['aws'],
-        remote_identity=remote_identity)
+        remote_identity=remote_identity,
+        cluster_name='ordinary-cluster')
     credentials = sky_check.get_cloud_credential_file_mounts(
         excluded_clouds=None, allowed_clouds=allowed_clouds)
 
@@ -329,7 +337,8 @@ def test_controller_task_mounts_workload_provider_credentials(monkeypatch):
     allowed_clouds = backend_utils._get_credential_provider_allowlist(
         task=controller_task,
         compute_cloud=credential_clouds['runpod'],
-        remote_identity=schemas.RemoteIdentityOptions.LOCAL_CREDENTIALS.value)
+        remote_identity=schemas.RemoteIdentityOptions.LOCAL_CREDENTIALS.value,
+        cluster_name='ordinary-cluster')
     credentials = sky_check.get_cloud_credential_file_mounts(
         excluded_clouds=None, allowed_clouds=allowed_clouds)
 
@@ -355,7 +364,8 @@ def test_controller_task_mounts_optimized_workload_provider_credentials(
     allowed_clouds = backend_utils._get_credential_provider_allowlist(
         task=controller_task,
         compute_cloud=credential_clouds['runpod'],
-        remote_identity=schemas.RemoteIdentityOptions.NO_UPLOAD.value)
+        remote_identity=schemas.RemoteIdentityOptions.NO_UPLOAD.value,
+        cluster_name='ordinary-cluster')
     credentials = sky_check.get_cloud_credential_file_mounts(
         excluded_clouds=None, allowed_clouds=allowed_clouds)
 
@@ -390,12 +400,84 @@ def test_credential_mounts_keep_logging_agent_credentials(monkeypatch):
     credentials = backend_utils._get_credential_file_mounts(
         task=task_lib.Task(),
         compute_cloud=clouds.AWS(),
-        remote_identity=schemas.RemoteIdentityOptions.LOCAL_CREDENTIALS.value)
+        remote_identity=schemas.RemoteIdentityOptions.LOCAL_CREDENTIALS.value,
+        cluster_name='ordinary-cluster',
+        region='us-east-1')
 
     assert credentials == {
         '~/.aws/credentials': '/credentials/aws',
         '~/.logging-agent/config': '/credentials/logging-agent',
     }
+
+
+@pytest.mark.parametrize('cluster_name, expected_kubeconfig_exclusion', [
+    (controller_utils.Controllers.JOBS_CONTROLLER.value.cluster_name, False),
+    ('ordinary-cluster', True),
+])
+def test_credential_mounts_scope_controller_discovery_and_kubeconfig(
+        monkeypatch, cluster_name, expected_kubeconfig_exclusion):
+    """Scope provider credentials while preserving controller kubeconfig access."""
+    captured_arguments = {}
+
+    def capture_credential_mounts(excluded_clouds, allowed_clouds):
+        captured_arguments['excluded_clouds'] = excluded_clouds
+        captured_arguments['allowed_clouds'] = allowed_clouds
+        return {}
+
+    monkeypatch.setattr(sky_check, 'get_cloud_credential_file_mounts',
+                        capture_credential_mounts)
+    monkeypatch.setattr(registry.CLOUD_REGISTRY, 'items', lambda: [
+        ('gcp', clouds.GCP()),
+    ])
+    monkeypatch.setattr(
+        skypilot_config, 'get_effective_workspace_region_config',
+        lambda cloud, **kwargs: (schemas.RemoteIdentityOptions.NO_UPLOAD.value
+                                 if cloud == 'gcp' else None))
+    monkeypatch.setattr(skypilot_config, 'get_workspace_cloud',
+                        lambda _: {'allowed_contexts': ['production']})
+    monkeypatch.setattr(backend_utils.logs, 'get_logging_agent', lambda: None)
+
+    backend_utils._get_credential_file_mounts(
+        task=task_lib.Task(),
+        compute_cloud=clouds.AWS(),
+        remote_identity=schemas.RemoteIdentityOptions.LOCAL_CREDENTIALS.value,
+        cluster_name=cluster_name,
+        region='us-east-1')
+
+    if expected_kubeconfig_exclusion:
+        assert captured_arguments['allowed_clouds'] is not None
+    else:
+        assert captured_arguments['allowed_clouds'] is None
+    assert clouds.cloud_in_iterable(clouds.GCP(),
+                                    captured_arguments['excluded_clouds'])
+    assert (clouds.cloud_in_iterable(
+        clouds.Kubernetes(),
+        captured_arguments['excluded_clouds']) == expected_kubeconfig_exclusion)
+    assert (clouds.cloud_in_iterable(
+        clouds.SSH(),
+        captured_arguments['excluded_clouds']) == expected_kubeconfig_exclusion)
+
+
+def test_controller_credential_excludelist_honors_profile_override(monkeypatch):
+    """Use cluster-specific remote-identity overrides for controller mounts."""
+    override_configs = {'remote_identity': 'override'}
+    controller_name = controller_utils.Controllers.JOBS_CONTROLLER.value.cluster_name
+    monkeypatch.setattr(registry.CLOUD_REGISTRY, 'items', lambda: [
+        ('gcp', clouds.GCP()),
+    ])
+    monkeypatch.setattr(
+        skypilot_config, 'get_effective_workspace_region_config',
+        lambda cloud, **kwargs: ([{
+            controller_name: schemas.RemoteIdentityOptions.NO_UPLOAD.value
+        }] if cloud == 'gcp' and kwargs['override_configs'] == override_configs
+                                 else None))
+    monkeypatch.setattr(skypilot_config, 'get_workspace_cloud',
+                        lambda _: {'allowed_contexts': ['production']})
+
+    excluded_clouds = backend_utils._get_credential_provider_excludelist(
+        controller_name, 'us-east-1', override_configs)
+
+    assert clouds.cloud_in_iterable(clouds.GCP(), excluded_clouds)
 
 
 # Set env var to test config file.

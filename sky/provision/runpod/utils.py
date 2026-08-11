@@ -527,6 +527,17 @@ def launch(
             new_instance = _create_pod_via_rest(
                 _rest_pod_create_params(params, bootstrap_cmd))
     else:
+        gpu_type_id = params.get('gpu_type_id')
+        gpu_count = params.get('gpu_count')
+        data_center_id = params.get('data_center_id')
+        if (not is_cpu_instance and isinstance(gpu_type_id, str) and
+                isinstance(gpu_count, int) and isinstance(data_center_id, str)):
+            available = _available_data_center_ids(
+                gpu_type_id, gpu_count, params['cloud_type'] == 'SECURE')
+            if (available is not None and data_center_id not in available):
+                raise RuntimeError(
+                    f'No {gpu_type_id} capacity currently reported in data '
+                    f'center {data_center_id}.')
         new_instance = runpod_commands.create_spot_pod(
             bid_per_gpu=bid_per_gpu,
             **params,  # type: ignore[arg-type]
