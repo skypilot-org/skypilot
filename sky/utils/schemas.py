@@ -1815,7 +1815,14 @@ def get_config_schema():
             },
             'bucket': {
                 'type': 'string',
-                'pattern': '^(https|s3|gs|r2|cos)://.+',
+                # This module cannot import sky.data.storage to derive the
+                # scheme list (storage.py imports this module), so the
+                # alternation is spelled out. It must cover every writable
+                # StoreType prefix; read-only stores (hf://) and volumes are
+                # deliberately absent. Kept in sync by
+                # tests/unit_tests/test_sky/utils/test_schemas.py::
+                # TestControllerBucketSchema.
+                'pattern': '^(https|s3|gs|r2|cos|oci|nebius|cw|vastdata)://.+',
                 'required': [],
             },
             'force_disable_cloud_bucket': {
