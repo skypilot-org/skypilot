@@ -4164,7 +4164,7 @@ def test_managed_job_volume_not_ready():
         size: 1Gi
         config:
           access_mode: ReadWriteMany
-          storage_class_name: skypilot-no-such-storage-class
+          storage_class_name: {smoke_tests_utils.unprovisionable_storage_class_name(name)}
     """)
     task_yaml = textwrap.dedent(f"""\
         resources:
@@ -4184,10 +4184,13 @@ def test_managed_job_volume_not_ready():
         test = smoke_tests_utils.Test(
             'managed_job_volume_not_ready',
             [
-                f'sky volumes apply -y {vol_f.name}',
+                smoke_tests_utils.create_unprovisionable_storage_class_cmd(
+                    name),
+                f'sky volumes apply -y {smoke_tests_utils.AGENT_K8S_INFRA} '
+                f'{vol_f.name}',
                 f'vols=$(sky volumes ls) && echo "$vols" && '
                 f'echo "$vols" | grep {volume_name} | grep NOT_READY',
-                f'sky jobs launch -n {name} --infra kubernetes '
+                f'sky jobs launch -n {name} {smoke_tests_utils.AGENT_K8S_INFRA} '
                 f'{smoke_tests_utils.LOW_RESOURCE_ARG} {task_f.name} -y -d',
                 smoke_tests_utils.
                 get_cmd_wait_until_managed_job_status_contains_matching_job_name(
@@ -4202,7 +4205,9 @@ def test_managed_job_volume_not_ready():
             ],
             smoke_tests_utils.chain_teardown(
                 f'sky jobs cancel -y -n {name}',
-                f'sky volumes delete {volume_name} -y || true'),
+                f'sky volumes delete {volume_name} -y || true',
+                smoke_tests_utils.delete_unprovisionable_storage_class_cmd(
+                    name)),
             env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
             timeout=20 * 60,
         )
@@ -4236,7 +4241,7 @@ def test_managed_job_auto_mount_not_ready():
         size: 1Gi
         config:
           access_mode: ReadWriteMany
-          storage_class_name: skypilot-no-such-storage-class
+          storage_class_name: {smoke_tests_utils.unprovisionable_storage_class_name(name)}
     """)
     task_yaml = textwrap.dedent("""\
         resources:
@@ -4266,13 +4271,18 @@ def test_managed_job_auto_mount_not_ready():
         test = smoke_tests_utils.Test(
             'managed_job_auto_mount_not_ready',
             [
+                smoke_tests_utils.create_unprovisionable_storage_class_cmd(
+                    name),
                 # Create the volume without auto_mounts in scope, so this step
                 # cannot be tripped up by the entry it is about to become.
                 smoke_tests_utils.with_config(
-                    f'sky volumes apply -y {vol_f.name}', '/dev/null'),
+                    f'sky volumes apply -y '
+                    f'{smoke_tests_utils.AGENT_K8S_INFRA} {vol_f.name}',
+                    '/dev/null'),
                 f'vols=$(sky volumes ls) && echo "$vols" && '
                 f'echo "$vols" | grep {volume_name} | grep NOT_READY',
-                f'sky jobs launch -n {name} --infra kubernetes '
+                f'sky jobs launch -n {name} '
+                f'{smoke_tests_utils.AGENT_K8S_INFRA} '
                 f'{smoke_tests_utils.LOW_RESOURCE_ARG} {task_f.name} -y -d',
                 # FAILED_PRECHECKS rather than a retry outcome is the point:
                 # the retry path ends in FAILED_NO_RESOURCE or the ceiling.
@@ -4287,7 +4297,9 @@ def test_managed_job_auto_mount_not_ready():
             ],
             smoke_tests_utils.chain_teardown(
                 f'sky jobs cancel -y -n {name}',
-                f'sky volumes delete {volume_name} -y || true'),
+                f'sky volumes delete {volume_name} -y || true',
+                smoke_tests_utils.delete_unprovisionable_storage_class_cmd(
+                    name)),
             env={
                 skypilot_config.ENV_VAR_GLOBAL_CONFIG: cfg_f.name,
             },

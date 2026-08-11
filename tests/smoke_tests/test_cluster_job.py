@@ -1809,7 +1809,7 @@ def test_auto_mount_not_ready_on_kubernetes():
         size: 1Gi
         config:
           access_mode: ReadWriteMany
-          storage_class_name: skypilot-no-such-storage-class
+          storage_class_name: {smoke_tests_utils.unprovisionable_storage_class_name(name)}
     """)
     good_yaml = textwrap.dedent(f"""\
         name: {good_volume}
@@ -1857,8 +1857,12 @@ def test_auto_mount_not_ready_on_kubernetes():
         test = smoke_tests_utils.Test(
             'auto_mount_not_ready_on_kubernetes',
             [
-                f'sky volumes apply -y {broken_f.name}',
-                f'sky volumes apply -y {good_f.name}',
+                smoke_tests_utils.create_unprovisionable_storage_class_cmd(
+                    name),
+                f'sky volumes apply -y {smoke_tests_utils.AGENT_K8S_INFRA} '
+                f'{broken_f.name}',
+                f'sky volumes apply -y {smoke_tests_utils.AGENT_K8S_INFRA} '
+                f'{good_f.name}',
                 # The claim cannot be provisioned, so the volume is reported
                 # unusable without waiting for the refresh daemon.
                 f'vols=$(sky volumes ls) && echo "$vols" && '
@@ -1885,7 +1889,8 @@ def test_auto_mount_not_ready_on_kubernetes():
             smoke_tests_utils.chain_teardown(
                 f'sky down -y {name}',
                 f'sky volumes delete {broken_volume} {good_volume} -y || true',
-                f'rm -f {name}-refused.log'),
+                smoke_tests_utils.delete_unprovisionable_storage_class_cmd(
+                    name), f'rm -f {name}-refused.log'),
         )
         smoke_tests_utils.run_one_test(test)
 
@@ -1910,7 +1915,7 @@ def test_volume_not_ready_on_kubernetes():
         size: 1Gi
         config:
           access_mode: ReadWriteMany
-          storage_class_name: skypilot-no-such-storage-class
+          storage_class_name: {smoke_tests_utils.unprovisionable_storage_class_name(name)}
     """)
     task_yaml = textwrap.dedent(f"""\
         resources:
@@ -1930,10 +1935,14 @@ def test_volume_not_ready_on_kubernetes():
         test = smoke_tests_utils.Test(
             'volume_not_ready_on_kubernetes',
             [
-                f'sky volumes apply -y {vol_f.name}',
+                smoke_tests_utils.create_unprovisionable_storage_class_cmd(
+                    name),
+                f'sky volumes apply -y {smoke_tests_utils.AGENT_K8S_INFRA} '
+                f'{vol_f.name}',
                 f'vols=$(sky volumes ls) && echo "$vols" && '
                 f'echo "$vols" | grep {volume_name} | grep NOT_READY',
-                f'! sky launch -y -c {name} --infra kubernetes {task_f.name} '
+                f'! sky launch -y -c {name} {smoke_tests_utils.AGENT_K8S_INFRA} '
+                f'{task_f.name} '
                 f'> {name}-refused.log 2>&1; '
                 f'cat {name}-refused.log && '
                 f'grep -q "not ready" {name}-refused.log && '
@@ -1944,7 +1953,8 @@ def test_volume_not_ready_on_kubernetes():
             smoke_tests_utils.chain_teardown(
                 f'sky down -y {name} || true',
                 f'sky volumes delete {volume_name} -y || true',
-                f'rm -f {name}-refused.log'),
+                smoke_tests_utils.delete_unprovisionable_storage_class_cmd(
+                    name), f'rm -f {name}-refused.log'),
         )
         smoke_tests_utils.run_one_test(test)
 
