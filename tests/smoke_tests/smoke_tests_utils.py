@@ -1582,3 +1582,38 @@ def wait_for_managed_job_status_sdk(job_name: Optional[str] = None,
         time.sleep(5)
     raise TimeoutError(f'Timeout waiting for job {job_name or job_id} to reach '
                        f'{target_statuses}')
+
+
+def unprovisionable_storage_class_name(test_name: str) -> str:
+    """Name of a per-test storage class that can never provision a volume."""
+    return f'{test_name}-noprov'
+
+
+def create_unprovisionable_storage_class_cmd(test_name: str) -> str:
+    """Creates a storage class whose provisioner does not exist.
+
+    This is how a test gets a volume that is genuinely not ready without
+    waiting on -- or paying for -- real storage. The class has to exist, or
+    `sky volumes apply` rejects the volume up front when it validates the
+    storage class; with the class present the claim is accepted and then sits
+    unbound forever, because nothing is watching for it.
+    """
+    sc_name = unprovisionable_storage_class_name(test_name)
+    return (f'kubectl apply -f - <<EOF\n'
+            f'apiVersion: storage.k8s.io/v1\n'
+            f'kind: StorageClass\n'
+            f'metadata:\n'
+            f'  name: {sc_name}\n'
+            f'provisioner: skypilot.co/does-not-exist\n'
+            f'volumeBindingMode: Immediate\n'
+            f'EOF')
+
+
+def delete_unprovisionable_storage_class_cmd(test_name: str) -> str:
+    sc_name = unprovisionable_storage_class_name(test_name)
+    return f'kubectl delete sc {sc_name} --ignore-not-found'
+
+
+# Pins a command to the cluster the agent's kubectl points at, so a volume and
+# the storage class created for it land together.
+AGENT_K8S_INFRA = '--infra k8s/$(kubectl config current-context)'

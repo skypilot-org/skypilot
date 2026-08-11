@@ -710,6 +710,23 @@ def _get_volume_name(path: str, cluster_name_on_cloud: str) -> str:
     return f'{cluster_name_on_cloud}-{path_hash}'
 
 
+def _reject_not_ready_auto_mount_volume(volume_name: str,
+                                        record: Dict[str, Any]) -> None:
+    """Raises if a volume about to be auto-mounted is not usable.
+
+    Raises:
+        exceptions.VolumeNotReadyError: if the volume is not ready.
+    """
+    if record.get('status') != status_lib.VolumeStatus.NOT_READY:
+        return
+    error_message = (record.get('error_message') or
+                     'The last status refresh found it unusable.')
+    raise exceptions.VolumeNotReadyError(
+        f'Auto-mount volume {volume_name!r} is not ready, so it cannot be '
+        f'mounted. Error: {error_message}. Check it with `sky volumes ls`, '
+        f'or remove {volume_name!r} from the auto_mounts config.')
+
+
 # TODO: too many things happening here - leaky abstraction. Refactor.
 @timeline.event
 def write_cluster_config(
@@ -1053,7 +1070,6 @@ def write_cluster_config(
             active_workspace = skypilot_config.get_active_workspace()
             for entry in auto_mounts_config:
                 volume_name = entry['volume_name']
-                mount_paths = entry.get('mount_paths', [])
                 record = global_user_state.get_volume_by_name(volume_name)
                 if record is None:
                     logger.warning(
@@ -1089,6 +1105,18 @@ def write_cluster_config(
                         f'ReadWriteMany PVC volumes are supported for '
                         f'auto_mounts. Skipping.')
                     continue
+                # Reject before a pod is created. Mounting a volume whose
+                # backing storage is not usable does not fail loudly -- the pod
+                # just sits unschedulable or stuck in ContainerCreating -- so
+                # the launch has to be refused here, as it already is for a
+                # volume declared on the task.
+                #
+                # Keep this last: the checks above skip entries that this
+                # launch will not mount at all. Moving it earlier would refuse
+                # a launch over a volume belonging to someone else's scope, or
+                # one that would have been passed over for its access mode.
+                _reject_not_ready_auto_mount_volume(volume_name, record)
+                mount_paths = entry.get('mount_paths', [])
                 for path in mount_paths:
                     if path.startswith('/'):
                         mount_path = path

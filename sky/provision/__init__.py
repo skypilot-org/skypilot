@@ -308,8 +308,8 @@ def map_all_volumes_usedby(
 
 @_route_to_cloud_impl
 def get_all_volumes_errors(
-        provider_name: str,
-        configs: List[models.VolumeConfig]) -> Dict[str, Optional[str]]:
+    provider_name: str, configs: List[models.VolumeConfig]
+) -> Tuple[Dict[str, Optional[str]], Set[str]]:
     """Get error messages for all volumes.
 
     Checks if volumes have errors (e.g., pending state due to
@@ -320,11 +320,20 @@ def get_all_volumes_errors(
         configs: List of VolumeConfig objects.
 
     Returns:
-        Dictionary mapping volume name to error message (None if no error).
+        errors: Dict mapping volume name to an error message, or to None
+          when the volume is healthy.
+        failed_volume_names: Set of volume names whose status could not be
+          determined because the cloud could not be queried. A volume listed
+          here must keep its recorded status; absence from ``errors`` alone
+          does not mean healthy.
+
+        An implementation should place every input config in exactly one of
+        the two. A volume in neither means this provider does not check
+        volume errors, as with the default below.
     """
-    # Default implementation returns empty dict (no error checking)
+    # Default implementation reports no errors (no error checking)
     del provider_name, configs
-    return {}
+    return {}, set()
 
 
 @_route_to_cloud_impl

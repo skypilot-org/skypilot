@@ -2,7 +2,7 @@
 
 import contextlib
 import os
-from typing import Any, Dict, Generator, List, Optional
+from typing import Any, Dict, Generator, List, Optional, Set, Tuple
 import uuid
 
 import filelock
@@ -41,6 +41,7 @@ def volume_refresh() -> None:
 
     # Group volumes by cloud for batch API calls
     cloud_to_configs: Dict[str, List[models.VolumeConfig]] = {}
+    cloud_to_volume_names: Dict[str, Set[str]] = {}
     volume_name_to_config: Dict[str, models.VolumeConfig] = {}
     for volume in volumes:
         config = volume.get('handle')
@@ -52,18 +53,29 @@ def volume_refresh() -> None:
         if cloud not in cloud_to_configs:
             cloud_to_configs[cloud] = []
         cloud_to_configs[cloud].append(config)
+        cloud_to_volume_names.setdefault(cloud, set()).add(volume.get('name'))
         volume_name_to_config[volume.get('name')] = config
 
     # Check for volume errors (e.g., misconfiguration)
     cloud_to_volume_errors: Dict[str, Dict[str, Optional[str]]] = {}
+    cloud_to_error_failed_names: Dict[str, Set[str]] = {}
     for cloud, configs in cloud_to_configs.items():
         try:
-            volume_errors = provision.get_all_volumes_errors(cloud, configs)
+            # A cloud with no error check of its own returns both empty, which
+            # leaves its volumes eligible for a status update driven by their
+            # usedby info alone.
+            volume_errors, error_failed_names = (
+                provision.get_all_volumes_errors(cloud, configs))
             cloud_to_volume_errors[cloud] = volume_errors
+            cloud_to_error_failed_names[cloud] = error_failed_names
         except Exception as e:  # pylint: disable=broad-except
-            logger.debug(
+            logger.warning(
                 f'Failed to get volume errors for volumes on {cloud}: {e}')
             cloud_to_volume_errors[cloud] = {}
+            # Do not let an unreadable cloud silently clear every volume's
+            # error and mark them all healthy -- keep their current status.
+            cloud_to_error_failed_names[cloud] = cloud_to_volume_names.get(
+                cloud, set())
 
     # Get usedby info for all volumes
     cloud_to_used_by_pods: Dict[str, Dict[str, Any]] = {}
@@ -98,6 +110,13 @@ def volume_refresh() -> None:
         if volume_name in cloud_to_failed_volume_names.get(cloud, set()):
             logger.debug(f'Skipping status update for volume {volume_name} '
                          f'due to failed usedby fetch')
+            continue
+
+        # Skip if the error fetch failed: reading an unknown result as "no
+        # error" would flip a broken volume to READY.
+        if volume_name in cloud_to_error_failed_names.get(cloud, set()):
+            logger.debug(f'Skipping status update for volume {volume_name} '
+                         f'due to failed error fetch')
             continue
 
         # Check for volume errors first
@@ -302,6 +321,36 @@ def volume_delete(names: List[str],
         logger.info(f'Deleted volumes: {names}')
 
 
+def _initial_volume_status(
+    cloud: str, config: models.VolumeConfig
+) -> Tuple[status_lib.VolumeStatus, Optional[str]]:
+    """Determines the status to record for a freshly created volume.
+
+    Creating the backing resource does not mean it is usable: with an
+    Immediate-binding storage class the PersistentVolume is provisioned
+    asynchronously and may never bind, so recording READY unconditionally
+    would advertise a volume that cannot be mounted. Ask the cloud what it
+    actually looks like, using the same check the refresh daemon uses so the
+    two can never disagree.
+
+    Falls back to READY when the cloud cannot be queried, matching the
+    optimistic behavior everywhere else on this path.
+    """
+    try:
+        volume_errors, failed_volume_names = provision.get_all_volumes_errors(
+            cloud, [config])
+    except Exception as e:  # pylint: disable=broad-except
+        logger.debug(f'Failed to check the initial status of volume '
+                     f'{config.name}: {e}')
+        return status_lib.VolumeStatus.READY, None
+    if config.name in failed_volume_names:
+        return status_lib.VolumeStatus.READY, None
+    error_message = volume_errors.get(config.name)
+    if error_message:
+        return status_lib.VolumeStatus.NOT_READY, error_message
+    return status_lib.VolumeStatus.READY, None
+
+
 def volume_apply(
     name: str,
     volume_type: str,
@@ -367,12 +416,22 @@ def volume_apply(
             # name_on_cloud so they cannot collide.
             if use_existing:
                 _check_duplicate_backend_resource(name, volume_config)
+            if is_ephemeral:
+                # add_volume forces ephemeral volumes to IN_USE, and they are
+                # created inline during provisioning, so probing the cloud
+                # here would cost a call whose answer is discarded.
+                initial_status = status_lib.VolumeStatus.READY
+                initial_error = None
+            else:
+                initial_status, initial_error = _initial_volume_status(
+                    cloud, volume_config)
             global_user_state.add_volume(
                 name,
                 volume_config,
-                status_lib.VolumeStatus.READY,
+                initial_status,
                 is_ephemeral,
                 creation_yaml=creation_yaml,
+                error_message=initial_error,
             )
         logger.info(f'Created volume {name} on cloud {cloud}')
 
