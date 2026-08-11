@@ -44,8 +44,8 @@ def launch(name: str,
            ports: Optional[List[int]],
            preemptible: bool,
            secure_only: bool,
-           network_tier: resources_utils.NetworkTier =
-           resources_utils.NetworkTier.STANDARD,
+           network_tier: resources_utils.NetworkTier = resources_utils.
+           NetworkTier.STANDARD,
            private_docker_registry: Optional[bool] = None,
            login: Optional[str] = None,
            create_instance_kwargs: Optional[Dict[str, Any]] = None,

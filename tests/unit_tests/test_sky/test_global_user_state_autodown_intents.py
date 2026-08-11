@@ -770,14 +770,14 @@ def test_invalid_states_are_rejected_before_writing(tmp_path, monkeypatch):
     assert global_user_state.get_autodown_intent('cluster') == intent
 
 
-def test_migration_021_schema_version_and_downgrade(tmp_path, monkeypatch):
+def test_migration_022_schema_version_and_downgrade(tmp_path, monkeypatch):
     engine = _fresh_db(tmp_path, monkeypatch)
     migration_module = importlib.import_module(
-        'sky.schemas.db.global_user_state.021_add_autodown_intents')
+        'sky.schemas.db.global_user_state.022_add_autodown_intents')
 
-    assert migration_utils.GLOBAL_USER_STATE_VERSION == '021'
-    assert migration_module.revision == '021'
-    assert migration_module.down_revision == '020'
+    assert migration_utils.GLOBAL_USER_STATE_VERSION == '022'
+    assert migration_module.revision == '022'
+    assert migration_module.down_revision == '021'
     inspector = sqlalchemy.inspect(engine)
     assert 'autodown_intents' in inspector.get_table_names()
     assert inspector.get_pk_constraint(
@@ -804,11 +804,11 @@ def test_migration_021_schema_version_and_downgrade(tmp_path, monkeypatch):
 
     alembic_config = migration_utils.get_alembic_config(
         engine, migration_utils.GLOBAL_USER_STATE_DB_NAME)
-    alembic_command.downgrade(alembic_config, '020')
+    alembic_command.downgrade(alembic_config, '021')
     assert 'autodown_intents' not in sqlalchemy.inspect(
         engine).get_table_names()
 
-    assert _schema_version(engine) == '020'
-    alembic_command.upgrade(alembic_config, '021')
-    assert 'autodown_intents' in sqlalchemy.inspect(engine).get_table_names()
     assert _schema_version(engine) == '021'
+    alembic_command.upgrade(alembic_config, '022')
+    assert 'autodown_intents' in sqlalchemy.inspect(engine).get_table_names()
+    assert _schema_version(engine) == '022'

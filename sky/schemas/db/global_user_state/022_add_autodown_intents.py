@@ -1,7 +1,7 @@
 """Add durable autodown intents.
 
-Revision ID: 021
-Revises: 020
+Revision ID: 022
+Revises: 021
 Create Date: 2026-08-03
 
 """
