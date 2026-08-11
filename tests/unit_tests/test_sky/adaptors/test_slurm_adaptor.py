@@ -4,7 +4,17 @@ import unittest.mock as mock
 
 import pytest
 
+from sky import exceptions
 from sky.adaptors import slurm
+
+
+def _batch_output(*outputs):
+    framed = ['SKYPILOT_SLURM_BATCH\n']
+    for returncode, stdout, stderr in outputs:
+        framed.append(
+            f'{returncode} {len(stdout.encode())} {len(stderr.encode())}\n')
+        framed.extend([stdout, stderr])
+    return ''.join(framed)
 
 
 class TestGetPartitions:
@@ -86,6 +96,119 @@ class TestInfoNodes:
             assert result[2].cpus == 4
             assert result[2].memory_gb == 32
             assert result[2].partition == 'tpu nodes'
+
+
+class TestInventorySnapshot:
+    """Tests for batched Slurm inventory collection."""
+
+    def test_get_node_inventory_uses_one_remote_invocation(self):
+        client = slurm.SlurmClient(ssh_host='localhost',
+                                   ssh_port=22,
+                                   ssh_user='root',
+                                   ssh_key=None)
+        sinfo_output = (f'nœud1{slurm.SEP}mix{slurm.SEP}gpu:h100:8{slurm.SEP}64'
+                        f'{slurm.SEP}819200{slurm.SEP}gpu\n')
+        details_output = ('NodeName=nœud1 CPUAlloc=32 CPUTot=64 '
+                          'CfgTRES=gres/gpu=8 AllocTRES=gres/gpu=4\n')
+        with mock.patch.object(client._runner, 'run') as mock_run:
+            mock_run.return_value = (0,
+                                     _batch_output((0, sinfo_output, ''),
+                                                   (0, details_output, '')), '')
+
+            node_infos, node_details = client.get_node_inventory()
+
+        mock_run.assert_called_once()
+        script = mock_run.call_args.args[0]
+        assert 'sinfo -h --Node' in script
+        assert 'scontrol show node -o' in script
+        assert script.count(' ) &') == 2
+        assert node_infos[0].node == 'nœud1'
+        assert node_details['nœud1']['CPUAlloc'] == '32'
+
+    def test_get_inventory_snapshot_parses_all_sections(self):
+        client = slurm.SlurmClient(ssh_host='localhost',
+                                   ssh_port=22,
+                                   ssh_user='root',
+                                   ssh_key=None)
+        sinfo_output = (f'node1{slurm.SEP}mix{slurm.SEP}gpu:h100:8'
+                        f'{slurm.SEP}64{slurm.SEP}819200{slurm.SEP}gpu\n')
+        details_output = ('NodeName=node1 CPUAlloc=32 CPUTot=64 '
+                          'CfgTRES=gres/gpu=8 AllocTRES=gres/gpu=4\n')
+        jobs_output = (f'123{slurm.SEP}train{slurm.SEP}alice{slurm.SEP}'
+                       f'node1{slurm.SEP}gpu:h100:4\n')
+        partitions_output = ('PartitionName=gpu Default=YES '
+                             'DefaultTime=01:00:00 MaxTime=UNLIMITED\n')
+        with mock.patch.object(client._runner, 'run') as mock_run:
+            mock_run.return_value = (0,
+                                     _batch_output(
+                                         (0, sinfo_output, ''),
+                                         (0, details_output, ''),
+                                         (0, jobs_output, ''),
+                                         (0, partitions_output, '')), '')
+
+            snapshot = client.get_inventory_snapshot()
+
+        mock_run.assert_called_once()
+        script = mock_run.call_args.args[0]
+        for command in ('sinfo -h --Node', 'scontrol show node -o',
+                        'squeue -h --states=running,completing',
+                        'scontrol show partitions -o'):
+            assert command in script
+        assert script.count(' ) &') == 4
+        assert snapshot.node_infos[0].node == 'node1'
+        assert snapshot.node_details['node1']['CPUAlloc'] == '32'
+        assert snapshot.jobs == {
+            'node1': [
+                slurm.JobGresInfo(job_id='123',
+                                  job_name='train',
+                                  user='alice',
+                                  gres_str='gpu:h100:4')
+            ]
+        }
+        assert snapshot.partitions == [
+            slurm.SlurmPartition(name='gpu',
+                                 is_default=True,
+                                 maxtime=None,
+                                 default_time='01:00:00')
+        ]
+
+    def test_get_inventory_snapshot_keeps_optional_failures_isolated(self):
+        client = slurm.SlurmClient(ssh_host='localhost',
+                                   ssh_port=22,
+                                   ssh_user='root',
+                                   ssh_key=None)
+        sinfo_output = (f'node1{slurm.SEP}idle{slurm.SEP}(null)'
+                        f'{slurm.SEP}4{slurm.SEP}16384{slurm.SEP}cpu\n')
+        with mock.patch.object(client._runner, 'run') as mock_run:
+            mock_run.return_value = (0,
+                                     _batch_output(
+                                         (0, sinfo_output, ''),
+                                         (1, '', 'scontrol failed'),
+                                         (1, '', 'squeue failed'),
+                                         (1, '', 'partitions failed')), '')
+
+            snapshot = client.get_inventory_snapshot()
+
+        assert len(snapshot.node_infos) == 1
+        assert snapshot.node_details == {}
+        assert snapshot.jobs is None
+        assert snapshot.partitions is None
+
+    def test_get_inventory_snapshot_requires_node_information(self):
+        client = slurm.SlurmClient(ssh_host='localhost',
+                                   ssh_port=22,
+                                   ssh_user='root',
+                                   ssh_key=None)
+        with mock.patch.object(client._runner, 'run') as mock_run:
+            mock_run.return_value = (
+                0,
+                _batch_output((1, '', 'sinfo failed'), (0, '', ''),
+                              (0, '', ''), (0, '', '')), '')
+
+            with pytest.raises(exceptions.CommandError) as exc_info:
+                client.get_inventory_snapshot()
+
+        assert exc_info.value.returncode == 1
 
 
 class TestCheckJobHasNodes:
