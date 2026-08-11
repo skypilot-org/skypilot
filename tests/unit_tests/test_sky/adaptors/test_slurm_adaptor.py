@@ -200,10 +200,10 @@ class TestInventorySnapshot:
                                    ssh_user='root',
                                    ssh_key=None)
         with mock.patch.object(client._runner, 'run') as mock_run:
-            mock_run.return_value = (
-                0,
-                _batch_output((1, '', 'sinfo failed'), (0, '', ''),
-                              (0, '', ''), (0, '', '')), '')
+            mock_run.return_value = (0,
+                                     _batch_output((1, '', 'sinfo failed'),
+                                                   (0, '', ''), (0, '', ''),
+                                                   (0, '', '')), '')
 
             with pytest.raises(exceptions.CommandError) as exc_info:
                 client.get_inventory_snapshot()

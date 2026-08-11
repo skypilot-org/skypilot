@@ -1220,7 +1220,7 @@ def get_slurm_cluster_inventory(
     """
     slurm_client = _get_slurm_inventory_client(slurm_cluster_name)
     snapshot = slurm_client.get_inventory_snapshot()
-    jobs_gres_by_node: Dict[str, List[str]] = {}
+    jobs_gres_by_node: Optional[Dict[str, List[str]]] = None
     if snapshot.jobs is not None:
         jobs_gres_by_node = {
             node_name: [job.gres_str for job in jobs
