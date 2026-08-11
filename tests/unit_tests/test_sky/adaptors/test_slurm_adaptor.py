@@ -6,6 +6,7 @@ import pytest
 
 from sky import exceptions
 from sky.adaptors import slurm
+from sky.utils import command_runner as command_runner_lib
 
 
 def _batch_output(*outputs):
@@ -15,6 +16,80 @@ def _batch_output(*outputs):
             f'{returncode} {len(stdout.encode())} {len(stderr.encode())}\n')
         framed.extend([stdout, stderr])
     return ''.join(framed)
+
+
+class TestRunSlurmCmds:
+    """Tests for the concurrent command transport and framing protocol."""
+
+    @staticmethod
+    def _client():
+        return slurm.SlurmClient(ssh_host='localhost',
+                                 ssh_port=22,
+                                 ssh_user='root',
+                                 ssh_key=None)
+
+    def test_empty_command_list_skips_remote_invocation(self):
+        client = self._client()
+        with mock.patch.object(client._runner, 'run') as mock_run:
+            assert not client._run_slurm_cmds([])
+        mock_run.assert_not_called()
+
+    def test_generated_script_and_parser_round_trip(self):
+        client = self._client()
+        client._runner = command_runner_lib.LocalProcessCommandRunner()
+
+        results = client._run_slurm_cmds([
+            "sleep 0.1; printf 'first\\nnœud\\n'",
+            "printf 'second error\\n' >&2; exit 7",
+        ])
+
+        assert results == [(0, 'first\nnœud\n', ''), (7, '', 'second error\n')]
+
+    def test_byte_lengths_preserve_arbitrary_text_and_input_order(self):
+        client = self._client()
+        outputs = [
+            (23, 'line 1\n0 2 3\nSKYPILOT_SLURM_BATCH\nnœud\x00',
+             'warning\nstill warning'),
+            (0, '', ''),
+        ]
+        with mock.patch.object(client._runner, 'run') as mock_run:
+            mock_run.return_value = (0, _batch_output(*outputs), '')
+
+            results = client._run_slurm_cmds(['slow command', 'fast command'])
+
+        assert results == outputs
+        script = mock_run.call_args.args[0]
+        assert script.index('slow command') < script.index('fast command')
+        assert script.count(' ) &') == 2
+        assert script.index('\nwait\n') < script.index('SKYPILOT_SLURM_BATCH')
+
+    @pytest.mark.parametrize(('output', 'error'), [
+        ('', 'missing header'),
+        ('not-the-protocol\n', 'missing header'),
+        ('SKYPILOT_SLURM_BATCH\n', 'missing frame header'),
+        ('SKYPILOT_SLURM_BATCH\ninvalid\n', 'invalid frame header'),
+        ('SKYPILOT_SLURM_BATCH\n0 1\nx', 'invalid frame header'),
+        ('SKYPILOT_SLURM_BATCH\n0 -1 0\n', 'invalid frame header'),
+        ('SKYPILOT_SLURM_BATCH\n0 2 0\nx', 'truncated frame'),
+        ('SKYPILOT_SLURM_BATCH\n0 0 0\nextra', 'trailing data'),
+    ])
+    def test_rejects_malformed_framing(self, output, error):
+        client = self._client()
+        with mock.patch.object(client._runner, 'run') as mock_run:
+            mock_run.return_value = (0, output, '')
+
+            with pytest.raises(RuntimeError, match=error):
+                client._run_slurm_cmds(['command'])
+
+    def test_outer_command_failure_is_not_parsed_as_a_frame(self):
+        client = self._client()
+        with mock.patch.object(client._runner, 'run') as mock_run:
+            mock_run.return_value = (255, '', 'connection lost')
+
+            with pytest.raises(exceptions.CommandError) as exc_info:
+                client._run_slurm_cmds(['command'])
+
+        assert exc_info.value.returncode == 255
 
 
 class TestGetPartitions:

@@ -304,7 +304,7 @@ class SlurmClient:
             stderr_path = f'"${{snapshot_dir}}/{index}.stderr"'
             returncode_path = f'"${{snapshot_dir}}/{index}.returncode"'
             script_lines.append(
-                f'( {command} > {stdout_path} 2> {stderr_path}; '
+                f'( ( {command} ) > {stdout_path} 2> {stderr_path}; '
                 f'printf \'%s\\n\' "$?" > {returncode_path} ) &')
         batch_output_header = _BATCH_OUTPUT_HEADER.rstrip('\n')
         script_lines.extend([
@@ -353,6 +353,8 @@ class SlurmClient:
                 returncode = int(returncode_str)
                 stdout_size = int(stdout_size_str)
                 stderr_size = int(stderr_size_str)
+                if stdout_size < 0 or stderr_size < 0:
+                    raise ValueError('negative output size')
             except (UnicodeDecodeError, ValueError) as e:
                 raise RuntimeError(
                     'Unexpected output from concurrent Slurm inventory '
