@@ -532,3 +532,32 @@ def test_debug_dump_nonexistent_resources(generic_cloud: str):
         timeout=2 * 60,
     )
     smoke_tests_utils.run_one_test(test)
+
+
+def test_managed_job_max_duration(generic_cloud: str):
+    """Test that a managed job is terminated after max_duration."""
+    name = smoke_tests_utils.get_cluster_name()
+    job_yaml = textwrap.dedent(f"""
+    name: {name}-job
+    resources:
+        cpus: 2
+        infra: {generic_cloud}
+    max_duration: 1m
+    run: |
+        sleep 3600
+    """)
+    with tempfile.NamedTemporaryFile(delete=True) as job_yaml_file:
+        job_yaml_file.write(job_yaml.encode('utf-8'))
+        job_yaml_file.flush()
+        test = smoke_tests_utils.Test(
+            'managed_job_max_duration',
+            [
+                f'sky jobs launch -y -n {name} {job_yaml_file.name}',
+                # Wait for the job to be terminated by max_duration
+                f'sleep 90',
+                f'sky jobs queue -n {name} | grep "FAILED"',
+                f'sky jobs logs -n {name} | grep "max_duration"',
+            ],
+            timeout=smoke_tests_utils.get_timeout(generic_cloud),
+            teardown=f'sky jobs cancel -y -n {name}')
+        smoke_tests_utils.run_one_test(test)
