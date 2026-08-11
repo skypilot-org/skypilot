@@ -1,5 +1,4 @@
 """Unit tests for Kubernetes volume provisioning."""
-import datetime
 from typing import Any, Dict, List
 from unittest.mock import MagicMock
 from unittest.mock import Mock
@@ -15,12 +14,6 @@ from sky.provision.kubernetes import config as config_lib
 from sky.provision.kubernetes import constants as k8s_constants
 from sky.provision.kubernetes import volume as k8s_volume
 from sky.utils import volume as volume_lib
-
-
-def _ago(seconds: float) -> datetime.datetime:
-    """A tz-aware timestamp `seconds` in the past."""
-    return (datetime.datetime.now(datetime.timezone.utc) -
-            datetime.timedelta(seconds=seconds))
 
 
 class MockPVC:
@@ -42,8 +35,6 @@ class MockPVC:
         self.spec.access_modes = access_modes or ['ReadWriteOnce']
         self.spec.resources = Mock()
         self.spec.resources.requests = {'storage': size}
-
-        self.metadata.creation_timestamp = _ago(1)
 
         self.status = Mock()
         self.status.capacity = {'storage': size}
@@ -1797,10 +1788,6 @@ class TestGetAllVolumesErrors:
         mock_storage_class.volume_binding_mode = 'Immediate'
         mock_storage_api.return_value.read_storage_class.return_value = mock_storage_class
 
-        # Past the provisioning grace period: nothing is acting on this claim.
-        mock_pvc.metadata.creation_timestamp = _ago(
-            k8s_volume.PVC_PROVISIONING_GRACE_SECONDS + 60)
-
         config = models.VolumeConfig(
             _version=1,
             name='test-vol',
@@ -2193,178 +2180,6 @@ class TestGetAllVolumesErrors:
 
         assert 'ProvisioningFailed' in errors['test-vol']
         assert 'below the 1Ti minimum' in errors['test-vol']
-
-    @patch('sky.provision.kubernetes.volume.kubernetes_utils.get_pvc_events')
-    @patch('sky.provision.kubernetes.volume._get_context_namespace')
-    @patch('sky.adaptors.kubernetes.core_api')
-    @patch('sky.adaptors.kubernetes.storage_api')
-    def test_pvc_pending_immediate_within_grace_is_not_an_error(
-            self, mock_storage_api, mock_core_api, mock_get_context,
-            mock_get_events):
-        """Provisioning a network volume takes minutes; calling that broken
-        would block launches on every healthy volume."""
-        mock_get_context.return_value = ('my-context', 'my-namespace')
-
-        mock_pvc = MockPVC('test-pvc', 'my-namespace')
-        mock_pvc.status.phase = 'Pending'
-        mock_pvc.spec.storage_class_name = 'standard'
-        mock_pvc.metadata.creation_timestamp = _ago(30)
-
-        mock_pvc_list = Mock()
-        mock_pvc_list.items = [mock_pvc]
-        mock_core_api.return_value.list_namespaced_persistent_volume_claim.return_value = mock_pvc_list
-        mock_pv_list = Mock()
-        mock_pv_list.items = []
-        mock_core_api.return_value.list_persistent_volume.return_value = mock_pv_list
-
-        mock_storage_class = Mock()
-        mock_storage_class.volume_binding_mode = 'Immediate'
-        mock_storage_api.return_value.read_storage_class.return_value = mock_storage_class
-        mock_get_events.return_value = []
-
-        config = models.VolumeConfig(
-            _version=1,
-            name='test-vol',
-            type='k8s-pvc',
-            cloud='kubernetes',
-            region='my-context',
-            zone=None,
-            name_on_cloud='test-pvc',
-            size='10',
-            config={'namespace': 'my-namespace'},
-        )
-
-        errors, failed = k8s_volume.get_all_volumes_errors([config])
-
-        assert errors['test-vol'] is None
-        assert failed == set()
-
-    @patch('sky.provision.kubernetes.volume.kubernetes_utils.get_pvc_events')
-    @patch('sky.provision.kubernetes.volume._get_context_namespace')
-    @patch('sky.adaptors.kubernetes.core_api')
-    @patch('sky.adaptors.kubernetes.storage_api')
-    def test_pvc_pending_wffc_never_ages_out(self, mock_storage_api,
-                                             mock_core_api, mock_get_context,
-                                             mock_get_events):
-        """A deferred-binding claim may sit unconsumed indefinitely; age says
-        nothing about its health."""
-        mock_get_context.return_value = ('my-context', 'my-namespace')
-
-        mock_pvc = MockPVC('test-pvc', 'my-namespace')
-        mock_pvc.status.phase = 'Pending'
-        mock_pvc.spec.storage_class_name = 'standard-rwx'
-        mock_pvc.metadata.creation_timestamp = _ago(30 * 24 * 3600)
-
-        mock_pvc_list = Mock()
-        mock_pvc_list.items = [mock_pvc]
-        mock_core_api.return_value.list_namespaced_persistent_volume_claim.return_value = mock_pvc_list
-        mock_pv_list = Mock()
-        mock_pv_list.items = []
-        mock_core_api.return_value.list_persistent_volume.return_value = mock_pv_list
-
-        mock_storage_class = Mock()
-        mock_storage_class.volume_binding_mode = 'WaitForFirstConsumer'
-        mock_storage_api.return_value.read_storage_class.return_value = mock_storage_class
-        mock_get_events.return_value = []
-
-        config = models.VolumeConfig(
-            _version=1,
-            name='test-vol',
-            type='k8s-pvc',
-            cloud='kubernetes',
-            region='my-context',
-            zone=None,
-            name_on_cloud='test-pvc',
-            size='10',
-            config={'namespace': 'my-namespace'},
-        )
-
-        errors, _ = k8s_volume.get_all_volumes_errors([config])
-
-        assert errors['test-vol'] is None
-
-
-class TestCurrentPVCFailure:
-    """Tests for _current_pvc_failure."""
-
-    @staticmethod
-    def _event(reason, etype='Normal', message='m', at=0):
-        e = Mock()
-        e.reason = reason
-        e.type = etype
-        e.message = message
-        e.last_timestamp = _ago(at)
-        return e
-
-    @patch('sky.provision.kubernetes.volume.kubernetes_utils.get_pvc_events')
-    def test_reports_a_standing_failure(self, mock_get_events):
-        mock_get_events.return_value = [
-            self._event('ProvisioningFailed',
-                        'Warning',
-                        'tier is invalid',
-                        at=10),
-            self._event('Provisioning', at=20),
-        ]
-
-        result = k8s_volume._current_pvc_failure('ctx', 'ns', 'pvc')
-
-        assert result is not None
-        assert 'tier is invalid' in result
-
-    @patch('sky.provision.kubernetes.volume.kubernetes_utils.get_pvc_events')
-    def test_newer_attempt_supersedes_an_older_failure(self, mock_get_events):
-        """The provisioner backs off and retries; a retry in flight means the
-        earlier failure no longer stands."""
-        mock_get_events.return_value = [
-            self._event('Provisioning', at=10),
-            self._event('ProvisioningFailed',
-                        'Warning',
-                        'transient blip',
-                        at=60),
-        ]
-
-        assert k8s_volume._current_pvc_failure('ctx', 'ns', 'pvc') is None
-
-    @patch('sky.provision.kubernetes.volume.kubernetes_utils.get_pvc_events')
-    def test_external_provisioning_does_not_supersede(self, mock_get_events):
-        """The PV controller re-emits ExternalProvisioning on a timer, so it
-        would otherwise always look newer than a real failure and mask it."""
-        mock_get_events.return_value = [
-            self._event('ExternalProvisioning', at=5),
-            self._event('ProvisioningFailed',
-                        'Warning',
-                        'tier is invalid',
-                        at=60),
-        ]
-
-        result = k8s_volume._current_pvc_failure('ctx', 'ns', 'pvc')
-
-        assert result is not None
-        assert 'tier is invalid' in result
-
-    @patch('sky.provision.kubernetes.volume.kubernetes_utils.get_pvc_events')
-    def test_attempt_at_the_same_second_does_not_supersede(
-            self, mock_get_events):
-        """Event times are second-granular and the provisioner logs an attempt
-        and its failure within the same second, so a tie is that very attempt.
-        Treating it as a retry would report a broken volume as healthy."""
-        mock_get_events.return_value = [
-            self._event('Provisioning', at=30),
-            self._event('ProvisioningFailed',
-                        'Warning',
-                        'tier is invalid',
-                        at=30),
-        ]
-
-        result = k8s_volume._current_pvc_failure('ctx', 'ns', 'pvc')
-
-        assert result is not None
-        assert 'tier is invalid' in result
-
-    @patch('sky.provision.kubernetes.volume.kubernetes_utils.get_pvc_events')
-    def test_no_events_is_no_failure(self, mock_get_events):
-        mock_get_events.return_value = []
-        assert k8s_volume._current_pvc_failure('ctx', 'ns', 'pvc') is None
 
 
 class TestFindPVCByNameOrLabel:

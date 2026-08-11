@@ -1,5 +1,4 @@
 """Kubernetes volume provisioning (PVC and hostPath)."""
-import datetime
 import time as time_module
 from typing import Any, Dict, List, Optional, Set, Tuple
 
@@ -18,19 +17,6 @@ logger = sky_logging.init_logger(__name__)
 
 PVC_FAILING_EVENT_REASONS = ('ProvisioningFailed',)
 WARNING_EVENT_TYPE = 'Warning'
-# Emitted by the external provisioner when it starts a CreateVolume attempt. A
-# newer one supersedes an older failure: the provisioner backs off and retries,
-# and that retry may succeed. Deliberately excludes 'ExternalProvisioning',
-# which the PV controller re-emits on a timer while a claim is unbound and so
-# would always look newer than a real failure and mask it.
-PVC_ATTEMPT_EVENT_REASONS = ('Provisioning',)
-# How long an Immediate-binding PVC may sit pending, with no failure event of
-# any kind, before it is called broken. Provisioning a network volume is slow --
-# a first GCP Filestore bind measures ~2 minutes -- and reporting those as
-# broken would block launches on healthy volumes. A claim still pending well
-# past that has no provisioner acting on it (a missing or wedged CSI
-# controller) and will not bind on its own.
-PVC_PROVISIONING_GRACE_SECONDS = 300
 
 
 def _is_rbac_permission_error(e: Exception) -> bool:
@@ -573,52 +559,20 @@ def map_all_volumes_usedby(
                                                   {}).get(pvc_name, []))
 
 
-def _current_pvc_failure(context: Optional[str], namespace: str,
-                         pvc_name: str) -> Optional[str]:
-    """Returns 'reason: message' for a PVC failure that still stands, if any.
+def _first_pvc_failure_event(context: Optional[str], namespace: str,
+                             pvc_name: str) -> Optional[str]:
+    """Returns 'reason: message' for the newest failing PVC event, if any.
 
     A failing event is the only positive evidence that a pending PVC will not
     bind on its own; a pending PVC without one may still be mid-provisioning.
-
-    An attempt that started *strictly* after the newest failure means the
-    provisioner is retrying and has not given up, so that failure is stale.
-    Equal timestamps do not count: event times are second-granular and the
-    provisioner routinely logs an attempt and its failure within the same
-    second, so a tie is the attempt that produced this very failure.
     """
-    newest_failure: Optional[str] = None
-    failure_at = None
-    attempt_at = None
-    # Events arrive newest-first, so the first of each kind is the newest.
     for event in kubernetes_utils.get_pvc_events(context, namespace, pvc_name):
-        at = event.last_timestamp or event.metadata.creation_timestamp
         if (event.type == WARNING_EVENT_TYPE or
                 event.reason in PVC_FAILING_EVENT_REASONS):
-            if newest_failure is None:
-                newest_failure = (f'{event.reason}: {event.message}'
-                                  if event.message else str(event.reason))
-                failure_at = at
-        elif event.reason in PVC_ATTEMPT_EVENT_REASONS:
-            if attempt_at is None:
-                attempt_at = at
-
-    if newest_failure is None:
-        return None
-    if (attempt_at is not None and failure_at is not None and
-            attempt_at > failure_at):
-        return None
-    return newest_failure
-
-
-def _pvc_age_seconds(pvc: Any) -> Optional[float]:
-    """Seconds since the PVC was created, or None if it cannot be determined."""
-    created = pvc.metadata.creation_timestamp
-    if created is None:
-        return None
-    if created.tzinfo is None:
-        created = created.replace(tzinfo=datetime.timezone.utc)
-    now = datetime.datetime.now(datetime.timezone.utc)
-    return (now - created).total_seconds()
+            if event.message:
+                return f'{event.reason}: {event.message}'
+            return str(event.reason)
+    return None
 
 
 def _get_pvc_error(context: Optional[str], namespace: str,
@@ -641,7 +595,7 @@ def _get_pvc_error(context: Optional[str], namespace: str,
         error_msg = _check_pvc_access_mode_error(context, pvc)
         if error_msg:
             return error_msg
-        failure = _current_pvc_failure(context, namespace, pvc_name)
+        failure = _first_pvc_failure_event(context, namespace, pvc_name)
         if failure is not None:
             return f'PVC is pending. {failure}. {debug_hint}'
         volume_binding_mode = _check_storage_class_volume_binding_mode(
@@ -649,18 +603,15 @@ def _get_pvc_error(context: Optional[str], namespace: str,
         if (volume_binding_mode is None or
                 volume_binding_mode == 'WaitForFirstConsumer'):
             # Binding is deferred until a pod consumes the PVC, so pending is
-            # the expected steady state here, however long it lasts.
+            # the expected steady state here.
             return None
-        # Immediate binding with no failure event: provisioning is under way.
-        # Give it a grace period -- calling this broken would block launches on
-        # every healthy volume for as long as its storage takes to provision.
-        age = _pvc_age_seconds(pvc)
-        if age is None or age < PVC_PROVISIONING_GRACE_SECONDS:
-            return None
-        return (f'PVC has been pending for '
-                f'{int(age // 60)}m without binding and without a provisioner '
-                f'error. The storage class may have no running provisioner, or '
-                f'the cluster may be out of storage capacity. {debug_hint}')
+        # Immediate binding: provisioning has started and has not finished.
+        # Word this as in-progress -- provisioning a network volume can
+        # legitimately take minutes -- while still reporting it as not ready.
+        return (f'PVC is pending: the PersistentVolume is still being '
+                f'provisioned. If this does not resolve, the storage class '
+                f'may be misconfigured or the cluster may be out of storage '
+                f'capacity. {debug_hint}')
 
     if pvc_phase == 'Lost':
         return ('PVC is in Lost state. The bound PersistentVolume '
