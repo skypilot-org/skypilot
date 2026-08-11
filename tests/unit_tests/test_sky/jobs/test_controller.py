@@ -2160,17 +2160,19 @@ class TestJobGroupCleanupClusters:
             f'expected all 3 teardowns in flight together, saw {max_active}')
 
 
-class TestJobGroupPhase2CleanupOnFailure:
-    """A Phase-2 sync failure must release every member cluster.
+class TestJobGroupPhase2FailurePropagation:
+    """A Phase-2 sync failure propagates cleanly, with no teardown.
 
     Phase 2 of _run_job_group (fetch handles + set RUNNING) runs after all
-    member clusters are up. Historically it sat outside every try block
-    with a bare gather: one transient DB error escaped to the generic
-    handlers, which release at most one task's cluster — stranding the
-    rest of the group. Regression tests for the fix:
-    - the group cleanup helper runs (with every member cluster name), and
+    member clusters are up. Two properties are pinned:
     - the sibling sync coros are not cancelled mid-write (gather collects
-      exceptions instead of aborting on the first one).
+      exceptions instead of aborting on the first one), and
+    - member clusters are deliberately NOT torn down: the failure is
+      controller/DB-side and propagates to emergency recovery, whose
+      re-entry reconciles against the live clusters (a teardown paired
+      with a retryable error would strand re-entry with RUNNING/STARTING
+      rows it cannot relaunch and an empty handle list that disables the
+      networking re-push).
     """
 
     def _make_tasks(self):
@@ -2199,7 +2201,7 @@ class TestJobGroupPhase2CleanupOnFailure:
         return controller
 
     @pytest.mark.asyncio
-    async def test_phase2_failure_cleans_up_all_clusters(self):
+    async def test_phase2_failure_propagates_without_teardown(self):
         tasks = self._make_tasks()
         controller = self._make_controller(tasks)
 
@@ -2228,13 +2230,12 @@ class TestJobGroupPhase2CleanupOnFailure:
             with pytest.raises(RuntimeError, match='phase2 db boom'):
                 await JobController._run_job_group(controller)
 
-        controller._cleanup_job_group_clusters.assert_awaited_once_with(
-            ['cluster-a', 'cluster-b'])
+        controller._cleanup_job_group_clusters.assert_not_awaited()
         assert sibling_synced == [1]
 
     @pytest.mark.asyncio
-    async def test_phase2_multiple_failures_raise_first_cleanup_once(self):
-        """Multiple member failures raise the first error, clean up once."""
+    async def test_phase2_multiple_failures_raise_first(self):
+        """Multiple member failures raise the first error, no teardown."""
         tasks = self._make_tasks()
         controller = self._make_controller(tasks)
 
@@ -2256,5 +2257,4 @@ class TestJobGroupPhase2CleanupOnFailure:
             with pytest.raises(RuntimeError, match='task 0 db boom'):
                 await JobController._run_job_group(controller)
 
-        controller._cleanup_job_group_clusters.assert_awaited_once_with(
-            ['cluster-a', 'cluster-b'])
+        controller._cleanup_job_group_clusters.assert_not_awaited()

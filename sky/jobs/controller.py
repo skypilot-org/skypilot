@@ -2105,40 +2105,38 @@ class JobController:
             Optional['cloud_vm_ray_backend.CloudVmRayResourceHandle']] = [
                 None
             ] * len(tasks)
-        try:
-            sync_results = await asyncio.gather(*sync_coros,
-                                                return_exceptions=True)
-            # Partition results in one pass: successes fill their task's
-            # handle slot, failures are collected for attribution.
-            failed_syncs = []
-            for i, sync_result in enumerate(sync_results):
-                task_id = sync_task_ids[i]
-                if isinstance(sync_result, BaseException):
-                    failed_syncs.append((task_id, sync_result))
-                else:
-                    handles[task_id] = sync_result
-            if failed_syncs:
-                for failed_task_id, sync_error in failed_syncs:
-                    error_str = (common_utils.format_exception(sync_error)
-                                 if isinstance(sync_error, Exception) else
-                                 repr(sync_error))
-                    logger.error(
-                        f'Failed to sync state for task {failed_task_id} '
-                        f'({tasks[failed_task_id].name}, cluster '
-                        f'{cluster_names[failed_task_id]}): {error_str}')
-                # Raise a real error over a stray cancellation so the
-                # cleanup below is not skipped; the original exception
-                # type must propagate for run() to classify it.
-                raise next((err for _, err in failed_syncs
-                            if isinstance(err, Exception)), failed_syncs[0][1])
-        except Exception as e:
-            # This is the last frame that knows every member cluster by name:
-            # the generic handlers this would otherwise escape to (emergency
-            # recovery) release at most one task's cluster, stranding the
-            # rest of the just-launched group.
-            logger.error(f'Failed to sync Job Group task states: {e}')
-            await self._cleanup_job_group_clusters(cluster_names)
-            raise
+        sync_results = await asyncio.gather(*sync_coros, return_exceptions=True)
+        # Partition results in one pass: successes fill their task's
+        # handle slot, failures are collected for attribution.
+        failed_syncs = []
+        for i, sync_result in enumerate(sync_results):
+            task_id = sync_task_ids[i]
+            if isinstance(sync_result, BaseException):
+                failed_syncs.append((task_id, sync_result))
+            else:
+                handles[task_id] = sync_result
+        if failed_syncs:
+            for failed_task_id, sync_error in failed_syncs:
+                error_str = (common_utils.format_exception(sync_error)
+                             if isinstance(sync_error, Exception) else
+                             repr(sync_error))
+                logger.error(f'Failed to sync state for task {failed_task_id} '
+                             f'({tasks[failed_task_id].name}, cluster '
+                             f'{cluster_names[failed_task_id]}): {error_str}')
+            # Deliberately no cluster teardown here: a sync failure is a
+            # controller/DB-side error, and the retry (emergency recovery)
+            # must reconcile against the live clusters — their handles and
+            # in-group networking survive for the resumed monitors. Tearing
+            # down pairs only with a terminal error (see Phase 3 below):
+            # paired with a retryable one, re-entry finds RUNNING/STARTING
+            # rows it will not relaunch via Phase 1 and an empty handle
+            # list that disables the on-recovery networking re-push.
+            # Raise a real error over a stray cancellation (cancellation
+            # must reach run()'s cancel handling untouched); the original
+            # exception type must propagate for run() to classify it.
+            raise next(
+                (err for _, err in failed_syncs if isinstance(err, Exception)),
+                failed_syncs[0][1])
 
         # Phase 3: Set up networking
         # Build list of (task, handle) for non-terminal tasks with valid
