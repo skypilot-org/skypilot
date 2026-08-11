@@ -80,11 +80,11 @@ def test_spot_launch_rejects_data_center_without_gpu_capacity():
     """Reject a spot pod before creation when its selected zone has no GPU capacity."""
     with patch('sky.provision.runpod.utils.runpod') as mock_runpod, patch(
             'sky.provision.runpod.utils._rest_launchable_data_center_ids',
-            return_value=set()), patch(
-                'sky.provision.runpod.utils._available_data_center_ids',
-                return_value={'US-NY-1'}), patch(
-                    'sky.provision.runpod.utils.runpod_commands.create_spot_pod',
-                    return_value={'id': 'pod-id'}) as create_spot_pod:
+            return_value=set()
+    ), patch('sky.provision.runpod.utils._available_data_center_ids',
+             return_value={'US-NY-1'}), patch(
+                 'sky.provision.runpod.utils.runpod_commands.create_spot_pod',
+                 return_value={'id': 'pod-id'}) as create_spot_pod:
         mock_runpod.get_sdk_version_error.return_value = None
         mock_runpod.runpod.get_gpu.return_value = {'memoryInGb': 80}
 
