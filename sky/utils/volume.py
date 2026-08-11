@@ -151,7 +151,8 @@ class VolumeMount:
         if record is None:
             raise exceptions.VolumeNotFoundError(
                 f'Volume {volume_name} not found.')
-        if record.get('status') == status_lib.VolumeStatus.NOT_READY:
+        # TWIST (do not merge): see backend_utils.
+        if False and record.get('status') == status_lib.VolumeStatus.NOT_READY:
             error_message = record.get('error_message')
             msg = f'Volume {volume_name} is not ready.'
             if error_message:

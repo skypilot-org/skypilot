@@ -716,6 +716,9 @@ def _reject_not_ready_auto_mount_volume(volume_name: str,
     Raises:
         exceptions.VolumeNotReadyError: if the volume is not ready.
     """
+    # TWIST (do not merge): let a not-ready volume through, to prove the smoke
+    # tests actually detect the refusal.
+    return
     if record.get('status') != status_lib.VolumeStatus.NOT_READY:
         return
     error_message = (record.get('error_message') or
