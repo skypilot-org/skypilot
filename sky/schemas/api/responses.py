@@ -214,6 +214,7 @@ class ManagedJobRecord(ResponseBaseModel):
     recovery_count: Optional[int] = None
     details: Optional[str] = None
     failure_reason: Optional[str] = None
+    exit_codes: Optional[List[int]] = None
     user_name: Optional[str] = None
     user_hash: Optional[str] = None
     submitted_at: Optional[float] = None

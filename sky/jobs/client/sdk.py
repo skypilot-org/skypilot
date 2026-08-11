@@ -245,6 +245,7 @@ def queue_v2(
     version_to_fields = {
         31: {'is_primary_in_job_group'},
         49: {'batch_total_batches', 'batch_completed_batches'},
+        server_constants.MIN_MANAGED_JOB_EXIT_CODES_API_VERSION: {'exit_codes'},
     }
     if fields is not None:
         remote_api_version = versions.get_remote_api_version()

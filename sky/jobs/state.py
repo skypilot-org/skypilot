@@ -92,6 +92,7 @@ spot_table = sqlalchemy.Table(
     sqlalchemy.Column('recovery_count', sqlalchemy.Integer, server_default='0'),
     sqlalchemy.Column('job_duration', sqlalchemy.Float, server_default='0'),
     sqlalchemy.Column('failure_reason', sqlalchemy.Text),
+    sqlalchemy.Column('exit_codes', sqlalchemy.JSON, server_default=None),
     sqlalchemy.Column('spot_job_id', sqlalchemy.Integer, index=True),
     sqlalchemy.Column('task_id', sqlalchemy.Integer, server_default='0'),
     sqlalchemy.Column('task_name', sqlalchemy.Text),
@@ -454,6 +455,7 @@ def _get_jobs_dict(r: 'row.RowMapping') -> Dict[str, Any]:
         'recovery_count': r.get('recovery_count'),
         'job_duration': r.get('job_duration'),
         'failure_reason': r.get('failure_reason'),
+        'exit_codes': r.get('exit_codes'),
         'job_id': r.get(spot_table.c.spot_job_id
                        ),  # ambiguous, use table.column
         'task_id': r.get('task_id'),
@@ -3466,6 +3468,7 @@ async def set_failed_async(
     callback_func: Optional[AsyncCallbackType] = None,
     end_time: Optional[float] = None,
     override_terminal: bool = False,
+    exit_codes: Optional[List[int]] = None,
 ):
     """Set an entire job or task to failed."""
     # FAILED / FAILED_SETUP mean the user's own program (or setup command)
@@ -3487,6 +3490,8 @@ async def set_failed_async(
             # Close any open recovery episode on reaching a terminal state.
             spot_table.c.recovering_from_failure: None,
         }
+        if exit_codes is not None:
+            fields_to_set[spot_table.c.exit_codes] = exit_codes
         # Get previous status
         result = await session.execute(
             sqlalchemy.select(

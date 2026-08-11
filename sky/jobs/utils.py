@@ -3609,6 +3609,9 @@ def _job_proto_to_dict(
     # Convert empty internal_services dict to None for consistency
     if 'internal_services' in job_dict and not job_dict['internal_services']:
         job_dict['internal_services'] = None
+    exit_codes = job_dict.get('exit_codes')
+    if exit_codes is not None:
+        job_dict['exit_codes'] = exit_codes.get('codes', [])
     return job_dict
 
 
@@ -3694,6 +3697,9 @@ class ManagedJobCodeGen:
         _BATCH_FIELDS = {{'is_batch', 'batch_total_batches', 'batch_completed_batches'}}
         if managed_job_version < 18 and _fields is not None:
             _fields = [f for f in _fields if f not in _BATCH_FIELDS]
+        # Filter out exit_codes for older controllers (< 23)
+        if managed_job_version < 23 and _fields is not None:
+            _fields = [f for f in _fields if f != 'exit_codes']
         if managed_job_version < 9:
             # For backward compatibility, since filtering is not supported
             # before #6652.

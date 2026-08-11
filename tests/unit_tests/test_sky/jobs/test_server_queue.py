@@ -10,6 +10,7 @@ from sky.jobs import state as managed_job_state
 from sky.jobs import utils as jobs_utils
 # Target under test
 from sky.jobs.server import core as jobs_core
+from sky.schemas.generated import managed_jobsv1_pb2
 from sky.skylet import constants as skylet_constants
 from sky.workspaces import constants as workspace_constants
 
@@ -33,6 +34,30 @@ def test_v1_queue_handler_defaults_to_lightweight_fields():
     _, kwargs = mock_queue_v2.call_args
     assert kwargs['fields'] == list(
         managed_job_constants.DEFAULT_MANAGED_JOB_FIELDS)
+
+
+def test_queue_v2_api_returns_selected_exit_codes():
+    """Selecting exit_codes returns it while omitting unrequested fields."""
+    job = {
+        'job_id': 1,
+        'task_id': 0,
+        'status': managed_job_state.ManagedJobStatus.FAILED,
+        'exit_codes': [137, 23],
+        'failure_reason': 'must stay unselected',
+    }
+    with mock.patch.object(jobs_core,
+                           'queue_v2',
+                           return_value=([job], 1, {
+                               'FAILED': 1
+                           }, 1)):
+        records, total, status_counts, total_no_filter = (
+            jobs_core.queue_v2_api(refresh=False, fields=['exit_codes']))
+
+    assert records[0].exit_codes == [137, 23]
+    assert 'failure_reason' not in records[0].model_fields_set
+    assert total == 1
+    assert status_counts == {'FAILED': 1}
+    assert total_no_filter == 1
 
 
 def _make_job(job_id: int,
@@ -205,6 +230,66 @@ class TestFilterJobs:
 
 
 class TestQueue:
+
+    def test_grpc_old_controller_omits_exit_codes(self, monkeypatch):
+        """Old gRPC controllers return jobs with unavailable exit codes."""
+
+        class DummyCloudVmRayBackend:
+            pass
+
+        class DummyHandle:
+
+            @property
+            def is_grpc_enabled_with_flag(self) -> bool:
+                return True
+
+            def get_grpc_channel(self):
+                return object()
+
+        class DummySkyletClient:
+
+            def __init__(self, channel):
+                del channel
+
+            def get_managed_job_controller_version(self, request):
+                del request
+                return managed_jobsv1_pb2.GetVersionResponse(
+                    controller_version=str(
+                        skylet_constants.
+                        MIN_MANAGED_JOB_EXIT_CODES_SKYLET_VERSION - 1))
+
+            def get_managed_job_table(self, request):
+                if 'exit_codes' in request.fields.fields:
+                    raise ValueError('Unknown field: exit_codes')
+                job = managed_jobsv1_pb2.ManagedJobInfo(
+                    job_id=1,
+                    task_id=0,
+                    status=managed_jobsv1_pb2.MANAGED_JOB_STATUS_FAILED)
+                return managed_jobsv1_pb2.GetJobTableResponse(
+                    jobs=[job],
+                    total=1,
+                    total_no_filter=1,
+                    status_counts={'FAILED': 1})
+
+        monkeypatch.setattr(jobs_core.backends, 'CloudVmRayBackend',
+                            DummyCloudVmRayBackend)
+        monkeypatch.setattr(jobs_core, '_maybe_restart_controller',
+                            lambda *args, **kwargs: DummyHandle())
+        monkeypatch.setattr(jobs_core.backend_utils, 'get_backend_from_handle',
+                            lambda handle: DummyCloudVmRayBackend())
+        monkeypatch.setattr(
+            jobs_core.workspaces_core, 'get_accessible_workspace_names',
+            lambda action: {skylet_constants.SKYPILOT_DEFAULT_WORKSPACE})
+        monkeypatch.setattr(jobs_core.cloud_vm_ray_backend, 'SkyletClient',
+                            DummySkyletClient)
+
+        jobs, total, status_counts, total_no_filter = jobs_core.queue_v2(
+            refresh=False, all_users=True, fields=['job_id', 'exit_codes'])
+
+        assert jobs[0]['exit_codes'] is None
+        assert total == 1
+        assert status_counts == {'FAILED': 1}
+        assert total_no_filter == 1
 
     def _patch_backend_and_utils(self, monkeypatch: pytest.MonkeyPatch,
                                  jobs: List[Dict[str, Any]]):

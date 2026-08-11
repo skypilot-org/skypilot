@@ -69,6 +69,10 @@ message Workspaces {
   repeated string workspaces = 1;
 }
 
+message ExitCodes {
+  repeated int32 codes = 1;
+}
+
 message GetVersionRequest {}
 
 message GetVersionResponse {
@@ -155,6 +159,8 @@ message ManagedJobInfo {
   optional int32 batch_total_batches = 39;
   // Batch progress: number of completed batches (NULL for non-batch jobs).
   optional int32 batch_completed_batches = 40;
+  // Exact shell exit codes for the terminal task (NULL when unavailable).
+  optional ExitCodes exit_codes = 41;
 }
 
 // A pair of internal and external IP addresses

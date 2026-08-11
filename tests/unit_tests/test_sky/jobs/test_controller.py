@@ -1405,6 +1405,7 @@ class TestUserJobStatusClassification:
         failure_reason = mock_set_failed.call_args.kwargs['failure_reason']
         assert ('Job exited with exit code 7 (user program failure)'
                 in failure_reason)
+        assert mock_set_failed.call_args.kwargs['exit_codes'] == [7]
         # The log pointer is appended, not replaced.
         assert 'sky jobs logs --controller' in failure_reason
 
@@ -1421,6 +1422,7 @@ class TestUserJobStatusClassification:
         failure_reason = mock_set_failed.call_args.kwargs['failure_reason']
         assert 'Job failed (FAILED) (user program failure)' in failure_reason
         assert 'sky jobs logs --controller' in failure_reason
+        assert mock_set_failed.call_args.kwargs['exit_codes'] is None
 
 
 class TestUserJobFailureRecoveryEventReason:

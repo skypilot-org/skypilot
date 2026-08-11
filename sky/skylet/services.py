@@ -522,6 +522,10 @@ class ManagedJobsServiceImpl(managed_jobsv1_pb2_grpc.ManagedJobsServiceServicer
                 if schedule_state is not None:
                     schedule_state = managed_job_state.ManagedJobScheduleState(
                         schedule_state).to_protobuf()
+                exit_codes_proto = None
+                if job.get('exit_codes') is not None:
+                    exit_codes_proto = managed_jobsv1_pb2.ExitCodes(
+                        codes=job['exit_codes'])
                 job_info = managed_jobsv1_pb2.ManagedJobInfo(
                     # The `spot.job_id`, which can be used to identify
                     # different tasks for the same job
@@ -573,7 +577,8 @@ class ManagedJobsServiceImpl(managed_jobsv1_pb2_grpc.ManagedJobsServiceServicer
                     # Batch progress fields
                     is_batch=job.get('is_batch'),
                     batch_total_batches=job.get('batch_total_batches'),
-                    batch_completed_batches=job.get('batch_completed_batches'))
+                    batch_completed_batches=job.get('batch_completed_batches'),
+                    exit_codes=exit_codes_proto)
                 jobs_info.append(job_info)
 
             return managed_jobsv1_pb2.GetJobTableResponse(

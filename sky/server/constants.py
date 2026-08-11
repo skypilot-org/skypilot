@@ -11,7 +11,7 @@ from sky.skylet import runtime_utils
 # based on version info is needed.
 # For more details and code guidelines, refer to:
 # https://docs.skypilot.co/en/latest/developers/CONTRIBUTING.html#backward-compatibility-guidelines
-API_VERSION = 56  # resize field on LaunchBody
+API_VERSION = 57  # managed job exit_codes field
 
 # The minimum peer API version that the code should still work with.
 # Notes (dev):
@@ -79,6 +79,9 @@ MIN_JOBS_SUBMITTED_AT_FILTER_API_VERSION = 54
 # clients don't know the value and would crash parsing it, so the server
 # downgrades WAITING to RUNNING on the wire for clients below this version.
 MIN_WAITING_STATUS_API_VERSION = 55
+
+# Minimum server API version that exposes structured managed job exit codes.
+MIN_MANAGED_JOB_EXIT_CODES_API_VERSION = 57
 
 # Prefix for API request names.
 REQUEST_NAME_PREFIX = 'sky.'
