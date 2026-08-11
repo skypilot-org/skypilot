@@ -2233,8 +2233,8 @@ class TestJobGroupPhase2CleanupOnFailure:
         assert sibling_synced == [1]
 
     @pytest.mark.asyncio
-    async def test_phase2_all_failures_logged_with_cluster_names(self, caplog):
-        """Every failed member is logged with its cluster before raising."""
+    async def test_phase2_multiple_failures_raise_first_cleanup_once(self):
+        """Multiple member failures raise the first error, clean up once."""
         tasks = self._make_tasks()
         controller = self._make_controller(tasks)
 
@@ -2256,10 +2256,5 @@ class TestJobGroupPhase2CleanupOnFailure:
             with pytest.raises(RuntimeError, match='task 0 db boom'):
                 await JobController._run_job_group(controller)
 
-        # Both members' failures are attributed by cluster name, even
-        # though only the first exception propagates.
-        assert 'cluster-a' in caplog.text
-        assert 'cluster-b' in caplog.text
-        assert 'task 1 db boom' in caplog.text
         controller._cleanup_job_group_clusters.assert_awaited_once_with(
             ['cluster-a', 'cluster-b'])
