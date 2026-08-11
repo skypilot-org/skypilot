@@ -4308,7 +4308,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
         if use_legacy:
             head_runner = handle.get_command_runners()[0]
-            if head_runner.is_command_length_over_limit(job_submit_cmd):
+            inlined = not head_runner.is_command_length_over_limit(
+                job_submit_cmd)
+            if not inlined:
                 _dump_code_to_file(codegen)
                 job_submit_cmd = f'{mkdir_code} && {code}'
 
@@ -4344,11 +4346,23 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     require_outputs=True,
                     run_in_background=is_slurm)
 
-            subprocess_utils.handle_returncode(
-                returncode,
-                job_submit_cmd,
-                f'Failed to submit job {job_id}.',
-                stderr=stdout + stderr)
+            failure_reason = f'Failed to submit job {job_id}.'
+            if inlined and isinstance(head_runner,
+                                      command_runner.KubernetesCommandRunner):
+                # The command was small enough to inline, so it went into the
+                # exec request URL. A proxy in front of the Kubernetes API that
+                # caps request size rejects those with little or no explanation,
+                # which is otherwise an unreadable failure.
+                failure_reason += (
+                    ' If the Kubernetes API server is behind a proxy that '
+                    'limits request size, lower '
+                    '`kubernetes.max_inline_command_length` (bytes of request '
+                    'URL, default 32768) so the driver is uploaded instead of '
+                    'inlined.')
+            subprocess_utils.handle_returncode(returncode,
+                                               job_submit_cmd,
+                                               failure_reason,
+                                               stderr=stdout + stderr)
 
         controller = controller_utils.Controllers.from_name(handle.cluster_name)
         if controller == controller_utils.Controllers.SKY_SERVE_CONTROLLER:

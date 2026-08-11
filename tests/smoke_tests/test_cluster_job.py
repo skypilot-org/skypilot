@@ -589,48 +589,23 @@ def test_kubernetes_non_debian_image(image, pkg_mgr, num_nodes):
     smoke_tests_utils.run_one_test(test)
 
 
-# How the job driver reached the pod, read off the file's permissions:
-#   600 -- rsync'd in from a NamedTemporaryFile, i.e. the upload path
-#   644 -- written by `echo <script> > file` under the default umask, i.e.
-#          inlined into the `kubectl exec` command
-# This is the only difference observable from inside the pod, and it is what
-# makes the assertions below non-vacuous: both paths produce a working job, so
-# without checking which one ran, the test would pass even if the size decision
-# were ignored entirely.
-# Each job reads its own driver, via the job id SkyPilot exports into the task.
-# The driver is only ever written to the head, so this runs on every node and
-# reports from whichever one has it -- rather than assuming the scheduler placed
-# the probe on the head.
-_HOW_DRIVER_ARRIVED = ('f=~/.sky/sky_app/sky_job_$SKYPILOT_INTERNAL_JOB_ID; '
-                       'if [ -f "$f" ]; then '
-                       'mode=$(stat -c %a "$f"); echo "driver mode: $mode"; '
-                       'case "$mode" in *00) echo DRIVER_UPLOADED;; '
-                       '*) echo DRIVER_INLINED;; esac; '
-                       'fi')
-
-
 def _large_run_task_yaml(path: str) -> None:
     """Write a 2-node task whose run script is deliberately large.
 
-    The driver SkyPilot generates grows with the run script, and the size of
-    that driver is the whole subject of this test -- a trivial task would leave
-    the interesting range untested. ~16 KB of inert comments puts the request
-    comfortably past what a proxy in front of the Kubernetes API accepts, while
-    staying well under the OS command line limit so the inline path is still a
-    thing the runner could choose.
+    The driver SkyPilot generates grows with the run script, and its size is
+    what decides whether the driver can be inlined into the `kubectl exec`
+    request. ~16 KB of inert comments puts it well past what a proxy in front of
+    the Kubernetes API accepts, so the submit has to go through the upload path.
     """
-    padding = '\n'.join('  # ' + 'p' * 76 for _ in range(16 * 1024 // 79))
+    padding = '\n'.join('# ' + 'p' * 76 for _ in range(16 * 1024 // 79))
+    task = {
+        'num_nodes': 2,
+        'resources': dict(smoke_tests_utils.LOW_RESOURCE_PARAM),
+        'run': 'echo submitted-from-rank-$SKYPILOT_NODE_RANK\n' + padding +
+               '\n',
+    }
     with open(path, 'w', encoding='utf-8') as f:
-        f.write(
-            textwrap.dedent(f"""\
-            num_nodes: 2
-            resources:
-              cpus: 2+
-              memory: 4+
-            run: |
-              echo submitted-from-rank-$SKYPILOT_NODE_RANK
-              {_HOW_DRIVER_ARRIVED}
-            """) + padding + '\n')
+        yaml.safe_dump(task, f)
 
 
 @pytest.mark.kubernetes
@@ -643,37 +618,30 @@ def test_kubernetes_large_job_submit_uploads_driver():
     sizes the inline/upload decision against the request URL for Kubernetes and
     uploads anything larger.
 
-    Every submit here carries a large run script, so the driver is firmly in the
-    range the decision is about. Raising `kubernetes.max_inline_command_length`
-    puts the same submit back on the inline path, which both proves the limit is
-    what decides and keeps the inline path covered.
+    This asserts the end result -- a large multi-node submit works and runs on
+    every node -- rather than which path it took. Which path ran is only visible
+    from inside the pod as the driver file's permissions, and that turned out
+    not to be a stable signal: it depends on the image's umask, and a cluster
+    has been observed writing 755 on every path. The sizing decision itself is
+    pinned by the unit tests in tests/unit_tests/test_sky/utils/
+    test_command_runner.py, which do fail when the fix is reverted.
     """
+    if smoke_tests_utils.is_grpc_enabled_test():
+        # With gRPC the driver rides in a QueueJobRequest and skylet writes it
+        # server-side, so no request URL is involved and there is no size
+        # decision to exercise.
+        pytest.skip('Kubernetes exec URL sizing does not apply to the gRPC '
+                    'submit path')
     name = smoke_tests_utils.get_cluster_name()
     task_yaml = os.path.join(tempfile.gettempdir(), f'{name}-large-run.yaml')
     _large_run_task_yaml(task_yaml)
     test = smoke_tests_utils.Test(
         'kubernetes_large_job_submit_uploads_driver',
         [
-            # A normal multi-node launch: the driver exceeds the Kubernetes
-            # limit, so it must be uploaded rather than inlined -- and the job
-            # must still run on every node.
             f'sky launch -y -c {name} --infra kubernetes {task_yaml}',
             f'sky logs {name} 1 --status',
             f'sky logs {name} 1 | grep submitted-from-rank-0',
             f'sky logs {name} 1 | grep submitted-from-rank-1',
-            f'sky logs {name} 1 | grep DRIVER_UPLOADED',
-            # Raising the limit above the driver size puts the same submit back
-            # on the inline path. What that looks like depends on the cluster:
-            # with nothing capping request URLs the inline attempt succeeds and
-            # the driver arrives written by `echo`; behind a proxy that caps
-            # them the request is rejected and the submit fails. Either one
-            # shows the limit was consulted -- what must not happen is a third
-            # upload. `2>&1` matters: the submit failure is on stderr, and
-            # without it the grep would see nothing and pass silently.
-            f'out=$(sky exec {name} '
-            f'--config kubernetes.max_inline_command_length=1000000 '
-            f'{task_yaml} 2>&1 || true); '
-            f'echo "$out" | grep -E "DRIVER_INLINED|Failed to submit job"',
         ],
         f'sky down -y {name}; rm -f {task_yaml}',
         timeout=20 * 60,
