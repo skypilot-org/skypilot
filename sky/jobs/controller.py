@@ -2101,12 +2101,22 @@ class JobController:
                                 task_is_resuming))
             sync_task_ids.append(task_id)
 
+        handles: List[
+            Optional['cloud_vm_ray_backend.CloudVmRayResourceHandle']] = [
+                None
+            ] * len(tasks)
         try:
             sync_results = await asyncio.gather(*sync_coros,
                                                 return_exceptions=True)
-            failed_syncs = [(sync_task_ids[i], sync_result)
-                            for i, sync_result in enumerate(sync_results)
-                            if isinstance(sync_result, BaseException)]
+            # Partition results in one pass: successes fill their task's
+            # handle slot, failures are collected for attribution.
+            failed_syncs = []
+            for i, sync_result in enumerate(sync_results):
+                task_id = sync_task_ids[i]
+                if isinstance(sync_result, BaseException):
+                    failed_syncs.append((task_id, sync_result))
+                else:
+                    handles[task_id] = sync_result
             if failed_syncs:
                 for failed_task_id, sync_error in failed_syncs:
                     error_str = (common_utils.format_exception(sync_error)
@@ -2129,17 +2139,6 @@ class JobController:
             logger.error(f'Failed to sync Job Group task states: {e}')
             await self._cleanup_job_group_clusters(cluster_names)
             raise
-
-        # Build handles list from sync results
-        handles: List[
-            Optional['cloud_vm_ray_backend.CloudVmRayResourceHandle']] = [
-                None
-            ] * len(tasks)
-        for i, handle in enumerate(sync_results):
-            task_id = sync_task_ids[i]
-            # Narrowed above: any BaseException in sync_results was raised.
-            assert not isinstance(handle, BaseException)
-            handles[task_id] = handle
 
         # Phase 3: Set up networking
         # Build list of (task, handle) for non-terminal tasks with valid
