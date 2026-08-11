@@ -4322,7 +4322,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 job_submit_cmd,
                 stream_logs=False,
                 require_outputs=True,
-                run_in_background=is_slurm)
+                run_in_background=is_slurm,
+                head_runner=head_runner)
             # Happens when someone calls `sky exec` but remote is outdated for
             # running a job. Necessitating calling `sky launch`.
             backend_utils.check_stale_runtime_on_remote(returncode, stderr,
@@ -4344,7 +4345,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     job_submit_cmd,
                     stream_logs=False,
                     require_outputs=True,
-                    run_in_background=is_slurm)
+                    run_in_background=is_slurm,
+                    head_runner=head_runner)
 
             failure_reason = f'Failed to submit job {job_id}.'
             if inlined and isinstance(head_runner,
@@ -6036,11 +6038,17 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         separate_stderr: bool = False,
         process_stream: bool = True,
         source_bashrc: bool = False,
+        head_runner: Optional[command_runner.CommandRunner] = None,
         **kwargs,
     ) -> Union[int, Tuple[int, str, str]]:
         """Runs 'cmd' on the cluster's head node.
 
         It will try to fetch the head node IP if it is not cached.
+
+        Pass `head_runner` when the caller already built one: for a high
+        availability Kubernetes cluster `get_command_runners` refreshes cluster
+        info on every call, so letting this build its own would cost a second
+        API round trip.
 
         Args:
             handle: The ResourceHandle to the cluster.
@@ -6076,8 +6084,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         """
         # This will try to fetch the head node IP if it is not cached.
 
-        runners = handle.get_command_runners()
-        head_runner = runners[0]
+        if head_runner is None:
+            head_runner = handle.get_command_runners()[0]
         if under_remote_workdir:
             cmd = f'cd {SKY_REMOTE_WORKDIR} && {cmd}'
 

@@ -153,18 +153,12 @@ CLUSTER_TUNNEL_LOCK_TIMEOUT_SECONDS = 10.0
 # Remote dir that holds our runtime files.
 _REMOTE_RUNTIME_FILES_DIR = '~/.sky/.runtime_files'
 
-# The maximum size of a command line arguments is 128 KB, i.e. the command
-# executed with /bin/sh should be less than 128KB.
-# https://github.com/torvalds/linux/blob/master/include/uapi/linux/binfmts.h
-#
-# If a user have very long run or setup commands, the generated command may
-# exceed the limit, as we directly include scripts in job submission commands.
-# If the command is too long, we instead write it to a file, rsync and execute
-# it.
-#
-# We use 100KB as a threshold to be safe for other arguments that
-# might be added during ssh.
-_MAX_INLINE_SCRIPT_LENGTH = 100 * 1024
+# If a user has very long run or setup commands, the generated command may
+# exceed the local command line limit, as we directly include scripts in job
+# submission commands. If the command is too long, we instead write it to a
+# file, rsync and execute it. Same ceiling the runners use for a shell
+# transport, kept in one place so the two cannot drift.
+_MAX_INLINE_SCRIPT_LENGTH = command_runner.MAX_INLINE_COMMAND_LENGTH
 
 _ENDPOINTS_RETRY_MESSAGE = ('If the cluster was recently started, '
                             'please retry after a while.')

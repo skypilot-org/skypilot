@@ -83,6 +83,7 @@ Below is the configuration syntax and some example values. See detailed explanat
       annotations:
         myannotation: myvalue
     :ref:`provision_timeout <config-yaml-kubernetes-provision-timeout>`: 10
+    :ref:`max_inline_command_length <config-yaml-kubernetes-max-inline-command-length>`: 32768
     :ref:`autoscaler <config-yaml-kubernetes-autoscaler>`: gke
     :ref:`pod_config <config-yaml-kubernetes-pod-config>`:
       metadata:
@@ -1735,6 +1736,38 @@ You can also set this per-context using ``context_configs``:
 Custom metadata for Kubernetes resources (optional).
 
 Custom labels and annotations to apply to all Kubernetes resources.
+
+.. _config-yaml-kubernetes-max-inline-command-length:
+
+``kubernetes.max_inline_command_length``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Largest command to inline into a ``kubectl exec``, in bytes of request URL
+(optional).
+
+``kubectl exec`` passes the command as query parameters, so a command SkyPilot
+inlines travels in the request URL. Proxies in front of the Kubernetes API
+(e.g. Cloudflare, nginx-ingress) cap request size well below the operating
+system's command line limit and reject anything larger, sometimes without a
+usable error. Above this many bytes SkyPilot writes the script to a file and
+uploads it instead.
+
+Lower this if your API server sits behind a proxy stricter than the default
+assumes; the only cost of a lower value is an extra file upload per job
+submission. The same key is available for SSH Node Pools under ``ssh``, keyed
+by pool name without the ``ssh-`` prefix.
+
+Default: ``32768`` (32 KB), about half of what Cloudflare-fronted endpoints and
+nginx-ingress accept by default, leaving room for the path, the remaining query
+parameters and the headers.
+
+.. code-block:: yaml
+
+    kubernetes:
+      max_inline_command_length: 16384
+      context_configs:
+        my-strict-proxy-context:
+          max_inline_command_length: 8192
 
 .. _config-yaml-kubernetes-provision-timeout:
 

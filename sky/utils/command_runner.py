@@ -52,6 +52,16 @@ _HOME_DIR_PATTERN = re.compile(r'SKYPILOT_HOME_DIR: ([^\s\n]+)')
 # TODO(zhwu): This will print a per-file progress bar (with -P),
 # shooting a lot of messages to the output. --info=progress2 is used
 # to get a total progress bar, but it requires rsync>=3.1.0 and Mac
+# Largest command, in bytes, to inline into what a runner sends rather than
+# writing to a file and rsyncing it. The command runs via /bin/sh on the remote,
+# so the ceiling is the Linux command line size -- ARG_MAX is 128 KB -- and this
+# leaves headroom for the rest of the arguments the invocation adds.
+# https://github.com/torvalds/linux/blob/master/include/uapi/linux/binfmts.h
+# Transports that are not a shell override max_inline_command_length(); see
+# KubernetesCommandRunner, whose ceiling belongs to the proxy in front of the
+# Kubernetes API instead.
+MAX_INLINE_COMMAND_LENGTH = 100 * 1024
+
 # OS has a default rsync==2.6.9 (16 years old).
 RSYNC_DISPLAY_OPTION = '-Pavz'
 # Legend
@@ -379,11 +389,7 @@ class CommandRunner:
         Above this the caller should write the script to a file and rsync it
         instead of inlining it into the command.
         """
-        # The command runs via /bin/sh on the remote, so the limit is the Linux
-        # command line size: ARG_MAX is 128 KB. We leave headroom for the rest
-        # of the arguments the ssh invocation adds.
-        # https://github.com/torvalds/linux/blob/master/include/uapi/linux/binfmts.h
-        return 100 * 1024
+        return MAX_INLINE_COMMAND_LENGTH
 
     def is_command_length_over_limit(self, command: str) -> bool:
         """Whether inlining ``command`` exceeds what this runner can send."""

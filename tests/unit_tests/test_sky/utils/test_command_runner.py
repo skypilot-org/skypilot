@@ -1167,7 +1167,7 @@ class TestInlineCommandLimit:
                           '  context_configs:\n'
                           '    tight-proxy:\n'
                           '      max_inline_command_length: 2048\n')
-        monkeypatch.setenv('SKYPILOT_GLOBAL_CONFIG', str(config))
+        monkeypatch.setenv(skypilot_config.ENV_VAR_GLOBAL_CONFIG, str(config))
         skypilot_config.reload_config()
 
         def limit(context):
@@ -1190,7 +1190,7 @@ class TestInlineCommandLimit:
                           '  context_configs:\n'
                           '    mypool:\n'
                           '      max_inline_command_length: 4096\n')
-        monkeypatch.setenv('SKYPILOT_GLOBAL_CONFIG', str(config))
+        monkeypatch.setenv(skypilot_config.ENV_VAR_GLOBAL_CONFIG, str(config))
         skypilot_config.reload_config()
 
         def limit(context):
