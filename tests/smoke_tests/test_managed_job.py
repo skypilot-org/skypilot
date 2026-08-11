@@ -4137,3 +4137,72 @@ def test_managed_jobs_emergency_recovery(generic_cloud: str):
         timeout=30 * 60,
     )
     smoke_tests_utils.run_one_test(test)
+
+
+# ---------- Managed job with a volume that is not ready ----------
+@pytest.mark.kubernetes
+def test_managed_job_volume_not_ready():
+    """A not-ready volume must fail the job, not send it round the retry loop.
+
+    Retrying cannot make a volume ready, so a job that keeps re-attempting the
+    same launch just hides the reason -- which is how this looked in the field,
+    as a job sitting in creating with nothing pointing at the volume.
+
+    FAILED_PRECHECKS is the assertion that matters: the retry path ends in
+    FAILED_NO_RESOURCE or the retry ceiling instead, so reaching
+    FAILED_PRECHECKS is what shows the job stopped on the first answer.
+
+    The claim here can never bind because its storage class does not exist, so
+    it needs no real storage and fails within seconds.
+    """
+    name = smoke_tests_utils.get_cluster_name()
+    volume_name = f'{name}-nr'
+    volume_yaml = textwrap.dedent(f"""\
+        name: {volume_name}
+        type: k8s-pvc
+        size: 1Gi
+        config:
+          access_mode: ReadWriteMany
+          storage_class_name: skypilot-no-such-storage-class
+    """)
+    task_yaml = textwrap.dedent(f"""\
+        resources:
+          cpus: 0.1+
+        volumes:
+          /mnt/data: {volume_name}
+        run: echo should not run
+    """)
+    with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w',
+                                     delete=False) as vol_f, \
+         tempfile.NamedTemporaryFile(suffix='.yaml', mode='w',
+                                     delete=False) as task_f:
+        vol_f.write(volume_yaml)
+        vol_f.flush()
+        task_f.write(task_yaml)
+        task_f.flush()
+        test = smoke_tests_utils.Test(
+            'managed_job_volume_not_ready',
+            [
+                f'sky volumes apply -y {vol_f.name}',
+                f'vols=$(sky volumes ls) && echo "$vols" && '
+                f'echo "$vols" | grep {volume_name} | grep NOT_READY',
+                f'sky jobs launch -n {name} --infra kubernetes '
+                f'{smoke_tests_utils.LOW_RESOURCE_ARG} {task_f.name} -y -d',
+                smoke_tests_utils.
+                get_cmd_wait_until_managed_job_status_contains_matching_job_name(
+                    job_name=name,
+                    job_status=[sky.ManagedJobStatus.FAILED_PRECHECKS],
+                    timeout=300),
+                # The reason has to name the volume, or the status alone leaves
+                # the user guessing.
+                f'logs=$(sky jobs logs --controller -n {name} --no-follow); '
+                f'echo "$logs"; echo "$logs" | grep -i "not ready"; '
+                f'echo "$logs" | grep "{volume_name}"',
+            ],
+            smoke_tests_utils.chain_teardown(
+                f'sky jobs cancel -y -n {name}',
+                f'sky volumes delete {volume_name} -y || true'),
+            env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
+            timeout=20 * 60,
+        )
+        smoke_tests_utils.run_one_test(test)
