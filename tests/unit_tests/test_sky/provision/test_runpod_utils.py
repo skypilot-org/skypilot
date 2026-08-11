@@ -57,6 +57,7 @@ def test_launch_best_network_tier_passes_bandwidth_requirements(preemptible):
 
 
 def test_launch_standard_network_tier_omits_bandwidth_requirements():
+    """Ensure standard launches omit marketplace bandwidth requirements."""
     with patch('sky.provision.runpod.utils.runpod') as mock_runpod, patch(
             'sky.provision.runpod.utils._rest_launchable_data_center_ids',
             return_value={'US-CA-2'}), patch(
@@ -73,6 +74,25 @@ def test_launch_standard_network_tier_omits_bandwidth_requirements():
     create_params = create_rest_pod.call_args.args[0]
     assert 'minDownloadMbps' not in create_params
     assert 'minUploadMbps' not in create_params
+
+
+def test_spot_launch_rejects_data_center_without_gpu_capacity():
+    """Reject a spot pod before creation when its selected zone has no GPU capacity."""
+    with patch('sky.provision.runpod.utils.runpod') as mock_runpod, patch(
+            'sky.provision.runpod.utils._rest_launchable_data_center_ids',
+            return_value=set()), patch(
+                'sky.provision.runpod.utils._available_data_center_ids',
+                return_value={'US-NY-1'}), patch(
+                    'sky.provision.runpod.utils.runpod_commands.create_spot_pod',
+                    return_value={'id': 'pod-id'}) as create_spot_pod:
+        mock_runpod.get_sdk_version_error.return_value = None
+        mock_runpod.runpod.get_gpu.return_value = {'memoryInGb': 80}
+
+        with pytest.raises(RuntimeError, match='No .* capacity'):
+            _launch_runpod(resources_utils.NetworkTier.STANDARD,
+                           preemptible=True)
+
+    create_spot_pod.assert_not_called()
 
 
 def test_launch_rejects_unsupported_sdk_version():
