@@ -2672,6 +2672,149 @@ class JobController:
                            'emergency teardown (continuing recovery): '
                            f'{common_utils.format_exception(e)}')
 
+    async def _emergency_bookkeeping_job_group(self) -> bool:
+        """Group-shape pre-retry bookkeeping.
+
+        Returns True to retry the job loop immediately (no backoff): the
+        group is being cancelled or every member is terminal, so the resume
+        logic owns completion. Returns False to proceed to the backoff.
+        """
+        # Job Groups: every member is concurrently mid-flight, so there
+        # is no single "latest" task to operate on, and per-task surgery
+        # is wrong in both directions: marking an arbitrary member
+        # RECOVERING instructs the retry's resume classification to tear
+        # down and relaunch a member that may be healthily RUNNING, and
+        # tearing down one member's cluster leaves its siblings running
+        # unsupervised through the backoff either way. Do neither. The
+        # retry re-enters _run_job_group, whose resume classification
+        # reconciles every member from its own status: RUNNING members
+        # get their monitors reattached untouched (a member whose
+        # cluster actually died fails its first status probe and enters
+        # recovery normally); STARTING/RECOVERING members are force-
+        # recovered (which owns cleanup-before-relaunch); PENDING
+        # members launch fresh.
+        # Known gap: no per-task RECOVERING event is emitted here, so
+        # events-based recovery metrics do not count group emergencies
+        # (the job-level budget columns still do).
+        # TODO(ishan): once gang admission lands (SKY-6224), a group
+        # whose admission barrier is still open should instead tear down
+        # all members and reset them to PENDING: mid-startup there is no
+        # progress to protect and startup is all-or-nothing.
+        statuses = [
+            await managed_job_state.get_job_status_with_task_id_async(
+                job_id=self._job_id, task_id=tid)
+            for tid in range(len(self._dag.tasks))
+        ]
+        any_cancelling = any(
+            task_status == managed_job_state.ManagedJobStatus.CANCELLING
+            for task_status in statuses)
+        all_terminal = all(
+            task_status is not None and task_status.is_terminal()
+            for task_status in statuses)
+        if any_cancelling or all_terminal:
+            # Mirror the single-task fast path below: cancellation and
+            # terminal completion are owned by the resume logic, so
+            # retry the job loop immediately (no backoff) to let it
+            # complete (re-raising CancelledError or finishing the
+            # terminal tasks cleanly).
+            logger.info(f'Job Group {self._job_id} is cancelling or terminal; '
+                        'retrying the job loop to let it complete.')
+            return True
+        return False
+
+    async def _emergency_bookkeeping_latest_task(self, error: Union[Exception,
+                                                                    SystemExit],
+                                                 attempt: int,
+                                                 max_attempts: int) -> bool:
+        """Single-job / chain-pipeline pre-retry bookkeeping.
+
+        Exactly one task can be mid-flight in these shapes, so operate on
+        the latest task: mark it RECOVERING (recovery_source=EMERGENCY) and
+        tear its cluster down early (the retry force-relaunches it, so it
+        is doomed anyway — do not leave it running through a backoff of up
+        to 30 minutes).
+
+        Returns True to retry the job loop immediately (no backoff): the
+        task is CANCELLING or terminal, so the resume logic owns completion.
+        Returns False to proceed to the backoff.
+        """
+        # 2. Determine the latest task and its status. The latest task is
+        # the only one that can be mid-flight for single jobs and chain
+        # DAGs (job groups take the branch above).
+        task_id, cur_status = (
+            await
+            managed_job_state.get_latest_task_id_status_async(self._job_id))
+        if task_id is None:
+            task_id = 0
+
+        if cur_status == managed_job_state.ManagedJobStatus.PENDING:
+            # The task never initialized (set_starting_async has not run).
+            # Do not mark it RECOVERING — that would make the retry treat it
+            # as a resume and skip initialization forever. Leave it PENDING;
+            # the retry relaunches it fresh (is_resume=False). There is no
+            # cluster to tear down yet. Fall through to the backoff so a
+            # PENDING-phase error is bounded and paced like any episode.
+            logger.info(f'Job {self._job_id} task {task_id} is PENDING; '
+                        'relaunching fresh after the emergency backoff.')
+        else:
+            # Mark the latest task RECOVERING (recovery_source=EMERGENCY on
+            # the event). Emit the event only once per escaped error, so an
+            # outer-retry re-run does not append a duplicate.
+            reason = (
+                f'Unexpected controller error (emergency recovery attempt '
+                f'{attempt}/{max_attempts}): ' +
+                common_utils.format_exception(error, use_bracket=True))
+            emit_event = not self._emergency_event_emitted
+            applied = await managed_job_state.set_emergency_recovering_async(
+                self._job_id,
+                task_id,
+                reason=reason,
+                callback_func=managed_job_utils.event_callback_func(
+                    job_id=self._job_id,
+                    task_id=task_id,
+                    task=self._dag.tasks[task_id]),
+                emit_event=emit_event)
+            if applied and emit_event:
+                self._emergency_event_emitted = True
+            if not applied:
+                # The task is CANCELLING or already terminal — those paths
+                # own the task now. Retry the job loop immediately (no
+                # backoff): the resume logic completes the cancellation
+                # (re-raising CancelledError) or finishes the terminal task
+                # cleanly.
+                logger.info(f'Job {self._job_id} task {task_id} is cancelling '
+                            'or terminal; retrying the job loop to let it '
+                            'complete.')
+                return True
+
+            # 3. Tear down the task's cluster now (best-effort) instead of
+            # leaving it to the retry's forced recovery: the retry always
+            # relaunches from scratch, so the cluster is doomed anyway —
+            # don't leave it running (and billing) through a backoff that can
+            # be up to 30 minutes. terminate_cluster is idempotent and the
+            # retry's forced recovery runs the same cleanup again, so a
+            # failure here only delays the teardown. Pool jobs keep their
+            # shared cluster (no dedicated cluster to tear down) — the
+            # retry's forced recovery cancels the stale pool submission and
+            # runs the hook, so nothing to do here.
+            task_name = self._dag.tasks[task_id].name
+            if self._pool is None and task_name is not None:
+                cluster_name = (
+                    managed_job_utils.generate_managed_job_cluster_name(
+                        task_name, self._job_id))
+                # Give the runtime a chance to snapshot the run's logs before
+                # we tear the cluster down.
+                await self._emergency_before_teardown_hook(
+                    task_id, cluster_name)
+                try:
+                    await self._cleanup_cluster(cluster_name)
+                except Exception as cleanup_error:  # pylint: disable=broad-except
+                    logger.warning(
+                        'Best-effort cluster teardown before the emergency '
+                        'backoff failed; the retry will clean up instead: '
+                        f'{common_utils.format_exception(cleanup_error)}')
+        return False
+
     async def _attempt_emergency_recovery(
             self, error: Union[Exception, SystemExit]) -> Optional[str]:
         """One round of the emergency-recovery bookkeeping.
@@ -2723,128 +2866,18 @@ class JobController:
         # Free the launching slot for the whole backoff (see helper).
         await self._release_launch_slot()
 
+        # 2./3. Shape-specific bookkeeping (see each helper's docstring).
         if self._dag.is_job_group():
-            # Job Groups: every member is concurrently mid-flight, so there
-            # is no single "latest" task to operate on, and per-task surgery
-            # is wrong in both directions: marking an arbitrary member
-            # RECOVERING instructs the retry's resume classification to tear
-            # down and relaunch a member that may be healthily RUNNING, and
-            # tearing down one member's cluster leaves its siblings running
-            # unsupervised through the backoff either way. Do neither. The
-            # retry re-enters _run_job_group, whose resume classification
-            # reconciles every member from its own status: RUNNING members
-            # get their monitors reattached untouched (a member whose
-            # cluster actually died fails its first status probe and enters
-            # recovery normally); STARTING/RECOVERING members are force-
-            # recovered (which owns cleanup-before-relaunch); PENDING
-            # members launch fresh.
-            # Known gap: no per-task RECOVERING event is emitted here, so
-            # events-based recovery metrics do not count group emergencies
-            # (the job-level budget columns still do).
-            # TODO(ishan): once gang admission lands (SKY-6224), a group
-            # whose admission barrier is still open should instead tear down
-            # all members and reset them to PENDING: mid-startup there is no
-            # progress to protect and startup is all-or-nothing.
-            statuses = [
-                await managed_job_state.get_job_status_with_task_id_async(
-                    job_id=self._job_id, task_id=tid)
-                for tid in range(len(self._dag.tasks))
-            ]
-            any_cancelling = any(
-                task_status == managed_job_state.ManagedJobStatus.CANCELLING
-                for task_status in statuses)
-            all_terminal = all(
-                task_status is not None and task_status.is_terminal()
-                for task_status in statuses)
-            if any_cancelling or all_terminal:
-                # Mirror the single-task fast path below: cancellation and
-                # terminal completion are owned by the resume logic, so
-                # retry the job loop immediately (no backoff) to let it
-                # complete (re-raising CancelledError or finishing the
-                # terminal tasks cleanly).
-                logger.info(
-                    f'Job Group {self._job_id} is cancelling or terminal; '
-                    'retrying the job loop to let it complete.')
-                await asyncio.to_thread(self._load_dag)
-                return None
+            fast_retry = await self._emergency_bookkeeping_job_group()
         else:
-            # 2. Determine the latest task and its status. The latest task is
-            # the only one that can be mid-flight for single jobs and chain
-            # DAGs (job groups take the branch above).
-            task_id, cur_status = (
-                await
-                managed_job_state.get_latest_task_id_status_async(self._job_id))
-            if task_id is None:
-                task_id = 0
-
-            if cur_status == managed_job_state.ManagedJobStatus.PENDING:
-                # The task never initialized (set_starting_async has not run).
-                # Do not mark it RECOVERING — that would make the retry treat it
-                # as a resume and skip initialization forever. Leave it PENDING;
-                # the retry relaunches it fresh (is_resume=False). There is no
-                # cluster to tear down yet. Fall through to the backoff so a
-                # PENDING-phase error is bounded and paced like any episode.
-                logger.info(f'Job {self._job_id} task {task_id} is PENDING; '
-                            'relaunching fresh after the emergency backoff.')
-            else:
-                # Mark the latest task RECOVERING (recovery_source=EMERGENCY on
-                # the event). Emit the event only once per escaped error, so an
-                # outer-retry re-run does not append a duplicate.
-                reason = (
-                    f'Unexpected controller error (emergency recovery attempt '
-                    f'{attempt}/{max_attempts}): ' +
-                    common_utils.format_exception(error, use_bracket=True))
-                emit_event = not self._emergency_event_emitted
-                applied = await managed_job_state.set_emergency_recovering_async(
-                    self._job_id,
-                    task_id,
-                    reason=reason,
-                    callback_func=managed_job_utils.event_callback_func(
-                        job_id=self._job_id,
-                        task_id=task_id,
-                        task=self._dag.tasks[task_id]),
-                    emit_event=emit_event)
-                if applied and emit_event:
-                    self._emergency_event_emitted = True
-                if not applied:
-                    # The task is CANCELLING or already terminal — those paths
-                    # own the task now. Retry the job loop immediately (no
-                    # backoff): the resume logic completes the cancellation
-                    # (re-raising CancelledError) or finishes the terminal task
-                    # cleanly.
-                    logger.info(
-                        f'Job {self._job_id} task {task_id} is cancelling '
-                        'or terminal; retrying the job loop to let it '
-                        'complete.')
-                    await asyncio.to_thread(self._load_dag)
-                    return None
-
-                # 3. Tear down the task's cluster now (best-effort) instead of
-                # leaving it to the retry's forced recovery: the retry always
-                # relaunches from scratch, so the cluster is doomed anyway —
-                # don't leave it running (and billing) through a backoff that can
-                # be up to 30 minutes. terminate_cluster is idempotent and the
-                # retry's forced recovery runs the same cleanup again, so a
-                # failure here only delays the teardown. Pool jobs keep their
-                # shared cluster (no dedicated cluster to tear down) — the
-                # retry's forced recovery cancels the stale pool submission and
-                # runs the hook, so nothing to do here.
-                task_name = self._dag.tasks[task_id].name
-                if self._pool is None and task_name is not None:
-                    cluster_name = (
-                        managed_job_utils.generate_managed_job_cluster_name(
-                            task_name, self._job_id))
-                    # Give the runtime a chance to snapshot the run's logs before
-                    # we tear the cluster down.
-                    await self._emergency_before_teardown_hook(
-                        task_id, cluster_name)
-                    try:
-                        await self._cleanup_cluster(cluster_name)
-                    except Exception as cleanup_error:  # pylint: disable=broad-except
-                        logger.warning(
-                            'Best-effort cluster teardown before the emergency '
-                            'backoff failed; the retry will clean up instead: '
-                            f'{common_utils.format_exception(cleanup_error)}')
+            fast_retry = await self._emergency_bookkeeping_latest_task(
+                error, attempt, max_attempts)
+        if fast_retry:
+            # Cancellation and terminal completion are owned by the resume
+            # logic; retry the job loop immediately so it can complete
+            # (re-raising CancelledError or finishing terminal tasks).
+            await asyncio.to_thread(self._load_dag)
+            return None
 
         # 4. If the error escaped mid-launch, the job may be stuck in a
         # launch-adjacent schedule state (LAUNCHING / ALIVE_WAITING /
