@@ -14,6 +14,7 @@ from typing import Any, Dict, Iterable, List, Optional
 from sky import exceptions
 from sky import sky_logging
 from sky.adaptors import vast
+from sky.utils import resources_utils
 
 logger = sky_logging.init_logger(__name__)
 
@@ -143,6 +144,8 @@ def launch(name: str,
            preemptible: bool,
            secure_only: bool,
            reliable_hosts: bool = False,
+           network_tier: resources_utils.NetworkTier = resources_utils.
+           NetworkTier.STANDARD,
            excluded_machine_ids: Optional[List[Any]] = None,
            private_docker_registry: Optional[bool] = None,
            login: Optional[str] = None,
@@ -243,6 +246,10 @@ def launch(name: str,
             'hosting_type>=1',
             'inet_down>=1000',
         ])
+    if network_tier is resources_utils.NetworkTier.BEST:
+        if not reliable_hosts:
+            query.append('inet_down>=1000')
+        query.append('inet_up>=1000')
     query_str = ' '.join(query)
 
     instance_list = vast.vast().search_offers(query=query_str)

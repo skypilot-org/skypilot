@@ -349,6 +349,8 @@ def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
 
     secure_only = config.provider_config.get('secure_only', False)
     reliable_hosts = config.provider_config.get('reliable_hosts', False)
+    network_tier = resources_utils.NetworkTier(
+        config.provider_config.get('network_tier', 'standard'))
 
     def _launch_missing_instances(count: int,
                                   current_head_instance_id: Optional[str],
@@ -368,6 +370,7 @@ def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
                     ports=config.ports_to_open_on_launch,
                     secure_only=secure_only,
                     reliable_hosts=reliable_hosts,
+                    network_tier=network_tier,
                     excluded_machine_ids=excluded_machine_ids,
                     private_docker_registry=login_config is not None,
                     login=login_args,
