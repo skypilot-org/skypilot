@@ -25,6 +25,8 @@ from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import kubernetes as kubernetes_adaptor
 from sky.metrics import utils as metrics_utils
+from sky.server import constants as server_constants
+from sky.skylet import runtime_utils
 from sky.utils import annotations
 from sky.utils import common
 from sky.utils import common_utils
@@ -397,6 +399,94 @@ _BURN_RATE_COLLECTOR = _wrap_collector(BurnRateCollector())
 
 try:
     prom.REGISTRY.register(_BURN_RATE_COLLECTOR)  # for non-multiprocess
+except ValueError:
+    pass
+
+# SQLite sidecar files that count toward a database's disk footprint.
+# The -wal file can grow large on its own when checkpoints fall behind;
+# -shm is small but included for completeness.
+_SQLITE_SIDECAR_SUFFIXES = ('-wal', '-shm')
+
+_SQLITE_DB_SIZE_HELP = (
+    'Total on-disk size in bytes (main file plus -wal/-shm sidecars) of '
+    'each SkyPilot SQLite database, by database category. Emitted only '
+    'for databases whose file exists on this host; deployments backed '
+    'by Postgres emit nothing. SQLite files never shrink without a '
+    'VACUUM (row deletion only frees pages for reuse), so expect this '
+    'to be monotone within a process lifetime for append-heavy '
+    'databases.')
+
+
+def _sqlite_db_paths() -> Dict[str, str]:
+    """Returns {db category: absolute path} for SkyPilot SQLite databases.
+
+    Resolved at scrape time rather than import time so that
+    SKY_RUNTIME_DIR / HOME are honored the same way the owning modules
+    resolve their own DB paths (see db_utils.DatabaseManager and
+    server_constants.API_SERVER_REQUEST_DB_PATH).
+    """
+    return {
+        'state': runtime_utils.get_runtime_dir_path('.sky/state.db'),
+        'spot_jobs': runtime_utils.get_runtime_dir_path('.sky/spot_jobs.db'),
+        'serve': runtime_utils.get_runtime_dir_path('.sky/serve/services.db'),
+        'config': runtime_utils.get_runtime_dir_path('.sky/config.db'),
+        'requests': runtime_utils.expanduser(
+            server_constants.API_SERVER_REQUEST_DB_PATH),
+    }
+
+
+class SqliteDBSizeCollector:
+    """Collector for the on-disk size of SkyPilot's SQLite databases.
+
+    Emits ``sky_apiserver_sqlite_db_size_bytes{db}`` for each SkyPilot
+    SQLite database present on this host, where the value is the total
+    disk footprint: the main file plus its ``-wal`` / ``-shm`` sidecars.
+    A series is emitted only when the main database file exists, so
+    deployments backed by Postgres emit nothing.
+
+    Rationale: SQLite files never shrink without a VACUUM — row GC (e.g.
+    the requests retention cleanup) only frees pages for reuse — so on
+    long-lived deployments append-heavy databases like requests.db can
+    grow unbounded within the server's lifetime. This gauge gives
+    operators the visibility to alert on file growth before DB latency
+    degrades.
+
+    A scrape costs only a handful of stat() calls, but the collector is
+    still wrapped in ResilientCollector like the others so a stat() that
+    blocks on a degraded filesystem cannot stall the /metrics scrape.
+    """
+
+    def describe(self):
+        yield prom_core.GaugeMetricFamily('sky_apiserver_sqlite_db_size_bytes',
+                                          _SQLITE_DB_SIZE_HELP,
+                                          labels=['db'])
+
+    def collect(self):
+        metric = prom_core.GaugeMetricFamily(
+            'sky_apiserver_sqlite_db_size_bytes',
+            _SQLITE_DB_SIZE_HELP,
+            labels=['db'])
+        for db, path in _sqlite_db_paths().items():
+            try:
+                size = os.path.getsize(path)
+            except OSError:
+                # Main file missing: this DB is not in use on this host
+                # (e.g. Postgres backend) — skip rather than emit a
+                # misleading 0.
+                continue
+            for suffix in _SQLITE_SIDECAR_SUFFIXES:
+                try:
+                    size += os.path.getsize(path + suffix)
+                except OSError:
+                    pass
+            metric.add_metric([db], size)
+        yield metric
+
+
+_SQLITE_DB_SIZE_COLLECTOR = _wrap_collector(SqliteDBSizeCollector())
+
+try:
+    prom.REGISTRY.register(_SQLITE_DB_SIZE_COLLECTOR)  # for non-multiprocess
 except ValueError:
     pass
 
@@ -890,6 +980,7 @@ def metrics() -> fastapi.Response:
         registry = prom.CollectorRegistry()
         multiprocess.MultiProcessCollector(registry)
         registry.register(_BURN_RATE_COLLECTOR)
+        registry.register(_SQLITE_DB_SIZE_COLLECTOR)
         registry.register(_WORKSPACE_USAGE_COLLECTOR)
         registry.register(_COLLECTOR_HEALTH_COLLECTOR)
         if _MANAGED_JOBS_COLLECTOR is not None:

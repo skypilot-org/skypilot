@@ -153,18 +153,12 @@ CLUSTER_TUNNEL_LOCK_TIMEOUT_SECONDS = 10.0
 # Remote dir that holds our runtime files.
 _REMOTE_RUNTIME_FILES_DIR = '~/.sky/.runtime_files'
 
-# The maximum size of a command line arguments is 128 KB, i.e. the command
-# executed with /bin/sh should be less than 128KB.
-# https://github.com/torvalds/linux/blob/master/include/uapi/linux/binfmts.h
-#
-# If a user have very long run or setup commands, the generated command may
-# exceed the limit, as we directly include scripts in job submission commands.
-# If the command is too long, we instead write it to a file, rsync and execute
-# it.
-#
-# We use 100KB as a threshold to be safe for other arguments that
-# might be added during ssh.
-_MAX_INLINE_SCRIPT_LENGTH = 100 * 1024
+# If a user has very long run or setup commands, the generated command may
+# exceed the local command line limit, as we directly include scripts in job
+# submission commands. If the command is too long, we instead write it to a
+# file, rsync and execute it. Same ceiling the runners use for a shell
+# transport, kept in one place so the two cannot drift.
+_MAX_INLINE_SCRIPT_LENGTH = command_runner.MAX_INLINE_COMMAND_LENGTH
 
 _ENDPOINTS_RETRY_MESSAGE = ('If the cluster was recently started, '
                             'please retry after a while.')
@@ -295,7 +289,14 @@ def _caller_is_viewer() -> bool:
 
 
 def is_command_length_over_limit(command: str, quote_levels: int = 2) -> bool:
-    """Check if the quoted command exceeds the inline command limit."""
+    """Check if the quoted command exceeds the local command line limit.
+
+    For a command SkyPilot is about to *transmit* to a cluster, use
+    ``CommandRunner.is_command_length_over_limit`` instead: the ceiling there
+    belongs to the runner's transport, which for Kubernetes is a request URL
+    rather than a shell. This function is the plain local-shell check, and is
+    called from generated code that runs on the cluster.
+    """
     for _ in range(quote_levels):
         command = shlex.quote(command)
     return len(command) > _MAX_INLINE_SCRIPT_LENGTH
@@ -1048,6 +1049,8 @@ def write_cluster_config(
         if auto_mounts_config:
             home_dir = kubernetes_utils.DEFAULT_HOME_DIRECTORY
             attached_auto_mount_volumes: Set[str] = set()
+            current_user_hash = common_utils.get_current_user().id
+            active_workspace = skypilot_config.get_active_workspace()
             for entry in auto_mounts_config:
                 volume_name = entry['volume_name']
                 mount_paths = entry.get('mount_paths', [])
@@ -1057,6 +1060,19 @@ def write_cluster_config(
                         f'Auto-mount volume {volume_name!r} not found in '
                         f'SkyPilot volume DB. Skipping. '
                         f'Create it with: sky volumes apply')
+                    continue
+                scope = entry.get('scope',
+                                  volume_utils.AutoMountScope.GLOBAL.value)
+                if not volume_utils.auto_mount_in_scope(
+                        scope,
+                        volume_user_hash=record['user_hash'],
+                        volume_workspace=record['workspace'],
+                        current_user_hash=current_user_hash,
+                        active_workspace=active_workspace):
+                    logger.debug(f'Auto-mount volume {volume_name!r} has scope '
+                                 f'{scope!r} and does not apply to this launch '
+                                 f'(user {current_user_hash!r}, workspace '
+                                 f'{active_workspace!r}). Skipping.')
                     continue
                 volume_config = record['handle']
                 # Only hostPath and ReadWriteMany PVC volumes support

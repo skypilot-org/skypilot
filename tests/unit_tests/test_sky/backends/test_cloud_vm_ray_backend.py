@@ -20,20 +20,13 @@ from sky.utils import locks
 from sky.utils import status_lib
 
 
-def test_command_length_accounts_for_slurm_user_quoting():
+def test_command_length_local_shell_limit():
+    # The local-shell check, still used by generated code that runs on the
+    # cluster. Per-transport limits live on CommandRunner instead; see
+    # tests/unit_tests/test_sky/utils/test_command_runner.py.
     command = "a'b" * 5000
     assert not backend_utils.is_command_length_over_limit(command)
     assert backend_utils.is_command_length_over_limit(command, quote_levels=4)
-
-    handle = MagicMock()
-    handle.launched_resources.cloud = clouds.Slurm()
-    handle.cached_cluster_info.provider_config = {'slurm_user': 'alice'}
-    assert cloud_vm_ray_backend.CloudVmRayBackend._inline_command_quote_levels(
-        handle) == 4
-
-    handle.cached_cluster_info.provider_config = {}
-    assert cloud_vm_ray_backend.CloudVmRayBackend._inline_command_quote_levels(
-        handle) == 3
 
 
 class TestCloudVmRayBackendTaskRedaction:
@@ -491,6 +484,13 @@ class TestIsMessageTooLong:
             (1,
              'error: unable to upgrade connection: <html><body><h1>400 Bad request</h1>',
              True),
+            # Signatures are matched as bare substrings against the whole
+            # setup log, which is user output, so generic network-failure text
+            # must not be in the table: a user script printing it and exiting 1
+            # would have its setup re-run from the top.
+            (1, 'read tcp 10.0.0.1:443: connection reset by peer', False),
+            (1, 'gzip: unexpected EOF', False),
+            (1, 'Error from server: ', False),
             # Case insensitivity
             (255, 'TOO LONG', True),
             (1, 'REQUEST HEADER FIELDS TOO LARGE', True),

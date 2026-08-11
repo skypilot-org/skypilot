@@ -705,3 +705,71 @@ class TestVolumeMountConflictChecker:
         identity = volume.VolumeMountConflictChecker._get_vol_source_identity(
             'runpod-network-volume')
         assert identity is None
+
+
+class TestAutoMountScope:
+    """Tests for auto_mount_in_scope."""
+
+    def test_global_applies_to_everyone(self):
+        assert volume.auto_mount_in_scope('global',
+                                          volume_user_hash='owner',
+                                          volume_workspace='ws-a',
+                                          current_user_hash='someone-else',
+                                          active_workspace='ws-b')
+
+    def test_personal_applies_to_owner(self):
+        assert volume.auto_mount_in_scope('personal',
+                                          volume_user_hash='owner',
+                                          volume_workspace='ws-a',
+                                          current_user_hash='owner',
+                                          active_workspace='ws-b')
+
+    def test_personal_skips_other_users(self):
+        assert not volume.auto_mount_in_scope('personal',
+                                              volume_user_hash='owner',
+                                              volume_workspace='ws-a',
+                                              current_user_hash='someone-else',
+                                              active_workspace='ws-a')
+
+    def test_personal_skips_when_owner_unknown(self):
+        """Volume records without user_hash never match personal scope."""
+        assert not volume.auto_mount_in_scope('personal',
+                                              volume_user_hash=None,
+                                              volume_workspace='ws-a',
+                                              current_user_hash=None,
+                                              active_workspace='ws-a')
+
+    def test_workspace_applies_within_workspace(self):
+        assert volume.auto_mount_in_scope('workspace',
+                                          volume_user_hash='owner',
+                                          volume_workspace='ws-a',
+                                          current_user_hash='someone-else',
+                                          active_workspace='ws-a')
+
+    def test_workspace_skips_other_workspaces(self):
+        assert not volume.auto_mount_in_scope('workspace',
+                                              volume_user_hash='owner',
+                                              volume_workspace='ws-a',
+                                              current_user_hash='owner',
+                                              active_workspace='ws-b')
+
+    def test_workspace_skips_when_workspace_unknown(self):
+        """Volume records without workspace never match workspace scope."""
+        assert not volume.auto_mount_in_scope('workspace',
+                                              volume_user_hash='owner',
+                                              volume_workspace=None,
+                                              current_user_hash='owner',
+                                              active_workspace=None)
+
+    def test_invalid_scope_raises(self):
+        with pytest.raises(ValueError, match='Invalid auto-mount scope'):
+            volume.auto_mount_in_scope('team',
+                                       volume_user_hash='owner',
+                                       volume_workspace='ws-a',
+                                       current_user_hash='owner',
+                                       active_workspace='ws-a')
+
+    def test_supported_scopes(self):
+        assert volume.AutoMountScope.supported_scopes() == [
+            'personal', 'workspace', 'global'
+        ]

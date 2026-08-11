@@ -37,6 +37,7 @@ from sky.utils import common_utils
 from sky.utils import config_utils
 from sky.utils import env_options
 from sky.utils import gpu_names
+from sky.utils import infra_utils
 from sky.utils import kubernetes_enums
 from sky.utils import plugin_extensions
 from sky.utils import schemas
@@ -5412,11 +5413,10 @@ def should_exclude_pod_from_gpu_allocation(pod) -> bool:
 def get_cleaned_context_and_cloud_str(
         context: Optional[str]) -> Tuple[Optional[str], str]:
     """Return the cleaned context and relevant cloud string from a context."""
-    cloud_str = 'kubernetes'
-    if context is not None and context.startswith('ssh-'):
-        cloud_str = 'ssh'
-        context = context[len('ssh-'):]
-    return context, cloud_str
+    # Lives in infra_utils so that low-level modules which cannot import this
+    # one (command_runner, which this module's import chain depends on) can
+    # resolve a context the same way. Re-exported here for existing callers.
+    return infra_utils.get_cleaned_context_and_cloud_str(context)
 
 
 def get_pvc_events(context: Optional[str],

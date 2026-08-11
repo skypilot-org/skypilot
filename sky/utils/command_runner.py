@@ -17,12 +17,14 @@ import threading
 import time
 from typing import (Any, Callable, Dict, Iterable, List, Optional, Tuple, Type,
                     Union)
+import urllib.parse
 import uuid
 
 import colorama
 
 from sky import exceptions
 from sky import sky_logging
+from sky import skypilot_config
 from sky.server import clean_env as clean_env_module
 from sky.skylet import constants
 from sky.skylet import log_lib
@@ -32,6 +34,7 @@ from sky.utils import context_utils
 from sky.utils import control_master_utils
 from sky.utils import env_options
 from sky.utils import git as git_utils
+from sky.utils import infra_utils
 from sky.utils import interactive_utils
 from sky.utils import subprocess_utils
 from sky.utils import timeline
@@ -44,6 +47,16 @@ _INTERACTIVE_AUTH_LOCK = threading.Lock()
 
 # Pattern to extract home directory from command output
 _HOME_DIR_PATTERN = re.compile(r'SKYPILOT_HOME_DIR: ([^\s\n]+)')
+
+# Largest command, in bytes, to inline into what a runner sends rather than
+# writing to a file and rsyncing it. The command runs via /bin/sh on the remote,
+# so the ceiling is the Linux command line size -- ARG_MAX is 128 KB -- and this
+# leaves headroom for the rest of the arguments the invocation adds.
+# https://github.com/torvalds/linux/blob/master/include/uapi/linux/binfmts.h
+# Transports that are not a shell override max_inline_command_length(); see
+# KubernetesCommandRunner, whose ceiling belongs to the proxy in front of the
+# Kubernetes API instead.
+MAX_INLINE_COMMAND_LENGTH = 100 * 1024
 
 # Rsync options
 # TODO(zhwu): This will print a per-file progress bar (with -P),
@@ -353,6 +366,35 @@ class CommandRunner:
     @property
     def node_id(self) -> str:
         return '-'.join(str(x) for x in self.node)
+
+    def _inline_command_quote_levels(self) -> int:
+        """Number of shell-quote layers an inline command passes through."""
+        # One for the remote login shell, one for the local shell.
+        return 2
+
+    def inline_command_size(self, command: str) -> int:
+        """Bytes an inlined ``command`` occupies in what this runner sends.
+
+        Runners transmit inline commands differently, so the byte count that
+        matters differs too -- see KubernetesCommandRunner for a transport where
+        it is not a shell-quoted length at all.
+        """
+        for _ in range(self._inline_command_quote_levels()):
+            command = shlex.quote(command)
+        return len(command)
+
+    def max_inline_command_length(self) -> int:
+        """Largest inline command, in ``inline_command_size`` bytes, to send.
+
+        Above this the caller should write the script to a file and rsync it
+        instead of inlining it into the command.
+        """
+        return MAX_INLINE_COMMAND_LENGTH
+
+    def is_command_length_over_limit(self, command: str) -> bool:
+        """Whether inlining ``command`` exceeds what this runner can send."""
+        limit = self.max_inline_command_length()
+        return self.inline_command_size(command) > limit
 
     def get_remote_home_dir(self) -> str:
         # Use pattern matching to extract home directory.
@@ -1549,6 +1591,38 @@ class KubernetesCommandRunner(CommandRunner):
         else:
             return f'pod/{self.pod_name}'
 
+    def inline_command_size(self, command: str) -> int:
+        """Bytes the command occupies in the ``kubectl exec`` request URL.
+
+        `kubectl exec` passes the command as repeated `command=` query
+        parameters, so an inlined script travels in the request URI and is
+        percent-encoded on the way -- which inflates a shell script by roughly
+        2x. Measuring shell-quoted bytes here would understate the request by
+        about that factor.
+        """
+        # Only one quote layer survives to kubectl's argv: the outer one this
+        # runner adds is consumed by the local shell.
+        return len(urllib.parse.quote(shlex.quote(command), safe=''))
+
+    def max_inline_command_length(self) -> int:
+        # Unlike a shell transport, the ceiling here belongs to whatever proxy
+        # fronts the Kubernetes API, not to the OS. Cloudflare-fronted endpoints
+        # (e.g. CoreWeave CKS) begin rejecting around 64 KB of URL, and
+        # nginx-ingress defaults to about the same for request line plus
+        # headers. Half of that leaves room for the path, the remaining query
+        # parameters and the headers.
+        default = 32 * 1024
+        # An SSH node pool runs through this runner too, but is configured
+        # under its own cloud and without the `ssh-` prefix on its name.
+        context, cloud_str = infra_utils.get_cleaned_context_and_cloud_str(
+            self.context)
+        limit = skypilot_config.get_effective_region_config(
+            cloud=cloud_str,
+            region=context,
+            keys=('max_inline_command_length',),
+            default_value=default)
+        return limit
+
     def port_forward_command(
             self,
             port_forward: List[Tuple[int, int]],
@@ -1968,6 +2042,11 @@ class SlurmLoginNodeCommandRunner(SSHCommandRunner):
         self.slurm_user = slurm_user
         self._use_sudo = ssh_user != 'root'
 
+    def _inline_command_quote_levels(self) -> int:
+        # wrap_command_as_user adds a `su --command` shell.
+        extra = 1 if self.slurm_user is not None else 0
+        return super()._inline_command_quote_levels() + extra
+
     def run(
         self,
         cmd: Union[str, List[str]],
@@ -2171,6 +2250,10 @@ exec {ssh_command} srun --unbuffered --quiet --overlap {extra_srun_args}\\
                                get_remote_home_dir=lambda: remote_home_dir,
                                timeout=timeout,
                                remote_rsync_command=remote_rsync_command)
+
+    def _inline_command_quote_levels(self) -> int:
+        # _run_via_srun adds an `srun ... bash -c` shell.
+        return super()._inline_command_quote_levels() + 1
 
     def _run_via_srun(
         self,
