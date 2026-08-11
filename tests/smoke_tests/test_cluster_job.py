@@ -2077,16 +2077,30 @@ done
 def test_container_logs_multinode_kubernetes():
     name = smoke_tests_utils.get_cluster_name()
     task_yaml = 'tests/test_yamls/test_k8s_logs.yaml'
+    # -A + a label selector + exact match on the skypilot-cluster-name
+    # annotation (not a substring grep on the pod name): the pods may not
+    # be in kubectl's default namespace (e.g. a workspace-scoped
+    # namespace), so a bare `kubectl get pods` can silently return
+    # nothing; and -A widens the search to every namespace, so a
+    # substring match risks picking up a same-named leftover pod from
+    # another run. xargs -r -L1 (not plain xargs): kubectl logs takes
+    # exactly one pod, but plain xargs concatenates every matching
+    # "-n ns pod" line into a single invocation.
+    list_pods = ('kubectl get pods -A -l skypilot-cluster-name --no-headers '
+                 '-o custom-columns="NS:.metadata.namespace,'
+                 'NAME:.metadata.name,'
+                 'CLUSTER:.metadata.annotations.skypilot-cluster-name"')
     head_logs = (
-        'all_pods=$(kubectl get pods); echo "$all_pods"; '
-        f'echo "$all_pods" | grep {name} | '
+        f'all_pods=$({list_pods}); echo "$all_pods"; '
+        f'echo "$all_pods" | awk -v n="{name}" \'$3==n\' | '
         # Exclude the cloud cmd execution pod.
-        'grep -v "cloud-cmd" |  '
+        'grep -v "cloud-cmd" | '
         'grep head | '
-        " awk '{print $1}' | xargs -I {} kubectl logs {}")
-    worker_logs = ('all_pods=$(kubectl get pods); echo "$all_pods"; '
-                   f'echo "$all_pods" | grep {name} |  grep worker | '
-                   " awk '{print $1}' | xargs -I {} kubectl logs {}")
+        """ awk '{print "-n " $1 " " $2}' | xargs -r -L1 kubectl logs""")
+    worker_logs = (
+        f'all_pods=$({list_pods}); echo "$all_pods"; '
+        f'echo "$all_pods" | awk -v n="{name}" \'$3==n\' | grep worker | '
+        """ awk '{print "-n " $1 " " $2}' | xargs -r -L1 kubectl logs""")
     with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
         test = smoke_tests_utils.Test(
             'container_logs_multinode_kubernetes',
@@ -2110,13 +2124,26 @@ def test_container_logs_multinode_kubernetes():
 def test_container_logs_two_jobs_kubernetes():
     name = smoke_tests_utils.get_cluster_name()
     task_yaml = 'tests/test_yamls/test_k8s_logs.yaml'
+    # -A + a label selector + exact match on the skypilot-cluster-name
+    # annotation (not a substring grep on the pod name): the pods may not
+    # be in kubectl's default namespace (e.g. a workspace-scoped
+    # namespace), so a bare `kubectl get pods` can silently return
+    # nothing; and -A widens the search to every namespace, so a
+    # substring match risks picking up a same-named leftover pod from
+    # another run. xargs -r -L1 (not plain xargs): kubectl logs takes
+    # exactly one pod, but plain xargs concatenates every matching
+    # "-n ns pod" line into a single invocation.
     pod_logs = (
-        'all_pods=$(kubectl get pods); echo "$all_pods"; '
-        f'echo "$all_pods" | grep {name} | '
+        'all_pods=$(kubectl get pods -A -l skypilot-cluster-name '
+        '--no-headers -o custom-columns="NS:.metadata.namespace,'
+        'NAME:.metadata.name,'
+        'CLUSTER:.metadata.annotations.skypilot-cluster-name"); '
+        'echo "$all_pods"; '
+        f'echo "$all_pods" | awk -v n="{name}" \'$3==n\' | '
         # Exclude the cloud cmd execution pod.
-        'grep -v "cloud-cmd" |  '
+        'grep -v "cloud-cmd" | '
         'grep head |'
-        " awk '{print $1}' | xargs -I {} kubectl logs {}")
+        """ awk '{print "-n " $1 " " $2}' | xargs -r -L1 kubectl logs""")
     with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
         test = smoke_tests_utils.Test(
             'test_container_logs_two_jobs_kubernetes',
@@ -2140,13 +2167,26 @@ def test_container_logs_two_jobs_kubernetes():
 def test_container_logs_two_simultaneous_jobs_kubernetes():
     name = smoke_tests_utils.get_cluster_name()
     task_yaml = 'tests/test_yamls/test_k8s_logs.yaml '
+    # -A + a label selector + exact match on the skypilot-cluster-name
+    # annotation (not a substring grep on the pod name): the pods may not
+    # be in kubectl's default namespace (e.g. a workspace-scoped
+    # namespace), so a bare `kubectl get pods` can silently return
+    # nothing; and -A widens the search to every namespace, so a
+    # substring match risks picking up a same-named leftover pod from
+    # another run. xargs -r -L1 (not plain xargs): kubectl logs takes
+    # exactly one pod, but plain xargs concatenates every matching
+    # "-n ns pod" line into a single invocation.
     pod_logs = (
-        'all_pods=$(kubectl get pods); echo "$all_pods"; '
-        f'echo "$all_pods" | grep {name} |  '
+        'all_pods=$(kubectl get pods -A -l skypilot-cluster-name '
+        '--no-headers -o custom-columns="NS:.metadata.namespace,'
+        'NAME:.metadata.name,'
+        'CLUSTER:.metadata.annotations.skypilot-cluster-name"); '
+        'echo "$all_pods"; '
+        f'echo "$all_pods" | awk -v n="{name}" \'$3==n\' | '
         # Exclude the cloud cmd execution pod.
-        'grep -v "cloud-cmd" |  '
+        'grep -v "cloud-cmd" | '
         'grep head |'
-        " awk '{print $1}' | xargs -I {} kubectl logs {}")
+        """ awk '{print "-n " $1 " " $2}' | xargs -r -L1 kubectl logs""")
     with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
         test = smoke_tests_utils.Test(
             'test_container_logs_two_simultaneous_jobs_kubernetes',
