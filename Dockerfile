@@ -141,7 +141,7 @@ COPY --from=process-source /skypilot /skypilot
 RUN cd /skypilot && \
     if [ "$INSTALL_FROM_SOURCE" = "true" ]; then \
         echo "Installing from source in editable mode" && \
-        ~/.local/bin/uv pip install -e ".[vast]" --system; \
+        ~/.local/bin/uv pip install -e ".[all]" --system; \
     else \
         echo "Installing from wheel file" && \
         WHEEL_FILE=$(ls dist/*skypilot*.whl 2>/dev/null | head -1) && \
@@ -150,7 +150,7 @@ RUN cd /skypilot && \
             ls -la /skypilot/dist/ && \
             exit 1; \
         fi && \
-        ~/.local/bin/uv pip install "${WHEEL_FILE}[vast]" --system && \
+        ~/.local/bin/uv pip install "${WHEEL_FILE}[all]" --system && \
         echo "Skipping dashboard build for wheel installation"; \
     fi && \
     # Cleanup all caches to reduce the image size
