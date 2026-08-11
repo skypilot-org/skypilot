@@ -15,6 +15,7 @@ from sky.utils import annotations
 
 
 def test_list_accelerators_skips_unavailable_vast_catalog(monkeypatch):
+    """Preserve errors when a caller requests the same unavailable cloud twice."""
 
     def import_catalog(module_name):
         if module_name == 'sky.catalog.vast_catalog':
@@ -31,6 +32,9 @@ def test_list_accelerators_skips_unavailable_vast_catalog(monkeypatch):
 
     with pytest.raises(catalog_common.CatalogFetchError, match='offline'):
         catalog.list_accelerators(clouds='vast')
+
+    with pytest.raises(catalog_common.CatalogFetchError, match='offline'):
+        catalog.list_accelerators(clouds=['vast', 'vast'])
 
 
 def test_rtxpro6000_in_common_gpus():

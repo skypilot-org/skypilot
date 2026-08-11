@@ -30,7 +30,7 @@ def _map_clouds_catalog(clouds: CloudFilter, method_name: str, *args, **kwargs):
     if single:
         clouds = [clouds]  # type: ignore
     skip_catalog_fetch_errors = (skip_catalog_fetch_errors and not single and
-                                 len(clouds) > 1)
+                                 len(set(clouds)) > 1)
 
     def _execute_catalog_method(cloud: str):
         try:
