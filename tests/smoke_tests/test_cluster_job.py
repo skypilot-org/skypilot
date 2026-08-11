@@ -30,6 +30,7 @@ import jinja2
 import pytest
 from smoke_tests import smoke_tests_utils
 from smoke_tests.docker import docker_utils
+import yaml
 
 import sky
 from sky import AWS
