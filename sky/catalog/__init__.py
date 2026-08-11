@@ -49,6 +49,8 @@ def _map_clouds_catalog(clouds: CloudFilter, method_name: str, *args, **kwargs):
         try:
             return method(*args, **kwargs)
         except Exception as exc:  # pylint: disable=broad-except
+            # Keep the import lazy to avoid importing every catalog on startup.
+            # pylint: disable-next=import-outside-toplevel
             from sky.catalog import common as catalog_common
             if not isinstance(exc, catalog_common.CatalogFetchError):
                 raise

@@ -11,6 +11,7 @@ from sky import exceptions
 from sky.provision import common
 from sky.provision.vast import instance as vast_instance
 from sky.provision.vast import utils as vast_utils
+from sky.utils import resources_utils
 from sky.utils import status_lib
 
 
