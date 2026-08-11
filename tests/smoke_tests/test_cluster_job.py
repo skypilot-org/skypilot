@@ -1890,6 +1890,65 @@ def test_auto_mount_not_ready_on_kubernetes():
         smoke_tests_utils.run_one_test(test)
 
 
+# ---------- A volume declared on the task must be ready ----------
+@pytest.mark.kubernetes
+def test_volume_not_ready_on_kubernetes():
+    """The reference behaviour the auto-mount check is modelled on.
+
+    Worth locking down: the whole point of the auto-mount check is that the two
+    ways of attaching a volume agree, so if this one ever stops refusing, they
+    have silently diverged again.
+
+    The claim can never bind because its storage class does not exist, so it
+    needs no real storage and fails within seconds.
+    """
+    name = smoke_tests_utils.get_cluster_name()
+    volume_name = f'{name}-nr'
+    volume_yaml = textwrap.dedent(f"""\
+        name: {volume_name}
+        type: k8s-pvc
+        size: 1Gi
+        config:
+          access_mode: ReadWriteMany
+          storage_class_name: skypilot-no-such-storage-class
+    """)
+    task_yaml = textwrap.dedent(f"""\
+        resources:
+          cpus: 0.1+
+        volumes:
+          /mnt/data: {volume_name}
+        run: echo should not run
+    """)
+    with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w',
+                                     delete=False) as vol_f, \
+         tempfile.NamedTemporaryFile(suffix='.yaml', mode='w',
+                                     delete=False) as task_f:
+        vol_f.write(volume_yaml)
+        vol_f.flush()
+        task_f.write(task_yaml)
+        task_f.flush()
+        test = smoke_tests_utils.Test(
+            'volume_not_ready_on_kubernetes',
+            [
+                f'sky volumes apply -y {vol_f.name}',
+                f'vols=$(sky volumes ls) && echo "$vols" && '
+                f'echo "$vols" | grep {volume_name} | grep NOT_READY',
+                f'! sky launch -y -c {name} --infra kubernetes {task_f.name} '
+                f'> {name}-refused.log 2>&1; '
+                f'cat {name}-refused.log && '
+                f'grep -q "not ready" {name}-refused.log && '
+                f'grep -q "{volume_name}" {name}-refused.log',
+                # Refused before provisioning, so no cluster was recorded.
+                f'! sky status 2>/dev/null | grep -q "{name}"',
+            ],
+            smoke_tests_utils.chain_teardown(
+                f'sky down -y {name} || true',
+                f'sky volumes delete {volume_name} -y || true',
+                f'rm -f {name}-refused.log'),
+        )
+        smoke_tests_utils.run_one_test(test)
+
+
 # ---------- Container logs from task on Kubernetes ----------
 
 

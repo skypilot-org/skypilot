@@ -4206,3 +4206,89 @@ def test_managed_job_volume_not_ready():
             timeout=20 * 60,
         )
         smoke_tests_utils.run_one_test(test)
+
+
+# ---------- Managed job with a not-ready auto-mount volume ----------
+@pytest.mark.kubernetes
+def test_managed_job_auto_mount_not_ready():
+    """The auto-mount path is separate from a volume declared on the task, so
+    it needs its own check that a managed job stops instead of retrying.
+
+    Consolidation mode only. With a separate controller cluster, `auto_mounts`
+    applies to the controller's own launch too -- it is provisioned through the
+    same code path -- so a broken volume stops `sky jobs launch` before any job
+    exists to reach FAILED_PRECHECKS. In consolidation mode the API server is
+    the controller, so the job cluster's launch is the first one the volume can
+    affect, which is what this is testing.
+    """
+    if not smoke_tests_utils.server_side_is_consolidation_mode():
+        pytest.skip('Needs consolidation mode: with a separate controller, a '
+                    'broken auto-mount volume blocks the controller launch '
+                    'rather than the job.')
+
+    name = smoke_tests_utils.get_cluster_name()
+    volume_name = f'{name}-am'
+    volume_yaml = textwrap.dedent(f"""\
+        name: {volume_name}
+        type: k8s-pvc
+        size: 1Gi
+        config:
+          access_mode: ReadWriteMany
+          storage_class_name: skypilot-no-such-storage-class
+    """)
+    task_yaml = textwrap.dedent("""\
+        resources:
+          cpus: 0.1+
+        run: echo should not run
+    """)
+    config_dict = {
+        'kubernetes': {
+            'auto_mounts': [{
+                'volume_name': volume_name,
+                'mount_paths': ['/mnt/auto'],
+            }],
+        },
+    }
+    with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w',
+                                     delete=False) as vol_f, \
+         tempfile.NamedTemporaryFile(suffix='.yaml', mode='w',
+                                     delete=False) as task_f, \
+         tempfile.NamedTemporaryFile(suffix='.yaml', mode='w',
+                                     delete=False) as cfg_f:
+        vol_f.write(volume_yaml)
+        vol_f.flush()
+        task_f.write(task_yaml)
+        task_f.flush()
+        yaml_utils.dump_yaml(cfg_f.name, config_dict)
+        cfg_f.flush()
+        test = smoke_tests_utils.Test(
+            'managed_job_auto_mount_not_ready',
+            [
+                # Create the volume without auto_mounts in scope, so this step
+                # cannot be tripped up by the entry it is about to become.
+                smoke_tests_utils.with_config(
+                    f'sky volumes apply -y {vol_f.name}', '/dev/null'),
+                f'vols=$(sky volumes ls) && echo "$vols" && '
+                f'echo "$vols" | grep {volume_name} | grep NOT_READY',
+                f'sky jobs launch -n {name} --infra kubernetes '
+                f'{smoke_tests_utils.LOW_RESOURCE_ARG} {task_f.name} -y -d',
+                # FAILED_PRECHECKS rather than a retry outcome is the point:
+                # the retry path ends in FAILED_NO_RESOURCE or the ceiling.
+                smoke_tests_utils.
+                get_cmd_wait_until_managed_job_status_contains_matching_job_name(
+                    job_name=name,
+                    job_status=[sky.ManagedJobStatus.FAILED_PRECHECKS],
+                    timeout=300),
+                f'logs=$(sky jobs logs --controller -n {name} --no-follow); '
+                f'echo "$logs"; echo "$logs" | grep -i "not ready"; '
+                f'echo "$logs" | grep "{volume_name}"',
+            ],
+            smoke_tests_utils.chain_teardown(
+                f'sky jobs cancel -y -n {name}',
+                f'sky volumes delete {volume_name} -y || true'),
+            env={
+                skypilot_config.ENV_VAR_GLOBAL_CONFIG: cfg_f.name,
+            },
+            timeout=20 * 60,
+        )
+        smoke_tests_utils.run_one_test(test)
