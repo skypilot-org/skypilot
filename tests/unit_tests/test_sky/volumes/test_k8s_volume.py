@@ -2181,6 +2181,85 @@ class TestGetAllVolumesErrors:
         assert 'ProvisioningFailed' in errors['test-vol']
         assert 'below the 1Ti minimum' in errors['test-vol']
 
+    @patch('sky.provision.kubernetes.volume._get_context_namespace')
+    @patch('sky.adaptors.kubernetes.core_api')
+    def test_same_pvc_name_in_two_namespaces_is_not_confused(
+            self, mock_core_api, mock_get_context):
+        """Claims are resolved per (context, namespace): the same claim name in
+        another namespace belongs to a different volume, and reading one's phase
+        as the other's would report the wrong volume broken."""
+        by_volume = {'vol-a': ('ctx', 'ns-a'), 'vol-b': ('ctx', 'ns-b')}
+        mock_get_context.side_effect = lambda cfg: by_volume[cfg.name]
+
+        bound = MockPVC('shared-name', 'ns-a')
+        bound.status.phase = 'Bound'
+        lost = MockPVC('shared-name', 'ns-b')
+        lost.status.phase = 'Lost'
+
+        def _list(namespace, **kwargs):
+            del kwargs
+            result = Mock()
+            result.items = [bound] if namespace == 'ns-a' else [lost]
+            return result
+
+        mock_core_api.return_value.list_namespaced_persistent_volume_claim.side_effect = _list
+
+        def _config(name):
+            return models.VolumeConfig(
+                _version=1,
+                name=name,
+                type='k8s-pvc',
+                cloud='kubernetes',
+                region='ctx',
+                zone=None,
+                name_on_cloud='shared-name',
+                size='10',
+                config={},
+            )
+
+        errors, failed = k8s_volume.get_all_volumes_errors(
+            [_config('vol-a'), _config('vol-b')])
+
+        assert failed == set()
+        assert errors['vol-a'] is None
+        assert errors['vol-b'] is not None
+        assert 'Lost' in errors['vol-b']
+
+    @patch('sky.provision.kubernetes.volume._get_context_namespace')
+    @patch('sky.adaptors.kubernetes.core_api')
+    def test_one_broken_volume_among_several_is_reported(
+            self, mock_core_api, mock_get_context):
+        mock_get_context.return_value = ('my-context', 'my-namespace')
+
+        good = MockPVC('good-pvc', 'my-namespace')
+        good.status.phase = 'Bound'
+        bad = MockPVC('bad-pvc', 'my-namespace')
+        bad.status.phase = 'Lost'
+
+        listing = Mock()
+        listing.items = [good, bad]
+        mock_core_api.return_value.list_namespaced_persistent_volume_claim.return_value = listing
+
+        def _config(name, pvc):
+            return models.VolumeConfig(
+                _version=1,
+                name=name,
+                type='k8s-pvc',
+                cloud='kubernetes',
+                region='my-context',
+                zone=None,
+                name_on_cloud=pvc,
+                size='10',
+                config={'namespace': 'my-namespace'},
+            )
+
+        errors, _ = k8s_volume.get_all_volumes_errors(
+            [_config('good-vol', 'good-pvc'),
+             _config('bad-vol', 'bad-pvc')])
+
+        assert errors['good-vol'] is None
+        assert errors['bad-vol'] is not None
+
 
 class TestFindPVCByNameOrLabel:
     """Tests for _find_pvc_by_name_or_label function."""

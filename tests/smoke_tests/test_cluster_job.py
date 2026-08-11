@@ -1787,6 +1787,109 @@ def test_hostpath_volume_on_kubernetes():
         smoke_tests_utils.run_one_test(test)
 
 
+# ---------- Auto-mount refuses a volume that is not ready ----------
+@pytest.mark.kubernetes
+def test_auto_mount_not_ready_on_kubernetes():
+    """A volume whose storage cannot be provisioned must stop the launch.
+
+    Without this, the volume is mounted anyway and the pod sits unschedulable
+    with nothing pointing at the volume as the cause -- which is how it showed
+    up in the field, as a job stuck in creating.
+
+    The claim here can never bind because its storage class does not exist, so
+    it fails within seconds and needs no real storage.
+    """
+    name = smoke_tests_utils.get_cluster_name()
+    broken_volume = f'{name}-broken'
+    good_volume = f'{name}-hp'
+    host_path = f'/tmp/skypilot-automount-{name}'
+    broken_yaml = textwrap.dedent(f"""\
+        name: {broken_volume}
+        type: k8s-pvc
+        size: 1Gi
+        config:
+          access_mode: ReadWriteMany
+          storage_class_name: skypilot-no-such-storage-class
+    """)
+    good_yaml = textwrap.dedent(f"""\
+        name: {good_volume}
+        type: k8s-hostpath
+        config:
+          host_path: {host_path}
+    """)
+    task_yaml = textwrap.dedent("""\
+        resources:
+          cpus: 0.1+
+        run: |
+          set -e
+          test -d /mnt/auto
+          touch /mnt/auto/probe
+          echo auto mount ok
+    """)
+    broken_config = textwrap.dedent(f"""\
+        kubernetes:
+          auto_mounts:
+            - volume_name: {broken_volume}
+              mount_paths: [/mnt/auto]
+    """)
+    good_config = textwrap.dedent(f"""\
+        kubernetes:
+          auto_mounts:
+            - volume_name: {good_volume}
+              mount_paths: [/mnt/auto]
+    """)
+    with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w',
+                                     delete=False) as broken_f, \
+         tempfile.NamedTemporaryFile(suffix='.yaml', mode='w',
+                                     delete=False) as good_f, \
+         tempfile.NamedTemporaryFile(suffix='.yaml', mode='w',
+                                     delete=False) as task_f, \
+         tempfile.NamedTemporaryFile(suffix='.yaml', mode='w',
+                                     delete=False) as broken_cfg_f, \
+         tempfile.NamedTemporaryFile(suffix='.yaml', mode='w',
+                                     delete=False) as good_cfg_f:
+        for handle, content in ((broken_f, broken_yaml), (good_f, good_yaml),
+                                (task_f, task_yaml),
+                                (broken_cfg_f, broken_config), (good_cfg_f,
+                                                                good_config)):
+            handle.write(content)
+            handle.flush()
+        test = smoke_tests_utils.Test(
+            'auto_mount_not_ready_on_kubernetes',
+            [
+                f'sky volumes apply -y {broken_f.name}',
+                f'sky volumes apply -y {good_f.name}',
+                # The claim cannot be provisioned, so the volume is reported
+                # unusable without waiting for the refresh daemon.
+                f'vols=$(sky volumes ls) && echo "$vols" && '
+                f'echo "$vols" | grep {broken_volume} | grep NOT_READY',
+                # Auto-mounting it must refuse the launch, name the volume, and
+                # leave no cluster behind.
+                smoke_tests_utils.with_config(
+                    f'! sky launch -y -c {name} --infra kubernetes '
+                    f'{task_f.name} > {name}-refused.log 2>&1; '
+                    f'cat {name}-refused.log && '
+                    f'grep -q "not ready" {name}-refused.log && '
+                    f'grep -q "{broken_volume}" {name}-refused.log',
+                    broken_cfg_f.name),
+                # Refused before provisioning, so no cluster was recorded.
+                f'! sky status 2>/dev/null | grep -q "{name}"',
+                # A usable auto-mount volume still mounts, so the check is not
+                # simply refusing everything.
+                smoke_tests_utils.with_config(
+                    f'sky launch -y -c {name} --infra kubernetes '
+                    f'{task_f.name}', good_cfg_f.name),
+                f'sky logs {name} 1 --status',
+                f'sky logs {name} 1 | grep "auto mount ok"',
+            ],
+            smoke_tests_utils.chain_teardown(
+                f'sky down -y {name}',
+                f'sky volumes delete {broken_volume} {good_volume} -y || true',
+                f'rm -f {name}-refused.log'),
+        )
+        smoke_tests_utils.run_one_test(test)
+
+
 # ---------- Container logs from task on Kubernetes ----------
 
 
