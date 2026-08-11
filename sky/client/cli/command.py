@@ -4059,8 +4059,10 @@ def check(infra_list: Tuple[str],
         api_server_url = server_common.get_server_url()
         click.echo()
         click.echo(
-            click.style(f'Using SkyPilot API server: {api_server_url}',
-                        fg='green'))
+            click.style(
+                'Using SkyPilot API server: '
+                f'{server_common.redact_url_password(api_server_url)}',
+                fg='green'))
 
 
 @cli.command()
@@ -8207,7 +8209,10 @@ def api_info(output_format: str):
                        'server: sky api start')
         else:
             click.echo(
-                f'Could not connect to SkyPilot API server at {url}\n'
+                'Could not connect to SkyPilot API server at '
+                f'{server_common.redact_url_password(url)}\n'
+                # The hint below is meant to be copy-pasted, so it keeps the
+                # real URL -- redacting it would hand the user a broken command.
                 f'{ux_utils.INDENT_SYMBOL}To re-login to the API server: '
                 f'sky api login --relogin -e {url}\n'
                 f'{ux_utils.INDENT_LAST_SYMBOL}To logout the server: '
@@ -8256,7 +8261,8 @@ def api_info(output_format: str):
             location = f'Endpoint set via {config_path}'
     else:
         location = 'Endpoint set to default local API server.'
-    click.echo(f'Using SkyPilot API server and dashboard: {url}\n'
+    click.echo(f'Using SkyPilot API server and dashboard: '
+               f'{server_common.redact_url_password(url)}\n'
                f'{ux_utils.INDENT_SYMBOL}Status: {api_server_info.status}, '
                f'commit: {api_server_info.commit}, '
                f'version: {api_server_info.version}\n'

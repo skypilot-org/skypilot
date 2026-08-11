@@ -432,6 +432,18 @@ class BasicAuthMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
         return await call_next(request)
 
 
+# Minimum seconds between persisted last_used_at updates per service-account
+# token. The update is an UPDATE on the token's single DB row, so Postgres
+# row-level locking serializes it across the whole deployment; with an
+# unthrottled per-request write, a high-concurrency SDK fleet sharing one
+# token queues on that row lock, each waiter pinning an auth-executor thread
+# and a sync DB connection, until the auth executor exhausts and unrelated
+# requests fail with retryable 503s. last_used_at is an audit/freshness
+# field, so interval granularity is sufficient; each server process writes at
+# most once per interval per token.
+_SA_LAST_USED_UPDATE_INTERVAL_SECONDS = 60
+
+
 @middleware_utils.websocket_aware
 class BearerTokenMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
     """Middleware to handle Bearer Token Auth (Service Accounts)."""
@@ -561,15 +573,29 @@ class BearerTokenMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
                 return _bearer_auth_401_response(
                     {'detail': 'Service account user no longer exists'})
 
-            # Update last used timestamp for token tracking. Use the
-            # DB row's token_id (not the JWT's): after rotation the JWT
-            # carries a different token_id than the DB row.
-            try:
-                await db_lookup.call_with_deadline(
-                    global_user_state.update_service_account_token_last_used,
-                    token_row['token_id'])
-            except Exception as e:  # pylint: disable=broad-except
-                logger.debug(f'Failed to update token last used time: {e}')
+            # Update last used timestamp for token tracking, skipped while
+            # the row's last_used_at is fresher than
+            # _SA_LAST_USED_UPDATE_INTERVAL_SECONDS (see the constant for
+            # why an unthrottled per-request write is dangerous). This
+            # pre-check filters the steady state for free (the row is
+            # already in hand); the interval is ALSO passed to the update,
+            # whose WHERE clause re-checks staleness atomically, so the
+            # in-flight requests that all read a stale timestamp at an
+            # interval boundary collapse to one real write instead of
+            # herding on the row lock. Use the DB row's token_id (not the
+            # JWT's): after rotation the JWT carries a different token_id
+            # than the DB row.
+            last_used_at = token_row.get('last_used_at')
+            if (last_used_at is None or time.time() - last_used_at >=
+                    _SA_LAST_USED_UPDATE_INTERVAL_SECONDS):
+                try:
+                    await db_lookup.call_with_deadline(
+                        global_user_state.
+                        update_service_account_token_last_used,
+                        token_row['token_id'],
+                        _SA_LAST_USED_UPDATE_INTERVAL_SECONDS)
+                except Exception as e:  # pylint: disable=broad-except
+                    logger.debug(f'Failed to update token last used time: {e}')
 
             # Set the authenticated user
             auth_user = models.User(id=user_id,

@@ -3277,15 +3277,37 @@ def get_user_service_account_tokens(user_hash: str) -> List[Dict[str, Any]]:
 
 
 @metrics_lib.time_me
-def update_service_account_token_last_used(token_id: str) -> None:
-    """Update the last_used_at timestamp for a service account token."""
+def update_service_account_token_last_used(token_id: str,
+                                           min_interval_seconds: int = 0
+                                          ) -> None:
+    """Update the last_used_at timestamp for a service account token.
+
+    With ``min_interval_seconds > 0`` the UPDATE is conditional: it only
+    lands when the stored ``last_used_at`` is NULL or older than the
+    interval. The staleness check lives in the WHERE clause (not in the
+    caller) so concurrent callers that all read a stale timestamp cannot
+    herd on the row at an interval boundary: the first transaction to
+    commit refreshes the row, and every other caller's UPDATE re-evaluates
+    against the committed row, matches zero rows, and writes nothing (no
+    redundant WAL/dead-tuple churn).
+    """
     engine = _db_manager.get_engine()
     last_used_at = int(time.time())
 
     with orm.Session(engine) as session:
-        session.query(service_account_token_table).filter_by(
-            token_id=token_id).update(
-                {service_account_token_table.c.last_used_at: last_used_at})
+        query = session.query(service_account_token_table).filter_by(
+            token_id=token_id)
+        if min_interval_seconds > 0:
+            query = query.filter(
+                sqlalchemy.or_(
+                    service_account_token_table.c.last_used_at.is_(None),
+                    service_account_token_table.c.last_used_at <
+                    last_used_at - min_interval_seconds))
+        # synchronize_session=False: the session is scoped to this single
+        # statement, and the conditional criteria above are not evaluatable
+        # in-memory by the default strategy.
+        query.update({service_account_token_table.c.last_used_at: last_used_at},
+                     synchronize_session=False)
         session.commit()
 
 
