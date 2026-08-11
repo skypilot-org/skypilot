@@ -4140,6 +4140,7 @@ def test_managed_jobs_emergency_recovery(generic_cloud: str):
 
 
 # ---------- Managed job with a volume that is not ready ----------
+@pytest.mark.managed_jobs
 @pytest.mark.kubernetes
 def test_managed_job_volume_not_ready():
     """A not-ready volume must fail the job, not send it round the retry loop.
@@ -4209,6 +4210,7 @@ def test_managed_job_volume_not_ready():
 
 
 # ---------- Managed job with a not-ready auto-mount volume ----------
+@pytest.mark.managed_jobs
 @pytest.mark.kubernetes
 def test_managed_job_auto_mount_not_ready():
     """The auto-mount path is separate from a volume declared on the task, so
