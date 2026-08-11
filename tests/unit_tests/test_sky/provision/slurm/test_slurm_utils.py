@@ -420,6 +420,11 @@ class _FakeSlurmClient:
             raise self._details_error
         return self._node_details
 
+    def get_node_inventory(self):
+        if self._details_error is not None:
+            return self._node_infos, {}
+        return self._node_infos, self._node_details
+
     def get_all_jobs_gres(self):
         self.jobs_gres_calls += 1
         return self._jobs_gres
@@ -597,7 +602,7 @@ class TestGetSlurmNodeInfoListEnrichment:
         from sky.adaptors import slurm as slurm_adaptor
 
         client = mock.Mock()
-        client.info_nodes.return_value = [
+        node_infos = [
             slurm_adaptor.NodeInfo(node='node1',
                                    state='mix',
                                    gres='gpu:gh200:1',
@@ -607,9 +612,10 @@ class TestGetSlurmNodeInfoListEnrichment:
         ]
         client.get_all_jobs_gres.return_value = {}
         if isinstance(node_details_result, Exception):
-            client.get_all_node_details.side_effect = node_details_result
+            client.get_node_inventory.return_value = (node_infos, {})
         else:
-            client.get_all_node_details.return_value = node_details_result
+            client.get_node_inventory.return_value = (node_infos,
+                                                      node_details_result)
 
         ssh_config = mock.Mock()
         ssh_config.lookup.return_value = {
@@ -684,3 +690,117 @@ class TestGetSlurmNodeInfoListEnrichment:
         assert node['node_name'] == 'node1'
         assert node['free_vcpus'] is None
         assert node['cpu_load'] is None
+
+
+class TestGetSlurmClusterInventory:
+    """Tests for the cluster-wide Slurm inventory API."""
+
+    def test_reuses_snapshot_jobs_for_gpu_accounting(self, monkeypatch):
+        node_info = slurm_adaptor.NodeInfo(node='node1',
+                                           state='mix',
+                                           gres='gpu:h100:8',
+                                           cpus=64,
+                                           memory_gb=800.0,
+                                           partition='gpu*')
+        job = slurm_adaptor.JobGresInfo(job_id='123',
+                                        job_name='train',
+                                        user='alice',
+                                        gres_str='gpu:h100:2')
+        snapshot = slurm_adaptor.SlurmInventorySnapshot(
+            node_infos=[node_info],
+            node_details={},
+            jobs={'node1': [job]},
+            partitions=[
+                slurm_adaptor.SlurmPartition(name='gpu',
+                                             is_default=True,
+                                             maxtime=None,
+                                             default_time=None)
+            ])
+        client = mock.Mock()
+        client.get_inventory_snapshot.return_value = snapshot
+        client.get_all_jobs_gres.side_effect = AssertionError(
+            'snapshot jobs should satisfy GPU accounting')
+        monkeypatch.setattr(utils, '_get_slurm_inventory_client',
+                            mock.Mock(return_value=client))
+
+        inventory = utils.get_slurm_cluster_inventory('cluster-a')
+
+        client.get_inventory_snapshot.assert_called_once_with()
+        assert inventory.nodes[0]['free_gpus'] == 6
+        assert inventory.jobs == {'node1': [job]}
+        assert inventory.default_partition == 'gpu'
+
+    def test_failed_snapshot_jobs_fall_back_for_gpu_accounting(
+            self, monkeypatch):
+        node_info = slurm_adaptor.NodeInfo(node='node1',
+                                           state='mix',
+                                           gres='gpu:h100:8',
+                                           cpus=8,
+                                           memory_gb=32.0,
+                                           partition='gpu')
+        snapshot = slurm_adaptor.SlurmInventorySnapshot(node_infos=[node_info],
+                                                        node_details={},
+                                                        jobs=None,
+                                                        partitions=None)
+        client = mock.Mock()
+        client.get_inventory_snapshot.return_value = snapshot
+        client.get_all_jobs_gres.return_value = {'node1': ['gpu:h100:2']}
+        monkeypatch.setattr(utils, '_get_slurm_inventory_client',
+                            mock.Mock(return_value=client))
+
+        inventory = utils.get_slurm_cluster_inventory('cluster-a')
+
+        assert len(inventory.nodes) == 1
+        assert inventory.nodes[0]['free_gpus'] == 6
+        assert inventory.jobs == {}
+        assert inventory.default_partition is None
+        client.get_all_jobs_gres.assert_called_once_with()
+
+    def test_failed_snapshot_jobs_do_not_fall_back_when_tres_is_complete(
+            self, monkeypatch):
+        node_info = slurm_adaptor.NodeInfo(node='node1',
+                                           state='mix',
+                                           gres='gpu:h100:8',
+                                           cpus=64,
+                                           memory_gb=800.0,
+                                           partition='gpu')
+        snapshot = slurm_adaptor.SlurmInventorySnapshot(
+            node_infos=[node_info],
+            node_details={
+                'node1': {
+                    'CfgTRES': 'cpu=64,gres/gpu=8',
+                    'AllocTRES': 'cpu=32,gres/gpu=4',
+                }
+            },
+            jobs=None,
+            partitions=None)
+        client = mock.Mock()
+        client.get_inventory_snapshot.return_value = snapshot
+        monkeypatch.setattr(utils, '_get_slurm_inventory_client',
+                            mock.Mock(return_value=client))
+
+        inventory = utils.get_slurm_cluster_inventory('cluster-a')
+
+        assert inventory.nodes[0]['free_gpus'] == 4
+        assert inventory.jobs == {}
+        client.get_all_jobs_gres.assert_not_called()
+
+    def test_failed_snapshot_and_fallback_jobs_propagate(self, monkeypatch):
+        node_info = slurm_adaptor.NodeInfo(node='node1',
+                                           state='mix',
+                                           gres='gpu:h100:8',
+                                           cpus=64,
+                                           memory_gb=800.0,
+                                           partition='gpu')
+        snapshot = slurm_adaptor.SlurmInventorySnapshot(node_infos=[node_info],
+                                                        node_details={},
+                                                        jobs=None,
+                                                        partitions=None)
+        client = mock.Mock()
+        client.get_inventory_snapshot.return_value = snapshot
+        client.get_all_jobs_gres.side_effect = RuntimeError('squeue failed')
+        monkeypatch.setattr(utils, '_get_slurm_inventory_client',
+                            mock.Mock(return_value=client))
+
+        with pytest.raises(RuntimeError, match='squeue failed'):
+            utils.get_slurm_cluster_inventory('cluster-a')
