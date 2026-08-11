@@ -4143,18 +4143,19 @@ def test_managed_jobs_emergency_recovery(generic_cloud: str):
 @pytest.mark.managed_jobs
 @pytest.mark.kubernetes
 def test_managed_job_volume_not_ready():
-    """A not-ready volume must fail the job, not send it round the retry loop.
+    """Submitting a managed job against a not-ready volume is refused outright.
 
-    Retrying cannot make a volume ready, so a job that keeps re-attempting the
-    same launch just hides the reason -- which is how this looked in the field,
-    as a job sitting in creating with nothing pointing at the volume.
+    A volume declared on the task is resolved while the request is still being
+    validated (`resolve_and_validate_volumes` in the jobs server), so the job is
+    never recorded and there is no status for it to reach -- the submission
+    itself fails, exactly as it does for a cluster.
 
-    FAILED_PRECHECKS is the assertion that matters: the retry path ends in
-    FAILED_NO_RESOURCE or the retry ceiling instead, so reaching
-    FAILED_PRECHECKS is what shows the job stopped on the first answer.
+    That is what separates it from an auto-mounted volume, which the controller
+    only resolves when it launches the job cluster, and which therefore does end
+    in FAILED_PRECHECKS. See test_managed_job_auto_mount_not_ready.
 
-    The claim here can never bind because its storage class does not exist, so
-    it needs no real storage and fails within seconds.
+    The claim can never bind because nothing provisions its storage class, so it
+    needs no real storage and fails within seconds.
     """
     name = smoke_tests_utils.get_cluster_name()
     volume_name = f'{name}-nr'
@@ -4190,24 +4191,21 @@ def test_managed_job_volume_not_ready():
                 f'{vol_f.name}',
                 f'vols=$(sky volumes ls) && echo "$vols" && '
                 f'echo "$vols" | grep {volume_name} | grep NOT_READY',
-                f'sky jobs launch -n {name} {smoke_tests_utils.AGENT_K8S_INFRA} '
-                f'{smoke_tests_utils.LOW_RESOURCE_ARG} {task_f.name} -y -d',
-                smoke_tests_utils.
-                get_cmd_wait_until_managed_job_status_contains_matching_job_name(
-                    job_name=name,
-                    job_status=[sky.ManagedJobStatus.FAILED_PRECHECKS],
-                    timeout=300),
-                # The reason has to name the volume, or the status alone leaves
-                # the user guessing.
-                f'logs=$(sky jobs logs --controller -n {name} --no-follow); '
-                f'echo "$logs"; echo "$logs" | grep -i "not ready"; '
-                f'echo "$logs" | grep "{volume_name}"',
+                f'! sky jobs launch -n {name} '
+                f'{smoke_tests_utils.AGENT_K8S_INFRA} '
+                f'{smoke_tests_utils.LOW_RESOURCE_ARG} {task_f.name} -y -d '
+                f'> {name}-refused.log 2>&1; '
+                f'cat {name}-refused.log && '
+                f'grep -q "not ready" {name}-refused.log && '
+                f'grep -q "{volume_name}" {name}-refused.log',
+                # Refused while validating, so no job was ever recorded.
+                f'! sky jobs queue -a 2>/dev/null | grep -q "{name}"',
             ],
             smoke_tests_utils.chain_teardown(
-                f'sky jobs cancel -y -n {name}',
+                f'sky jobs cancel -y -n {name} || true',
                 f'sky volumes delete {volume_name} -y || true',
                 smoke_tests_utils.delete_unprovisionable_storage_class_cmd(
-                    name)),
+                    name), f'rm -f {name}-refused.log'),
             env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
             timeout=20 * 60,
         )
