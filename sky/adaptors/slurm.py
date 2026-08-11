@@ -91,12 +91,6 @@ class SlurmInventorySnapshot(NamedTuple):
     partitions: Optional[List[SlurmPartition]]
 
 
-class _CommandOutput(NamedTuple):
-    returncode: int
-    stdout: str
-    stderr: str
-
-
 def _parse_maxtime(line: str) -> Optional[int]:
     """Parse the maximum time a job can run from the scontrol output."""
     maxtime_match = _MAXTIME_REGEX.search(line)
@@ -294,7 +288,8 @@ class SlurmClient:
                                 separate_stderr=True,
                                 stream_logs=False)
 
-    def _run_slurm_cmds(self, commands: Sequence[str]) -> List[_CommandOutput]:
+    def _run_slurm_cmds(self,
+                        commands: Sequence[str]) -> List[Tuple[int, str, str]]:
         """Run independent commands concurrently in one remote invocation."""
         if not commands:
             return []
@@ -370,8 +365,7 @@ class SlurmClient:
             stdout_end = offset + stdout_size
             command_stdout = output_bytes[offset:stdout_end].decode('utf-8')
             command_stderr = output_bytes[stdout_end:frame_end].decode('utf-8')
-            results.append(
-                _CommandOutput(returncode, command_stdout, command_stderr))
+            results.append((returncode, command_stdout, command_stderr))
             offset = frame_end
         if offset != len(output_bytes):
             raise RuntimeError('Unexpected output from concurrent Slurm '
@@ -476,24 +470,23 @@ class SlurmClient:
             self) -> Tuple[List[NodeInfo], Dict[str, Dict[str, str]]]:
         """Get node information and details in one remote invocation."""
         outputs = self._run_slurm_cmds([_INFO_NODES_CMD, _ALL_NODE_DETAILS_CMD])
-        node_output = outputs[0]
-        details_output = outputs[1]
+        node_returncode, node_stdout, node_stderr = outputs[0]
+        details_returncode, details_stdout, details_stderr = outputs[1]
         subprocess_utils.handle_returncode(
-            node_output.returncode,
+            node_returncode,
             _INFO_NODES_CMD,
             'Failed to get Slurm node information.',
-            stderr=f'{node_output.stdout}\n{node_output.stderr}',
+            stderr=f'{node_stdout}\n{node_stderr}',
             stream_logs=False)
-        node_infos = _parse_info_nodes_output(node_output.stdout)
+        node_infos = _parse_info_nodes_output(node_stdout)
 
         node_details: Dict[str, Dict[str, str]] = {}
-        if details_output.returncode != 0:
+        if details_returncode != 0:
             logger.debug('Failed to get detailed Slurm node information: %s',
-                         details_output.stderr)
+                         details_stderr)
         else:
             try:
-                node_details = _parse_all_node_details_output(
-                    details_output.stdout)
+                node_details = _parse_all_node_details_output(details_stdout)
             except Exception as e:  # pylint: disable=broad-except
                 logger.debug(
                     'Failed to parse detailed Slurm node '
@@ -513,49 +506,46 @@ class SlurmClient:
             _ALL_JOBS_INFO_CMD,
             _PARTITIONS_INFO_CMD,
         ])
-        node_output = outputs[0]
-        details_output = outputs[1]
-        jobs_output = outputs[2]
-        partitions_output = outputs[3]
+        node_returncode, node_stdout, node_stderr = outputs[0]
+        details_returncode, details_stdout, details_stderr = outputs[1]
+        jobs_returncode, jobs_stdout, jobs_stderr = outputs[2]
+        partitions_returncode, partitions_stdout, partitions_stderr = outputs[3]
         subprocess_utils.handle_returncode(
-            node_output.returncode,
+            node_returncode,
             _INFO_NODES_CMD,
             'Failed to get Slurm node information.',
-            stderr=f'{node_output.stdout}\n{node_output.stderr}',
+            stderr=f'{node_stdout}\n{node_stderr}',
             stream_logs=False)
-        node_infos = _parse_info_nodes_output(node_output.stdout)
+        node_infos = _parse_info_nodes_output(node_stdout)
 
         node_details: Dict[str, Dict[str, str]] = {}
-        if details_output.returncode != 0:
+        if details_returncode != 0:
             logger.debug('Failed to get detailed Slurm node information: %s',
-                         details_output.stderr)
+                         details_stderr)
         else:
             try:
-                node_details = _parse_all_node_details_output(
-                    details_output.stdout)
+                node_details = _parse_all_node_details_output(details_stdout)
             except Exception as e:  # pylint: disable=broad-except
                 logger.debug(
                     'Failed to parse detailed Slurm node '
                     'information: %s', e)
 
         jobs = None
-        if jobs_output.returncode != 0:
-            logger.debug('Failed to get running Slurm jobs: %s',
-                         jobs_output.stderr)
+        if jobs_returncode != 0:
+            logger.debug('Failed to get running Slurm jobs: %s', jobs_stderr)
         else:
             try:
-                jobs = _parse_all_jobs_info_output(jobs_output.stdout)
+                jobs = _parse_all_jobs_info_output(jobs_stdout)
             except Exception as e:  # pylint: disable=broad-except
                 logger.debug('Failed to parse running Slurm jobs: %s', e)
 
         partitions = None
-        if partitions_output.returncode != 0:
+        if partitions_returncode != 0:
             logger.debug('Failed to get Slurm partitions: %s',
-                         partitions_output.stderr)
+                         partitions_stderr)
         else:
             try:
-                partitions = _parse_partitions_info_output(
-                    partitions_output.stdout)
+                partitions = _parse_partitions_info_output(partitions_stdout)
             except Exception as e:  # pylint: disable=broad-except
                 logger.debug('Failed to parse Slurm partitions: %s', e)
 
