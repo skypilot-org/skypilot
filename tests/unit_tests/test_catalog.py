@@ -1,6 +1,7 @@
 import os
 import tempfile
 import time
+from types import SimpleNamespace
 from unittest import mock
 
 import numpy as np
@@ -11,6 +12,25 @@ import pytest
 from sky import catalog
 from sky.catalog import common as catalog_common
 from sky.utils import annotations
+
+
+def test_list_accelerators_skips_unavailable_vast_catalog(monkeypatch):
+
+    def import_catalog(module_name):
+        if module_name == 'sky.catalog.vast_catalog':
+            return SimpleNamespace(list_accelerators=mock.Mock(
+                side_effect=catalog_common.CatalogFetchError('offline')))
+        if module_name == 'sky.catalog.aws_catalog':
+            return SimpleNamespace(list_accelerators=mock.Mock(
+                return_value={'A100': []}))
+        raise AssertionError(module_name)
+
+    monkeypatch.setattr(catalog.importlib, 'import_module', import_catalog)
+
+    assert catalog.list_accelerators(clouds=['vast', 'aws']) == {'A100': []}
+
+    with pytest.raises(catalog_common.CatalogFetchError, match='offline'):
+        catalog.list_accelerators(clouds='vast')
 
 
 def test_rtxpro6000_in_common_gpus():
