@@ -2679,26 +2679,26 @@ class JobController:
         group is being cancelled or every member is terminal, so the resume
         logic owns completion. Returns False to proceed to the backoff.
         """
-        # Job Groups: every member is concurrently mid-flight, so there
-        # is no single "latest" task to operate on, and per-task surgery
-        # is wrong in both directions: marking an arbitrary member
-        # RECOVERING instructs the retry's resume classification to tear
-        # down and relaunch a member that may be healthily RUNNING, and
-        # tearing down one member's cluster leaves its siblings running
-        # unsupervised through the backoff either way. Do neither. The
-        # retry re-enters _run_job_group, whose resume classification
-        # reconciles every member from its own status: RUNNING members
-        # get their monitors reattached untouched (a member whose
-        # cluster actually died fails its first status probe and enters
-        # recovery normally); STARTING/RECOVERING members are force-
-        # recovered (which owns cleanup-before-relaunch); PENDING
-        # members launch fresh.
+        # Policy: no per-member surgery — reconcile on re-entry instead,
+        # exactly like a controller restart (_run_job_group's resume
+        # classification judges each member from its own status; a member
+        # whose cluster actually died fails its first monitor probe and
+        # recovers normally). The considered alternative is generalizing
+        # the single-task policy to all N live members: mark each
+        # RECOVERING and tear its cluster down (symmetric reset). Rejected
+        # as the default because the error is evidence about the
+        # controller, not about any member — a reset's cost scales with N
+        # while its justification does not — and because neither a
+        # controller restart nor a real preemption of one member restarts
+        # the group; an internal error should not be more destructive than
+        # infrastructure failure. The symmetric reset is a two-line policy
+        # flip here if experience disagrees.
         # Known gap: no per-task RECOVERING event is emitted here, so
         # events-based recovery metrics do not count group emergencies
         # (the job-level budget columns still do).
         # TODO(ishan): once gang admission lands (SKY-6224), a group
-        # whose admission barrier is still open should instead tear down
-        # all members and reset them to PENDING: mid-startup there is no
+        # whose admission barrier is still open should take the symmetric
+        # reset (tear down all, reset to PENDING): mid-startup there is no
         # progress to protect and startup is all-or-nothing.
         statuses = [
             await managed_job_state.get_job_status_with_task_id_async(
