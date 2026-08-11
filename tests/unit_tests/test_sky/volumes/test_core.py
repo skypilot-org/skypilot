@@ -2071,3 +2071,39 @@ class TestVolumeApplyRecordsInitialStatus:
         mock_add_volume.assert_called_once()
         assert mock_add_volume.call_args[0][2] == status_lib.VolumeStatus.READY
         assert mock_add_volume.call_args[1]['error_message'] is None
+
+
+class TestEphemeralVolumeSkipsStatusProbe:
+    """add_volume forces ephemeral volumes to IN_USE, so probing is waste."""
+
+    def test_probe_is_not_called(self, monkeypatch):
+        mock_cloud = mock.MagicMock()
+        mock_cloud.max_cluster_name_length.return_value = 63
+        mock_cloud.validate_region_zone.return_value = ('my-context', None)
+        mock_registry = mock.MagicMock()
+        mock_registry.from_str.return_value = mock_cloud
+        monkeypatch.setattr('sky.utils.registry.CLOUD_REGISTRY', mock_registry)
+        monkeypatch.setattr(
+            'sky.volumes.server.core.common_utils.make_cluster_name_on_cloud',
+            mock.MagicMock(return_value='eph-vol'))
+        monkeypatch.setattr(global_user_state, 'get_volume_by_name',
+                            mock.MagicMock(return_value=None))
+        monkeypatch.setattr(provision, 'apply_volume',
+                            mock.MagicMock(side_effect=lambda cloud, c: c))
+        monkeypatch.setattr('sky.volumes.server.core.filelock.FileLock',
+                            mock.MagicMock())
+        monkeypatch.setattr(global_user_state, 'add_volume', mock.MagicMock())
+        mock_get_errors = mock.MagicMock(return_value=({}, set()))
+        monkeypatch.setattr(provision, 'get_all_volumes_errors',
+                            mock_get_errors)
+
+        core.volume_apply(name='eph-vol',
+                          volume_type='k8s-pvc',
+                          cloud='kubernetes',
+                          region='my-context',
+                          zone=None,
+                          size='10',
+                          config={},
+                          is_ephemeral=True)
+
+        mock_get_errors.assert_not_called()

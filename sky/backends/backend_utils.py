@@ -709,8 +709,8 @@ def _get_volume_name(path: str, cluster_name_on_cloud: str) -> str:
     return f'{cluster_name_on_cloud}-{path_hash}'
 
 
-def _check_auto_mount_volumes_ready(
-        mountable: List[Tuple[Dict[str, Any], Any]]) -> None:
+def _check_auto_mount_volumes_ready(mountable: List[Tuple[Dict[str, Any], Any]],
+                                    dryrun: bool = False) -> None:
     """Raises if any volume about to be auto-mounted is not usable.
 
     The recorded status can be up to one refresh interval stale, so re-check
@@ -718,30 +718,36 @@ def _check_auto_mount_volumes_ready(
     fall back to the recorded status rather than blocking every launch on a
     transient API failure.
 
+    Under dryrun the recorded status is used on its own: dryrun is expected not
+    to contact the cloud (see `adjust_resources_to_allocatable`), and a stale
+    status is an acceptable price for a check that reaches no further than the
+    local database.
+
     Raises:
         exceptions.VolumeNotReadyError: if any volume is not ready.
     """
     if not mountable:
         return
 
-    configs_by_cloud: Dict[str, List[Any]] = {}
-    for _, record in mountable:
-        volume_config = record['handle']
-        configs_by_cloud.setdefault(volume_config.cloud,
-                                    []).append(volume_config)
-
     live_errors: Dict[str, Optional[str]] = {}
     unknown: Set[str] = set()
-    for cloud, configs in configs_by_cloud.items():
-        try:
-            errors, failed = provision_lib.get_all_volumes_errors(
-                cloud, configs)
-            live_errors.update(errors)
-            unknown.update(failed)
-        except Exception as e:  # pylint: disable=broad-except
-            logger.debug(f'Failed to check auto-mount volume status on '
-                         f'{cloud}: {e}')
-            unknown.update(config.name for config in configs)
+    if not dryrun:
+        configs_by_cloud: Dict[str, List[Any]] = {}
+        for _, record in mountable:
+            volume_config = record['handle']
+            configs_by_cloud.setdefault(volume_config.cloud,
+                                        []).append(volume_config)
+
+        for cloud, configs in configs_by_cloud.items():
+            try:
+                errors, failed = provision_lib.get_all_volumes_errors(
+                    cloud, configs)
+                live_errors.update(errors)
+                unknown.update(failed)
+            except Exception as e:  # pylint: disable=broad-except
+                logger.debug(f'Failed to check auto-mount volume status on '
+                             f'{cloud}: {e}')
+                unknown.update(config.name for config in configs)
 
     for _, record in mountable:
         volume_name = record['handle'].name
@@ -1154,7 +1160,7 @@ def write_cluster_config(
             # just sits unschedulable or stuck in ContainerCreating -- so
             # the readiness check has to happen here, mirroring the explicit
             # `volumes:` path in `VolumeMount.resolve`.
-            _check_auto_mount_volumes_ready(mountable)
+            _check_auto_mount_volumes_ready(mountable, dryrun=dryrun)
 
             for entry, record in mountable:
                 volume_name = entry['volume_name']

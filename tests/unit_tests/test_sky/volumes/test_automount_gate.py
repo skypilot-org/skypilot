@@ -180,3 +180,26 @@ class TestCheckAutoMountVolumesReady:
         mock_get_errors.assert_called_once()
         _, configs = mock_get_errors.call_args[0]
         assert len(configs) == 2
+
+
+class TestGateUnderDryrun:
+    """Dryrun must not reach the cloud; the recorded status has to do."""
+
+    @patch('sky.backends.backend_utils.provision_lib.get_all_volumes_errors')
+    def test_no_cloud_call_on_dryrun(self, mock_get_errors):
+        backend_utils._check_auto_mount_volumes_ready(
+            [_mountable('vol', status_lib.VolumeStatus.READY)], dryrun=True)
+
+        mock_get_errors.assert_not_called()
+
+    @patch('sky.backends.backend_utils.provision_lib.get_all_volumes_errors')
+    def test_recorded_not_ready_still_rejected_on_dryrun(self, mock_get_errors):
+        with pytest.raises(exceptions.VolumeNotReadyError):
+            backend_utils._check_auto_mount_volumes_ready([
+                _mountable('vol',
+                           status_lib.VolumeStatus.NOT_READY,
+                           error_message='PVC is pending.')
+            ],
+                                                          dryrun=True)
+
+        mock_get_errors.assert_not_called()

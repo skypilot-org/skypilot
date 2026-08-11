@@ -416,8 +416,15 @@ def volume_apply(
             # name_on_cloud so they cannot collide.
             if use_existing:
                 _check_duplicate_backend_resource(name, volume_config)
-            initial_status, initial_error = _initial_volume_status(
-                cloud, volume_config)
+            if is_ephemeral:
+                # add_volume forces ephemeral volumes to IN_USE, and they are
+                # created inline during provisioning, so probing the cloud
+                # here would cost a call whose answer is discarded.
+                initial_status = status_lib.VolumeStatus.READY
+                initial_error = None
+            else:
+                initial_status, initial_error = _initial_volume_status(
+                    cloud, volume_config)
             global_user_state.add_volume(
                 name,
                 volume_config,
