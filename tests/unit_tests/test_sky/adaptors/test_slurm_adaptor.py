@@ -1,5 +1,6 @@
 """Unit tests for Slurm adaptor."""
 
+import base64
 import unittest.mock as mock
 
 import pytest
@@ -12,9 +13,11 @@ from sky.utils import command_runner as command_runner_lib
 def _batch_output(*outputs):
     framed = ['SKYPILOT_SLURM_BATCH\n']
     for returncode, stdout, stderr in outputs:
+        encoded_stdout = base64.b64encode(stdout.encode()).decode()
+        encoded_stderr = base64.b64encode(stderr.encode()).decode()
         framed.append(
-            f'{returncode} {len(stdout.encode())} {len(stderr.encode())}\n')
-        framed.extend([stdout, stderr])
+            f'{returncode} {len(encoded_stdout)} {len(encoded_stderr)}\n')
+        framed.extend([encoded_stdout, encoded_stderr])
     return ''.join(framed)
 
 
@@ -39,11 +42,35 @@ class TestRunSlurmCmds:
         client._runner = command_runner_lib.LocalProcessCommandRunner()
 
         results = client._run_slurm_cmds([
-            "sleep 0.1; printf 'first\\nnœud\\n'",
-            "printf 'second error\\n' >&2; exit 7",
+            'sleep 0.1; printf \'first\\nnœud\\n\'',
+            'printf \'second error\\n\' >&2; exit 7',
         ])
 
         assert results == [(0, 'first\nnœud\n', ''), (7, '', 'second error\n')]
+
+    def test_transport_preserves_frames_after_invalid_utf8_replacement(self):
+        client = self._client()
+        client._runner = command_runner_lib.LocalProcessCommandRunner()
+
+        results = client._run_slurm_cmds([
+            'python3 -c \'import os; os.write(1, bytes([255])); '
+            'os.write(2, bytes([254]))\'',
+            'printf \'second\'',
+        ])
+
+        assert results == [(0, '\ufffd', '\ufffd'), (0, 'second', '')]
+
+    def test_transport_preserves_lines_filtered_by_command_runner(self):
+        client = self._client()
+        client._runner = command_runner_lib.LocalProcessCommandRunner()
+        warning = 'bash: cannot set terminal process group\n'
+
+        results = client._run_slurm_cmds([
+            f'printf {warning!r}',
+            f'printf {warning!r} >&2',
+        ])
+
+        assert results == [(0, warning, ''), (0, '', warning)]
 
     def test_byte_lengths_preserve_arbitrary_text_and_input_order(self):
         client = self._client()
@@ -63,14 +90,31 @@ class TestRunSlurmCmds:
         assert script.count(' ) &') == 2
         assert script.index('\nwait\n') < script.index('SKYPILOT_SLURM_BATCH')
 
+    def test_parser_accepts_line_wrapped_base64_frames(self):
+        client = self._client()
+        expected = 'nœud\n' * 40
+        encoded = base64.b64encode(expected.encode()).decode()
+        wrapped = '\n'.join(encoded[offset:offset + 76]
+                            for offset in range(0, len(encoded), 76))
+        output = (f'SKYPILOT_SLURM_BATCH\n0 {len(wrapped)} 0\n'
+                  f'{wrapped}')
+        with mock.patch.object(client._runner, 'run') as mock_run:
+            mock_run.return_value = (0, output, '')
+
+            results = client._run_slurm_cmds(['command'])
+
+        assert results == [(0, expected, '')]
+
     @pytest.mark.parametrize(('output', 'error'), [
         ('', 'missing header'),
         ('not-the-protocol\n', 'missing header'),
+        ('SKYPILOT_SLURM_BATCH\n\ufffd', 'non-ASCII transport output'),
         ('SKYPILOT_SLURM_BATCH\n', 'missing frame header'),
         ('SKYPILOT_SLURM_BATCH\ninvalid\n', 'invalid frame header'),
         ('SKYPILOT_SLURM_BATCH\n0 1\nx', 'invalid frame header'),
         ('SKYPILOT_SLURM_BATCH\n0 -1 0\n', 'invalid frame header'),
         ('SKYPILOT_SLURM_BATCH\n0 2 0\nx', 'truncated frame'),
+        ('SKYPILOT_SLURM_BATCH\n0 1 0\n?', 'invalid encoded output'),
         ('SKYPILOT_SLURM_BATCH\n0 0 0\nextra', 'trailing data'),
     ])
     def test_rejects_malformed_framing(self, output, error):

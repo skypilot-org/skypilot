@@ -1,5 +1,7 @@
 """Slurm adaptor for SkyPilot."""
 
+import base64
+import binascii
 import ipaddress
 import logging
 import re
@@ -314,15 +316,21 @@ class SlurmClient:
         for index in range(len(commands)):
             stdout_path = f'"${{snapshot_dir}}/{index}.stdout"'
             stderr_path = f'"${{snapshot_dir}}/{index}.stderr"'
+            encoded_stdout_path = f'"${{snapshot_dir}}/{index}.stdout.b64"'
+            encoded_stderr_path = f'"${{snapshot_dir}}/{index}.stderr.b64"'
             returncode_path = f'"${{snapshot_dir}}/{index}.returncode"'
             script_lines.extend([
                 f'returncode=$(cat {returncode_path}) || exit $?',
-                f'stdout_size=$(wc -c < {stdout_path}) || exit $?',
-                f'stderr_size=$(wc -c < {stderr_path}) || exit $?',
+                # Keep the framed transport ASCII-only because command runners
+                # decode and filter subprocess output as text.
+                f'base64 < {stdout_path} > {encoded_stdout_path} || exit $?',
+                f'base64 < {stderr_path} > {encoded_stderr_path} || exit $?',
+                f'stdout_size=$(wc -c < {encoded_stdout_path}) || exit $?',
+                f'stderr_size=$(wc -c < {encoded_stderr_path}) || exit $?',
                 'printf \'%s %s %s\\n\' "$returncode" "$stdout_size" '
                 '"$stderr_size"',
-                f'cat {stdout_path} || exit $?',
-                f'cat {stderr_path} || exit $?',
+                f'cat {encoded_stdout_path} || exit $?',
+                f'cat {encoded_stderr_path} || exit $?',
             ])
 
         script = '\n'.join(script_lines)
@@ -334,7 +342,12 @@ class SlurmClient:
             stderr=f'{stdout}\n{stderr}',
             stream_logs=False)
 
-        output_bytes = stdout.encode('utf-8')
+        try:
+            output_bytes = stdout.encode('ascii')
+        except UnicodeEncodeError as e:
+            raise RuntimeError('Unexpected output from concurrent Slurm '
+                               'inventory commands: non-ASCII transport '
+                               'output.') from e
         header_bytes = _BATCH_OUTPUT_HEADER.encode('ascii')
         if not output_bytes.startswith(header_bytes):
             raise RuntimeError('Unexpected output from concurrent Slurm '
@@ -346,8 +359,9 @@ class SlurmClient:
             if header_end == -1:
                 raise RuntimeError('Unexpected output from concurrent Slurm '
                                    'inventory commands: missing frame header.')
-            frame_header = output_bytes[offset:header_end].decode('ascii')
+            frame_header_bytes = output_bytes[offset:header_end]
             try:
+                frame_header = frame_header_bytes.decode('ascii')
                 returncode_str, stdout_size_str, stderr_size_str = (
                     frame_header.split())
                 returncode = int(returncode_str)
@@ -358,15 +372,31 @@ class SlurmClient:
             except (UnicodeDecodeError, ValueError) as e:
                 raise RuntimeError(
                     'Unexpected output from concurrent Slurm inventory '
-                    f'commands: invalid frame header {frame_header!r}.') from e
+                    f'commands: invalid frame header '
+                    f'{frame_header_bytes!r}.') from e
             offset = header_end + 1
             frame_end = offset + stdout_size + stderr_size
             if frame_end > len(output_bytes):
                 raise RuntimeError('Unexpected output from concurrent Slurm '
                                    'inventory commands: truncated frame.')
             stdout_end = offset + stdout_size
-            command_stdout = output_bytes[offset:stdout_end].decode('utf-8')
-            command_stderr = output_bytes[stdout_end:frame_end].decode('utf-8')
+            encoded_stdout = output_bytes[offset:stdout_end]
+            encoded_stderr = output_bytes[stdout_end:frame_end]
+            try:
+                command_stdout_bytes = base64.b64decode(b''.join(
+                    encoded_stdout.split()),
+                                                        validate=True)
+                command_stderr_bytes = base64.b64decode(b''.join(
+                    encoded_stderr.split()),
+                                                        validate=True)
+            except binascii.Error as e:
+                raise RuntimeError('Unexpected output from concurrent Slurm '
+                                   'inventory commands: invalid encoded '
+                                   'output.') from e
+            command_stdout = command_stdout_bytes.decode('utf-8',
+                                                         errors='replace')
+            command_stderr = command_stderr_bytes.decode('utf-8',
+                                                         errors='replace')
             results.append((returncode, command_stdout, command_stderr))
             offset = frame_end
         if offset != len(output_bytes):
