@@ -2104,9 +2104,23 @@ class JobController:
         try:
             sync_results = await asyncio.gather(*sync_coros,
                                                 return_exceptions=True)
-            for sync_result in sync_results:
-                if isinstance(sync_result, BaseException):
-                    raise sync_result
+            failed_syncs = [(sync_task_ids[i], sync_result)
+                            for i, sync_result in enumerate(sync_results)
+                            if isinstance(sync_result, BaseException)]
+            if failed_syncs:
+                for failed_task_id, sync_error in failed_syncs:
+                    error_str = (common_utils.format_exception(sync_error)
+                                 if isinstance(sync_error, Exception) else
+                                 repr(sync_error))
+                    logger.error(
+                        f'Failed to sync state for task {failed_task_id} '
+                        f'({tasks[failed_task_id].name}, cluster '
+                        f'{cluster_names[failed_task_id]}): {error_str}')
+                # Raise a real error over a stray cancellation so the
+                # cleanup below is not skipped; the original exception
+                # type must propagate for run() to classify it.
+                raise next((err for _, err in failed_syncs
+                            if isinstance(err, Exception)), failed_syncs[0][1])
         except Exception as e:
             # This is the last frame that knows every member cluster by name:
             # the generic handlers this would otherwise escape to (emergency

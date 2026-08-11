@@ -2231,3 +2231,35 @@ class TestJobGroupPhase2CleanupOnFailure:
         controller._cleanup_job_group_clusters.assert_awaited_once_with(
             ['cluster-a', 'cluster-b'])
         assert sibling_synced == [1]
+
+    @pytest.mark.asyncio
+    async def test_phase2_all_failures_logged_with_cluster_names(self, caplog):
+        """Every failed member is logged with its cluster before raising."""
+        tasks = self._make_tasks()
+        controller = self._make_controller(tasks)
+
+        async def set_started(job_id, task_id, start_time, callback_func):
+            del job_id, start_time, callback_func
+            raise RuntimeError(f'task {task_id} db boom')
+
+        with patch('sky.jobs.controller.managed_job_runtime') as runtime, \
+             patch('sky.jobs.controller.managed_job_state') as state, \
+             patch('sky.jobs.controller.managed_job_utils'), \
+             patch('sky.jobs.controller.global_user_state'), \
+             patch('sky.jobs.controller.context') as ctx:
+            runtime.is_registered.return_value = False
+            state.get_job_status_with_task_id_async = AsyncMock(
+                return_value=None)
+            state.set_started_async = AsyncMock(side_effect=set_started)
+            ctx.contextual_async = lambda f: f
+
+            with pytest.raises(RuntimeError, match='task 0 db boom'):
+                await JobController._run_job_group(controller)
+
+        # Both members' failures are attributed by cluster name, even
+        # though only the first exception propagates.
+        assert 'cluster-a' in caplog.text
+        assert 'cluster-b' in caplog.text
+        assert 'task 1 db boom' in caplog.text
+        controller._cleanup_job_group_clusters.assert_awaited_once_with(
+            ['cluster-a', 'cluster-b'])
