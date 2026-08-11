@@ -2696,7 +2696,7 @@ class JobController:
         # Known gap: no per-task RECOVERING event is emitted here, so
         # events-based recovery metrics do not count group emergencies
         # (the job-level budget columns still do).
-        # TODO(ishan): once gang admission lands (SKY-6224), a group
+        # TODO(ishan): once gang admission for job groups lands, a group
         # whose admission barrier is still open should take the symmetric
         # reset (tear down all, reset to PENDING): mid-startup there is no
         # progress to protect and startup is all-or-nothing.
