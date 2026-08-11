@@ -2288,18 +2288,22 @@ class TestCurrentPVCFailure:
     """Tests for _current_pvc_failure."""
 
     @staticmethod
-    def _event(reason, etype='Normal', message='m'):
+    def _event(reason, etype='Normal', message='m', at=0):
         e = Mock()
         e.reason = reason
         e.type = etype
         e.message = message
+        e.last_timestamp = _ago(at)
         return e
 
     @patch('sky.provision.kubernetes.volume.kubernetes_utils.get_pvc_events')
     def test_reports_a_standing_failure(self, mock_get_events):
         mock_get_events.return_value = [
-            self._event('ProvisioningFailed', 'Warning', 'tier is invalid'),
-            self._event('Provisioning'),
+            self._event('ProvisioningFailed',
+                        'Warning',
+                        'tier is invalid',
+                        at=10),
+            self._event('Provisioning', at=20),
         ]
 
         result = k8s_volume._current_pvc_failure('ctx', 'ns', 'pvc')
@@ -2312,8 +2316,11 @@ class TestCurrentPVCFailure:
         """The provisioner backs off and retries; a retry in flight means the
         earlier failure no longer stands."""
         mock_get_events.return_value = [
-            self._event('Provisioning'),
-            self._event('ProvisioningFailed', 'Warning', 'transient blip'),
+            self._event('Provisioning', at=10),
+            self._event('ProvisioningFailed',
+                        'Warning',
+                        'transient blip',
+                        at=60),
         ]
 
         assert k8s_volume._current_pvc_failure('ctx', 'ns', 'pvc') is None
@@ -2323,8 +2330,30 @@ class TestCurrentPVCFailure:
         """The PV controller re-emits ExternalProvisioning on a timer, so it
         would otherwise always look newer than a real failure and mask it."""
         mock_get_events.return_value = [
-            self._event('ExternalProvisioning'),
-            self._event('ProvisioningFailed', 'Warning', 'tier is invalid'),
+            self._event('ExternalProvisioning', at=5),
+            self._event('ProvisioningFailed',
+                        'Warning',
+                        'tier is invalid',
+                        at=60),
+        ]
+
+        result = k8s_volume._current_pvc_failure('ctx', 'ns', 'pvc')
+
+        assert result is not None
+        assert 'tier is invalid' in result
+
+    @patch('sky.provision.kubernetes.volume.kubernetes_utils.get_pvc_events')
+    def test_attempt_at_the_same_second_does_not_supersede(
+            self, mock_get_events):
+        """Event times are second-granular and the provisioner logs an attempt
+        and its failure within the same second, so a tie is that very attempt.
+        Treating it as a retry would report a broken volume as healthy."""
+        mock_get_events.return_value = [
+            self._event('Provisioning', at=30),
+            self._event('ProvisioningFailed',
+                        'Warning',
+                        'tier is invalid',
+                        at=30),
         ]
 
         result = k8s_volume._current_pvc_failure('ctx', 'ns', 'pvc')

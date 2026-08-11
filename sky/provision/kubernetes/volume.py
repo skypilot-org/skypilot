@@ -580,19 +580,34 @@ def _current_pvc_failure(context: Optional[str], namespace: str,
     A failing event is the only positive evidence that a pending PVC will not
     bind on its own; a pending PVC without one may still be mid-provisioning.
 
-    Events come newest-first, and the first one that is either a failure or a
-    fresh attempt settles it -- a retry started after a failure means the
-    provisioner has not given up, so the stale failure must not be reported.
+    An attempt that started *strictly* after the newest failure means the
+    provisioner is retrying and has not given up, so that failure is stale.
+    Equal timestamps do not count: event times are second-granular and the
+    provisioner routinely logs an attempt and its failure within the same
+    second, so a tie is the attempt that produced this very failure.
     """
+    newest_failure: Optional[str] = None
+    failure_at = None
+    attempt_at = None
+    # Events arrive newest-first, so the first of each kind is the newest.
     for event in kubernetes_utils.get_pvc_events(context, namespace, pvc_name):
+        at = event.last_timestamp or event.metadata.creation_timestamp
         if (event.type == WARNING_EVENT_TYPE or
                 event.reason in PVC_FAILING_EVENT_REASONS):
-            if event.message:
-                return f'{event.reason}: {event.message}'
-            return str(event.reason)
-        if event.reason in PVC_ATTEMPT_EVENT_REASONS:
-            return None
-    return None
+            if newest_failure is None:
+                newest_failure = (f'{event.reason}: {event.message}'
+                                  if event.message else str(event.reason))
+                failure_at = at
+        elif event.reason in PVC_ATTEMPT_EVENT_REASONS:
+            if attempt_at is None:
+                attempt_at = at
+
+    if newest_failure is None:
+        return None
+    if (attempt_at is not None and failure_at is not None and
+            attempt_at > failure_at):
+        return None
+    return newest_failure
 
 
 def _pvc_age_seconds(pvc: Any) -> Optional[float]:
