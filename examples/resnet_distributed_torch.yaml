@@ -48,6 +48,11 @@ run: |
     # launcher passes the hyphenated --local-rank, which its argparse rejects.
     # nproc_per_node is 1, so the local rank is always 0: pass it explicitly and
     # use torchrun (which does not inject a rank flag of its own).
+    #
+    # num_epochs is deliberately generous: test_cancel_pytorch cancels this job
+    # ~2.5min in and then asserts the GPU went idle, so the run has to still be
+    # alive at that point. 20 epochs finishes in under 4min on 2xH100, which
+    # left the cancel almost nothing to cancel.
     torchrun --nproc_per_node=1 \
     --nnodes=$num_nodes --node_rank=${SKYPILOT_NODE_RANK} --master_addr=$master_addr \
-    --master_port=8008 resnet_ddp.py --local_rank=0 --num_epochs 20
+    --master_port=8008 resnet_ddp.py --local_rank=0 --num_epochs 60
