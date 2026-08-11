@@ -220,20 +220,6 @@ class Vast(clouds.Cloud):
             default_value={},
             override_configs=resources.cluster_config_overrides,
         )
-        reliable_hosts = skypilot_config.get_effective_region_config(
-            cloud='vast',
-            region=region.name,
-            keys=('reliable_hosts',),
-            default_value=False,
-            override_configs=resources.cluster_config_overrides,
-        )
-        provision_timeout = skypilot_config.get_effective_region_config(
-            cloud='vast',
-            region=region.name,
-            keys=('provision_timeout',),
-            default_value=30 * 60,
-            override_configs=resources.cluster_config_overrides,
-        )
         network_tier = (resources.network_tier or
                         resources_utils.NetworkTier.STANDARD)
 
@@ -243,8 +229,6 @@ class Vast(clouds.Cloud):
             'region': region.name,
             'image_id': image_id,
             'secure_only': secure_only,
-            'reliable_hosts': reliable_hosts,
-            'provision_timeout': provision_timeout,
             'create_instance_kwargs': create_instance_kwargs or {},
             'network_tier': network_tier.value,
         }
@@ -335,6 +319,7 @@ class Vast(clouds.Cloud):
             return False, (
                 'error \n'  # First line is indented by 4 spaces
                 '    Credentials can be set up by running: \n'
+                '        $ pip install vastai\n'
                 '        $ mkdir -p ~/.config/vastai\n'
                 f'        $ echo [key] > {_CREDENTIAL_PATH}\n'
                 '    For more information, see https://docs.skypilot.co/en/latest/getting-started/installation.html#vast'  # pylint: disable=line-too-long
