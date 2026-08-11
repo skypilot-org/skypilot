@@ -48,10 +48,6 @@ _INTERACTIVE_AUTH_LOCK = threading.Lock()
 # Pattern to extract home directory from command output
 _HOME_DIR_PATTERN = re.compile(r'SKYPILOT_HOME_DIR: ([^\s\n]+)')
 
-# Rsync options
-# TODO(zhwu): This will print a per-file progress bar (with -P),
-# shooting a lot of messages to the output. --info=progress2 is used
-# to get a total progress bar, but it requires rsync>=3.1.0 and Mac
 # Largest command, in bytes, to inline into what a runner sends rather than
 # writing to a file and rsyncing it. The command runs via /bin/sh on the remote,
 # so the ceiling is the Linux command line size -- ARG_MAX is 128 KB -- and this
@@ -62,6 +58,10 @@ _HOME_DIR_PATTERN = re.compile(r'SKYPILOT_HOME_DIR: ([^\s\n]+)')
 # Kubernetes API instead.
 MAX_INLINE_COMMAND_LENGTH = 100 * 1024
 
+# Rsync options
+# TODO(zhwu): This will print a per-file progress bar (with -P),
+# shooting a lot of messages to the output. --info=progress2 is used
+# to get a total progress bar, but it requires rsync>=3.1.0 and Mac
 # OS has a default rsync==2.6.9 (16 years old).
 RSYNC_DISPLAY_OPTION = '-Pavz'
 # Legend

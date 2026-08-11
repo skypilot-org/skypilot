@@ -4187,10 +4187,15 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             remote_log_dir = self.log_dir
         remote_log_path = os.path.join(remote_log_dir, 'run.log')
 
-        def _dump_code_to_file(codegen: str,
-                               target_dir: str = SKY_REMOTE_APP_DIR) -> None:
-            runners = handle.get_command_runners()
-            head_runner = runners[0]
+        def _dump_code_to_file(
+                codegen: str,
+                target_dir: str = SKY_REMOTE_APP_DIR,
+                runner: Optional[command_runner.CommandRunner] = None) -> None:
+            # Reuse the caller's runner when it has one: for a high
+            # availability Kubernetes cluster get_command_runners() refreshes
+            # cluster info on every call, and uploading is the common path.
+            head_runner = (runner if runner is not None else
+                           handle.get_command_runners()[0])
             with tempfile.NamedTemporaryFile('w', prefix='sky_app_') as fp:
                 fp.write(codegen)
                 fp.flush()
@@ -4311,7 +4316,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             inlined = not head_runner.is_command_length_over_limit(
                 job_submit_cmd)
             if not inlined:
-                _dump_code_to_file(codegen)
+                _dump_code_to_file(codegen, runner=head_runner)
                 job_submit_cmd = f'{mkdir_code} && {code}'
 
             # For Slurm, run in background so that SSH returns immediately.
@@ -4337,8 +4342,10 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     'Failed to submit job due to command length limit. '
                     'Dumping job to file and running it with SSH. '
                     f'Output: {output}')
-                _dump_code_to_file(codegen)
+                _dump_code_to_file(codegen, runner=head_runner)
                 job_submit_cmd = f'{mkdir_code} && {code}'
+                # This attempt uploads, so a failure of it is not about size.
+                inlined = False
                 # See comment above for why run_in_background=is_slurm.
                 returncode, stdout, stderr = self.run_on_head(
                     handle,
@@ -4355,12 +4362,13 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 # exec request URL. A proxy in front of the Kubernetes API that
                 # caps request size rejects those with little or no explanation,
                 # which is otherwise an unreadable failure.
+                limit = head_runner.max_inline_command_length()
                 failure_reason += (
                     ' If the Kubernetes API server is behind a proxy that '
                     'limits request size, lower '
-                    '`kubernetes.max_inline_command_length` (bytes of request '
-                    'URL, default 32768) so the driver is uploaded instead of '
-                    'inlined.')
+                    '`kubernetes.max_inline_command_length` (currently '
+                    f'{limit} bytes of request URL) so the driver is uploaded '
+                    'instead of inlined.')
             subprocess_utils.handle_returncode(returncode,
                                                job_submit_cmd,
                                                failure_reason,

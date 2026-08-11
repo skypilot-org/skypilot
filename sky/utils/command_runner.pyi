@@ -64,6 +64,15 @@ class CommandRunner:
     ) -> None:
         ...
 
+    def inline_command_size(self, command: str) -> int:
+        ...
+
+    def max_inline_command_length(self) -> int:
+        ...
+
+    def is_command_length_over_limit(self, command: str) -> bool:
+        ...
+
     @typing.overload
     def run(self,
             cmd: Union[str, List[str]],
