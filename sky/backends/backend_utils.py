@@ -709,69 +709,27 @@ def _get_volume_name(path: str, cluster_name_on_cloud: str) -> str:
     return f'{cluster_name_on_cloud}-{path_hash}'
 
 
-def _check_auto_mount_volumes_ready(mountable: List[Tuple[Dict[str, Any], Any]],
-                                    dryrun: bool = False) -> None:
-    """Raises if any volume about to be auto-mounted is not usable.
+def _reject_not_ready_auto_mount_volume(volume_name: str,
+                                        record: Dict[str, Any]) -> None:
+    """Raises if a volume about to be auto-mounted is not usable.
 
-    The recorded status can be up to one refresh interval stale, so re-check
-    against the cloud and prefer that answer. If the cloud cannot be reached,
-    fall back to the recorded status rather than blocking every launch on a
-    transient API failure.
-
-    Under dryrun the recorded status is used on its own: dryrun is expected not
-    to contact the cloud (see `adjust_resources_to_allocatable`), and a stale
-    status is an acceptable price for a check that reaches no further than the
-    local database.
+    Mirrors the check `VolumeMount.resolve` applies to volumes declared on a
+    task, and reads the same recorded status, so the two ways of attaching a
+    volume agree. That status can be up to one refresh interval stale; a volume
+    broken out of band within that window is caught when the pod fails to
+    schedule rather than here.
 
     Raises:
-        exceptions.VolumeNotReadyError: if any volume is not ready.
+        exceptions.VolumeNotReadyError: if the volume is not ready.
     """
-    if not mountable:
+    if record.get('status') != status_lib.VolumeStatus.NOT_READY:
         return
-
-    live_errors: Dict[str, Optional[str]] = {}
-    unknown: Set[str] = set()
-    if not dryrun:
-        configs_by_cloud: Dict[str, List[Any]] = {}
-        for _, record in mountable:
-            volume_config = record['handle']
-            configs_by_cloud.setdefault(volume_config.cloud,
-                                        []).append(volume_config)
-
-        for cloud, configs in configs_by_cloud.items():
-            try:
-                errors, failed = provision_lib.get_all_volumes_errors(
-                    cloud, configs)
-                live_errors.update(errors)
-                unknown.update(failed)
-            except Exception as e:  # pylint: disable=broad-except
-                logger.debug(f'Failed to check auto-mount volume status on '
-                             f'{cloud}: {e}')
-                unknown.update(config.name for config in configs)
-
-    for _, record in mountable:
-        volume_name = record['handle'].name
-        # A volume missing from both means the cloud does not implement the
-        # check at all; `unknown` means it does but could not reach the
-        # cluster. Neither is an answer.
-        answered = volume_name in live_errors and volume_name not in unknown
-        if answered:
-            # None means the cloud looked and found nothing wrong.
-            error_message = live_errors[volume_name]
-        elif record.get('status') == status_lib.VolumeStatus.NOT_READY:
-            # No answer, so go by what the last refresh recorded.
-            error_message = (record.get('error_message') or
-                             'The last status refresh found it unusable.')
-        else:
-            error_message = None
-
-        if not error_message:
-            continue
-        raise exceptions.VolumeNotReadyError(
-            f'Auto-mount volume {volume_name!r} is not ready, so it cannot '
-            f'be mounted. Error: {error_message} Check it with '
-            f'`sky volumes ls`, or remove {volume_name!r} from the '
-            f'auto_mounts config.')
+    error_message = (record.get('error_message') or
+                     'The last status refresh found it unusable.')
+    raise exceptions.VolumeNotReadyError(
+        f'Auto-mount volume {volume_name!r} is not ready, so it cannot be '
+        f'mounted. Error: {error_message} Check it with `sky volumes ls`, or '
+        f'remove {volume_name!r} from the auto_mounts config.')
 
 
 # TODO: too many things happening here - leaky abstraction. Refactor.
@@ -1113,7 +1071,6 @@ def write_cluster_config(
         if auto_mounts_config:
             home_dir = kubernetes_utils.DEFAULT_HOME_DIRECTORY
             attached_auto_mount_volumes: Set[str] = set()
-            mountable: List[Tuple[Dict[str, Any], Any]] = []
             current_user_hash = common_utils.get_current_user().id
             active_workspace = skypilot_config.get_active_workspace()
             for entry in auto_mounts_config:
@@ -1153,19 +1110,13 @@ def write_cluster_config(
                         f'ReadWriteMany PVC volumes are supported for '
                         f'auto_mounts. Skipping.')
                     continue
-                mountable.append((entry, record))
-
-            # Reject before any pod is created. Mounting a volume whose
-            # backing storage is not usable does not fail loudly -- the pod
-            # just sits unschedulable or stuck in ContainerCreating -- so
-            # the readiness check has to happen here, mirroring the explicit
-            # `volumes:` path in `VolumeMount.resolve`.
-            _check_auto_mount_volumes_ready(mountable, dryrun=dryrun)
-
-            for entry, record in mountable:
-                volume_name = entry['volume_name']
+                # Reject before a pod is created. Mounting a volume whose
+                # backing storage is not usable does not fail loudly -- the pod
+                # just sits unschedulable or stuck in ContainerCreating -- so
+                # the launch has to be refused here, as it already is for a
+                # volume declared on the task.
+                _reject_not_ready_auto_mount_volume(volume_name, record)
                 mount_paths = entry.get('mount_paths', [])
-                volume_config = record['handle']
                 for path in mount_paths:
                     if path.startswith('/'):
                         mount_path = path
