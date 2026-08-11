@@ -1269,24 +1269,28 @@ def remove_queue_name_from_config() -> Iterator[None]:
     """Removes the local_queue_name from the config."""
     config = to_dict()
 
-    def update_to_none_if_set(keys: Tuple[str, ...]) -> None:
+    def pop_if_set(keys: Tuple[str, ...]) -> None:
         for queue_key in _QUEUE_NAME_KEYS:
             if config.get_nested(keys + queue_key, None) is not None:
-                logger.debug(f'removing local queue name: setting '
-                             f'{keys + queue_key} to None')
-                config.set_nested(keys + queue_key, None)
+                logger.debug(f'removing local queue name: {keys + queue_key}')
+                # Pop the key instead of setting it to None: the queue name
+                # schemas require a string, so a literal null fails schema
+                # validation when the mutated config is loaded again (e.g. by
+                # anything reading the config file pointed to by
+                # SKYPILOT_CONFIG while the override is active).
+                config.pop_nested(keys + queue_key, None)
 
     def remove_from_context_configs(keys: Tuple[str, ...]) -> None:
         for context_name, _ in config.get_nested((*keys, 'context_configs'),
                                                  {}).items():
-            update_to_none_if_set((*keys, 'context_configs', context_name))
+            pop_if_set((*keys, 'context_configs', context_name))
 
     # remove from global config
-    update_to_none_if_set(('kubernetes',))
+    pop_if_set(('kubernetes',))
     remove_from_context_configs(('kubernetes',))
     # remove from all workspaces configs
     for workspace_name, _ in config.get_nested(('workspaces',), {}).items():
-        update_to_none_if_set(('workspaces', workspace_name, 'kubernetes'))
+        pop_if_set(('workspaces', workspace_name, 'kubernetes'))
         remove_from_context_configs(
             ('workspaces', workspace_name, 'kubernetes'))
     logger.debug(

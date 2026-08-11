@@ -1300,13 +1300,22 @@ available_node_types:
                 # sources.list.d, calls dpkg, and installs via apt. Rather than
                 # letting a non-Debian image fail obscurely partway through
                 # (`dpkg: command not found`, or a 404 on a Docker repo that has
-                # no build for this $ID), say so plainly. Making it portable is
-                # out of scope for this change.
+                # no build for this $ID), handle it explicitly. In BUILD mode
+                # the task asked for Docker, so fail plainly. In ALL mode the
+                # config is a cluster-wide default that must not brick every
+                # non-Debian image on the cluster: warn and skip the CLI
+                # install (the dind sidecar still runs; only the `docker` CLI
+                # in this container is unavailable). Making the install
+                # portable is out of scope for this change.
                 if [ "$PKG_MGR" != "apt" ]; then
+                {% if k8s_enable_docker_build %}
                   echo "Error: kubernetes.enable_docker requires a Debian-family image (apt); detected PKG_MGR='${PKG_MGR:-none}'." >> /tmp/apt-update.log
                   dump_apt_log
                   exit 1
-                fi
+                {% else %}
+                  echo "Warning: kubernetes.enable_docker: skipping Docker CLI install; requires a Debian-family image (apt), detected PKG_MGR='${PKG_MGR:-none}'. The docker CLI will not be available in the task container." >> /tmp/apt-update.log
+                {% endif %}
+                else
                 set -e
                 $(prefix_cmd) install -m 0755 -d /etc/apt/keyrings
                 curl -fsSL "https://download.docker.com/linux/$(. /etc/os-release && echo "$ID")/gpg" \
@@ -1322,6 +1331,7 @@ available_node_types:
                   dump_apt_log
                   exit 1
                 }
+                fi
                 {% endif %}
 
                 {% if k8s_fuse_device_required %}

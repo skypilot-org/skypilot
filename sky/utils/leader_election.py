@@ -4,8 +4,9 @@ This module abstracts leader election behind :class:`LeaderElector` and offers
 a second, lease-based backend. A *lease* is a single row
 (``leader_leases(lock_id, holder, epoch, expires_at)``) refreshed by a short
 ``UPDATE`` in its own bounded transaction. Each renewal is a self-contained
-transaction, so it can ride a pooled/pgBouncer connection and holds no
-persistent connection between renewals; the row
+transaction on a dedicated direct, unpooled engine — no persistent connection
+is held between renewals, and the heartbeat never contends with application
+traffic for a shared pool (see ``PgLeaseElector._execute_bounded``); the row
 also carries a monotonic ``epoch`` that acts as a fencing token, letting a
 caller verify leadership atomically inside its own write transaction.
 
@@ -194,9 +195,10 @@ class PgLeaseElector(LeaderElector):
     ``try_acquire`` is an insert-or-take-over upsert that bumps ``epoch`` on
     every fresh acquisition; ``renew`` is a separate statement that only extends
     a lease we still validly hold, keeping ``epoch`` fixed for the term. Every
-    call is one short bounded transaction (see :meth:`_execute_bounded`) on the
-    pooled engine, so it rides a transaction-mode pooler and holds no persistent
-    connection between renewals.
+    call is one short bounded transaction on a dedicated direct, unpooled
+    engine (see :meth:`_execute_bounded`): no persistent connection is held
+    between renewals, and the heartbeat never shares — so can never be starved
+    by — the application engine's pool or a transaction pooler's server pool.
     """
 
     # Insert-or-take-over in one statement, used only by ``try_acquire``. All
@@ -288,8 +290,21 @@ class PgLeaseElector(LeaderElector):
         only takes effect inside a transaction block, so do NOT "simplify" this
         to ``isolation_level='AUTOCOMMIT'`` -- under autocommit ``SET LOCAL``
         degrades to a WARNING no-op and the statement timeout silently
-        disappears."""
-        engine = db_utils.get_engine(None)
+        disappears.
+
+        Runs on a dedicated direct + unpooled engine, never the shared
+        application engine. These calls are the leader-election heartbeat: if
+        they queue behind application traffic on a shared pool (or behind a
+        transaction pooler's starved server pool), DB pressure fails renewals
+        and churns the leader at exactly the moment stability matters most --
+        and each new leader's catch-up work adds more pressure, a feedback
+        loop. A fresh direct connection per call cannot be starved by any
+        shared pool state; at the renew cadence (one short statement every
+        ``renew_interval_seconds`` per held lease) the per-connection setup
+        cost is negligible, and holding a persistent connection instead would
+        reintroduce the standing per-process backend this backend exists to
+        avoid."""
+        engine = db_utils.get_engine(None, direct=True, no_pool=True)
         with engine.connect() as conn:
             conn.execute(
                 sqlalchemy.text(f'SET LOCAL statement_timeout = '
