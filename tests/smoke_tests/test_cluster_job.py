@@ -2077,16 +2077,21 @@ done
 def test_container_logs_multinode_kubernetes():
     name = smoke_tests_utils.get_cluster_name()
     task_yaml = 'tests/test_yamls/test_k8s_logs.yaml'
+    # -A + custom-columns: the pods may not be in kubectl's default
+    # namespace (e.g. a workspace-scoped namespace), so a bare `kubectl
+    # get pods` can silently return nothing.
+    list_pods = ('kubectl get pods -A --no-headers -o custom-columns='
+                 '"NS:.metadata.namespace,NAME:.metadata.name"')
     head_logs = (
-        'all_pods=$(kubectl get pods); echo "$all_pods"; '
+        f'all_pods=$({list_pods}); echo "$all_pods"; '
         f'echo "$all_pods" | grep {name} | '
         # Exclude the cloud cmd execution pod.
         'grep -v "cloud-cmd" |  '
         'grep head | '
-        " awk '{print $1}' | xargs -I {} kubectl logs {}")
-    worker_logs = ('all_pods=$(kubectl get pods); echo "$all_pods"; '
+        """ awk '{print "-n " $1 " " $2}' | xargs kubectl logs""")
+    worker_logs = (f'all_pods=$({list_pods}); echo "$all_pods"; '
                    f'echo "$all_pods" | grep {name} |  grep worker | '
-                   " awk '{print $1}' | xargs -I {} kubectl logs {}")
+                   """ awk '{print "-n " $1 " " $2}' | xargs kubectl logs""")
     with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
         test = smoke_tests_utils.Test(
             'container_logs_multinode_kubernetes',
@@ -2110,13 +2115,17 @@ def test_container_logs_multinode_kubernetes():
 def test_container_logs_two_jobs_kubernetes():
     name = smoke_tests_utils.get_cluster_name()
     task_yaml = 'tests/test_yamls/test_k8s_logs.yaml'
+    # -A + custom-columns: the pods may not be in kubectl's default
+    # namespace (e.g. a workspace-scoped namespace), so a bare `kubectl
+    # get pods` can silently return nothing.
     pod_logs = (
-        'all_pods=$(kubectl get pods); echo "$all_pods"; '
+        'all_pods=$(kubectl get pods -A --no-headers -o custom-columns='
+        '"NS:.metadata.namespace,NAME:.metadata.name"); echo "$all_pods"; '
         f'echo "$all_pods" | grep {name} | '
         # Exclude the cloud cmd execution pod.
         'grep -v "cloud-cmd" |  '
         'grep head |'
-        " awk '{print $1}' | xargs -I {} kubectl logs {}")
+        """ awk '{print "-n " $1 " " $2}' | xargs kubectl logs""")
     with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
         test = smoke_tests_utils.Test(
             'test_container_logs_two_jobs_kubernetes',
@@ -2140,13 +2149,17 @@ def test_container_logs_two_jobs_kubernetes():
 def test_container_logs_two_simultaneous_jobs_kubernetes():
     name = smoke_tests_utils.get_cluster_name()
     task_yaml = 'tests/test_yamls/test_k8s_logs.yaml '
+    # -A + custom-columns: the pods may not be in kubectl's default
+    # namespace (e.g. a workspace-scoped namespace), so a bare `kubectl
+    # get pods` can silently return nothing.
     pod_logs = (
-        'all_pods=$(kubectl get pods); echo "$all_pods"; '
+        'all_pods=$(kubectl get pods -A --no-headers -o custom-columns='
+        '"NS:.metadata.namespace,NAME:.metadata.name"); echo "$all_pods"; '
         f'echo "$all_pods" | grep {name} |  '
         # Exclude the cloud cmd execution pod.
         'grep -v "cloud-cmd" |  '
         'grep head |'
-        " awk '{print $1}' | xargs -I {} kubectl logs {}")
+        """ awk '{print "-n " $1 " " $2}' | xargs kubectl logs""")
     with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
         test = smoke_tests_utils.Test(
             'test_container_logs_two_simultaneous_jobs_kubernetes',
