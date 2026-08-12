@@ -2036,14 +2036,15 @@ def test_volume_ready_on_immediate_binding_on_kubernetes():
     it, so it never exercises this.
     """
     name = smoke_tests_utils.get_cluster_name()
-    default_storage_class = smoke_tests_utils.default_storage_class_or_skip()
+    storage_class = smoke_tests_utils.resolve_immediate_binding_storage_class(
+        name)
     volume_name = f'{name}-ready'
     volume_yaml = textwrap.dedent(f"""\
         name: {volume_name}
         type: k8s-pvc
         size: 1Gi
         config:
-          storage_class_name: {smoke_tests_utils.immediate_binding_storage_class_name(name)}
+          storage_class_name: {storage_class.name}
     """)
     task_yaml = textwrap.dedent(f"""\
         resources:
@@ -2063,8 +2064,7 @@ def test_volume_ready_on_immediate_binding_on_kubernetes():
         test = smoke_tests_utils.Test(
             'volume_ready_on_immediate_binding_on_kubernetes',
             [
-                smoke_tests_utils.create_immediate_binding_storage_class_cmd(
-                    name, default_storage_class),
+                storage_class.setup_cmd,
                 f'sky volumes apply -y {smoke_tests_utils.AGENT_K8S_INFRA} '
                 f'{vol_f.name}',
                 # The status recorded at creation is what the launch gate reads,
@@ -2083,8 +2083,7 @@ def test_volume_ready_on_immediate_binding_on_kubernetes():
             smoke_tests_utils.chain_teardown(
                 f'sky down -y {name} || true',
                 f'sky volumes delete {volume_name} -y || true',
-                smoke_tests_utils.delete_immediate_binding_storage_class_cmd(
-                    name)),
+                storage_class.teardown_cmd),
         )
         smoke_tests_utils.run_one_test(test)
 

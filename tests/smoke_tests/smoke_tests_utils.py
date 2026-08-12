@@ -1622,52 +1622,73 @@ def delete_unprovisionable_storage_class_cmd(test_name: str) -> str:
 _DEFERRED_ONLY_PROVISIONERS = ('rancher.io/local-path',)
 
 
+class ImmediateBindingStorageClass(NamedTuple):
+    """A storage class that binds a claim without waiting for a pod.
+
+    `setup_cmd`/`teardown_cmd` are no-ops when an existing class is reused.
+    """
+    name: str
+    setup_cmd: str
+    teardown_cmd: str
+
+
 def immediate_binding_storage_class_name(test_name: str) -> str:
     """Name of a per-test storage class that binds without waiting for a pod."""
     return f'{test_name}-immediate'
 
 
-def _default_storage_class() -> Optional[Dict[str, Any]]:
-    """The cluster's default StorageClass, or None if it has none."""
+def _storage_classes() -> Optional[List[Dict[str, Any]]]:
     result = subprocess.run(['kubectl', 'get', 'sc', '-o', 'json'],
                             capture_output=True,
                             text=True,
                             check=False)
     if result.returncode != 0:
         return None
-    for item in json.loads(result.stdout).get('items', []):
-        annotations = item['metadata'].get('annotations') or {}
-        if annotations.get(
-                'storageclass.kubernetes.io/is-default-class') == 'true':
-            return item
-    return None
+    return json.loads(result.stdout).get('items', [])
 
 
-def default_storage_class_or_skip() -> Dict[str, Any]:
-    """Returns the default StorageClass, skipping if it cannot bind Immediately.
+def _can_bind_immediately(storage_class: Dict[str, Any]) -> bool:
+    return storage_class.get(
+        'provisioner') not in _DEFERRED_ONLY_PROVISIONERS
 
-    Reaching the Immediate-binding path needs a provisioner that creates the
-    volume on its own. A cluster whose only provisioner waits for the scheduler
-    has no way to get there, so the test has nothing to assert.
+
+def resolve_immediate_binding_storage_class(
+        test_name: str) -> ImmediateBindingStorageClass:
+    """Finds or builds a storage class that binds without waiting for a pod.
+
+    Prefers one the cluster already has, since that is real storage configured
+    the way a deployment actually runs it. Falls back to an Immediate-binding
+    copy of the default class -- same provisioner and parameters, so the claim
+    is served by the same storage and only *when* it binds changes.
+
+    Skips when neither is possible: reaching the Immediate-binding path needs a
+    provisioner that creates the volume on its own, and a cluster whose only
+    provisioner waits for the scheduler cannot get there.
     """
-    storage_class = _default_storage_class()
-    if storage_class is None:
-        pytest.skip('cluster has no default StorageClass to derive from')
-    provisioner = storage_class.get('provisioner')
-    if provisioner in _DEFERRED_ONLY_PROVISIONERS:
-        pytest.skip(f'{provisioner} cannot bind before a pod is scheduled')
-    return storage_class
+    storage_classes = _storage_classes()
+    if storage_classes is None:
+        pytest.skip('could not list StorageClasses')
 
+    for storage_class in storage_classes:
+        if (storage_class.get('volumeBindingMode') == 'Immediate' and
+                _can_bind_immediately(storage_class)):
+            return ImmediateBindingStorageClass(
+                name=storage_class['metadata']['name'],
+                setup_cmd='true',
+                teardown_cmd='true')
 
-def create_immediate_binding_storage_class_cmd(
-        test_name: str, default_storage_class: Dict[str, Any]) -> str:
-    """Creates an Immediate-binding copy of the cluster's default class.
+    default = next(
+        (sc for sc in storage_classes
+         if (sc['metadata'].get('annotations') or {}).get(
+             'storageclass.kubernetes.io/is-default-class') == 'true'), None)
+    if default is None:
+        pytest.skip('no Immediate-binding StorageClass and no default to '
+                    'derive one from')
+    if not _can_bind_immediately(default):
+        pytest.skip(f'{default.get("provisioner")} cannot bind before a pod '
+                    'is scheduled, and the cluster has no other '
+                    'Immediate-binding class')
 
-    Keeps the default class's provisioner and parameters, so the claim is
-    served by the same real storage, and changes only *when* it binds. That is
-    the shape a network filesystem class (Filestore, EFS) has in practice, and
-    the one whose claim is Pending for as long as provisioning takes.
-    """
     sc_name = immediate_binding_storage_class_name(test_name)
     manifest: Dict[str, Any] = {
         'apiVersion': 'storage.k8s.io/v1',
@@ -1675,20 +1696,16 @@ def create_immediate_binding_storage_class_cmd(
         'metadata': {
             'name': sc_name
         },
-        'provisioner': default_storage_class['provisioner'],
+        'provisioner': default['provisioner'],
         'volumeBindingMode': 'Immediate',
     }
     for key in ('parameters', 'reclaimPolicy', 'allowVolumeExpansion'):
-        if key in default_storage_class:
-            manifest[key] = default_storage_class[key]
-    return (f'kubectl apply -f - <<EOF\n'
-            f'{json.dumps(manifest)}\n'
-            f'EOF')
-
-
-def delete_immediate_binding_storage_class_cmd(test_name: str) -> str:
-    sc_name = immediate_binding_storage_class_name(test_name)
-    return f'kubectl delete sc {sc_name} --ignore-not-found'
+        if key in default:
+            manifest[key] = default[key]
+    return ImmediateBindingStorageClass(
+        name=sc_name,
+        setup_cmd=(f'kubectl apply -f - <<EOF\n{json.dumps(manifest)}\nEOF'),
+        teardown_cmd=f'kubectl delete sc {sc_name} --ignore-not-found')
 
 
 AGENT_K8S_INFRA = '--infra k8s/$(kubectl config current-context)'
