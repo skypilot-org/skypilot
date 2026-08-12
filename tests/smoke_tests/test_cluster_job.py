@@ -3085,7 +3085,13 @@ def test_remote_server_api_login():
         pytest.skip('This test is only for remote server')
 
     endpoint = smoke_tests_utils.get_api_server_url()
-    config_path = skypilot_config._GLOBAL_CONFIG_PATH
+    # Smoke tests run with SKYPILOT_GLOBAL_CONFIG pointing at a temp config, and
+    # login writes the config file that is in effect, so assert on the path the
+    # login process resolves rather than the default one.
+    # $HOME rather than ~, since a tilde arriving from a parameter expansion is
+    # not expanded again by the shell.
+    config_path = (f'${{{skypilot_config.ENV_VAR_GLOBAL_CONFIG}:-'
+                   '$HOME/.sky/config.yaml}')
     backup_path = f'{config_path}.backup_for_test_remote_server_api_login'
 
     test = smoke_tests_utils.Test(
