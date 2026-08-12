@@ -944,30 +944,26 @@ class Kubernetes(clouds.Cloud):
         # controller sets these per member via cluster_config_overrides;
         # they are not meant to be set in user or tenant config files.
         # gate_name stamps an extra scheduling gate that the controller
-        # removes only once every member of the group is admitted;
-        # pod_group_name / pod_group_total_count override the per-cluster
-        # Kueue pod group so a group's members can share one admission
-        # unit. All default to None, which renders exactly today's
-        # per-cluster behavior.
+        # removes only once every member of the group is admitted.
+        # kueue_pod_group_name overrides THIS member's
+        # kueue.x-k8s.io/pod-group-name label (its Kueue admission-unit
+        # identity, normally the cluster name): the controller stamps a
+        # fresh, attempt-suffixed name on each gang retry so a new attempt
+        # never collides with the previous attempt's still-terminating
+        # Kueue Workload of the same name. Both default to None, which
+        # renders exactly today's behavior.
         gang_gate_name = skypilot_config.get_effective_region_config(
             cloud='kubernetes',
             region=context,
             keys=('gang_scheduling', 'gate_name'),
             default_value=None,
             override_configs=resources.cluster_config_overrides)
-        gang_pod_group_name = skypilot_config.get_effective_region_config(
+        gang_kueue_pod_group_name = skypilot_config.get_effective_region_config(
             cloud='kubernetes',
             region=context,
-            keys=('gang_scheduling', 'pod_group_name'),
+            keys=('gang_scheduling', 'kueue_pod_group_name'),
             default_value=None,
             override_configs=resources.cluster_config_overrides)
-        gang_pod_group_total_count = (
-            skypilot_config.get_effective_region_config(
-                cloud='kubernetes',
-                region=context,
-                keys=('gang_scheduling', 'pod_group_total_count'),
-                default_value=None,
-                override_configs=resources.cluster_config_overrides))
 
         # Check DWS configuration for GKE.
         (enable_flex_start, enable_flex_start_queued_provisioning,
@@ -1065,8 +1061,7 @@ class Kubernetes(clouds.Cloud):
             'k8s_fuse_device_required': fuse_device_required,
             'k8s_kueue_local_queue_name': k8s_kueue_local_queue_name,
             'k8s_gang_gate_name': gang_gate_name,
-            'k8s_pod_group_name': gang_pod_group_name,
-            'k8s_pod_group_total_count': gang_pod_group_total_count,
+            'k8s_kueue_pod_group_name': gang_kueue_pod_group_name,
             # Namespace to run the fusermount-server daemonset in
             'k8s_skypilot_system_namespace': _SKYPILOT_SYSTEM_NAMESPACE,
             'k8s_fusermount_shared_dir': kubernetes_fuse.FUSERMOUNT_SHARED_DIR,

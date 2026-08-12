@@ -1653,11 +1653,8 @@ _CONTEXT_CONFIG_SCHEMA_KUBERNETES = {
             'gate_name': {
                 'type': 'string',
             },
-            'pod_group_name': {
+            'kueue_pod_group_name': {
                 'type': 'string',
-            },
-            'pod_group_total_count': {
-                'type': 'integer',
             },
         },
     },

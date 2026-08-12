@@ -299,7 +299,7 @@ available_node_types:
             {% endif %}
             {% if k8s_kueue_local_queue_name %}
             kueue.x-k8s.io/queue-name: {{k8s_kueue_local_queue_name}}
-            kueue.x-k8s.io/pod-group-name: {{k8s_pod_group_name or cluster_name_on_cloud}}
+            kueue.x-k8s.io/pod-group-name: {{k8s_kueue_pod_group_name or cluster_name_on_cloud}}
             {% endif %}
         annotations:
           # The skypilot-user *label* (above) sanitizes characters that are
@@ -316,7 +316,7 @@ available_node_types:
           {% endif %}
           {% if k8s_kueue_local_queue_name %}
           kueue.x-k8s.io/retriable-in-group: "false"
-          kueue.x-k8s.io/pod-group-total-count: "{{ (k8s_pod_group_total_count or num_nodes)|string }}"
+          kueue.x-k8s.io/pod-group-total-count: "{{ num_nodes|string }}"
           {% if k8s_max_run_duration_seconds %}
           provreq.kueue.x-k8s.io/maxRunDurationSeconds: "{{k8s_max_run_duration_seconds|string}}"
           {% endif %}

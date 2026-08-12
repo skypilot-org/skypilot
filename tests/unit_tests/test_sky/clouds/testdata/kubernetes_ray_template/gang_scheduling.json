@@ -10,13 +10,13 @@
         "kind": "Pod",
         "metadata": {
           "annotations": {
-            "kueue.x-k8s.io/pod-group-total-count": "5",
+            "kueue.x-k8s.io/pod-group-total-count": "2",
             "kueue.x-k8s.io/retriable-in-group": "false",
             "skypilot-user": "testuser",
             "skypilot-workspace": "default"
           },
           "labels": {
-            "kueue.x-k8s.io/pod-group-name": "my-group-a1",
+            "kueue.x-k8s.io/pod-group-name": "my-member-a2",
             "kueue.x-k8s.io/queue-name": "user-queue",
             "parent": "skypilot",
             "skypilot-cluster": "sky-cluster-abc123",
