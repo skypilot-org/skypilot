@@ -369,6 +369,27 @@ def _utc(timestamp: Any) -> Optional[datetime.datetime]:
     return timestamp.astimezone(datetime.timezone.utc)
 
 
+def _event_window(
+    event: Any
+) -> Tuple[Optional[datetime.datetime], Optional[datetime.datetime]]:
+    """When an event was first and most recently reported.
+
+    firstTimestamp/lastTimestamp are what client-go's EventRecorder maintains,
+    and what an aggregated repeat advances. An event written through the newer
+    events.k8s.io API carries the same two facts under different names, so read
+    those as well rather than collapsing to creationTimestamp -- both endpoints
+    landing on the same instant would say the failure lasted no time at all, and
+    so could never be judged persistent.
+    """
+    created = _utc(event.metadata.creation_timestamp)
+    series = getattr(event, 'series', None)
+    last = (_utc(event.last_timestamp) or
+            _utc(getattr(series, 'last_observed_time', None)) or
+            _utc(event.event_time) or created)
+    first = _utc(event.first_timestamp) or _utc(event.event_time) or created
+    return first, last
+
+
 def _get_pending_pvcs(
     namespace: str,
     context: Optional[str],
@@ -416,10 +437,8 @@ def _get_pending_pvcs(
                     event_messages.append(f'{event.reason}: {msg}')
                 if not is_failure:
                     continue
-                created = _utc(event.metadata.creation_timestamp)
-                last = _utc(event.last_timestamp) or created
-                first = _utc(event.first_timestamp) or created or last
-                if last is None or first is None:
+                first, last = _event_window(event)
+                if first is None or last is None:
                     continue
                 if failures_since is not None and last < failures_since:
                     continue
@@ -540,6 +559,11 @@ class _PendingVolumeProbe:
                 self._failures_before.pop(pvc_name, None)
                 continue
             if hold_failures:
+                logger.debug(
+                    f'Volume {pvc_name} is reporting a failure while '
+                    f'launching {self._cluster_name}, but a node is on '
+                    f'its way, so it is being discounted: '
+                    f'{pending.detail}')
                 self._failures_before[pvc_name] = pending.failure.last
                 continue
             failing_for = pending.failure.seconds_since(
@@ -1142,16 +1166,20 @@ def _wait_for_pods_to_schedule(namespace, context, new_nodes, timeout: int,
                     LAUNCH_PROGRESS,
                     nop_if_duplicate=True,
                 )
-        elif not is_autoscaling:
+        else:
             # Nothing is waiting on a volume any more, so a later one that is
-            # must be reported again even if it reads the same.
+            # must be reported again even if it reads the same. Outside the
+            # autoscaling check: the message can clear while a scale-up is in
+            # progress too.
             last_volume_status_text = None
-            _update_spinner_message(iteration=iteration,
-                                    pods=pods,
-                                    context=context,
-                                    namespace=namespace,
-                                    cluster_name_on_cloud=cluster_name_on_cloud,
-                                    cluster_name=cluster_name)
+            if not is_autoscaling:
+                _update_spinner_message(
+                    iteration=iteration,
+                    pods=pods,
+                    context=context,
+                    namespace=namespace,
+                    cluster_name_on_cloud=cluster_name_on_cloud,
+                    cluster_name=cluster_name)
 
         iteration += 1
         time.sleep(1)

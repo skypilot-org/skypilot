@@ -265,6 +265,21 @@ class TestGetPendingPvcs:
 
         assert 'tier is invalid' in self._pending(cluster)[0].detail
 
+    def test_an_event_written_through_the_newer_api_still_spans(self, cluster):
+        """events.k8s.io records the same two facts under other names. Reading
+        only firstTimestamp/lastTimestamp would collapse the window to an instant
+        and the claim could never be judged persistent."""
+        event = _event('ProvisioningFailed', _CSI_MESSAGE)
+        event.first_timestamp = None
+        event.last_timestamp = None
+        event.event_time = _at(5)
+        event.series.last_observed_time = _at(605)
+        cluster.set('vol', 'Pending', [event])
+
+        failure = self._pending(cluster)[0].failure
+
+        assert failure.seconds_since(_PODS_CREATED_AT) == 600
+
     def test_an_unreadable_claim_is_not_reported(self, cluster):
         """Fail open: a transient API error must not fail the launch."""
         assert instance._get_pending_pvcs('ns', 'ctx', ['missing']) == []
