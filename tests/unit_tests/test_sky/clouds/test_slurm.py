@@ -297,6 +297,50 @@ class TestCheckInstanceFits:
             assert reason is None
 
 
+class TestRegionsWithOfferingPartitionMap:
+    """Test configured partition validation against live partitions."""
+
+    @patch('sky.clouds.slurm.slurm_utils.lookup_gpu_partition_map',
+           new=mock.Mock(return_value=['configured-gpu']))
+    @patch('sky.clouds.slurm.slurm_utils.get_partitions',
+           new=mock.Mock(return_value=['live-gpu', 'cpu']))
+    @patch.object(slurm_cloud.Slurm,
+                  'existing_allowed_clusters',
+                  new=mock.Mock(return_value=['cluster-a']))
+    def test_fixed_region_partition_mismatch_raises(self):
+        with pytest.raises(
+                ValueError,
+                match='gpu_partition_map.*H100.*cluster-a.*cpu.*live-gpu'):
+            slurm_cloud.Slurm.regions_with_offering(
+                instance_type='64CPU--256GB--H100:1',
+                accelerators=None,
+                use_spot=False,
+                region='cluster-a',
+                zone=None)
+
+    @patch('sky.clouds.slurm.slurm_utils.check_instance_fits',
+           new=mock.Mock(return_value=(True, None)))
+    @patch('sky.clouds.slurm.slurm_utils.lookup_gpu_partition_map',
+           new=mock.Mock(return_value=['gpu']))
+    @patch('sky.clouds.slurm.slurm_utils.get_partitions',
+           new=mock.Mock(side_effect=lambda cluster: {
+               'cluster-a': ['cpu'],
+               'cluster-b': ['gpu'],
+           }[cluster]))
+    @patch.object(slurm_cloud.Slurm,
+                  'existing_allowed_clusters',
+                  new=mock.Mock(return_value=['cluster-a', 'cluster-b']))
+    def test_unspecified_region_continues_after_partition_mismatch(self):
+        regions = slurm_cloud.Slurm.regions_with_offering(
+            instance_type='64CPU--256GB--H100:1',
+            accelerators=None,
+            use_spot=False,
+            region=None,
+            zone=None)
+
+        assert [region.name for region in regions] == ['cluster-b']
+
+
 class TestLookupGpuPartitionMap:
     """Test slurm_utils.lookup_gpu_partition_map()."""
 

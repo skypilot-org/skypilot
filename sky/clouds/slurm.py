@@ -322,6 +322,9 @@ class Slurm(clouds.Cloud):
             try:
                 sit = slurm_utils.SlurmInstanceType.from_instance_type(
                     instance_type)
+            except ValueError:
+                pass
+            else:
                 if sit.accelerator_type is not None:
                     mapped = slurm_utils.lookup_gpu_partition_map(
                         cluster, sit.accelerator_type)
@@ -342,6 +345,14 @@ class Slurm(clouds.Cloud):
                                                f'gpu_partition_map or omit '
                                                f'the partition from --infra.'
                                                f'{colorama.Style.RESET_ALL}')
+                            elif region is not None and available:
+                                live_partitions = sorted(available)
+                                raise ValueError(
+                                    f'None of the partitions {mapped} in '
+                                    f'gpu_partition_map for accelerator '
+                                    f'{sit.accelerator_type!r} exist on '
+                                    f'cluster {cluster!r}. Available '
+                                    f'partitions: {live_partitions}.')
                             else:
                                 logger.warning(f'{colorama.Fore.YELLOW}'
                                                f'gpu_partition_map maps '
@@ -378,8 +389,6 @@ class Slurm(clouds.Cloud):
                                 f'on cluster {cluster!r}. Please '
                                 f'double-check the partition name.'
                                 f'{colorama.Style.RESET_ALL}')
-            except ValueError:
-                pass
 
             # TODO(kevin): Batch this check to reduce number of roundtrips.
             for partition in partitions_to_check:
