@@ -5,6 +5,7 @@ import contextlib
 import dataclasses
 import enum
 import functools
+import itertools
 import os
 import pathlib
 import shutil
@@ -1356,6 +1357,54 @@ async def clean_finished_requests_with_retention(retention_seconds: int,
                 f'older than {retention_seconds} seconds')
 
 
+async def clean_stale_client_task_yamls(retention_seconds: int) -> None:
+    """Delete stale per-task YAML files under the client directories.
+
+    ``sky.server.common.process_mounts_in_task_on_api_server`` persists two
+    YAML files per submitted task under
+    ``~/.sky/api_server/clients/<user_hash>/``: the original task in
+    ``tasks/<task_id>.yaml`` and the translated task in
+    ``<task_id>_translated.yaml``. Both are read back right after being
+    written and are only kept for debugging afterwards, but nothing deletes
+    them while the server is running, so a long-running API server
+    accumulates two files per submitted task indefinitely. Age them out with
+    the same retention that is applied to the request records they were
+    created for.
+
+    Args:
+        retention_seconds: Files whose mtime is older than this many seconds
+            will be deleted.
+    """
+    cutoff = time.time() - retention_seconds
+
+    def _clean() -> int:
+        clients_dir = server_common.API_SERVER_CLIENT_DIR.expanduser()
+        if not clients_dir.exists():
+            return 0
+        deleted = 0
+        for user_dir in clients_dir.iterdir():
+            if not user_dir.is_dir():
+                continue
+            yaml_paths = itertools.chain(user_dir.glob('*_translated.yaml'),
+                                         user_dir.glob('tasks/*.yaml'))
+            for path in yaml_paths:
+                try:
+                    if path.stat().st_mtime < cutoff:
+                        path.unlink()
+                        deleted += 1
+                except OSError:
+                    # Best-effort: the file may be deleted concurrently, e.g.
+                    # by the GC of another API server instance sharing the
+                    # same client directory.
+                    pass
+        return deleted
+
+    deleted = await asyncio.to_thread(_clean)
+    if deleted:
+        logger.info(f'Cleaned up {deleted} stale task YAML files older than '
+                    f'{retention_seconds} seconds')
+
+
 async def requests_gc_daemon():
     """Garbage collect finished requests periodically."""
     while True:
@@ -1369,6 +1418,7 @@ async def requests_gc_daemon():
             # Negative value disables the requests GC
             if retention_seconds >= 0:
                 await clean_finished_requests_with_retention(retention_seconds)
+                await clean_stale_client_task_yamls(retention_seconds)
         except asyncio.CancelledError:
             logger.info('Requests GC daemon cancelled')
             break

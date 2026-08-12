@@ -2,6 +2,7 @@
 import asyncio
 import json
 import logging
+import os
 import pathlib
 import time
 from typing import List, Optional
@@ -492,6 +493,49 @@ async def test_clean_finished_requests_with_retention_all_statuses(
     mock_logger.info.assert_called_once()
     log_message = mock_logger.info.call_args[0][0]
     assert 'Cleaned up 3 finished requests' in log_message
+
+
+@pytest.mark.asyncio
+async def test_clean_stale_client_task_yamls(tmp_path):
+    """Test that stale per-task YAMLs are deleted and fresh ones are kept."""
+    clients_dir = tmp_path / 'clients'
+    user_dir = clients_dir / 'test-user'
+    tasks_dir = user_dir / 'tasks'
+    tasks_dir.mkdir(parents=True)
+    file_mounts_dir = user_dir / 'file_mounts'
+    file_mounts_dir.mkdir()
+
+    old_translated = user_dir / 'old-task_translated.yaml'
+    old_task = tasks_dir / 'old-task.yaml'
+    recent_translated = user_dir / 'recent-task_translated.yaml'
+    recent_task = tasks_dir / 'recent-task.yaml'
+    # File mounts have their own reference-aware GC and must not be touched
+    # here, regardless of age.
+    old_file_mount = file_mounts_dir / 'old-file-mount.yaml'
+
+    for path in (old_translated, old_task, recent_translated, recent_task,
+                 old_file_mount):
+        path.write_text('run: echo hi')
+    old_mtime = time.time() - 7200
+    for path in (old_translated, old_task, old_file_mount):
+        os.utime(path, (old_mtime, old_mtime))
+
+    with mock.patch('sky.server.common.API_SERVER_CLIENT_DIR', clients_dir):
+        await requests.clean_stale_client_task_yamls(retention_seconds=3600)
+
+    assert not old_translated.exists()
+    assert not old_task.exists()
+    assert recent_translated.exists()
+    assert recent_task.exists()
+    assert old_file_mount.exists()
+
+
+@pytest.mark.asyncio
+async def test_clean_stale_client_task_yamls_missing_dir(tmp_path):
+    """Test that a missing clients directory is a no-op, not an error."""
+    with mock.patch('sky.server.common.API_SERVER_CLIENT_DIR',
+                    tmp_path / 'nonexistent'):
+        await requests.clean_stale_client_task_yamls(retention_seconds=3600)
 
 
 @pytest.mark.asyncio
