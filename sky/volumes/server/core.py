@@ -2,6 +2,7 @@
 
 import contextlib
 import os
+import time
 from typing import Any, Dict, Generator, List, Optional, Set, Tuple
 import uuid
 
@@ -321,6 +322,22 @@ def volume_delete(names: List[str],
         logger.info(f'Deleted volumes: {names}')
 
 
+# How long to let a freshly created volume settle before recording it as not
+# ready. Creating the backing resource only starts provisioning: with an
+# Immediate-binding storage class the PersistentVolume is created
+# asynchronously, so the claim is Pending until the provisioner finishes.
+# Judging it the moment after creation would report every functioning
+# Immediate-binding storage class as not ready.
+#
+# Covered by unit tests only. Reaching this case end to end needs a storage
+# class that binds immediately *and* a provisioner that can serve it, and the
+# Kubernetes smoke lane has neither: local-path defers to the scheduler, so a
+# claim on it is pending by design. Such a test would have to run against a
+# cloud CSI driver.
+_INITIAL_STATUS_SETTLE_SECONDS = 10
+_INITIAL_STATUS_POLL_SECONDS = 0.5
+
+
 def _initial_volume_status(
     cloud: str, config: models.VolumeConfig
 ) -> Tuple[status_lib.VolumeStatus, Optional[str]]:
@@ -336,19 +353,25 @@ def _initial_volume_status(
     Falls back to READY when the cloud cannot be queried, matching the
     optimistic behavior everywhere else on this path.
     """
-    try:
-        volume_errors, failed_volume_names = provision.get_all_volumes_errors(
-            cloud, [config])
-    except Exception as e:  # pylint: disable=broad-except
-        logger.debug(f'Failed to check the initial status of volume '
-                     f'{config.name}: {e}')
-        return status_lib.VolumeStatus.READY, None
-    if config.name in failed_volume_names:
-        return status_lib.VolumeStatus.READY, None
-    error_message = volume_errors.get(config.name)
-    if error_message:
-        return status_lib.VolumeStatus.NOT_READY, error_message
-    return status_lib.VolumeStatus.READY, None
+    deadline = time.time() + _INITIAL_STATUS_SETTLE_SECONDS
+    while True:
+        try:
+            volume_errors, failed_volume_names = (
+                provision.get_all_volumes_errors(cloud, [config]))
+        except Exception as e:  # pylint: disable=broad-except
+            logger.debug(f'Failed to check the initial status of volume '
+                         f'{config.name}: {e}')
+            return status_lib.VolumeStatus.READY, None
+        if config.name in failed_volume_names:
+            return status_lib.VolumeStatus.READY, None
+        error_message = volume_errors.get(config.name)
+        if not error_message:
+            return status_lib.VolumeStatus.READY, None
+        if time.time() >= deadline:
+            # Still not usable after a full settle window: whatever is wrong
+            # is not the provisioner merely being mid-flight.
+            return status_lib.VolumeStatus.NOT_READY, error_message
+        time.sleep(_INITIAL_STATUS_POLL_SECONDS)
 
 
 def volume_apply(
