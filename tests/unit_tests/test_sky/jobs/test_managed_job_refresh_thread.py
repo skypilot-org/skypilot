@@ -6,8 +6,13 @@ not the full daemon loop:
 * ``_lock_still_held`` dispatches correctly between ``PostgresLock``
   (probes the underlying PG session) and any other ``DistributedLock``
   (trusts the local ``is_locked`` flag).
-* ``_suicide_on_lock_loss`` sends ``SIGTERM`` to the API server PID so
-  K8s restarts the pod and the leader is re-elected on another replica.
+* ``_step_down_on_lock_loss`` hands leadership over *without* killing the
+  API server process: it gates controller starts, stops the job
+  controllers this replica owns and confirms they are gone, and replaces
+  the lock object so the next acquire is real.
+* the outer ``run`` loop re-contends after a clean step-down, and stops
+  only when the step-down could not prove this replica's controllers are
+  gone (contending then could put two controllers on one job).
 * ``start_managed_job_refresh_daemon`` gates on consolidation mode,
   preserving the historical ``should_skip_managed_job_status_refresh``
   semantics now that the daemon no longer lives in
@@ -19,29 +24,39 @@ from unittest import mock
 import pytest
 
 from sky.jobs import managed_job_refresh_thread as mjrt
+from sky.jobs import state as managed_job_state
 from sky.utils import locks
+
+
+def _records(*pids):
+    return [
+        managed_job_state.ControllerPidRecord(pid=p, started_at=1.0)
+        for p in pids
+    ]
+
+
+def _thread_with_lock():
+    thread = mjrt.ManagedJobRefreshDaemonThread()
+    thread._lock = mock.create_autospec(locks.PostgresLock,
+                                        instance=True,
+                                        spec_set=True)
+    return thread
 
 
 class TestLockStillHeld:
     """`_lock_still_held` dispatches on lock type."""
 
     def test_postgres_lock_session_alive(self):
-        thread = mjrt.ManagedJobRefreshDaemonThread()
-        thread._lock = mock.create_autospec(locks.PostgresLock,
-                                            instance=True,
-                                            spec_set=True)
+        thread = _thread_with_lock()
         thread._lock.is_session_alive.return_value = True
         assert thread._lock_still_held() is True
         thread._lock.is_session_alive.assert_called_once_with()
 
     def test_postgres_lock_session_dead(self):
         """Silent PG conn loss: PostgresLock thinks acquired locally but
-        ``is_session_alive`` says otherwise.  Probe must return False so
-        the caller can SIGTERM the process."""
-        thread = mjrt.ManagedJobRefreshDaemonThread()
-        thread._lock = mock.create_autospec(locks.PostgresLock,
-                                            instance=True,
-                                            spec_set=True)
+        ``is_session_alive`` says otherwise. Probe must return False so
+        the caller can step down."""
+        thread = _thread_with_lock()
         thread._lock.is_session_alive.return_value = False
         assert thread._lock_still_held() is False
 
@@ -55,147 +70,270 @@ class TestLockStillHeld:
         assert thread._lock_still_held() is True
 
 
-class TestSuicideOnLockLoss:
-    """Lock-loss must SIGTERM the current process, not the thread."""
+class TestStepDownOnLockLoss:
+    """Losing the lock hands over the leader role, not the process."""
 
-    def test_sends_sigterm_to_current_pid(self):
-        thread = mjrt.ManagedJobRefreshDaemonThread()
-        thread._lock = mock.create_autospec(locks.PostgresLock,
-                                            instance=True,
-                                            spec_set=True)
-        with mock.patch.object(mjrt.os, 'kill') as kill_mock, \
-                mock.patch.object(mjrt.os, 'getpid', return_value=12345), \
+    def test_does_not_kill_the_process(self, tmp_path, monkeypatch):
+        """The headline behaviour. The API server keeps serving; only the
+        leader role moves. Killing the process here takes this replica's
+        share of the Service's traffic down with it, which is a far larger
+        blast radius than the leadership change requires."""
+        monkeypatch.setattr(mjrt.constants,
+                            'PERSISTENT_RUN_RESTARTING_SIGNAL_FILE',
+                            str(tmp_path / 'restart_signal'))
+        thread = _thread_with_lock()
+        with mock.patch('os.kill') as kill_mock, \
                 mock.patch.object(mjrt.managed_job_scheduler,
-                                  'kill_local_job_controllers'):
-            thread._suicide_on_lock_loss()
-        kill_mock.assert_called_once_with(12345, signal.SIGTERM)
+                                  'get_controller_process_records',
+                                  return_value=[]), \
+                mock.patch.object(mjrt.locks, 'get_lock'):
+            assert thread._step_down_on_lock_loss() is True
+        kill_mock.assert_not_called()
 
-    def test_kills_local_controllers_before_sigterm(self):
-        """Controllers must be SIGTERMed before the API server SIGTERM —
-        the lock is already released here, so a new leader can schedule
-        within milliseconds. Killing first prevents split-brain."""
-        thread = mjrt.ManagedJobRefreshDaemonThread()
-        thread._lock = mock.create_autospec(locks.PostgresLock,
-                                            instance=True,
-                                            spec_set=True)
-        call_order = []
-        with mock.patch.object(
-                mjrt.managed_job_scheduler,
-                'kill_local_job_controllers',
-                side_effect=lambda: call_order.append('kill_controllers')), \
-                mock.patch.object(
-                    mjrt.os, 'kill',
-                    side_effect=lambda *a, **kw: call_order.append('sigterm')), \
-                mock.patch.object(mjrt.os, 'getpid', return_value=12345):
-            thread._suicide_on_lock_loss()
-        assert call_order == ['kill_controllers', 'sigterm']
-
-    def test_sigterm_still_sent_when_controller_kill_raises(self):
-        """A failure killing controllers must not block the SIGTERM —
-        otherwise the replica would stay up holding nothing useful."""
-        thread = mjrt.ManagedJobRefreshDaemonThread()
-        thread._lock = mock.create_autospec(locks.PostgresLock,
-                                            instance=True,
-                                            spec_set=True)
-        with mock.patch.object(
-                mjrt.managed_job_scheduler,
-                'kill_local_job_controllers',
-                side_effect=RuntimeError('boom')), \
-                mock.patch.object(mjrt.os, 'kill') as kill_mock, \
-                mock.patch.object(mjrt.os, 'getpid', return_value=12345):
-            thread._suicide_on_lock_loss()
-        kill_mock.assert_called_once_with(12345, signal.SIGTERM)
-
-    def test_touches_recovery_signal_file(self, tmp_path, monkeypatch):
-        """The signal file must be touched BEFORE we kill controllers, so
-        any in-flight submit_jobs racing this path on another worker
-        process short-circuits maybe_start_controllers rather than
-        spawning a new controller that we'd then orphan."""
+    def test_gates_controller_starts_before_draining(self, tmp_path,
+                                                     monkeypatch):
+        """The gate file must exist before we start killing, so an in-flight
+        submit_jobs on another worker process short-circuits
+        maybe_start_controllers instead of spawning a controller we would
+        then orphan."""
         signal_file = tmp_path / 'restart_signal'
         monkeypatch.setattr(mjrt.constants,
                             'PERSISTENT_RUN_RESTARTING_SIGNAL_FILE',
                             str(signal_file))
-
-        thread = mjrt.ManagedJobRefreshDaemonThread()
-        thread._lock = mock.create_autospec(locks.PostgresLock,
-                                            instance=True,
-                                            spec_set=True)
+        thread = _thread_with_lock()
         order = []
-        with mock.patch.object(
-                mjrt.managed_job_scheduler,
-                'kill_local_job_controllers',
-                side_effect=lambda: order.append('kill')), \
-                mock.patch.object(
-                    mjrt.os, 'kill',
-                    side_effect=lambda *a, **kw: order.append('sigterm')), \
-                mock.patch.object(mjrt.os, 'getpid', return_value=12345):
-            thread._suicide_on_lock_loss()
 
-        assert signal_file.exists()
-        # File must be created BEFORE kill_controllers and SIGTERM,
-        # otherwise a fresh submit_jobs slipped in just before the
-        # kill could still spawn a controller.
-        assert order == ['kill', 'sigterm']
+        def on_kill(*args, **kwargs):
+            assert signal_file.exists(), (
+                'controller starts must be gated before we kill anything')
+            order.append('kill')
+            return 1
 
-    def test_signal_file_touch_failure_does_not_block_sigterm(
+        with mock.patch.object(mjrt.managed_job_scheduler,
+                               'get_controller_process_records',
+                               return_value=_records(101)), \
+                mock.patch.object(mjrt.managed_job_scheduler,
+                                  'kill_local_job_controllers',
+                                  side_effect=on_kill), \
+                mock.patch.object(mjrt.managed_job_utils,
+                                  'controller_process_alive',
+                                  return_value=False), \
+                mock.patch.object(mjrt.locks, 'get_lock'):
+            assert thread._step_down_on_lock_loss() is True
+
+        assert signal_file.exists(), (
+            'the gate file must survive the step-down: this replica is no '
+            'longer the leader, so it must not start controllers')
+        assert order == ['kill']
+
+    def test_sigterm_is_enough_when_controllers_exit(self, tmp_path,
+                                                     monkeypatch):
+        monkeypatch.setattr(mjrt.constants,
+                            'PERSISTENT_RUN_RESTARTING_SIGNAL_FILE',
+                            str(tmp_path / 'restart_signal'))
+        thread = _thread_with_lock()
+        with mock.patch.object(mjrt.managed_job_scheduler,
+                               'get_controller_process_records',
+                               return_value=_records(101, 102)), \
+                mock.patch.object(mjrt.managed_job_scheduler,
+                                  'kill_local_job_controllers') as kill, \
+                mock.patch.object(mjrt.managed_job_utils,
+                                  'controller_process_alive',
+                                  return_value=False), \
+                mock.patch.object(mjrt.locks, 'get_lock'):
+            assert thread._step_down_on_lock_loss() is True
+        # SIGTERM only (no signal argument), no escalation.
+        assert kill.call_args_list == [mock.call()]
+
+    def test_escalates_to_sigkill_when_sigterm_ignored(self, tmp_path,
+                                                       monkeypatch):
+        """Stepping down in place removes the container teardown that used to
+        reap controllers which ignored SIGTERM, so the drain must escalate
+        itself."""
+        monkeypatch.setattr(mjrt.constants,
+                            'PERSISTENT_RUN_RESTARTING_SIGNAL_FILE',
+                            str(tmp_path / 'restart_signal'))
+        # Zero budgets so neither phase sleeps: each phase does exactly one
+        # liveness check and then hits its deadline.
+        monkeypatch.setattr(mjrt, '_STEP_DOWN_SIGTERM_GRACE_SECONDS', 0)
+        monkeypatch.setattr(mjrt, '_STEP_DOWN_DRAIN_TIMEOUT_SECONDS', 0)
+        thread = _thread_with_lock()
+        # Alive for the post-SIGTERM check, gone for the post-SIGKILL check.
+        with mock.patch.object(mjrt.managed_job_scheduler,
+                               'get_controller_process_records',
+                               return_value=_records(101)), \
+                mock.patch.object(mjrt.managed_job_scheduler,
+                                  'kill_local_job_controllers') as kill, \
+                mock.patch.object(mjrt.managed_job_utils,
+                                  'controller_process_alive',
+                                  side_effect=[True, False]), \
+                mock.patch.object(mjrt.locks, 'get_lock'):
+            assert thread._step_down_on_lock_loss() is True
+        assert kill.call_args_list == [mock.call(), mock.call(signal.SIGKILL)]
+
+    def test_refuses_to_lead_again_when_controllers_survive(
+            self, tmp_path, monkeypatch):
+        """An undead controller plus a fresh leadership win on this replica is
+        exactly the two-controllers-on-one-job case, so report failure."""
+        monkeypatch.setattr(mjrt.constants,
+                            'PERSISTENT_RUN_RESTARTING_SIGNAL_FILE',
+                            str(tmp_path / 'restart_signal'))
+        monkeypatch.setattr(mjrt, '_STEP_DOWN_SIGTERM_GRACE_SECONDS', 0)
+        monkeypatch.setattr(mjrt, '_STEP_DOWN_DRAIN_TIMEOUT_SECONDS', 0)
+        thread = _thread_with_lock()
+        with mock.patch.object(mjrt.managed_job_scheduler,
+                               'get_controller_process_records',
+                               return_value=_records(101)), \
+                mock.patch.object(mjrt.managed_job_scheduler,
+                                  'kill_local_job_controllers'), \
+                mock.patch.object(mjrt.managed_job_utils,
+                                  'controller_process_alive',
+                                  return_value=True), \
+                mock.patch.object(mjrt.locks, 'get_lock'):
+            assert thread._step_down_on_lock_loss() is False
+
+    def test_unreadable_pid_file_refuses_to_lead_again(self, tmp_path,
+                                                       monkeypatch):
+        """``get_controller_process_records`` returns None when the pid file
+        cannot be read. That is 'unknown', not 'none' — assuming there were no
+        controllers would silently drop the only guarantee this path has."""
+        monkeypatch.setattr(mjrt.constants,
+                            'PERSISTENT_RUN_RESTARTING_SIGNAL_FILE',
+                            str(tmp_path / 'restart_signal'))
+        thread = _thread_with_lock()
+        with mock.patch.object(mjrt.managed_job_scheduler,
+                               'get_controller_process_records',
+                               return_value=None), \
+                mock.patch.object(mjrt.managed_job_scheduler,
+                                  'kill_local_job_controllers') as kill, \
+                mock.patch.object(mjrt.locks, 'get_lock'):
+            assert thread._step_down_on_lock_loss() is False
+        kill.assert_not_called()
+
+    def test_replaces_the_lock_object(self, tmp_path, monkeypatch):
+        """A release() on a dead connection leaves PostgresLock._acquired True,
+        and is_locked() returns that flag — so reusing the object would make the
+        next _become_leader_and_run skip acquire() and lead without the lock."""
+        monkeypatch.setattr(mjrt.constants,
+                            'PERSISTENT_RUN_RESTARTING_SIGNAL_FILE',
+                            str(tmp_path / 'restart_signal'))
+        thread = _thread_with_lock()
+        old_lock = thread._lock
+        fresh = mock.create_autospec(locks.PostgresLock,
+                                     instance=True,
+                                     spec_set=True)
+        with mock.patch.object(mjrt.managed_job_scheduler,
+                               'get_controller_process_records',
+                               return_value=[]), \
+                mock.patch.object(mjrt.locks, 'get_lock',
+                                  return_value=fresh) as get_lock:
+            assert thread._step_down_on_lock_loss() is True
+        old_lock.release.assert_called_once_with()
+        get_lock.assert_called_once_with(
+            mjrt.managed_job_constants.CONSOLIDATION_MODE_LOCK_ID)
+        assert thread._lock is fresh
+
+    def test_release_failure_still_replaces_the_lock(self, tmp_path,
+                                                     monkeypatch):
+        """Releasing a lock whose session already died routinely raises; that
+        must not leave the stale object in place."""
+        monkeypatch.setattr(mjrt.constants,
+                            'PERSISTENT_RUN_RESTARTING_SIGNAL_FILE',
+                            str(tmp_path / 'restart_signal'))
+        thread = _thread_with_lock()
+        thread._lock.release.side_effect = RuntimeError('conn already dead')
+        fresh = mock.create_autospec(locks.PostgresLock,
+                                     instance=True,
+                                     spec_set=True)
+        with mock.patch.object(mjrt.managed_job_scheduler,
+                               'get_controller_process_records',
+                               return_value=[]), \
+                mock.patch.object(mjrt.locks, 'get_lock', return_value=fresh):
+            assert thread._step_down_on_lock_loss() is True
+        assert thread._lock is fresh
+
+    def test_drain_failure_still_replaces_the_lock(self, tmp_path, monkeypatch):
+        """Even when we cannot prove the controllers are gone, the lock object
+        must be dropped — otherwise a later retry could lead on a stale flag."""
+        monkeypatch.setattr(mjrt.constants,
+                            'PERSISTENT_RUN_RESTARTING_SIGNAL_FILE',
+                            str(tmp_path / 'restart_signal'))
+        thread = _thread_with_lock()
+        fresh = mock.create_autospec(locks.PostgresLock,
+                                     instance=True,
+                                     spec_set=True)
+        with mock.patch.object(mjrt.managed_job_scheduler,
+                               'get_controller_process_records',
+                               side_effect=RuntimeError('boom')), \
+                mock.patch.object(mjrt.locks, 'get_lock', return_value=fresh):
+            assert thread._step_down_on_lock_loss() is False
+        assert thread._lock is fresh
+
+    def test_signal_file_touch_failure_does_not_block_the_drain(
             self, monkeypatch):
-        """If the FS refuses the touch (read-only, full, etc.), proceed
-        with kill + SIGTERM anyway. Better than blocking shutdown."""
+        """If the FS refuses the touch (read-only, full), still stop the
+        controllers — that is the part that prevents split-brain."""
 
         def boom_touch(self, *args, **kwargs):  # pylint: disable=unused-argument
             raise OSError('read-only fs')
 
-        thread = mjrt.ManagedJobRefreshDaemonThread()
-        thread._lock = mock.create_autospec(locks.PostgresLock,
-                                            instance=True,
-                                            spec_set=True)
+        thread = _thread_with_lock()
         with mock.patch.object(mjrt.pathlib.Path, 'touch', boom_touch), \
                 mock.patch.object(mjrt.managed_job_scheduler,
-                                  'kill_local_job_controllers'), \
-                mock.patch.object(mjrt.os, 'kill') as kill_mock, \
-                mock.patch.object(mjrt.os, 'getpid', return_value=12345):
-            thread._suicide_on_lock_loss()
-        kill_mock.assert_called_once_with(12345, signal.SIGTERM)
+                                  'get_controller_process_records',
+                                  return_value=_records(101)), \
+                mock.patch.object(mjrt.managed_job_scheduler,
+                                  'kill_local_job_controllers') as kill, \
+                mock.patch.object(mjrt.managed_job_utils,
+                                  'controller_process_alive',
+                                  return_value=False), \
+                mock.patch.object(mjrt.locks, 'get_lock'):
+            assert thread._step_down_on_lock_loss() is True
+        kill.assert_called_once_with()
 
 
-class TestOuterLoopStopsAfterSuicide:
-    """Normal return from _become_leader_and_run only happens after the
-    inner loop's probe detected lock loss and called _suicide_on_lock_loss.
-    The outer run() loop must stop the thread instead of re-entering —
-    otherwise the next iteration would skip the lock acquire (the local
-    _acquired flag is stale) and run ha_recovery_for_consolidation_mode,
-    which would spawn fresh controllers under a now-released lock while
-    the new leader on another replica is doing the same.
-    """
+class TestOuterLoopAfterStepDown:
+    """run() re-contends after a clean step-down and stops after a dirty one."""
 
-    def test_run_returns_after_become_leader_returns_normally(self):
+    def test_reenters_after_a_clean_step_down(self):
+        """A clean step-down leaves this replica eligible: controller starts are
+        gated, our controllers are gone, and the lock object was replaced — so
+        the next pass really does acquire() before leading."""
         thread = mjrt.ManagedJobRefreshDaemonThread()
         lock = mock.create_autospec(locks.PostgresLock,
                                     instance=True,
                                     spec_set=True)
-        # If the outer loop incorrectly iterates, _become_leader_and_run
-        # would be called more than once. Use a side_effect that fails
-        # the test if that happens.
-        call_count = {'n': 0}
-
-        def normal_return(self):
-            call_count['n'] += 1
-
         with mock.patch('sky.utils.locks.get_lock', return_value=lock), \
                 mock.patch.object(
                     mjrt.ManagedJobRefreshDaemonThread,
                     '_become_leader_and_run',
-                    normal_return), \
+                    side_effect=[True, True, SystemExit()]) as become, \
+                mock.patch.object(mjrt.time, 'sleep'):
+            with pytest.raises(SystemExit):
+                thread.run()
+        assert become.call_count == 3, (
+            'run() must contend again after a clean step-down')
+
+    def test_stops_when_step_down_could_not_confirm_the_drain(self):
+        """If our controllers might still be alive, contending again could put a
+        second controller on one of their jobs. Stop the thread instead."""
+        thread = mjrt.ManagedJobRefreshDaemonThread()
+        lock = mock.create_autospec(locks.PostgresLock,
+                                    instance=True,
+                                    spec_set=True)
+        with mock.patch('sky.utils.locks.get_lock', return_value=lock), \
+                mock.patch.object(
+                    mjrt.ManagedJobRefreshDaemonThread,
+                    '_become_leader_and_run',
+                    return_value=False) as become, \
                 mock.patch.object(mjrt.time, 'sleep'):
             thread.run()
-        assert call_count['n'] == 1, (
-            'run() must not re-enter _become_leader_and_run after a '
-            'normal return — that path can only follow a suicide.')
+        assert become.call_count == 1
 
 
 class TestOuterLoopExceptionHandling:
-    """When _become_leader_and_run throws, decide between SIGTERM and retry
-    based on whether we previously held a now-dead lock."""
+    """When _become_leader_and_run throws, decide between stepping down and
+    retrying based on whether we previously held a now-dead lock."""
 
     @staticmethod
     def _patches(is_locked: bool, session_alive: bool):
@@ -208,11 +346,29 @@ class TestOuterLoopExceptionHandling:
         lock.is_session_alive.return_value = session_alive
         return mock.patch('sky.utils.locks.get_lock', return_value=lock), lock
 
-    def test_sigterm_when_was_leader_and_session_dead(self):
+    def test_steps_down_when_was_leader_and_session_dead(self):
         """Acquired the lock, then recovery threw because the underlying
         PG session died — running again would race the new leader."""
         thread = mjrt.ManagedJobRefreshDaemonThread()
-        get_lock_p, lock = self._patches(is_locked=True, session_alive=False)
+        get_lock_p, _ = self._patches(is_locked=True, session_alive=False)
+        with get_lock_p, \
+                mock.patch.object(
+                    mjrt.ManagedJobRefreshDaemonThread,
+                    '_become_leader_and_run',
+                    side_effect=[RuntimeError('recovery boom'),
+                                 SystemExit()]), \
+                mock.patch.object(
+                    mjrt.ManagedJobRefreshDaemonThread,
+                    '_step_down_on_lock_loss',
+                    return_value=True) as step_down, \
+                mock.patch.object(mjrt.time, 'sleep'):
+            with pytest.raises(SystemExit):
+                thread.run()
+        step_down.assert_called_once()
+
+    def test_stops_when_step_down_says_unsafe(self):
+        thread = mjrt.ManagedJobRefreshDaemonThread()
+        get_lock_p, _ = self._patches(is_locked=True, session_alive=False)
         with get_lock_p, \
                 mock.patch.object(
                     mjrt.ManagedJobRefreshDaemonThread,
@@ -220,16 +376,17 @@ class TestOuterLoopExceptionHandling:
                     side_effect=RuntimeError('recovery boom')), \
                 mock.patch.object(
                     mjrt.ManagedJobRefreshDaemonThread,
-                    '_suicide_on_lock_loss') as suicide, \
+                    '_step_down_on_lock_loss',
+                    return_value=False) as step_down, \
                 mock.patch.object(mjrt.time, 'sleep'):
             thread.run()
-        suicide.assert_called_once()
+        step_down.assert_called_once()
 
     def test_retry_when_acquire_threw(self):
         """acquire() itself failed (e.g. another replica holds the lock,
         or transient PG hiccup); is_locked stays False, just retry."""
         thread = mjrt.ManagedJobRefreshDaemonThread()
-        get_lock_p, lock = self._patches(is_locked=False, session_alive=False)
+        get_lock_p, _ = self._patches(is_locked=False, session_alive=False)
         with get_lock_p, \
                 mock.patch.object(
                     mjrt.ManagedJobRefreshDaemonThread,
@@ -239,17 +396,17 @@ class TestOuterLoopExceptionHandling:
                                  SystemExit()]), \
                 mock.patch.object(
                     mjrt.ManagedJobRefreshDaemonThread,
-                    '_suicide_on_lock_loss') as suicide, \
+                    '_step_down_on_lock_loss') as step_down, \
                 mock.patch.object(mjrt.time, 'sleep'):
             with pytest.raises(SystemExit):
                 thread.run()
-        suicide.assert_not_called()
+        step_down.assert_not_called()
 
     def test_retry_when_lock_still_held(self):
         """Recovery threw on transient error but our lock session is
         still alive — keep retrying as leader."""
         thread = mjrt.ManagedJobRefreshDaemonThread()
-        get_lock_p, lock = self._patches(is_locked=True, session_alive=True)
+        get_lock_p, _ = self._patches(is_locked=True, session_alive=True)
         with get_lock_p, \
                 mock.patch.object(
                     mjrt.ManagedJobRefreshDaemonThread,
@@ -258,11 +415,11 @@ class TestOuterLoopExceptionHandling:
                                  SystemExit()]), \
                 mock.patch.object(
                     mjrt.ManagedJobRefreshDaemonThread,
-                    '_suicide_on_lock_loss') as suicide, \
+                    '_step_down_on_lock_loss') as step_down, \
                 mock.patch.object(mjrt.time, 'sleep'):
             with pytest.raises(SystemExit):
                 thread.run()
-        suicide.assert_not_called()
+        step_down.assert_not_called()
 
 
 class TestBecomeLeaderOrdering:
@@ -368,8 +525,8 @@ class TestBecomeLeaderOrdering:
     def test_steps_down_if_lock_lost_during_wait(self, tmp_path, monkeypatch):
         """If the lock session goes stale during the post-acquire wait, we
         must NOT run recovery — another replica may now hold the lock. Step
-        down via _suicide_on_lock_loss and leave the gate file in place (the
-        suicide path re-touches it to keep controllers gated)."""
+        down and leave the gate file in place (the step-down path re-touches it
+        to keep controllers gated), and propagate its verdict to run()."""
         signal_file = tmp_path / 'restart_signal'
         monkeypatch.setattr(mjrt.constants,
                             'PERSISTENT_RUN_RESTARTING_SIGNAL_FILE',
@@ -390,14 +547,45 @@ class TestBecomeLeaderOrdering:
                     'ha_recovery_for_consolidation_mode') as recovery, \
                 mock.patch.object(
                     mjrt.ManagedJobRefreshDaemonThread,
-                    '_suicide_on_lock_loss') as suicide:
-            thread._become_leader_and_run()
+                    '_step_down_on_lock_loss',
+                    return_value=True) as step_down:
+            assert thread._become_leader_and_run() is True
 
-        suicide.assert_called_once()
+        step_down.assert_called_once()
         recovery.assert_not_called()
-        # The gate file is NOT removed on the step-down path; the suicide
-        # routine owns re-touching it for the shutdown drain.
+        # The gate file is NOT removed on the step-down path; the step-down
+        # routine owns re-touching it while this replica is not the leader.
         assert signal_file.exists()
+
+    def test_lock_lost_in_event_loop_propagates_step_down_verdict(
+            self, tmp_path, monkeypatch):
+        """The steady-state probe path must return the step-down's verdict too,
+        so an unconfirmed drain stops the thread instead of re-contending."""
+        signal_file = tmp_path / 'restart_signal'
+        monkeypatch.setattr(mjrt.constants,
+                            'PERSISTENT_RUN_RESTARTING_SIGNAL_FILE',
+                            str(signal_file))
+
+        thread = mjrt.ManagedJobRefreshDaemonThread()
+        lock = mock.create_autospec(locks.PostgresLock,
+                                    instance=True,
+                                    spec_set=True)
+        lock.is_locked.return_value = False
+        # Alive for the post-acquire re-check, dead at the first loop probe.
+        lock.is_session_alive.side_effect = [True, False]
+        thread._lock = lock
+
+        with mock.patch.object(mjrt.time, 'sleep'), \
+                mock.patch.object(mjrt.managed_job_utils,
+                                  'ha_recovery_for_consolidation_mode'), \
+                mock.patch.object(mjrt.events, 'ManagedJobEvent'), \
+                mock.patch.object(
+                    mjrt.ManagedJobRefreshDaemonThread,
+                    '_step_down_on_lock_loss',
+                    return_value=False) as step_down:
+            assert thread._become_leader_and_run() is False
+
+        step_down.assert_called_once()
 
 
 class TestStart:

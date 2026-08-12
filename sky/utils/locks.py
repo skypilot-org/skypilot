@@ -401,8 +401,21 @@ class PostgresLock(DistributedLock):
         could now hold the same lock.
 
         This method exposes a cheap ``SELECT 1`` probe on the very connection
-        that holds the lock so the holder can detect the loss and react
-        (typically by exiting and letting the orchestrator restart it).
+        that holds the lock so the holder can detect the loss and react.
+
+        Reacting by exiting the process is one option, but not the only one and
+        not the cheapest: a holder that also serves traffic takes that traffic
+        down with it. A holder can instead step down in place — stop whatever
+        work the lock guarded, prove it stopped, drop this lock object (see the
+        note below) and go back to contending. ``sky/jobs/
+        managed_job_refresh_thread.py::_step_down_on_lock_loss`` does that.
+
+        Note for either path: a failed ``release()`` on the dead connection
+        leaves ``self._acquired`` True, because that flag is only cleared after
+        a successful unlock — and ``is_locked()`` returns exactly that flag. A
+        holder that keeps using this object after a lost session can therefore
+        believe it still holds the lock. Build a fresh lock instead of reusing
+        one whose session died.
 
         Returns ``False`` if the lock was never acquired, if the connection
         is missing, or if the probe raises any exception.  Returns ``True``
