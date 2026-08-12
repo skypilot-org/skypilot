@@ -116,6 +116,9 @@ def base_variables() -> Dict[str, Any]:
         'k8s_automount_sa_token': 'true',
         'k8s_fuse_device_required': False,
         'k8s_kueue_local_queue_name': None,
+        'k8s_gang_gate_name': None,
+        'k8s_pod_group_name': None,
+        'k8s_pod_group_total_count': None,
         'k8s_skypilot_system_namespace': 'skypilot-system',
         'k8s_fusermount_shared_dir': '/var/run/fusermount',
         'k8s_fusermount_setup_command': 'FUSERMOUNT_SETUP_COMMAND',
@@ -297,6 +300,17 @@ CASES: Dict[str, Dict[str, Any]] = {
     'kueue': {
         'k8s_kueue_local_queue_name': 'user-queue',
         'k8s_max_run_duration_seconds': 3600,
+    },
+    # Job Group gang scheduling: the controller-set overrides stamp an
+    # extra scheduling gate and point the member at a shared, group-wide
+    # Kueue pod group (name + summed total-count) instead of its own
+    # per-cluster one.
+    'gang_scheduling': {
+        'k8s_kueue_local_queue_name': 'user-queue',
+        'k8s_gang_gate_name': 'skypilot.co/gang',
+        'k8s_pod_group_name': 'my-group-a1',
+        'k8s_pod_group_total_count': 5,
+        'num_nodes': 2,
     },
     'docker_all': {
         'k8s_enable_docker_all': True,

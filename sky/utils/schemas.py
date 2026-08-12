@@ -1642,6 +1642,25 @@ _CONTEXT_CONFIG_SCHEMA_KUBERNETES = {
             },
         },
     },
+    # Controller-internal (Job Group gang scheduling): set per member via
+    # cluster_config_overrides by the jobs controller, not in user or
+    # tenant config files.
+    'gang_scheduling': {
+        'type': 'object',
+        'required': [],
+        'additionalProperties': False,
+        'properties': {
+            'gate_name': {
+                'type': 'string',
+            },
+            'pod_group_name': {
+                'type': 'string',
+            },
+            'pod_group_total_count': {
+                'type': 'integer',
+            },
+        },
+    },
     # Alias of `kueue.local_queue_name`; `quota.queue` takes precedence
     # when both are set. Permissive so external schedulers (registered
     # via plugins) can layer their own sub-fields under `quota` without

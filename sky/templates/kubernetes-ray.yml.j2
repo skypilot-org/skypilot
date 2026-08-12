@@ -299,7 +299,7 @@ available_node_types:
             {% endif %}
             {% if k8s_kueue_local_queue_name %}
             kueue.x-k8s.io/queue-name: {{k8s_kueue_local_queue_name}}
-            kueue.x-k8s.io/pod-group-name: {{cluster_name_on_cloud}}
+            kueue.x-k8s.io/pod-group-name: {{k8s_pod_group_name or cluster_name_on_cloud}}
             {% endif %}
         annotations:
           # The skypilot-user *label* (above) sanitizes characters that are
@@ -316,7 +316,7 @@ available_node_types:
           {% endif %}
           {% if k8s_kueue_local_queue_name %}
           kueue.x-k8s.io/retriable-in-group: "false"
-          kueue.x-k8s.io/pod-group-total-count: "{{ num_nodes|string }}"
+          kueue.x-k8s.io/pod-group-total-count: "{{ (k8s_pod_group_total_count or num_nodes)|string }}"
           {% if k8s_max_run_duration_seconds %}
           provreq.kueue.x-k8s.io/maxRunDurationSeconds: "{{k8s_max_run_duration_seconds|string}}"
           {% endif %}
@@ -394,6 +394,14 @@ available_node_types:
         serviceAccountName: {{k8s_service_account_name}}
         automountServiceAccountToken: {{k8s_automount_sa_token}}
         restartPolicy: {{ "Always" if high_availability else "Never" }}
+        {% if k8s_gang_gate_name %}
+        # Held back from scheduling until the jobs controller removes this
+        # gate: no Job Group member may bind before every member of the
+        # group is admitted. Coexists with Kueue's own admission gate on
+        # the same pod; each owner removes only its own entry.
+        schedulingGates:
+          - name: {{ k8s_gang_gate_name }}
+        {% endif %}
         {% if preemption_hook_timeout is defined and preemption_hook_timeout %}
         terminationGracePeriodSeconds: {{ preemption_hook_timeout }}
         {% endif %}
