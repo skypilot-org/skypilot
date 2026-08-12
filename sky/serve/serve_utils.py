@@ -16,7 +16,7 @@ import time
 import traceback
 import typing
 from typing import (Any, Callable, DefaultDict, Deque, Dict, Iterator, List,
-                    Optional, Set, TextIO, Type, Union)
+                    Mapping, Optional, Set, TextIO, Type, Union)
 import uuid
 
 import colorama
@@ -58,6 +58,23 @@ else:
     requests = adaptors_common.LazyImport('requests')
 
 logger = sky_logging.init_logger(__name__)
+
+# Request headers and query parameters are user-controlled.  In particular,
+# serving requests commonly carry bearer tokens or API keys, so they must not
+# be included verbatim in controller/load-balancer logs.
+_SENSITIVE_REQUEST_FIELD_PATTERN = re.compile(
+    r'(?:authorization|auth|cookie|credential|password|secret|token|'
+    r'api[-_]?key|proxy[-_]?authorization)', re.IGNORECASE)
+
+
+def redact_request_fields(fields: Mapping[str, Any]) -> Dict[str, Any]:
+    """Redact sensitive request header or query parameter values."""
+    return {
+        key: ('<redacted>'
+              if _SENSITIVE_REQUEST_FIELD_PATTERN.search(str(key)) else value)
+        for key, value in fields.items()
+    }
+
 
 # Retry settings for cross-pod controller HTTP calls. The DB row update of
 # `controller_ip` is atomic w.r.t. controller readiness (sky.serve.service
