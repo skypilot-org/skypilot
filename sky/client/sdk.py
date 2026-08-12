@@ -663,7 +663,10 @@ def dashboard(starting_page: Optional[str] = None) -> None:
     api_server_url = server_common.get_server_url()
     url = server_common.get_dashboard_url(api_server_url,
                                           starting_page=starting_page)
-    logger.info(f'Opening dashboard in browser: {url}')
+    # The browser needs the real URL for basic auth to complete, but the log
+    # line is just for the user to read, so mask the password there.
+    logger.info('Opening dashboard in browser: '
+                f'{server_common.redact_url_password(url)}')
     common_utils.open_browser(url)
 
 
@@ -3151,9 +3154,11 @@ def api_login(endpoint: Optional[str] = None,
                 identity_info += user_id
         else:
             identity_info = ''
-        dashboard_msg = f'Dashboard: {dashboard_url}'
+        dashboard_msg = (
+            f'Dashboard: {server_common.redact_url_password(dashboard_url)}')
         click.secho(
-            f'Logged into SkyPilot API server at: {endpoint}'
+            'Logged into SkyPilot API server at: '
+            f'{server_common.redact_url_password(endpoint)}'
             f'{identity_info}'
             f'\n{ux_utils.INDENT_LAST_SYMBOL}{colorama.Fore.GREEN}'
             f'{dashboard_msg}',

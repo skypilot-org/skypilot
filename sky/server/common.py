@@ -782,8 +782,8 @@ def get_request_id(response: 'requests.Response') -> RequestId[T]:
         with ux_utils.print_exception_no_traceback():
             raise RuntimeError(
                 'Failed to get request ID from SkyPilot API server at '
-                f'{get_server_url()}. Response: {response.status_code} '
-                f'{response.text}')
+                f'{redact_url_password(get_server_url())}. '
+                f'Response: {response.status_code} {response.text}')
     return RequestId[T](request_id)
 
 
@@ -844,8 +844,9 @@ def _start_api_server(deploy: bool = False,
                     'Starting a local server.'
                     f'{colorama.Style.RESET_ALL}')
         if not is_api_server_local():
-            raise RuntimeError(f'Cannot start API server: {get_server_url()} '
-                               'is not a local URL')
+            raise RuntimeError(
+                'Cannot start API server: '
+                f'{redact_url_password(get_server_url())} is not a local URL')
 
         # At this point, we cannot reliably tell if we will be using
         # consolidation mode, because that requires accessing the db
