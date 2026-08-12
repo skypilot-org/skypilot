@@ -1058,66 +1058,37 @@ def write_cluster_config(
     # they go through the same Jinja2 template path as user volume mounts
     # (volume definitions, volumeMounts, and permission fixes).
     if isinstance(cloud, clouds.Kubernetes):
-        auto_mounts_config = skypilot_config.get_effective_region_config(
-            cloud='kubernetes',
-            region=to_provision.region,
-            keys=('auto_mounts',),
-            default_value=None)
-        if auto_mounts_config:
+        # Resolved a second time here: the provision timeout is computed from
+        # the same list, before this point (see
+        # Kubernetes._calculate_provision_timeout).
+        auto_mounts = volume_utils.resolve_auto_mounts(to_provision.region)
+        for skipped_mount in auto_mounts.skipped:
+            if skipped_mount.is_warning:
+                logger.warning(skipped_mount.message)
+            else:
+                logger.debug(skipped_mount.message)
+        if auto_mounts.mounted:
             home_dir = kubernetes_utils.DEFAULT_HOME_DIRECTORY
             attached_auto_mount_volumes: Set[str] = set()
-            current_user_hash = common_utils.get_current_user().id
-            active_workspace = skypilot_config.get_active_workspace()
-            for entry in auto_mounts_config:
-                volume_name = entry['volume_name']
-                record = global_user_state.get_volume_by_name(volume_name)
-                if record is None:
-                    logger.warning(
-                        f'Auto-mount volume {volume_name!r} not found in '
-                        f'SkyPilot volume DB. Skipping. '
-                        f'Create it with: sky volumes apply')
-                    continue
-                scope = entry.get('scope',
-                                  volume_utils.AutoMountScope.GLOBAL.value)
-                if not volume_utils.auto_mount_in_scope(
-                        scope,
-                        volume_user_hash=record['user_hash'],
-                        volume_workspace=record['workspace'],
-                        current_user_hash=current_user_hash,
-                        active_workspace=active_workspace):
-                    logger.debug(f'Auto-mount volume {volume_name!r} has scope '
-                                 f'{scope!r} and does not apply to this launch '
-                                 f'(user {current_user_hash!r}, workspace '
-                                 f'{active_workspace!r}). Skipping.')
-                    continue
-                volume_config = record['handle']
-                # Only hostPath and ReadWriteMany PVC volumes support
-                # concurrent multi-pod access required by auto_mounts.
-                if (volume_config.type == volume_utils.VolumeType.PVC.value and
-                        volume_config.config.get('access_mode') !=
-                        volume_utils.VolumeAccessMode.READ_WRITE_MANY.value):
-                    logger.warning(
-                        f'Auto-mount volume {volume_name!r} has access '
-                        f'mode '
-                        f'{volume_config.config.get("access_mode")!r}, '
-                        f'which does not support concurrent multi-pod '
-                        f'access. Only hostPath volumes and '
-                        f'ReadWriteMany PVC volumes are supported for '
-                        f'auto_mounts. Skipping.')
-                    continue
+            for auto_mount in auto_mounts.mounted:
+                volume_name = auto_mount.volume_name
+                volume_config = auto_mount.volume_config
                 # Reject before a pod is created. Mounting a volume whose
                 # backing storage is not usable does not fail loudly -- the pod
                 # just sits unschedulable or stuck in ContainerCreating -- so
                 # the launch has to be refused here, as it already is for a
                 # volume declared on the task.
                 #
-                # Keep this last: the checks above skip entries that this
-                # launch will not mount at all. Moving it earlier would refuse
-                # a launch over a volume belonging to someone else's scope, or
-                # one that would have been passed over for its access mode.
-                _reject_not_ready_auto_mount_volume(volume_name, record)
-                mount_paths = entry.get('mount_paths', [])
-                for path in mount_paths:
+                # Readiness is checked here rather than in
+                # resolve_auto_mounts() because the entries that resolver
+                # passes over are ones this launch will not mount at all.
+                # Refusing there would refuse a launch over a volume belonging
+                # to someone else's scope, or one that would have been passed
+                # over for its access mode -- and would also raise on the
+                # provision-timeout path.
+                _reject_not_ready_auto_mount_volume(volume_name,
+                                                    auto_mount.record)
+                for path in auto_mount.mount_paths:
                     if path.startswith('/'):
                         mount_path = path
                     elif path.startswith('~/'):
