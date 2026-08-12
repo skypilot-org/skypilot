@@ -1,0 +1,75 @@
+"""Tests for SkyServe load balancer request accounting."""
+from unittest import mock
+
+import httpx
+import pytest
+
+from sky.serve import load_balancer
+
+
+def _make_request():
+    request = mock.MagicMock()
+    request.method = 'GET'
+    request.url.path = '/'
+    request.url.query = ''
+    request.headers.raw = []
+    request.body = mock.AsyncMock(return_value=b'')
+    return request
+
+
+def _make_load_balancer():
+    return load_balancer.SkyServeLoadBalancer(
+        controller_url='http://controller',
+        load_balancer_port=30001,
+        load_balancing_policy_name='least_load')
+
+
+@pytest.mark.asyncio
+async def test_proxy_error_releases_least_load_accounting():
+    lb = _make_load_balancer()
+    replica_url = 'http://replica'
+    client = mock.MagicMock()
+    client.build_request.return_value = mock.sentinel.proxy_request
+    client.send = mock.AsyncMock(side_effect=httpx.ReadTimeout('timed out'))
+    lb._client_pool[replica_url] = client
+
+    result = await lb._proxy_request_to(replica_url, _make_request())
+
+    assert isinstance(result, httpx.ReadTimeout)
+    assert lb._load_balancing_policy.load_map[replica_url] == 0
+
+
+@pytest.mark.asyncio
+async def test_streaming_response_releases_least_load_accounting_on_close():
+    lb = _make_load_balancer()
+    replica_url = 'http://replica'
+    client = mock.MagicMock()
+    client.build_request.return_value = mock.sentinel.proxy_request
+
+    async def response_body():
+        yield b'response'
+
+    proxy_response = mock.MagicMock()
+    proxy_response.aiter_raw.return_value = response_body()
+    proxy_response.status_code = 200
+    proxy_response.headers = {}
+    proxy_response.aclose = mock.AsyncMock()
+    client.send = mock.AsyncMock(return_value=proxy_response)
+    lb._client_pool[replica_url] = client
+
+    response = await lb._proxy_request_to(replica_url, _make_request())
+
+    assert lb._load_balancing_policy.load_map[replica_url] == 1
+    await response.background()
+    assert lb._load_balancing_policy.load_map[replica_url] == 0
+
+
+@pytest.mark.asyncio
+async def test_missing_client_releases_least_load_accounting():
+    lb = _make_load_balancer()
+    replica_url = 'http://replica'
+
+    result = await lb._proxy_request_to(replica_url, _make_request())
+
+    assert isinstance(result, RuntimeError)
+    assert lb._load_balancing_policy.load_map[replica_url] == 0

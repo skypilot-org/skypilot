@@ -173,6 +173,7 @@ class SkyServeLoadBalancer:
         """
         logger.info(f'Proxy request to {url}')
         self._load_balancing_policy.pre_execute_hook(url, request)
+        release_load_immediately = True
         try:
             # We defer the get of the client here on purpose, for case when the
             # replica is ready in `_proxy_with_retries` but refreshed before
@@ -194,19 +195,31 @@ class SkyServeLoadBalancer:
             proxy_response = await client.send(proxy_request, stream=True)
 
             async def background_func():
-                await proxy_response.aclose()
-                self._load_balancing_policy.post_execute_hook(url, request)
+                try:
+                    await proxy_response.aclose()
+                finally:
+                    self._load_balancing_policy.post_execute_hook(url, request)
 
-            return fastapi.responses.StreamingResponse(
+            response = fastapi.responses.StreamingResponse(
                 content=proxy_response.aiter_raw(),
                 status_code=proxy_response.status_code,
                 headers=proxy_response.headers,
                 background=background.BackgroundTask(background_func))
+            # Keep the load counted until the streaming response has finished.
+            release_load_immediately = False
+            return response
         except (httpx.RequestError, httpx.HTTPStatusError) as e:
             logger.error(f'Error when proxy request to {url}: '
                          f'{common_utils.format_exception(e)}'
                          f'\nTraceback: {traceback.format_exc()}')
             return e
+        finally:
+            # If proxying failed before a StreamingResponse was returned, the
+            # background task above cannot run to release the load. This also
+            # covers a replica disappearing from the client pool between
+            # selection and proxying.
+            if release_load_immediately:
+                self._load_balancing_policy.post_execute_hook(url, request)
 
     async def _proxy_with_retries(
             self, request: fastapi.Request) -> fastapi.responses.Response:
