@@ -42,7 +42,7 @@ SkyPilot gives **AI teams** a simple interface to run jobs on any infra.
 
 :fire: *News* :fire:
 - [Aug 2026] **RL is bottlenecked by inference**: scale it independently with SkyPilot: [**blog**](https://skypilot.ai/blog/slime-agentic-rl)
-- [Jul 2026] **Serving Kimi K3 on your own GPUs** with SkyPilot: [**blog**](https://skypilot.ai/blog/kimi-k3)
+- [Jul 2026] **Serving Kimi K3 on your own GPUs with SkyPilot**: [**blog**](https://skypilot.ai/blog/kimi-k3)
 - [Jun 2026] **SkyPilot Endpoints**: production-ready inference on every cluster you own: [**blog**](https://skypilot.ai/blog/skypilot-endpoints)
 - [Jun 2026] **Announcing SkyPilot Sandboxes**: run untrusted, LLM-generated code on the Kubernetes clusters you already own. [**Learn more**](https://skypilot.ai/blog/sandboxes), [**join early access**](https://forms.gle/o4keAryXsVazNjyGA)
 - [May 2026] **How Multiverse doubled their GPU utilization with SkyPilot**: [**case study**](https://multiversecomputing.com/papers/2x-gpu-utilization-same-hardware-discover-our-efficiency-playbook)
