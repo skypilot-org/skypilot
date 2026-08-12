@@ -1,5 +1,6 @@
 """Slurm instance provisioning."""
 
+import math
 import os
 import shlex
 import tempfile
@@ -660,7 +661,7 @@ echo "[container-init] Packages installed in $((SECONDS - INIT_START))s"
 #SBATCH --wait-all-nodes=1
 # Let the job be terminated rather than requeued implicitly.
 #SBATCH --no-requeue
-#SBATCH --cpus-per-task={int(resources["cpus"])}
+#SBATCH --cpus-per-task={math.ceil(float(resources["cpus"]))}
 {mem_directive}{gpu_directive}{extra_sbatch_directives}
 
 # Cleanup function to remove cluster dirs on job termination.

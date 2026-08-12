@@ -6961,13 +6961,32 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         else:
             return task_codegen.RayCodeGen()
 
+    @staticmethod
+    def _get_task_demands_dict(handle: CloudVmRayResourceHandle,
+                               task: task_lib.Task) -> Dict[str, float]:
+        """Returns task demands for the handle's execution backend."""
+        resources_dict = backend_utils.get_task_demands_dict(task)
+        if (not isinstance(handle.launched_resources.cloud, clouds.Slurm) or
+                task.is_controller_task()):
+            return resources_dict
+
+        resources = task.best_resources
+        if resources is None:
+            assert len(task.resources) == 1, task.resources
+            resources = next(iter(task.resources))
+        requested_cpus = resources.cpus
+        if requested_cpus is None:
+            requested_cpus = handle.launched_resources.cpus
+        if requested_cpus is not None:
+            resources_dict['CPU'] = float(requested_cpus.rstrip('+'))
+        return resources_dict
+
     def _execute_task_one_node(self, handle: CloudVmRayResourceHandle,
                                task: task_lib.Task, job_id: int,
                                remote_log_dir: str) -> None:
         # Launch the command as a Ray task.
         log_dir = os.path.join(remote_log_dir, 'tasks')
-
-        resources_dict = backend_utils.get_task_demands_dict(task)
+        resources_dict = self._get_task_demands_dict(handle, task)
         internal_ips = handle.internal_ips()
         assert internal_ips is not None, 'internal_ips is not cached in handle'
 
@@ -6985,13 +7004,13 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             setup_cmd=self._setup_cmd,
         )
 
-        codegen.add_task(
-            1,
-            bash_script=task.run,
-            env_vars=task_env_vars,
-            task_name=task.name,
-            resources_dict=backend_utils.get_task_demands_dict(task),
-            log_dir=log_dir)
+        codegen.add_task(1,
+                         bash_script=task.run,
+                         env_vars=task_env_vars,
+                         task_name=task.name,
+                         resources_dict=self._get_task_demands_dict(
+                             handle, task),
+                         log_dir=log_dir)
 
         codegen.add_epilogue()
 
@@ -7011,7 +7030,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         #   for node:
         #     submit _run_cmd(cmd) with resource {node_i: 1}
         log_dir = os.path.join(remote_log_dir, 'tasks')
-        resources_dict = backend_utils.get_task_demands_dict(task)
+        resources_dict = self._get_task_demands_dict(handle, task)
         internal_ips = handle.internal_ips()
         assert internal_ips is not None, 'internal_ips is not cached in handle'
 
@@ -7031,13 +7050,13 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             setup_cmd=self._setup_cmd,
         )
 
-        codegen.add_task(
-            num_actual_nodes,
-            bash_script=task.run,
-            env_vars=task_env_vars,
-            task_name=task.name,
-            resources_dict=backend_utils.get_task_demands_dict(task),
-            log_dir=log_dir)
+        codegen.add_task(num_actual_nodes,
+                         bash_script=task.run,
+                         env_vars=task_env_vars,
+                         task_name=task.name,
+                         resources_dict=self._get_task_demands_dict(
+                             handle, task),
+                         log_dir=log_dir)
 
         codegen.add_epilogue()
         # TODO(zhanghao): Add help info for downloading logs.

@@ -1166,6 +1166,35 @@ class TestCreateVirtualInstance:
         assert written_script is not None, 'Script was not written'
         return written_script
 
+    @staticmethod
+    def _make_non_container_config(cpus):
+        from sky.provision import common
+
+        return common.ProvisionConfig(
+            provider_config={
+                'ssh': {
+                    'hostname': 'login.example.com',
+                    'port': '22',
+                    'user': 'root',
+                    'private_key': '/path/to/key',
+                },
+                'cluster': 'test-slurm',
+                'partition': 'cpus',
+                'provision_timeout': 300,
+                'slurm_user': 'alice',
+            },
+            authentication_config={},
+            docker_config={},
+            node_config={
+                'cpus': cpus,
+                'memory': 8,
+            },
+            count=1,
+            tags={},
+            resume_stopped_nodes=False,
+            ports_to_open_on_launch=None,
+        )
+
     @patch('sky.provision.slurm.instance._wait_for_job_nodes')
     @patch('sky.provision.slurm.instance.slurm_utils.get_proctrack_type')
     @patch('sky.provision.slurm.instance.slurm_utils.get_partition_info')
@@ -1225,42 +1254,38 @@ class TestCreateVirtualInstance:
                                          mock_get_proctrack_type,
                                          mock_wait_for_job_nodes):
         """Test that sbatch provision script without containers is correct."""
-        from sky.provision import common
-
         self._setup_mocks(mock_ssh_runner, mock_slurm_client,
                           mock_get_partition_info, 'cpus')
         mock_get_proctrack_type.return_value = 'cgroup'
 
-        config = common.ProvisionConfig(
-            provider_config={
-                'ssh': {
-                    'hostname': 'login.example.com',
-                    'port': '22',
-                    'user': 'root',
-                    'private_key': '/path/to/key',
-                },
-                'cluster': 'test-slurm',
-                'partition': 'cpus',
-                'provision_timeout': 300,
-                'slurm_user': 'alice',
-            },
-            authentication_config={},
-            docker_config={},
-            node_config={
-                'cpus': 2,
-                'memory': 8,
-            },
-            count=1,
-            tags={},
-            resume_stopped_nodes=False,
-            ports_to_open_on_launch=None,
-        )
-
+        config = self._make_non_container_config(cpus=2)
         written_script = self._run_and_capture_script(
             'test-cluster-no-container', config)
+
         assert_sbatch_matches_snapshot('basic', written_script)
         assert mock_slurm_client.call_args.kwargs['slurm_user'] == 'alice'
         assert mock_ssh_runner.call_args.kwargs['slurm_user'] == 'alice'
+
+    @patch('sky.provision.slurm.instance._wait_for_job_nodes')
+    @patch('sky.provision.slurm.instance.slurm_utils.get_proctrack_type')
+    @patch('sky.provision.slurm.instance.slurm_utils.get_partition_info')
+    @patch('sky.provision.slurm.instance.slurm.SlurmClient')
+    @patch('sky.provision.slurm.instance.command_runner.'
+           'SlurmLoginNodeCommandRunner')
+    def test_fractional_cpus_are_rounded_up(self, mock_ssh_runner,
+                                            mock_slurm_client,
+                                            mock_get_partition_info,
+                                            mock_get_proctrack_type,
+                                            mock_wait_for_job_nodes):
+        self._setup_mocks(mock_ssh_runner, mock_slurm_client,
+                          mock_get_partition_info, 'cpus')
+        mock_get_proctrack_type.return_value = 'cgroup'
+
+        config = self._make_non_container_config(cpus=1.5)
+        written_script = self._run_and_capture_script(
+            'test-cluster-fractional-cpus', config)
+
+        assert '#SBATCH --cpus-per-task=2' in written_script
 
     @pytest.mark.parametrize('memory_gb,expected_mem_mb', [
         (0.5, 512),
