@@ -345,14 +345,6 @@ class Slurm(clouds.Cloud):
                                                f'gpu_partition_map or omit '
                                                f'the partition from --infra.'
                                                f'{colorama.Style.RESET_ALL}')
-                            elif region is not None and available:
-                                live_partitions = sorted(available)
-                                raise ValueError(
-                                    f'None of the partitions {mapped} in '
-                                    f'gpu_partition_map for accelerator '
-                                    f'{sit.accelerator_type!r} exist on '
-                                    f'cluster {cluster!r}. Available '
-                                    f'partitions: {live_partitions}.')
                             else:
                                 logger.warning(f'{colorama.Fore.YELLOW}'
                                                f'gpu_partition_map maps '
@@ -639,7 +631,9 @@ class Slurm(clouds.Cloud):
                 zone=resources.zone,
                 resources=resources)
             if not available_regions:
-                return resources_utils.FeasibleResources([], [], None)
+                hint = self._gpu_partition_map_hint(resources.instance_type,
+                                                    resources.region)
+                return resources_utils.FeasibleResources([], [], hint)
 
             # Return a single resource without region set.
             # The optimizer will call make_launchables_for_valid_region_zones()
@@ -711,11 +705,47 @@ class Slurm(clouds.Cloud):
             zone=resources.zone,
             resources=resources)
         if not available_regions:
-            hint = self._get_memory_hint(resources)
+            hint = (self._gpu_partition_map_hint(chosen_instance_type,
+                                                 resources.region) or
+                    self._get_memory_hint(resources))
             return resources_utils.FeasibleResources([], [], hint)
 
         return resources_utils.FeasibleResources(_make([chosen_instance_type]),
                                                  [], None)
+
+    @staticmethod
+    def _gpu_partition_map_hint(instance_type: str,
+                                region: Optional[str]) -> Optional[str]:
+        """Return a hint when a pinned cluster's gpu_partition_map maps the
+        requested accelerator only to partitions that do not exist there.
+
+        Returning a hint instead of raising keeps other ``any_of``/``ordered``
+        resource candidates eligible; the optimizer only surfaces the hint
+        when no candidate is feasible.
+        """
+        if region is None:
+            return None
+        try:
+            sit = slurm_utils.SlurmInstanceType.from_instance_type(
+                instance_type)
+        except ValueError:
+            return None
+        if sit.accelerator_type is None:
+            return None
+        mapped = slurm_utils.lookup_gpu_partition_map(region,
+                                                      sit.accelerator_type)
+        if mapped is None:
+            return None
+        try:
+            live_partitions = sorted(slurm_utils.get_partitions(region))
+        except Exception as e:  # pylint: disable=broad-except
+            logger.debug(f'Failed to get partitions for {region}: {e}')
+            return None
+        if not live_partitions or any(p in live_partitions for p in mapped):
+            return None
+        return (f'None of the partitions {mapped} in gpu_partition_map for '
+                f'accelerator {sit.accelerator_type!r} exist on cluster '
+                f'{region!r}. Available partitions: {live_partitions}.')
 
     @staticmethod
     def _get_memory_hint(resources: 'resources_lib.Resources') -> Optional[str]:

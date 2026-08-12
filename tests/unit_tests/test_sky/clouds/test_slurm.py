@@ -2,6 +2,7 @@
 
 import os
 from pathlib import Path
+import re
 from unittest.mock import patch
 import unittest.mock as mock
 
@@ -307,16 +308,41 @@ class TestRegionsWithOfferingPartitionMap:
     @patch.object(slurm_cloud.Slurm,
                   'existing_allowed_clusters',
                   new=mock.Mock(return_value=['cluster-a']))
-    def test_fixed_region_partition_mismatch_raises(self):
-        with pytest.raises(
-                ValueError,
-                match='gpu_partition_map.*H100.*cluster-a.*cpu.*live-gpu'):
-            slurm_cloud.Slurm.regions_with_offering(
-                instance_type='64CPU--256GB--H100:1',
-                accelerators=None,
-                use_spot=False,
-                region='cluster-a',
-                zone=None)
+    def test_fixed_region_partition_mismatch_returns_no_regions(self):
+        regions = slurm_cloud.Slurm.regions_with_offering(
+            instance_type='64CPU--256GB--H100:1',
+            accelerators=None,
+            use_spot=False,
+            region='cluster-a',
+            zone=None)
+
+        assert regions == []
+
+    @patch('sky.clouds.slurm.slurm_utils.lookup_gpu_partition_map',
+           new=mock.Mock(return_value=['configured-gpu']))
+    @patch('sky.clouds.slurm.slurm_utils.get_partitions',
+           new=mock.Mock(return_value=['live-gpu', 'cpu']))
+    @patch.object(slurm_cloud.Slurm,
+                  'existing_allowed_clusters',
+                  new=mock.Mock(return_value=['cluster-a']))
+    def test_fixed_region_partition_mismatch_surfaces_hint(self):
+        """The diagnostic must flow through the FeasibleResources hint, not
+        an exception, so other any_of/ordered candidates stay eligible."""
+        resources = mock.MagicMock(unsafe=True)
+        resources.instance_type = '64CPU--256GB--H100:1'
+        resources.region = 'cluster-a'
+        resources.zone = None
+        resources.use_spot = False
+        resources.is_launchable.return_value = True
+        resources.get_required_cloud_features.return_value = set()
+
+        feasible = slurm_cloud.Slurm()._get_feasible_launchable_resources(
+            resources)
+
+        assert feasible.resources_list == []
+        assert re.search(
+            r"gpu_partition_map.*'H100'.*'cluster-a'.*cpu.*live-gpu",
+            feasible.hint)
 
     @patch('sky.clouds.slurm.slurm_utils.check_instance_fits',
            new=mock.Mock(return_value=(True, None)))
