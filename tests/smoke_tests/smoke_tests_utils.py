@@ -1648,8 +1648,14 @@ def _storage_classes() -> Optional[List[Dict[str, Any]]]:
 
 
 def _can_bind_immediately(storage_class: Dict[str, Any]) -> bool:
-    return storage_class.get(
-        'provisioner') not in _DEFERRED_ONLY_PROVISIONERS
+    provisioner = storage_class.get('provisioner')
+    return provisioner not in _DEFERRED_ONLY_PROVISIONERS
+
+
+def _is_default_storage_class(storage_class: Dict[str, Any]) -> bool:
+    annotations = storage_class['metadata'].get('annotations') or {}
+    return annotations.get(
+        'storageclass.kubernetes.io/is-default-class') == 'true'
 
 
 def resolve_immediate_binding_storage_class(
@@ -1678,9 +1684,7 @@ def resolve_immediate_binding_storage_class(
                 teardown_cmd='true')
 
     default = next(
-        (sc for sc in storage_classes
-         if (sc['metadata'].get('annotations') or {}).get(
-             'storageclass.kubernetes.io/is-default-class') == 'true'), None)
+        (sc for sc in storage_classes if _is_default_storage_class(sc)), None)
     if default is None:
         pytest.skip('no Immediate-binding StorageClass and no default to '
                     'derive one from')
