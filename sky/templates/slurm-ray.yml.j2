@@ -105,12 +105,19 @@ setup_commands:
 
     mkdir -p ~{{user}}/.sky
     cat > ~{{user}}/.sky_ssh_rc <<'SKYPILOT_SSH_RC'
-    # Added by SkyPilot: override HOME for Slurm interactive sessions
-    if [ -n "${{slurm_cluster_name_env_var}}" ]; then
+    # Added by SkyPilot: override HOME for Slurm interactive sessions.
+    # Guarded by SKY_SSH_RC_APPLIED: ~/.bashrc is re-sourced by every
+    # nested interactive shell (bash -i, tmux windows, env managers), which
+    # must not overwrite the HOME and working directory the user has since
+    # changed. The guard is exported, so it applies once per SSH session;
+    # a fresh SSH connection starts without it and lands in the cluster
+    # directory as before.
+    if [ -n "${{slurm_cluster_name_env_var}}" ] && [ "$SKY_SSH_RC_APPLIED" != "${{slurm_cluster_name_env_var}}" ]; then
         CLUSTER_DIR=~/.sky_clusters/${{slurm_cluster_name_env_var}}
         if [ -d "$CLUSTER_DIR" ]; then
             cd "$CLUSTER_DIR"
             export HOME=$(pwd)
+            export SKY_SSH_RC_APPLIED=${{slurm_cluster_name_env_var}}
         fi
     fi
     SKYPILOT_SSH_RC
