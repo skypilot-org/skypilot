@@ -328,6 +328,12 @@ def volume_delete(names: List[str],
 # asynchronously, so the claim is Pending until the provisioner finishes.
 # Judging it the moment after creation would report every functioning
 # Immediate-binding storage class as not ready.
+#
+# Covered by unit tests only. Reaching this case end to end needs a storage
+# class that binds immediately *and* a provisioner that can serve it, and the
+# Kubernetes smoke lane has neither: local-path defers to the scheduler, so a
+# claim on it is pending by design. Such a test would have to run against a
+# cloud CSI driver.
 _INITIAL_STATUS_SETTLE_SECONDS = 10
 _INITIAL_STATUS_POLL_SECONDS = 0.5
 
