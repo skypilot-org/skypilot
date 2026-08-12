@@ -1061,6 +1061,11 @@ def write_cluster_config(
         # Resolved a second time here: the provision timeout is computed from
         # the same list, before this point (see
         # Kubernetes._calculate_provision_timeout).
+        #
+        # That one resolves against `region.name`, which is the same string as
+        # `to_provision.region`: the caller asserts the latter is set and builds
+        # the Region from it (see _retry_zones in cloud_vm_ray_backend.py), so
+        # the two cannot read different effective configs.
         auto_mounts = volume_utils.resolve_auto_mounts(to_provision.region)
         for skipped_mount in auto_mounts.skipped:
             if skipped_mount.is_warning:

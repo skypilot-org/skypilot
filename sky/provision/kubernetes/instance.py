@@ -121,15 +121,18 @@ _MOUNT_FAILURE_TIMEOUT_SECONDS = 600
 # normal case, not a signal.
 _PVC_PROBE_INITIAL_DELAY_SECONDS = 10
 _PVC_PROBE_INTERVAL_SECONDS = 15
-# How long a claim must report a failure continuously before provisioning is
-# failed. A CSI provisioner emits ProvisioningFailed for transient reasons too
-# -- a driver still starting on a freshly scaled-up node (which alone can take
-# a minute or more), a cloud API rate limit, a concurrent operation on the same
-# volume -- and then retries successfully. Counting sightings instead of
-# elapsed time would not help: Kubernetes aggregates a repeated event into the
-# existing one and keeps it for an hour, so the same failure seen twice is one
-# failure, not two. 300s is external-provisioner's default maximum retry
-# interval, i.e. a full backoff cycle spent failing.
+# How long a claim's own events must span before provisioning is failed. A CSI
+# provisioner emits ProvisioningFailed for transient reasons too -- a driver
+# still starting on a freshly scaled-up node (which alone can take a minute or
+# more), a cloud API rate limit, a concurrent operation on the same volume --
+# and then retries successfully, so one report proves nothing. 300s is
+# external-provisioner's default maximum retry interval, i.e. a full backoff
+# cycle spent failing.
+#
+# Measured over the events (see FailureWindow), not over how long we have been
+# watching them: a single warning stays visible for an hour, so a claim that
+# failed once and is now being provisioned normally would otherwise look
+# indistinguishable from one that has been failing throughout.
 #
 # The consequence is that this only pre-empts a provision_timeout longer than
 # 300s -- a queue admission controller's 24h, or flex start's 1200-2400s. The
@@ -317,16 +320,32 @@ def _format_pvc_binding_error(pvc_details: Optional[str], pvc_names: List[str],
             '\n'.join(debug_lines))
 
 
+class FailureWindow(NamedTuple):
+    """The period a claim has been reporting a failure over.
+
+    Kubernetes aggregates a repeated event into the existing one, advancing its
+    lastTimestamp, so this widens for as long as a provisioner keeps failing and
+    stays a single instant for a one-off failure it then recovers from. That
+    makes it, and not the number of times we happen to look, the signal for
+    whether waiting is pointless.
+    """
+    first: datetime.datetime
+    last: datetime.datetime
+
+    def seconds_since(self, start: datetime.datetime) -> float:
+        """How long the failure lasted, ignoring anything before ``start``."""
+        return (self.last - max(self.first, start)).total_seconds()
+
+
 class PendingPvc(NamedTuple):
     """A PVC a pod needs that has not been bound yet."""
     name: str
     # '<name> (phase: Pending)', plus ' - <reason>: <message>' when an event
     # explains it.
     detail: str
-    # Whether something reported a failure binding this claim, i.e. whether
-    # waiting longer is pointless. False means a provisioner is still working,
-    # or a WaitForFirstConsumer claim is waiting for its pod to be scheduled.
-    failed: bool
+    # When the claim reported a failure, or None if nothing has: a provisioner
+    # is still working, or a WaitForFirstConsumer claim is waiting for its pod.
+    failure: Optional[FailureWindow]
 
 
 def _pod_pvc_names(pod: Any) -> List[str]:
@@ -342,34 +361,30 @@ def _pod_pvc_names(pod: Any) -> List[str]:
     return list(dict.fromkeys(names))
 
 
+def _utc(timestamp: Any) -> Optional[datetime.datetime]:
+    if timestamp is None:
+        return None
+    if timestamp.tzinfo is None:
+        return timestamp.replace(tzinfo=datetime.timezone.utc)
+    return timestamp.astimezone(datetime.timezone.utc)
+
+
 def _get_pending_pvcs(
     namespace: str,
     context: Optional[str],
     pvc_names: List[str],
-    failure_since: Optional[datetime.datetime] = None,
+    failures_since: Optional[datetime.datetime] = None,
 ) -> List[PendingPvc]:
     """Which of the given PVCs are still Pending, and whether they are failing.
 
     Args:
-        failure_since: only a Warning event newer than this marks a PVC as
-            failed. Events outlive the attempt that produced them (the
-            API server keeps them for an hour by default), so without an anchor
-            a Warning left behind by an earlier launch would fail a launch that
-            is provisioning normally. None accepts any Warning, which is what
-            the post-timeout path wants -- by then nothing is going to bind the
-            claim regardless of when it broke.
+        failures_since: ignore failures reported before this. Events outlive the
+            attempt that produced them (the API server keeps them for an hour by
+            default), so without an anchor a warning left behind by an earlier
+            launch would look like this launch's problem. None accepts any
+            warning, which is what the post-timeout path wants -- by then
+            nothing is going to bind the claim regardless of when it broke.
     """
-
-    def _is_recent(event: Any) -> bool:
-        if failure_since is None:
-            return True
-        timestamp = event.last_timestamp or event.metadata.creation_timestamp
-        if timestamp is None:
-            return False
-        if timestamp.tzinfo is None:
-            timestamp = timestamp.replace(tzinfo=datetime.timezone.utc)
-        return timestamp.astimezone(datetime.timezone.utc) >= failure_since
-
     pending_pvcs: List[PendingPvc] = []
     for pvc_name in pvc_names:
         try:
@@ -386,7 +401,8 @@ def _get_pending_pvcs(
                                                             pvc_name,
                                                             reverse=False)
             event_messages = []
-            failed = False
+            warning_messages = []
+            failure: Optional[FailureWindow] = None
             for event in sorted_events:
                 is_failure = event.type == 'Warning'
                 # 'WaitForFirstConsumer' is a Normal event and the expected
@@ -395,17 +411,33 @@ def _get_pending_pvcs(
                 if not is_failure and event.reason not in (
                         'ProvisioningFailed', 'WaitForFirstConsumer'):
                     continue
-                if is_failure and _is_recent(event):
-                    failed = True
                 msg = event.message or ''
                 if msg:
                     event_messages.append(f'{event.reason}: {msg}')
+                if not is_failure:
+                    continue
+                created = _utc(event.metadata.creation_timestamp)
+                last = _utc(event.last_timestamp) or created
+                first = _utc(event.first_timestamp) or created or last
+                if last is None or first is None:
+                    continue
+                if failures_since is not None and last < failures_since:
+                    continue
+                if msg:
+                    warning_messages.append(f'{event.reason}: {msg}')
+                if failure is None:
+                    failure = FailureWindow(first=first, last=last)
+                else:
+                    failure = FailureWindow(first=min(failure.first, first),
+                                            last=max(failure.last, last))
             pending_info = f'{pvc_name} (phase: Pending)'
-            if event_messages:
-                # Take the most recent event message
-                pending_info += f' - {event_messages[-1]}'
+            # Prefer the newest warning when there is one: it is the reason the
+            # claim is failing, and a Normal event can be newer than it.
+            explanation = warning_messages or event_messages
+            if explanation:
+                pending_info += f' - {explanation[-1]}'
             pending_pvcs.append(
-                PendingPvc(name=pvc_name, detail=pending_info, failed=failed))
+                PendingPvc(name=pvc_name, detail=pending_info, failure=failure))
         except Exception as e:  # pylint: disable=broad-except
             logger.debug(f'Failed to get PVC {pvc_name} status: {e}')
             continue
@@ -446,10 +478,11 @@ class _PendingVolumeProbe:
         self._cluster_name = cluster_name
         self._pods_created_at = pods_created_at
         self._next_probe_at = time.time() + _PVC_PROBE_INITIAL_DELAY_SECONDS
-        # When each claim was first found failing, keyed by PVC name. Dropped
-        # when a probe finds the claim healthy again, so that the grace period
-        # only ever measures an uninterrupted run of failures.
-        self._failing_since: Dict[str, float] = {}
+        # Failures reported at or before this are not this launch's problem
+        # any more, keyed by PVC name. Only set while failures are held: a
+        # failure seen during a scale-up may have been caused by the missing
+        # node, so the claim gets the grace period afresh once one arrives.
+        self._failures_before: Dict[str, datetime.datetime] = {}
         # What the last completed probe found, so that callers polling faster
         # than the probe interval keep reporting it between probes.
         self._message: Optional[str] = None
@@ -465,9 +498,9 @@ class _PendingVolumeProbe:
         repeats what the last one found.
 
         Args:
-            hold_failures: report claims but never fail on them, and forget how
-                long they have been failing. For when a node is on its way: a
-                provisioner that needs a node it does not have yet reports the
+            hold_failures: report claims but never fail on them, and discount
+                the failures seen while doing so. For when a node is on its way:
+                a provisioner that needs a node it does not have yet reports the
                 same failure as one that will never succeed (a topology-aware
                 CSI driver in a cluster scaled to zero, for instance), and
                 waiting really is the right thing to do until the node arrives.
@@ -495,19 +528,27 @@ class _PendingVolumeProbe:
         pending_pvcs = _get_pending_pvcs(self._namespace,
                                          self._context,
                                          pvc_names,
-                                         failure_since=self._pods_created_at)
+                                         failures_since=self._pods_created_at)
         pending_by_name = {pvc.name: pvc for pvc in pending_pvcs}
         for pvc_name in pvc_names:
             pending = pending_by_name.get(pvc_name)
-            if pending is None or not pending.failed or hold_failures:
-                self._failing_since.pop(pvc_name, None)
+            # A claim that is gone, bound or not failing clears its history. An
+            # unreadable claim lands here too, so an API server that is erroring
+            # intermittently keeps the fast-failure path from ever triggering --
+            # which is the right bias, but it does mean it can be starved.
+            if pending is None or pending.failure is None:
+                self._failures_before.pop(pvc_name, None)
                 continue
-            failing_since = self._failing_since.setdefault(pvc_name, now)
-            if now - failing_since < _PVC_FAILURE_GRACE_SECONDS:
-                logger.debug(f'Volume {pvc_name} is reporting a failure while '
-                             f'launching {self._cluster_name}; giving it until '
-                             f'{_PVC_FAILURE_GRACE_SECONDS}s to recover: '
-                             f'{pending.detail}')
+            if hold_failures:
+                self._failures_before[pvc_name] = pending.failure.last
+                continue
+            failing_for = pending.failure.seconds_since(
+                self._failures_before.get(pvc_name, self._pods_created_at))
+            if failing_for < _PVC_FAILURE_GRACE_SECONDS:
+                logger.debug(f'Volume {pvc_name} has been reporting a failure '
+                             f'for {failing_for:.0f}s while launching '
+                             f'{self._cluster_name}; giving it until '
+                             f'{_PVC_FAILURE_GRACE_SECONDS}s: {pending.detail}')
                 continue
             raise config_lib.KubernetesError(
                 _format_pvc_binding_error(pvc_details=pending.detail,
@@ -1061,42 +1102,56 @@ def _wait_for_pods_to_schedule(namespace, context, new_nodes, timeout: int,
         # what we are waiting on rather than only finding out at the deadline.
         # Gated pods never reach here (the branch above continues), which is
         # what we want: their claims are not being provisioned yet either.
-        # Held while a node is on its way, for the same reason the deadline is
-        # extended then -- see the hold_failures argument.
-        volume_wait_msg = volume_probe.probe(
-            unscheduled_pods, hold_failures=autoscale_detected_time is not None)
+        #
+        # Failures are held while a node is on its way, for the same reason the
+        # deadline is extended then (see the hold_failures argument), and for
+        # exactly as long: past that window the deadline no longer believes a
+        # node is coming either. Bounding it matters because
+        # autoscale_detected_time is never cleared, and the event it is set
+        # from is looked up namespace-wide, so an unrelated pod's scale-up
+        # would otherwise suppress this check for the rest of the wait.
+        scale_up_in_flight = (autoscale_detected_time is not None and
+                              time.time() < autoscale_detected_time +
+                              _AUTOSCALE_DETECTED_TIMEOUT_SECONDS)
+        volume_wait_msg = volume_probe.probe(unscheduled_pods,
+                                             hold_failures=scale_up_in_flight)
 
-        if not is_autoscaling:
-            if volume_wait_msg is not None:
-                # Name the volume being waited on. A bare spinner leaves no way
-                # to tell a slow volume from a broken one.
-                #
-                # Only on change: this runs every second, and for a whole wait
-                # -- 24 hours of it, with a queue admission controller
-                # configured. nop_if_duplicate would collapse the rows, but it
-                # reads the last event to do so, so it is a query per second.
-                volume_status_text = f'Launching ({volume_wait_msg})'
-                if volume_status_text != last_volume_status_text:
-                    last_volume_status_text = volume_status_text
-                    rich_utils.force_update_status(
-                        ux_utils.spinner_message(volume_status_text,
-                                                 cluster_name=cluster_name))
-                    global_user_state.add_cluster_event(
-                        cluster_name,
-                        new_status=None,
-                        reason=volume_status_text,
-                        event_type=global_user_state.ClusterEventType.
-                        LAUNCH_PROGRESS,
-                        nop_if_duplicate=True,
-                    )
-            else:
-                _update_spinner_message(
-                    iteration=iteration,
-                    pods=pods,
-                    context=context,
-                    namespace=namespace,
-                    cluster_name_on_cloud=cluster_name_on_cloud,
-                    cluster_name=cluster_name)
+        if volume_wait_msg is not None:
+            # Name the volume being waited on. A bare spinner leaves no way to
+            # tell a slow volume from a broken one. This takes precedence over
+            # the autoscaling message above, which is both less specific and
+            # already recorded as its own cluster event -- and which a pod held
+            # up by a volume triggers by itself where the autoscaler is detected
+            # heuristically, from FailedScheduling.
+            #
+            # Only on change: this runs every second, and for a whole wait --
+            # 24 hours of it, with a queue admission controller configured.
+            # nop_if_duplicate would collapse the rows, but it reads the last
+            # event to do so, so it is a query per second.
+            volume_status_text = f'Launching ({volume_wait_msg})'
+            if volume_status_text != last_volume_status_text:
+                last_volume_status_text = volume_status_text
+                rich_utils.force_update_status(
+                    ux_utils.spinner_message(volume_status_text,
+                                             cluster_name=cluster_name))
+                global_user_state.add_cluster_event(
+                    cluster_name,
+                    new_status=None,
+                    reason=volume_status_text,
+                    event_type=global_user_state.ClusterEventType.
+                    LAUNCH_PROGRESS,
+                    nop_if_duplicate=True,
+                )
+        elif not is_autoscaling:
+            # Nothing is waiting on a volume any more, so a later one that is
+            # must be reported again even if it reads the same.
+            last_volume_status_text = None
+            _update_spinner_message(iteration=iteration,
+                                    pods=pods,
+                                    context=context,
+                                    namespace=namespace,
+                                    cluster_name_on_cloud=cluster_name_on_cloud,
+                                    cluster_name=cluster_name)
 
         iteration += 1
         time.sleep(1)

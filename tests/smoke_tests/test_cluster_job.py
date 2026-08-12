@@ -2079,6 +2079,13 @@ def test_auto_mount_pending_volume_on_kubernetes():
                 # premise of the test is gone.
                 f'vols=$(sky volumes ls) && echo "$vols" && '
                 f'echo "$vols" | grep {volume_name} | grep READY',
+                # What the launch names is the claim, whose name SkyPilot
+                # derives from the volume's and truncates -- so read it off the
+                # cluster rather than assuming it still contains the volume name.
+                f'kubectl get pvc -A -l skypilot-name={volume_name} '
+                f'-o jsonpath=\'{{.items[0].metadata.name}}\' '
+                f'> {name}-pvc.txt && cat {name}-pvc.txt && '
+                f'test -s {name}-pvc.txt',
                 smoke_tests_utils.with_config(
                     f'start=$(date +%s); '
                     f'! sky launch -y -c {name} --infra kubernetes '
@@ -2086,7 +2093,7 @@ def test_auto_mount_pending_volume_on_kubernetes():
                     f'elapsed=$(( $(date +%s) - start )); '
                     f'cat {name}-pending.log && '
                     f'echo "launch took ${{elapsed}}s" && '
-                    f'grep -q "{volume_name}" {name}-pending.log && '
+                    f'grep -q "$(cat {name}-pvc.txt)" {name}-pending.log && '
                     # The volume got the minutes a network filesystem needs,
                     # not the seconds a pod needs.
                     f'[ "$elapsed" -ge {min_wait_seconds} ]',
@@ -2095,13 +2102,14 @@ def test_auto_mount_pending_volume_on_kubernetes():
                 # only in the error at the end.
                 f'sky logs --provision {name} > {name}-provision.log 2>&1; '
                 f'grep -q "waiting for volume" {name}-provision.log && '
-                f'grep -q "{volume_name}" {name}-provision.log',
+                f'grep -q "$(cat {name}-pvc.txt)" {name}-provision.log',
             ],
             smoke_tests_utils.chain_teardown(
                 f'sky down -y {name} || true',
                 f'sky volumes delete {volume_name} -y || true',
                 smoke_tests_utils.delete_unprovisionable_storage_class_cmd(
-                    name), f'rm -f {name}-pending.log {name}-provision.log'),
+                    name), f'rm -f {name}-pending.log {name}-provision.log '
+                f'{name}-pvc.txt'),
             timeout=15 * 60,
         )
         smoke_tests_utils.run_one_test(test)

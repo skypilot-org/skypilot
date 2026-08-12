@@ -1,12 +1,13 @@
 """Unit tests for detecting a volume that will not bind while a pod waits.
 
-Kubernetes reports an unbindable claim only through events, so both pod wait
-loops otherwise learn of it by running out of time. These tests cover the two
-judgements that makes possible: a reported failure is fatal, and a claim that is
-merely slow is not.
+Kubernetes reports an unbindable claim only through events, so the scheduling
+wait loop otherwise learns of it by running out of time. These tests cover the
+judgement that makes possible: a failure the claim's own events show lasting is
+fatal, and one report of a failure -- which stays visible for an hour whether or
+not the provisioner has moved on -- is not.
 """
 import datetime
-import math
+from typing import Optional
 from unittest import mock
 
 import pytest
@@ -16,24 +17,35 @@ from sky.provision.kubernetes import config as config_lib
 from sky.provision.kubernetes import instance
 
 _PODS_CREATED_AT = datetime.datetime(2026, 1, 1, tzinfo=datetime.timezone.utc)
-_BEFORE_PODS = _PODS_CREATED_AT - datetime.timedelta(minutes=5)
-_AFTER_PODS = _PODS_CREATED_AT + datetime.timedelta(seconds=5)
+_CLOCK_START = 1000.0
+_GRACE = instance._PVC_FAILURE_GRACE_SECONDS
 _CSI_MESSAGE = ('failed to provision volume with StorageClass "fast": rpc '
                 'error: code = InvalidArgument desc = tier is invalid')
-# How far _advance_past_next_probe() below moves the clock, and how many probes
-# it therefore takes for a first sighting to age out of the grace period.
-_PROBE_STEP_SECONDS = (instance._PVC_PROBE_INITIAL_DELAY_SECONDS +
-                       instance._PVC_PROBE_INTERVAL_SECONDS)
-_PROBES_TO_OUTLAST_GRACE = 1 + math.ceil(
-    instance._PVC_FAILURE_GRACE_SECONDS / _PROBE_STEP_SECONDS)
 
 
-def _event(reason, message, event_type='Warning', timestamp=_AFTER_PODS):
+def _at(offset: float) -> datetime.datetime:
+    """The instant ``offset`` seconds after the pods were created."""
+    return _PODS_CREATED_AT + datetime.timedelta(seconds=offset)
+
+
+def _event(reason,
+           message,
+           event_type='Warning',
+           first: float = 5,
+           last: Optional[float] = None):
+    """An event, optionally one Kubernetes has aggregated repeats into.
+
+    ``first`` and ``last`` are offsets in seconds from pod creation. They differ
+    when the same failure has been reported more than once: Kubernetes advances
+    lastTimestamp on the existing event rather than creating another.
+    """
     event = mock.MagicMock()
     event.reason = reason
     event.message = message
     event.type = event_type
-    event.last_timestamp = timestamp
+    event.first_timestamp = _at(first)
+    event.last_timestamp = _at(first if last is None else last)
+    event.metadata.creation_timestamp = event.first_timestamp
     return event
 
 
@@ -63,67 +75,159 @@ def _pod(pvc_names, name='pod-0', cluster_name_on_cloud='cn-on-cloud'):
     return pod
 
 
+class _Cluster:
+    """A fake namespace whose PVC phases, events and clock the test controls.
+
+    Event time and the probe's clock advance together, as they do in a real
+    cluster: `advance()` moves both.
+    """
+
+    def __init__(self):
+        self.phases = {}
+        self.events = {}
+        self.pvc_reads = 0
+        self.clock = _CLOCK_START
+        # PVCs whose failure is still being re-reported, so that lastTimestamp
+        # keeps up with the clock, keyed by name -> when it started failing.
+        self._failing_from = {}
+
+    @property
+    def elapsed(self) -> float:
+        return self.clock - _CLOCK_START
+
+    def set(self, pvc_name, phase, events=()):
+        self.phases[pvc_name] = phase
+        self.events[pvc_name] = list(events)
+        self._failing_from.pop(pvc_name, None)
+
+    def keep_failing(self, pvc_name, since: float = 5):
+        """A provisioner that reports the same failure on every retry."""
+        self.phases[pvc_name] = 'Pending'
+        self._failing_from[pvc_name] = since
+
+    def stop_failing(self, pvc_name):
+        """The failure stops being re-reported -- but stays visible for an hour,
+        which is the whole reason persistence cannot be judged by looking."""
+        self._failing_from.pop(pvc_name, None)
+
+    def advance(self, seconds: float):
+        self.clock += seconds
+
+    def _events_for(self, pvc_name):
+        failing_from = self._failing_from.get(pvc_name)
+        if failing_from is None:
+            return self.events.get(pvc_name, [])
+        return [
+            _event('ProvisioningFailed',
+                   _CSI_MESSAGE,
+                   first=failing_from,
+                   last=max(failing_from, self.elapsed))
+        ]
+
+    def read_pvc(self, name, namespace, **kwargs):
+        del namespace, kwargs  # unused
+        self.pvc_reads += 1
+        if name not in self.phases:
+            raise ValueError(f'no such PVC: {name}')
+        pvc = mock.MagicMock()
+        pvc.status.phase = self.phases[name]
+        return pvc
+
+
 @pytest.fixture(name='cluster')
 def cluster_fixture(monkeypatch):
-    """A fake namespace whose PVC phases and events the test controls."""
-
-    class Cluster:
-
-        def __init__(self):
-            self.phases = {}
-            self.events = {}
-            self.pvc_reads = 0
-
-        def set(self, pvc_name, phase, events=()):
-            self.phases[pvc_name] = phase
-            self.events[pvc_name] = list(events)
-
-        def _read_pvc(self, name, namespace, **kwargs):
-            del namespace, kwargs  # unused
-            self.pvc_reads += 1
-            if name not in self.phases:
-                raise ValueError(f'no such PVC: {name}')
-            pvc = mock.MagicMock()
-            pvc.status.phase = self.phases[name]
-            return pvc
-
-    cluster = Cluster()
+    cluster = _Cluster()
     core_api = mock.MagicMock()
     core_api.read_namespaced_persistent_volume_claim.side_effect = (
-        cluster._read_pvc)
+        cluster.read_pvc)
     monkeypatch.setattr('sky.adaptors.kubernetes.core_api',
                         lambda *a, **kw: core_api)
     monkeypatch.setattr(instance.kubernetes_utils,
                         'get_pvc_events',
                         lambda context, namespace, pvc_name, reverse=True:
-                        cluster.events.get(pvc_name, []))
+                        cluster._events_for(pvc_name))
+    monkeypatch.setattr(instance.time, 'time', lambda: cluster.clock)
     return cluster
 
 
 class TestGetPendingPvcs:
-    """Which claims are pending, and whether they are failing or just slow."""
+    """Which claims are pending, and over what period they have been failing."""
 
-    def _pending(self, cluster, failure_since=_PODS_CREATED_AT):
+    def _pending(self, cluster, failures_since=_PODS_CREATED_AT):
         return instance._get_pending_pvcs('ns',
                                           'ctx',
                                           list(cluster.phases),
-                                          failure_since=failure_since)
+                                          failures_since=failures_since)
 
     def test_bound_claim_is_not_pending(self, cluster):
         cluster.set('vol', 'Bound')
 
         assert self._pending(cluster) == []
 
-    def test_provisioning_failure_is_a_failure(self, cluster):
+    def test_a_provisioning_failure_is_reported_as_one(self, cluster):
         cluster.set('vol', 'Pending',
                     [_event('ProvisioningFailed', _CSI_MESSAGE)])
 
         pending = self._pending(cluster)
 
         assert len(pending) == 1
-        assert pending[0].failed
+        assert pending[0].failure is not None
         assert 'tier is invalid' in pending[0].detail
         assert 'vol' in pending[0].detail
+
+    def test_one_report_spans_no_time(self, cluster):
+        """The distinction the grace period rests on: a failure reported once
+        has lasted no time at all, however long it stays visible."""
+        cluster.set('vol', 'Pending',
+                    [_event('ProvisioningFailed', _CSI_MESSAGE, first=5)])
+
+        failure = self._pending(cluster)[0].failure
+
+        assert failure.seconds_since(_PODS_CREATED_AT) == 0
+
+    def test_repeated_reports_span_the_time_between_them(self, cluster):
+        """Kubernetes aggregates them into one event, advancing lastTimestamp."""
+        cluster.set(
+            'vol', 'Pending',
+            [_event('ProvisioningFailed', _CSI_MESSAGE, first=5, last=605)])
+
+        failure = self._pending(cluster)[0].failure
+
+        assert failure.seconds_since(_PODS_CREATED_AT) == 600
+
+    def test_time_before_the_pods_does_not_count(self, cluster):
+        """An event aggregated across an earlier launch of the same claim: only
+        the part of it that belongs to this attempt does."""
+        cluster.set(
+            'vol', 'Pending',
+            [_event('ProvisioningFailed', _CSI_MESSAGE, first=-600, last=60)])
+
+        failure = self._pending(cluster)[0].failure
+
+        assert failure.seconds_since(_PODS_CREATED_AT) == 60
+
+    def test_a_failure_entirely_before_the_pods_is_ignored(self, cluster):
+        """Events outlive the attempt that produced them, so a leftover warning
+        must not fail a launch that is provisioning normally."""
+        cluster.set(
+            'vol', 'Pending',
+            [_event('ProvisioningFailed', _CSI_MESSAGE, first=-600, last=-300)])
+
+        pending = self._pending(cluster)
+
+        assert pending[0].failure is None
+        # Still reported: it is the best explanation available for the wait.
+        assert 'tier is invalid' in pending[0].detail
+
+    def test_without_an_anchor_any_failure_counts(self, cluster):
+        """What the post-timeout path wants: by then nothing is going to bind
+        the claim regardless of when it broke."""
+        cluster.set(
+            'vol', 'Pending',
+            [_event('ProvisioningFailed', _CSI_MESSAGE, first=-600, last=-300)])
+
+        assert self._pending(cluster,
+                             failures_since=None)[0].failure is not None
 
     def test_waiting_for_first_consumer_is_not_a_failure(self, cluster):
         """The expected state of a WaitForFirstConsumer claim before its pod is
@@ -136,7 +240,7 @@ class TestGetPendingPvcs:
 
         pending = self._pending(cluster)
 
-        assert not pending[0].failed
+        assert pending[0].failure is None
         assert 'WaitForFirstConsumer' in pending[0].detail
 
     def test_pending_with_no_events_is_not_a_failure(self, cluster):
@@ -144,38 +248,26 @@ class TestGetPendingPvcs:
 
         pending = self._pending(cluster)
 
-        assert not pending[0].failed
+        assert pending[0].failure is None
         assert pending[0].detail == 'vol (phase: Pending)'
 
-    def test_a_failure_from_before_this_attempt_is_ignored(self, cluster):
-        """Events outlive the attempt that produced them, so a leftover warning
-        must not fail a launch that is provisioning normally."""
+    def test_the_reported_reason_is_the_failure_not_a_newer_normal_event(
+            self, cluster):
+        """A provisioner emits a Normal event per attempt as well, so the newest
+        event is not necessarily the one that says what went wrong."""
         cluster.set('vol', 'Pending', [
-            _event('ProvisioningFailed', _CSI_MESSAGE, timestamp=_BEFORE_PODS)
+            _event('ProvisioningFailed', _CSI_MESSAGE, first=5),
+            _event('WaitForFirstConsumer',
+                   'waiting for first consumer to be created',
+                   event_type='Normal',
+                   first=10),
         ])
 
-        pending = self._pending(cluster)
-
-        assert not pending[0].failed
-        # Still reported: it is the best explanation available for the wait.
-        assert 'tier is invalid' in pending[0].detail
-
-    def test_without_an_anchor_any_failure_counts(self, cluster):
-        """What the post-timeout path wants: by then nothing is going to bind
-        the claim regardless of when it broke."""
-        cluster.set('vol', 'Pending', [
-            _event('ProvisioningFailed', _CSI_MESSAGE, timestamp=_BEFORE_PODS)
-        ])
-
-        pending = self._pending(cluster, failure_since=None)
-
-        assert pending[0].failed
+        assert 'tier is invalid' in self._pending(cluster)[0].detail
 
     def test_an_unreadable_claim_is_not_reported(self, cluster):
         """Fail open: a transient API error must not fail the launch."""
-        pending = instance._get_pending_pvcs('ns', 'ctx', ['missing'])
-
-        assert pending == []
+        assert instance._get_pending_pvcs('ns', 'ctx', ['missing']) == []
 
 
 class TestPodPvcNames:
@@ -196,122 +288,121 @@ class TestPodPvcNames:
 
 class TestPendingVolumeProbe:
 
-    @pytest.fixture(autouse=True)
-    def _fake_clock(self, monkeypatch):
-        self.clock = {'t': 1000.0}
-        monkeypatch.setattr(instance.time, 'time', lambda: self.clock['t'])
-
-    def _advance_past_next_probe(self):
-        self.clock['t'] += (instance._PVC_PROBE_INITIAL_DELAY_SECONDS +
-                            instance._PVC_PROBE_INTERVAL_SECONDS)
-
     def _probe(self):
         return instance._PendingVolumeProbe(namespace='ns',
                                             context='ctx',
                                             cluster_name='cn',
                                             pods_created_at=_PODS_CREATED_AT)
 
+    @staticmethod
+    def _step(cluster):
+        """Past the next probe, so every call to probe() does something."""
+        cluster.advance(instance._PVC_PROBE_INITIAL_DELAY_SECONDS +
+                        instance._PVC_PROBE_INTERVAL_SECONDS)
+
     def test_nothing_is_probed_before_the_first_delay(self, cluster):
-        cluster.set('vol', 'Pending',
-                    [_event('ProvisioningFailed', _CSI_MESSAGE)])
+        cluster.keep_failing('vol')
         probe = self._probe()
 
         assert probe.probe([_pod(['vol'])]) is None
         assert cluster.pvc_reads == 0
 
-    def test_a_failure_within_the_grace_period_does_not_fail_the_launch(
-            self, cluster):
-        """A CSI provisioner emits ProvisioningFailed for transient reasons --
-        a driver still starting on a new node, a cloud API rate limit -- and
-        then retries successfully."""
+    def test_a_failure_reported_once_never_fails_the_launch(self, cluster):
+        """The case the grace period exists for, and the one a wall-clock
+        version of it gets wrong: one transient ProvisioningFailed at the start,
+        then a provisioner quietly taking minutes to finish. The event stays
+        visible throughout, so looking at it repeatedly proves nothing."""
         cluster.set('vol', 'Pending',
-                    [_event('ProvisioningFailed', _CSI_MESSAGE)])
+                    [_event('ProvisioningFailed', _CSI_MESSAGE, first=5)])
         probe = self._probe()
         pods = [_pod(['vol'])]
-        deadline = self.clock['t'] + instance._PVC_FAILURE_GRACE_SECONDS
 
         message = None
-        while self.clock['t'] < deadline:
+        while cluster.elapsed < _GRACE * 3:
+            self._step(cluster)
             message = probe.probe(pods)
-            self._advance_past_next_probe()
 
         assert message is not None
         assert 'vol' in message
 
-    def test_a_failure_that_outlasts_the_grace_period_fails_the_launch(
+    def test_a_failure_that_keeps_being_reported_fails_the_launch(
             self, cluster):
-        cluster.set('vol', 'Pending',
-                    [_event('ProvisioningFailed', _CSI_MESSAGE)])
+        cluster.keep_failing('vol', since=5)
         probe = self._probe()
         pods = [_pod(['vol'])]
 
         with pytest.raises(config_lib.KubernetesError) as exc:
-            for _ in range(_PROBES_TO_OUTLAST_GRACE):
-                self._advance_past_next_probe()
+            while cluster.elapsed < _GRACE * 2:
+                self._step(cluster)
                 probe.probe(pods)
 
+        assert cluster.elapsed >= _GRACE
         assert 'vol' in str(exc.value)
         assert 'tier is invalid' in str(exc.value)
         assert 'kubectl describe pvc vol' in str(exc.value)
 
-    def test_the_grace_period_measures_an_uninterrupted_run(self, cluster):
-        """A provisioner that recovers in between, even once, has not been
-        failing for the whole window."""
-        pods = [_pod(['vol'])]
+    def test_a_failure_that_stops_being_reported_does_not_fail_the_launch(
+            self, cluster):
+        """It failed for a while, then the provisioner got on with it. The
+        event's span stops growing even though the event is still there."""
+        cluster.keep_failing('vol', since=5)
         probe = self._probe()
-        failing = [_event('ProvisioningFailed', _CSI_MESSAGE)]
+        pods = [_pod(['vol'])]
 
-        # Fail for one probe short of the grace period...
-        cluster.set('vol', 'Pending', failing)
-        for _ in range(_PROBES_TO_OUTLAST_GRACE - 1):
-            self._advance_past_next_probe()
+        while cluster.elapsed < _GRACE / 2:
+            self._step(cluster)
             probe.probe(pods)
-        # ... recover for a single probe, then fail for that long again.
-        cluster.set('vol', 'Pending')
-        self._advance_past_next_probe()
-        probe.probe(pods)
-        cluster.set('vol', 'Pending', failing)
-        for _ in range(_PROBES_TO_OUTLAST_GRACE - 1):
-            self._advance_past_next_probe()
-            probe.probe(pods)  # Does not raise: the clock restarted.
+        cluster.stop_failing('vol')
+        cluster.set('vol', 'Pending', [
+            _event('ProvisioningFailed',
+                   _CSI_MESSAGE,
+                   first=5,
+                   last=cluster.elapsed)
+        ])
+
+        while cluster.elapsed < _GRACE * 3:
+            self._step(cluster)
+            probe.probe(pods)  # Does not raise.
 
     def test_a_failure_is_never_confirmed_while_a_node_is_on_its_way(
             self, cluster):
         """A topology-aware CSI driver in a cluster scaled to zero reports the
         same failure as one that will never succeed. Waiting is right until the
         node arrives, however long the autoscaler takes."""
-        cluster.set('vol', 'Pending',
-                    [_event('ProvisioningFailed', _CSI_MESSAGE)])
+        cluster.keep_failing('vol', since=5)
         probe = self._probe()
         pods = [_pod(['vol'])]
 
         message = None
-        for _ in range(_PROBES_TO_OUTLAST_GRACE * 3):
-            self._advance_past_next_probe()
+        while cluster.elapsed < _GRACE * 3:
+            self._step(cluster)
             message = probe.probe(pods, hold_failures=True)
 
         assert message is not None
         assert 'vol' in message
 
     def test_the_grace_period_restarts_once_the_node_has_arrived(self, cluster):
-        """The hold forgets the failures seen during it -- their cause may have
-        been the missing node."""
-        cluster.set('vol', 'Pending',
-                    [_event('ProvisioningFailed', _CSI_MESSAGE)])
+        """The hold discounts the failures seen during it -- their cause may
+        have been the missing node."""
+        cluster.keep_failing('vol', since=5)
         probe = self._probe()
         pods = [_pod(['vol'])]
 
-        for _ in range(_PROBES_TO_OUTLAST_GRACE):
-            self._advance_past_next_probe()
+        while cluster.elapsed < _GRACE * 2:
+            self._step(cluster)
             probe.probe(pods, hold_failures=True)
 
-        # One probe short of the grace period after the hold is lifted.
-        for _ in range(_PROBES_TO_OUTLAST_GRACE - 1):
-            self._advance_past_next_probe()
-            probe.probe(pods)
-        self._advance_past_next_probe()
+        # Held long past the grace period, so without the discount the next
+        # unheld probe would fail immediately.
+        held_until = cluster.elapsed
+        while cluster.elapsed < held_until + _GRACE / 2:
+            self._step(cluster)
+            probe.probe(pods)  # Does not raise.
+
         with pytest.raises(config_lib.KubernetesError):
-            probe.probe(pods)
+            while cluster.elapsed < held_until + _GRACE * 2:
+                self._step(cluster)
+                probe.probe(pods)
 
     def test_a_slow_claim_is_reported_but_not_failed(self, cluster):
         """Repeated forever if need be -- this is a Filestore volume that will
@@ -323,18 +414,18 @@ class TestPendingVolumeProbe:
         ])
         probe = self._probe()
 
-        for _ in range(5):
-            self._advance_past_next_probe()
+        while cluster.elapsed < _GRACE * 3:
+            self._step(cluster)
             message = probe.probe([_pod(['vol'])])
             assert message is not None
             assert 'vol' in message
 
     def test_the_last_finding_is_repeated_between_probes(self, cluster):
-        """The wait loops poll once a second, far faster than the probe
-        interval, and need something to display in between."""
+        """The wait loop polls once a second, far faster than the probe
+        interval, and needs something to display in between."""
         cluster.set('vol', 'Pending')
         probe = self._probe()
-        self._advance_past_next_probe()
+        self._step(cluster)
         message = probe.probe([_pod(['vol'])])
 
         assert probe.probe([_pod(['vol'])]) == message
@@ -343,11 +434,11 @@ class TestPendingVolumeProbe:
     def test_a_claim_that_binds_clears_the_message(self, cluster):
         cluster.set('vol', 'Pending')
         probe = self._probe()
-        self._advance_past_next_probe()
+        self._step(cluster)
         assert probe.probe([_pod(['vol'])]) is not None
 
         cluster.set('vol', 'Bound')
-        self._advance_past_next_probe()
+        self._step(cluster)
 
         assert probe.probe([_pod(['vol'])]) is None
 
@@ -355,7 +446,7 @@ class TestPendingVolumeProbe:
         pod = mock.MagicMock()
         pod.spec.volumes = None
         probe = self._probe()
-        self._advance_past_next_probe()
+        self._step(cluster)
 
         assert probe.probe([pod]) is None
         assert cluster.pvc_reads == 0
@@ -363,7 +454,7 @@ class TestPendingVolumeProbe:
     def test_a_shared_claim_is_read_once_per_probe(self, cluster):
         cluster.set('vol', 'Pending')
         probe = self._probe()
-        self._advance_past_next_probe()
+        self._step(cluster)
 
         probe.probe([_pod(['vol'], name='pod-0'), _pod(['vol'], name='pod-1')])
 
@@ -376,22 +467,21 @@ class TestSchedulingLoopFailsOnABrokenVolume:
     controller configured.
     """
 
-    # A day of simulated seconds at one iteration per second, capped so that
-    # removing the probe fails this test instead of looking like a hang.
-    _MAX_ITERATIONS = 2000
+    # Simulated seconds at one iteration per second, capped so that removing the
+    # probe fails this test instead of looking like a hang.
+    _MAX_ITERATIONS = 4000
 
     @pytest.fixture(autouse=True)
     def _harness(self, monkeypatch, cluster):
         self.cluster = cluster
         self.pod = _pod(['vol'])
-        cluster.set('vol', 'Pending',
-                    [_event('ProvisioningFailed', _CSI_MESSAGE)])
+        cluster.keep_failing('vol', since=5)
 
         core_api = mock.MagicMock()
         core_api.list_namespaced_pod.return_value = mock.MagicMock(
             items=[self.pod])
         core_api.read_namespaced_persistent_volume_claim.side_effect = (
-            cluster._read_pvc)
+            cluster.read_pvc)
         monkeypatch.setattr('sky.adaptors.kubernetes.core_api',
                             lambda *a, **kw: core_api)
 
@@ -407,16 +497,15 @@ class TestSchedulingLoopFailsOnABrokenVolume:
             instance, '_raise_pod_scheduling_errors',
             mock.MagicMock(side_effect=config_lib.KubernetesError('timed-out')))
 
-        clock = {'t': 1000.0, 'iterations': 0}
+        iterations = {'n': 0}
 
         def _sleep(seconds):
-            clock['iterations'] += 1
-            if clock['iterations'] > self._MAX_ITERATIONS:
+            iterations['n'] += 1
+            if iterations['n'] > self._MAX_ITERATIONS:
                 raise AssertionError('the wait loop did not report the broken '
                                      'volume')
-            clock['t'] += seconds
+            cluster.advance(seconds)
 
-        monkeypatch.setattr(instance.time, 'time', lambda: clock['t'])
         monkeypatch.setattr(instance.time, 'sleep', _sleep)
 
     def _wait(self, timeout=24 * 60 * 60):
@@ -433,6 +522,25 @@ class TestSchedulingLoopFailsOnABrokenVolume:
 
         assert 'tier is invalid' in str(exc.value)
         assert 'timed-out' not in str(exc.value)
+
+    def test_the_hold_on_a_scaling_cluster_expires(self, monkeypatch):
+        """A scale-up suspends the failure judgement, but only for as long as
+        the deadline extension it borrows that from. The signal it keys on is
+        never cleared and is looked up namespace-wide, so an unrelated pod's
+        scale-up would otherwise disable this check for the whole wait."""
+        monkeypatch.setattr(
+            'sky.skypilot_config.get_effective_region_config',
+            lambda cloud, region, keys, default_value=None, **kw: 'gke'
+            if keys == ('autoscaler',) else default_value)
+        monkeypatch.setattr(instance, '_cluster_had_autoscale_event',
+                            lambda *a, **kw: True)
+
+        with pytest.raises(config_lib.KubernetesError) as exc:
+            self._wait()
+
+        assert 'tier is invalid' in str(exc.value)
+        assert (self.cluster.elapsed >=
+                instance._AUTOSCALE_DETECTED_TIMEOUT_SECONDS)
 
     def test_the_wait_is_not_one_cluster_event_per_second(self):
         """The event is emitted from a loop that runs every second for as long
