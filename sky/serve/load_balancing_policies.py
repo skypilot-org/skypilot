@@ -115,6 +115,7 @@ class LeastLoadPolicy(LoadBalancingPolicy, name='least_load', default=True):
         super().__init__()
         self.load_map: Dict[str, int] = collections.defaultdict(int)
         self.lock = threading.Lock()
+        self._tie_breaker_index = 0
 
     def set_ready_replicas(self, ready_replicas: List[str]) -> None:
         if set(self.ready_replicas) == set(ready_replicas):
@@ -135,8 +136,32 @@ class LeastLoadPolicy(LoadBalancingPolicy, name='least_load', default=True):
         if not self.ready_replicas:
             return None
         with self.lock:
-            return min(self.ready_replicas,
-                       key=lambda replica: self.load_map.get(replica, 0))
+            min_load = min(
+                self.load_map.get(replica, 0)
+                for replica in self.ready_replicas)
+            tied_replicas = [
+                replica for replica in self.ready_replicas
+                if self.load_map.get(replica, 0) == min_load
+            ]
+            return self._select_tied_replica(tied_replicas)
+
+    def _select_tied_replica(self, replicas: List[str]) -> Optional[str]:
+        """Select among tied replicas without favoring the first one.
+
+        The cursor is relative to all ready replicas, so changes to the set
+        of tied replicas do not cause the same endpoint to win repeatedly.
+        """
+        if not replicas or not self.ready_replicas:
+            return None
+        tied_replicas = set(replicas)
+        for offset in range(len(self.ready_replicas)):
+            index = (self._tie_breaker_index + offset) % len(
+                self.ready_replicas)
+            replica = self.ready_replicas[index]
+            if replica in tied_replicas:
+                self._tie_breaker_index = (index + 1) % len(self.ready_replicas)
+                return replica
+        return None
 
     def pre_execute_hook(self, replica_url: str,
                          request: 'fastapi.Request') -> None:
@@ -263,8 +288,12 @@ class InstanceAwareLeastLoadPolicy(LeastLoadPolicy,
                 normalized_load = self._get_normalized_load(replica)
                 replica_loads.append((replica, normalized_load))
 
-            # Select replica with minimum normalized load
-            selected_replica = min(replica_loads, key=lambda x: x[1])[0]
+            # Select a minimum-load replica, rotating among ties.
+            min_load = min(load for _, load in replica_loads)
+            tied_replicas = [
+                replica for replica, load in replica_loads if load == min_load
+            ]
+            selected_replica = self._select_tied_replica(tied_replicas)
             logger.debug('Available replicas and loads: %s', replica_loads)
             logger.debug('Selected replica: %s', selected_replica)
             return selected_replica
