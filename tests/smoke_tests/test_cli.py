@@ -533,7 +533,6 @@ def test_debug_dump_nonexistent_resources(generic_cloud: str):
     )
     smoke_tests_utils.run_one_test(test)
 
-
 def test_managed_job_max_duration(generic_cloud: str):
     """Test that a managed job is terminated after max_duration."""
     name = smoke_tests_utils.get_cluster_name()
@@ -553,11 +552,26 @@ def test_managed_job_max_duration(generic_cloud: str):
             'managed_job_max_duration',
             [
                 f'sky jobs launch -y -n {name} {job_yaml_file.name}',
-                # Wait for the job to be terminated by max_duration
+                # Wait for the job to be terminated by max_duration. The
+                # controller polls job status every ~30s, so give it enough
+                # time to detect the timeout (1m limit + polling gap).
                 f'sleep 90',
-                f'sky jobs queue -n {name} | grep "FAILED"',
-                f'sky jobs logs -n {name} | grep "max_duration"',
+                # Verify the job was terminated (FAILED) and the failure
+                # reason mentions max_duration. Use --all (the job is
+                # finished) and -v (to show the DETAILS column with the
+                # failure reason). Filter by name via grep since
+                # `sky jobs queue` has no -n/--name option.
+                f'sky jobs queue --all -v | grep "{name}" | grep "FAILED"',
+                f'sky jobs queue --all -v | grep "{name}"
+                # Verify the job was terminated (FAILED) and the failure
+                # reason mentions max_duration. Use --all (the job is
+                # finished) and -v (to show the DETAILS column with the
+                # failure reason). Filter by name via grep since
+                # `sky jobs queue` has no -n/--name option.
+                f'sky jobs queue --all -v | grep "{name}" | grep "FAILED"',
+                f'sky jobs queue --all -v | grep "{name}" | grep "max_duration"',
             ],
             timeout=smoke_tests_utils.get_timeout(generic_cloud),
             teardown=f'sky jobs cancel -y -n {name}')
         smoke_tests_utils.run_one_test(test)
+        
