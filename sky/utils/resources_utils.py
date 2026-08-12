@@ -7,6 +7,7 @@ import math
 import typing
 from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
+from sky import sky_logging
 from sky import skypilot_config
 from sky.skylet import constants
 from sky.utils import common_utils
@@ -16,6 +17,8 @@ from sky.utils import ux_utils
 if typing.TYPE_CHECKING:
     from sky import backends
     from sky import resources as resources_lib
+
+logger = sky_logging.init_logger(__name__)
 
 _PORT_RANGE_HINT_MSG = ('Invalid port range {}. Please use the format '
                         '"from-to", in which from <= to. e.g. "1-3".')
@@ -366,8 +369,22 @@ def format_resource(
     is_k8s = resource.cloud.canonical_name() == 'kubernetes'
     vcpu, mem = None, None
     if resource.accelerators is None or is_k8s or not simplified_only:
-        vcpu, mem = resource.cloud.get_vcpus_mem_from_instance_type(
-            resource.instance_type)
+        try:
+            vcpu, mem = resource.cloud.get_vcpus_mem_from_instance_type(
+                resource.instance_type)
+        except Exception:  # pylint: disable=broad-except
+            # An instance type can disappear from the catalog while a cluster
+            # is still running on it -- e.g. a brokered SKU that goes out of
+            # stock is dropped on the next catalog regeneration. This is a
+            # display path, so degrade to omitting cpus=/mem= rather than
+            # propagate: raising here fails the whole `sky status` request and
+            # hides every other cluster, including the live one that can no
+            # longer be rendered.
+            logger.debug(
+                f'Failed to get vCPUs/memory for instance type '
+                f'{resource.instance_type!r} on {resource.cloud}; omitting '
+                'cpus=/mem= from the resources string.',
+                exc_info=True)
 
     elements_simple = []
     elements_full = []

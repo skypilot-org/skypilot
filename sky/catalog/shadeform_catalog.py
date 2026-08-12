@@ -4,6 +4,7 @@ This module loads pricing and instance information from the Shadeform API
 and can be used to query instance types and pricing information for Shadeform.
 """
 
+import re
 import typing
 from typing import Dict, List, Optional, Tuple, Union
 
@@ -47,9 +48,21 @@ def _get_df():
     return _df
 
 
+# sky.catalog.common raises several different phrasings for "this row is not in
+# the catalog", and only one of them contains the literal 'not found':
+#   'Instance type <x> not found ...'      (get_instance_type_for_accelerator)
+#   'No instance type <x> found.'          (get_vcpus_mem_from_instance_type,
+#                                           get_accelerators_from_instance_type)
+#   'No <price> found for instance type <x>'
+# Matching 'not found' alone therefore defeated _call_or_default() below for the
+# most common phrasing, and the ValueError propagated out of a display path.
+_NOT_FOUND_PATTERN = re.compile(r'not found|not supported|'
+                                r'no instance type .*found|'
+                                r'no .*found for instance type')
+
+
 def _is_not_found_error(err: ValueError) -> bool:
-    msg = str(err).lower()
-    return 'not found' in msg or 'not supported' in msg
+    return _NOT_FOUND_PATTERN.search(str(err).lower()) is not None
 
 
 def _call_or_default(func, default):

@@ -180,6 +180,34 @@ def test_format_resource_unmodified_pod_memory_unit_convention():
     assert 'requested' not in full
 
 
+def test_format_resource_survives_missing_catalog_entry(monkeypatch):
+    """A vanished instance type must not fail the whole render.
+
+    An instance type can drop out of the catalog while a cluster is still
+    running on it (e.g. a brokered SKU that goes out of stock). `sky status`
+    renders every cluster in a single pass, so raising here would hide all of
+    them -- including the live cluster that can no longer be rendered.
+    """
+    resource = resources_lib.Resources(cloud=clouds.AWS(),
+                                       instance_type='p4d.24xlarge')
+
+    def _vanished(self, instance_type):
+        del self  # Unused.
+        raise ValueError(f'No instance type {instance_type} found.')
+
+    monkeypatch.setattr(clouds.AWS, 'get_vcpus_mem_from_instance_type',
+                        _vanished)
+
+    simple, full = resources_utils.format_resource(resource,
+                                                   simplified_only=False)
+
+    # The cpus=/mem= fields are dropped, everything else still renders.
+    assert 'cpus=' not in full
+    assert 'mem=' not in full
+    assert 'gpus=A100:8' in simple
+    assert 'p4d.24xlarge' in full
+
+
 def test_get_readable_resources_repr_uses_cached_cluster_info():
     """Handle display prefers actual requests from cached_cluster_info."""
     cluster_info = provision_common.ClusterInfo(instances={},

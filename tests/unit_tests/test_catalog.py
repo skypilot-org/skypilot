@@ -10,6 +10,7 @@ import pytest
 
 from sky import catalog
 from sky.catalog import common as catalog_common
+from sky.catalog import shadeform_catalog
 from sky.utils import annotations
 
 
@@ -806,3 +807,39 @@ def test_efa_count_duplicate_index_safe():
     df.index = [0] * len(df)
     assert catalog_common.get_efa_count_for_accelerator_impl(df, 'H100',
                                                              8) == 32
+
+
+def test_shadeform_not_found_matches_catalog_phrasings():
+    # sky.catalog.common uses several phrasings for "this row is not in the
+    # catalog". All of them must be recognised, otherwise _call_or_default()
+    # re-raises and the error escapes into callers that only wanted to render
+    # a status line.
+    assert shadeform_catalog._is_not_found_error(
+        ValueError('No instance type latitude_H100 found.'))
+    assert shadeform_catalog._is_not_found_error(
+        ValueError("Instance type 'foo' not found in catalog"))
+    assert shadeform_catalog._is_not_found_error(
+        ValueError('No Price found for instance type foo'))
+    assert shadeform_catalog._is_not_found_error(
+        ValueError('Spot instances are not supported on Shadeform'))
+
+
+def test_shadeform_not_found_does_not_swallow_real_errors():
+    # A malformed catalog row is a genuine error and must still propagate.
+    assert not shadeform_catalog._is_not_found_error(
+        ValueError('Cannot determine the number of vCPUs of the instance '
+                   'type foo.'))
+
+
+def test_shadeform_vcpus_mem_defaults_when_instance_type_vanished():
+    # A cluster can outlive its catalog row: the lookup must degrade to
+    # (None, None) rather than raise.
+    empty_df = pd.DataFrame(columns=[
+        'InstanceType', 'AcceleratorName', 'AcceleratorCount', 'vCPUs',
+        'MemoryGiB', 'Price', 'Region', 'GpuInfo', 'SpotPrice'
+    ])
+    with mock.patch.object(shadeform_catalog, '_get_df', return_value=empty_df):
+        assert shadeform_catalog.get_vcpus_mem_from_instance_type(
+            'latitude_H100') == (None, None)
+        assert shadeform_catalog.get_accelerators_from_instance_type(
+            'latitude_H100') is None
