@@ -1589,7 +1589,9 @@ def unprovisionable_storage_class_name(test_name: str) -> str:
     return f'{test_name}-noprov'
 
 
-def create_unprovisionable_storage_class_cmd(test_name: str) -> str:
+def create_unprovisionable_storage_class_cmd(test_name: str,
+                                             binding_mode: str = 'Immediate'
+                                            ) -> str:
     """Creates a storage class whose provisioner does not exist.
 
     This is how a test gets a volume that is genuinely not ready without
@@ -1597,6 +1599,12 @@ def create_unprovisionable_storage_class_cmd(test_name: str) -> str:
     `sky volumes apply` rejects the volume up front when it validates the
     storage class; with the class present the claim is accepted and then sits
     unbound forever, because nothing is watching for it.
+
+    `binding_mode` picks which of the two situations to reproduce. Immediate
+    claims are unbound as soon as they are created, so the volume is knowably
+    unusable before any launch. WaitForFirstConsumer claims are not touched
+    until a pod needs them, so nothing about them looks wrong until a launch is
+    already under way.
     """
     sc_name = unprovisionable_storage_class_name(test_name)
     return (f'kubectl apply -f - <<EOF\n'
@@ -1605,7 +1613,7 @@ def create_unprovisionable_storage_class_cmd(test_name: str) -> str:
             f'metadata:\n'
             f'  name: {sc_name}\n'
             f'provisioner: skypilot.co/does-not-exist\n'
-            f'volumeBindingMode: Immediate\n'
+            f'volumeBindingMode: {binding_mode}\n'
             f'EOF')
 
 

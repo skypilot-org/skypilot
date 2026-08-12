@@ -2020,6 +2020,93 @@ def test_volume_not_ready_on_kubernetes():
         smoke_tests_utils.run_one_test(test)
 
 
+# ---------- A volume that cannot be judged before the launch ----------
+@pytest.mark.kubernetes
+def test_auto_mount_pending_volume_on_kubernetes():
+    """A WaitForFirstConsumer claim, which no pre-launch check can catch.
+
+    Such a claim is untouched until a pod needs it, so it is correctly READY
+    when the launch starts and the launch is correctly allowed to proceed. That
+    leaves the wait loop as the only place the problem can surface, which is
+    what this covers: the launch has to name the volume it is waiting on rather
+    than show a bare spinner, and it has to allow the volume the minutes a
+    network filesystem takes to provision rather than the seconds a pod takes to
+    schedule.
+    """
+    name = smoke_tests_utils.get_cluster_name()
+    volume_name = f'{name}-wffc'
+    volume_yaml = textwrap.dedent(f"""\
+        name: {volume_name}
+        type: k8s-pvc
+        size: 1Gi
+        config:
+          access_mode: ReadWriteMany
+          storage_class_name: {smoke_tests_utils.unprovisionable_storage_class_name(name)}
+    """)
+    task_yaml = textwrap.dedent("""\
+        resources:
+          cpus: 0.1+
+        run: echo should not run
+    """)
+    config = textwrap.dedent(f"""\
+        kubernetes:
+          auto_mounts:
+            - volume_name: {volume_name}
+              mount_paths: [/mnt/auto]
+    """)
+    # Comfortably above the timeout an auto-mounted volume used to get (10-60s
+    # for a single node) and below the one it gets now (180s).
+    min_wait_seconds = 120
+    with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w',
+                                     delete=False) as vol_f, \
+         tempfile.NamedTemporaryFile(suffix='.yaml', mode='w',
+                                     delete=False) as task_f, \
+         tempfile.NamedTemporaryFile(suffix='.yaml', mode='w',
+                                     delete=False) as cfg_f:
+        for handle, content in ((vol_f, volume_yaml), (task_f, task_yaml),
+                                (cfg_f, config)):
+            handle.write(content)
+            handle.flush()
+        test = smoke_tests_utils.Test(
+            'auto_mount_pending_volume_on_kubernetes',
+            [
+                smoke_tests_utils.create_unprovisionable_storage_class_cmd(
+                    name, binding_mode='WaitForFirstConsumer'),
+                f'sky volumes apply -y {smoke_tests_utils.AGENT_K8S_INFRA} '
+                f'{vol_f.name}',
+                # Nothing has asked for the claim yet, so there is nothing
+                # wrong with it to find. If this ever reports NOT_READY the
+                # premise of the test is gone.
+                f'vols=$(sky volumes ls) && echo "$vols" && '
+                f'echo "$vols" | grep {volume_name} | grep READY',
+                smoke_tests_utils.with_config(
+                    f'start=$(date +%s); '
+                    f'! sky launch -y -c {name} --infra kubernetes '
+                    f'{task_f.name} > {name}-pending.log 2>&1; '
+                    f'elapsed=$(( $(date +%s) - start )); '
+                    f'cat {name}-pending.log && '
+                    f'echo "launch took ${{elapsed}}s" && '
+                    f'grep -q "{volume_name}" {name}-pending.log && '
+                    # The volume got the minutes a network filesystem needs,
+                    # not the seconds a pod needs.
+                    f'[ "$elapsed" -ge {min_wait_seconds} ]',
+                    cfg_f.name),
+                # The volume was named while the launch was still waiting, not
+                # only in the error at the end.
+                f'sky logs --provision {name} > {name}-provision.log 2>&1; '
+                f'grep -q "waiting for volume" {name}-provision.log && '
+                f'grep -q "{volume_name}" {name}-provision.log',
+            ],
+            smoke_tests_utils.chain_teardown(
+                f'sky down -y {name} || true',
+                f'sky volumes delete {volume_name} -y || true',
+                smoke_tests_utils.delete_unprovisionable_storage_class_cmd(
+                    name), f'rm -f {name}-pending.log {name}-provision.log'),
+            timeout=15 * 60,
+        )
+        smoke_tests_utils.run_one_test(test)
+
+
 # ---------- Container logs from task on Kubernetes ----------
 
 
