@@ -2101,16 +2101,42 @@ class JobController:
                                 task_is_resuming))
             sync_task_ids.append(task_id)
 
-        sync_results = await asyncio.gather(*sync_coros)
-
-        # Build handles list from sync results
         handles: List[
             Optional['cloud_vm_ray_backend.CloudVmRayResourceHandle']] = [
                 None
             ] * len(tasks)
-        for i, handle in enumerate(sync_results):
+        sync_results = await asyncio.gather(*sync_coros, return_exceptions=True)
+        # Partition results in one pass: successes fill their task's
+        # handle slot, failures are collected for attribution.
+        failed_syncs = []
+        for i, sync_result in enumerate(sync_results):
             task_id = sync_task_ids[i]
-            handles[task_id] = handle
+            if isinstance(sync_result, BaseException):
+                failed_syncs.append((task_id, sync_result))
+            else:
+                handles[task_id] = sync_result
+        if failed_syncs:
+            for failed_task_id, sync_error in failed_syncs:
+                error_str = (common_utils.format_exception(sync_error)
+                             if isinstance(sync_error, Exception) else
+                             repr(sync_error))
+                logger.error(f'Failed to sync state for task {failed_task_id} '
+                             f'({tasks[failed_task_id].name}, cluster '
+                             f'{cluster_names[failed_task_id]}): {error_str}')
+            # Deliberately no cluster teardown here: a sync failure is a
+            # controller/DB-side error, and the retry (emergency recovery)
+            # must reconcile against the live clusters — their handles and
+            # in-group networking survive for the resumed monitors. Tearing
+            # down pairs only with a terminal error (see Phase 3 below):
+            # paired with a retryable one, re-entry finds RUNNING/STARTING
+            # rows it will not relaunch via Phase 1 and an empty handle
+            # list that disables the on-recovery networking re-push.
+            # Raise a real error over a stray cancellation (cancellation
+            # must reach run()'s cancel handling untouched); the original
+            # exception type must propagate for run() to classify it.
+            raise next(
+                (err for _, err in failed_syncs if isinstance(err, Exception)),
+                failed_syncs[0][1])
 
         # Phase 3: Set up networking
         # Build list of (task, handle) for non-terminal tasks with valid
@@ -2394,13 +2420,21 @@ class JobController:
 
     async def _cleanup_job_group_clusters(
             self, cluster_names: typing.List[typing.Optional[str]]) -> None:
-        """Clean up all clusters in a JobGroup."""
-        for cluster_name in cluster_names:
-            if cluster_name is not None:
-                try:
-                    await self._cleanup_cluster(cluster_name)
-                except Exception as e:  # pylint: disable=broad-except
-                    logger.warning(f'Failed to cleanup {cluster_name}: {e}')
+        """Clean up all clusters in a JobGroup, in parallel.
+
+        Best-effort per cluster: one cluster's failure must not skip the
+        others' teardown, so failures are logged and swallowed.
+        """
+
+        async def cleanup_one(cluster_name: str) -> None:
+            try:
+                await self._cleanup_cluster(cluster_name)
+            except Exception as e:  # pylint: disable=broad-except
+                logger.warning(f'Failed to cleanup {cluster_name}: {e}')
+
+        await asyncio.gather(*(cleanup_one(cluster_name)
+                               for cluster_name in cluster_names
+                               if cluster_name is not None))
 
     async def run(self):
         """Run controller logic and handle exceptions.
