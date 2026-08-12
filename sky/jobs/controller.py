@@ -2700,17 +2700,16 @@ class JobController:
         # whose admission barrier is still open should take the symmetric
         # reset (tear down all, reset to PENDING): mid-startup there is no
         # progress to protect and startup is all-or-nothing.
-        statuses = [
-            await managed_job_state.get_job_status_with_task_id_async(
-                job_id=self._job_id, task_id=tid)
-            for tid in range(len(self._dag.tasks))
-        ]
+        id_statuses = await managed_job_state.get_all_task_ids_statuses_async(
+            self._job_id)
+        statuses = [task_status for _, task_status in id_statuses]
         any_cancelling = any(
             task_status == managed_job_state.ManagedJobStatus.CANCELLING
             for task_status in statuses)
-        all_terminal = all(
-            task_status is not None and task_status.is_terminal()
-            for task_status in statuses)
+        # Guarded on every member having a row: a missing row must never
+        # count toward "all terminal".
+        all_terminal = (len(statuses) == len(self._dag.tasks) and all(
+            task_status.is_terminal() for task_status in statuses))
         if any_cancelling or all_terminal:
             # Mirror the single-task fast path below: cancellation and
             # terminal completion are owned by the resume logic, so

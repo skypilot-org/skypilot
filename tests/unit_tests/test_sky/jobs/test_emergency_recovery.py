@@ -552,15 +552,12 @@ class _RetryLoopHarness:
         if task_statuses is None:
             task_statuses = [state.ManagedJobStatus.RUNNING] * num_tasks
 
-        async def _get_task_status(job_id, task_id):
-            del job_id
-            return task_statuses[task_id]
-
-        self.get_task_status = AsyncMock(side_effect=_get_task_status)
+        self.get_task_statuses = AsyncMock(
+            return_value=list(enumerate(task_statuses)))
 
         mjs = 'sky.jobs.controller.managed_job_state'
-        monkeypatch.setattr(f'{mjs}.get_job_status_with_task_id_async',
-                            self.get_task_status)
+        monkeypatch.setattr(f'{mjs}.get_all_task_ids_statuses_async',
+                            self.get_task_statuses)
         monkeypatch.setattr(f'{mjs}.get_emergency_recovery_budget_async',
                             self.get_budget)
         monkeypatch.setattr(f'{mjs}.record_emergency_recovery_attempt_async',
@@ -1141,4 +1138,4 @@ class TestJobGroupEmergencyRecovery:
         h.set_emergency.assert_awaited_once()
         h.jc._cleanup_cluster.assert_awaited_once()
         # The group-only bulk status probe is never used on this path.
-        h.get_task_status.assert_not_awaited()
+        h.get_task_statuses.assert_not_awaited()
