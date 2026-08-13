@@ -3506,6 +3506,31 @@ def get_volume_names_start_with(starts_with: str) -> List[str]:
     return [row.name for row in rows]
 
 
+def _volume_record_from_row(row: Any) -> Dict[str, Any]:
+    """Builds a volume record from a volume table row.
+
+    Shared so every accessor returns the same shape: a caller that switches
+    between them must not have to check which keys it now has.
+    """
+    return {
+        'name': row.name,
+        'launched_at': row.launched_at,
+        'handle': pickle.loads(row.handle),
+        'user_hash': row.user_hash,
+        'workspace': row.workspace,
+        'last_attached_at': row.last_attached_at,
+        'last_use': row.last_use,
+        'status': status_lib.VolumeStatus[row.status],
+        'is_ephemeral': bool(row.is_ephemeral),
+        'error_message': row.error_message,
+        # Decode JSON-encoded usedby fields
+        'usedby_pods': json.loads(row.usedby_pods) if row.usedby_pods else [],
+        'usedby_clusters':
+            (json.loads(row.usedby_clusters) if row.usedby_clusters else []),
+        'creation_yaml': row.creation_yaml,
+    }
+
+
 @metrics_lib.time_me
 def get_volumes(is_ephemeral: Optional[bool] = None) -> List[Dict[str, Any]]:
     engine = _db_manager.get_engine()
@@ -3515,27 +3540,39 @@ def get_volumes(is_ephemeral: Optional[bool] = None) -> List[Dict[str, Any]]:
         else:
             rows = session.query(volume_table).filter_by(
                 is_ephemeral=int(is_ephemeral)).all()
-    records = []
-    for row in rows:
-        # Decode JSON-encoded usedby fields
-        usedby_pods = json.loads(row.usedby_pods) if row.usedby_pods else []
-        usedby_clusters = (json.loads(row.usedby_clusters)
-                           if row.usedby_clusters else [])
-        records.append({
-            'name': row.name,
-            'launched_at': row.launched_at,
-            'handle': pickle.loads(row.handle),
-            'user_hash': row.user_hash,
-            'workspace': row.workspace,
-            'last_attached_at': row.last_attached_at,
-            'last_use': row.last_use,
-            'status': status_lib.VolumeStatus[row.status],
-            'is_ephemeral': bool(row.is_ephemeral),
-            'error_message': row.error_message,
-            'usedby_pods': usedby_pods,
-            'usedby_clusters': usedby_clusters,
-            'creation_yaml': row.creation_yaml,
-        })
+    return [_volume_record_from_row(row) for row in rows]
+
+
+@metrics_lib.time_me
+def get_volumes_from_names(
+        volume_names: List[str],
+        is_ephemeral: Optional[bool] = None) -> List[Dict[str, Any]]:
+    """Batched ``get_volume_by_name`` for many volume names at once.
+
+    Returns records in the same shape as ``get_volumes``. Names with no row
+    are simply absent from the result, so the caller sees the same thing it
+    would from a filtered ``get_volumes``.
+
+    Args:
+        volume_names: Volume names to look up.
+        is_ephemeral: If given, keep only volumes with this ephemerality,
+            matching ``get_volumes``.
+    """
+    if not volume_names:
+        return []
+    engine = _db_manager.get_engine()
+    # Chunk the IN list for the same reason as _CLUSTER_IN_QUERY_CHUNK_SIZE:
+    # SQLite caps bound parameters and PostgreSQL plans huge IN clauses badly.
+    records: List[Dict[str, Any]] = []
+    with orm.Session(engine) as session:
+        for offset in range(0, len(volume_names), _CLUSTER_IN_QUERY_CHUNK_SIZE):
+            batch = volume_names[offset:offset + _CLUSTER_IN_QUERY_CHUNK_SIZE]
+            query = session.query(volume_table).filter(
+                volume_table.c.name.in_(batch))
+            if is_ephemeral is not None:
+                query = query.filter(
+                    volume_table.c.is_ephemeral == int(is_ephemeral))
+            records.extend(_volume_record_from_row(row) for row in query.all())
     return records
 
 
@@ -3545,24 +3582,7 @@ def get_volume_by_name(name: str) -> Optional[Dict[str, Any]]:
     with orm.Session(engine) as session:
         row = session.query(volume_table).filter_by(name=name).first()
     if row:
-        # Decode JSON-encoded usedby fields
-        usedby_pods = json.loads(row.usedby_pods) if row.usedby_pods else []
-        usedby_clusters = (json.loads(row.usedby_clusters)
-                           if row.usedby_clusters else [])
-        return {
-            'name': row.name,
-            'launched_at': row.launched_at,
-            'handle': pickle.loads(row.handle),
-            'user_hash': row.user_hash,
-            'workspace': row.workspace,
-            'last_attached_at': row.last_attached_at,
-            'last_use': row.last_use,
-            'status': status_lib.VolumeStatus[row.status],
-            'error_message': row.error_message,
-            'usedby_pods': usedby_pods,
-            'usedby_clusters': usedby_clusters,
-            'creation_yaml': row.creation_yaml,
-        }
+        return _volume_record_from_row(row)
     return None
 
 

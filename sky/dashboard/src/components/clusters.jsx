@@ -73,7 +73,10 @@ import cachePreloader from '@/lib/cache-preloader';
 import { ChevronDownIcon, ChevronRightIcon, InfoIcon } from 'lucide-react';
 import yaml from 'js-yaml';
 import { UserDisplay } from '@/components/elements/UserDisplay';
-import { evaluateCondition } from '@/components/shared/FilterSystem';
+import {
+  evaluateCondition,
+  updateFiltersByURLParams as sharedUpdateFiltersByURLParams,
+} from '@/components/shared/FilterSystem';
 import { SegmentedToggle } from '@/components/elements/SegmentedToggle';
 import { getCurrentUserInfo } from '@/data/connectors/client';
 import { trackClusterAction, trackFilterUsed } from '@/lib/analytics';
@@ -434,7 +437,7 @@ export function Clusters() {
     let values = [];
 
     filters.map((filter, _index) => {
-      properties.push(filter.property.toLowerCase() ?? '');
+      properties.push((filter.property ?? '').toLowerCase());
       operators.push(filter.operator);
       values.push(filter.value);
     });
@@ -487,45 +490,21 @@ export function Clusters() {
   };
 
   const updateFiltersByURLParams = () => {
-    const query = { ...router.query };
-
-    const properties = query.property;
-    const operators = query.operator;
-    const values = query.value;
-
-    if (properties === undefined) {
+    if (router.query.property === undefined) {
       return;
     }
+    // Keys match PROPERTY_OPTIONS above; a URL naming anything else is dropped
+    // by the shared decoder.
+    const propertyMap = new Map([
+      ['status', 'Status'],
+      ['cluster', 'Cluster'],
+      ['user', 'User'],
+      ['workspace', 'Workspace'],
+      ['infra', 'Infra'],
+      ['labels', 'Labels'],
+    ]);
 
-    let filters = [];
-
-    const length = Array.isArray(properties) ? properties.length : 1;
-
-    const propertyMap = new Map();
-    propertyMap.set('', '');
-    propertyMap.set('status', 'Status');
-    propertyMap.set('cluster', 'Cluster');
-    propertyMap.set('user', 'User');
-    propertyMap.set('workspace', 'Workspace');
-    propertyMap.set('infra', 'Infra');
-
-    if (length === 1) {
-      filters.push({
-        property: propertyMap.get(properties),
-        operator: operators,
-        value: values,
-      });
-    } else {
-      for (let i = 0; i < length; i++) {
-        filters.push({
-          property: propertyMap.get(properties[i]),
-          operator: operators[i],
-          value: values[i],
-        });
-      }
-    }
-
-    setFilters(filters);
+    setFilters(sharedUpdateFiltersByURLParams(router, propertyMap));
   };
 
   const selectScope = (scope) => {

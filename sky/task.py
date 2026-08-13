@@ -1142,11 +1142,22 @@ class Task:
                     # External volume with 'name' field
                     volume_mount = volume_lib.VolumeMount.resolve(
                         dst_path, vol['name'], sub_path=vol.get('sub_path'))
+                elif 'host_path' in vol:
+                    if not self.resources or not all(
+                            isinstance(resource.cloud, clouds.Slurm)
+                            for resource in self.resources):
+                        raise ValueError(
+                            'Inline host_path volumes are only supported for '
+                            'tasks explicitly targeting Slurm.')
+                    volume_mount = (
+                        volume_lib.VolumeMount.resolve_host_path_config(
+                            dst_path, vol))
                 else:
                     raise ValueError(
                         f'Invalid volume config: {dst_path}: {vol}. '
-                        'Either "size" (for ephemeral volume) or "name" '
-                        '(for external volume) must be set.')
+                        'One of "size" (for an ephemeral volume), "name" '
+                        '(for an external volume), or "host_path" (for a '
+                        'Slurm host bind) must be set.')
             else:
                 raise ValueError(f'Invalid volume config: {dst_path}: {vol}')
             volume_mounts.append(volume_mount)

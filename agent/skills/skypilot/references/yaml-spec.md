@@ -1050,7 +1050,8 @@ See Nested SkyPilot from managed jobs for details.
 
 ### ``volumes``
 
-SkyPilot supports managing persistent and ephemeral volumes for tasks or jobs on Kubernetes clusters. Refer to volumes on Kubernetes for more details.
+SkyPilot supports managed persistent and ephemeral volumes on Kubernetes, plus host path bind mounts for Slurm containers.
+Refer to volumes on Kubernetes for managed volume details.
 
 Example:
 
@@ -1061,8 +1062,27 @@ volumes:
   # Ephemeral volume
   /mnt/cache:
     size: 100Gi
-
 ```
+
+For Slurm tasks using Pyxis/Enroot, mount an existing absolute host path directly:
+
+```yaml
+resources:
+  cloud: slurm
+  image_id: docker:ubuntu:24.04
+
+volumes:
+  /data:
+    host_path: /shared/datasets
+    mode: ro  # Optional; defaults to ro. Use rw for a writable mount.
+```
+
+Host and container paths must use safe POSIX path characters.
+Host paths may contain simple environment variable expansions such as `$SLURM_JOB_ID`.
+
+Administrators can also declare cluster-wide binds applied to every containerized job; see
+slurm.container_mounts.
+
 
 
 ### ``file_mounts``

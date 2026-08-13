@@ -322,6 +322,9 @@ class Slurm(clouds.Cloud):
             try:
                 sit = slurm_utils.SlurmInstanceType.from_instance_type(
                     instance_type)
+            except ValueError:
+                pass
+            else:
                 if sit.accelerator_type is not None:
                     mapped = slurm_utils.lookup_gpu_partition_map(
                         cluster, sit.accelerator_type)
@@ -378,8 +381,6 @@ class Slurm(clouds.Cloud):
                                 f'on cluster {cluster!r}. Please '
                                 f'double-check the partition name.'
                                 f'{colorama.Style.RESET_ALL}')
-            except ValueError:
-                pass
 
             # TODO(kevin): Batch this check to reduce number of roundtrips.
             for partition in partitions_to_check:
@@ -474,7 +475,7 @@ class Slurm(clouds.Cloud):
         dryrun: bool = False,
         volume_mounts: Optional[List['volume_lib.VolumeMount']] = None,
     ) -> Dict[str, Any]:
-        del cluster_name, dryrun, volume_mounts  # Unused.
+        del cluster_name, dryrun  # Unused.
         if region is not None:
             cluster = region.name
         else:
@@ -542,6 +543,15 @@ class Slurm(clouds.Cloud):
                     f'Error: {common_utils.format_exception(e)}')
 
         image_id = resources.extract_docker_image()
+        if volume_mounts:
+            for mount in volume_mounts:
+                if mount.volume_config.config.get('host_path') is None:
+                    raise ValueError(
+                        f'Slurm only supports inline host_path volume '
+                        f'mounts; {mount.path!r} does not bind a host path.')
+            if image_id is None:
+                raise ValueError(
+                    'Slurm host_path volume mounts require a container image.')
 
         provision_timeout = skypilot_config.get_effective_region_config(
             cloud='slurm',
@@ -583,6 +593,43 @@ class Slurm(clouds.Cloud):
         if task_sbatch is not None:
             sbatch_options.update(task_sbatch)
 
+        # Read admin-declared container mounts with two-level merge:
+        # global < cluster. Each entry maps a container path to either a
+        # host path string (read-only) or {host_path: ..., mode: ro|rw}.
+        container_mounts: Dict[str, Any] = {}
+        for config_keys in [
+            ('slurm', 'container_mounts'),
+            ('slurm', 'cluster_configs', cluster, 'container_mounts'),
+        ]:
+            level_config = skypilot_config.get_nested(config_keys,
+                                                      default_value=None)
+            if level_config is not None:
+                container_mounts.update(level_config)
+
+        volume_mount_vars = []
+        if container_mounts:
+            if image_id is None:
+                logger.debug(f'Ignoring configured container_mounts for '
+                             f'cluster {cluster!r}: the task does not use a '
+                             f'container image.')
+            else:
+                # pylint: disable-next=import-outside-toplevel
+                from sky.utils import volume
+                task_mount_paths = {mount.path for mount in volume_mounts or []}
+                for dst_path, mount_config in sorted(container_mounts.items()):
+                    if dst_path in task_mount_paths:
+                        logger.debug(
+                            f'Configured container mount {dst_path!r} is '
+                            f'overridden by the task YAML volume.')
+                        continue
+                    if isinstance(mount_config, str):
+                        mount_config = {'host_path': mount_config}
+                    mount = volume.VolumeMount.resolve_host_path_config(
+                        dst_path, mount_config)
+                    volume_mount_vars.append(mount.to_yaml_config())
+        volume_mount_vars.extend(
+            mount.to_yaml_config() for mount in volume_mounts or [])
+
         deploy_vars = {
             'instance_type': resources.instance_type,
             'custom_resources': custom_resources,
@@ -611,6 +658,9 @@ class Slurm(clouds.Cloud):
                 (constants.SKY_CLUSTER_NAME_ENV_VAR_KEY),
             'image_id': image_id,
             'sbatch_options': sbatch_options,
+            # 'volume_mounts' is reserved by write_cluster_config(), which
+            # overwrites it with generic VolumeInfo objects.
+            'slurm_volume_mounts': volume_mount_vars,
         }
 
         return deploy_vars
@@ -630,7 +680,9 @@ class Slurm(clouds.Cloud):
                 zone=resources.zone,
                 resources=resources)
             if not available_regions:
-                return resources_utils.FeasibleResources([], [], None)
+                hint = self._gpu_partition_map_hint(resources.instance_type,
+                                                    resources.region)
+                return resources_utils.FeasibleResources([], [], hint)
 
             # Return a single resource without region set.
             # The optimizer will call make_launchables_for_valid_region_zones()
@@ -702,11 +754,47 @@ class Slurm(clouds.Cloud):
             zone=resources.zone,
             resources=resources)
         if not available_regions:
-            hint = self._get_memory_hint(resources)
+            hint = (self._gpu_partition_map_hint(chosen_instance_type,
+                                                 resources.region) or
+                    self._get_memory_hint(resources))
             return resources_utils.FeasibleResources([], [], hint)
 
         return resources_utils.FeasibleResources(_make([chosen_instance_type]),
                                                  [], None)
+
+    @staticmethod
+    def _gpu_partition_map_hint(instance_type: str,
+                                region: Optional[str]) -> Optional[str]:
+        """Return a hint when a pinned cluster's gpu_partition_map maps the
+        requested accelerator only to partitions that do not exist there.
+
+        Returning a hint instead of raising keeps other ``any_of``/``ordered``
+        resource candidates eligible; the optimizer only surfaces the hint
+        when no candidate is feasible.
+        """
+        if region is None:
+            return None
+        try:
+            sit = slurm_utils.SlurmInstanceType.from_instance_type(
+                instance_type)
+        except ValueError:
+            return None
+        if sit.accelerator_type is None:
+            return None
+        mapped = slurm_utils.lookup_gpu_partition_map(region,
+                                                      sit.accelerator_type)
+        if mapped is None:
+            return None
+        try:
+            live_partitions = sorted(slurm_utils.get_partitions(region))
+        except Exception as e:  # pylint: disable=broad-except
+            logger.debug(f'Failed to get partitions for {region}: {e}')
+            return None
+        if not live_partitions or any(p in live_partitions for p in mapped):
+            return None
+        return (f'None of the partitions {mapped} in gpu_partition_map for '
+                f'accelerator {sit.accelerator_type!r} exist on cluster '
+                f'{region!r}. Available partitions: {live_partitions}.')
 
     @staticmethod
     def _get_memory_hint(resources: 'resources_lib.Resources') -> Optional[str]:
