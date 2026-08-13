@@ -144,12 +144,34 @@ describe('filterData grouping', () => {
   ];
   const f = (property, value) => ({ property, operator: ':', value });
 
-  it('ORs several values on the same property', () => {
+  it('ANDs same-property values by default, so existing pages are unchanged', () => {
     const out = filterData(rows, [
       f('Status', 'RUNNING'),
       f('Status', 'STOPPED'),
     ]);
+    expect(out).toHaveLength(0);
+  });
+
+  it('ORs a property the caller opts in', () => {
+    const out = filterData(
+      rows,
+      [f('Status', 'RUNNING'), f('Status', 'STOPPED')],
+      { orProperties: ['Status'] }
+    );
     expect(out).toHaveLength(3);
+  });
+
+  it('keeps key/value filters intersecting even when opted-in siblings OR', () => {
+    const labelled = [
+      { status: 'RUNNING', labels: { team: 'ml', env: 'prod' } },
+      { status: 'RUNNING', labels: { team: 'ml' } },
+    ];
+    const out = filterData(
+      labelled,
+      [f('Labels', 'team:ml'), f('Labels', 'env:prod')],
+      { orProperties: ['Status'] }
+    );
+    expect(out).toHaveLength(1);
   });
 
   it('ANDs across different properties', () => {
@@ -158,11 +180,11 @@ describe('filterData grouping', () => {
   });
 
   it('combines both: (status OR status) AND user', () => {
-    const out = filterData(rows, [
-      f('Status', 'RUNNING'),
-      f('Status', 'STOPPED'),
-      f('User', 'alice'),
-    ]);
+    const out = filterData(
+      rows,
+      [f('Status', 'RUNNING'), f('Status', 'STOPPED'), f('User', 'alice')],
+      { orProperties: ['Status'] }
+    );
     expect(out).toHaveLength(2);
   });
 

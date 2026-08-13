@@ -69,14 +69,22 @@ export const evaluateCondition = (item, filter) => {
 
 // Main filter function.
 //
-// Several filters on the same property mean "match any of these" (OR);
-// different properties still narrow each other (AND). AND-ing everything would
-// make two values on one property -- two statuses, two users -- always yield
-// zero rows, and would disagree with the URL, where one key carries a list.
-export const filterData = (data, filters) => {
+// Filters on different properties always narrow each other (AND). Filters on
+// the *same* property AND too, unless the caller names that property in
+// `options.orProperties` -- then its values are alternatives (OR), which is
+// what a multi-valued filter like `?status=RUNNING,STOPPED` means.
+//
+// The default is AND so that pages which have not adopted the schema keep their
+// existing behaviour. Note that key/value filters such as Labels want AND even
+// when they repeat: `team:ml` plus `env:prod` reads as an intersection.
+export const filterData = (data, filters, options = {}) => {
   if (!filters || filters.length === 0) {
     return data;
   }
+
+  const orProperties = new Set(
+    (options.orProperties || []).map((p) => String(p).toLowerCase())
+  );
 
   const groups = new Map();
   for (const filter of filters) {
@@ -86,10 +94,13 @@ export const filterData = (data, filters) => {
     }
     groups.get(key).push(filter);
   }
-  const grouped = [...groups.values()];
 
   return data.filter((item) =>
-    grouped.every((group) => group.some((f) => evaluateCondition(item, f)))
+    [...groups.entries()].every(([property, group]) =>
+      orProperties.has(property)
+        ? group.some((f) => evaluateCondition(item, f))
+        : group.every((f) => evaluateCondition(item, f))
+    )
   );
 };
 

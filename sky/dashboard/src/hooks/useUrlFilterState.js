@@ -66,7 +66,7 @@ export function useUrlFilterState(filterSchema, viewSchema = []) {
 
   const initial = useRef(null);
   if (initial.current === null) {
-    initial.current = readInitial();
+    initial.current = { ...readInitial(), query: readQuery() };
   }
 
   const [filters, setFilters] = useState(initial.current.filters);
@@ -138,5 +138,15 @@ export function useUrlFilterState(filterSchema, viewSchema = []) {
     );
   }, []);
 
-  return { filters, setFilters, view, setView };
+  // The query as it was on arrival, before this hook rewrote the address bar.
+  // Pages that need to know whether something was deep-linked must read this
+  // rather than `router.query`: the rewrite can land before Next parses the
+  // query on a statically exported page, and the two would disagree.
+  return {
+    filters,
+    setFilters,
+    view,
+    setView,
+    initialQuery: initial.current.query,
+  };
 }

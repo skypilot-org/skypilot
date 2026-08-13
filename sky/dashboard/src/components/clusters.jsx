@@ -135,6 +135,25 @@ const PROPERTY_OPTIONS = CLUSTER_FILTER_SCHEMA.map(({ key, label }) => ({
   value: key,
 }));
 
+// Properties whose values are alternatives rather than extra conditions. Only
+// these may hold more than one chip; everything else replaces, so the page can
+// never show more filters than a shared link is able to carry.
+const OR_PROPERTIES = CLUSTER_FILTER_SCHEMA.filter((e) => e.multi === true).map(
+  (e) => e.label
+);
+const MULTI_VALUE_LABELS = new Set(
+  CLUSTER_FILTER_SCHEMA.filter((e) => e.multi).map((e) => e.label)
+);
+
+// Add a chip, replacing any existing one on a single-valued property and
+// ignoring an exact duplicate.
+const addFilter = (prevFilters, property, value) => {
+  const base = MULTI_VALUE_LABELS.has(property)
+    ? prevFilters.filter((f) => !(f.property === property && f.value === value))
+    : prevFilters.filter((f) => f.property !== property);
+  return [...base, { property, operator: ':', value }];
+};
+
 // `history` carries the window directly: absent means the history view is off,
 // otherwise `1d` / `5d` / `10d` / `30d`. Replaces the old `history=true` plus
 // `historyDays=N` pair.
@@ -242,10 +261,8 @@ export function Clusters() {
   const [selectedCluster, setSelectedCluster] = useState(null);
 
   // Filters and the shareable view state both live in the URL, keyed by name.
-  const { filters, setFilters, view, setView } = useUrlFilterState(
-    CLUSTER_FILTER_SCHEMA,
-    CLUSTER_VIEW_SCHEMA
-  );
+  const { filters, setFilters, view, setView, initialQuery } =
+    useUrlFilterState(CLUSTER_FILTER_SCHEMA, CLUSTER_VIEW_SCHEMA);
 
   const historyDays = parseHistory(view.history) ?? 1;
   const showHistory = parseHistory(view.history) !== null;
@@ -316,7 +333,7 @@ export function Clusters() {
       return;
     }
     scopeSeeded.current = true;
-    const deepLinked = router.query.owner;
+    const deepLinked = initialQuery.owner;
     if (isOwnerScope(deepLinked)) {
       writeStoredOwnerScope(deepLinked);
       return;
@@ -326,13 +343,7 @@ export function Clusters() {
       setView('owner', stored);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [
-    router.isReady,
-    router.query.owner,
-    authResolved,
-    currentUser,
-    view.owner,
-  ]);
+  }, [router.isReady, initialQuery, authResolved, currentUser, view.owner]);
 
   useEffect(() => {
     const fetchFilterData = async () => {
@@ -409,8 +420,22 @@ export function Clusters() {
     writeStoredOwnerScope(scope);
   };
 
+  // Remember the chosen window across an Active/All round trip: `history=off`
+  // carries no day count, so without this the toggle would silently reset a
+  // 30-day view to 1 day.
+  const lastHistoryDays = useRef(historyDays);
+  useEffect(() => {
+    const days = parseHistory(view.history);
+    if (days !== null) {
+      lastHistoryDays.current = days;
+    }
+  }, [view.history]);
+
   const selectHistoryTab = (showHistoryValue) => {
-    setView('history', showHistoryValue ? `${historyDays}d` : 'off');
+    setView(
+      'history',
+      showHistoryValue ? `${lastHistoryDays.current}d` : 'off'
+    );
   };
 
   const selectHistoryDays = (days) => {
@@ -824,7 +849,7 @@ export function ClusterTable({
 
     const filteredData = isServerPagination
       ? dataToProcess
-      : filterData(dataToProcess, filters);
+      : filterData(dataToProcess, filters, { orProperties: OR_PROPERTIES });
 
     return sortData(filteredData, sortConfig.key, sortConfig.direction);
   }, [hookData, allData, sortConfig, filters, isServerPagination]);
@@ -1613,18 +1638,9 @@ const FilterDropdown = ({
 
   const handleOptionSelect = (option) => {
     trackFilterUsed('cluster', { property: propertyValue, value: option });
-    setFilters((prevFilters) => {
-      const updatedFilters = [
-        ...prevFilters,
-        {
-          property: getPropertyLabel(propertyValue),
-          operator: ':',
-          value: option,
-        },
-      ];
-
-      return updatedFilters;
-    });
+    setFilters((prevFilters) =>
+      addFilter(prevFilters, getPropertyLabel(propertyValue), option)
+    );
     setIsOpen(false);
     setValue('');
     inputRef.current.focus();
@@ -1632,18 +1648,9 @@ const FilterDropdown = ({
 
   const handleKeyDown = (e) => {
     if (e.key === 'Enter' && value.trim() !== '') {
-      setFilters((prevFilters) => {
-        const updatedFilters = [
-          ...prevFilters,
-          {
-            property: getPropertyLabel(propertyValue),
-            operator: ':',
-            value: value,
-          },
-        ];
-
-        return updatedFilters;
-      });
+      setFilters((prevFilters) =>
+        addFilter(prevFilters, getPropertyLabel(propertyValue), value)
+      );
       setValue('');
       setIsOpen(false);
     } else if (e.key === 'Escape') {
