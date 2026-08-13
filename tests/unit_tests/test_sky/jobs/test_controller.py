@@ -31,6 +31,7 @@ from sky.jobs.controller import JobController
 from sky.skylet import job_lib
 from sky.utils import common
 from sky.utils import status_lib
+from sky.utils.plugin_extensions import LogDeliverySource
 
 
 class TestNormalJobRecovery:
@@ -1115,13 +1116,15 @@ class TestDownloadLogAndStreamLoggingAgentGate:
                 controller, JobController))
         return controller
 
-    def _run(self, agent_configured, reader):
+    def _run(self, agent_configured, reader, undelivered_reason=None):
         controller = self._make_controller()
         handle = MagicMock()
         with patch('sky.jobs.controller.logs.is_logging_agent_configured',
                    return_value=agent_configured), \
              patch('sky.jobs.controller.logs.get_log_reader',
                    return_value=reader), \
+             patch('sky.jobs.controller.LogDeliverySource.undelivered_reason',
+                   return_value=undelivered_reason), \
              patch('sky.jobs.controller.managed_job_state') as mock_state, \
              patch('sky.jobs.controller.managed_job_runtime') as mock_runtime, \
              patch('sky.jobs.controller.controller_utils') as mock_cutils:
@@ -1148,6 +1151,44 @@ class TestDownloadLogAndStreamLoggingAgentGate:
     def test_downloads_when_no_logging_agent(self):
         _, _, mock_cutils = self._run(agent_configured=False, reader=None)
         mock_cutils.download_and_stream_job_log.assert_called_once()
+
+    def test_downloads_when_delivery_source_reports_undelivered(self):
+        # Agent and reader are configured, but the component operating the
+        # agent knows it never delivered this cluster's logs -> the local copy
+        # is the only copy that will exist, so it must be kept.
+        _, _, mock_cutils = self._run(
+            agent_configured=True,
+            reader=MagicMock(),
+            undelivered_reason='logging agent was not deployed on the cluster')
+        mock_cutils.download_and_stream_job_log.assert_called_once()
+
+    def test_skips_download_when_delivery_source_confirms(self):
+        # A registered source with no evidence against delivery must not
+        # change the skip behavior.
+        _, _, mock_cutils = self._run(agent_configured=True,
+                                      reader=MagicMock(),
+                                      undelivered_reason=None)
+        mock_cutils.download_and_stream_job_log.assert_not_called()
+
+    def test_no_delivery_source_registered_is_inert(self):
+        # The compatibility property of the extension point: with nothing
+        # registered, the check must not change behavior at all. Unlike the
+        # cases above, this exercises the real LogDeliverySource rather than
+        # patching its lookup, so a future default other than None is caught.
+        assert not LogDeliverySource.is_registered()
+        controller = self._make_controller()
+        with patch('sky.jobs.controller.logs.is_logging_agent_configured',
+                   return_value=True), \
+             patch('sky.jobs.controller.logs.get_log_reader',
+                   return_value=MagicMock()), \
+             patch('sky.jobs.controller.managed_job_state') as mock_state, \
+             patch('sky.jobs.controller.managed_job_runtime') as mock_runtime, \
+             patch('sky.jobs.controller.controller_utils') as mock_cutils:
+            mock_runtime.is_registered.return_value = False
+            controller.download_log_and_stream(0, MagicMock(), None)
+        mock_state.set_local_log_file.assert_not_called()
+        mock_runtime.download_logs.assert_not_called()
+        mock_cutils.download_and_stream_job_log.assert_not_called()
 
 
 class TestJobGroupResumeDoesNotReissueStarting:
