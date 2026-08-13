@@ -708,10 +708,18 @@ class Kubernetes(clouds.Cloud):
             if any(
                     volume_lib.is_read_write_many_pvc(volume_config)
                     for volume_config in volume_configs):
-                # GKE may take several minutes to provision a PV
-                # supporting READ_WRITE_MANY with filestore.
-                base_timeout = 180
-                max_timeout = 240
+                # Creating the network filesystem behind a READ_WRITE_MANY PV
+                # takes minutes: a 1 TiB GKE Filestore instance on the
+                # enterprise tier measured ~7 minutes end to end. The previous
+                # 180-240s could not cover that, so such a launch timed out
+                # while its volume was being created normally.
+                #
+                # Waiting this long is only reasonable because a volume that
+                # will not bind no longer needs the timeout to report it -- the
+                # scheduling wait loop fails on what the storage backend says
+                # (see _PendingVolumeProbe), whatever the timeout is.
+                base_timeout = 600
+                max_timeout = 900
 
         return int(
             min(base_timeout + (per_node_timeout * (num_nodes - 1)),

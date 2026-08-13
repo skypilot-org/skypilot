@@ -9,7 +9,9 @@ from sky import models
 from sky.utils import volume as volume_lib
 
 _BASE_TIMEOUT = 10
-_RWX_TIMEOUT = 180
+# Long enough for the network filesystem behind the volume to be created: a
+# 1 TiB GKE Filestore instance measured ~7 minutes.
+_RWX_TIMEOUT = 600
 
 
 def _volume_config(volume_type: str = 'k8s-pvc',
