@@ -13,13 +13,10 @@ export const evaluateCondition = (item, filter) => {
 
   if (!value) return true; // skip empty filters
 
-  // Global search: check all values
-  if (!property) {
-    const strValue = value.toLowerCase();
-    return Object.values(item).some((val) =>
-      val?.toString().toLowerCase().includes(strValue)
-    );
-  }
+  // A filter without a property cannot be evaluated. The decoders drop these
+  // before they reach the filter list, so this is a guard, not a code path:
+  // skip the filter rather than throwing on the lookup below.
+  if (!property) return true;
 
   const propertyLower = property.toLowerCase();
 
@@ -103,7 +100,7 @@ export const updateURLParams = (router, filters) => {
   let values = [];
 
   filters.map((filter, _index) => {
-    properties.push(filter.property.toLowerCase() ?? '');
+    properties.push((filter.property ?? '').toLowerCase());
     operators.push(filter.operator);
     values.push(filter.value);
   });
@@ -138,20 +135,20 @@ export const updateFiltersByURLParams = (router, propertyMap) => {
 
   const length = Array.isArray(properties) ? properties.length : 1;
 
-  if (length === 1) {
-    filters.push({
-      property: propertyMap.get(properties),
-      operator: operators,
-      value: values,
-    });
-  } else {
-    for (let i = 0; i < length; i++) {
-      filters.push({
-        property: propertyMap.get(properties[i]),
-        operator: operators[i],
-        value: values[i],
-      });
+  for (let i = 0; i < length; i++) {
+    const rawProperty = length === 1 ? properties : properties[i];
+    const property = propertyMap.get(rawProperty);
+    // A property the page does not know about cannot be filtered on. Drop it:
+    // keeping it would render a chip labeled `undefined` that filters nothing
+    // it claims to, and a URL is user-editable input, not trusted state.
+    if (!property) {
+      continue;
     }
+    filters.push({
+      property,
+      operator: length === 1 ? operators : operators[i],
+      value: length === 1 ? values : values[i],
+    });
   }
 
   return filters;

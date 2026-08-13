@@ -2107,3 +2107,85 @@ class TestEphemeralVolumeSkipsStatusProbe:
                           is_ephemeral=True)
 
         mock_get_errors.assert_not_called()
+
+
+class TestVolumeRefreshScopedToNames:
+    """A caller waiting on one volume must not pay for the whole table.
+
+    volume_refresh takes a file lock and a database round-trip per volume it
+    walks, and those are the same locks concurrent volume operations take, so
+    polling it unscoped puts the whole table in the poll loop's path.
+    """
+
+    def _volume(self, name):
+        return {
+            'name': name,
+            'launched_at': 1234567890,
+            'user_hash': 'user123',
+            'workspace': 'default',
+            'last_attached_at': None,
+            'last_use': None,
+            'handle': mock.MagicMock(name=name,
+                                     cloud='kubernetes',
+                                     type='k8s-pvc',
+                                     region='my-context',
+                                     zone=None,
+                                     size='1Gi',
+                                     config={},
+                                     name_on_cloud=f'{name}-on-cloud',
+                                     spec=models.VolumeConfig),
+            'status': status_lib.VolumeStatus.NOT_READY,
+            'is_ephemeral': False,
+        }
+
+    def _patch_common(self, monkeypatch, wanted):
+        monkeypatch.setattr(provision, 'get_all_volumes_errors',
+                            mock.MagicMock(return_value=({}, set())))
+        monkeypatch.setattr(provision, 'get_all_volumes_usedby',
+                            mock.MagicMock(return_value=({}, {}, set())))
+        monkeypatch.setattr(provision, 'map_all_volumes_usedby',
+                            mock.MagicMock(return_value=([], [])))
+        monkeypatch.setattr(
+            provision, 'refresh_volume_config',
+            mock.MagicMock(side_effect=lambda cloud, c: (False, c)))
+        monkeypatch.setattr(
+            global_user_state, 'get_volume_by_name',
+            mock.MagicMock(side_effect=lambda n: self._volume(n)))
+        monkeypatch.setattr('sky.volumes.server.core.filelock.FileLock',
+                            mock.MagicMock())
+        mock_update = mock.MagicMock()
+        monkeypatch.setattr(global_user_state, 'update_volume_status',
+                            mock_update)
+        mock_scoped = mock.MagicMock(
+            return_value=[self._volume(n) for n in wanted])
+        monkeypatch.setattr(global_user_state, 'get_volumes_from_names',
+                            mock_scoped)
+        mock_all = mock.MagicMock(
+            return_value=[self._volume(n) for n in ('vol-a', 'vol-b')])
+        monkeypatch.setattr(global_user_state, 'get_volumes', mock_all)
+        return mock_all, mock_scoped, mock_update
+
+    def test_only_the_named_volume_is_touched(self, monkeypatch):
+        mock_all, mock_scoped, mock_update = self._patch_common(
+            monkeypatch, ['vol-a'])
+
+        core.volume_refresh(volume_names=['vol-a'])
+
+        mock_all.assert_not_called()
+        mock_scoped.assert_called_once_with(['vol-a'], is_ephemeral=False)
+        # vol-b is never locked, read, or written.
+        assert [c.args[0] for c in mock_update.call_args_list] == ['vol-a']
+
+    def test_no_names_still_refreshes_everything(self, monkeypatch):
+        """The daemon and `sky volumes ls --refresh` pass nothing and must
+        keep their existing behavior."""
+        mock_all, mock_scoped, mock_update = self._patch_common(
+            monkeypatch, ['vol-a'])
+
+        core.volume_refresh()
+
+        mock_all.assert_called_once_with(is_ephemeral=False)
+        mock_scoped.assert_not_called()
+        assert sorted(c.args[0] for c in mock_update.call_args_list) == [
+            'vol-a', 'vol-b'
+        ]

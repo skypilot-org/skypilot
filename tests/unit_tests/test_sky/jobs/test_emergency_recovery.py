@@ -491,19 +491,33 @@ class TestEmergencyRecoveryState:
 class _RetryLoopHarness:
     """Drives the real JobController.run() with mocked collaborators."""
 
-    def __init__(self, monkeypatch, body_effects):
-        """body_effects: side_effect list for _run_one_task."""
+    def __init__(self,
+                 monkeypatch,
+                 body_effects,
+                 is_job_group=False,
+                 num_tasks=1,
+                 task_statuses=None):
+        """body_effects: side_effect list for the job body.
+
+        Drives _run_one_task for single jobs, _run_job_group when
+        is_job_group is set. task_statuses feeds the group branch's
+        per-member status probe (defaults to all RUNNING).
+        """
         jc = controller.JobController.__new__(controller.JobController)
         jc._job_id = 1
-        task = MagicMock()
-        task.name = 'task0'
+        tasks = []
+        for i in range(num_tasks):
+            task = MagicMock()
+            task.name = f'task{i}'
+            tasks.append(task)
         dag = MagicMock()
-        dag.is_job_group.return_value = False
-        dag.tasks = [task]
+        dag.is_job_group.return_value = is_job_group
+        dag.tasks = tasks
         jc._dag = dag
         jc._pool = None
         jc._emergency_backoff_seconds = None
         jc._run_one_task = AsyncMock(side_effect=body_effects)
+        jc._run_job_group = AsyncMock(side_effect=body_effects)
         jc._update_failed_task_state = AsyncMock()
         jc._cleanup_cluster = AsyncMock()
         # Shared launching-slot primitives (real JobController gets these from
@@ -535,7 +549,15 @@ class _RetryLoopHarness:
         async def _fake_sleep(seconds):
             self.sleeps.append(seconds)
 
+        if task_statuses is None:
+            task_statuses = [state.ManagedJobStatus.RUNNING] * num_tasks
+
+        self.get_task_statuses = AsyncMock(
+            return_value=list(enumerate(task_statuses)))
+
         mjs = 'sky.jobs.controller.managed_job_state'
+        monkeypatch.setattr(f'{mjs}.get_all_task_ids_statuses_async',
+                            self.get_task_statuses)
         monkeypatch.setattr(f'{mjs}.get_emergency_recovery_budget_async',
                             self.get_budget)
         monkeypatch.setattr(f'{mjs}.record_emergency_recovery_attempt_async',
@@ -1025,3 +1047,95 @@ class TestTaskPrepFailureIsTerminal:
         h.get_budget.assert_not_awaited()
         h.record_attempt.assert_not_awaited()
         assert not h.sleeps
+
+
+class TestJobGroupEmergencyRecovery:
+    """Group-mode emergency recovery does no per-task surgery.
+
+    For job groups, every member is concurrently mid-flight, so "the
+    latest task" is an arbitrary member: marking it RECOVERING would
+    force-recover (tear down + relaunch) a possibly-healthy RUNNING
+    member on re-entry, and tearing down its cluster leaves siblings
+    running unsupervised through the backoff. The group branch skips
+    both and leaves reconciliation to the retry's resume classification,
+    keeping only the job-level bookkeeping (budget, launch slot,
+    schedule-state normalization, backoff).
+    """
+
+    @pytest.mark.asyncio
+    async def test_group_skips_per_task_surgery(self, monkeypatch):
+        h = _RetryLoopHarness(monkeypatch, [RuntimeError('boom'), True],
+                              is_job_group=True,
+                              num_tasks=3)
+
+        await h.jc.run()
+
+        assert h.jc._run_job_group.call_count == 2
+        h.jc._update_failed_task_state.assert_not_called()
+        # Budget is still spent and the episode paced like any other.
+        h.record_attempt.assert_awaited_once()
+        assert h.record_attempt.await_args.args[1] == 1
+        _assert_jittered(
+            h.sleeps, [jobs_constants.EMERGENCY_RECOVERY_BACKOFF_BASE_SECONDS])
+        # No per-task surgery: no member marked RECOVERING, no member's
+        # cluster torn down, no "latest task" resolution at all.
+        h.set_emergency.assert_not_awaited()
+        h.jc._cleanup_cluster.assert_not_awaited()
+        h.get_latest_task.assert_not_awaited()
+        # Job-level bookkeeping still runs.
+        h.normalize.assert_awaited_once()
+        assert 1 not in h.jc.starting  # launch slot released
+
+    @pytest.mark.asyncio
+    async def test_group_cancelling_member_retries_without_backoff(
+            self, monkeypatch):
+        h = _RetryLoopHarness(monkeypatch,
+                              [RuntimeError('boom'),
+                               asyncio.CancelledError()],
+                              is_job_group=True,
+                              num_tasks=2,
+                              task_statuses=[
+                                  state.ManagedJobStatus.RUNNING,
+                                  state.ManagedJobStatus.CANCELLING,
+                              ])
+
+        with pytest.raises(asyncio.CancelledError):
+            await h.jc.run()
+
+        assert h.jc._run_job_group.call_count == 2
+        assert not h.sleeps  # no backoff for the cancellation handoff
+        h.set_emergency.assert_not_awaited()
+        h.jc._cleanup_cluster.assert_not_awaited()
+        # Cancellation ordering mirrors the single-task fast path.
+        h.set_cancelling.assert_awaited_once()
+        h.set_cancelled.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_group_all_terminal_retries_without_backoff(
+            self, monkeypatch):
+        h = _RetryLoopHarness(monkeypatch, [RuntimeError('boom'), True],
+                              is_job_group=True,
+                              num_tasks=2,
+                              task_statuses=[
+                                  state.ManagedJobStatus.SUCCEEDED,
+                                  state.ManagedJobStatus.FAILED,
+                              ])
+
+        await h.jc.run()
+
+        assert h.jc._run_job_group.call_count == 2
+        assert not h.sleeps
+        h.set_emergency.assert_not_awaited()
+        h.jc._cleanup_cluster.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_single_task_surgery_unchanged(self, monkeypatch):
+        """Regression pin: single jobs keep the mark + early teardown."""
+        h = _RetryLoopHarness(monkeypatch, [RuntimeError('boom'), True])
+
+        await h.jc.run()
+
+        h.set_emergency.assert_awaited_once()
+        h.jc._cleanup_cluster.assert_awaited_once()
+        # The group-only bulk status probe is never used on this path.
+        h.get_task_statuses.assert_not_awaited()

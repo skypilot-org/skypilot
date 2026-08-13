@@ -31,6 +31,7 @@ from sky.jobs.controller import JobController
 from sky.skylet import job_lib
 from sky.utils import common
 from sky.utils import status_lib
+from sky.utils.plugin_extensions import LogDeliverySource
 
 
 class TestNormalJobRecovery:
@@ -1115,13 +1116,15 @@ class TestDownloadLogAndStreamLoggingAgentGate:
                 controller, JobController))
         return controller
 
-    def _run(self, agent_configured, reader):
+    def _run(self, agent_configured, reader, undelivered_reason=None):
         controller = self._make_controller()
         handle = MagicMock()
         with patch('sky.jobs.controller.logs.is_logging_agent_configured',
                    return_value=agent_configured), \
              patch('sky.jobs.controller.logs.get_log_reader',
                    return_value=reader), \
+             patch('sky.jobs.controller.LogDeliverySource.undelivered_reason',
+                   return_value=undelivered_reason), \
              patch('sky.jobs.controller.managed_job_state') as mock_state, \
              patch('sky.jobs.controller.managed_job_runtime') as mock_runtime, \
              patch('sky.jobs.controller.controller_utils') as mock_cutils:
@@ -1148,6 +1151,44 @@ class TestDownloadLogAndStreamLoggingAgentGate:
     def test_downloads_when_no_logging_agent(self):
         _, _, mock_cutils = self._run(agent_configured=False, reader=None)
         mock_cutils.download_and_stream_job_log.assert_called_once()
+
+    def test_downloads_when_delivery_source_reports_undelivered(self):
+        # Agent and reader are configured, but the component operating the
+        # agent knows it never delivered this cluster's logs -> the local copy
+        # is the only copy that will exist, so it must be kept.
+        _, _, mock_cutils = self._run(
+            agent_configured=True,
+            reader=MagicMock(),
+            undelivered_reason='logging agent was not deployed on the cluster')
+        mock_cutils.download_and_stream_job_log.assert_called_once()
+
+    def test_skips_download_when_delivery_source_confirms(self):
+        # A registered source with no evidence against delivery must not
+        # change the skip behavior.
+        _, _, mock_cutils = self._run(agent_configured=True,
+                                      reader=MagicMock(),
+                                      undelivered_reason=None)
+        mock_cutils.download_and_stream_job_log.assert_not_called()
+
+    def test_no_delivery_source_registered_is_inert(self):
+        # The compatibility property of the extension point: with nothing
+        # registered, the check must not change behavior at all. Unlike the
+        # cases above, this exercises the real LogDeliverySource rather than
+        # patching its lookup, so a future default other than None is caught.
+        assert not LogDeliverySource.is_registered()
+        controller = self._make_controller()
+        with patch('sky.jobs.controller.logs.is_logging_agent_configured',
+                   return_value=True), \
+             patch('sky.jobs.controller.logs.get_log_reader',
+                   return_value=MagicMock()), \
+             patch('sky.jobs.controller.managed_job_state') as mock_state, \
+             patch('sky.jobs.controller.managed_job_runtime') as mock_runtime, \
+             patch('sky.jobs.controller.controller_utils') as mock_cutils:
+            mock_runtime.is_registered.return_value = False
+            controller.download_log_and_stream(0, MagicMock(), None)
+        mock_state.set_local_log_file.assert_not_called()
+        mock_runtime.download_logs.assert_not_called()
+        mock_cutils.download_and_stream_job_log.assert_not_called()
 
 
 class TestJobGroupResumeDoesNotReissueStarting:
@@ -2106,3 +2147,157 @@ class TestOnRecoveryClusterSetUpErrorHandling:
         assert (kwargs['failure_type'] ==
                 managed_job_state.ManagedJobStatus.FAILED_SETUP)
         assert 'networking gone' in kwargs['failure_reason']
+
+
+class TestJobGroupCleanupClusters:
+    """_cleanup_job_group_clusters must clean every member, in parallel.
+
+    The gang-admission retry loop will call this once per failed attempt
+    (today it runs once per job), so per-cluster failures must not skip
+    the remaining teardowns, and N members must not tear down serially.
+    """
+
+    def _make_controller(self):
+        controller = MagicMock(spec=JobController)
+        return controller
+
+    @pytest.mark.asyncio
+    async def test_one_failure_does_not_skip_others(self):
+        controller = self._make_controller()
+        cleaned = []
+
+        async def cleanup_cluster(name):
+            if name == 'cluster-b':
+                raise RuntimeError('teardown boom')
+            cleaned.append(name)
+
+        controller._cleanup_cluster = AsyncMock(side_effect=cleanup_cluster)
+        # Must not raise despite cluster-b failing.
+        await JobController._cleanup_job_group_clusters(
+            controller, ['cluster-a', 'cluster-b', None, 'cluster-c'])
+        assert sorted(cleaned) == ['cluster-a', 'cluster-c']
+        # None entries (terminal tasks) are skipped, not passed through.
+        awaited_names = [
+            call.args[0] for call in controller._cleanup_cluster.await_args_list
+        ]
+        assert None not in awaited_names
+        assert sorted(awaited_names) == ['cluster-a', 'cluster-b', 'cluster-c']
+
+    @pytest.mark.asyncio
+    async def test_cleanup_runs_in_parallel(self):
+        controller = self._make_controller()
+        active = 0
+        max_active = 0
+
+        async def cleanup_cluster(name):
+            nonlocal active, max_active
+            active += 1
+            max_active = max(max_active, active)
+            await asyncio.sleep(0.05)
+            active -= 1
+
+        controller._cleanup_cluster = AsyncMock(side_effect=cleanup_cluster)
+        await JobController._cleanup_job_group_clusters(
+            controller, ['cluster-a', 'cluster-b', 'cluster-c'])
+        assert max_active == 3, (
+            f'expected all 3 teardowns in flight together, saw {max_active}')
+
+
+class TestJobGroupPhase2FailurePropagation:
+    """A Phase-2 sync failure propagates cleanly, with no teardown.
+
+    Phase 2 of _run_job_group (fetch handles + set RUNNING) runs after all
+    member clusters are up. Two properties are pinned:
+    - the sibling sync coros are not cancelled mid-write (gather collects
+      exceptions instead of aborting on the first one), and
+    - member clusters are deliberately NOT torn down: the failure is
+      controller/DB-side and propagates to emergency recovery, whose
+      re-entry reconciles against the live clusters (a teardown paired
+      with a retryable error would strand re-entry with RUNNING/STARTING
+      rows it cannot relaunch and an empty handle list that disables the
+      networking re-push).
+    """
+
+    def _make_tasks(self):
+        tasks = []
+        for name in ('job-a', 'job-b'):
+            task = MagicMock()
+            task.name = name
+            task.envs = {}
+            tasks.append(task)
+        return tasks
+
+    def _make_controller(self, tasks):
+        controller = MagicMock(spec=JobController)
+        controller._job_id = 1
+        controller._pool = None
+        controller._dag = MagicMock()
+        controller._dag.name = 'group'
+        controller._dag.tasks = tasks
+        executors = [MagicMock(), MagicMock()]
+        for executor in executors:
+            executor.launch = AsyncMock(return_value=123.0)
+        controller._prepare_job_group_task_for_launch = AsyncMock(
+            side_effect=[('cluster-a', executors[0]), ('cluster-b',
+                                                       executors[1])])
+        controller._cleanup_job_group_clusters = AsyncMock()
+        return controller
+
+    @pytest.mark.asyncio
+    async def test_phase2_failure_propagates_without_teardown(self):
+        tasks = self._make_tasks()
+        controller = self._make_controller(tasks)
+
+        sibling_synced = []
+
+        async def set_started(job_id, task_id, start_time, callback_func):
+            del job_id, start_time, callback_func
+            if task_id == 0:
+                raise RuntimeError('phase2 db boom')
+            # Prove the sibling's write is not cancelled by task 0's
+            # failure: it must run to completion before teardown starts.
+            await asyncio.sleep(0.02)
+            sibling_synced.append(task_id)
+
+        with patch('sky.jobs.controller.managed_job_runtime') as runtime, \
+             patch('sky.jobs.controller.managed_job_state') as state, \
+             patch('sky.jobs.controller.managed_job_utils'), \
+             patch('sky.jobs.controller.global_user_state'), \
+             patch('sky.jobs.controller.context') as ctx:
+            runtime.is_registered.return_value = False
+            state.get_job_status_with_task_id_async = AsyncMock(
+                return_value=None)
+            state.set_started_async = AsyncMock(side_effect=set_started)
+            ctx.contextual_async = lambda f: f
+
+            with pytest.raises(RuntimeError, match='phase2 db boom'):
+                await JobController._run_job_group(controller)
+
+        controller._cleanup_job_group_clusters.assert_not_awaited()
+        assert sibling_synced == [1]
+
+    @pytest.mark.asyncio
+    async def test_phase2_multiple_failures_raise_first(self):
+        """Multiple member failures raise the first error, no teardown."""
+        tasks = self._make_tasks()
+        controller = self._make_controller(tasks)
+
+        async def set_started(job_id, task_id, start_time, callback_func):
+            del job_id, start_time, callback_func
+            raise RuntimeError(f'task {task_id} db boom')
+
+        with patch('sky.jobs.controller.managed_job_runtime') as runtime, \
+             patch('sky.jobs.controller.managed_job_state') as state, \
+             patch('sky.jobs.controller.managed_job_utils'), \
+             patch('sky.jobs.controller.global_user_state'), \
+             patch('sky.jobs.controller.context') as ctx:
+            runtime.is_registered.return_value = False
+            state.get_job_status_with_task_id_async = AsyncMock(
+                return_value=None)
+            state.set_started_async = AsyncMock(side_effect=set_started)
+            ctx.contextual_async = lambda f: f
+
+            with pytest.raises(RuntimeError, match='task 0 db boom'):
+                await JobController._run_job_group(controller)
+
+        controller._cleanup_job_group_clusters.assert_not_awaited()

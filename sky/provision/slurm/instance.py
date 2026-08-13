@@ -1,6 +1,8 @@
 """Slurm instance provisioning."""
 
+import math
 import os
+import re
 import shlex
 import tempfile
 import threading
@@ -71,6 +73,19 @@ _SBATCH_PROTECTED_OPTIONS = frozenset({
     'gres',
     'partition',
 })
+
+_PYXIS_MOUNT_PATH_PATTERN = re.compile(
+    r'/(?:[A-Za-z0-9._~+@%=/\-]|\$[A-Za-z_][A-Za-z0-9_]*)*')
+
+
+def _validate_pyxis_mount_path(path: str, field: str) -> None:
+    """Validate a path before interpolating it into --container-mounts."""
+    if not (isinstance(path, str) and
+            _PYXIS_MOUNT_PATH_PATTERN.fullmatch(path)):
+        raise ValueError(
+            f'Invalid Pyxis container mount {field} path {path!r}. Paths must '
+            'be absolute and contain only safe POSIX path characters or '
+            'simple $VARNAME expansions.')
 
 
 def _build_custom_sbatch_directives(sbatch_options: Dict[str, Any]) -> str:
@@ -577,6 +592,17 @@ def _create_virtual_instance(
         # it so the container can access sky_cluster_home_dir.
         if workdir is not None and workdir != remote_home_dir:
             mount_paths.append(f'{workdir}:{workdir}')
+        for volume_mount in resources.get('volume_mounts', []) or []:
+            dst_path = volume_mount['path']
+            volume_config = volume_mount['volume_config']
+            host_path = volume_config['config']['host_path']
+            _validate_pyxis_mount_path(host_path, 'source')
+            _validate_pyxis_mount_path(dst_path, 'destination')
+            mount = f'{host_path}:{dst_path}'
+            # Fail closed: anything but an explicit 'rw' mounts read-only.
+            if volume_config['config'].get('mode') != 'rw':
+                mount += ':ro'
+            mount_paths.append(mount)
         container_mounts = ','.join(mount_paths)
         # Add sudo alias to bashrc since we're already root in the container.
         # This allows scripts with 'sudo' commands to work without modification.
@@ -660,7 +686,7 @@ echo "[container-init] Packages installed in $((SECONDS - INIT_START))s"
 #SBATCH --wait-all-nodes=1
 # Let the job be terminated rather than requeued implicitly.
 #SBATCH --no-requeue
-#SBATCH --cpus-per-task={int(resources["cpus"])}
+#SBATCH --cpus-per-task={math.ceil(float(resources["cpus"]))}
 {mem_directive}{gpu_directive}{extra_sbatch_directives}
 
 # Cleanup function to remove cluster dirs on job termination.

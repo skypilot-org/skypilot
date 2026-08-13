@@ -1505,6 +1505,31 @@ _GPU_PARTITION_MAP_SCHEMA = {
     },
 }
 
+_CONTAINER_MOUNTS_SCHEMA = {
+    'type': 'object',
+    'required': [],
+    # Maps a container path to a host path string (read-only) or
+    # {host_path: ..., mode: ro|rw}.
+    'additionalProperties': {
+        'anyOf': [{
+            'type': 'string',
+        }, {
+            'type': 'object',
+            'required': ['host_path'],
+            'additionalProperties': False,
+            'properties': {
+                'host_path': {
+                    'type': 'string',
+                },
+                'mode': {
+                    'type': 'string',
+                    'enum': ['ro', 'rw'],
+                },
+            },
+        }],
+    },
+}
+
 _PRICING_SCHEMA = {
     'type': 'object',
     'required': [],
@@ -2106,6 +2131,7 @@ def get_config_schema():
                 'cpu_partition': {
                     'type': 'string',
                 },
+                'container_mounts': _CONTAINER_MOUNTS_SCHEMA,
                 'cluster_configs': {
                     'type': 'object',
                     'required': [],
@@ -2130,6 +2156,7 @@ def get_config_schema():
                             'cpu_partition': {
                                 'type': 'string',
                             },
+                            'container_mounts': _CONTAINER_MOUNTS_SCHEMA,
                             'partition_configs': {
                                 'type': 'object',
                                 'required': [],
