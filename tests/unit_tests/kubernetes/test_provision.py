@@ -2897,272 +2897,185 @@ class TestGetPodPendingReasonFromContainerStatus:
             pod) is None
 
 
+def _utc(unix: int) -> datetime.datetime:
+    return datetime.datetime.fromtimestamp(unix, datetime.timezone.utc)
+
+
+def _make_pod_event(reason: str = 'Pulling',
+                    event_type: str = 'Normal',
+                    message: str = '',
+                    last_observed: Optional[int] = None,
+                    series=None,
+                    last_timestamp=None,
+                    event_time=None,
+                    creation_timestamp=None):
+    """A mock pod event.
+
+    `last_observed` is the sugar for the usual case: a unix timestamp on
+    last_timestamp, None for an event with no timestamp at all. The individual
+    timestamp fields are for exercising the precedence between them.
+    """
+    if last_observed is not None:
+        last_timestamp = _utc(last_observed)
+    ev = mock.MagicMock()
+    ev.reason = reason
+    ev.type = event_type
+    ev.message = message
+    ev.series = series
+    ev.last_timestamp = last_timestamp
+    ev.event_time = event_time
+    ev.metadata.creation_timestamp = creation_timestamp
+    return ev
+
+
 class TestEventLastObserved:
     """The last-observed time of an event, which is what says whether the
     condition behind it is still happening."""
 
-    @staticmethod
-    def _ts(unix: int):
-        return datetime.datetime.fromtimestamp(unix, datetime.timezone.utc)
-
-    @staticmethod
-    def _event(**fields):
-        ev = mock.MagicMock()
-        for name in ('series', 'last_timestamp', 'event_time'):
-            setattr(ev, name, fields.get(name))
-        ev.metadata.creation_timestamp = fields.get('creation_timestamp')
-        return ev
-
-    def test_series_last_observed_time_wins(self):
-        """The events.k8s.io path records repeats in a series, whose
-        last_observed_time is the only field that moves."""
-        ev = self._event(
-            series=mock.MagicMock(last_observed_time=self._ts(3000)),
-            last_timestamp=self._ts(2000),
-            creation_timestamp=self._ts(1000))
-        assert instance._event_last_observed(ev) == 3000
-
-    def test_last_timestamp_beats_creation_timestamp(self):
-        """A repeated event is folded into the original object: creation_
-        timestamp stays at the first occurrence, last_timestamp moves."""
-        ev = self._event(last_timestamp=self._ts(2000),
-                         creation_timestamp=self._ts(1000))
-        assert instance._event_last_observed(ev) == 2000
-
-    def test_event_time_used_when_no_last_timestamp(self):
-        ev = self._event(event_time=self._ts(2000),
-                         creation_timestamp=self._ts(1000))
-        assert instance._event_last_observed(ev) == 2000
-
-    def test_creation_timestamp_is_the_last_resort(self):
-        ev = self._event(creation_timestamp=self._ts(1000))
-        assert instance._event_last_observed(ev) == 1000
+    @pytest.mark.parametrize(
+        'fields,expected',
+        [
+            # Kubernetes folds a repeated event back into the original object,
+            # so the fields that move outrank the one pinned to the first
+            # occurrence. The events.k8s.io path records the repeat in a
+            # series instead of on last_timestamp.
+            pytest.param(
+                {
+                    'series': mock.MagicMock(last_observed_time=_utc(3000)),
+                    'last_timestamp': _utc(2000),
+                    'creation_timestamp': _utc(1000),
+                },
+                3000,
+                id='series-beats-last-timestamp'),
+            pytest.param(
+                {
+                    'last_timestamp': _utc(2000),
+                    'creation_timestamp': _utc(1000),
+                },
+                2000,
+                id='last-timestamp-beats-creation'),
+            pytest.param(
+                {
+                    'event_time': _utc(2000),
+                    'creation_timestamp': _utc(1000),
+                },
+                2000,
+                id='event-time-beats-creation'),
+            pytest.param({'creation_timestamp': _utc(1000)},
+                         1000,
+                         id='creation-is-the-last-resort'),
+            pytest.param({}, None, id='undated'),
+            # A field the API server left as a string, or a bare mock: an
+            # undatable event must be reported as such, not compared.
+            pytest.param({'last_timestamp': '2026-01-01T00:00:00Z'},
+                         None,
+                         id='not-a-datetime'),
+        ])
+    def test_precedence(self, fields, expected):
+        assert instance._event_last_observed(
+            _make_pod_event(**fields)) == expected
 
     def test_naive_timestamp_is_read_as_utc(self):
         """Not as local time, which would shift it by the host's offset and
         misorder it against a tz-aware sibling event."""
         naive = datetime.datetime(2026, 1, 1, 0, 0, 0)
-        expected = naive.replace(tzinfo=datetime.timezone.utc).timestamp()
         assert instance._event_last_observed(
-            self._event(last_timestamp=naive)) == expected
-
-    def test_undated_event_returns_none(self):
-        assert instance._event_last_observed(self._event()) is None
-
-    def test_non_datetime_field_returns_none(self):
-        """Guards against a mock or a field the API server left as a string:
-        an undatable event must be reported as such, not compared."""
-        assert instance._event_last_observed(
-            self._event(last_timestamp='2026-01-01T00:00:00Z')) is None
+            _make_pod_event(last_timestamp=naive)) == naive.replace(
+                tzinfo=datetime.timezone.utc).timestamp()
 
 
 class TestGetPodPendingReasonTieredEventFilter:
     """Two-pass scan: Warning events first, then a small allow-list of slow
     Normal events -- except where the Warning is demonstrably stale."""
 
-    @staticmethod
-    def _event(reason: str,
-               event_type: str = 'Normal',
-               message: str = '',
-               last_observed: Optional[int] = None):
-        """An event; `last_observed` is a unix timestamp, None for undated."""
-        ev = mock.MagicMock()
-        ev.reason = reason
-        ev.type = event_type
-        ev.message = message
-        ev.series = None
-        ev.event_time = None
-        ev.last_timestamp = (None if last_observed is None else
-                             datetime.datetime.fromtimestamp(
-                                 last_observed, datetime.timezone.utc))
-        ev.metadata.creation_timestamp = None
-        return ev
+    # (reason, type, message) of the two events the cross-tier choice is
+    # between. The code does not branch on the reason, so one of each is
+    # enough to pin the tiering down.
+    _WARNING = ('FailedMount', 'Warning', 'Unable to attach or mount volumes')
+    _NORMAL = ('Pulling', 'Normal', 'Pulling image "foo:bar"')
+    _SCHEDULED = ('Scheduled', 'Normal', 'Successfully assigned ns/p to node-1')
+
+    _event = staticmethod(_make_pod_event)
 
     def _patch_events(self, monkeypatch, events):
         monkeypatch.setattr(instance, '_get_pod_events',
                             lambda *a, **kw: events)
 
+    @staticmethod
+    def _expected(event_spec):
+        """The (reason, message) _get_pod_pending_reason returns for a spec."""
+        return event_spec[0], event_spec[2]
+
     def test_no_events_returns_none(self, monkeypatch):
         self._patch_events(monkeypatch, [])
         assert instance._get_pod_pending_reason('ctx', 'ns', 'pod-0') is None
 
-    def test_warning_wins_over_undated_normal(self, monkeypatch):
-        # Newest event (index 0) is a Normal Pulling, older event is a
-        # Warning FailedScheduling. With nothing to date either by, the
-        # Warning must win.
-        events = [
-            self._event('Pulling', 'Normal', 'Pulling image "foo:bar"'),
-            self._event('FailedScheduling', 'Warning',
-                        '0/3 nodes are available: insufficient cpu.'),
-        ]
-        self._patch_events(monkeypatch, events)
-        assert instance._get_pod_pending_reason('ctx', 'ns', 'p') == (
-            'FailedScheduling',
-            '0/3 nodes are available: insufficient cpu.',
-        )
+    @pytest.mark.parametrize('warning_at,normal_at,warning_wins', [
+        pytest.param(None, None, True, id='both-undated'),
+        pytest.param(2000, 1000, True, id='warning-is-newer'),
+        pytest.param(1000, 1000, True, id='same-instant'),
+        pytest.param(None, 2000, True, id='warning-undated'),
+        pytest.param(1000, None, True, id='normal-undated'),
+        pytest.param(1000, 2000, False, id='normal-is-newer'),
+    ])
+    def test_cross_tier_recency(self, monkeypatch, warning_at, normal_at,
+                                warning_wins):
+        """A Warning is the more truthful pending reason -- a FailedScheduling
+        beats a Pulling from a doomed retry -- right up until the Normal
+        overtakes it, at which point the Warning describes a condition the pod
+        has already moved past: a mount the kubelet retried successfully, say,
+        before the image pull now under way. Only a Warning that can be *shown*
+        to be older loses, so an undated event on either side keeps it.
 
-    def test_warning_wins_over_an_older_normal(self, monkeypatch):
-        """The doomed-retry case the Warning tier exists for: the pull came
-        first and the Warning is the newer, live condition."""
-        events = [
-            self._event('FailedScheduling',
-                        'Warning',
-                        '0/3 nodes are available: insufficient cpu.',
-                        last_observed=2000),
-            self._event('Pulling',
-                        'Normal',
-                        'Pulling image "foo:bar"',
-                        last_observed=1000),
-        ]
-        self._patch_events(monkeypatch, events)
-        assert instance._get_pod_pending_reason('ctx', 'ns', 'p') == (
-            'FailedScheduling',
-            '0/3 nodes are available: insufficient cpu.',
-        )
-
-    def test_more_recent_normal_beats_a_stale_warning(self, monkeypatch):
-        """A pod that waited on the autoscaler keeps its FailedScheduling for
-        the event TTL (~1h) after being bound. Once the kubelet starts pulling,
-        the pull is the pod's real pending reason -- reporting the resolved
-        Warning instead would also make the no-progress deadline in
-        _wait_for_pods_to_run count a healthy pull as a stall."""
-        events = [
-            self._event('Pulling',
-                        'Normal',
-                        'Pulling image "foo:bar"',
-                        last_observed=2000),
-            self._event('FailedScheduling',
-                        'Warning',
-                        '0/3 nodes are available: insufficient cpu.',
-                        last_observed=1000),
-        ]
-        self._patch_events(monkeypatch, events)
+        The Normal is first in the list (newest by creation order) throughout,
+        so this also pins down that list position does not decide the choice.
+        """
+        self._patch_events(monkeypatch, [
+            self._event(*self._NORMAL, last_observed=normal_at),
+            self._event(*self._WARNING, last_observed=warning_at),
+        ])
         assert instance._get_pod_pending_reason(
-            'ctx', 'ns', 'p') == ('Pulling', 'Pulling image "foo:bar"')
+            'ctx', 'ns', 'p') == self._expected(
+                self._WARNING if warning_wins else self._NORMAL)
 
-    def test_resolved_mount_failure_loses_to_the_pull_that_followed_it(
-            self, monkeypatch):
-        """The kubelet retries a mount until it succeeds, then pulls. The
-        FailedMount from the failed attempts must not outrank the pull, or a
-        transient mount hiccup would fail an otherwise healthy launch."""
-        events = [
-            self._event('Pulling',
-                        'Normal',
-                        'Pulling image "foo:bar"',
-                        last_observed=2000),
-            self._event('FailedMount',
-                        'Warning',
-                        'Unable to attach or mount volumes',
-                        last_observed=1000),
-        ]
-        self._patch_events(monkeypatch, events)
-        assert instance._get_pod_pending_reason(
-            'ctx', 'ns', 'p') == ('Pulling', 'Pulling image "foo:bar"')
-
-    def test_ties_go_to_the_warning(self, monkeypatch):
-        events = [
-            self._event('Pulling',
-                        'Normal',
-                        'Pulling image "foo:bar"',
-                        last_observed=1000),
-            self._event('FailedMount',
-                        'Warning',
-                        'Unable to attach or mount volumes',
-                        last_observed=1000),
-        ]
+    @pytest.mark.parametrize('bind_at,warning_survives', [
+        pytest.param(2000, False, id='warning-predates-the-bind'),
+        pytest.param(None, True, id='bind-no-longer-in-the-event-window'),
+    ])
+    def test_warning_predating_the_bind_is_dropped(self, monkeypatch, bind_at,
+                                                   warning_survives):
+        """Everything this function observes happens after the pod was bound,
+        so a Warning older than the bind cannot describe it -- the pod that
+        waited on an autoscaler carries its FailedScheduling for the event TTL
+        even with no Normal event to overtake it (image already cached, a slow
+        volume attach that emits nothing yet). Once the Scheduled event itself
+        ages out of the window, every pre-bind Warning has aged out ahead of
+        it and there is nothing left to demote.
+        """
+        stale = ('FailedScheduling', 'Warning', 'insufficient cpu')
+        events = [self._event(*stale, last_observed=1000)]
+        if bind_at is not None:
+            events.insert(0, self._event(*self._SCHEDULED,
+                                         last_observed=bind_at))
         self._patch_events(monkeypatch, events)
         assert instance._get_pod_pending_reason(
             'ctx', 'ns',
-            'p') == ('FailedMount', 'Unable to attach or mount volumes')
-
-    def test_warning_from_before_the_bind_is_dropped(self, monkeypatch):
-        """The autoscaler case with nothing to overtake it: the pod carries a
-        FailedScheduling for the event TTL and no allow-listed Normal follows
-        (image already cached, a slow volume attach that emits nothing yet).
-        Everything this function observes happens after the bind, so a Warning
-        older than the Scheduled event cannot describe the pod now."""
-        events = [
-            self._event('Scheduled',
-                        'Normal',
-                        'Successfully assigned ns/p to node-1',
-                        last_observed=2000),
-            self._event('FailedScheduling',
-                        'Warning',
-                        '0/3 nodes are available: insufficient cpu.',
-                        last_observed=1000),
-        ]
-        self._patch_events(monkeypatch, events)
-        assert instance._get_pod_pending_reason('ctx', 'ns', 'p') is None
-
-    def test_warning_after_the_bind_is_kept(self, monkeypatch):
-        """The kubelet's own warnings all postdate the bind and must survive
-        the same check."""
-        events = [
-            self._event('FailedCreatePodSandBox',
-                        'Warning',
-                        'plugin not initialized',
-                        last_observed=3000),
-            self._event('Scheduled',
-                        'Normal',
-                        'Successfully assigned ns/p to node-1',
-                        last_observed=2000),
-        ]
-        self._patch_events(monkeypatch, events)
-        assert instance._get_pod_pending_reason(
-            'ctx', 'ns',
-            'p') == ('FailedCreatePodSandBox', 'plugin not initialized')
+            'p') == (self._expected(stale) if warning_survives else None)
 
     def test_a_pre_bind_warning_does_not_hide_a_live_one(self, monkeypatch):
         """Dropping the stale Warning must fall through to the next Warning,
-        not abandon the tier."""
-        events = [
-            self._event('FailedMount',
-                        'Warning',
-                        'Unable to attach or mount volumes',
-                        last_observed=3000),
-            self._event('Scheduled',
-                        'Normal',
-                        'Successfully assigned ns/p to node-1',
-                        last_observed=2000),
+        not abandon the tier -- and the kubelet's own warnings, which all
+        postdate the bind, must survive the check."""
+        self._patch_events(monkeypatch, [
+            self._event(*self._WARNING, last_observed=3000),
+            self._event(*self._SCHEDULED, last_observed=2000),
             self._event('FailedScheduling',
                         'Warning',
                         'insufficient cpu',
                         last_observed=1000),
-        ]
-        self._patch_events(monkeypatch, events)
+        ])
         assert instance._get_pod_pending_reason(
-            'ctx', 'ns',
-            'p') == ('FailedMount', 'Unable to attach or mount volumes')
-
-    def test_no_scheduled_event_leaves_warnings_alone(self, monkeypatch):
-        """Once the Scheduled event ages out of the window every pre-bind
-        Warning has aged out ahead of it, so there is nothing to demote."""
-        events = [
-            self._event('FailedMount',
-                        'Warning',
-                        'Unable to attach or mount volumes',
-                        last_observed=1000),
-        ]
-        self._patch_events(monkeypatch, events)
-        assert instance._get_pod_pending_reason(
-            'ctx', 'ns',
-            'p') == ('FailedMount', 'Unable to attach or mount volumes')
-
-    def test_undated_warning_is_never_treated_as_stale(self, monkeypatch):
-        """Only a Warning that can be shown to be older than the Normal loses.
-        An event the API server left undated cannot be, so it keeps winning."""
-        events = [
-            self._event('Pulling',
-                        'Normal',
-                        'Pulling image "foo:bar"',
-                        last_observed=2000),
-            self._event('FailedMount', 'Warning',
-                        'Unable to attach or mount volumes'),
-        ]
-        self._patch_events(monkeypatch, events)
-        assert instance._get_pod_pending_reason(
-            'ctx', 'ns',
-            'p') == ('FailedMount', 'Unable to attach or mount volumes')
+            'ctx', 'ns', 'p') == self._expected(self._WARNING)
 
     def test_allow_listed_normal_returned_when_no_warning(self, monkeypatch):
         events = [self._event('Pulling', 'Normal', 'Pulling image "foo:bar"')]
@@ -3633,17 +3546,6 @@ class TestStallExemptionHelpers:
     def test_non_exempt_reasons(self, reason):
         assert not instance._reason_is_exempt_from_stall(reason)
 
-    def test_pod_initialization_is_not_exempt(self):
-        """'PodInitializing' with no init container running or being created
-        means the init phase is done and the kubelet has not moved on. There is
-        no legitimately-slow work behind it, so it must not be exempt -- it was
-        previously labelled 'init container running' and swept up by the
-        prefix match, which left that hang unbounded."""
-        assert not instance._reason_is_exempt_from_stall(
-            instance._POD_INITIALIZATION_REASON)
-        assert not instance._POD_INITIALIZATION_REASON.startswith(
-            instance._INIT_CONTAINER_REASON_PREFIX)
-
     def test_synthetic_reasons_stay_in_sync_with_the_exemption(self):
         """The exemption matches on the literals _inspect_pod_status builds, so
         both sides must come from the same constants."""
@@ -3651,6 +3553,11 @@ class TestStallExemptionHelpers:
                 in instance._STALL_EXEMPT_PENDING_REASONS)
         assert instance._PENDING_REASON_NORMAL_EVENT_ALLOWLIST.issubset(
             instance._STALL_EXEMPT_PENDING_REASONS)
+        # 'pod initialization' must stay clear of the init-container prefix:
+        # it was previously labelled 'init container running', which the
+        # prefix match swept up and left that hang unbounded.
+        assert not instance._POD_INITIALIZATION_REASON.startswith(
+            instance._INIT_CONTAINER_REASON_PREFIX)
 
     def test_mount_failures_keep_their_own_window(self):
         assert (instance._stall_timeout_seconds('FailedMount') ==
@@ -3884,58 +3791,49 @@ class TestWaitForPodsToRunStallEscalation:
         assert 'reports no reason why' in msg
         assert 'pod-0' in msg
 
-    @pytest.mark.parametrize('stale_warning',
-                             ['FailedScheduling', 'FailedMount'])
-    def test_a_resolved_warning_does_not_fail_a_healthy_pull(
-            self, monkeypatch, stale_warning):
-        """The regression this deadline is most exposed to: kubernetes keeps
-        events for ~1h, so a pod that waited on the autoscaler, or whose mount
-        the kubelet retried successfully, still carries that Warning while it
-        pulls its image. A stale Warning never changes, so counting it would
-        fail a launch that was making progress the whole time. Driven through
-        the real _get_pod_pending_reason: 200 iterations at 301s is ~16
-        simulated hours of pulling.
+    @pytest.mark.parametrize('warning_reason,warning_at,escalates', [
+        pytest.param('FailedScheduling', 1000, False, id='stale-scheduling'),
+        pytest.param('FailedMount', 1000, False, id='stale-mount'),
+        pytest.param('FailedCreatePodSandBox', 3000, True, id='live-sandbox'),
+    ])
+    def test_the_pull_and_the_warning_decide_the_launch_together(
+            self, monkeypatch, warning_reason, warning_at, escalates):
+        """The same two events, in both orders, driven through the *real*
+        _get_pod_pending_reason rather than a stub -- so the tiering and the
+        deadline are covered as one.
+
+        Kubernetes keeps events for ~1h, so a pod that waited on the autoscaler
+        or whose mount the kubelet retried successfully still carries that
+        Warning while it pulls. A stale Warning never changes, so counting it
+        would fail a launch that was making progress the whole time; 200
+        iterations at 301s is ~16 simulated hours of pulling. A Warning newer
+        than the pull, on the other hand, is the pod's live condition and must
+        still fail the launch.
         """
         events = [
-            TestGetPodPendingReasonTieredEventFilter._event(
-                'Pulling',
-                'Normal',
-                'Pulling image "foo:bar"',
-                last_observed=2000),
-            TestGetPodPendingReasonTieredEventFilter._event(
-                stale_warning,
-                'Warning',
-                'resolved a while ago',
-                last_observed=1000),
+            _make_pod_event('Pulling',
+                            'Normal',
+                            'Pulling image "foo:bar"',
+                            last_observed=2000),
+            _make_pod_event(warning_reason,
+                            'Warning',
+                            self._EVENT_MSG,
+                            last_observed=warning_at),
         ]
-        self._run_wait(monkeypatch,
-                       pod=self._make_pending_pod(),
-                       pod_events=events,
-                       healthy_after=200)
 
-    def test_a_live_warning_still_escalates_over_an_older_pull(
-            self, monkeypatch):
-        """The other side of the same tiering: a Warning that is newer than the
-        pull is the pod's live condition and must still fail the launch."""
-        events = [
-            TestGetPodPendingReasonTieredEventFilter._event(
-                'FailedCreatePodSandBox',
-                'Warning',
-                self._EVENT_MSG,
-                last_observed=2000),
-            TestGetPodPendingReasonTieredEventFilter._event(
-                'Pulling',
-                'Normal',
-                'Pulling image "foo:bar"',
-                last_observed=1000),
-        ]
-        with pytest.raises(config_lib.KubernetesError) as exc_info:
+        def run():
             self._run_wait(monkeypatch,
                            pod=self._make_pending_pod(),
-                           pod_events=events)
-        msg = str(exc_info.value)
-        assert 'FailedCreatePodSandBox' in msg
-        assert self._EVENT_MSG in msg
+                           pod_events=events,
+                           healthy_after=None if escalates else 200)
+
+        if not escalates:
+            run()
+            return
+        with pytest.raises(config_lib.KubernetesError) as exc_info:
+            run()
+        assert warning_reason in str(exc_info.value)
+        assert self._EVENT_MSG in str(exc_info.value)
 
     def test_timer_resets_when_reason_changes(self, monkeypatch):
         """Two different non-exempt reasons in sequence: the deadline is
@@ -4000,20 +3898,17 @@ class TestWaitForPodsToRunMissingPodDiagnosis:
         assert 'sky logs --provision cn' in msg
 
     def test_absence_of_a_reason_is_explained(self, monkeypatch):
-        """Name the pod and say a cause could not be derived, rather than only
-        implying it ran and died."""
+        """Name the pod and say a cause could not be *derived*, rather than
+        implying it ran and died -- and without asserting one the code never
+        established. _get_pod_missing_reason returns None in three situations
+        and only one of them is 'the pod had no events': it also returns None
+        when the events were all seen on an earlier pass, and when they name
+        no cause it recognises (the common case -- Scheduled/Pulled/Created/
+        Killing)."""
         msg = self._run(monkeypatch, missing_reason=None)
         assert "['pod-0']" in msg
         assert 'no cause could be derived from their events' in msg
         assert 'may have been deleted' in msg
-
-    def test_no_reason_does_not_claim_there_were_no_events(self, monkeypatch):
-        """_get_pod_missing_reason returns None in three situations, and only
-        one of them is 'the pod had no events': it also returns None when the
-        events were all seen on an earlier pass, and when they name no cause it
-        recognises (the common case -- Scheduled/Pulled/Created/Killing). The
-        message must not assert a cause the code never established."""
-        msg = self._run(monkeypatch, missing_reason=None)
         assert 'no events were found' not in msg
         assert 'was likely deleted' not in msg
 
@@ -4332,70 +4227,54 @@ class TestInspectPodStatusInitContainerReason:
 
         return apply
 
-    def test_pod_initializing_no_running_init_container(self, monkeypatch):
-        """PodInitializing with every init container already terminated
-        successfully is not 'an init container is running' -- the init phase is
-        over and the kubelet has not moved on to the main containers. It gets
-        its own reason, which (unlike the init-container ones) is not exempt
-        from the no-progress deadline."""
-        monkeypatch.setattr(instance, '_get_pod_pending_reason',
-                            lambda *a, **kw: None)
-
-        pending_init = self._pod_initializing_with([
+    @pytest.mark.parametrize('make_init_statuses,expected_reason,exempt', [
+        pytest.param(lambda: [
             _make_init_status_with_name(name='init-copy-home',
                                         terminated_exit_code=0),
-        ])
-
-        def running(pod):
-            pod.status.phase = 'Running'
-            pod.status.container_statuses = [
-                self._make_running_container_status()
-            ]
-
-        results, _ = self._run_wait(monkeypatch, [pending_init, running])
-        assert results[0] == [(False, instance._POD_INITIALIZATION_REASON)]
-        assert not instance._reason_is_exempt_from_stall(results[0][0][1])
-
-    @pytest.mark.parametrize('waiting_reason',
-                             ['ContainerCreating', 'PodInitializing'])
-    def test_init_container_being_created_is_reported_as_starting(
-            self, monkeypatch, waiting_reason):
-        """An init container the kubelet is still creating is most often
-        pulling its own image -- legitimately slow, and distinct from both the
-        running case and the nothing-is-happening case."""
-        monkeypatch.setattr(instance, '_get_pod_pending_reason',
-                            lambda *a, **kw: None)
-
-        pending_init = self._pod_initializing_with([
+        ],
+                     'pod initialization',
+                     False,
+                     id='init-done-kubelet-has-not-moved-on'),
+        pytest.param(lambda: [
             _make_init_status_with_name(name='init-setup-ssh',
                                         terminated_exit_code=0),
             _make_init_status_with_name(name='init-copy-home',
-                                        waiting_reason=waiting_reason),
-        ])
-
-        def running(pod):
-            pod.status.phase = 'Running'
-            pod.status.container_statuses = [
-                self._make_running_container_status()
-            ]
-
-        results, _ = self._run_wait(monkeypatch, [pending_init, running])
-        reason = results[0][0][1]
-        assert reason == "init container 'init-copy-home' starting (2/2)"
-        assert instance._reason_is_exempt_from_stall(reason)
-
-    def test_running_init_container_outranks_one_being_created(
-            self, monkeypatch):
-        """With a sidecar running and a later init container being created,
-        the running one is what the pod is waiting on."""
-        monkeypatch.setattr(instance, '_get_pod_pending_reason',
-                            lambda *a, **kw: None)
-
-        pending_init = self._pod_initializing_with([
+                                        waiting_reason='ContainerCreating'),
+        ],
+                     "init container 'init-copy-home' starting (2/2)",
+                     True,
+                     id='being-created'),
+        pytest.param(lambda: [
+            _make_init_status_with_name(name='init-setup-ssh',
+                                        terminated_exit_code=0),
+            _make_init_status_with_name(name='init-copy-home',
+                                        waiting_reason='PodInitializing'),
+        ],
+                     "init container 'init-copy-home' starting (2/2)",
+                     True,
+                     id='being-created-reported-as-podinitializing'),
+        pytest.param(lambda: [
             _make_init_status_with_name(name='init-copy-home',
                                         waiting_reason='ContainerCreating'),
             _make_init_status_with_name(name='init-sidecar', running=True),
-        ])
+        ],
+                     "init container 'init-sidecar' running (2/2)",
+                     True,
+                     id='running-outranks-being-created'),
+    ])
+    def test_init_phase_states_are_distinguished(self, monkeypatch,
+                                                 make_init_statuses,
+                                                 expected_reason, exempt):
+        """_check_init_containers reports three different things, and the
+        no-progress deadline turns on telling them apart: an init container
+        running (arbitrary user work), one the kubelet is still creating (most
+        often pulling an image of its own), and neither -- the init phase is
+        over and the kubelet has not moved on to the main containers. Only the
+        last is bounded; it was previously labelled 'init container running'
+        too, and the prefix-based exemption swept it up.
+        """
+        monkeypatch.setattr(instance, '_get_pod_pending_reason',
+                            lambda *a, **kw: None)
 
         def running(pod):
             pod.status.phase = 'Running'
@@ -4403,9 +4282,11 @@ class TestInspectPodStatusInitContainerReason:
                 self._make_running_container_status()
             ]
 
-        results, _ = self._run_wait(monkeypatch, [pending_init, running])
-        assert results[0] == [(False,
-                               "init container 'init-sidecar' running (2/2)")]
+        results, _ = self._run_wait(
+            monkeypatch,
+            [self._pod_initializing_with(make_init_statuses()), running])
+        assert results[0] == [(False, expected_reason)]
+        assert instance._reason_is_exempt_from_stall(expected_reason) is exempt
 
     def test_pod_initializing_multiple_init_containers(self, monkeypatch):
         """With multiple init containers, report the currently running one."""
