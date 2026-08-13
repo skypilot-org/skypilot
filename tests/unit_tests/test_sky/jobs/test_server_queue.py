@@ -278,8 +278,9 @@ class TestQueue:
         monkeypatch.setattr(jobs_core.backend_utils, 'get_backend_from_handle',
                             lambda handle: DummyCloudVmRayBackend())
         monkeypatch.setattr(
-            jobs_core.workspaces_core, 'get_accessible_workspace_names',
-            lambda action: {skylet_constants.SKYPILOT_DEFAULT_WORKSPACE})
+            jobs_core.workspaces_core,
+            'get_accessible_workspace_names',
+            lambda action=None: {skylet_constants.SKYPILOT_DEFAULT_WORKSPACE})
         monkeypatch.setattr(jobs_core.cloud_vm_ray_backend, 'SkyletClient',
                             DummySkyletClient)
 

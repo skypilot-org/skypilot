@@ -6,6 +6,7 @@ import pytest
 from sky.jobs import constants as managed_job_constants
 from sky.jobs.client import sdk as jobs_sdk
 from sky.jobs.client import sdk_async as jobs_sdk_async
+from sky.server import constants as server_constants
 
 
 def _unwrap(fn):
@@ -69,8 +70,19 @@ def test_queue_v2_fields_none_requests_all_fields():
 def test_queue_v2_omits_exit_codes_for_older_servers():
     """Older servers never receive the unknown exit_codes field selector."""
     body = _call_raw_queue_v2_for_server_version(
-        56, refresh=False, fields=['job_id', 'exit_codes'])
+        server_constants.MIN_MANAGED_JOB_EXIT_CODES_API_VERSION - 1,
+        refresh=False,
+        fields=['job_id', 'exit_codes'])
     assert body['fields'] == ['job_id']
+
+
+def test_queue_v2_sends_exit_codes_to_supported_servers():
+    """The exit-code selector is sent once the server reaches its API gate."""
+    body = _call_raw_queue_v2_for_server_version(
+        server_constants.MIN_MANAGED_JOB_EXIT_CODES_API_VERSION,
+        refresh=False,
+        fields=['job_id', 'exit_codes'])
+    assert body['fields'] == ['job_id', 'exit_codes']
 
 
 def test_queue_version_2_dispatches_to_queue_v2():
