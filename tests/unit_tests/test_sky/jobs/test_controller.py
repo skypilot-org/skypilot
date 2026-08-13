@@ -31,6 +31,7 @@ from sky.jobs.controller import JobController
 from sky.skylet import job_lib
 from sky.utils import common
 from sky.utils import status_lib
+from sky.utils.plugin_extensions import LogDeliverySource
 
 
 class TestNormalJobRecovery:
@@ -1167,6 +1168,26 @@ class TestDownloadLogAndStreamLoggingAgentGate:
         _, _, mock_cutils = self._run(agent_configured=True,
                                       reader=MagicMock(),
                                       undelivered_reason=None)
+        mock_cutils.download_and_stream_job_log.assert_not_called()
+
+    def test_no_delivery_source_registered_is_inert(self):
+        # The compatibility property of the extension point: with nothing
+        # registered, the check must not change behavior at all. Unlike the
+        # cases above, this exercises the real LogDeliverySource rather than
+        # patching its lookup, so a future default other than None is caught.
+        assert not LogDeliverySource.is_registered()
+        controller = self._make_controller()
+        with patch('sky.jobs.controller.logs.is_logging_agent_configured',
+                   return_value=True), \
+             patch('sky.jobs.controller.logs.get_log_reader',
+                   return_value=MagicMock()), \
+             patch('sky.jobs.controller.managed_job_state') as mock_state, \
+             patch('sky.jobs.controller.managed_job_runtime') as mock_runtime, \
+             patch('sky.jobs.controller.controller_utils') as mock_cutils:
+            mock_runtime.is_registered.return_value = False
+            controller.download_log_and_stream(0, MagicMock(), None)
+        mock_state.set_local_log_file.assert_not_called()
+        mock_runtime.download_logs.assert_not_called()
         mock_cutils.download_and_stream_job_log.assert_not_called()
 
 
