@@ -1253,6 +1253,8 @@ class TestQueryInstances:
         manifest = _snapshot_manifest(num_nodes=2)
         read_manifest = mock.MagicMock(return_value=manifest)
         monkeypatch.setattr(instance, '_read_snapshot_manifest', read_manifest)
+        sleep = mock.MagicMock()
+        monkeypatch.setattr(instance.time, 'sleep', sleep)
         provider_config = {
             **_PROVIDER_CONFIG,
             'sky_base_dir': '/home/test',
@@ -1260,7 +1262,8 @@ class TestQueryInstances:
 
         statuses = instance.query_instances('test-cluster',
                                             _CLUSTER,
-                                            provider_config=provider_config)
+                                            provider_config=provider_config,
+                                            retry_if_missing=True)
 
         assert statuses == {
             'snapshot-rank-0':
@@ -1270,6 +1273,8 @@ class TestQueryInstances:
         }
         read_manifest.assert_called_once_with(
             login_runner, '/home/test/.sky_snapshots/test-cluster')
+        assert client.query_jobs.call_count == 7
+        sleep.assert_not_called()
         get_config.assert_not_called()
 
     def test_running_job_ignores_recent_terminal_allocation(self, monkeypatch):
@@ -1301,3 +1306,93 @@ class TestQueryInstances:
                 (instance.status_lib.ClusterStatus.UP, None)
         }
         read_manifest.assert_not_called()
+
+    def test_retries_missing_job(self, mock_client, monkeypatch):
+        running_queries = 0
+
+        def query_jobs(job_name, state_filters):
+            nonlocal running_queries
+            assert job_name == _CLUSTER
+            if state_filters == ['running']:
+                running_queries += 1
+                if running_queries == 2:
+                    return ['386700']
+            return []
+
+        mock_client.query_jobs.side_effect = query_jobs
+        mock_client.get_job_nodes.return_value = (['node-a'], None)
+        monkeypatch.setattr(instance, '_read_snapshot_manifest',
+                            mock.MagicMock(return_value=None))
+        sleep = mock.MagicMock()
+        monkeypatch.setattr(instance.time, 'sleep', sleep)
+
+        result = instance.query_instances(_CLUSTER,
+                                          _CLUSTER,
+                                          provider_config=_PROVIDER_CONFIG,
+                                          retry_if_missing=True)
+
+        assert result == {
+            'job386700-node-a': (instance.status_lib.ClusterStatus.UP, None)
+        }
+        assert running_queries == 2
+        sleep.assert_called_once_with(
+            instance._QUERY_INSTANCES_RETRY_INTERVAL_SECONDS)
+
+    def test_does_not_retry_when_terminal_job_is_found(self, mock_client,
+                                                       monkeypatch):
+
+        def query_jobs(job_name, state_filters):
+            assert job_name == _CLUSTER
+            if state_filters == ['completed']:
+                return ['386700']
+            return []
+
+        mock_client.query_jobs.side_effect = query_jobs
+        mock_client.get_job_reason.return_value = 'Completed'
+        read_manifest = mock.MagicMock(return_value=None)
+        monkeypatch.setattr(instance, '_read_snapshot_manifest', read_manifest)
+        sleep = mock.MagicMock()
+        monkeypatch.setattr(instance.time, 'sleep', sleep)
+
+        result = instance.query_instances(_CLUSTER,
+                                          _CLUSTER,
+                                          provider_config=_PROVIDER_CONFIG,
+                                          retry_if_missing=True)
+
+        assert not result
+        assert mock_client.query_jobs.call_count == 7
+        mock_client.get_job_reason.assert_called_once_with('386700')
+        read_manifest.assert_called_once()
+        sleep.assert_not_called()
+
+    def test_does_not_retry_by_default(self, mock_client, monkeypatch):
+        mock_client.query_jobs.return_value = []
+        monkeypatch.setattr(instance, '_read_snapshot_manifest',
+                            mock.MagicMock(return_value=None))
+        sleep = mock.MagicMock()
+        monkeypatch.setattr(instance.time, 'sleep', sleep)
+
+        result = instance.query_instances(_CLUSTER,
+                                          _CLUSTER,
+                                          provider_config=_PROVIDER_CONFIG,
+                                          retry_if_missing=False)
+
+        assert not result
+        assert mock_client.query_jobs.call_count == 7
+        sleep.assert_not_called()
+
+    def test_retry_exhaustion_returns_empty(self, mock_client, monkeypatch):
+        mock_client.query_jobs.return_value = []
+        read_manifest = mock.MagicMock(return_value=None)
+        monkeypatch.setattr(instance, '_read_snapshot_manifest', read_manifest)
+        monkeypatch.setattr(instance.time, 'sleep', mock.MagicMock())
+
+        result = instance.query_instances(_CLUSTER,
+                                          _CLUSTER,
+                                          provider_config=_PROVIDER_CONFIG,
+                                          retry_if_missing=True)
+
+        assert not result
+        expected_rounds = 1 + instance._MAX_QUERY_INSTANCES_RETRIES
+        assert mock_client.query_jobs.call_count == 7 * expected_rounds
+        read_manifest.assert_called_once()
