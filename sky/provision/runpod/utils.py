@@ -626,9 +626,8 @@ def _create_pod_via_rest(create_params: Dict[str, Any]) -> Dict[str, Any]:
         timeout=_REST_API_TIMEOUT_SECONDS,
     )
     if not response.ok:
-        raise RuntimeError(
-            'RunPod REST pod creation failed with status '
-            f'{response.status_code}.')
+        raise RuntimeError('RunPod REST pod creation failed with status '
+                           f'{response.status_code}.')
     return response.json()
 
 
