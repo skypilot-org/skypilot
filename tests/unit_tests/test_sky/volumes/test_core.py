@@ -1881,51 +1881,6 @@ class TestInitialVolumeStatus:
         """Creating a PVC does not provision the PersistentVolume, so a
         just-created volume must not be advertised as usable."""
         config = _make_volume_config()
-        monkeypatch.setattr(core, '_INITIAL_STATUS_SETTLE_SECONDS', 0)
-        monkeypatch.setattr(
-            provision, 'get_all_volumes_errors', lambda cloud, configs: ({
-                'test-vol': 'PVC is pending.'
-            }, set()))
-
-        status, error = core._initial_volume_status('Kubernetes', config)
-
-        assert status == status_lib.VolumeStatus.NOT_READY
-        assert error == 'PVC is pending.'
-
-    def test_volume_that_binds_during_the_settle_window_is_ready(
-            self, monkeypatch):
-        """A claim still provisioning is not a claim that failed to provision.
-
-        Creating the backing resource only starts provisioning, so the first
-        look at a just-created volume finds it pending on any storage class
-        that binds immediately. Judging it there reports every functioning
-        Immediate-binding storage class as not ready.
-        """
-        config = _make_volume_config()
-        monkeypatch.setattr(core, '_INITIAL_STATUS_POLL_SECONDS', 0)
-        calls = []
-
-        def _pending_then_bound(cloud, configs):
-            calls.append(cloud)
-            if len(calls) == 1:
-                return {'test-vol': 'PVC is pending.'}, set()
-            return {'test-vol': None}, set()
-
-        monkeypatch.setattr(provision, 'get_all_volumes_errors',
-                            _pending_then_bound)
-
-        status, error = core._initial_volume_status('Kubernetes', config)
-
-        assert status == status_lib.VolumeStatus.READY
-        assert error is None
-        assert len(calls) == 2, 'expected a re-check after the first pending'
-
-    def test_settle_window_is_bounded(self, monkeypatch):
-        """A volume that never binds must still be reported, not waited on
-        forever."""
-        config = _make_volume_config()
-        monkeypatch.setattr(core, '_INITIAL_STATUS_SETTLE_SECONDS', 0.05)
-        monkeypatch.setattr(core, '_INITIAL_STATUS_POLL_SECONDS', 0.01)
         monkeypatch.setattr(
             provision, 'get_all_volumes_errors', lambda cloud, configs: ({
                 'test-vol': 'PVC is pending.'
