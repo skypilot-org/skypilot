@@ -1,0 +1,93 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg viewBox="0 0 1280 380" width="100%" height="auto" class="diag" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="What runs when on a Sky Batch worker: the pool's setup command runs once at pool creation, the mapper code before the for-loop runs once per worker per job, and the loop body — load, your code, save_results — repeats for every batch.">
+  <style><![CDATA[
+    .diag { font-family: 'Waldenburg', system-ui, -apple-system, sans-serif; color: #04070B; letter-spacing: -0.01em; }
+    .diag .mono { font-family: 'BerkeleyMono', ui-monospace, Menlo, monospace; font-feature-settings: "zero" 1; letter-spacing: 0.02em; }
+    .diag .eyebrow { font-family: 'BerkeleyMono', monospace; font-size: 12px; letter-spacing: 0.18em; text-transform: uppercase; fill: #5d6a7a; font-feature-settings: "zero" 1; }
+    .diag .role { font-family: 'BerkeleyMono', monospace; font-size: 11.5px; letter-spacing: 0.14em; text-transform: uppercase; fill: #5d6a7a; }
+    .diag .task-name { font-family: 'Waldenburg', sans-serif; font-size: 20px; font-weight: 500; letter-spacing: -0.015em; fill: #04070B; }
+    .diag .annot { font-family: 'Waldenburg', sans-serif; font-size: 13.5px; font-weight: 400; fill: #5d6a7a; }
+    .diag .flow-label { font-family: 'BerkeleyMono', monospace; font-size: 13px; letter-spacing: 0.04em; font-weight: 600; fill: #0A55EE; paint-order: stroke; stroke: #FCFCFB; stroke-width: 6; stroke-linejoin: round; }
+    .diag .flow-label.hot { fill: #C7402E; }
+    @keyframes flow-dash { from { stroke-dashoffset: 0; } to { stroke-dashoffset: -22; } }
+    .diag .flow { animation: flow-dash 1.8s linear infinite; }
+]]></style>
+
+  <rect x="0" y="0" width="1280" height="380" rx="20" fill="#FCFCFB"/>
+
+  <!-- ============ Pool setup ============ -->
+  <g transform="translate(40 115)">
+    <rect x="0" y="0" width="230" height="120" rx="12" fill="#FFFFFF" stroke="#C8C6C7" stroke-width="1"/>
+    <text x="16" y="26" class="role">pool setup</text>
+    <text x="16" y="56" class="task-name">setup:</text>
+    <text x="16" y="82" font-family="BerkeleyMono, monospace" font-size="12" fill="#243142">pip install vllm</text>
+    <text x="16" y="104" class="annot" font-size="13">runs once, at pool creation</text>
+  </g>
+
+  <!-- ============ Mapper prologue ============ -->
+  <g transform="translate(310 115)">
+    <rect x="0" y="0" width="230" height="120" rx="12" fill="#ECF2FD" stroke="#0A55EE" stroke-width="1.5"/>
+    <text x="16" y="26" class="role">mapper prologue</text>
+    <text x="16" y="56" class="task-name">before the loop</text>
+    <text x="16" y="82" font-family="BerkeleyMono, monospace" font-size="12" fill="#243142">model = pipeline(&#8230;)</text>
+    <text x="16" y="104" class="annot" font-size="13">runs once per worker, per job</text>
+  </g>
+
+  <!-- ============ Per-batch loop ============ -->
+  <g>
+    <rect x="590" y="70" width="650" height="230" rx="20" fill="none" stroke="#C7402E" stroke-width="1.5" stroke-dasharray="2 5"/>
+    <g transform="translate(616 70)">
+      <rect x="-12" y="-16" width="238" height="32" rx="16" fill="#FCFCFB" stroke="#C7402E" stroke-width="1.25"/>
+      <text x="0" y="6" font-family="BerkeleyMono, monospace" font-size="14" letter-spacing="0.18em" font-weight="700" fill="#C7402E">FOR&#160;EVERY&#160;BATCH</text>
+    </g>
+  </g>
+
+  <g transform="translate(610 130)">
+    <rect x="0" y="0" width="190" height="90" rx="12" fill="#FFFFFF" stroke="#C8C6C7" stroke-width="1"/>
+    <text x="95" y="40" text-anchor="middle" font-family="BerkeleyMono, monospace" font-size="13" font-weight="600" fill="#04070B">sky.batch.load()</text>
+    <text x="95" y="64" text-anchor="middle" class="annot">yields the next batch</text>
+  </g>
+
+  <g transform="translate(820 130)">
+    <rect x="0" y="0" width="190" height="90" rx="12" fill="#FBEEEB" stroke="#C7402E" stroke-width="1.5"/>
+    <text x="95" y="40" text-anchor="middle" font-family="BerkeleyMono, monospace" font-size="13" font-weight="600" fill="#04070B">your code</text>
+    <text x="95" y="64" text-anchor="middle" class="annot">GPU work on the batch</text>
+  </g>
+
+  <g transform="translate(1030 130)">
+    <rect x="0" y="0" width="190" height="90" rx="12" fill="#FFFFFF" stroke="#C8C6C7" stroke-width="1"/>
+    <text x="95" y="40" text-anchor="middle" font-family="BerkeleyMono, monospace" font-size="13" font-weight="600" fill="#04070B">save_results()</text>
+    <text x="95" y="64" text-anchor="middle" class="annot">one dict per input item</text>
+  </g>
+
+  <!-- ============ Flows ============ -->
+  <g>
+    <path d="M 270 175 L 306 175" fill="none" stroke="#0A55EE" stroke-width="1.5" stroke-linecap="round" stroke-dasharray="8 4" class="flow"/>
+    <polyline points="295,181.5 306,175 295,168.5" fill="none" stroke="#0A55EE" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="bevel"/>
+  </g>
+  <g>
+    <path d="M 540 175 L 588 175" fill="none" stroke="#0A55EE" stroke-width="1.5" stroke-linecap="round" stroke-dasharray="8 4" class="flow"/>
+    <polyline points="577,181.5 588,175 577,168.5" fill="none" stroke="#0A55EE" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="bevel"/>
+  </g>
+  <g>
+    <path d="M 800 175 L 818 175" fill="none" stroke="#C7402E" stroke-width="1.5" stroke-linecap="round"/>
+    <polyline points="809,181.5 818,175 809,168.5" fill="none" stroke="#C7402E" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="bevel"/>
+  </g>
+  <g>
+    <path d="M 1010 175 L 1028 175" fill="none" stroke="#C7402E" stroke-width="1.5" stroke-linecap="round"/>
+    <polyline points="1019,181.5 1028,175 1019,168.5" fill="none" stroke="#C7402E" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="bevel"/>
+  </g>
+
+  <!-- loop-back arc -->
+  <g>
+    <path d="M 1125 220 L 1125 262 Q 1125 272 1115 272 L 715 272 Q 705 272 705 262 L 705 226" fill="none" stroke="#C7402E" stroke-width="1.5" stroke-linecap="round" stroke-dasharray="6 5" class="flow"/>
+    <polyline points="698.5,237 705,226 711.5,237" fill="none" stroke="#C7402E" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="bevel"/>
+    <text x="915" y="264" text-anchor="middle" class="flow-label hot">next batch &#8634;</text>
+  </g>
+
+  <!-- ============ Bottom band ============ -->
+  <g transform="translate(40 336)">
+    <text x="0" y="0" class="eyebrow">WHY&#160;IT&#160;MATTERS</text>
+    <text x="0" y="26" class="annot" font-size="14" fill="#243142">Model weights are loaded once and reused for every batch &#8212; not once per item, and not once per batch.</text>
+  </g>
+</svg>
