@@ -150,6 +150,8 @@ Below is the configuration syntax and some example values. See detailed explanat
     :ref:`gpu_partition_map <config-yaml-slurm-gpu-partition-map>`:
       H100: h100-partition
     :ref:`cpu_partition <config-yaml-slurm-cpu-partition>`: cpu-batch
+    :ref:`container_mounts <config-yaml-slurm-container-mounts>`:
+      /datasets: /shared/datasets
     :ref:`cluster_configs <config-yaml-slurm-cluster-configs>`:
       mycluster1:
         submit_as_user: true
@@ -2397,6 +2399,37 @@ Example:
 using the ``config:`` block in a task YAML. Per-cluster values override
 global values.
 
+.. _config-yaml-slurm-container-mounts:
+
+``slurm.container_mounts``
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Host path bind mounts applied to every containerized (Pyxis/Enroot) Slurm job
+(optional).
+
+Each entry maps a container path to either a host path string, mounted
+read-only, or a mapping with ``host_path`` and an optional ``mode``
+(``ro``, the default, or ``rw``).
+
+Jobs without a container image ignore these mounts. If a task YAML
+:ref:`volume <yaml-spec-new-volumes>` binds the same container path, the task
+YAML entry wins.
+
+Example:
+
+.. code-block:: yaml
+
+  slurm:
+    container_mounts:
+      /datasets: /shared/datasets
+      /scratch:
+        host_path: /nvme/$SLURM_JOB_ID
+        mode: rw
+
+``container_mounts`` can also be set per-cluster using
+:ref:`cluster_configs <config-yaml-slurm-cluster-configs>`. Entries are merged
+per container path, with per-cluster values overriding global values.
+
 .. _config-yaml-slurm-cluster-configs:
 
 ``slurm.cluster_configs``
@@ -2433,6 +2466,11 @@ Supported fields:
 - ``cpu_partition``:
   :ref:`CPU partition <config-yaml-slurm-cpu-partition>` override at the
   cluster level. Per-cluster values override the global value.
+
+- ``container_mounts``:
+  :ref:`Container mounts <config-yaml-slurm-container-mounts>` overrides at
+  the cluster level. Entries are merged per container path, with per-cluster
+  values overriding global values.
 
 Example:
 

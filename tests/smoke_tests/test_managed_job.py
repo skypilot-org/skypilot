@@ -4142,6 +4142,10 @@ def test_managed_jobs_emergency_recovery(generic_cloud: str):
 # ---------- Managed job with a volume that is not ready ----------
 @pytest.mark.managed_jobs
 @pytest.mark.kubernetes
+# See test_auto_mount_not_ready_on_kubernetes in test_cluster_job.py: the
+# StorageClass fixture needs cluster-admin kubectl co-located with the API
+# server.
+@pytest.mark.no_remote_server
 def test_managed_job_volume_not_ready():
     """Submitting a managed job against a not-ready volume is refused outright.
 
@@ -4215,6 +4219,10 @@ def test_managed_job_volume_not_ready():
 # ---------- Managed job with a not-ready auto-mount volume ----------
 @pytest.mark.managed_jobs
 @pytest.mark.kubernetes
+# See test_auto_mount_not_ready_on_kubernetes in test_cluster_job.py: the
+# StorageClass fixture needs cluster-admin kubectl co-located with the API
+# server.
+@pytest.mark.no_remote_server
 def test_managed_job_auto_mount_not_ready():
     """The auto-mount path is separate from a volume declared on the task, so
     it needs its own check that a managed job stops instead of retrying.

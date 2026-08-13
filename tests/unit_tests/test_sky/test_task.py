@@ -881,6 +881,49 @@ def test_resolve_volumes_dict_volume_success():
             assert r.cloud == registry.CLOUD_REGISTRY.from_str('aws')
 
 
+def test_resolve_volumes_inline_slurm_host_path():
+    t = task.Task.from_yaml_str("""
+resources:
+  cloud: slurm
+volumes:
+  /data:
+    host_path: /host/data
+  /scratch:
+    host_path: /host/scratch
+    mode: rw
+""")
+
+    t.resolve_and_validate_volumes()
+
+    assert t.volume_mounts is not None
+    assert [(mount.path, mount.volume_config.name_on_cloud,
+             mount.volume_config.config) for mount in t.volume_mounts] == [
+                 ('/data', '/host/data', {
+                     'host_path': '/host/data',
+                     'mode': 'ro',
+                 }),
+                 ('/scratch', '/host/scratch', {
+                     'host_path': '/host/scratch',
+                     'mode': 'rw',
+                 }),
+             ]
+
+
+@pytest.mark.parametrize('host_path,mode,error', [
+    ('relative/path', 'ro', 'absolute path'),
+    ('/', 'ro', 'root directory'),
+    ('/host/data', 'read-only', 'Supported modes'),
+])
+def test_resolve_volumes_inline_slurm_host_path_validation(
+        host_path, mode, error):
+    t = task.Task(resources=resources_lib.Resources(
+        cloud=registry.CLOUD_REGISTRY.from_str('slurm')))
+    t._volumes = {'/data': {'host_path': host_path, 'mode': mode}}
+
+    with pytest.raises(ValueError, match=error):
+        t.resolve_and_validate_volumes()
+
+
 def test_resolve_volumes_topology_conflict_between_volumes():
     t = task.Task()
     t._volumes = {'/mnt1': 'vol1', '/mnt2': 'vol2'}
@@ -987,14 +1030,15 @@ def test_resolve_volumes_dict_with_name_and_size():
         mock_resolve.assert_not_called()
 
 
-def test_resolve_volumes_invalid_dict_no_size_no_name():
-    """Test dict without 'size' or 'name' raises ValueError."""
+def test_resolve_volumes_invalid_dict_no_source():
+    """Test a dict without a supported volume source raises ValueError."""
     t = task.Task()
     t._volumes = {'/mnt': {'type': 'pd-standard'}}
     t.resources = [make_mock_resource()]
 
-    with pytest.raises(ValueError,
-                       match='Invalid volume config.*Either "size".*or "name"'):
+    with pytest.raises(
+            ValueError,
+            match='Invalid volume config.*"size".*"name".*"host_path"'):
         t.resolve_and_validate_volumes()
 
 
@@ -1004,8 +1048,9 @@ def test_resolve_volumes_invalid_dict_empty():
     t._volumes = {'/mnt': {}}
     t.resources = [make_mock_resource()]
 
-    with pytest.raises(ValueError,
-                       match='Invalid volume config.*Either "size".*or "name"'):
+    with pytest.raises(
+            ValueError,
+            match='Invalid volume config.*"size".*"name".*"host_path"'):
         t.resolve_and_validate_volumes()
 
 

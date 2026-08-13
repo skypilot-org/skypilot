@@ -29,6 +29,71 @@ def test_command_length_local_shell_limit():
     assert backend_utils.is_command_length_over_limit(command, quote_levels=4)
 
 
+def test_non_slurm_cpu_demand_uses_ray_default():
+    handle = MagicMock()
+    handle.launched_resources = resources.Resources(cloud=clouds.Kubernetes())
+    test_task = task.Task(resources=resources.Resources(cpus=1.5))
+
+    demands = (cloud_vm_ray_backend.CloudVmRayBackend._get_task_demands_dict(
+        handle, test_task))
+
+    assert demands['CPU'] == backend_utils.DEFAULT_TASK_CPU_DEMAND
+
+
+def test_slurm_controller_cpu_demand_uses_controller_default():
+    handle = MagicMock()
+    handle.launched_resources = resources.Resources(cloud=clouds.Slurm())
+    test_task = task.Task(resources=resources.Resources(cpus=4))
+    test_task.service_name = 'service'
+
+    demands = (cloud_vm_ray_backend.CloudVmRayBackend._get_task_demands_dict(
+        handle, test_task))
+
+    assert (
+        demands['CPU'] == backend_utils.constants.CONTROLLER_PROCESS_CPU_DEMAND)
+
+
+def test_slurm_cpu_demand_uses_allocated_cpus():
+    allocated = resources.Resources(cloud=clouds.Slurm(),
+                                    instance_type='2CPU--2GB')
+    handle = MagicMock()
+    handle.launched_resources = allocated
+    test_task = task.Task(resources=resources.Resources(cpus=0.25))
+    test_task.best_resources = allocated
+
+    demands = (cloud_vm_ray_backend.CloudVmRayBackend._get_task_demands_dict(
+        handle, test_task))
+
+    assert demands['CPU'] == 2.0
+
+
+def test_slurm_gpu_cpu_demand_uses_allocated_cpus():
+    allocated = resources.Resources(cloud=clouds.Slurm(),
+                                    instance_type='4CPU--16GB--H200:1')
+    handle = MagicMock()
+    handle.launched_resources = allocated
+    test_task = task.Task(resources=resources.Resources(
+        accelerators={'H200': 1}))
+    test_task.best_resources = allocated
+
+    demands = (cloud_vm_ray_backend.CloudVmRayBackend._get_task_demands_dict(
+        handle, test_task))
+
+    assert demands['CPU'] == 4.0
+
+
+def test_slurm_exec_cpu_demand_uses_cluster_allocation():
+    handle = MagicMock()
+    handle.launched_resources = resources.Resources(cloud=clouds.Slurm(),
+                                                    instance_type='8CPU--32GB')
+    test_task = task.Task(resources=resources.Resources())
+
+    demands = (cloud_vm_ray_backend.CloudVmRayBackend._get_task_demands_dict(
+        handle, test_task))
+
+    assert demands['CPU'] == 8.0
+
+
 class TestCloudVmRayBackendTaskRedaction:
     """Tests for CloudVmRayBackend usage of redacted task configs."""
 

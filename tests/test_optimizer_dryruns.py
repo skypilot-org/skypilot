@@ -4,6 +4,7 @@ import tempfile
 import textwrap
 import time
 from typing import Callable, Optional, Set
+import uuid
 
 from click import testing as cli_testing
 import pytest
@@ -96,7 +97,21 @@ def _test_resources(
         assert expected_cloud.is_same_cloud(resources.cloud)
 
 
+def _unique_cluster_name() -> str:
+    """A per-call unique cluster name for dryrun launches.
+
+    An unnamed launch falls back to the default cluster name, which is
+    deterministic per user -- so under pytest-xdist every unnamed dryrun
+    test in this file contends for the SAME cluster status lock, and a
+    loser surfaces ExecutionPausedError ("locked by another operation")
+    as a spurious failure. Unique names make the tests lock-disjoint.
+    """
+    return f'dryrun-{uuid.uuid4().hex[:8]}'
+
+
 def _test_resources_from_yaml(spec: str, cluster_name: str = None):
+    if cluster_name is None:
+        cluster_name = _unique_cluster_name()
     resources = sky.Resources.from_yaml_config(spec)
     with sky.Dag() as dag:
         task = sky.Task('test_task')
@@ -109,6 +124,8 @@ def _test_resources_launch(*resources_args,
                            cluster_name: str = None,
                            **resources_kwargs):
     """This function is testing for the core functions on client side."""
+    if cluster_name is None:
+        cluster_name = _unique_cluster_name()
     resources = _make_resources(*resources_args, **resources_kwargs)
     resources.validate()
     with sky.Dag() as dag:
@@ -772,7 +789,9 @@ def test_ordered_resources(enable_all_clouds):
             ])
         dag = sky.optimize(dag)
         cli_runner = cli_testing.CliRunner()
-        request_id = sky.launch(task, dryrun=True)
+        request_id = sky.launch(task,
+                                dryrun=True,
+                                cluster_name=_unique_cluster_name())
         result = cli_runner.invoke(command.api_logs, [request_id])
         assert not result.exit_code
 
@@ -971,7 +990,8 @@ def test_candidate_logging(enable_all_clouds, capfd):
             sky.Resources(accelerators={'H200': 1}, use_spot=True),
         ])
     sky.optimize(dag)
-    sky.stream_and_get(sky.launch(dag, dryrun=True))
+    sky.stream_and_get(
+        sky.launch(dag, dryrun=True, cluster_name=_unique_cluster_name()))
     stdout, _ = capfd.readouterr()
     l4_section = any(
         'L4:1' in line and '✔' in line for line in stdout.splitlines())
