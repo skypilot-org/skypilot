@@ -1195,6 +1195,10 @@ class AWS(clouds.Cloud):
             AWSIdentityType.IAM_ROLE,
             AWSIdentityType.CONTAINER_ROLE,
             AWSIdentityType.LOGIN,
+            # Web-identity federation (EKS IRSA) reports as `assume-role`, and
+            # like the other role types it hands out temporary credentials that
+            # must not be embedded in an rclone profile.
+            AWSIdentityType.ASSUME_ROLE,
         }
         return identity_type in non_static_types
 
