@@ -12,11 +12,12 @@ Sky Batch lets you distribute data processing across cloud GPUs and on-prem clus
 .. figure:: ../../images/batch-architecture.svg
    :width: 100%
    :align: center
-   :alt: Sky Batch architecture: a Python script calls ds.map() on a pool of workers. Input JSONL in cloud storage is split into batches and distributed across warm workers, each holding a loaded runtime; results are written back to cloud storage by JsonWriter or ImageWriter.
+   :alt: Sky Batch architecture: a Python script calls ds.map() on a pool of workers. Input JSONL in cloud storage is split into batches and distributed across warm workers that span clouds and GPU types — worker 0 on an AWS L4, workers 1 and 2 on Nebius H200s. Results are written back to cloud storage by JsonWriter or ImageWriter.
 
    **Sky Batch** splits your input data into batches, distributes them across a pool of
-   warm workers, and collects the results back into cloud storage. The pool outlives the
-   job, so the next ``ds.map()`` skips setup entirely.
+   warm workers, and collects the results back into cloud storage. Workers in one pool can
+   land on different clouds and GPU types, and the pool outlives the job — so the next
+   ``ds.map()`` skips setup entirely.
 
 .. contents:: Contents
    :local:

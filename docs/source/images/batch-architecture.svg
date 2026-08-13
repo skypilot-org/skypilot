@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<svg viewBox="0 0 1280 600" width="100%" height="auto" class="diag" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Sky Batch architecture: a Python script calls ds.map() on a pool of workers. Input JSONL in cloud storage is split into batches and distributed across warm workers, each holding a loaded runtime; results are written back to cloud storage by JsonWriter or ImageWriter.">
+<svg viewBox="0 0 1280 600" width="100%" height="auto" class="diag" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Sky Batch architecture: a Python script calls ds.map() on a pool of workers. Input JSONL in cloud storage is split into batches and distributed across warm workers that span clouds and GPU types — worker 0 on an AWS L4, workers 1 and 2 on Nebius H200s. Results are written back to cloud storage by JsonWriter or ImageWriter.">
   <style><![CDATA[
     .diag { font-family: 'Waldenburg', system-ui, -apple-system, sans-serif; color: #04070B; letter-spacing: -0.01em; }
     .diag .mono { font-family: 'BerkeleyMono', ui-monospace, Menlo, monospace; font-feature-settings: "zero" 1; letter-spacing: 0.02em; }
@@ -8,6 +8,7 @@
     .diag .task-name { font-family: 'Waldenburg', sans-serif; font-size: 21px; font-weight: 500; letter-spacing: -0.015em; fill: #04070B; }
     .diag .annot { font-family: 'Waldenburg', sans-serif; font-size: 15px; font-weight: 400; fill: #5d6a7a; }
     .diag .code { font-family: 'BerkeleyMono', monospace; font-size: 13px; letter-spacing: 0.01em; fill: #243142; }
+    .diag .record { font-family: 'BerkeleyMono', monospace; font-size: 11.5px; fill: #5d6a7a; }
     .diag .flow-label { font-family: 'BerkeleyMono', monospace; font-size: 13px; letter-spacing: 0.04em; font-weight: 600; fill: #0A55EE; paint-order: stroke; stroke: #FCFCFB; stroke-width: 6; stroke-linejoin: round; }
     @keyframes flow-dash { from { stroke-dashoffset: 0; } to { stroke-dashoffset: -22; } }
     .diag .flow { animation: flow-dash 1.8s linear infinite; }
@@ -25,71 +26,77 @@
 
   <!-- ============ Worker pool boundary ============ -->
   <g>
-    <rect x="340" y="228" width="600" height="282" rx="20" fill="none" stroke="#0A55EE" stroke-width="1.5" stroke-dasharray="2 5"/>
-    <g transform="translate(366 228)">
+    <rect x="320" y="228" width="640" height="282" rx="20" fill="none" stroke="#0A55EE" stroke-width="1.5" stroke-dasharray="2 5"/>
+    <g transform="translate(346 228)">
       <rect x="-12" y="-16" width="252" height="32" rx="16" fill="#FCFCFB" stroke="#0A55EE" stroke-width="1.25"/>
       <text x="0" y="6" font-family="BerkeleyMono, monospace" font-size="14" letter-spacing="0.18em" font-weight="700" fill="#0A55EE">SKYPILOT&#160;WORKER&#160;POOL</text>
     </g>
+    <text x="640" y="497" text-anchor="middle" class="annot" font-size="13.5">one pool &#183; workers can span clouds and GPU types</text>
   </g>
 
   <!-- ============ Worker 0 ============ -->
-  <g transform="translate(358 282)">
-    <rect x="0" y="0" width="176" height="196" rx="12" fill="#ECF2FD" stroke="#0A55EE" stroke-width="1.5"/>
+  <g transform="translate(339 282)">
+    <rect x="0" y="0" width="188" height="196" rx="12" fill="#ECF2FD" stroke="#0A55EE" stroke-width="1.5"/>
     <text x="16" y="28" class="role">worker 0</text>
-    <g transform="translate(16 40)"><rect x="0" y="0" width="58" height="22" rx="11" fill="#FBEEEB" stroke="#C7402E" stroke-width="1.2"/><text x="10" y="15.5" fill="#C7402E" font-family="BerkeleyMono, monospace" font-size="12" font-weight="600" letter-spacing="0.04em">L4&#215;1</text></g>
-    <rect x="16" y="78" width="144" height="34" rx="8" fill="#FFFFFF" stroke="#C8C6C7" stroke-width="1"/>
-    <text x="88" y="100" text-anchor="middle" font-family="BerkeleyMono, monospace" font-size="12" fill="#243142">&#10003; warm runtime</text>
-    <rect x="16" y="126" width="144" height="26" rx="6" fill="#FFFFFF" stroke="#9DB6EA" stroke-width="1.2"/>
-    <text x="88" y="144" text-anchor="middle" font-family="BerkeleyMono, monospace" font-size="12" fill="#0A55EE">batch 0</text>
-    <rect x="16" y="158" width="144" height="26" rx="6" fill="#FFFFFF" stroke="#9DB6EA" stroke-width="1.2"/>
-    <text x="88" y="176" text-anchor="middle" font-family="BerkeleyMono, monospace" font-size="12" fill="#0A55EE">batch 3</text>
+    <g transform="translate(16 40)"><rect x="0" y="0" width="54" height="22" rx="11" fill="#FBEEEB" stroke="#C7402E" stroke-width="1.2"/><text x="27" y="15.5" text-anchor="middle" fill="#C7402E" font-family="BerkeleyMono, monospace" font-size="12" font-weight="600" letter-spacing="0.04em">L4&#215;1</text></g>
+    <g transform="translate(78 40)"><rect x="0" y="0" width="48" height="22" rx="11" fill="#FFFFFF" stroke="#C8C6C7" stroke-width="1.2"/><text x="24" y="15.5" text-anchor="middle" fill="#243142" font-family="BerkeleyMono, monospace" font-size="12" font-weight="600" letter-spacing="0.04em">AWS</text></g>
+    <rect x="16" y="78" width="156" height="34" rx="8" fill="#FFFFFF" stroke="#C8C6C7" stroke-width="1"/>
+    <text x="94" y="100" text-anchor="middle" font-family="BerkeleyMono, monospace" font-size="12" fill="#243142">&#10003; warm runtime</text>
+    <rect x="16" y="126" width="156" height="26" rx="6" fill="#FFFFFF" stroke="#9DB6EA" stroke-width="1.2"/>
+    <text x="94" y="144" text-anchor="middle" font-family="BerkeleyMono, monospace" font-size="12" fill="#0A55EE">batch 0</text>
+    <rect x="16" y="158" width="156" height="26" rx="6" fill="#FFFFFF" stroke="#9DB6EA" stroke-width="1.2"/>
+    <text x="94" y="176" text-anchor="middle" font-family="BerkeleyMono, monospace" font-size="12" fill="#0A55EE">batch 3</text>
   </g>
 
   <!-- ============ Worker 1 ============ -->
-  <g transform="translate(552 282)">
-    <rect x="0" y="0" width="176" height="196" rx="12" fill="#ECF2FD" stroke="#0A55EE" stroke-width="1.5"/>
+  <g transform="translate(546 282)">
+    <rect x="0" y="0" width="188" height="196" rx="12" fill="#ECF2FD" stroke="#0A55EE" stroke-width="1.5"/>
     <text x="16" y="28" class="role">worker 1</text>
-    <g transform="translate(16 40)"><rect x="0" y="0" width="58" height="22" rx="11" fill="#FBEEEB" stroke="#C7402E" stroke-width="1.2"/><text x="10" y="15.5" fill="#C7402E" font-family="BerkeleyMono, monospace" font-size="12" font-weight="600" letter-spacing="0.04em">L4&#215;1</text></g>
-    <rect x="16" y="78" width="144" height="34" rx="8" fill="#FFFFFF" stroke="#C8C6C7" stroke-width="1"/>
-    <text x="88" y="100" text-anchor="middle" font-family="BerkeleyMono, monospace" font-size="12" fill="#243142">&#10003; warm runtime</text>
-    <rect x="16" y="126" width="144" height="26" rx="6" fill="#FFFFFF" stroke="#9DB6EA" stroke-width="1.2"/>
-    <text x="88" y="144" text-anchor="middle" font-family="BerkeleyMono, monospace" font-size="12" fill="#0A55EE">batch 1</text>
-    <rect x="16" y="158" width="144" height="26" rx="6" fill="#FFFFFF" stroke="#9DB6EA" stroke-width="1.2"/>
-    <text x="88" y="176" text-anchor="middle" font-family="BerkeleyMono, monospace" font-size="12" fill="#0A55EE">batch 4</text>
+    <g transform="translate(16 40)"><rect x="0" y="0" width="68" height="22" rx="11" fill="#FBEEEB" stroke="#C7402E" stroke-width="1.2"/><text x="34" y="15.5" text-anchor="middle" fill="#C7402E" font-family="BerkeleyMono, monospace" font-size="12" font-weight="600" letter-spacing="0.04em">H200&#215;1</text></g>
+    <g transform="translate(92 40)"><rect x="0" y="0" width="66" height="22" rx="11" fill="#FFFFFF" stroke="#C8C6C7" stroke-width="1.2"/><text x="33" y="15.5" text-anchor="middle" fill="#243142" font-family="BerkeleyMono, monospace" font-size="12" font-weight="600" letter-spacing="0.04em">Nebius</text></g>
+    <rect x="16" y="78" width="156" height="34" rx="8" fill="#FFFFFF" stroke="#C8C6C7" stroke-width="1"/>
+    <text x="94" y="100" text-anchor="middle" font-family="BerkeleyMono, monospace" font-size="12" fill="#243142">&#10003; warm runtime</text>
+    <rect x="16" y="126" width="156" height="26" rx="6" fill="#FFFFFF" stroke="#9DB6EA" stroke-width="1.2"/>
+    <text x="94" y="144" text-anchor="middle" font-family="BerkeleyMono, monospace" font-size="12" fill="#0A55EE">batch 1</text>
+    <rect x="16" y="158" width="156" height="26" rx="6" fill="#FFFFFF" stroke="#9DB6EA" stroke-width="1.2"/>
+    <text x="94" y="176" text-anchor="middle" font-family="BerkeleyMono, monospace" font-size="12" fill="#0A55EE">batch 4</text>
   </g>
 
   <!-- ============ Worker 2 ============ -->
-  <g transform="translate(746 282)">
-    <rect x="0" y="0" width="176" height="196" rx="12" fill="#ECF2FD" stroke="#0A55EE" stroke-width="1.5"/>
+  <g transform="translate(753 282)">
+    <rect x="0" y="0" width="188" height="196" rx="12" fill="#ECF2FD" stroke="#0A55EE" stroke-width="1.5"/>
     <text x="16" y="28" class="role">worker 2</text>
-    <g transform="translate(16 40)"><rect x="0" y="0" width="58" height="22" rx="11" fill="#FBEEEB" stroke="#C7402E" stroke-width="1.2"/><text x="10" y="15.5" fill="#C7402E" font-family="BerkeleyMono, monospace" font-size="12" font-weight="600" letter-spacing="0.04em">L4&#215;1</text></g>
-    <rect x="16" y="78" width="144" height="34" rx="8" fill="#FFFFFF" stroke="#C8C6C7" stroke-width="1"/>
-    <text x="88" y="100" text-anchor="middle" font-family="BerkeleyMono, monospace" font-size="12" fill="#243142">&#10003; warm runtime</text>
-    <rect x="16" y="126" width="144" height="26" rx="6" fill="#FFFFFF" stroke="#9DB6EA" stroke-width="1.2"/>
-    <text x="88" y="144" text-anchor="middle" font-family="BerkeleyMono, monospace" font-size="12" fill="#0A55EE">batch 2</text>
-    <rect x="16" y="158" width="144" height="26" rx="6" fill="#FFFFFF" stroke="#9DB6EA" stroke-width="1.2"/>
-    <text x="88" y="176" text-anchor="middle" font-family="BerkeleyMono, monospace" font-size="12" fill="#0A55EE">batch 5</text>
+    <g transform="translate(16 40)"><rect x="0" y="0" width="68" height="22" rx="11" fill="#FBEEEB" stroke="#C7402E" stroke-width="1.2"/><text x="34" y="15.5" text-anchor="middle" fill="#C7402E" font-family="BerkeleyMono, monospace" font-size="12" font-weight="600" letter-spacing="0.04em">H200&#215;1</text></g>
+    <g transform="translate(92 40)"><rect x="0" y="0" width="66" height="22" rx="11" fill="#FFFFFF" stroke="#C8C6C7" stroke-width="1.2"/><text x="33" y="15.5" text-anchor="middle" fill="#243142" font-family="BerkeleyMono, monospace" font-size="12" font-weight="600" letter-spacing="0.04em">Nebius</text></g>
+    <rect x="16" y="78" width="156" height="34" rx="8" fill="#FFFFFF" stroke="#C8C6C7" stroke-width="1"/>
+    <text x="94" y="100" text-anchor="middle" font-family="BerkeleyMono, monospace" font-size="12" fill="#243142">&#10003; warm runtime</text>
+    <rect x="16" y="126" width="156" height="26" rx="6" fill="#FFFFFF" stroke="#9DB6EA" stroke-width="1.2"/>
+    <text x="94" y="144" text-anchor="middle" font-family="BerkeleyMono, monospace" font-size="12" fill="#0A55EE">batch 2</text>
+    <rect x="16" y="158" width="156" height="26" rx="6" fill="#FFFFFF" stroke="#9DB6EA" stroke-width="1.2"/>
+    <text x="94" y="176" text-anchor="middle" font-family="BerkeleyMono, monospace" font-size="12" fill="#0A55EE">batch 5</text>
   </g>
 
   <!-- ============ Input storage ============ -->
-  <g transform="translate(30 300)">
-    <rect x="0" y="0" width="230" height="150" rx="12" fill="#FFFFFF" stroke="#C8C6C7" stroke-width="1"/>
+  <g transform="translate(30 296)">
+    <rect x="0" y="0" width="220" height="158" rx="12" fill="#FFFFFF" stroke="#C8C6C7" stroke-width="1"/>
     <text x="16" y="26" class="role">input &#183; cloud storage</text>
     <text x="16" y="58" class="task-name">data.jsonl</text>
-    <text x="16" y="82" font-family="BerkeleyMono, monospace" font-size="12" fill="#5d6a7a">s3:// or gs://</text>
-    <rect x="16" y="96" width="198" height="13" rx="4" fill="#F1F3F6"/>
-    <rect x="16" y="113" width="198" height="13" rx="4" fill="#F1F3F6"/>
-    <rect x="16" y="130" width="154" height="13" rx="4" fill="#F1F3F6"/>
+    <text x="16" y="80" font-family="BerkeleyMono, monospace" font-size="12" fill="#5d6a7a">s3:// or gs://</text>
+    <line x1="16" y1="96" x2="204" y2="96" stroke="#E7E5E4" stroke-width="1"/>
+    <text x="16" y="116" class="record">{"prompt": "&#8230;"}</text>
+    <text x="16" y="134" class="record">{"prompt": "&#8230;"}</text>
+    <text x="16" y="150" class="record">&#8230;</text>
   </g>
 
   <!-- ============ Output storage ============ -->
-  <g transform="translate(1020 300)">
-    <rect x="0" y="0" width="230" height="150" rx="12" fill="#FFFFFF" stroke="#C8C6C7" stroke-width="1"/>
+  <g transform="translate(1030 296)">
+    <rect x="0" y="0" width="220" height="158" rx="12" fill="#FFFFFF" stroke="#C8C6C7" stroke-width="1"/>
     <text x="16" y="26" class="role">output &#183; cloud storage</text>
     <text x="16" y="58" class="task-name">out.jsonl</text>
-    <text x="16" y="82" font-family="BerkeleyMono, monospace" font-size="12" fill="#5d6a7a">one row per input item</text>
-    <g transform="translate(16 96)"><rect x="0" y="0" width="84" height="24" rx="12" fill="#FFFFFF" stroke="#C8C6C7" stroke-width="1.2"/><text x="42" y="16.5" text-anchor="middle" fill="#243142" font-family="BerkeleyMono, monospace" font-size="11" font-weight="600">JsonWriter</text></g>
-    <g transform="translate(108 96)"><rect x="0" y="0" width="92" height="24" rx="12" fill="#FFFFFF" stroke="#C8C6C7" stroke-width="1.2"/><text x="46" y="16.5" text-anchor="middle" fill="#243142" font-family="BerkeleyMono, monospace" font-size="11" font-weight="600">ImageWriter</text></g>
+    <text x="16" y="80" font-family="BerkeleyMono, monospace" font-size="12" fill="#5d6a7a">one row per input item</text>
+    <line x1="16" y1="96" x2="204" y2="96" stroke="#E7E5E4" stroke-width="1"/>
+    <g transform="translate(16 110)"><rect x="0" y="0" width="84" height="24" rx="12" fill="#FFFFFF" stroke="#C8C6C7" stroke-width="1.2"/><text x="42" y="16.5" text-anchor="middle" fill="#243142" font-family="BerkeleyMono, monospace" font-size="11" font-weight="600">JsonWriter</text></g>
+    <g transform="translate(108 110)"><rect x="0" y="0" width="92" height="24" rx="12" fill="#FFFFFF" stroke="#C8C6C7" stroke-width="1.2"/><text x="46" y="16.5" text-anchor="middle" fill="#243142" font-family="BerkeleyMono, monospace" font-size="11" font-weight="600">ImageWriter</text></g>
   </g>
 
   <!-- ============ Flow: script -> pool ============ -->
@@ -101,16 +108,16 @@
 
   <!-- ============ Flow: input -> pool ============ -->
   <g>
-    <path d="M 260 375 L 350 375" fill="none" stroke="#0A55EE" stroke-width="1.5" stroke-linecap="round" stroke-dasharray="8 4" class="flow"/>
-    <polyline points="339,381.5 350,375 339,368.5" fill="none" stroke="#0A55EE" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="bevel"/>
-    <text x="305" y="360" text-anchor="middle" class="flow-label">batches</text>
+    <path d="M 250 375 L 337 375" fill="none" stroke="#0A55EE" stroke-width="1.5" stroke-linecap="round" stroke-dasharray="8 4" class="flow"/>
+    <polyline points="326,381.5 337,375 326,368.5" fill="none" stroke="#0A55EE" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="bevel"/>
+    <text x="293" y="360" text-anchor="middle" class="flow-label">batches</text>
   </g>
 
   <!-- ============ Flow: pool -> output ============ -->
   <g>
-    <path d="M 930 375 L 1018 375" fill="none" stroke="#0A55EE" stroke-width="1.5" stroke-linecap="round" stroke-dasharray="8 4" class="flow"/>
-    <polyline points="1007,381.5 1018,375 1007,368.5" fill="none" stroke="#0A55EE" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="bevel"/>
-    <text x="974" y="360" text-anchor="middle" class="flow-label">results</text>
+    <path d="M 960 375 L 1028 375" fill="none" stroke="#0A55EE" stroke-width="1.5" stroke-linecap="round" stroke-dasharray="8 4" class="flow"/>
+    <polyline points="1017,381.5 1028,375 1017,368.5" fill="none" stroke="#0A55EE" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="bevel"/>
+    <text x="994" y="360" text-anchor="middle" class="flow-label">results</text>
   </g>
 
   <!-- ============ Bottom band ============ -->
