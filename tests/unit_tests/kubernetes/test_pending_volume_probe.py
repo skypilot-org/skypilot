@@ -301,6 +301,26 @@ class TestGetPendingPvcs:
 
         assert failure.seconds_since(_PODS_CREATED_AT) == 600
 
+    def test_waiting_on_the_pod_is_reported_as_that(self, cluster):
+        """A claim whose pod cannot be scheduled: reporting the earlier
+        WaitForFirstConsumer instead would say nothing has claimed the volume,
+        when something has and the pod is the thing that is stuck."""
+        cluster.set('vol', 'Pending', [
+            _event('WaitForFirstConsumer',
+                   'waiting for first consumer to be created before binding',
+                   event_type='Normal',
+                   first=5),
+            _event('WaitForPodScheduled',
+                   'waiting for pod cn-head to be scheduled',
+                   event_type='Normal',
+                   first=60),
+        ])
+
+        detail = self._pending(cluster)[0].detail
+
+        assert 'waiting for pod cn-head to be scheduled' in detail
+        assert 'first consumer' not in detail
+
     def test_an_unreadable_claim_is_not_reported(self, cluster):
         """Fail open: a transient API error must not fail the launch."""
         assert instance._get_pending_pvcs('ns', 'ctx', ['missing']) == []

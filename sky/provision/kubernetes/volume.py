@@ -20,9 +20,15 @@ logger = sky_logging.init_logger(__name__)
 PVC_FAILING_EVENT_REASONS = ('ProvisioningFailed',)
 WARNING_EVENT_TYPE = 'Warning'
 # Normal event reasons that explain why a claim is still pending. Reported to
-# the user, never treated as failures.
-PVC_PENDING_EVENT_REASONS = ('WaitForFirstConsumer', 'ExternalProvisioning',
-                             'Provisioning')
+# the user, never treated as failures -- the PV controller and the provisioner
+# record these while working, and every reason either of them uses to report a
+# problem is a Warning, which is judged separately.
+#
+# They report progress in this order, and the newest is the one worth showing:
+# nothing has claimed the volume yet, a pod has but is not scheduled, the
+# provisioner has been handed it, the provisioner is working on it.
+PVC_PENDING_EVENT_REASONS = ('WaitForFirstConsumer', 'WaitForPodScheduled',
+                             'ExternalProvisioning', 'Provisioning')
 
 # CSI is a gRPC interface, so a provisioner's failure message carries the code
 # the storage backend returned, in grpc-go's standard rendering.
