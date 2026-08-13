@@ -6411,6 +6411,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             if task.volume_mounts:
                 # Get existing cluster's volume mounts from cluster yaml
                 existing_volume_names = set()
+                existing_slurm_host_mounts = set()
                 try:
                     if cluster_yaml_obj is not None:
                         # Extract volume names from existing cluster
@@ -6459,6 +6460,17 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                 vol_name = vol_mount.get('VolumeNameOnCloud')
                                 if vol_name:
                                     existing_volume_names.add(vol_name)
+                        elif isinstance(to_provision.cloud, clouds.Slurm):
+                            for vol_mount in node_config.get(
+                                    'volume_mounts', []):
+                                config = vol_mount.get('volume_config',
+                                                       {}).get('config', {})
+                                host_path = config.get('host_path')
+                                mount_path = vol_mount.get('path')
+                                if host_path and mount_path:
+                                    existing_slurm_host_mounts.add(
+                                        (host_path, mount_path,
+                                         config.get('mode')))
                 except Exception as e:  # pylint: disable=broad-except
                     # If we can't get the existing volume mounts, log debug
                     # and skip the warning check
@@ -6469,10 +6481,17 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 new_ephemeral_volumes = []
                 new_persistent_volumes = []
                 for volume_mount in task.volume_mounts:
+                    config = volume_mount.volume_config.config
                     # Compare using volume_name for user-facing name
                     if volume_mount.is_ephemeral:
                         if volume_mount.path not in existing_volume_names:
                             new_ephemeral_volumes.append(volume_mount.path)
+                    elif (isinstance(to_provision.cloud, clouds.Slurm) and
+                          config.get('host_path')):
+                        identity = (config['host_path'], volume_mount.path,
+                                    config.get('mode'))
+                        if identity not in existing_slurm_host_mounts:
+                            new_persistent_volumes.append(volume_mount.path)
                     elif (volume_mount.volume_name not in existing_volume_names
                           and volume_mount.volume_config.name_on_cloud
                           not in existing_volume_names):

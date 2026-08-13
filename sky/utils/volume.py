@@ -25,6 +25,12 @@ class VolumeAccessMode(enum.Enum):
     READ_ONLY_MANY = 'ReadOnlyMany'
 
 
+class VolumeMountMode(enum.Enum):
+    """Per-mount permission for host path bind mounts."""
+    RO = 'ro'
+    RW = 'rw'
+
+
 class VolumeType(enum.Enum):
     """Volume type."""
     PVC = 'k8s-pvc'
@@ -119,8 +125,8 @@ class VolumeMount:
 
     def pre_mount(self) -> None:
         """Update the volume status before actual mounting."""
-        # Skip pre_mount for ephemeral volumes as they don't exist yet
-        if self.is_ephemeral:
+        # Inline and ephemeral volumes have no global volume record.
+        if not self.volume_name:
             return
         # TODO(aylei): for ReadWriteOnce volume, we also need to queue the
         # mount request if the target volume is already mounted to another
@@ -160,6 +166,37 @@ class VolumeMount:
         assert 'handle' in record, 'Volume handle is None.'
         volume_config: models.VolumeConfig = record['handle']
         return cls(path, volume_name, volume_config, sub_path=sub_path)
+
+    @classmethod
+    def resolve_host_path_config(cls, path: str,
+                                 config: Dict[str, Any]) -> 'VolumeMount':
+        """Create a non-provisioned host path mount from inline config."""
+        host_path = config.get('host_path')
+        if not isinstance(host_path, str) or not host_path.startswith('/'):
+            raise ValueError(
+                f'host_path must be an absolute path, got: {host_path!r}')
+        if host_path == '/':
+            raise ValueError('host_path must not be the root directory \'/\'')
+        mode = config.get('mode', VolumeMountMode.RO.value)
+        if mode not in (VolumeMountMode.RO.value, VolumeMountMode.RW.value):
+            raise ValueError(f'Invalid host_path volume mode {mode!r}. '
+                             'Supported modes are "ro" and "rw".')
+        unexpected_fields = set(config) - {'host_path', 'mode'}
+        if unexpected_fields:
+            raise ValueError(f'Invalid host_path volume config fields: '
+                             f'{sorted(unexpected_fields)}')
+        volume_config = models.VolumeConfig(name='',
+                                            type='',
+                                            cloud='Slurm',
+                                            region=None,
+                                            zone=None,
+                                            name_on_cloud=host_path,
+                                            size=None,
+                                            config={
+                                                'host_path': host_path,
+                                                'mode': mode,
+                                            })
+        return cls(path, '', volume_config)
 
     @classmethod
     def from_yaml_config(cls, config: Dict[str, Any]) -> 'VolumeMount':

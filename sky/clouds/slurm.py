@@ -475,7 +475,7 @@ class Slurm(clouds.Cloud):
         dryrun: bool = False,
         volume_mounts: Optional[List['volume_lib.VolumeMount']] = None,
     ) -> Dict[str, Any]:
-        del cluster_name, dryrun, volume_mounts  # Unused.
+        del cluster_name, dryrun  # Unused.
         if region is not None:
             cluster = region.name
         else:
@@ -543,6 +543,15 @@ class Slurm(clouds.Cloud):
                     f'Error: {common_utils.format_exception(e)}')
 
         image_id = resources.extract_docker_image()
+        if volume_mounts:
+            for mount in volume_mounts:
+                if mount.volume_config.config.get('host_path') is None:
+                    raise ValueError(
+                        f'Slurm only supports inline host_path volume '
+                        f'mounts; {mount.path!r} does not bind a host path.')
+            if image_id is None:
+                raise ValueError(
+                    'Slurm host_path volume mounts require a container image.')
 
         provision_timeout = skypilot_config.get_effective_region_config(
             cloud='slurm',
@@ -584,6 +593,43 @@ class Slurm(clouds.Cloud):
         if task_sbatch is not None:
             sbatch_options.update(task_sbatch)
 
+        # Read admin-declared container mounts with two-level merge:
+        # global < cluster. Each entry maps a container path to either a
+        # host path string (read-only) or {host_path: ..., mode: ro|rw}.
+        container_mounts: Dict[str, Any] = {}
+        for config_keys in [
+            ('slurm', 'container_mounts'),
+            ('slurm', 'cluster_configs', cluster, 'container_mounts'),
+        ]:
+            level_config = skypilot_config.get_nested(config_keys,
+                                                      default_value=None)
+            if level_config is not None:
+                container_mounts.update(level_config)
+
+        volume_mount_vars = []
+        if container_mounts:
+            if image_id is None:
+                logger.debug(f'Ignoring configured container_mounts for '
+                             f'cluster {cluster!r}: the task does not use a '
+                             f'container image.')
+            else:
+                # pylint: disable-next=import-outside-toplevel
+                from sky.utils import volume
+                task_mount_paths = {mount.path for mount in volume_mounts or []}
+                for dst_path, mount_config in sorted(container_mounts.items()):
+                    if dst_path in task_mount_paths:
+                        logger.debug(
+                            f'Configured container mount {dst_path!r} is '
+                            f'overridden by the task YAML volume.')
+                        continue
+                    if isinstance(mount_config, str):
+                        mount_config = {'host_path': mount_config}
+                    mount = volume.VolumeMount.resolve_host_path_config(
+                        dst_path, mount_config)
+                    volume_mount_vars.append(mount.to_yaml_config())
+        volume_mount_vars.extend(
+            mount.to_yaml_config() for mount in volume_mounts or [])
+
         deploy_vars = {
             'instance_type': resources.instance_type,
             'custom_resources': custom_resources,
@@ -612,6 +658,9 @@ class Slurm(clouds.Cloud):
                 (constants.SKY_CLUSTER_NAME_ENV_VAR_KEY),
             'image_id': image_id,
             'sbatch_options': sbatch_options,
+            # 'volume_mounts' is reserved by write_cluster_config(), which
+            # overwrites it with generic VolumeInfo objects.
+            'slurm_volume_mounts': volume_mount_vars,
         }
 
         return deploy_vars

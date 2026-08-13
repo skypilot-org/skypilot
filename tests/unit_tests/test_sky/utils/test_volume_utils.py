@@ -525,6 +525,47 @@ class TestVolumeMount:
         assert volume_mount.volume_config == mock_volume_config
         assert volume_mount.is_ephemeral is False
 
+    @mock.patch('sky.global_user_state.update_volume')
+    def test_pre_mount_inline_host_path_skips_state_update(self, mock_update):
+        volume_config = models.VolumeConfig(name='',
+                                            type='',
+                                            cloud='slurm',
+                                            region=None,
+                                            zone=None,
+                                            name_on_cloud='/host/data',
+                                            size=None,
+                                            config={
+                                                'host_path': '/host/data',
+                                                'mode': 'ro',
+                                            })
+        volume_mount = volume.VolumeMount('/data', '', volume_config)
+
+        volume_mount.pre_mount()
+
+        mock_update.assert_not_called()
+
+    @mock.patch('sky.global_user_state.update_volume')
+    def test_pre_mount_named_host_path_updates_state(self, mock_update):
+        volume_config = models.VolumeConfig(name='host-volume',
+                                            type='k8s-hostpath',
+                                            cloud='kubernetes',
+                                            region=None,
+                                            zone=None,
+                                            name_on_cloud='host-volume',
+                                            size=None,
+                                            config={
+                                                'host_path': '/host/data',
+                                                'access_mode': 'ReadOnlyMany',
+                                            })
+        volume_mount = volume.VolumeMount('/data', 'host-volume', volume_config)
+
+        volume_mount.pre_mount()
+
+        mock_update.assert_called_once_with(
+            'host-volume',
+            last_attached_at=mock.ANY,
+            status=status_lib.VolumeStatus.IN_USE)
+
 
 PVC_TYPE = 'k8s-pvc'
 HOSTPATH_TYPE = 'k8s-hostpath'

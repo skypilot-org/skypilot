@@ -96,13 +96,17 @@ class TestSlurmClientSubmitUser:
 class TestSubmitUserDeployVariables:
 
     @staticmethod
-    def _make_deploy_variables(submit_user, ssh_user='root'):
+    def _make_deploy_variables(submit_user,
+                               ssh_user='root',
+                               volume_mounts=None,
+                               image_id=None,
+                               config_container_mounts=None):
         cloud = slurm_cloud.Slurm()
         resources = mock.MagicMock(unsafe=True)
         resources.zone = 'gpu'
         resources.instance_type = '4CPU--16GB'
         resources.assert_launchable.return_value = resources
-        resources.extract_docker_image.return_value = None
+        resources.extract_docker_image.return_value = image_id
         resources.cluster_config_overrides = {}
 
         region = mock.MagicMock()
@@ -117,12 +121,21 @@ class TestSubmitUserDeployVariables:
             'identityfile': ['/root/.ssh/id_ed25519'],
         }
 
+        def _get_nested(keys, default_value=None, **_):
+            if (keys == ('slurm', 'cluster_configs', 'my-cluster',
+                         'container_mounts') and
+                    config_container_mounts is not None):
+                return config_container_mounts
+            return default_value
+
         with patch('sky.clouds.slurm.slurm_utils.get_slurm_ssh_config',
                    return_value=ssh_config), \
              patch('sky.clouds.slurm.slurm_utils.get_submit_user',
                    return_value=submit_user), \
              patch('sky.clouds.slurm.slurm_utils.get_partitions',
                    return_value=['gpu']), \
+             patch('sky.clouds.slurm.skypilot_config.get_nested',
+                   side_effect=_get_nested), \
              patch('sky.clouds.slurm.skypilot_config.'
                    'get_effective_region_config', return_value=None):
             return cloud.make_deploy_resources_variables(
@@ -130,7 +143,8 @@ class TestSubmitUserDeployVariables:
                 cluster_name=mock.MagicMock(),
                 region=region,
                 zones=[zone],
-                num_nodes=1)
+                num_nodes=1,
+                volume_mounts=volume_mounts)
 
     def test_submit_user_persisted(self):
         deploy_vars = self._make_deploy_variables('alice')
@@ -147,6 +161,106 @@ class TestSubmitUserDeployVariables:
 
         assert deploy_vars['ssh_user'] == 'ubuntu'
         assert deploy_vars['slurm_user'] == 'alice'
+
+    def test_volume_mounts_serialized(self):
+        mount = mock.MagicMock()
+        mount.volume_config.config = {'host_path': '/host/data'}
+        mount.to_yaml_config.return_value = {
+            'path': '/data',
+            'volume_name': '',
+            'volume_config': {
+                'config': {
+                    'host_path': '/host/data',
+                    'mode': 'ro',
+                },
+            },
+            'is_ephemeral': False,
+        }
+
+        deploy_vars = self._make_deploy_variables(None,
+                                                  volume_mounts=[mount],
+                                                  image_id='ubuntu:22.04')
+
+        assert deploy_vars['slurm_volume_mounts'] == [
+            mount.to_yaml_config.return_value
+        ]
+
+    @pytest.mark.parametrize(
+        'config,image_id,error',
+        [
+            ({}, 'ubuntu:22.04', r"only supports inline host_path.*'/mnt'"),
+            ({
+                'host_path': '/host/data'
+            }, None, 'require a container image'),
+        ],
+    )
+    def test_volume_mounts_validate_slurm_support(self, config, image_id,
+                                                  error):
+        mount = mock.MagicMock()
+        mount.path = '/mnt'
+        mount.volume_config.config = config
+
+        with pytest.raises(ValueError, match=error):
+            self._make_deploy_variables(None,
+                                        volume_mounts=[mount],
+                                        image_id=image_id)
+
+    def test_config_container_mounts_serialized(self):
+        deploy_vars = self._make_deploy_variables(
+            None,
+            image_id='ubuntu:22.04',
+            config_container_mounts={
+                '/blob': '/data/blob',
+                '/scratch': {
+                    'host_path': '/nvme/$SLURM_JOB_ID',
+                    'mode': 'rw',
+                },
+            })
+
+        mounts = {
+            m['path']: m['volume_config']['config']
+            for m in deploy_vars['slurm_volume_mounts']
+        }
+        assert mounts == {
+            '/blob': {
+                'host_path': '/data/blob',
+                'mode': 'ro',
+            },
+            '/scratch': {
+                'host_path': '/nvme/$SLURM_JOB_ID',
+                'mode': 'rw',
+            },
+        }
+
+    def test_config_container_mounts_yield_to_task_volume(self):
+        mount = mock.MagicMock()
+        mount.path = '/data'
+        mount.volume_config.config = {'host_path': '/host/data'}
+        mount.to_yaml_config.return_value = {
+            'path': '/data',
+            'volume_config': {
+                'config': {
+                    'host_path': '/host/data',
+                    'mode': 'ro',
+                },
+            },
+        }
+
+        deploy_vars = self._make_deploy_variables(
+            None,
+            volume_mounts=[mount],
+            image_id='ubuntu:22.04',
+            config_container_mounts={'/data': '/config/data'})
+
+        assert deploy_vars['slurm_volume_mounts'] == [
+            mount.to_yaml_config.return_value
+        ]
+
+    def test_config_container_mounts_skipped_without_image(self):
+        deploy_vars = self._make_deploy_variables(
+            None, config_container_mounts={'/blob': '/data/blob'})
+
+        assert deploy_vars['slurm_volume_mounts'] == []
 
 
 class TestSubmitUserTemplate:
@@ -187,6 +301,17 @@ class TestSubmitUserTemplate:
                 'accelerator_type': None,
                 'accelerator_count': 0,
                 'sbatch_options': {},
+                'slurm_volume_mounts': [{
+                    'path': '/data',
+                    'volume_name': '',
+                    'volume_config': {
+                        'config': {
+                            'host_path': '/host/data',
+                            'mode': 'ro',
+                        },
+                    },
+                    'is_ephemeral': False,
+                }],
                 'sky_ray_yaml_remote_path': '/tmp/ray.yaml',
                 'sky_ray_yaml_local_path': '/tmp/ray.yaml',
                 'sky_remote_path': '/tmp/sky',
@@ -210,6 +335,8 @@ class TestSubmitUserTemplate:
             assert config['provider']['slurm_user'] == slurm_user
         assert config['provider']['ssh']['user'] == transport_user
         assert config['auth']['ssh_user'] == expected_ssh_user
+        assert config['available_node_types']['ray_head_default'][
+            'node_config']['volume_mounts'][0]['path'] == '/data'
 
 
 class TestCheckInstanceFits:
@@ -1282,6 +1409,63 @@ class TestCreateVirtualInstance:
 
         written_script = self._run_and_capture_script('test-cluster', config)
         assert_sbatch_matches_snapshot('containers', written_script)
+
+        config.node_config['volume_mounts'] = [
+            {
+                'path': '/data',
+                'volume_name': '',
+                'volume_config': {
+                    'config': {
+                        'host_path': '/host/data',
+                        'mode': 'ro',
+                    },
+                },
+                'is_ephemeral': False,
+            },
+            {
+                'path': '/scratch',
+                'volume_name': '',
+                'volume_config': {
+                    'config': {
+                        'host_path': '/nvme/$SLURM_JOB_ID',
+                        'mode': 'rw',
+                    },
+                },
+                'is_ephemeral': False,
+            },
+            {
+                # No 'mode': must fail closed to read-only.
+                'path': '/models',
+                'volume_name': '',
+                'volume_config': {
+                    'config': {
+                        'host_path': '/host/models',
+                    },
+                },
+                'is_ephemeral': False,
+            },
+        ]
+        mounted_script = self._run_and_capture_script('test-cluster-mounted',
+                                                      config)
+        assert ('--container-mounts="/home/testuser:/home/testuser,'
+                '/tmp/ccache_$(id -u):/var/cache/ccache,'
+                '/host/data:/data:ro,/nvme/$SLURM_JOB_ID:/scratch,'
+                '/host/models:/models:ro"' in mounted_script)
+
+    @pytest.mark.parametrize('path', [
+        '/host/data,other',
+        '/host/data:/other',
+        '/host/data with-space',
+        '/host/"data"',
+        '/host/`id`',
+        '/host/$(id)',
+        '/host/${HOME}',
+        '/host/data\nmalicious',
+        'relative/path',
+    ])
+    def test_container_mount_rejects_unsafe_paths(self, path):
+        with pytest.raises(ValueError, match='Invalid Pyxis container mount'):
+            slurm_instance._validate_pyxis_mount_path(path, 'source')
 
     @patch('sky.provision.slurm.instance._wait_for_job_nodes')
     @patch('sky.provision.slurm.instance.slurm_utils.get_proctrack_type')
