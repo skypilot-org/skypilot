@@ -26,7 +26,7 @@ VOLUME_LOCK_PATH = os.path.expanduser('~/.sky/.{volume_name}.lock')
 VOLUME_LOCK_TIMEOUT_SECONDS = 20
 
 
-def volume_refresh() -> None:
+def volume_refresh(volume_names: Optional[List[str]] = None) -> None:
     """Refreshes volume status by querying cloud APIs.
 
     This is called by the background daemon to update volume state.
@@ -36,8 +36,21 @@ def volume_refresh() -> None:
     - NOT_READY: Volume has errors (e.g., pending due to misconfiguration)
     - IN_USE: Volume is healthy and in use
     - READY: Volume is healthy and not in use
+
+    Args:
+        volume_names: Refresh only these volumes instead of every one. A
+            caller waiting on a single volume it just created would otherwise
+            take a file lock and a database round-trip per volume in the
+            table on every poll, contending with concurrent volume
+            operations for the same locks. Names with no row are ignored.
+            Cloud calls are per (context, namespace) rather than per volume,
+            so this narrows the database work, not necessarily the API calls.
     """
-    volumes = global_user_state.get_volumes(is_ephemeral=False)
+    if volume_names is None:
+        volumes = global_user_state.get_volumes(is_ephemeral=False)
+    else:
+        volumes = global_user_state.get_volumes_from_names(volume_names,
+                                                           is_ephemeral=False)
 
     # Group volumes by cloud for batch API calls
     cloud_to_configs: Dict[str, List[models.VolumeConfig]] = {}
