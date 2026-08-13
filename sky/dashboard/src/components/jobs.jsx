@@ -411,7 +411,6 @@ export function ManagedJobs() {
 
   const updateFiltersByURLParams = React.useCallback(() => {
     const propertyMap = new Map();
-    propertyMap.set('', '');
     propertyMap.set('id', 'ID');
     propertyMap.set('status', 'Status');
     propertyMap.set('name', 'Name');
