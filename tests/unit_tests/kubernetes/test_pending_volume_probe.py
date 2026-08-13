@@ -19,8 +19,21 @@ from sky.provision.kubernetes import instance
 _PODS_CREATED_AT = datetime.datetime(2026, 1, 1, tzinfo=datetime.timezone.utc)
 _CLOCK_START = 1000.0
 _GRACE = instance._PVC_FAILURE_GRACE_SECONDS
-_CSI_MESSAGE = ('failed to provision volume with StorageClass "fast": rpc '
-                'error: code = InvalidArgument desc = tier is invalid')
+# Verbatim from a GKE Filestore claim whose storage class named a tier that does
+# not exist. InvalidArgument is what sig-storage's provisioner library calls an
+# infeasible error, and it says so in the message itself.
+_CSI_MESSAGE = (
+    'Volume provisioning failed with infeasible error. Retries will be '
+    'delayed. rpc error: code = InvalidArgument desc = Invalid value at '
+    "'instance.tier' \"not-a-real-tier\", invalid")
+# Verbatim from a claim that went on to bind: the driver's own call timed out
+# while the filesystem was still being created.
+_CSI_IN_PROGRESS_MESSAGE = ('rpc error: code = DeadlineExceeded desc = Volume '
+                            'pvc-6ae55004 not ready, current state: CREATING')
+# A failure with no gRPC code to go on, e.g. from a provisioner that does not
+# report one. All that can be said about it is how long it lasts.
+_OPAQUE_MESSAGE = ('failed to provision volume with StorageClass "slow": the '
+                   'provisioner is unhappy')
 
 
 def _at(offset: float) -> datetime.datetime:
@@ -100,10 +113,17 @@ class _Cluster:
         self.events[pvc_name] = list(events)
         self._failing_from.pop(pvc_name, None)
 
-    def keep_failing(self, pvc_name, since: float = 5):
-        """A provisioner that reports the same failure on every retry."""
+    def keep_failing(self,
+                     pvc_name,
+                     since: float = 5,
+                     message: str = _OPAQUE_MESSAGE):
+        """A provisioner that reports the same failure on every retry.
+
+        Defaults to a failure carrying no gRPC code, since that is the case
+        where all the probe has to go on is how long it persists.
+        """
         self.phases[pvc_name] = 'Pending'
-        self._failing_from[pvc_name] = since
+        self._failing_from[pvc_name] = (since, message)
 
     def stop_failing(self, pvc_name):
         """The failure stops being re-reported -- but stays visible for an hour,
@@ -114,14 +134,15 @@ class _Cluster:
         self.clock += seconds
 
     def _events_for(self, pvc_name):
-        failing_from = self._failing_from.get(pvc_name)
-        if failing_from is None:
+        failing = self._failing_from.get(pvc_name)
+        if failing is None:
             return self.events.get(pvc_name, [])
+        since, message = failing
         return [
             _event('ProvisioningFailed',
-                   _CSI_MESSAGE,
-                   first=failing_from,
-                   last=max(failing_from, self.elapsed))
+                   message,
+                   first=since,
+                   last=max(since, self.elapsed))
         ]
 
     def read_pvc(self, name, namespace, **kwargs):
@@ -172,7 +193,7 @@ class TestGetPendingPvcs:
 
         assert len(pending) == 1
         assert pending[0].failure is not None
-        assert 'tier is invalid' in pending[0].detail
+        assert "instance.tier" in pending[0].detail
         assert 'vol' in pending[0].detail
 
     def test_one_report_spans_no_time(self, cluster):
@@ -217,7 +238,7 @@ class TestGetPendingPvcs:
 
         assert pending[0].failure is None
         # Still reported: it is the best explanation available for the wait.
-        assert 'tier is invalid' in pending[0].detail
+        assert "instance.tier" in pending[0].detail
 
     def test_without_an_anchor_any_failure_counts(self, cluster):
         """What the post-timeout path wants: by then nothing is going to bind
@@ -263,7 +284,7 @@ class TestGetPendingPvcs:
                    first=10),
         ])
 
-        assert 'tier is invalid' in self._pending(cluster)[0].detail
+        assert "instance.tier" in self._pending(cluster)[0].detail
 
     def test_an_event_written_through_the_newer_api_still_spans(self, cluster):
         """events.k8s.io records the same two facts under other names. Reading
@@ -322,13 +343,48 @@ class TestPendingVolumeProbe:
         assert probe.probe([_pod(['vol'])]) is None
         assert cluster.pvc_reads == 0
 
-    def test_a_failure_reported_once_never_fails_the_launch(self, cluster):
+    def test_a_backend_that_rejects_the_request_fails_the_launch_at_once(
+            self, cluster):
+        """Nothing is learned by waiting: the size, the tier or the source has
+        to change before this claim can bind."""
+        cluster.keep_failing('vol', message=_CSI_MESSAGE)
+        probe = self._probe()
+        self._step(cluster)
+
+        with pytest.raises(config_lib.KubernetesError) as exc:
+            probe.probe([_pod(['vol'])])
+
+        assert cluster.elapsed < _GRACE, 'should not have waited'
+        assert 'vol' in str(exc.value)
+        assert "'instance.tier'" in str(exc.value)
+        assert 'kubectl describe pvc vol' in str(exc.value)
+
+    def test_a_call_that_may_still_be_running_never_fails_the_launch(
+            self, cluster):
+        """What GKE Filestore reports for minutes on the way to a healthy
+        volume: the driver's own call timed out while the filesystem was still
+        being created. Failing on it would kill a launch that was going to
+        work."""
+        cluster.keep_failing('vol', message=_CSI_IN_PROGRESS_MESSAGE)
+        probe = self._probe()
+        pods = [_pod(['vol'])]
+
+        message = None
+        while cluster.elapsed < _GRACE * 2:
+            self._step(cluster)
+            message = probe.probe(pods)
+
+        assert message is not None
+        assert 'vol' in message
+
+    def test_an_unclassified_failure_reported_once_never_fails_the_launch(
+            self, cluster):
         """The case the grace period exists for, and the one a wall-clock
-        version of it gets wrong: one transient ProvisioningFailed at the start,
-        then a provisioner quietly taking minutes to finish. The event stays
-        visible throughout, so looking at it repeatedly proves nothing."""
+        version of it gets wrong: one failure at the start, then a provisioner
+        quietly taking minutes to finish. The event stays visible throughout, so
+        looking at it repeatedly proves nothing."""
         cluster.set('vol', 'Pending',
-                    [_event('ProvisioningFailed', _CSI_MESSAGE, first=5)])
+                    [_event('ProvisioningFailed', _OPAQUE_MESSAGE, first=5)])
         probe = self._probe()
         pods = [_pod(['vol'])]
 
@@ -340,7 +396,7 @@ class TestPendingVolumeProbe:
         assert message is not None
         assert 'vol' in message
 
-    def test_a_failure_that_keeps_being_reported_fails_the_launch(
+    def test_an_unclassified_failure_that_persists_fails_the_launch(
             self, cluster):
         cluster.keep_failing('vol', since=5)
         probe = self._probe()
@@ -353,10 +409,9 @@ class TestPendingVolumeProbe:
 
         assert cluster.elapsed >= _GRACE
         assert 'vol' in str(exc.value)
-        assert 'tier is invalid' in str(exc.value)
-        assert 'kubectl describe pvc vol' in str(exc.value)
+        assert 'provisioner is unhappy' in str(exc.value)
 
-    def test_a_failure_that_stops_being_reported_does_not_fail_the_launch(
+    def test_an_unclassified_failure_that_stops_does_not_fail_the_launch(
             self, cluster):
         """It failed for a while, then the provisioner got on with it. The
         event's span stops growing even though the event is still there."""
@@ -370,7 +425,7 @@ class TestPendingVolumeProbe:
         cluster.stop_failing('vol')
         cluster.set('vol', 'Pending', [
             _event('ProvisioningFailed',
-                   _CSI_MESSAGE,
+                   _OPAQUE_MESSAGE,
                    first=5,
                    last=cluster.elapsed)
         ])
@@ -490,7 +545,7 @@ class TestSchedulingLoopFailsOnABrokenVolume:
     def _harness(self, monkeypatch, cluster):
         self.cluster = cluster
         self.pod = _pod(['vol'])
-        cluster.keep_failing('vol', since=5)
+        cluster.keep_failing('vol', since=5, message=_CSI_MESSAGE)
 
         core_api = mock.MagicMock()
         core_api.list_namespaced_pod.return_value = mock.MagicMock(
@@ -535,7 +590,7 @@ class TestSchedulingLoopFailsOnABrokenVolume:
         with pytest.raises(config_lib.KubernetesError) as exc:
             self._wait()
 
-        assert 'tier is invalid' in str(exc.value)
+        assert "instance.tier" in str(exc.value)
         assert 'timed-out' not in str(exc.value)
 
     def test_the_hold_on_a_scaling_cluster_expires(self, monkeypatch):
@@ -553,7 +608,7 @@ class TestSchedulingLoopFailsOnABrokenVolume:
         with pytest.raises(config_lib.KubernetesError) as exc:
             self._wait()
 
-        assert 'tier is invalid' in str(exc.value)
+        assert "instance.tier" in str(exc.value)
         assert (self.cluster.elapsed >=
                 instance._AUTOSCALE_DETECTED_TIMEOUT_SECONDS)
 

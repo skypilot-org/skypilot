@@ -121,24 +121,24 @@ _MOUNT_FAILURE_TIMEOUT_SECONDS = 600
 # normal case, not a signal.
 _PVC_PROBE_INITIAL_DELAY_SECONDS = 10
 _PVC_PROBE_INTERVAL_SECONDS = 15
-# How long a claim's own events must span before provisioning is failed. A CSI
-# provisioner emits ProvisioningFailed for transient reasons too -- a driver
-# still starting on a freshly scaled-up node (which alone can take a minute or
-# more), a cloud API rate limit, a concurrent operation on the same volume --
-# and then retries successfully, so one report proves nothing. 300s is
-# external-provisioner's default maximum retry interval, i.e. a full backoff
-# cycle spent failing.
+# How long a claim's own events must span before provisioning is failed, when
+# the failure cannot be classified (see volume.classify_pvc_failure). A failure
+# the storage backend reports by gRPC code is judged on the code instead, and
+# needs no waiting: this is the fallback for a provisioner that reports
+# something else, where all we have to go on is that it keeps saying it.
 #
 # Measured over the events (see FailureWindow), not over how long we have been
 # watching them: a single warning stays visible for an hour, so a claim that
 # failed once and is now being provisioned normally would otherwise look
 # indistinguishable from one that has been failing throughout.
 #
-# The consequence is that this only pre-empts a provision_timeout longer than
-# 300s -- a queue admission controller's 24h, or flex start's 1200-2400s. The
-# 180-240s a ReadWriteMany volume gets already reports the same error, by the
-# same formatter, when it expires.
-_PVC_FAILURE_GRACE_SECONDS = 300
+# An hour is deliberately far longer than any provisioning that is going to
+# succeed, because getting this wrong fails a launch whose volume was fine. It
+# is therefore only ever reached by a provision_timeout longer than an hour --
+# in practice a queue admission controller's 24h, or one set by hand. Shorter
+# timeouts expire first and report the same claim through the same formatter,
+# which is the behaviour that predates this check.
+_PVC_FAILURE_GRACE_SECONDS = 3600
 
 # Pattern to extract SSH user from command output, handling MOTD contamination
 _SSH_USER_PATTERN = re.compile(r'SKYPILOT_SSH_USER: ([^\s\n]+)')
@@ -343,8 +343,13 @@ class PendingPvc(NamedTuple):
     # '<name> (phase: Pending)', plus ' - <reason>: <message>' when an event
     # explains it.
     detail: str
-    # When the claim reported a failure, or None if nothing has: a provisioner
-    # is still working, or a WaitForFirstConsumer claim is waiting for its pod.
+    # Whether the storage backend has reported something that cannot succeed
+    # however long it is retried, e.g. a size its API rejects.
+    terminal: bool
+    # When the claim reported a failure that might yet be one, or None if
+    # nothing has: nothing is wrong, or what is wrong may still resolve. Only
+    # meaningful while `terminal` is False, and only as a fallback for failures
+    # the gRPC code does not classify.
     failure: Optional[FailureWindow]
 
 
@@ -423,14 +428,15 @@ def _get_pending_pvcs(
                                                             reverse=False)
             event_messages = []
             warning_messages = []
+            terminal = False
             failure: Optional[FailureWindow] = None
             for event in sorted_events:
                 is_failure = event.type == 'Warning'
-                # 'WaitForFirstConsumer' is a Normal event and the expected
-                # state of a WaitForFirstConsumer claim before its pod is
-                # scheduled; it is reported but is not a failure.
-                if not is_failure and event.reason not in (
-                        'ProvisioningFailed', 'WaitForFirstConsumer'):
+                # The Normal reasons say why a claim is still pending -- which
+                # pod it is waiting for, which provisioner is working on it --
+                # and are worth reporting even though none of them is a failure.
+                if not is_failure and (event.reason
+                                       not in volume.PVC_PENDING_EVENT_REASONS):
                     continue
                 msg = event.message or ''
                 if msg:
@@ -444,6 +450,14 @@ def _get_pending_pvcs(
                     continue
                 if msg:
                     warning_messages.append(f'{event.reason}: {msg}')
+                kind = volume.classify_pvc_failure(msg)
+                if kind == volume.PvcFailure.TERMINAL:
+                    terminal = True
+                elif kind == volume.PvcFailure.IN_PROGRESS:
+                    # The call behind it may still be running, so this says
+                    # nothing about whether the claim will bind. Reported, not
+                    # counted.
+                    continue
                 if failure is None:
                     failure = FailureWindow(first=first, last=last)
                 else:
@@ -456,7 +470,10 @@ def _get_pending_pvcs(
             if explanation:
                 pending_info += f' - {explanation[-1]}'
             pending_pvcs.append(
-                PendingPvc(name=pvc_name, detail=pending_info, failure=failure))
+                PendingPvc(name=pvc_name,
+                           detail=pending_info,
+                           terminal=terminal,
+                           failure=failure))
         except Exception as e:  # pylint: disable=broad-except
             logger.debug(f'Failed to get PVC {pvc_name} status: {e}')
             continue
@@ -525,7 +542,9 @@ class _PendingVolumeProbe:
                 waiting really is the right thing to do until the node arrives.
 
         Raises:
-            config_lib.KubernetesError: a claim has been reporting a failure for
+            config_lib.KubernetesError: the storage backend reported something
+                that cannot succeed however long it is retried, or a failure it
+                does not classify has persisted for
                 _PVC_FAILURE_GRACE_SECONDS. This is a provisioning failure, so
                 it can fail over to another region -- unlike a volume already
                 known to be unusable before the launch, which is refused
@@ -555,7 +574,8 @@ class _PendingVolumeProbe:
             # unreadable claim lands here too, so an API server that is erroring
             # intermittently keeps the fast-failure path from ever triggering --
             # which is the right bias, but it does mean it can be starved.
-            if pending is None or pending.failure is None:
+            if pending is None or (not pending.terminal and
+                                   pending.failure is None):
                 self._failures_before.pop(pvc_name, None)
                 continue
             if hold_failures:
@@ -564,16 +584,21 @@ class _PendingVolumeProbe:
                     f'launching {self._cluster_name}, but a node is on '
                     f'its way, so it is being discounted: '
                     f'{pending.detail}')
-                self._failures_before[pvc_name] = pending.failure.last
+                if pending.failure is not None:
+                    self._failures_before[pvc_name] = pending.failure.last
                 continue
-            failing_for = pending.failure.seconds_since(
-                self._failures_before.get(pvc_name, self._pods_created_at))
-            if failing_for < _PVC_FAILURE_GRACE_SECONDS:
-                logger.debug(f'Volume {pvc_name} has been reporting a failure '
-                             f'for {failing_for:.0f}s while launching '
-                             f'{self._cluster_name}; giving it until '
-                             f'{_PVC_FAILURE_GRACE_SECONDS}s: {pending.detail}')
-                continue
+            if not pending.terminal and pending.failure is not None:
+                # Nothing said this cannot succeed, so all there is to go on is
+                # how long it has been saying it.
+                failing_for = pending.failure.seconds_since(
+                    self._failures_before.get(pvc_name, self._pods_created_at))
+                if failing_for < _PVC_FAILURE_GRACE_SECONDS:
+                    logger.debug(
+                        f'Volume {pvc_name} has been reporting an unclassified '
+                        f'failure for {failing_for:.0f}s while launching '
+                        f'{self._cluster_name}; giving it until '
+                        f'{_PVC_FAILURE_GRACE_SECONDS}s: {pending.detail}')
+                    continue
             raise config_lib.KubernetesError(
                 _format_pvc_binding_error(pvc_details=pending.detail,
                                           pvc_names=[pvc_name],
