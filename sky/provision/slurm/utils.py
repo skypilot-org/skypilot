@@ -5,7 +5,7 @@ import os
 import re
 import shlex
 import time
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, Dict, List, NamedTuple, Optional, Tuple, Union
 
 from paramiko.config import SSHConfig
 
@@ -54,6 +54,13 @@ _SLURM_PROCTRACK_TYPE_CACHE_TTL = 24 * 60 * 60
 _SLURM_PYXIS_CHECK_CACHE_TTL = 24 * 60 * 60
 # FUSE availability is unlikely to change frequently.
 _SLURM_FUSE_CHECK_CACHE_TTL = 24 * 60 * 60
+
+
+class SlurmClusterInventory(NamedTuple):
+    """Cluster-wide node, job, and partition inventory."""
+    nodes: List[Dict[str, Any]]
+    jobs: Dict[str, List[slurm.JobGresInfo]]
+    default_partition: Optional[str]
 
 
 def expand_path_vars(path: str, env: Dict[str, str]) -> str:
@@ -1033,6 +1040,22 @@ def _parse_float_or_none(value: Optional[str]) -> Optional[float]:
         return None
 
 
+def _get_slurm_inventory_client(slurm_cluster_name: str) -> 'slurm.SlurmClient':
+    slurm_config = get_slurm_ssh_config()
+    slurm_config_dict = slurm_config.lookup(slurm_cluster_name)
+    logger.debug(f'Slurm config dict: {slurm_config_dict}')
+    return slurm.SlurmClient(
+        slurm_config_dict['hostname'],
+        int(slurm_config_dict.get('port', 22)),
+        slurm_config_dict['user'],
+        get_identity_file(slurm_config_dict),
+        ssh_proxy_command=slurm_config_dict.get('proxycommand', None),
+        ssh_proxy_jump=slurm_config_dict.get('proxyjump', None),
+        identities_only=get_identities_only(slurm_config_dict),
+        slurm_user=None,
+    )
+
+
 def _get_slurm_node_info_list(slurm_cluster_name: str) -> List[Dict[str, Any]]:
     """Gathers detailed information about each node in the Slurm cluster.
 
@@ -1047,42 +1070,26 @@ def _get_slurm_node_info_list(slurm_cluster_name: str) -> List[Dict[str, Any]]:
         exceptions.CommandError: If a Slurm command fails on the cluster, e.g.
             because the login node is unreachable.
     """
-    # 1. Get node state and GRES using sinfo
+    slurm_client = _get_slurm_inventory_client(slurm_cluster_name)
+    node_infos, node_details_by_name = slurm_client.get_node_inventory()
+    return _build_slurm_node_info_list(slurm_cluster_name, slurm_client,
+                                       node_infos, node_details_by_name)
 
-    # can raise FileNotFoundError if config file does not exist.
-    slurm_config = get_slurm_ssh_config()
-    slurm_config_dict = slurm_config.lookup(slurm_cluster_name)
-    logger.debug(f'Slurm config dict: {slurm_config_dict}')
-    slurm_client = slurm.SlurmClient(
-        slurm_config_dict['hostname'],
-        int(slurm_config_dict.get('port', 22)),
-        slurm_config_dict['user'],
-        get_identity_file(slurm_config_dict),
-        ssh_proxy_command=slurm_config_dict.get('proxycommand', None),
-        ssh_proxy_jump=slurm_config_dict.get('proxyjump', None),
-        identities_only=get_identities_only(slurm_config_dict),
-        # The SSH transport identity gives cluster-wide inventory callers one
-        # consistent view of monitoring and capacity data.
-        slurm_user=None,
-    )
-    node_infos = slurm_client.info_nodes()
+
+def _build_slurm_node_info_list(
+    slurm_cluster_name: str,
+    slurm_client: 'slurm.SlurmClient',
+    node_infos: List[slurm.NodeInfo],
+    node_details_by_name: Dict[str, Dict[str, str]],
+    jobs_gres_by_node: Optional[Dict[str, List[str]]] = None,
+) -> List[Dict[str, Any]]:
+    """Build node inventory from cluster-wide Slurm query results."""
 
     if not node_infos:
         logger.warning(
             f'`sinfo -N` returned no output on cluster {slurm_cluster_name}. '
             f'No nodes found?')
         return []
-
-    # Best-effort enrichment with per-node scontrol attributes (CPU/memory
-    # allocation from the scheduler plus actual load/free-memory sampled
-    # by slurmd) — sinfo's format codes cannot express these. A failure
-    # here must not break basic node info.
-    try:
-        node_details_by_name = slurm_client.get_all_node_details()
-    except Exception as e:  # pylint: disable=broad-except
-        logger.debug(f'Could not fetch scontrol node details on cluster '
-                     f'{slurm_cluster_name}: {e}')
-        node_details_by_name = {}
 
     # 2. Process each node, aggregating partitions per node
     slurm_nodes_info: Dict[str, Dict[str, Any]] = {}
@@ -1135,7 +1142,11 @@ def _get_slurm_node_info_list(slurm_cluster_name: str) -> List[Dict[str, Any]]:
             # TODO(zhwu): move to enum
             if state in ('alloc', 'mix', 'drain', 'drng', 'drained', 'resv',
                          'comp'):
-                jobs_gres = _get_all_jobs_gres(slurm_client).get(node_name, [])
+                if jobs_gres_by_node is None:
+                    jobs_gres = _get_all_jobs_gres(slurm_client).get(
+                        node_name, [])
+                else:
+                    jobs_gres = jobs_gres_by_node.get(node_name, [])
                 if jobs_gres:
                     for job_line in jobs_gres:
                         _, job_gpu_count = get_gpu_type_and_count(job_line)
@@ -1198,6 +1209,35 @@ def _get_slurm_node_info_list(slurm_cluster_name: str) -> List[Dict[str, Any]]:
         node_info['partition'] = ','.join(str(p) for p in partitions)
 
     return list(slurm_nodes_info.values())
+
+
+def get_slurm_cluster_inventory(
+        slurm_cluster_name: str) -> SlurmClusterInventory:
+    """Get nodes, running GPU jobs, and the default partition for a cluster.
+
+    The underlying Slurm commands run concurrently in one remote invocation.
+    Node information is required; jobs and partition metadata are best-effort.
+    """
+    slurm_client = _get_slurm_inventory_client(slurm_cluster_name)
+    snapshot = slurm_client.get_inventory_snapshot()
+    jobs_gres_by_node: Optional[Dict[str, List[str]]] = None
+    if snapshot.jobs is not None:
+        jobs_gres_by_node = {
+            node_name: [job.gres_str for job in jobs
+                       ] for node_name, jobs in snapshot.jobs.items()
+        }
+    nodes = _build_slurm_node_info_list(slurm_cluster_name, slurm_client,
+                                        snapshot.node_infos,
+                                        snapshot.node_details,
+                                        jobs_gres_by_node)
+    default_partition = None
+    if snapshot.partitions is not None:
+        default_partition = next((partition.name
+                                  for partition in snapshot.partitions
+                                  if partition.is_default), None)
+    return SlurmClusterInventory(nodes=nodes,
+                                 jobs=snapshot.jobs or {},
+                                 default_partition=default_partition)
 
 
 def slurm_cluster_names() -> List[str]:
