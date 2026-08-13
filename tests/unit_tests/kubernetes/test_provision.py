@@ -3075,6 +3075,79 @@ class TestGetPodPendingReasonTieredEventFilter:
             'ctx', 'ns',
             'p') == ('FailedMount', 'Unable to attach or mount volumes')
 
+    def test_warning_from_before_the_bind_is_dropped(self, monkeypatch):
+        """The autoscaler case with nothing to overtake it: the pod carries a
+        FailedScheduling for the event TTL and no allow-listed Normal follows
+        (image already cached, a slow volume attach that emits nothing yet).
+        Everything this function observes happens after the bind, so a Warning
+        older than the Scheduled event cannot describe the pod now."""
+        events = [
+            self._event('Scheduled',
+                        'Normal',
+                        'Successfully assigned ns/p to node-1',
+                        last_observed=2000),
+            self._event('FailedScheduling',
+                        'Warning',
+                        '0/3 nodes are available: insufficient cpu.',
+                        last_observed=1000),
+        ]
+        self._patch_events(monkeypatch, events)
+        assert instance._get_pod_pending_reason('ctx', 'ns', 'p') is None
+
+    def test_warning_after_the_bind_is_kept(self, monkeypatch):
+        """The kubelet's own warnings all postdate the bind and must survive
+        the same check."""
+        events = [
+            self._event('FailedCreatePodSandBox',
+                        'Warning',
+                        'plugin not initialized',
+                        last_observed=3000),
+            self._event('Scheduled',
+                        'Normal',
+                        'Successfully assigned ns/p to node-1',
+                        last_observed=2000),
+        ]
+        self._patch_events(monkeypatch, events)
+        assert instance._get_pod_pending_reason(
+            'ctx', 'ns',
+            'p') == ('FailedCreatePodSandBox', 'plugin not initialized')
+
+    def test_a_pre_bind_warning_does_not_hide_a_live_one(self, monkeypatch):
+        """Dropping the stale Warning must fall through to the next Warning,
+        not abandon the tier."""
+        events = [
+            self._event('FailedMount',
+                        'Warning',
+                        'Unable to attach or mount volumes',
+                        last_observed=3000),
+            self._event('Scheduled',
+                        'Normal',
+                        'Successfully assigned ns/p to node-1',
+                        last_observed=2000),
+            self._event('FailedScheduling',
+                        'Warning',
+                        'insufficient cpu',
+                        last_observed=1000),
+        ]
+        self._patch_events(monkeypatch, events)
+        assert instance._get_pod_pending_reason(
+            'ctx', 'ns',
+            'p') == ('FailedMount', 'Unable to attach or mount volumes')
+
+    def test_no_scheduled_event_leaves_warnings_alone(self, monkeypatch):
+        """Once the Scheduled event ages out of the window every pre-bind
+        Warning has aged out ahead of it, so there is nothing to demote."""
+        events = [
+            self._event('FailedMount',
+                        'Warning',
+                        'Unable to attach or mount volumes',
+                        last_observed=1000),
+        ]
+        self._patch_events(monkeypatch, events)
+        assert instance._get_pod_pending_reason(
+            'ctx', 'ns',
+            'p') == ('FailedMount', 'Unable to attach or mount volumes')
+
     def test_undated_warning_is_never_treated_as_stale(self, monkeypatch):
         """Only a Warning that can be shown to be older than the Normal loses.
         An event the API server left undated cannot be, so it keeps winning."""
@@ -3543,7 +3616,7 @@ class TestStallExemptionHelpers:
         'WaitForFirstConsumer',
         'container creation',
         "init container 'setup' running (1/2)",
-        'init container running',
+        "init container 'setup' starting (1/2)",
     ])
     def test_exempt_reasons(self, reason):
         assert instance._reason_is_exempt_from_stall(reason)
@@ -3555,9 +3628,21 @@ class TestStallExemptionHelpers:
         'FailedCreatePodSandBox',
         'CrashLoopBackOff',
         'OOMKilled',
+        'pod initialization',
     ])
     def test_non_exempt_reasons(self, reason):
         assert not instance._reason_is_exempt_from_stall(reason)
+
+    def test_pod_initialization_is_not_exempt(self):
+        """'PodInitializing' with no init container running or being created
+        means the init phase is done and the kubelet has not moved on. There is
+        no legitimately-slow work behind it, so it must not be exempt -- it was
+        previously labelled 'init container running' and swept up by the
+        prefix match, which left that hang unbounded."""
+        assert not instance._reason_is_exempt_from_stall(
+            instance._POD_INITIALIZATION_REASON)
+        assert not instance._POD_INITIALIZATION_REASON.startswith(
+            instance._INIT_CONTAINER_REASON_PREFIX)
 
     def test_synthetic_reasons_stay_in_sync_with_the_exemption(self):
         """The exemption matches on the literals _inspect_pod_status builds, so
@@ -3588,8 +3673,13 @@ class TestWaitForPodsToRunStallEscalation:
     _EVENT_MSG = 'failed to create pod network sandbox: plugin not initialized'
 
     @staticmethod
-    def _make_pending_pod(*, name='pod-0', initializing=False):
-        """A scheduled pod whose container is still waiting."""
+    def _make_pending_pod(*, name='pod-0', initializing=False, init_done=False):
+        """A scheduled pod whose container is still waiting.
+
+        With initializing=True the pod reports PodInitializing: by default an
+        init container is running, and with init_done=True they have all
+        terminated successfully while the kubelet has not moved on.
+        """
         from sky.provision import constants as prov_constants
         pod = mock.MagicMock()
         pod.metadata.name = name
@@ -3609,9 +3699,14 @@ class TestWaitForPodsToRunStallEscalation:
         if initializing:
             init_status = mock.MagicMock()
             init_status.name = 'setup'
-            init_status.state.terminated = None
-            init_status.state.running = mock.MagicMock()
             init_status.state.waiting = None
+            if init_done:
+                init_status.state.terminated = mock.MagicMock(exit_code=0,
+                                                              message=None)
+                init_status.state.running = None
+            else:
+                init_status.state.terminated = None
+                init_status.state.running = mock.MagicMock()
             pod.status.init_container_statuses = [init_status]
         return pod
 
@@ -3760,6 +3855,22 @@ class TestWaitForPodsToRunStallEscalation:
                        pending_reasons=[None],
                        healthy_after=200)
 
+    def test_stuck_after_init_containers_finished_raises(self, monkeypatch):
+        """PodInitializing with every init container already terminated
+        successfully: the init phase is over and the kubelet never started the
+        main containers. Nothing is legitimately slow here, so this must be
+        bounded -- it was previously labelled 'init container running', which
+        the prefix-based exemption swept up, leaving the launch hung forever.
+        """
+        with pytest.raises(config_lib.KubernetesError) as exc_info:
+            self._run_wait(monkeypatch,
+                           pod=self._make_pending_pod(initializing=True,
+                                                      init_done=True),
+                           pending_reasons=[None])
+        msg = str(exc_info.value)
+        assert instance._POD_INITIALIZATION_REASON in msg
+        assert 'pod-0' in msg
+
     def test_no_reason_at_all_raises(self, monkeypatch):
         """A pod that is neither running nor able to say why is the pure
         'infinite Launching spinner' case: no pending reason means no spinner
@@ -3888,14 +3999,23 @@ class TestWaitForPodsToRunMissingPodDiagnosis:
         assert 'pod-0: pod was evicted by taint manager' in msg
         assert 'sky logs --provision cn' in msg
 
-    def test_absence_of_events_is_explained(self, monkeypatch):
-        """The common case for a pod the API server rejected outright: no
-        events at all. Name the pod and say so, rather than only implying it
-        ran and died."""
+    def test_absence_of_a_reason_is_explained(self, monkeypatch):
+        """Name the pod and say a cause could not be derived, rather than only
+        implying it ran and died."""
         msg = self._run(monkeypatch, missing_reason=None)
         assert "['pod-0']" in msg
-        assert 'no events were found' in msg
-        assert 'rejected by the API server' in msg
+        assert 'no cause could be derived from their events' in msg
+        assert 'may have been deleted' in msg
+
+    def test_no_reason_does_not_claim_there_were_no_events(self, monkeypatch):
+        """_get_pod_missing_reason returns None in three situations, and only
+        one of them is 'the pod had no events': it also returns None when the
+        events were all seen on an earlier pass, and when they name no cause it
+        recognises (the common case -- Scheduled/Pulled/Created/Killing). The
+        message must not assert a cause the code never established."""
+        msg = self._run(monkeypatch, missing_reason=None)
+        assert 'no events were found' not in msg
+        assert 'was likely deleted' not in msg
 
 
 class TestCheckInitContainersEnrichedRaise:
@@ -4195,13 +4315,11 @@ class TestInspectPodStatusInitContainerReason:
         assert '(1/1)' in init_logs[0]
         assert 'Pulling' not in init_logs[0]
 
-    def test_pod_initializing_no_running_init_container(self, monkeypatch):
-        """When PodInitializing but no init container is in running state,
-        fall back to generic message."""
-        monkeypatch.setattr(instance, '_get_pod_pending_reason',
-                            lambda *a, **kw: None)
+    @staticmethod
+    def _pod_initializing_with(init_statuses):
+        """A Pending pod whose main container reports PodInitializing."""
 
-        def pending_init(pod):
+        def apply(pod):
             pod.status.phase = 'Pending'
             cs = mock.MagicMock()
             cs.state = mock.MagicMock()
@@ -4210,10 +4328,23 @@ class TestInspectPodStatusInitContainerReason:
             cs.state.terminated = None
             cs.last_state.terminated = None
             pod.status.container_statuses = [cs]
-            pod.status.init_container_statuses = [
-                _make_init_status_with_name(name='init-copy-home',
-                                            terminated_exit_code=0),
-            ]
+            pod.status.init_container_statuses = init_statuses
+
+        return apply
+
+    def test_pod_initializing_no_running_init_container(self, monkeypatch):
+        """PodInitializing with every init container already terminated
+        successfully is not 'an init container is running' -- the init phase is
+        over and the kubelet has not moved on to the main containers. It gets
+        its own reason, which (unlike the init-container ones) is not exempt
+        from the no-progress deadline."""
+        monkeypatch.setattr(instance, '_get_pod_pending_reason',
+                            lambda *a, **kw: None)
+
+        pending_init = self._pod_initializing_with([
+            _make_init_status_with_name(name='init-copy-home',
+                                        terminated_exit_code=0),
+        ])
 
         def running(pod):
             pod.status.phase = 'Running'
@@ -4222,7 +4353,59 @@ class TestInspectPodStatusInitContainerReason:
             ]
 
         results, _ = self._run_wait(monkeypatch, [pending_init, running])
-        assert results[0] == [(False, 'init container running')]
+        assert results[0] == [(False, instance._POD_INITIALIZATION_REASON)]
+        assert not instance._reason_is_exempt_from_stall(results[0][0][1])
+
+    @pytest.mark.parametrize('waiting_reason',
+                             ['ContainerCreating', 'PodInitializing'])
+    def test_init_container_being_created_is_reported_as_starting(
+            self, monkeypatch, waiting_reason):
+        """An init container the kubelet is still creating is most often
+        pulling its own image -- legitimately slow, and distinct from both the
+        running case and the nothing-is-happening case."""
+        monkeypatch.setattr(instance, '_get_pod_pending_reason',
+                            lambda *a, **kw: None)
+
+        pending_init = self._pod_initializing_with([
+            _make_init_status_with_name(name='init-setup-ssh',
+                                        terminated_exit_code=0),
+            _make_init_status_with_name(name='init-copy-home',
+                                        waiting_reason=waiting_reason),
+        ])
+
+        def running(pod):
+            pod.status.phase = 'Running'
+            pod.status.container_statuses = [
+                self._make_running_container_status()
+            ]
+
+        results, _ = self._run_wait(monkeypatch, [pending_init, running])
+        reason = results[0][0][1]
+        assert reason == "init container 'init-copy-home' starting (2/2)"
+        assert instance._reason_is_exempt_from_stall(reason)
+
+    def test_running_init_container_outranks_one_being_created(
+            self, monkeypatch):
+        """With a sidecar running and a later init container being created,
+        the running one is what the pod is waiting on."""
+        monkeypatch.setattr(instance, '_get_pod_pending_reason',
+                            lambda *a, **kw: None)
+
+        pending_init = self._pod_initializing_with([
+            _make_init_status_with_name(name='init-copy-home',
+                                        waiting_reason='ContainerCreating'),
+            _make_init_status_with_name(name='init-sidecar', running=True),
+        ])
+
+        def running(pod):
+            pod.status.phase = 'Running'
+            pod.status.container_statuses = [
+                self._make_running_container_status()
+            ]
+
+        results, _ = self._run_wait(monkeypatch, [pending_init, running])
+        assert results[0] == [(False,
+                               "init container 'init-sidecar' running (2/2)")]
 
     def test_pod_initializing_multiple_init_containers(self, monkeypatch):
         """With multiple init containers, report the currently running one."""

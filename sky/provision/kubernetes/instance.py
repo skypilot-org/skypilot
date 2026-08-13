@@ -5,8 +5,8 @@ import json
 import re
 import sys
 import time
-from typing import (Any, Callable, Dict, List, Mapping, Optional, Set, Tuple,
-                    TYPE_CHECKING, Union)
+from typing import (Any, Callable, Dict, List, Mapping, NamedTuple, Optional,
+                    Set, Tuple, TYPE_CHECKING, Union)
 
 from sky import exceptions
 from sky import global_user_state
@@ -113,19 +113,33 @@ _MOUNT_FAILURE_EVENT_REASONS = ('FailedMount', 'FailedAttachVolume')
 # deadline they would hang provisioning forever with only a spinner update.
 _MOUNT_FAILURE_TIMEOUT_SECONDS = 600
 
+# Reason of the Normal event the scheduler emits when it binds a pod to a node
+# ('Successfully assigned <ns>/<pod> to <node>'). Marks the boundary between
+# the scheduler's warnings and the kubelet's.
+_POD_BOUND_EVENT_REASON = 'Scheduled'
+
 # Synthetic pending reason used when a pod is bound to a node but the kubelet
 # has not reported anything yet (the uninformative 'ContainerCreating' waiting
 # state with no event).
 _CONTAINER_CREATION_REASON = 'container creation'
-# Prefix of the synthetic pending reasons describing a running init container.
+# Prefix of the synthetic pending reasons describing an init container that is
+# running, or that the kubelet is still creating.
 _INIT_CONTAINER_REASON_PREFIX = 'init container '
+# Synthetic pending reason for a pod that reports 'PodInitializing' while no
+# init container is running or being created -- i.e. they have all terminated
+# successfully and the kubelet has not moved on to the main containers. Kept
+# distinct from the reasons above precisely so it is *not* stall-exempt: there
+# is no legitimately-slow work behind it to wait for.
+_POD_INITIALIZATION_REASON = 'pod initialization'
 # Pending reasons that can legitimately persist, unchanged, for a very long
 # time, and so must not count towards the no-progress deadline below:
 #   - the allow-listed Normal events (pulling a large image, an external CSI
 #     provisioner creating a volume, a late-binding storage class),
 #   - 'container creation', which is also what a pod reports while pulling an
 #     image whose 'Pulling' event has already aged out of the event window,
-#   - a running init container, which may be doing arbitrary user work.
+#   - a running init container, which may be doing arbitrary user work, and an
+#     init container the kubelet is still creating, which may be pulling a
+#     large image of its own.
 _STALL_EXEMPT_PENDING_REASONS = frozenset(
     _PENDING_REASON_NORMAL_EVENT_ALLOWLIST | {_CONTAINER_CREATION_REASON})
 # How long a pod may keep reporting the same non-exempt pending reason before
@@ -139,6 +153,17 @@ _POD_RUN_STALL_TIMEOUT_SECONDS = 600
 
 # Pattern to extract SSH user from command output, handling MOTD contamination
 _SSH_USER_PATTERN = re.compile(r'SKYPILOT_SSH_USER: ([^\s\n]+)')
+
+
+class _InitContainerProgress(NamedTuple):
+    """The init container currently holding up a pod's initialization."""
+    name: str
+    position: int  # 1-based, for display against `total`.
+    total: int
+    # True if the container is running its own work; False if the kubelet is
+    # still creating it (typically pulling its image).
+    running: bool
+
 
 logger = sky_logging.init_logger(__name__)
 
@@ -959,16 +984,19 @@ def _wait_for_pods_to_run(namespace, context, cluster_name, new_pods):
     # Create a set of pod names we're waiting for
     expected_pod_names = {pod.metadata.name for pod in new_pods}
 
-    def _check_init_containers(pod) -> Optional[Tuple[str, int, int]]:
-        """Check init containers for errors and return running container info.
+    def _check_init_containers(pod) -> Optional[_InitContainerProgress]:
+        """Check init containers for errors and return the one holding up pod
+        initialization.
 
-        Returns (name, 1-based index, total) of the currently running init
-        container, or None if none is running.
+        Returns the first init container that is running, else the first one
+        the kubelet is still creating (pulling its image), else None -- no
+        init container accounts for the pod being uninitialized.
         Raises KubernetesError if any init container failed.
         """
         init_statuses = pod.status.init_container_statuses
         total = len(init_statuses)
-        running_info: Optional[Tuple[str, int, int]] = None
+        running_info: Optional[_InitContainerProgress] = None
+        starting_info: Optional[_InitContainerProgress] = None
         for idx, init_status in enumerate(init_statuses):
             init_terminated = init_status.state.terminated
             if init_terminated:
@@ -980,22 +1008,31 @@ def _wait_for_pods_to_run(namespace, context, cluster_name, new_pods):
                         f'{pod.metadata.name}. Error details: {msg}.')
                 continue
             if (init_status.state.running is not None and running_info is None):
-                running_info = (init_status.name, idx + 1, total)
+                running_info = _InitContainerProgress(init_status.name, idx + 1,
+                                                      total, True)
             init_waiting = init_status.state.waiting
-            if (init_waiting is not None and init_waiting.reason
-                    not in ['ContainerCreating', 'PodInitializing']):
-                # TODO(romilb): There may be more states to check for. Add
-                #  them as needed.
-                msg = init_waiting.message if (
-                    init_waiting.message) else str(init_waiting)
-                unmasked = _unmask_crashloopbackoff_reason(init_status)
-                reason_text = (unmasked if unmasked is not None else
-                               (init_waiting.reason or 'Unknown'))
-                raise config_lib.KubernetesError(
-                    f'Failed to create init container for pod '
-                    f'{pod.metadata.name}. Error details: '
-                    f'{reason_text}: {msg}.')
-        return running_info
+            if init_waiting is not None:
+                if init_waiting.reason in ('ContainerCreating',
+                                           'PodInitializing'):
+                    # The kubelet is creating it -- most often pulling its
+                    # image, which is legitimately slow. Recorded so the
+                    # no-progress deadline does not mistake it for a stall.
+                    if starting_info is None:
+                        starting_info = _InitContainerProgress(
+                            init_status.name, idx + 1, total, False)
+                else:
+                    # TODO(romilb): There may be more states to check for. Add
+                    #  them as needed.
+                    msg = init_waiting.message if (
+                        init_waiting.message) else str(init_waiting)
+                    unmasked = _unmask_crashloopbackoff_reason(init_status)
+                    reason_text = (unmasked if unmasked is not None else
+                                   (init_waiting.reason or 'Unknown'))
+                    raise config_lib.KubernetesError(
+                        f'Failed to create init container for pod '
+                        f'{pod.metadata.name}. Error details: '
+                        f'{reason_text}: {msg}.')
+        return running_info if running_info is not None else starting_info
 
     def _inspect_pod_status(pod):
         # Check if pod is terminated/preempted/failed (unchanged).
@@ -1033,15 +1070,24 @@ def _wait_for_pods_to_run(namespace, context, cluster_name, new_pods):
                     waiting = container_status.state.waiting
                     if waiting is not None:
                         if waiting.reason == 'PodInitializing':
-                            running_init = _check_init_containers(pod)
-                            if running_init is not None:
-                                name, idx, total = running_init
+                            init_progress = _check_init_containers(pod)
+                            if init_progress is not None:
+                                verb = ('running' if init_progress.running else
+                                        'starting')
                                 init_reason = (
-                                    f'{_INIT_CONTAINER_REASON_PREFIX}{name!r} '
-                                    f'running ({idx}/{total})')
+                                    f'{_INIT_CONTAINER_REASON_PREFIX}'
+                                    f'{init_progress.name!r} {verb} '
+                                    f'({init_progress.position}/'
+                                    f'{init_progress.total})')
                             else:
-                                init_reason = (
-                                    f'{_INIT_CONTAINER_REASON_PREFIX}running')
+                                # PodInitializing, yet no init container is
+                                # running or being created -- they have all
+                                # terminated successfully and the kubelet has
+                                # simply not moved on to the main containers.
+                                # Nothing here is legitimately slow, so unlike
+                                # the two branches above this reason is not
+                                # exempt from the no-progress deadline.
+                                init_reason = _POD_INITIALIZATION_REASON
                         elif waiting.reason != 'ContainerCreating':
                             msg = waiting.message if (
                                 waiting.message) else str(waiting)
@@ -1180,11 +1226,16 @@ def _wait_for_pods_to_run(namespace, context, cluster_name, new_pods):
                 if missing_pod_reasons:
                     missing_detail = '; '.join(missing_pod_reasons)
                 else:
+                    # A reason of None does not mean the pod had no events:
+                    # _get_pod_missing_reason also returns None when the events
+                    # were all seen on an earlier pass, and when they simply do
+                    # not name one of the causes it recognises. Say only what
+                    # was established -- that no cause could be derived.
                     missing_detail = (
                         f'{sorted(missing_pod_names)} may have been terminated '
-                        'or failed unexpectedly, and no events were found for '
-                        'them — the pod was likely deleted, or rejected by the '
-                        'API server before it started')
+                        'or failed unexpectedly, and no cause could be derived '
+                        'from their events — the pod may have been deleted, or '
+                        'rejected by the API server before it started')
                 raise config_lib.KubernetesError(
                     f'Failed to get all pods after {missing_pods_retry} '
                     f'retries: {missing_detail}. Run '
@@ -3198,20 +3249,28 @@ def _get_pod_pending_reason(context: Optional[str], namespace: str,
          _PENDING_REASON_NORMAL_EVENT_ALLOWLIST.
     A Warning beats an allow-listed Normal -- a FailedScheduling Warning is a
     more truthful pending reason than a Pulling Normal from a doomed retry --
-    *unless* the Normal was observed more recently, in which case the Warning
-    describes a condition the pod has already moved past. Kubernetes keeps
-    events for the API server's event TTL (~1h), so a resolved Warning outlives
-    the condition that produced it by a long way: a pod that waited on an
-    autoscaler still carries its FailedScheduling long after it was bound, and
-    a mount that the kubelet retried successfully still carries its FailedMount
-    while the image pull that follows it is under way. Reporting the stale
-    Warning there is not just a mislabeled spinner -- the reason never changes
-    while the pod makes progress, which is exactly what the no-progress
-    deadline in _wait_for_pods_to_run reads as a stall.
+    but only while the Warning still describes the pod. Kubernetes keeps events
+    for the API server's event TTL (~1h), so a resolved Warning outlives the
+    condition that produced it by a long way, and reporting a stale one is not
+    just a mislabeled spinner: the reason then never changes while the pod
+    makes progress, which is exactly what the no-progress deadline in
+    _wait_for_pods_to_run reads as a stall. Two independent checks demote one:
 
-    Timestamp ordering *within* a tier is left to _get_pod_events' newest-first
-    creation order; only the cross-tier choice consults the last-observed time,
-    since that is the only place staleness can mislead.
+      a. A Warning last observed before the pod was bound cannot describe what
+         the kubelet is doing, because every caller of this function observes
+         the pod only after the bind. This covers the pod that waited on an
+         autoscaler and carries a FailedScheduling for the next hour, whether
+         or not any Normal event follows it.
+      b. A Warning observed less recently than the allow-listed Normal has
+         been overtaken by it -- e.g. a mount the kubelet retried successfully,
+         whose FailedMount predates the image pull now under way.
+
+    Both compare last-observed times, not creation times: kubernetes folds a
+    repeated event back into the original object, bumping count/last_timestamp
+    while creation_timestamp stays pinned to the first occurrence. So a live
+    Warning being re-emitted survives both checks, and an event that cannot be
+    dated is never treated as stale. Ordering *within* a tier is left to
+    _get_pod_events' newest-first creation order.
 
     Returns a (reason, message) tuple, or None if neither pass matches.
     """
@@ -3224,18 +3283,32 @@ def _get_pod_pending_reason(context: Optional[str], namespace: str,
     if not pod_events:
         return None
 
+    # (a) The bind, read from the pod's own events. Absent once it has aged
+    # out of the event window -- by which point every pre-bind Warning has
+    # aged out ahead of it, so there is nothing left to demote.
+    bound_at = next((_event_last_observed(e)
+                     for e in pod_events
+                     if e.reason == _POD_BOUND_EVENT_REASON), None)
+
+    def _describes_pod_now(event: Any) -> bool:
+        if bound_at is None:
+            return True
+        observed_at = _event_last_observed(event)
+        return observed_at is None or observed_at >= bound_at
+
     # Tier 2: Warning events.
-    warning = next((e for e in pod_events if e.type == 'Warning'), None)
+    warning = next((
+        e for e in pod_events if e.type == 'Warning' and _describes_pod_now(e)),
+                   None)
     # Tier 3: allow-listed Normal events.
     normal = next((e for e in pod_events
                    if e.reason in _PENDING_REASON_NORMAL_EVENT_ALLOWLIST), None)
 
     chosen = warning if warning is not None else normal
+    # (b) Cross-tier recency.
     if warning is not None and normal is not None:
         warning_at = _event_last_observed(warning)
         normal_at = _event_last_observed(normal)
-        # Fall back to the Warning when either side is undated -- an event the
-        # API server left without any timestamp cannot be shown to be stale.
         if (warning_at is not None and normal_at is not None and
                 normal_at > warning_at):
             chosen = normal
