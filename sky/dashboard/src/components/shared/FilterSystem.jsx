@@ -67,28 +67,30 @@ export const evaluateCondition = (item, filter) => {
   }
 };
 
-// Main filter function
+// Main filter function.
+//
+// Several filters on the same property mean "match any of these" (OR);
+// different properties still narrow each other (AND). AND-ing everything would
+// make two values on one property -- two statuses, two users -- always yield
+// zero rows, and would disagree with the URL, where one key carries a list.
 export const filterData = (data, filters) => {
-  if (filters.length === 0) {
+  if (!filters || filters.length === 0) {
     return data;
   }
 
-  return data.filter((item) => {
-    let result = null;
-
-    for (let i = 0; i < filters.length; i++) {
-      const filter = filters[i];
-      const current = evaluateCondition(item, filter);
-
-      if (result === null) {
-        result = current;
-      } else {
-        result = result && current;
-      }
+  const groups = new Map();
+  for (const filter of filters) {
+    const key = (filter.property || '').toLowerCase();
+    if (!groups.has(key)) {
+      groups.set(key, []);
     }
+    groups.get(key).push(filter);
+  }
+  const grouped = [...groups.values()];
 
-    return result;
-  });
+  return data.filter((item) =>
+    grouped.every((group) => group.some((f) => evaluateCondition(item, f)))
+  );
 };
 
 // URL parameter handling utilities

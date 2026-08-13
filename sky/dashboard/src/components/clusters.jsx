@@ -73,10 +73,8 @@ import cachePreloader from '@/lib/cache-preloader';
 import { ChevronDownIcon, ChevronRightIcon, InfoIcon } from 'lucide-react';
 import yaml from 'js-yaml';
 import { UserDisplay } from '@/components/elements/UserDisplay';
-import {
-  evaluateCondition,
-  updateFiltersByURLParams as sharedUpdateFiltersByURLParams,
-} from '@/components/shared/FilterSystem';
+import { filterData } from '@/components/shared/FilterSystem';
+import { useUrlFilterState } from '@/hooks/useUrlFilterState';
 import { SegmentedToggle } from '@/components/elements/SegmentedToggle';
 import { getCurrentUserInfo } from '@/data/connectors/client';
 import { trackClusterAction, trackFilterUsed } from '@/lib/analytics';
@@ -95,33 +93,55 @@ const CLUSTERS_PAGE_SIZE_STORAGE_KEY = 'skypilot-clusters-page-size';
 //   return cost.toFixed(2);
 // };
 
-// Define filter options for the filter dropdown
-const PROPERTY_OPTIONS = [
+// The filterable properties of this page, declared once. `key` is what the URL
+// carries and what `optionValues` is keyed by; `label` is display only, and is
+// what a chip stores in `filter.property`. Because the dropdown and the URL
+// read the same list, a filter the page offers is always one it can read back.
+export const CLUSTER_FILTER_SCHEMA = [
+  { key: 'status', label: 'Status', kind: 'enum', multi: true },
+  { key: 'cluster', label: 'Cluster', kind: 'text' },
+  { key: 'user', label: 'User', kind: 'text' },
+  { key: 'workspace', label: 'Workspace', kind: 'text' },
+  { key: 'infra', label: 'Infra', kind: 'text' },
+  { key: 'labels', label: 'Labels', kind: 'kv', multi: 'repeat' },
+];
+
+const HISTORY_DAY_OPTIONS = [1, 5, 10, 30];
+
+// Non-filter state that also belongs in a shared link. Anything left at its
+// default stays out of the URL.
+const CLUSTER_VIEW_SCHEMA = [
+  { key: 'owner', default: 'mine' },
   {
-    label: 'Status',
-    value: 'status',
-  },
-  {
-    label: 'Cluster',
-    value: 'cluster',
-  },
-  {
-    label: 'User',
-    value: 'user',
-  },
-  {
-    label: 'Workspace',
-    value: 'workspace',
-  },
-  {
-    label: 'Infra',
-    value: 'infra',
-  },
-  {
-    label: 'Labels',
-    value: 'labels',
+    key: 'history',
+    default: 'off',
+    // Older links carry `history=true` and a separate `historyDays=N`.
+    legacyKeys: ['historyDays'],
+    fromLegacy: (query) => {
+      if (query.history === 'true') {
+        const days = parseInt(query.historyDays, 10);
+        return HISTORY_DAY_OPTIONS.includes(days) ? `${days}d` : '1d';
+      }
+      if (query.history === 'false') {
+        return 'off';
+      }
+      return undefined;
+    },
   },
 ];
+
+const PROPERTY_OPTIONS = CLUSTER_FILTER_SCHEMA.map(({ key, label }) => ({
+  label,
+  value: key,
+}));
+
+// `history` carries the window directly: absent means the history view is off,
+// otherwise `1d` / `5d` / `10d` / `30d`. Replaces the old `history=true` plus
+// `historyDays=N` pair.
+const parseHistory = (value) => {
+  const days = parseInt(String(value ?? '').replace(/d$/, ''), 10);
+  return HISTORY_DAY_OPTIONS.includes(days) ? days : null;
+};
 
 // Helper function to format username for display (reuse from users.jsx)
 const formatUserDisplay = (username, userId) => {
@@ -221,46 +241,20 @@ export function Clusters() {
   const [isVSCodeModalOpen, setIsVSCodeModalOpen] = useState(false);
   const [selectedCluster, setSelectedCluster] = useState(null);
 
-  // Initialize showHistory from URL parameter immediately
-  const getInitialShowHistory = () => {
-    if (typeof window !== 'undefined' && router.isReady) {
-      const historyParam = router.query.history;
-      return historyParam === 'true';
-    }
-    return false;
-  };
+  // Filters and the shareable view state both live in the URL, keyed by name.
+  const { filters, setFilters, view, setView } = useUrlFilterState(
+    CLUSTER_FILTER_SCHEMA,
+    CLUSTER_VIEW_SCHEMA
+  );
 
-  // Initialize historyDays from URL parameter immediately
-  const getInitialHistoryDays = () => {
-    if (typeof window !== 'undefined' && router.isReady) {
-      const daysParam = router.query.historyDays;
-      if (
-        daysParam &&
-        typeof daysParam === 'string' &&
-        ['1', '5', '10', '30'].includes(daysParam)
-      ) {
-        return parseInt(daysParam);
-      }
-    }
-    return 1; // Default to 1 day
-  };
+  const historyDays = parseHistory(view.history) ?? 1;
+  const showHistory = parseHistory(view.history) !== null;
+  const userScope = isOwnerScope(view.owner) ? view.owner : OWNER_SCOPE_MINE;
+  const setUserScope = useCallback(
+    (scope) => setView('owner', scope),
+    [setView]
+  );
 
-  const getInitialUserScope = () => {
-    const owner = router.query.owner;
-    if (
-      typeof window !== 'undefined' &&
-      router.isReady &&
-      isOwnerScope(owner)
-    ) {
-      return owner;
-    }
-    // Fall back to the user's last choice, then to My Clusters.
-    return readStoredOwnerScope() ?? OWNER_SCOPE_MINE;
-  };
-
-  const [showHistory, setShowHistory] = useState(getInitialShowHistory);
-  const [historyDays, setHistoryDays] = useState(getInitialHistoryDays);
-  const [userScope, setUserScope] = useState(getInitialUserScope);
   const [currentUser, setCurrentUser] = useState(null);
   const [authResolved, setAuthResolved] = useState(false);
   // Whether the current scope has any rows; gates the "Showing your
@@ -289,9 +283,10 @@ export function Clusters() {
     return () => {
       cancelled = true;
     };
+    // Runs once on mount; setUserScope is stable via useCallback.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const [filters, setFilters] = useState([]);
   const [optionValues, setOptionValues] = useState({
     status: [],
     cluster: [],
@@ -303,59 +298,40 @@ export function Clusters() {
   const [preloadingComplete, setPreloadingComplete] = useState(false);
   const [lastFetchedTime, setLastFetchedTime] = useState(null);
 
-  // Handle URL query parameters for workspace and user filtering and show history
+  // Owner scope resolution: a deep-linked `?owner=` wins and is persisted like
+  // a manual toggle; otherwise fall back to the user's last choice. An
+  // anonymous server has no "mine" to scope to, so it is always All.
+  const scopeSeeded = useRef(false);
   useEffect(() => {
-    if (router.isReady) {
-      updateFiltersByURLParams();
-
-      // Sync showHistory state with URL if it has changed
-      const historyParam = router.query.history;
-      const expectedState = historyParam === 'true';
-
-      if (showHistory !== expectedState) {
-        setShowHistory(expectedState);
+    if (!router.isReady) {
+      return;
+    }
+    if (authResolved && !currentUser) {
+      if (view.owner !== OWNER_SCOPE_ALL) {
+        setView('owner', OWNER_SCOPE_ALL);
       }
-
-      // Sync historyDays state with URL if it has changed
-      const daysParam = router.query.historyDays;
-      if (
-        daysParam &&
-        typeof daysParam === 'string' &&
-        ['1', '5', '10', '30'].includes(daysParam)
-      ) {
-        const expectedDays = parseInt(daysParam);
-        if (historyDays !== expectedDays) {
-          setHistoryDays(expectedDays);
-        }
-      }
-
-      const isAnonymous = authResolved && !currentUser;
-      const owner = router.query.owner;
-      if (isAnonymous) {
-        if (userScope !== OWNER_SCOPE_ALL) {
-          setUserScope(OWNER_SCOPE_ALL);
-        }
-      } else if (isOwnerScope(owner)) {
-        if (userScope !== owner) {
-          // Go through selectScope so a deep-linked ?owner=... choice is also
-          // persisted to localStorage like a manual toggle.
-          selectScope(owner);
-        } else if (readStoredOwnerScope() !== owner) {
-          // On a fresh load the initial state is already seeded from the URL,
-          // so the branch above never runs; still persist the deep-linked
-          // choice like a manual toggle.
-          writeStoredOwnerScope(owner);
-        }
-      }
+      return;
+    }
+    if (scopeSeeded.current) {
+      return;
+    }
+    scopeSeeded.current = true;
+    const deepLinked = router.query.owner;
+    if (isOwnerScope(deepLinked)) {
+      writeStoredOwnerScope(deepLinked);
+      return;
+    }
+    const stored = readStoredOwnerScope();
+    if (stored && stored !== view.owner) {
+      setView('owner', stored);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     router.isReady,
-    router.query.history,
-    router.query.historyDays,
     router.query.owner,
     authResolved,
     currentUser,
+    view.owner,
   ]);
 
   useEffect(() => {
@@ -428,103 +404,17 @@ export function Clusters() {
     fetchFilterData();
   }, []);
 
-  // Helper function to update URL query parameters
-  const updateURLParams = (filters) => {
-    const query = { ...router.query };
-
-    let properties = [];
-    let operators = [];
-    let values = [];
-
-    filters.map((filter, _index) => {
-      properties.push((filter.property ?? '').toLowerCase());
-      operators.push(filter.operator);
-      values.push(filter.value);
-    });
-
-    query.property = properties;
-    query.operator = operators;
-    query.value = values;
-
-    // Use replace to avoid adding to browser history for filter changes
-    router.replace(
-      {
-        pathname: router.pathname,
-        query,
-      },
-      undefined,
-      { shallow: true }
-    );
-  };
-
-  // Helper function to update show history in URL
-  const updateShowHistoryURL = (showHistoryValue) => {
-    const query = { ...router.query };
-    query.history = showHistoryValue.toString();
-
-    // Use replace to avoid adding to browser history for show history changes
-    router.replace(
-      {
-        pathname: router.pathname,
-        query,
-      },
-      undefined,
-      { shallow: true }
-    );
-  };
-
-  // Helper function to update history days in URL
-  const updateHistoryDaysURL = (historyDaysValue) => {
-    const query = { ...router.query };
-    query.historyDays = historyDaysValue.toString();
-
-    // Use replace to avoid adding to browser history for history days changes
-    router.replace(
-      {
-        pathname: router.pathname,
-        query,
-      },
-      undefined,
-      { shallow: true }
-    );
-  };
-
-  const updateFiltersByURLParams = () => {
-    if (router.query.property === undefined) {
-      return;
-    }
-    // Keys match PROPERTY_OPTIONS above; a URL naming anything else is dropped
-    // by the shared decoder.
-    const propertyMap = new Map([
-      ['status', 'Status'],
-      ['cluster', 'Cluster'],
-      ['user', 'User'],
-      ['workspace', 'Workspace'],
-      ['infra', 'Infra'],
-      ['labels', 'Labels'],
-    ]);
-
-    setFilters(sharedUpdateFiltersByURLParams(router, propertyMap));
-  };
-
   const selectScope = (scope) => {
-    setUserScope(scope);
+    setView('owner', scope);
     writeStoredOwnerScope(scope);
-    const query = { ...router.query };
-    query.owner = scope;
-    router.replace(
-      {
-        pathname: router.pathname,
-        query,
-      },
-      undefined,
-      { shallow: true }
-    );
   };
 
   const selectHistoryTab = (showHistoryValue) => {
-    setShowHistory(showHistoryValue);
-    updateShowHistoryURL(showHistoryValue);
+    setView('history', showHistoryValue ? `${historyDays}d` : 'off');
+  };
+
+  const selectHistoryDays = (days) => {
+    setView('history', `${days}d`);
   };
 
   const explicitUserFilter = useMemo(
@@ -588,18 +478,13 @@ export function Clusters() {
             propertyList={PROPERTY_OPTIONS}
             valueList={optionValues}
             setFilters={setFilters}
-            updateURLParams={updateURLParams}
             placeholder="Filter clusters"
             filters={filters}
           />
         </div>
       </div>
 
-      <Filters
-        filters={filters}
-        setFilters={setFilters}
-        updateURLParams={updateURLParams}
-      />
+      <Filters filters={filters} setFilters={setFilters} />
 
       {/* Toggles live on their own row (mirrors the Managed Jobs layout) so
           they read consistently across pages and stay clear of the search
@@ -660,11 +545,7 @@ export function Clusters() {
           {showHistory && (
             <Select
               value={historyDays.toString()}
-              onValueChange={(value) => {
-                const newDays = parseInt(value);
-                setHistoryDays(newDays);
-                updateHistoryDaysURL(newDays);
-              }}
+              onValueChange={(value) => selectHistoryDays(parseInt(value))}
             >
               <SelectTrigger className="w-24 h-8 text-xs">
                 <SelectValue />
@@ -921,30 +802,6 @@ export function ClusterTable({
   // For server-side pagination, data is already paginated, so we apply filters/sort to hookData
   // For client-side pagination, we apply filters/sort to allData, then paginate
   const sortedData = React.useMemo(() => {
-    // Main filter function
-    const filterData = (data, filters) => {
-      if (filters.length === 0) {
-        return data;
-      }
-
-      return data.filter((item) => {
-        let result = null;
-
-        for (let i = 0; i < filters.length; i++) {
-          const filter = filters[i];
-          const current = evaluateCondition(item, filter);
-
-          if (result === null) {
-            result = current;
-          } else {
-            result = result && current;
-          }
-        }
-
-        return result;
-      });
-    };
-
     // For server-side pagination, server already handles filtering - just apply sorting
     // For client-side pagination, we filter/sort the full data then paginate.
     // The current-user ("My Clusters") scope is applied server-side via the
@@ -1634,7 +1491,6 @@ const FilterDropdown = ({
   propertyList = [],
   valueList,
   setFilters,
-  updateURLParams,
   placeholder = 'Filter clusters',
   filters = [],
 }) => {
@@ -1767,7 +1623,6 @@ const FilterDropdown = ({
         },
       ];
 
-      updateURLParams(updatedFilters);
       return updatedFilters;
     });
     setIsOpen(false);
@@ -1787,7 +1642,6 @@ const FilterDropdown = ({
           },
         ];
 
-        updateURLParams(updatedFilters);
         return updatedFilters;
       });
       setValue('');
@@ -1880,21 +1734,14 @@ const FilterDropdown = ({
   );
 };
 
-const Filters = ({ filters = [], setFilters, updateURLParams }) => {
+const Filters = ({ filters = [], setFilters }) => {
   const onRemove = (index) => {
-    setFilters((prevFilters) => {
-      const updatedFilters = prevFilters.filter(
-        (_, _index) => _index !== index
-      );
-
-      updateURLParams(updatedFilters);
-
-      return updatedFilters;
-    });
+    setFilters((prevFilters) =>
+      prevFilters.filter((_, _index) => _index !== index)
+    );
   };
 
   const clearFilters = () => {
-    updateURLParams([]);
     setFilters([]);
   };
 
