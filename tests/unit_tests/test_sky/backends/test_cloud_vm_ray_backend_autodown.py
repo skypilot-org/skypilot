@@ -517,8 +517,8 @@ def test_rejected_replacement_restores_predecessor_when_status_read_fails(
 
     restored = global_user_state.get_autodown_intent('cluster')
     assert restored is not None
-    assert dataclasses.replace(
-        restored, updated_at=predecessor.updated_at) == predecessor
+    assert dataclasses.replace(restored,
+                               updated_at=predecessor.updated_at) == predecessor
 
 
 @pytest.mark.usefixtures('fresh_state_db')
