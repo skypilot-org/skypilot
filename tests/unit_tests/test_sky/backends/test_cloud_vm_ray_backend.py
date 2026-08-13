@@ -407,6 +407,9 @@ class TestCloudVmRayBackendGetGrpcChannel:
         try:
             # Different processes have different handle instances.
             handle = CloudVmRayResourceHandle(**self.MOCK_HANDLE_KWARGS)
+            grpc_module = MagicMock()
+            grpc_module.insecure_channel.side_effect = (
+                lambda address, options: address)
 
             def mock_get_tunnel_side_effect():
                 # Return None if the tunnel is not created yet.
@@ -430,7 +433,7 @@ class TestCloudVmRayBackendGetGrpcChannel:
 
             with patch.object(handle, '_get_skylet_ssh_tunnel', side_effect=mock_get_tunnel_side_effect), \
                 patch.object(handle, '_open_and_update_skylet_tunnel', side_effect=mock_open_tunnel), \
-                patch('grpc.insecure_channel', side_effect=lambda addr, options: addr), \
+                patch.object(cloud_vm_ray_backend, 'grpc', grpc_module), \
                 patch('socket.socket') as mock_socket:
 
                 mock_socket.return_value.__enter__.return_value.connect.side_effect = socket_connect_side_effect
@@ -450,6 +453,32 @@ class TestCloudVmRayBackendGetGrpcChannel:
         if port == self.INITIAL_TUNNEL_PORT:
             raise socket.error("Connection error")
         return None
+
+    def test_get_grpc_channel_rechecks_tunnel_after_acquiring_lock(self):
+        """Reuse a tunnel another process published before the lock was held."""
+        handle = CloudVmRayResourceHandle(**self.MOCK_HANDLE_KWARGS)
+        existing_tunnel = SSHTunnelInfo(port=self.INITIAL_TUNNEL_PORT,
+                                        pid=self.INITIAL_TUNNEL_PID)
+        exclusive_lock = MagicMock()
+        grpc_module = MagicMock()
+        grpc_module.insecure_channel.side_effect = (
+            lambda address, options: address)
+
+        with patch.object(handle,
+                          '_get_skylet_ssh_tunnel',
+                          side_effect=[None, existing_tunnel]), \
+                patch.object(handle, '_open_and_update_skylet_tunnel') as open_tunnel, \
+                patch.object(cloud_vm_ray_backend,
+                             '_is_tunnel_healthy',
+                             return_value=True), \
+                patch.object(cloud_vm_ray_backend.locks,
+                             'get_lock',
+                             return_value=exclusive_lock), \
+                patch.object(cloud_vm_ray_backend, 'grpc', grpc_module):
+            assert handle.get_grpc_channel(
+            ) == f'localhost:{self.INITIAL_TUNNEL_PORT}'
+
+        open_tunnel.assert_not_called()
 
     def test_get_grpc_channel_multiprocess_race_condition(self):
         """Test get_grpc_channel with multiple processes racing for tunnel creation."""
