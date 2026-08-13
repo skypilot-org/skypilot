@@ -7,12 +7,13 @@ not the full daemon loop:
   (probes the underlying PG session) and any other ``DistributedLock``
   (trusts the local ``is_locked`` flag).
 * ``_step_down_on_lock_loss`` hands leadership over *without* killing the
-  API server process: it gates controller starts, stops the job
-  controllers this replica owns and confirms they are gone, and replaces
-  the lock object so the next acquire is real.
+  API server process in the common case: it stops the job controllers
+  this replica owns, confirms they are gone, and replaces the lock object
+  so the next acquire is real. When it *cannot* confirm they are gone it
+  falls back to exiting the process, because declining to lead does not
+  stop another replica from re-adopting those jobs.
 * the outer ``run`` loop re-contends after a clean step-down, and stops
-  only when the step-down could not prove this replica's controllers are
-  gone (contending then could put two controllers on one job).
+  the thread after an unconfirmed one (where the process is exiting).
 * ``start_managed_job_refresh_daemon`` gates on consolidation mode,
   preserving the historical ``should_skip_managed_job_status_refresh``
   semantics now that the daemon no longer lives in
@@ -90,12 +91,12 @@ class TestStepDownOnLockLoss:
             assert thread._step_down_on_lock_loss() is True
         kill_mock.assert_not_called()
 
-    def test_gates_controller_starts_before_draining(self, tmp_path,
-                                                     monkeypatch):
-        """The gate file must exist before we start killing, so an in-flight
-        submit_jobs on another worker process short-circuits
-        maybe_start_controllers instead of spawning a controller we would
-        then orphan."""
+    def test_touches_the_gate_file_before_draining(self, tmp_path, monkeypatch):
+        """The recovery signal file must be in place before we start killing, so
+        the FAILED_CONTROLLER sweep does not run against jobs whose controllers
+        we are in the middle of stopping. (It does not gate controller starts —
+        maybe_start_controllers never reads it; see the comment on step 1 of
+        _step_down_on_lock_loss.)"""
         signal_file = tmp_path / 'restart_signal'
         monkeypatch.setattr(mjrt.constants,
                             'PERSISTENT_RUN_RESTARTING_SIGNAL_FILE',
@@ -122,8 +123,8 @@ class TestStepDownOnLockLoss:
             assert thread._step_down_on_lock_loss() is True
 
         assert signal_file.exists(), (
-            'the gate file must survive the step-down: this replica is no '
-            'longer the leader, so it must not start controllers')
+            'the gate file must survive the step-down; the next leader\'s '
+            'recovery is what unlinks it')
         assert order == ['kill']
 
     def test_sigterm_is_enough_when_controllers_exit(self, tmp_path,
@@ -171,10 +172,14 @@ class TestStepDownOnLockLoss:
             assert thread._step_down_on_lock_loss() is True
         assert kill.call_args_list == [mock.call(), mock.call(signal.SIGKILL)]
 
-    def test_refuses_to_lead_again_when_controllers_survive(
-            self, tmp_path, monkeypatch):
-        """An undead controller plus a fresh leadership win on this replica is
-        exactly the two-controllers-on-one-job case, so report failure."""
+    def test_exits_the_process_when_controllers_survive(self, tmp_path,
+                                                        monkeypatch):
+        """An undead controller is the two-controllers-on-one-job case, and
+        merely declining to lead does not prevent it: the new leader on another
+        replica cannot see our survivors (its liveness check is a local psutil
+        lookup) and re-adopts their jobs regardless. Only the process exiting —
+        and the container teardown that follows — reaps them, so fall back to
+        that."""
         monkeypatch.setattr(mjrt.constants,
                             'PERSISTENT_RUN_RESTARTING_SIGNAL_FILE',
                             str(tmp_path / 'restart_signal'))
@@ -189,14 +194,18 @@ class TestStepDownOnLockLoss:
                 mock.patch.object(mjrt.managed_job_utils,
                                   'controller_process_alive',
                                   return_value=True), \
-                mock.patch.object(mjrt.locks, 'get_lock'):
+                mock.patch.object(mjrt.locks, 'get_lock'), \
+                mock.patch('os.kill') as kill_mock, \
+                mock.patch('os.getpid', return_value=4242):
             assert thread._step_down_on_lock_loss() is False
+        kill_mock.assert_called_once_with(4242, signal.SIGTERM)
 
-    def test_unreadable_pid_file_refuses_to_lead_again(self, tmp_path,
-                                                       monkeypatch):
+    def test_exits_the_process_when_pid_file_unreadable(self, tmp_path,
+                                                        monkeypatch):
         """``get_controller_process_records`` returns None when the pid file
-        cannot be read. That is 'unknown', not 'none' — assuming there were no
-        controllers would silently drop the only guarantee this path has."""
+        cannot be read. That is 'unknown', not 'none': we cannot even enumerate
+        our controllers, so nothing is signalled and the process must exit for
+        the teardown to reap whatever is there."""
         monkeypatch.setattr(mjrt.constants,
                             'PERSISTENT_RUN_RESTARTING_SIGNAL_FILE',
                             str(tmp_path / 'restart_signal'))
@@ -206,9 +215,32 @@ class TestStepDownOnLockLoss:
                                return_value=None), \
                 mock.patch.object(mjrt.managed_job_scheduler,
                                   'kill_local_job_controllers') as kill, \
-                mock.patch.object(mjrt.locks, 'get_lock'):
+                mock.patch.object(mjrt.locks, 'get_lock'), \
+                mock.patch('os.kill') as kill_mock, \
+                mock.patch('os.getpid', return_value=4242):
             assert thread._step_down_on_lock_loss() is False
         kill.assert_not_called()
+        kill_mock.assert_called_once_with(4242, signal.SIGTERM)
+
+    def test_clean_drain_does_not_exit_the_process(self, tmp_path, monkeypatch):
+        """The whole point of the change: the common case hands over leadership
+        without costing the replica. Only an unconfirmed drain escalates."""
+        monkeypatch.setattr(mjrt.constants,
+                            'PERSISTENT_RUN_RESTARTING_SIGNAL_FILE',
+                            str(tmp_path / 'restart_signal'))
+        thread = _thread_with_lock()
+        with mock.patch.object(mjrt.managed_job_scheduler,
+                               'get_controller_process_records',
+                               return_value=_records(101)), \
+                mock.patch.object(mjrt.managed_job_scheduler,
+                                  'kill_local_job_controllers'), \
+                mock.patch.object(mjrt.managed_job_utils,
+                                  'controller_process_alive',
+                                  return_value=False), \
+                mock.patch.object(mjrt.locks, 'get_lock'), \
+                mock.patch('os.kill') as kill_mock:
+            assert thread._step_down_on_lock_loss() is True
+        kill_mock.assert_not_called()
 
     def test_replaces_the_lock_object(self, tmp_path, monkeypatch):
         """A release() on a dead connection leaves PostgresLock._acquired True,
@@ -265,7 +297,8 @@ class TestStepDownOnLockLoss:
         with mock.patch.object(mjrt.managed_job_scheduler,
                                'get_controller_process_records',
                                side_effect=RuntimeError('boom')), \
-                mock.patch.object(mjrt.locks, 'get_lock', return_value=fresh):
+                mock.patch.object(mjrt.locks, 'get_lock', return_value=fresh), \
+                mock.patch('os.kill'):
             assert thread._step_down_on_lock_loss() is False
         assert thread._lock is fresh
 

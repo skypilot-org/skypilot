@@ -1,4 +1,5 @@
 """Run the managed-job-status-refresh loop as a thread in the API server."""
+import os
 import pathlib
 import signal
 import threading
@@ -28,13 +29,24 @@ _ACQUIRE_RETRY_INTERVAL_SECONDS = 5
 # is no container teardown afterwards to reap whatever survives a SIGTERM — so
 # we wait for them to actually exit and escalate to SIGKILL.
 #
-# The total budget must stay comfortably below
-# _RECOVERY_WAIT_AFTER_ACQUIRE_SECONDS: that wait is what separates our dying
-# controllers from the new leader's recovery sweep, and the sweep decides a job
-# needs re-adopting by checking whether its controller pid is alive *locally*
-# (see _drain_local_controllers).
-_STEP_DOWN_SIGTERM_GRACE_SECONDS = 5
-_STEP_DOWN_DRAIN_TIMEOUT_SECONDS = 10
+# How this races the new leader's recovery sweep, precisely, because the two
+# clocks do NOT start together: the new leader's
+# _RECOVERY_WAIT_AFTER_ACQUIRE_SECONDS (15s) starts when it ACQUIRES the lock,
+# which it can do the moment our session dies server-side. Our drain starts only
+# once we NOTICE, which on the steady-state path is up to
+# _LOCK_PROBE_INTERVAL_SECONDS (5s) later, and on the exception path (a raise
+# out of _become_leader_and_run) can be arbitrarily later. So the budget below
+# buys margin on the steady-state path only:
+#
+#     5s detection + 6s drain = 11s  <  15s recovery wait
+#
+# It does not make the exception path safe, and it is not the thing the
+# correctness of the step-down rests on. What that rests on is the drain either
+# confirming the controllers are gone or admitting it could not — see
+# _step_down_on_lock_loss, which falls back to exiting the process in the second
+# case rather than assuming the wait covered us.
+_STEP_DOWN_SIGTERM_GRACE_SECONDS = 3
+_STEP_DOWN_DRAIN_TIMEOUT_SECONDS = 6
 _STEP_DOWN_DRAIN_POLL_SECONDS = 0.2
 
 # How long to wait after acquiring the consolidation-mode lock before running
@@ -227,6 +239,19 @@ class ManagedJobRefreshDaemonThread(threading.Thread):
         backstop. So: SIGTERM, wait for exit, escalate to SIGKILL, and report
         whether they are actually gone.
 
+        Load-bearing assumption, recorded because it is easy to break from far
+        away: the recorded pid must be the controller itself, not a shell
+        wrapper. ``launch_new_process_tree`` runs ``nohup bash -c '<export>;
+        <activate>; python -m sky.jobs.controller'`` and records ``$!``, i.e.
+        the bash pid — but bash execs the final simple command of a ``-c``
+        script, so that pid becomes the controller. Verified live: a
+        cmdline-based process count over the leader's pod showed exactly one
+        process per controller (a surviving wrapper would have doubled it) and
+        dropped to zero after this drain. Appending anything after the
+        controller invocation in ``scheduler.py``'s ``run_cmd`` would stop bash
+        exec'ing, and this drain would then start confirming the death of a
+        wrapper while the controller kept running.
+
         Returns True iff no controller recorded for this replica is still alive.
         """
         records = managed_job_scheduler.get_controller_process_records()
@@ -261,16 +286,28 @@ class ManagedJobRefreshDaemonThread(threading.Thread):
         its lock object, and returns to contending for the lock as a follower.
 
         Returns True iff it is safe to contend for leadership again — i.e. we
-        proved our own controllers are gone. If we could not, contending again
-        risks two controllers on one job, so the caller must stop instead.
+        proved our own controllers are gone. If we could not, this exits the
+        process (see below) and returns False so the caller stops the thread.
         """
         assert self._lock is not None
         logger.error(f'Lost consolidation mode lock {self._lock}; stepping '
                      'down to follower')
 
-        # 1. Gate controller starts on this replica for as long as we are not
-        #    the leader. _become_leader_and_run touches this again before its
-        #    next acquire and only unlinks it once its own recovery completes.
+        # 1. Re-touch the recovery signal file, kept for what it actually does
+        #    rather than what the surrounding comments have long claimed. It is
+        #    consulted by update_managed_jobs_statuses (sky/jobs/utils.py) and
+        #    job_lib, NOT by scheduler.maybe_start_controllers — so it does not
+        #    itself gate controller starts. What keeps a non-leader from
+        #    starting controllers in consolidation mode is
+        #    maybe_start_controllers' unconditional early return on the request
+        #    path; the leader's recovery is the only starter. The file's job
+        #    here is to hold off the FAILED_CONTROLLER sweep across the
+        #    handoff, so jobs whose controllers we are about to stop are not
+        #    marked failed for it.
+        #    Note it can be fleet-wide, not replica-local: the HA chart has a
+        #    configuration that mounts the shared state volume at ~/.sky, and
+        #    this path lives directly under it. The next leader's recovery
+        #    unlinks it (in a finally), which bounds the window.
         try:
             signal_file = pathlib.Path(
                 constants.PERSISTENT_RUN_RESTARTING_SIGNAL_FILE).expanduser()
@@ -304,12 +341,30 @@ class ManagedJobRefreshDaemonThread(threading.Thread):
             managed_job_constants.CONSOLIDATION_MODE_LOCK_ID)
 
         if not drained:
+            # Last resort: exit the process, which is what actually closed this
+            # hole before this change.
+            #
+            # Merely declining to lead again is NOT equivalent, and it is worth
+            # being explicit about why. The new leader on another replica
+            # decides a job needs re-adopting from a *local* psutil check
+            # (controller_process_alive), so it cannot see our survivors and
+            # will re-adopt their jobs no matter what we do here — giving that
+            # job a second controller. Staying up only guarantees we do not add
+            # a *third*. The old self-SIGTERM worked because the process exiting
+            # took the container with it, and the teardown reaped whatever had
+            # ignored the signal; so ask for exactly that.
+            #
+            # It also covers the single-replica case (the chart's default
+            # apiService.replicas is 1): there, stopping this thread would leave
+            # nobody running recovery, controller top-ups or the
+            # FAILED_CONTROLLER sweep, with nothing to restart it.
             logger.error(
                 'Step-down could not confirm this replica\'s job controllers '
-                'are gone; refusing to lead again. Controller starts stay '
-                'gated on this replica, so its surviving controllers keep '
-                'their jobs and no second controller is started here, but '
-                'this replica needs a restart to become eligible again')
+                'are gone; exiting so the orchestrator restarts this replica '
+                'and its teardown reaps them. Declining to lead would not be '
+                'enough: another replica cannot see our controllers and will '
+                're-adopt their jobs regardless')
+            os.kill(os.getpid(), signal.SIGTERM)
         else:
             logger.info('Stepped down cleanly; contending for the '
                         'consolidation mode lock again as a follower')
