@@ -110,8 +110,7 @@ def test_rest_create_error_does_not_expose_provider_response_body():
     response.text = 'Authorization: Bearer secret-token'
 
     with patch('sky.provision.runpod.utils._ensure_api_key_configured'), patch(
-            'sky.provision.runpod.utils.requests.post',
-            return_value=response):
+            'sky.provision.runpod.utils.requests.post', return_value=response):
         with pytest.raises(RuntimeError) as exc_info:
             runpod_utils._create_pod_via_rest({'name': 'test-pod'})
 
