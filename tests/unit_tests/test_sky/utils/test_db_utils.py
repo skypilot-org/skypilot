@@ -633,6 +633,43 @@ class TestConnStringResolution:
         assert out == ('postgresql://u:p@127.0.0.1:6432/db'
                        '?application_name=sky&sslmode=disable')
 
+    def test_rewrite_preserves_percent_encoded_values(self):
+        """Surviving params must keep their exact bytes. A parse_qsl +
+        urlencode round trip would rewrite ``options=-c%20search_path%3Dfoo``
+        as ``options=-c+search_path%3Dfoo``, and libpq does not interpret
+        ``+`` as a space in URI query values, so the value would be
+        mangled."""
+        out = db_utils._rewrite_hostport(
+            'postgresql://u:p@10.0.0.5:5432/db'
+            '?options=-c%20search_path%3Dfoo&sslmode=require', '127.0.0.1:6432')
+        assert out == ('postgresql://u:p@127.0.0.1:6432/db'
+                       '?options=-c%20search_path%3Dfoo&sslmode=disable')
+
+    def test_rewrite_preserves_literal_plus(self):
+        """A literal ``+`` in a value must survive as ``+``: parse_qsl
+        decodes it into a space on the way in, so a round trip would not
+        return the original bytes."""
+        out = db_utils._rewrite_hostport(
+            'postgresql://u:p@10.0.0.5:5432/db?application_name=a+b',
+            '127.0.0.1:6432')
+        assert out == ('postgresql://u:p@127.0.0.1:6432/db'
+                       '?application_name=a+b&sslmode=disable')
+
+    def test_rewrite_keeps_bare_key_pair(self):
+        """A bare ``key`` pair (no ``=``) survives byte-for-byte."""
+        out = db_utils._rewrite_hostport(
+            'postgresql://u:p@10.0.0.5:5432/db?keepalives', '127.0.0.1:6432')
+        assert out == ('postgresql://u:p@127.0.0.1:6432/db'
+                       '?keepalives&sslmode=disable')
+
+    def test_rewrite_drops_percent_encoded_ssl_key(self):
+        """libpq percent-decodes URI keywords, so a percent-encoded ssl*
+        key (e.g. ``%73slmode``) must be dropped like its plain form."""
+        out = db_utils._rewrite_hostport(
+            'postgresql://u:p@10.0.0.5:5432/db?%73slmode=require',
+            '127.0.0.1:6432')
+        assert out == 'postgresql://u:p@127.0.0.1:6432/db?sslmode=disable'
+
     def test_rewrite_non_postgres_is_noop(self):
         uri = 'sqlite:////var/lib/sky/state.db'
         assert db_utils._rewrite_hostport(uri, '127.0.0.1:6432') == uri
