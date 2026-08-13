@@ -1,10 +1,12 @@
 """Unit tests for sky.provision.slurm.instance."""
+import asyncio
 from unittest import mock
 
 import pytest
 
 from sky import exceptions
 from sky.provision.slurm import instance
+from sky.utils import status_lib
 
 _CLUSTER = 'test-cluster'
 _PROVIDER_CONFIG = {
@@ -193,3 +195,78 @@ class TestWaitForJobStates:
             255, 'squeue', 'ssh dropped', None)
         assert not instance._wait_for_job_states(
             client, 'job', instance._EXITING_JOB_STATES, timeout=0)
+
+
+class TestQueryInstances:
+    """Test query_instances() missing-job safeguards."""
+
+    def test_retries_missing_job(self, mock_client, monkeypatch):
+        running_queries = 0
+
+        def query_jobs(job_name, state_filters):
+            nonlocal running_queries
+            assert job_name == _CLUSTER
+            if state_filters == ['running']:
+                running_queries += 1
+                if running_queries == 2:
+                    return ['386700']
+            return []
+
+        mock_client.query_jobs.side_effect = query_jobs
+        mock_client.get_job_nodes.return_value = (['node-a'], None)
+        sleep = mock.MagicMock()
+        monkeypatch.setattr(instance.time, 'sleep', sleep)
+
+        result = instance.query_instances(_CLUSTER,
+                                          _CLUSTER,
+                                          provider_config=_PROVIDER_CONFIG,
+                                          retry_if_missing=True)
+
+        assert result == {
+            'job386700-node-a': (status_lib.ClusterStatus.UP, None)
+        }
+        assert running_queries == 2
+        sleep.assert_called_once_with(
+            instance._QUERY_INSTANCES_RETRY_INTERVAL_SECONDS)
+
+    def test_does_not_retry_by_default(self, mock_client, monkeypatch):
+        mock_client.query_jobs.return_value = []
+        sleep = mock.MagicMock()
+        monkeypatch.setattr(instance.time, 'sleep', sleep)
+
+        result = instance.query_instances(_CLUSTER,
+                                          _CLUSTER,
+                                          provider_config=_PROVIDER_CONFIG,
+                                          retry_if_missing=False)
+
+        assert not result
+        assert mock_client.query_jobs.call_count == 7
+        sleep.assert_not_called()
+
+    def test_retry_exhaustion_returns_empty(self, mock_client, monkeypatch):
+        mock_client.query_jobs.return_value = []
+        monkeypatch.setattr(instance.time, 'sleep', mock.MagicMock())
+
+        result = instance.query_instances(_CLUSTER,
+                                          _CLUSTER,
+                                          provider_config=_PROVIDER_CONFIG,
+                                          retry_if_missing=True)
+
+        assert not result
+        expected_rounds = 1 + instance._MAX_QUERY_INSTANCES_RETRIES
+        assert mock_client.query_jobs.call_count == 7 * expected_rounds
+
+    def test_retry_observes_request_cancellation(self, mock_client,
+                                                 monkeypatch):
+        mock_client.query_jobs.return_value = []
+        monkeypatch.setattr(instance.context_utils, 'raise_if_canceled',
+                            mock.MagicMock(side_effect=asyncio.CancelledError))
+
+        with pytest.raises(asyncio.CancelledError):
+            instance.query_instances(_CLUSTER,
+                                     _CLUSTER,
+                                     provider_config=_PROVIDER_CONFIG,
+                                     retry_if_missing=True)
+
+        # Only the initial full status query ran; no empty result was returned.
+        assert mock_client.query_jobs.call_count == 7
