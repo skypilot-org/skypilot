@@ -104,6 +104,22 @@ def test_launch_rejects_unsupported_sdk_version():
             _launch_runpod(resources_utils.NetworkTier.BEST)
 
 
+def test_rest_create_error_does_not_expose_provider_response_body():
+    """Ensure RunPod REST failures do not expose secrets echoed by the API."""
+    response = MagicMock(ok=False, status_code=400)
+    response.text = 'Authorization: Bearer secret-token'
+
+    with patch('sky.provision.runpod.utils._ensure_api_key_configured'), patch(
+            'sky.provision.runpod.utils.requests.post',
+            return_value=response):
+        with pytest.raises(RuntimeError) as exc_info:
+            runpod_utils._create_pod_via_rest({'name': 'test-pod'})
+
+    assert '400' in str(exc_info.value)
+    assert 'secret-token' not in str(exc_info.value)
+    assert response.text not in str(exc_info.value)
+
+
 class TestCreateTemplateForDockerLogin:
 
     def test_no_docker_login_config_returns_image_unchanged(self):
