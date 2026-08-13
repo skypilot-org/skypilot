@@ -1,10 +1,139 @@
 """Unit tests for Slurm adaptor."""
 
+import base64
 import unittest.mock as mock
 
 import pytest
 
+from sky import exceptions
 from sky.adaptors import slurm
+from sky.utils import command_runner as command_runner_lib
+
+
+def _batch_output(*outputs):
+    framed = ['SKYPILOT_SLURM_BATCH\n']
+    for returncode, stdout, stderr in outputs:
+        encoded_stdout = base64.b64encode(stdout.encode()).decode()
+        encoded_stderr = base64.b64encode(stderr.encode()).decode()
+        framed.append(
+            f'{returncode} {len(encoded_stdout)} {len(encoded_stderr)}\n')
+        framed.extend([encoded_stdout, encoded_stderr])
+    return ''.join(framed)
+
+
+class TestRunSlurmCmds:
+    """Tests for the concurrent command transport and framing protocol."""
+
+    @staticmethod
+    def _client():
+        return slurm.SlurmClient(ssh_host='localhost',
+                                 ssh_port=22,
+                                 ssh_user='root',
+                                 ssh_key=None)
+
+    def test_empty_command_list_skips_remote_invocation(self):
+        client = self._client()
+        with mock.patch.object(client._runner, 'run') as mock_run:
+            assert not client._run_slurm_cmds([])
+        mock_run.assert_not_called()
+
+    def test_generated_script_and_parser_round_trip(self):
+        client = self._client()
+        client._runner = command_runner_lib.LocalProcessCommandRunner()
+
+        results = client._run_slurm_cmds([
+            'sleep 0.1; printf \'first\\nnœud\\n\'',
+            'printf \'second error\\n\' >&2; exit 7',
+        ])
+
+        assert results == [(0, 'first\nnœud\n', ''), (7, '', 'second error\n')]
+
+    def test_transport_preserves_frames_after_invalid_utf8_replacement(self):
+        client = self._client()
+        client._runner = command_runner_lib.LocalProcessCommandRunner()
+
+        results = client._run_slurm_cmds([
+            'python3 -c \'import os; os.write(1, bytes([255])); '
+            'os.write(2, bytes([254]))\'',
+            'printf \'second\'',
+        ])
+
+        assert results == [(0, '\ufffd', '\ufffd'), (0, 'second', '')]
+
+    def test_transport_preserves_lines_filtered_by_command_runner(self):
+        client = self._client()
+        client._runner = command_runner_lib.LocalProcessCommandRunner()
+        warning = 'bash: cannot set terminal process group\n'
+
+        results = client._run_slurm_cmds([
+            f'printf {warning!r}',
+            f'printf {warning!r} >&2',
+        ])
+
+        assert results == [(0, warning, ''), (0, '', warning)]
+
+    def test_byte_lengths_preserve_arbitrary_text_and_input_order(self):
+        client = self._client()
+        outputs = [
+            (23, 'line 1\n0 2 3\nSKYPILOT_SLURM_BATCH\nnœud\x00',
+             'warning\nstill warning'),
+            (0, '', ''),
+        ]
+        with mock.patch.object(client._runner, 'run') as mock_run:
+            mock_run.return_value = (0, _batch_output(*outputs), '')
+
+            results = client._run_slurm_cmds(['slow command', 'fast command'])
+
+        assert results == outputs
+        script = mock_run.call_args.args[0]
+        assert script.index('slow command') < script.index('fast command')
+        assert script.count(' ) &') == 2
+        assert script.index('\nwait\n') < script.index('SKYPILOT_SLURM_BATCH')
+
+    def test_parser_accepts_line_wrapped_base64_frames(self):
+        client = self._client()
+        expected = 'nœud\n' * 40
+        encoded = base64.b64encode(expected.encode()).decode()
+        wrapped = '\n'.join(encoded[offset:offset + 76]
+                            for offset in range(0, len(encoded), 76))
+        output = (f'SKYPILOT_SLURM_BATCH\n0 {len(wrapped)} 0\n'
+                  f'{wrapped}')
+        with mock.patch.object(client._runner, 'run') as mock_run:
+            mock_run.return_value = (0, output, '')
+
+            results = client._run_slurm_cmds(['command'])
+
+        assert results == [(0, expected, '')]
+
+    @pytest.mark.parametrize(('output', 'error'), [
+        ('', 'missing header'),
+        ('not-the-protocol\n', 'missing header'),
+        ('SKYPILOT_SLURM_BATCH\n\ufffd', 'non-ASCII transport output'),
+        ('SKYPILOT_SLURM_BATCH\n', 'missing frame header'),
+        ('SKYPILOT_SLURM_BATCH\ninvalid\n', 'invalid frame header'),
+        ('SKYPILOT_SLURM_BATCH\n0 1\nx', 'invalid frame header'),
+        ('SKYPILOT_SLURM_BATCH\n0 -1 0\n', 'invalid frame header'),
+        ('SKYPILOT_SLURM_BATCH\n0 2 0\nx', 'truncated frame'),
+        ('SKYPILOT_SLURM_BATCH\n0 1 0\n?', 'invalid encoded output'),
+        ('SKYPILOT_SLURM_BATCH\n0 0 0\nextra', 'trailing data'),
+    ])
+    def test_rejects_malformed_framing(self, output, error):
+        client = self._client()
+        with mock.patch.object(client._runner, 'run') as mock_run:
+            mock_run.return_value = (0, output, '')
+
+            with pytest.raises(RuntimeError, match=error):
+                client._run_slurm_cmds(['command'])
+
+    def test_outer_command_failure_is_not_parsed_as_a_frame(self):
+        client = self._client()
+        with mock.patch.object(client._runner, 'run') as mock_run:
+            mock_run.return_value = (255, '', 'connection lost')
+
+            with pytest.raises(exceptions.CommandError) as exc_info:
+                client._run_slurm_cmds(['command'])
+
+        assert exc_info.value.returncode == 255
 
 
 class TestGetPartitions:
@@ -86,6 +215,119 @@ class TestInfoNodes:
             assert result[2].cpus == 4
             assert result[2].memory_gb == 32
             assert result[2].partition == 'tpu nodes'
+
+
+class TestInventorySnapshot:
+    """Tests for batched Slurm inventory collection."""
+
+    def test_get_node_inventory_uses_one_remote_invocation(self):
+        client = slurm.SlurmClient(ssh_host='localhost',
+                                   ssh_port=22,
+                                   ssh_user='root',
+                                   ssh_key=None)
+        sinfo_output = (f'nœud1{slurm.SEP}mix{slurm.SEP}gpu:h100:8{slurm.SEP}64'
+                        f'{slurm.SEP}819200{slurm.SEP}gpu\n')
+        details_output = ('NodeName=nœud1 CPUAlloc=32 CPUTot=64 '
+                          'CfgTRES=gres/gpu=8 AllocTRES=gres/gpu=4\n')
+        with mock.patch.object(client._runner, 'run') as mock_run:
+            mock_run.return_value = (0,
+                                     _batch_output((0, sinfo_output, ''),
+                                                   (0, details_output, '')), '')
+
+            node_infos, node_details = client.get_node_inventory()
+
+        mock_run.assert_called_once()
+        script = mock_run.call_args.args[0]
+        assert 'sinfo -h --Node' in script
+        assert 'scontrol show node -o' in script
+        assert script.count(' ) &') == 2
+        assert node_infos[0].node == 'nœud1'
+        assert node_details['nœud1']['CPUAlloc'] == '32'
+
+    def test_get_inventory_snapshot_parses_all_sections(self):
+        client = slurm.SlurmClient(ssh_host='localhost',
+                                   ssh_port=22,
+                                   ssh_user='root',
+                                   ssh_key=None)
+        sinfo_output = (f'node1{slurm.SEP}mix{slurm.SEP}gpu:h100:8'
+                        f'{slurm.SEP}64{slurm.SEP}819200{slurm.SEP}gpu\n')
+        details_output = ('NodeName=node1 CPUAlloc=32 CPUTot=64 '
+                          'CfgTRES=gres/gpu=8 AllocTRES=gres/gpu=4\n')
+        jobs_output = (f'123{slurm.SEP}train{slurm.SEP}alice{slurm.SEP}'
+                       f'node1{slurm.SEP}gpu:h100:4\n')
+        partitions_output = ('PartitionName=gpu Default=YES '
+                             'DefaultTime=01:00:00 MaxTime=UNLIMITED\n')
+        with mock.patch.object(client._runner, 'run') as mock_run:
+            mock_run.return_value = (0,
+                                     _batch_output(
+                                         (0, sinfo_output, ''),
+                                         (0, details_output, ''),
+                                         (0, jobs_output, ''),
+                                         (0, partitions_output, '')), '')
+
+            snapshot = client.get_inventory_snapshot()
+
+        mock_run.assert_called_once()
+        script = mock_run.call_args.args[0]
+        for command in ('sinfo -h --Node', 'scontrol show node -o',
+                        'squeue -h --states=running,completing',
+                        'scontrol show partitions -o'):
+            assert command in script
+        assert script.count(' ) &') == 4
+        assert snapshot.node_infos[0].node == 'node1'
+        assert snapshot.node_details['node1']['CPUAlloc'] == '32'
+        assert snapshot.jobs == {
+            'node1': [
+                slurm.JobGresInfo(job_id='123',
+                                  job_name='train',
+                                  user='alice',
+                                  gres_str='gpu:h100:4')
+            ]
+        }
+        assert snapshot.partitions == [
+            slurm.SlurmPartition(name='gpu',
+                                 is_default=True,
+                                 maxtime=None,
+                                 default_time='01:00:00')
+        ]
+
+    def test_get_inventory_snapshot_keeps_optional_failures_isolated(self):
+        client = slurm.SlurmClient(ssh_host='localhost',
+                                   ssh_port=22,
+                                   ssh_user='root',
+                                   ssh_key=None)
+        sinfo_output = (f'node1{slurm.SEP}idle{slurm.SEP}(null)'
+                        f'{slurm.SEP}4{slurm.SEP}16384{slurm.SEP}cpu\n')
+        with mock.patch.object(client._runner, 'run') as mock_run:
+            mock_run.return_value = (0,
+                                     _batch_output(
+                                         (0, sinfo_output, ''),
+                                         (1, '', 'scontrol failed'),
+                                         (1, '', 'squeue failed'),
+                                         (1, '', 'partitions failed')), '')
+
+            snapshot = client.get_inventory_snapshot()
+
+        assert len(snapshot.node_infos) == 1
+        assert snapshot.node_details == {}
+        assert snapshot.jobs is None
+        assert snapshot.partitions is None
+
+    def test_get_inventory_snapshot_requires_node_information(self):
+        client = slurm.SlurmClient(ssh_host='localhost',
+                                   ssh_port=22,
+                                   ssh_user='root',
+                                   ssh_key=None)
+        with mock.patch.object(client._runner, 'run') as mock_run:
+            mock_run.return_value = (0,
+                                     _batch_output((1, '', 'sinfo failed'),
+                                                   (0, '', ''), (0, '', ''),
+                                                   (0, '', '')), '')
+
+            with pytest.raises(exceptions.CommandError) as exc_info:
+                client.get_inventory_snapshot()
+
+        assert exc_info.value.returncode == 1
 
 
 class TestCheckJobHasNodes:

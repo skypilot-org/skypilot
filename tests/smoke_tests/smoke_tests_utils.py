@@ -427,6 +427,26 @@ def get_cmd_wait_until_job_status_succeeded(cluster_name: str,
 
 DEFAULT_CMD_TIMEOUT = 15 * 60
 
+# Per-command timeout for tests that configure `logs.store`.
+#
+# Configuring a log store adds a "Setting up logging agent" step to every
+# cluster launch, which installs fluent-bit on each node. That install runs
+# `apt-get update` and `apt-get install` against the distro package mirrors
+# before fetching fluent-bit itself. On a freshly booted VM the package index
+# refresh is the dominant cost -- it has been observed taking anywhere from 4 to
+# 19 minutes when a mirror is serving at ~100 kB/s, while the (much larger)
+# fluent-bit package downloads from its own CDN in seconds. That pushes a single
+# `sky launch` past the default budget, so give these tests enough room to ride
+# out a slow mirror instead of relying on retries.
+LOG_STORE_CMD_TIMEOUT = 30 * 60
+
+# Time for a managed job to go from submitted to RUNNING when a log store is
+# configured: the job's cluster is provisioned from scratch and pays the
+# fluent-bit install described above before the job can start. Kept below
+# LOG_STORE_CMD_TIMEOUT so that this wait, rather than the enclosing per-command
+# timeout, is what reports the failure.
+LOG_STORE_JOB_START_TIMEOUT = 25 * 60
+
 
 class Test(NamedTuple):
     name: str

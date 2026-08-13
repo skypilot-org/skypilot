@@ -2117,6 +2117,53 @@ def test_auto_mount_pending_volume_on_kubernetes():
 
 # ---------- Container logs from task on Kubernetes ----------
 
+_POD_COLUMNS = ('--no-headers -o custom-columns="NS:.metadata.namespace,'
+                'NAME:.metadata.name,'
+                'CLUSTER:.metadata.annotations.skypilot-cluster-name"')
+
+
+def _set_cluster_pods(name):
+    """Shell snippet setting `$all_pods` to the `NS NAME CLUSTER` rows.
+
+    Rows are selected by an exact match on the `skypilot-cluster-name`
+    annotation rather than a substring grep on the pod name, because a
+    substring also matches the `-cloud-cmd` helper pod and any same-prefixed
+    leftover from another run.
+
+    `smoke_tests_utils.run_cloud_cmd_on_cluster` dispatches these commands to
+    one of two places, and kubectl runs with a different identity in each:
+
+    - against a local API server, the command runs verbatim on the test
+      machine, against the local kubeconfig. That credential is typically
+      cluster-wide, but its default namespace is whatever the kubeconfig
+      context says, which need not be the namespace SkyPilot placed the pods
+      in (a `kubernetes.namespace` override, or a workspace-scoped namespace).
+      Only a cluster-scoped list is guaranteed to find them.
+
+    - on a `--remote-server` run, the command goes through `sky exec` into the
+      cloud-cmd pod, where kubectl authenticates as the least-privilege
+      `skypilot-service-account`. That account has full access within its own
+      namespace -- which is the namespace the cluster's pods are in, so a
+      namespace-scoped list finds them -- but no cluster-scoped access to
+      pods, so `kubectl get pods -A` is rejected outright::
+
+        pods is forbidden: User
+        "system:serviceaccount:<ns>:skypilot-service-account" cannot list
+        resource "pods" in API group "" at the cluster scope
+
+    So neither form works in both places: `-A` is the only one that reliably
+    finds the pods in the first case, and the only one that is refused in the
+    second. Hence namespace-scoped first, widening to `-A` only when that
+    returned nothing. Errors are discarded on both attempts -- a denied or
+    empty lookup just leaves `$all_pods` empty and the caller's retry loop
+    tries again.
+    """
+    get = f'kubectl get pods -l skypilot-cluster-name {_POD_COLUMNS}'
+    match = f'awk -v n="{name}" \'$3==n\''
+    return (f'all_pods=$({get} 2>/dev/null | {match}); '
+            f'if [ -z "$all_pods" ]; then '
+            f'all_pods=$({get} -A 2>/dev/null | {match}); fi')
+
 
 def _check_container_logs(name, logs, total_lines, count, timeout=60):
     """Check if the container logs contain the expected number of logging lines.
@@ -2172,16 +2219,20 @@ done
 def test_container_logs_multinode_kubernetes():
     name = smoke_tests_utils.get_cluster_name()
     task_yaml = 'tests/test_yamls/test_k8s_logs.yaml'
+    # xargs -r -L1 (not plain xargs): kubectl logs takes exactly one pod, but
+    # plain xargs concatenates every matching pod into a single invocation,
+    # and -r skips the call entirely when nothing matched.
     head_logs = (
-        'all_pods=$(kubectl get pods); echo "$all_pods"; '
-        f'echo "$all_pods" | grep {name} | '
+        f'{_set_cluster_pods(name)}; echo "$all_pods"; '
+        'echo "$all_pods" | '
         # Exclude the cloud cmd execution pod.
-        'grep -v "cloud-cmd" |  '
+        'grep -v "cloud-cmd" | '
         'grep head | '
-        " awk '{print $1}' | xargs -I {} kubectl logs {}")
-    worker_logs = ('all_pods=$(kubectl get pods); echo "$all_pods"; '
-                   f'echo "$all_pods" | grep {name} |  grep worker | '
-                   " awk '{print $1}' | xargs -I {} kubectl logs {}")
+        """ awk '{print "-n " $1 " " $2}' | xargs -r -L1 kubectl logs""")
+    worker_logs = (
+        f'{_set_cluster_pods(name)}; echo "$all_pods"; '
+        'echo "$all_pods" | grep worker | '
+        """ awk '{print "-n " $1 " " $2}' | xargs -r -L1 kubectl logs""")
     with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
         test = smoke_tests_utils.Test(
             'container_logs_multinode_kubernetes',
@@ -2205,13 +2256,16 @@ def test_container_logs_multinode_kubernetes():
 def test_container_logs_two_jobs_kubernetes():
     name = smoke_tests_utils.get_cluster_name()
     task_yaml = 'tests/test_yamls/test_k8s_logs.yaml'
+    # xargs -r -L1 (not plain xargs): kubectl logs takes exactly one pod, but
+    # plain xargs concatenates every matching pod into a single invocation,
+    # and -r skips the call entirely when nothing matched.
     pod_logs = (
-        'all_pods=$(kubectl get pods); echo "$all_pods"; '
-        f'echo "$all_pods" | grep {name} | '
+        f'{_set_cluster_pods(name)}; echo "$all_pods"; '
+        'echo "$all_pods" | '
         # Exclude the cloud cmd execution pod.
-        'grep -v "cloud-cmd" |  '
+        'grep -v "cloud-cmd" | '
         'grep head |'
-        " awk '{print $1}' | xargs -I {} kubectl logs {}")
+        """ awk '{print "-n " $1 " " $2}' | xargs -r -L1 kubectl logs""")
     with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
         test = smoke_tests_utils.Test(
             'test_container_logs_two_jobs_kubernetes',
@@ -2235,13 +2289,16 @@ def test_container_logs_two_jobs_kubernetes():
 def test_container_logs_two_simultaneous_jobs_kubernetes():
     name = smoke_tests_utils.get_cluster_name()
     task_yaml = 'tests/test_yamls/test_k8s_logs.yaml '
+    # xargs -r -L1 (not plain xargs): kubectl logs takes exactly one pod, but
+    # plain xargs concatenates every matching pod into a single invocation,
+    # and -r skips the call entirely when nothing matched.
     pod_logs = (
-        'all_pods=$(kubectl get pods); echo "$all_pods"; '
-        f'echo "$all_pods" | grep {name} |  '
+        f'{_set_cluster_pods(name)}; echo "$all_pods"; '
+        'echo "$all_pods" | '
         # Exclude the cloud cmd execution pod.
-        'grep -v "cloud-cmd" |  '
+        'grep -v "cloud-cmd" | '
         'grep head |'
-        " awk '{print $1}' | xargs -I {} kubectl logs {}")
+        """ awk '{print "-n " $1 " " $2}' | xargs -r -L1 kubectl logs""")
     with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
         test = smoke_tests_utils.Test(
             'test_container_logs_two_simultaneous_jobs_kubernetes',
