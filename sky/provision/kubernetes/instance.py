@@ -113,6 +113,30 @@ _MOUNT_FAILURE_EVENT_REASONS = ('FailedMount', 'FailedAttachVolume')
 # deadline they would hang provisioning forever with only a spinner update.
 _MOUNT_FAILURE_TIMEOUT_SECONDS = 600
 
+# Synthetic pending reason used when a pod is bound to a node but the kubelet
+# has not reported anything yet (the uninformative 'ContainerCreating' waiting
+# state with no event).
+_CONTAINER_CREATION_REASON = 'container creation'
+# Prefix of the synthetic pending reasons describing a running init container.
+_INIT_CONTAINER_REASON_PREFIX = 'init container '
+# Pending reasons that can legitimately persist, unchanged, for a very long
+# time, and so must not count towards the no-progress deadline below:
+#   - the allow-listed Normal events (pulling a large image, an external CSI
+#     provisioner creating a volume, a late-binding storage class),
+#   - 'container creation', which is also what a pod reports while pulling an
+#     image whose 'Pulling' event has already aged out of the event window,
+#   - a running init container, which may be doing arbitrary user work.
+_STALL_EXEMPT_PENDING_REASONS = frozenset(
+    _PENDING_REASON_NORMAL_EVENT_ALLOWLIST | {_CONTAINER_CREATION_REASON})
+# How long a pod may keep reporting the same non-exempt pending reason before
+# provisioning is failed. Every pod reaching _wait_for_pods_to_run is already
+# bound to a node (_wait_for_pods_to_schedule only returns once all pods are
+# scheduled), so no queue-admission or autoscaling wait remains: what is left
+# is kubelet-side work, and any of it stuck on the same reason for this long is
+# not going to resolve. Without this deadline such a pod hangs the launch
+# forever behind a 'Launching' spinner, with no error, ever.
+_POD_RUN_STALL_TIMEOUT_SECONDS = 600
+
 # Pattern to extract SSH user from command output, handling MOTD contamination
 _SSH_USER_PATTERN = re.compile(r'SKYPILOT_SSH_USER: ([^\s\n]+)')
 
@@ -901,6 +925,27 @@ def _wait_for_pods_to_schedule(namespace, context, new_nodes, timeout: int,
             f'Error: {common_utils.format_exception(e)}') from None
 
 
+def _reason_is_exempt_from_stall(reason: Optional[str]) -> bool:
+    """Whether a pending reason is allowed to persist indefinitely.
+
+    A reason of None is not exempt: a pod that is neither running nor able to
+    say why is exactly the case the no-progress deadline exists to catch.
+    """
+    if reason is None:
+        return False
+    if reason in _STALL_EXEMPT_PENDING_REASONS:
+        return True
+    return reason.startswith(_INIT_CONTAINER_REASON_PREFIX)
+
+
+def _stall_timeout_seconds(reason: Optional[str]) -> int:
+    """The no-progress deadline for a pending reason, in seconds."""
+    if reason in _MOUNT_FAILURE_EVENT_REASONS:
+        # Mount failures get their own window; see the constant.
+        return _MOUNT_FAILURE_TIMEOUT_SECONDS
+    return _POD_RUN_STALL_TIMEOUT_SECONDS
+
+
 @timeline.event
 def _wait_for_pods_to_run(namespace, context, cluster_name, new_pods):
     """Wait for pods and their containers to be ready.
@@ -991,10 +1036,12 @@ def _wait_for_pods_to_run(namespace, context, cluster_name, new_pods):
                             running_init = _check_init_containers(pod)
                             if running_init is not None:
                                 name, idx, total = running_init
-                                init_reason = (f'init container {name!r} '
-                                               f'running ({idx}/{total})')
+                                init_reason = (
+                                    f'{_INIT_CONTAINER_REASON_PREFIX}{name!r} '
+                                    f'running ({idx}/{total})')
                             else:
-                                init_reason = 'init container running'
+                                init_reason = (
+                                    f'{_INIT_CONTAINER_REASON_PREFIX}running')
                         elif waiting.reason != 'ContainerCreating':
                             msg = waiting.message if (
                                 waiting.message) else str(waiting)
@@ -1035,7 +1082,7 @@ def _wait_for_pods_to_run(namespace, context, cluster_name, new_pods):
                 # creation)') instead of a bare 'Launching'. Gate on
                 # _pod_is_scheduled so an unbound pod still waiting for
                 # capacity is not mislabeled as creating a container.
-                reason = 'container creation'
+                reason = _CONTAINER_CREATION_REASON
             if reason is not None:
                 log_msg = f'Pod {pod.metadata.name} is pending: {reason}'
                 if event_message:
@@ -1048,23 +1095,34 @@ def _wait_for_pods_to_run(namespace, context, cluster_name, new_pods):
         # returned (False, None) silently, masking OOMKilled etc.
         return False, container_reason
 
-    # First time each pod was seen continuously reporting a mount-failure
-    # event, keyed by pod name. Cleared when the pod's pending reason moves
-    # on (the kubelet retry succeeded).
-    mount_failure_first_seen: Dict[str, float] = {}
+    # The pending reason each pod is currently being timed against, and when
+    # that reason was first seen, keyed by pod name. Reset whenever the reason
+    # changes (progress) or the pod starts running, so a deadline is always
+    # measured from the most recent onset of a single reason.
+    stalled_since: Dict[str, Tuple[Optional[str], float]] = {}
 
-    def _raise_mount_failure(pod_name: str, reason: str) -> None:
+    def _raise_stalled(pod_name: str, reason: Optional[str]) -> None:
         # Re-fetch the newest event for the full kubelet message — the wait
         # loop only tracks the bare reason (e.g. 'FailedMount').
         detail = ''
         pending_reason = _get_pod_pending_reason(context, namespace, pod_name)
-        if (pending_reason is not None and
-                pending_reason[0] in _MOUNT_FAILURE_EVENT_REASONS):
+        if pending_reason is not None and pending_reason[0] == reason:
             detail = f': {pending_reason[1]}'
+        minutes = _stall_timeout_seconds(reason) // 60
+        if reason in _MOUNT_FAILURE_EVENT_REASONS:
+            raise config_lib.KubernetesError(
+                f'Pod {pod_name} has failed to attach or mount volumes for '
+                f'over {minutes} minutes: {reason}{detail}')
+        if reason is None:
+            raise config_lib.KubernetesError(
+                f'Pod {pod_name} has not started running after {minutes} '
+                'minutes and reports no reason why. Run '
+                f'`sky logs --provision {cluster_name}` and '
+                f'`kubectl describe pod {pod_name}` for more details.')
         raise config_lib.KubernetesError(
-            f'Pod {pod_name} has failed to attach or mount volumes for over '
-            f'{_MOUNT_FAILURE_TIMEOUT_SECONDS // 60} minutes: '
-            f'{reason}{detail}')
+            f'Pod {pod_name} has been stuck on the same condition for over '
+            f'{minutes} minutes: {reason}{detail}. Run '
+            f'`sky logs --provision {cluster_name}` for more details.')
 
     missing_pods_retry = 0
     transport_error_since: Optional[float] = None
@@ -1106,17 +1164,31 @@ def _wait_for_pods_to_run(namespace, context, cluster_name, new_pods):
             # instead of hardcoding the number of retries?
             if missing_pods_retry >= _MAX_MISSING_PODS_RETRIES:
                 first_pod = True
-                for pod_name in missing_pod_names:
+                missing_pod_reasons: List[str] = []
+                for pod_name in sorted(missing_pod_names):
                     reason = _get_pod_missing_reason(context, namespace,
                                                      cluster_name, pod_name,
                                                      first_pod)
                     logger.warning(f'Pod {pod_name} missing: {reason}')
+                    if reason is not None:
+                        missing_pod_reasons.append(f'{pod_name}: {reason}')
                     first_pod = False
+                # Surface whatever the events said. Without this the only
+                # signal is the generic sentence below, which reads the same
+                # whether the pod was evicted, deleted by another controller,
+                # or rejected by the API server before it ever started.
+                if missing_pod_reasons:
+                    missing_detail = '; '.join(missing_pod_reasons)
+                else:
+                    missing_detail = (
+                        f'{sorted(missing_pod_names)} may have been terminated '
+                        'or failed unexpectedly, and no events were found for '
+                        'them — the pod was likely deleted, or rejected by the '
+                        'API server before it started')
                 raise config_lib.KubernetesError(
                     f'Failed to get all pods after {missing_pods_retry} '
-                    f'retries. Some pods may have been terminated or failed '
-                    f'unexpectedly. Run `sky logs --provision {cluster_name}` '
-                    'for more details.')
+                    f'retries: {missing_detail}. Run '
+                    f'`sky logs --provision {cluster_name}` for more details.')
             logger.info('Retrying running pods check: '
                         f'Missing pods: {missing_pod_names}')
             time.sleep(0.5)
@@ -1141,19 +1213,24 @@ def _wait_for_pods_to_run(namespace, context, cluster_name, new_pods):
             if pending_reason is not None:
                 pending_reasons_count[pending_reason] = (
                     pending_reasons_count.get(pending_reason, 0) + 1)
-            # Escalate a sustained volume attach/mount failure to a
-            # provisioning error. Unlike other kubelet-level failures (which
-            # show up in containerStatuses and raise in _inspect_pod_status),
-            # a mount failure leaves the container in 'ContainerCreating'
-            # indefinitely — without this deadline the loop would spin
-            # forever with only a spinner update.
+            # Escalate a pod that keeps reporting the same condition to a
+            # provisioning error. Some kubelet-level failures raise from
+            # _inspect_pod_status as soon as they are seen, but the ones that
+            # only leave the container in 'ContainerCreating' (a mount
+            # failure, a pod sandbox that cannot be created) or that are
+            # normal in isolation (a container restart) are invisible there —
+            # without this deadline such a pod spins here forever with only a
+            # spinner update.
             pod_name = pod.metadata.name
-            if pending_reason in _MOUNT_FAILURE_EVENT_REASONS:
-                first_seen = mount_failure_first_seen.setdefault(pod_name, now)
-                if now - first_seen >= _MOUNT_FAILURE_TIMEOUT_SECONDS:
-                    _raise_mount_failure(pod_name, pending_reason)
+            if is_running or _reason_is_exempt_from_stall(pending_reason):
+                stalled_since.pop(pod_name, None)
             else:
-                mount_failure_first_seen.pop(pod_name, None)
+                previous = stalled_since.get(pod_name)
+                if previous is None or previous[0] != pending_reason:
+                    stalled_since[pod_name] = (pending_reason, now)
+                elif (now - previous[1] >=
+                      _stall_timeout_seconds(pending_reason)):
+                    _raise_stalled(pod_name, pending_reason)
 
         if all_pods_running:
             break

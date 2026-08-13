@@ -3373,6 +3373,307 @@ class TestWaitForPodsToRunMountFailureEscalation:
         assert 'kubectl describe pod' in hint
 
 
+class TestStallExemptionHelpers:
+    """The pure predicates behind the no-progress deadline."""
+
+    @pytest.mark.parametrize('reason', [
+        'Pulling',
+        'Provisioning',
+        'WaitForFirstConsumer',
+        'container creation',
+        "init container 'setup' running (1/2)",
+        'init container running',
+    ])
+    def test_exempt_reasons(self, reason):
+        assert instance._reason_is_exempt_from_stall(reason)
+
+    @pytest.mark.parametrize('reason', [
+        None,
+        'FailedMount',
+        'FailedAttachVolume',
+        'FailedCreatePodSandBox',
+        'CrashLoopBackOff',
+        'OOMKilled',
+    ])
+    def test_non_exempt_reasons(self, reason):
+        assert not instance._reason_is_exempt_from_stall(reason)
+
+    def test_synthetic_reasons_stay_in_sync_with_the_exemption(self):
+        """The exemption matches on the literals _inspect_pod_status builds, so
+        both sides must come from the same constants."""
+        assert (instance._CONTAINER_CREATION_REASON
+                in instance._STALL_EXEMPT_PENDING_REASONS)
+        assert instance._PENDING_REASON_NORMAL_EVENT_ALLOWLIST.issubset(
+            instance._STALL_EXEMPT_PENDING_REASONS)
+
+    def test_mount_failures_keep_their_own_window(self):
+        assert (instance._stall_timeout_seconds('FailedMount') ==
+                instance._MOUNT_FAILURE_TIMEOUT_SECONDS)
+        assert (instance._stall_timeout_seconds('FailedCreatePodSandBox') ==
+                instance._POD_RUN_STALL_TIMEOUT_SECONDS)
+        assert (instance._stall_timeout_seconds(None) ==
+                instance._POD_RUN_STALL_TIMEOUT_SECONDS)
+
+
+class TestWaitForPodsToRunStallEscalation:
+    """A pod that keeps reporting the same non-exempt condition must escalate
+    to a KubernetesError once the no-progress deadline elapses, instead of
+    spinning in _wait_for_pods_to_run forever. Reasons that can legitimately
+    persist unchanged for a long time (image pull, volume provisioning, a
+    running init container, plain container creation) must never escalate,
+    however long they last.
+    """
+
+    _EVENT_MSG = 'failed to create pod network sandbox: plugin not initialized'
+
+    @staticmethod
+    def _make_pending_pod(*, name='pod-0', initializing=False):
+        """A scheduled pod whose container is still waiting."""
+        from sky.provision import constants as prov_constants
+        pod = mock.MagicMock()
+        pod.metadata.name = name
+        pod.metadata.deletion_timestamp = None
+        pod.metadata.labels = {
+            prov_constants.TAG_SKYPILOT_CLUSTER_NAME: 'cn-on-cloud',
+        }
+        pod.status.phase = 'Pending'
+        cs = mock.MagicMock()
+        cs.state.waiting = mock.MagicMock(
+            reason='PodInitializing' if initializing else 'ContainerCreating',
+            message=None)
+        cs.state.terminated = None
+        cs.state.running = None
+        cs.last_state.terminated = None
+        pod.status.container_statuses = [cs]
+        if initializing:
+            init_status = mock.MagicMock()
+            init_status.name = 'setup'
+            init_status.state.terminated = None
+            init_status.state.running = mock.MagicMock()
+            init_status.state.waiting = None
+            pod.status.init_container_statuses = [init_status]
+        return pod
+
+    @staticmethod
+    def _make_running_pod(*, name='pod-0', all_containers_running=True):
+        """A Running pod. With all_containers_running=False one container has
+        exited cleanly (e.g. a sidecar), which is the case that produces a
+        pending reason of None: not running, and nothing to report.
+        """
+        from sky.provision import constants as prov_constants
+        pod = mock.MagicMock()
+        pod.metadata.name = name
+        pod.metadata.deletion_timestamp = None
+        pod.metadata.labels = {
+            prov_constants.TAG_SKYPILOT_CLUSTER_NAME: 'cn-on-cloud',
+        }
+        pod.status.phase = 'Running'
+        cs = mock.MagicMock()
+        cs.state.waiting = None
+        cs.state.running = (mock.MagicMock()
+                            if all_containers_running else None)
+        cs.state.terminated = (None if all_containers_running else
+                               mock.MagicMock(exit_code=0, reason='Completed'))
+        cs.last_state.terminated = None
+        pod.status.container_statuses = [cs]
+        return pod
+
+    def _run_wait(self,
+                  monkeypatch,
+                  *,
+                  pod,
+                  pending_reasons=(None,),
+                  clock_step=301.0,
+                  healthy_after=None,
+                  max_iterations=500):
+        """Drive _wait_for_pods_to_run against a single pod, with a scripted
+        event-derived pending reason per iteration (the last entry repeats).
+        The fake clock advances by `clock_step` at each end-of-iteration sleep.
+        If `healthy_after` is set, that iteration (0-based) lists an
+        all-Running pod so the loop exits cleanly.
+
+        The loop is expected to either exit or raise within `max_iterations`;
+        past that the harness fails the test rather than hanging, so a
+        regression that makes the wait unbounded again shows up as a failure
+        and not as a stuck CI job.
+        """
+        healthy_pod = self._make_running_pod()
+        iteration = {'n': -1}
+
+        core_api = mock.MagicMock()
+
+        def _list_pods(*args, **kwargs):
+            iteration['n'] += 1
+            if iteration['n'] > max_iterations:
+                raise AssertionError(
+                    f'_wait_for_pods_to_run did not terminate within '
+                    f'{max_iterations} iterations '
+                    f'({max_iterations * clock_step / 3600:.1f} simulated '
+                    'hours)')
+            if healthy_after is not None and iteration['n'] >= healthy_after:
+                return mock.MagicMock(items=[healthy_pod])
+            return mock.MagicMock(items=[pod])
+
+        core_api.list_namespaced_pod.side_effect = _list_pods
+        monkeypatch.setattr('sky.adaptors.kubernetes.core_api',
+                            lambda *a, **kw: core_api)
+
+        def _pending_reason(context, namespace, pod_name):
+            del context, namespace, pod_name  # unused
+            idx = min(max(iteration['n'], 0), len(pending_reasons) - 1)
+            reason = pending_reasons[idx]
+            if reason is None:
+                return None
+            return reason, self._EVENT_MSG
+
+        monkeypatch.setattr(instance, '_get_pod_pending_reason',
+                            _pending_reason)
+
+        clock = {'t': 1000.0}
+        monkeypatch.setattr(instance.time, 'time', lambda: clock['t'])
+
+        def _sleep(seconds):
+            del seconds  # unused
+            clock['t'] += clock_step
+
+        monkeypatch.setattr(instance.time, 'sleep', _sleep)
+        monkeypatch.setattr('sky.utils.subprocess_utils.run_in_parallel',
+                            lambda fn, items, n: [fn(p) for p in items])
+        monkeypatch.setattr('sky.utils.rich_utils.force_update_status',
+                            lambda *a, **kw: None)
+        monkeypatch.setattr(instance.global_user_state, 'add_cluster_event',
+                            mock.MagicMock())
+
+        instance._wait_for_pods_to_run(namespace='ns',
+                                       context='ctx',
+                                       cluster_name='cn',
+                                       new_pods=[pod])
+
+    def test_sustained_warning_reason_raises(self, monkeypatch):
+        """A kubelet Warning that leaves the container in ContainerCreating
+        (here: pod sandbox creation failing) must escalate, carrying both the
+        reason and the event message."""
+        with pytest.raises(config_lib.KubernetesError) as exc_info:
+            self._run_wait(monkeypatch,
+                           pod=self._make_pending_pod(),
+                           pending_reasons=['FailedCreatePodSandBox'])
+        msg = str(exc_info.value)
+        assert 'FailedCreatePodSandBox' in msg
+        assert self._EVENT_MSG in msg
+        assert 'pod-0' in msg
+
+    @pytest.mark.parametrize(
+        'reason', ['Pulling', 'Provisioning', 'WaitForFirstConsumer'])
+    def test_legitimately_slow_reasons_never_raise(self, monkeypatch, reason):
+        """A large image pull or a slow volume provision holds the same reason
+        for its whole duration and must not be failed. 200 iterations at 301s
+        each is ~16 hours of it."""
+        self._run_wait(monkeypatch,
+                       pod=self._make_pending_pod(),
+                       pending_reasons=[reason],
+                       healthy_after=200)
+
+    def test_container_creation_never_raises(self, monkeypatch):
+        """'container creation' is the no-event fallback, and is also what a
+        pod reports once its 'Pulling' event has aged out of the event window
+        — so it must not be failed either."""
+        self._run_wait(monkeypatch,
+                       pod=self._make_pending_pod(),
+                       pending_reasons=[None],
+                       healthy_after=200)
+
+    def test_running_init_container_never_raises(self, monkeypatch):
+        """An init container may run arbitrarily long user work."""
+        self._run_wait(monkeypatch,
+                       pod=self._make_pending_pod(initializing=True),
+                       pending_reasons=[None],
+                       healthy_after=200)
+
+    def test_no_reason_at_all_raises(self, monkeypatch):
+        """A pod that is neither running nor able to say why is the pure
+        'infinite Launching spinner' case: no pending reason means no spinner
+        detail and no error, forever."""
+        with pytest.raises(config_lib.KubernetesError) as exc_info:
+            self._run_wait(
+                monkeypatch,
+                pod=self._make_running_pod(all_containers_running=False),
+                pending_reasons=[None])
+        msg = str(exc_info.value)
+        assert 'reports no reason why' in msg
+        assert 'pod-0' in msg
+
+    def test_timer_resets_when_reason_changes(self, monkeypatch):
+        """Two different non-exempt reasons in sequence: the deadline is
+        measured from the most recent onset, so neither window is long enough
+        to raise even though the total elapsed time exceeds the deadline."""
+        self._run_wait(monkeypatch,
+                       pod=self._make_pending_pod(),
+                       pending_reasons=[
+                           'FailedCreatePodSandBox', 'FailedCreatePodSandBox',
+                           'FailedCreatePodContainer'
+                       ],
+                       healthy_after=3)
+
+    def test_stall_error_picks_up_the_failure_hint(self):
+        """A stall whose reason names a known cause must still trip
+        KUBERNETES_FAILURE_HINTS, since the hint match is a substring test on
+        the message."""
+        message = ('Pod pod-0 has been stuck on the same condition for over '
+                   '10 minutes: OOMKilled: killed')
+        hint = kubernetes_utils.match_kubernetes_failure_hint(message)
+        assert hint is not None
+        assert 'ran out of memory' in hint
+
+
+class TestWaitForPodsToRunMissingPodDiagnosis:
+    """When pods vanish while waiting for them to run, the raised error must
+    carry whatever the events said, not just the generic sentence.
+    """
+
+    def _run(self, monkeypatch, *, missing_reason):
+        from sky.provision import constants as prov_constants
+        pod = mock.MagicMock()
+        pod.metadata.name = 'pod-0'
+        pod.metadata.labels = {
+            prov_constants.TAG_SKYPILOT_CLUSTER_NAME: 'cn-on-cloud',
+        }
+
+        core_api = mock.MagicMock()
+        # The pod is never returned by the list call -- it is missing.
+        core_api.list_namespaced_pod.return_value = mock.MagicMock(items=[])
+        monkeypatch.setattr('sky.adaptors.kubernetes.core_api',
+                            lambda *a, **kw: core_api)
+        monkeypatch.setattr(instance, '_get_pod_missing_reason',
+                            lambda *a, **kw: missing_reason)
+        monkeypatch.setattr(instance.time, 'sleep', lambda seconds: None)
+        monkeypatch.setattr('sky.utils.rich_utils.force_update_status',
+                            lambda *a, **kw: None)
+        monkeypatch.setattr(instance.global_user_state, 'add_cluster_event',
+                            mock.MagicMock())
+
+        with pytest.raises(config_lib.KubernetesError) as exc_info:
+            instance._wait_for_pods_to_run(namespace='ns',
+                                           context='ctx',
+                                           cluster_name='cn',
+                                           new_pods=[pod])
+        return str(exc_info.value)
+
+    def test_reason_is_surfaced(self, monkeypatch):
+        msg = self._run(monkeypatch,
+                        missing_reason='pod was evicted by taint manager')
+        assert 'pod-0: pod was evicted by taint manager' in msg
+        assert 'sky logs --provision cn' in msg
+
+    def test_absence_of_events_is_explained(self, monkeypatch):
+        """The common case for a pod the API server rejected outright: no
+        events at all. Name the pod and say so, rather than only implying it
+        ran and died."""
+        msg = self._run(monkeypatch, missing_reason=None)
+        assert "['pod-0']" in msg
+        assert 'no events were found' in msg
+        assert 'rejected by the API server' in msg
+
+
 class TestCheckInitContainersEnrichedRaise:
     """Tests the enriched raise message in _check_init_containers when an
     init container is in CrashLoopBackOff."""
