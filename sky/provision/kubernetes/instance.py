@@ -1221,6 +1221,10 @@ def _wait_for_pods_to_run(namespace, context, cluster_name, new_pods):
             # normal in isolation (a container restart) are invisible there —
             # without this deadline such a pod spins here forever with only a
             # spinner update.
+            # This reads "the reason did not change" as "the pod made no
+            # progress", which holds only because _get_pod_pending_reason will
+            # not keep reporting a Warning the pod has already moved past; see
+            # its docstring.
             pod_name = pod.metadata.name
             if is_running or _reason_is_exempt_from_stall(pending_reason):
                 stalled_since.pop(pod_name, None)
@@ -2850,6 +2854,29 @@ def _condensed_pod_reason(pod: 'V1Pod') -> str:
     return kubernetes_utils.get_condensed_pod_reason(pod)
 
 
+def _event_last_observed(event: Any) -> Optional[float]:
+    """When ``event`` was last observed, in unix seconds; None if unknown.
+
+    Prefers the last-observed time over the creation time. Kubernetes folds a
+    repeated event back into the original object -- bumping ``count`` and
+    ``last_timestamp`` (``series.last_observed_time`` on the events.k8s.io
+    path) while ``metadata.creation_timestamp`` stays pinned to the first
+    occurrence -- so the creation time says when a condition started, and only
+    the last-observed time says whether it is still happening.
+    """
+    series = getattr(event, 'series', None)
+    ts = (getattr(series, 'last_observed_time', None) or
+          getattr(event, 'last_timestamp', None) or
+          getattr(event, 'event_time', None) or
+          getattr(getattr(event, 'metadata', None), 'creation_timestamp', None))
+    if not isinstance(ts, datetime.datetime):
+        # Absent, or a field the API server did not populate.
+        return None
+    if ts.tzinfo is None:
+        ts = ts.replace(tzinfo=datetime.timezone.utc)
+    return ts.timestamp()
+
+
 def _get_pod_events(context: Optional[str], namespace: str,
                     pod_name: str) -> List[Any]:
     """Get the events for a pod, sorted by timestamp, most recent first."""
@@ -3166,12 +3193,25 @@ def _get_pod_pending_reason(context: Optional[str], namespace: str,
     """Get the reason why a pod is pending from its events.
 
     Two-pass scan over the event list (sorted newest-first by _get_pod_events):
-      1. Tier 2 -- return the newest event with event.type == 'Warning'.
-      2. Tier 3 -- return the newest event whose reason is in
+      1. Tier 2 -- the newest event with event.type == 'Warning'.
+      2. Tier 3 -- the newest event whose reason is in
          _PENDING_REASON_NORMAL_EVENT_ALLOWLIST.
-    Warnings always beat allow-listed Normals, regardless of timestamp ordering
-    in the event window -- a FailedScheduling Warning is a more truthful pending
-    reason than a Pulling Normal from a doomed retry.
+    A Warning beats an allow-listed Normal -- a FailedScheduling Warning is a
+    more truthful pending reason than a Pulling Normal from a doomed retry --
+    *unless* the Normal was observed more recently, in which case the Warning
+    describes a condition the pod has already moved past. Kubernetes keeps
+    events for the API server's event TTL (~1h), so a resolved Warning outlives
+    the condition that produced it by a long way: a pod that waited on an
+    autoscaler still carries its FailedScheduling long after it was bound, and
+    a mount that the kubelet retried successfully still carries its FailedMount
+    while the image pull that follows it is under way. Reporting the stale
+    Warning there is not just a mislabeled spinner -- the reason never changes
+    while the pod makes progress, which is exactly what the no-progress
+    deadline in _wait_for_pods_to_run reads as a stall.
+
+    Timestamp ordering *within* a tier is left to _get_pod_events' newest-first
+    creation order; only the cross-tier choice consults the last-observed time,
+    since that is the only place staleness can mislead.
 
     Returns a (reason, message) tuple, or None if neither pass matches.
     """
@@ -3185,16 +3225,23 @@ def _get_pod_pending_reason(context: Optional[str], namespace: str,
         return None
 
     # Tier 2: Warning events.
-    for event in pod_events:
-        if event.type == 'Warning':
-            return event.reason or 'Unknown', event.message or ''
-
+    warning = next((e for e in pod_events if e.type == 'Warning'), None)
     # Tier 3: allow-listed Normal events.
-    for event in pod_events:
-        if event.reason in _PENDING_REASON_NORMAL_EVENT_ALLOWLIST:
-            return event.reason, event.message or ''
+    normal = next((e for e in pod_events
+                   if e.reason in _PENDING_REASON_NORMAL_EVENT_ALLOWLIST), None)
 
-    return None
+    chosen = warning if warning is not None else normal
+    if warning is not None and normal is not None:
+        warning_at = _event_last_observed(warning)
+        normal_at = _event_last_observed(normal)
+        # Fall back to the Warning when either side is undated -- an event the
+        # API server left without any timestamp cannot be shown to be stale.
+        if (warning_at is not None and normal_at is not None and
+                normal_at > warning_at):
+            chosen = normal
+    if chosen is None:
+        return None
+    return chosen.reason or 'Unknown', chosen.message or ''
 
 
 def _format_pod_missing_reason(
