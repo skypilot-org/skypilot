@@ -109,8 +109,7 @@ def test_vast_template_persists_network_tier(tmp_path):
             'ray_skypilot_installation_commands': '',
             'copy_skypilot_templates_commands': '',
             'ssh_max_sessions_config': '',
-        },
-        str(output_path))
+        }, str(output_path))
 
     config = yaml_utils.read_yaml(str(output_path))
     assert config['provider']['network_tier'] == 'best'
