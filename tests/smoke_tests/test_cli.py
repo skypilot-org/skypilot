@@ -555,13 +555,15 @@ def test_managed_job_max_duration(generic_cloud: str):
                 # Wait for the job to be terminated by max_duration. The
                 # controller polls job status every ~30s, so give it enough
                 # time to detect the timeout (1m limit + polling gap).
-                f'sleep 90',
-                # Verify the job was terminated (FAILED) and the failure
-                # reason mentions max_duration. Use --all (the job is
-                # finished) and -v (to show the DETAILS column with the
-                # failure reason). Filter by name via grep since
+                smoke_tests_utils.
+                get_cmd_wait_until_managed_job_status_contains_matching_job_name(
+                    job_name=name,
+                    job_status=[sky.ManagedJobStatus.FAILED],
+                    timeout=smoke_tests_utils.get_timeout(generic_cloud)),
+                # Verify the failure reason mentions max_duration. Use --all
+                # (the job is finished) and -v (to show the DETAILS column
+                # with the failure reason). Filter by name via grep since
                 # `sky jobs queue` has no -n/--name option.
-                f'sky jobs queue --all -v | grep "{name}" | grep "FAILED"',
                 f'sky jobs queue --all -v | grep "{name}" | grep "max_duration"',
             ],
             timeout=smoke_tests_utils.get_timeout(generic_cloud),
