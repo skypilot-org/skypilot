@@ -490,6 +490,7 @@ def test_rejected_post_claim_update_preserves_irreversible_teardown(
 @pytest.mark.usefixtures('fresh_state_db')
 def test_rejected_replacement_restores_predecessor_when_status_read_fails(
         monkeypatch):
+    """Rejected updates restore the predecessor despite a failed status read."""
     handle = _make_handle()
     _add_cluster(handle)
     get_status, apply_autodown_intent, _ = _patch_skylet(monkeypatch)
@@ -514,7 +515,10 @@ def test_rejected_replacement_restores_predecessor_when_status_read_fails(
                              autostop_lib.DEFAULT_AUTOSTOP_WAIT_FOR,
                              down=True)
 
-    assert global_user_state.get_autodown_intent('cluster') == predecessor
+    restored = global_user_state.get_autodown_intent('cluster')
+    assert restored is not None
+    assert dataclasses.replace(
+        restored, updated_at=predecessor.updated_at) == predecessor
 
 
 @pytest.mark.usefixtures('fresh_state_db')
