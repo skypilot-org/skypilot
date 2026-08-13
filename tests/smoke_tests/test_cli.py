@@ -562,13 +562,6 @@ def test_managed_job_max_duration(generic_cloud: str):
                 # failure reason). Filter by name via grep since
                 # `sky jobs queue` has no -n/--name option.
                 f'sky jobs queue --all -v | grep "{name}" | grep "FAILED"',
-                f'sky jobs queue --all -v | grep "{name}"
-                # Verify the job was terminated (FAILED) and the failure
-                # reason mentions max_duration. Use --all (the job is
-                # finished) and -v (to show the DETAILS column with the
-                # failure reason). Filter by name via grep since
-                # `sky jobs queue` has no -n/--name option.
-                f'sky jobs queue --all -v | grep "{name}" | grep "FAILED"',
                 f'sky jobs queue --all -v | grep "{name}" | grep "max_duration"',
             ],
             timeout=smoke_tests_utils.get_timeout(generic_cloud),
