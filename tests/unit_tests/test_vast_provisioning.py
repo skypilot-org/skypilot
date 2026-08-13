@@ -11,8 +11,10 @@ from sky import exceptions
 from sky.provision import common
 from sky.provision.vast import instance as vast_instance
 from sky.provision.vast import utils as vast_utils
+from sky.utils import common_utils
 from sky.utils import resources_utils
 from sky.utils import status_lib
+from sky.utils import yaml_utils
 
 
 def _instance(instance_id: str,
@@ -74,6 +76,44 @@ def _mock_vast_sdk(monkeypatch):
     sdk.show_instance.return_value = {'id': '3'}
     monkeypatch.setattr(vast_utils.vast, 'vast', lambda: sdk)
     return sdk
+
+
+def test_vast_template_persists_network_tier(tmp_path):
+    """Verify the Vast template passes the selected network tier to Ray."""
+    output_path = tmp_path / 'vast-ray.yml'
+    common_utils.fill_template(
+        'vast-ray.yml.j2', {
+            'cluster_name_on_cloud': 'test-cluster',
+            'num_nodes': 1,
+            'region': 'US',
+            'secure_only': False,
+            'reliable_hosts': False,
+            'network_tier': 'best',
+            'provision_timeout': 1800,
+            'docker_login_config': None,
+            'create_instance_kwargs': {},
+            'ssh_private_key': '/tmp/sky-key',
+            'instance_type': '1x-A100-4-8192',
+            'disk_size': 30,
+            'image_id': 'vastai/base:0.0.2',
+            'use_spot': False,
+            'sky_ray_yaml_remote_path': '/tmp/ray.yaml',
+            'sky_ray_yaml_local_path': '/tmp/ray.yaml',
+            'sky_remote_path': '/tmp/sky',
+            'sky_wheel_hash': 'wheel.whl',
+            'sky_local_path': '/tmp/sky.whl',
+            'credentials': {},
+            'initial_setup_commands': [],
+            'conda_installation_commands': '',
+            'uv_installation_commands': '',
+            'ray_skypilot_installation_commands': '',
+            'copy_skypilot_templates_commands': '',
+            'ssh_max_sessions_config': '',
+        },
+        str(output_path))
+
+    config = yaml_utils.read_yaml(str(output_path))
+    assert config['provider']['network_tier'] == 'best'
 
 
 def test_launch_best_network_tier_filters_symmetric_bandwidth(monkeypatch):
