@@ -1,4 +1,6 @@
 """Kubernetes volume provisioning (PVC and hostPath)."""
+import enum
+import re
 import time as time_module
 from typing import Any, Dict, List, Optional, Set, Tuple
 
@@ -17,6 +19,63 @@ logger = sky_logging.init_logger(__name__)
 
 PVC_FAILING_EVENT_REASONS = ('ProvisioningFailed',)
 WARNING_EVENT_TYPE = 'Warning'
+# Normal event reasons that explain why a claim is still pending. Reported to
+# the user, never treated as failures.
+PVC_PENDING_EVENT_REASONS = ('WaitForFirstConsumer', 'ExternalProvisioning',
+                             'Provisioning')
+
+# CSI is a gRPC interface, so a provisioner's failure message carries the code
+# the storage backend returned, in grpc-go's standard rendering.
+_GRPC_CODE_PATTERN = re.compile(r'\bcode = (\w+)')
+# Codes whose documented recovery behaviour is that the caller has to change
+# something before retrying, so retrying as-is cannot succeed. Taken from the
+# CreateVolume error table in the CSI spec: INVALID_ARGUMENT ("use different
+# parameters"), ALREADY_EXISTS ("fix the arguments or use a different name"),
+# OUT_OF_RANGE ("fix the capacity range"), NOT_FOUND ("verify the source").
+# InvalidArgument is also exactly what sig-storage's provisioner library calls
+# an infeasible error, after which it retries only every retry-interval-max.
+#
+# Deliberately conservative: leaving a code out costs time (the claim falls back
+# to the slower judgement below), while wrongly including one fails a launch
+# whose volume was going to work.
+_TERMINAL_GRPC_CODES = ('InvalidArgument', 'AlreadyExists', 'OutOfRange',
+                        'NotFound')
+# Codes that mean the CreateVolume call may still be running. From
+# external-provisioner's own checkError(), which maps exactly these to
+# "provisioning in background". A network filesystem reports these while it is
+# being created -- GKE Filestore emits DeadlineExceeded ("volume not ready,
+# current state: CREATING") and Aborted ("an operation with the given volume key
+# already exists") for minutes on the way to a healthy volume -- so they must
+# never fail a launch.
+_IN_PROGRESS_GRPC_CODES = ('Canceled', 'DeadlineExceeded', 'Unavailable',
+                           'Aborted')
+
+
+class PvcFailure(enum.Enum):
+    """What a failure reported on a PVC says about waiting any longer."""
+    # The request has to change; waiting cannot help.
+    TERMINAL = 'terminal'
+    # The call may still be running, or the obstacle may clear by itself.
+    IN_PROGRESS = 'in_progress'
+    # No code to go on: another provisioner, or a failure raised before the
+    # gRPC call. Judged on how long it persists instead.
+    UNKNOWN = 'unknown'
+
+
+def classify_pvc_failure(message: Optional[str]) -> PvcFailure:
+    """Classifies a PVC failure event message by the gRPC code it carries."""
+    match = _GRPC_CODE_PATTERN.search(message or '')
+    if match is None:
+        return PvcFailure.UNKNOWN
+    code = match.group(1)
+    if code in _TERMINAL_GRPC_CODES:
+        return PvcFailure.TERMINAL
+    if code in _IN_PROGRESS_GRPC_CODES:
+        return PvcFailure.IN_PROGRESS
+    # Everything else -- ResourceExhausted, Internal, Unknown, PermissionDenied
+    # -- is neither provably hopeless nor provably in flight. Quota, for one,
+    # can be raised while a launch waits.
+    return PvcFailure.UNKNOWN
 
 
 def _is_rbac_permission_error(e: Exception) -> bool:
@@ -565,10 +624,18 @@ def _first_pvc_failure_event(context: Optional[str], namespace: str,
 
     A failing event is the only positive evidence that a pending PVC will not
     bind on its own; a pending PVC without one may still be mid-provisioning.
+
+    A warning the provisioner reports while its CreateVolume call is still
+    running is not such evidence: a network filesystem being created emits them
+    for minutes and then binds. Counting those made a volume read as unusable
+    for the middle of its own creation, which in turn refused every launch that
+    wanted it.
     """
     for event in kubernetes_utils.get_pvc_events(context, namespace, pvc_name):
         if (event.type == WARNING_EVENT_TYPE or
                 event.reason in PVC_FAILING_EVENT_REASONS):
+            if classify_pvc_failure(event.message) == PvcFailure.IN_PROGRESS:
+                continue
             if event.message:
                 return f'{event.reason}: {event.message}'
             return str(event.reason)
