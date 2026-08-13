@@ -58,6 +58,14 @@ class LogDeliverySource:
     as "no reason to doubt delivery" and preserves the previous behavior,
     so a broken source degrades to today's semantics rather than making
     every job download its logs again.
+
+    Implementations must answer quickly and must not block. The check runs
+    once per managed job task, on the job-finalization path, in a worker
+    thread drawn from a pool the rest of the controller shares -- so a
+    source that hangs does not just delay one job, it holds a thread others
+    are waiting for. Exceptions are contained (see below); a hang is not.
+    A local lookup of something recorded earlier is the intended shape; a
+    round trip that can stall indefinitely is not.
     """
 
     _undelivered_reason_func: Optional[UndeliveredReasonFunc] = None
@@ -71,7 +79,8 @@ class LogDeliverySource:
         Args:
             undelivered_reason: Function returning a human-readable reason
                 why the cluster's logs did not reach the external store, or
-                None when there is no evidence against delivery.
+                None when there is no evidence against delivery. Must return
+                promptly and must not block -- see the class docstring.
                 Signature: (cluster_name: Optional[str],
                             cluster_name_on_cloud: Optional[str])
                            -> Optional[str]
