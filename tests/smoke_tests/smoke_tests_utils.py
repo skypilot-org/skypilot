@@ -1768,13 +1768,17 @@ def rejecting_storage_class_name(test_name: str) -> str:
     return f'{test_name}-reject'
 
 
-def create_rejecting_storage_class_cmd(test_name: str) -> Optional[str]:
+def create_rejecting_storage_class_cmd(
+        test_name: str,
+        binding_mode: str = 'WaitForFirstConsumer') -> Optional[str]:
     """Command creating a class whose driver refuses the claims made on it.
 
-    Bound to WaitForFirstConsumer on purpose: until a pod asks for the claim the
-    driver is never called, so the volume is correctly ready, and the rejection
-    arrives only once a launch is under way. That is the one situation no
-    pre-launch check can catch.
+    `binding_mode` picks when the refusal arrives. Under
+    WaitForFirstConsumer the driver is not called until a pod asks for the
+    claim, so the volume is correctly ready right up to the launch that breaks
+    it -- the one situation no pre-launch check can catch. Under Immediate the
+    driver is called when the claim is created, so the volume is knowably
+    unusable before any launch.
 
     Borrows the provisioner from the cluster's RWX class, which is the one
     driver a lane is known to have. Returns None when that driver has no known
@@ -1793,7 +1797,7 @@ def create_rejecting_storage_class_cmd(test_name: str) -> Optional[str]:
             f'metadata:\n'
             f'  name: {rejecting_storage_class_name(test_name)}\n'
             f'provisioner: {provisioner}\n'
-            f'volumeBindingMode: WaitForFirstConsumer\n')
+            f'volumeBindingMode: {binding_mode}\n')
     if parameters:
         body += f'parameters:\n{parameters}'
     return f'kubectl apply -f - <<EOF\n{body}EOF'
@@ -1802,6 +1806,37 @@ def create_rejecting_storage_class_cmd(test_name: str) -> Optional[str]:
 def delete_rejecting_storage_class_cmd(test_name: str) -> str:
     sc_name = rejecting_storage_class_name(test_name)
     return f'kubectl delete sc {sc_name} --ignore-not-found'
+
+
+def wait_until_volume_is_rejected_cmd(volume_name: str,
+                                      timeout: int = 180) -> str:
+    """A step that blocks until the volume's record carries a rejection.
+
+    A volume on a rejecting class is not-ready from the moment it is created,
+    but for the first refresh cycle the recorded reason is that it is still
+    being provisioned -- which is what `volume_apply` can see without waiting.
+    Only once the status refresh has read the driver's answer does the record
+    say it was refused, and that is what a launch is refused over: the reason,
+    not the not-ready flag, since being provisioned is also not-ready.
+
+    Measured on the kind lane: the driver answers within seconds, the record
+    catches up in about a minute (the refresh daemon's interval).
+    """
+    return (f'start_time=$SECONDS; '
+            f'while true; do '
+            f'  vols=$(sky volumes ls); '
+            f'  row=$(echo "$vols" | grep {volume_name} || true); '
+            f'  echo "$row"; '
+            f'  if echo "$row" | grep -q ProvisioningFailed; then '
+            f'    echo "Volume {volume_name} is recorded as refused."; break; '
+            f'  fi; '
+            f'  if (( $SECONDS - $start_time > {timeout} )); then '
+            f'    echo "$vols"; '
+            f'    echo "Timeout after {timeout} seconds waiting for volume '
+            f'{volume_name} to be recorded as refused"; exit 1; '
+            f'  fi; '
+            f'  sleep 10; '
+            f'done')
 
 
 # Pins a command to the cluster the agent's kubectl points at, so a volume and

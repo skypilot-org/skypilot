@@ -4158,10 +4158,17 @@ def test_managed_job_volume_not_ready():
     only resolves when it launches the job cluster, and which therefore does end
     in FAILED_PRECHECKS. See test_managed_job_auto_mount_not_ready.
 
-    The claim can never bind because nothing provisions its storage class, so it
-    needs no real storage and fails within seconds.
+    The volume is on a class whose driver refuses the claim, bound Immediately so
+    the refusal is recorded before the job is submitted. It has to be a real
+    rejection: a volume that is merely being provisioned is also not ready, and
+    is deliberately not refused.
     """
     name = smoke_tests_utils.get_cluster_name()
+    create_sc_cmd = smoke_tests_utils.create_rejecting_storage_class_cmd(
+        name, binding_mode='Immediate')
+    if create_sc_cmd is None:
+        pytest.skip('No CSI driver on this cluster with a known way to refuse '
+                    'a claim; see _REJECTED_BY_PROVISIONER.')
     volume_name = f'{name}-nr'
     volume_yaml = textwrap.dedent(f"""\
         name: {volume_name}
@@ -4169,7 +4176,7 @@ def test_managed_job_volume_not_ready():
         size: 1Gi
         config:
           access_mode: ReadWriteMany
-          storage_class_name: {smoke_tests_utils.unprovisionable_storage_class_name(name)}
+          storage_class_name: {smoke_tests_utils.rejecting_storage_class_name(name)}
     """)
     task_yaml = textwrap.dedent(f"""\
         resources:
@@ -4189,12 +4196,15 @@ def test_managed_job_volume_not_ready():
         test = smoke_tests_utils.Test(
             'managed_job_volume_not_ready',
             [
-                smoke_tests_utils.create_unprovisionable_storage_class_cmd(
-                    name),
+                create_sc_cmd,
                 f'sky volumes apply -y {smoke_tests_utils.AGENT_K8S_INFRA} '
                 f'{vol_f.name}',
-                f'vols=$(sky volumes ls) && echo "$vols" && '
-                f'echo "$vols" | grep {volume_name} | grep NOT_READY',
+                # The driver's answer reaches the record on the status
+                # refresh's schedule; until then the reason recorded is that the
+                # volume is being provisioned, which is deliberately not
+                # refused.
+                smoke_tests_utils.wait_until_volume_is_rejected_cmd(volume_name
+                                                                   ),
                 f'! sky jobs launch -n {name} '
                 f'{smoke_tests_utils.AGENT_K8S_INFRA} '
                 f'{smoke_tests_utils.LOW_RESOURCE_ARG} {task_f.name} -y -d '
@@ -4208,8 +4218,8 @@ def test_managed_job_volume_not_ready():
             smoke_tests_utils.chain_teardown(
                 f'sky jobs cancel -y -n {name} || true',
                 f'sky volumes delete {volume_name} -y || true',
-                smoke_tests_utils.delete_unprovisionable_storage_class_cmd(
-                    name), f'rm -f {name}-refused.log'),
+                smoke_tests_utils.delete_rejecting_storage_class_cmd(name),
+                f'rm -f {name}-refused.log'),
             env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
             timeout=20 * 60,
         )
@@ -4227,6 +4237,11 @@ def test_managed_job_auto_mount_not_ready():
     """The auto-mount path is separate from a volume declared on the task, so
     it needs its own check that a managed job stops instead of retrying.
 
+    The volume is on a class whose driver refuses the claim, bound Immediately so
+    the refusal is recorded before any launch -- a real rejection, since a volume
+    that is merely being provisioned is also not ready and is deliberately not
+    refused.
+
     Consolidation mode only. With a separate controller cluster, `auto_mounts`
     applies to the controller's own launch too -- it is provisioned through the
     same code path -- so a broken volume stops `sky jobs launch` before any job
@@ -4240,6 +4255,11 @@ def test_managed_job_auto_mount_not_ready():
                     'rather than the job.')
 
     name = smoke_tests_utils.get_cluster_name()
+    create_sc_cmd = smoke_tests_utils.create_rejecting_storage_class_cmd(
+        name, binding_mode='Immediate')
+    if create_sc_cmd is None:
+        pytest.skip('No CSI driver on this cluster with a known way to refuse '
+                    'a claim; see _REJECTED_BY_PROVISIONER.')
     volume_name = f'{name}-am'
     volume_yaml = textwrap.dedent(f"""\
         name: {volume_name}
@@ -4247,7 +4267,7 @@ def test_managed_job_auto_mount_not_ready():
         size: 1Gi
         config:
           access_mode: ReadWriteMany
-          storage_class_name: {smoke_tests_utils.unprovisionable_storage_class_name(name)}
+          storage_class_name: {smoke_tests_utils.rejecting_storage_class_name(name)}
     """)
     task_yaml = textwrap.dedent("""\
         resources:
@@ -4277,16 +4297,19 @@ def test_managed_job_auto_mount_not_ready():
         test = smoke_tests_utils.Test(
             'managed_job_auto_mount_not_ready',
             [
-                smoke_tests_utils.create_unprovisionable_storage_class_cmd(
-                    name),
+                create_sc_cmd,
                 # Create the volume without auto_mounts in scope, so this step
                 # cannot be tripped up by the entry it is about to become.
                 smoke_tests_utils.with_config(
                     f'sky volumes apply -y '
                     f'{smoke_tests_utils.AGENT_K8S_INFRA} {vol_f.name}',
                     '/dev/null'),
-                f'vols=$(sky volumes ls) && echo "$vols" && '
-                f'echo "$vols" | grep {volume_name} | grep NOT_READY',
+                # The driver's answer reaches the record on the status
+                # refresh's schedule; until then the reason recorded is that the
+                # volume is being provisioned, which is deliberately not
+                # refused.
+                smoke_tests_utils.wait_until_volume_is_rejected_cmd(volume_name
+                                                                   ),
                 f'sky jobs launch -n {name} '
                 f'{smoke_tests_utils.AGENT_K8S_INFRA} '
                 f'{smoke_tests_utils.LOW_RESOURCE_ARG} {task_f.name} -y -d',
@@ -4304,8 +4327,7 @@ def test_managed_job_auto_mount_not_ready():
             smoke_tests_utils.chain_teardown(
                 f'sky jobs cancel -y -n {name}',
                 f'sky volumes delete {volume_name} -y || true',
-                smoke_tests_utils.delete_unprovisionable_storage_class_cmd(
-                    name)),
+                smoke_tests_utils.delete_rejecting_storage_class_cmd(name)),
             env={
                 skypilot_config.ENV_VAR_GLOBAL_CONFIG: cfg_f.name,
             },
@@ -4439,10 +4461,22 @@ def test_managed_job_volume_mix():
 
     The cluster-launch equivalent is test_volume_mix_on_kubernetes. Worth
     covering separately because a job's volumes travel a different route to the
-    launch: they are resolved when the job is submitted and carried to the
-    controller, which launches the cluster later and, for auto_mounts, resolves
-    the config itself.
+    launch: the ones named on the task are resolved when the job is submitted
+    and carried to the controller, while `auto_mounts` is resolved where the job
+    cluster is provisioned.
+
+    Consolidation mode only, because of that last part. With a separate
+    controller cluster the launch runs against the controller's own state DB,
+    which does not hold the volume table, so every auto_mounts entry is skipped
+    and the volume is silently not mounted -- CI showed the job failing on a
+    missing /mnt/auto, with the pod spec carrying only the other two volumes.
     """
+    if not smoke_tests_utils.server_side_is_consolidation_mode():
+        pytest.skip('Needs consolidation mode: auto_mounts is resolved where '
+                    'the job cluster is provisioned, and a separate '
+                    'controller cannot read the volume table, so the '
+                    'auto-mounted volume would be skipped rather than '
+                    'mounted.')
     name = smoke_tests_utils.get_cluster_name()
     persistent_volume = f'{name}-p'
     auto_volume = f'{name}-a'

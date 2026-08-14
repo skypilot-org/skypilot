@@ -109,6 +109,34 @@ def is_read_write_many_pvc(volume_config: models.VolumeConfig) -> bool:
             == VolumeAccessMode.READ_WRITE_MANY.value)
 
 
+# The one reason a volume can be recorded not-ready and still become usable on
+# its own: a StorageClass that binds Immediately starts provisioning when the
+# claim is created, so the claim is Pending for as long as the backend takes,
+# and a network filesystem takes minutes. `_get_pvc_error` builds its message
+# from this, and `volume_error_may_resolve` reads it back.
+PVC_PROVISIONING_MESSAGE = ('PVC is pending: the PersistentVolume is still '
+                            'being provisioned.')
+
+
+def volume_error_may_resolve(error_message: Optional[str]) -> bool:
+    """Whether a not-ready volume may still become usable without a change.
+
+    Refusing a launch over a volume is for volumes that will not work until
+    someone fixes them. This tells that case from the one where waiting is all
+    that is needed, so a launch is not refused over the minutes a network
+    filesystem legitimately takes.
+
+    A recorded message with no reason to expect it to resolve is read as needing
+    a change -- including one carrying no gRPC code at all, e.g. an access mode
+    the available PersistentVolumes do not support, which is permanent. Deciding
+    the other way round (refuse only what is provably terminal) would let that
+    class of misconfiguration through.
+    """
+    if not error_message:
+        return False
+    return PVC_PROVISIONING_MESSAGE in error_message
+
+
 def mount_is_read_write_many_pvc(volume_mount: 'VolumeMount') -> bool:
     """`is_read_write_many_pvc` for a volume declared on a task.
 

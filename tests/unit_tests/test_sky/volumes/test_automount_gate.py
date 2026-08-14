@@ -5,6 +5,7 @@ from sky import exceptions
 from sky import models
 from sky.backends import backend_utils
 from sky.utils import status_lib
+from sky.utils import volume as volume_utils
 
 
 def _record(status: status_lib.VolumeStatus,
@@ -74,6 +75,30 @@ class TestRejectNotReadyVolume:
         assert 'auto_mounts' in str(auto.value)
         assert 'auto_mounts' not in str(task.value)
         assert 'task' in str(task.value)
+
+    def test_a_volume_still_being_provisioned_passes(self):
+        """Not-ready but on its way: a class that binds Immediately provisions
+        asynchronously, and a network filesystem takes minutes. Refusing here
+        would fail a managed job's relaunch over a volume about to work, and a
+        job that fails prechecks does not retry."""
+        _reject(
+            _record(status_lib.VolumeStatus.NOT_READY,
+                    error_message=f'{volume_utils.PVC_PROVISIONING_MESSAGE} If '
+                    f'this does not resolve, the storage class may be '
+                    f'misconfigured. To debug, run: kubectl describe pvc vol'))
+
+    def test_a_permanent_failure_without_a_grpc_code_is_still_rejected(self):
+        """The reason to read the message for what it is rather than for a
+        terminal gRPC code: an access mode no available PersistentVolume
+        supports never resolves, and says so without a code."""
+        with pytest.raises(exceptions.VolumeNotReadyError) as exc:
+            _reject(
+                _record(status_lib.VolumeStatus.NOT_READY,
+                        error_message='PVC access mode mismatch: PVC requests '
+                        'ReadWriteMany, but available PersistentVolumes '
+                        'support: ReadWriteOnce'))
+
+        assert 'access mode mismatch' in str(exc.value)
 
     def test_ready_volume_passes(self):
         _reject(_record(status_lib.VolumeStatus.READY))

@@ -1887,10 +1887,17 @@ def test_auto_mount_not_ready_on_kubernetes():
     with nothing pointing at the volume as the cause -- which is how it showed
     up in the field, as a job stuck in creating.
 
-    The claim here can never bind because its storage class does not exist, so
-    it fails within seconds and needs no real storage.
+    The broken volume is on a class whose driver refuses the claim, bound
+    Immediately so the refusal is recorded before any launch. It has to be a
+    real rejection: a volume that is merely being provisioned is also not ready,
+    and is deliberately not refused.
     """
     name = smoke_tests_utils.get_cluster_name()
+    create_sc_cmd = smoke_tests_utils.create_rejecting_storage_class_cmd(
+        name, binding_mode='Immediate')
+    if create_sc_cmd is None:
+        pytest.skip('No CSI driver on this cluster with a known way to refuse '
+                    'a claim; see _REJECTED_BY_PROVISIONER.')
     broken_volume = f'{name}-broken'
     good_volume = f'{name}-hp'
     host_path = f'/tmp/skypilot-automount-{name}'
@@ -1900,7 +1907,7 @@ def test_auto_mount_not_ready_on_kubernetes():
         size: 1Gi
         config:
           access_mode: ReadWriteMany
-          storage_class_name: {smoke_tests_utils.unprovisionable_storage_class_name(name)}
+          storage_class_name: {smoke_tests_utils.rejecting_storage_class_name(name)}
     """)
     good_yaml = textwrap.dedent(f"""\
         name: {good_volume}
@@ -1948,16 +1955,17 @@ def test_auto_mount_not_ready_on_kubernetes():
         test = smoke_tests_utils.Test(
             'auto_mount_not_ready_on_kubernetes',
             [
-                smoke_tests_utils.create_unprovisionable_storage_class_cmd(
-                    name),
+                create_sc_cmd,
                 f'sky volumes apply -y {smoke_tests_utils.AGENT_K8S_INFRA} '
                 f'{broken_f.name}',
                 f'sky volumes apply -y {smoke_tests_utils.AGENT_K8S_INFRA} '
                 f'{good_f.name}',
-                # The claim cannot be provisioned, so the volume is reported
-                # unusable without waiting for the refresh daemon.
-                f'vols=$(sky volumes ls) && echo "$vols" && '
-                f'echo "$vols" | grep {broken_volume} | grep NOT_READY',
+                # The driver's answer reaches the record on the status
+                # refresh's schedule; until then the reason recorded is that the
+                # volume is being provisioned, which is deliberately not
+                # refused.
+                smoke_tests_utils.wait_until_volume_is_rejected_cmd(
+                    broken_volume),
                 # Auto-mounting it must refuse the launch, name the volume, and
                 # leave no cluster behind.
                 smoke_tests_utils.with_config(
@@ -1980,8 +1988,8 @@ def test_auto_mount_not_ready_on_kubernetes():
             smoke_tests_utils.chain_teardown(
                 f'sky down -y {name}',
                 f'sky volumes delete {broken_volume} {good_volume} -y || true',
-                smoke_tests_utils.delete_unprovisionable_storage_class_cmd(
-                    name), f'rm -f {name}-refused.log'),
+                smoke_tests_utils.delete_rejecting_storage_class_cmd(name),
+                f'rm -f {name}-refused.log'),
         )
         smoke_tests_utils.run_one_test(test)
 
@@ -1998,10 +2006,18 @@ def test_volume_not_ready_on_kubernetes():
     ways of attaching a volume agree, so if this one ever stops refusing, they
     have silently diverged again.
 
-    The claim can never bind because its storage class does not exist, so it
-    needs no real storage and fails within seconds.
+    The volume is on a class whose driver refuses the claim, bound Immediately
+    so the refusal lands before any launch. What makes a volume refusable is the
+    reason recorded against it, not the not-ready flag alone -- being provisioned
+    is also not-ready, and refusing that would fail launches over volumes that
+    were about to work -- so the fixture has to produce a real rejection.
     """
     name = smoke_tests_utils.get_cluster_name()
+    create_sc_cmd = smoke_tests_utils.create_rejecting_storage_class_cmd(
+        name, binding_mode='Immediate')
+    if create_sc_cmd is None:
+        pytest.skip('No CSI driver on this cluster with a known way to refuse '
+                    'a claim; see _REJECTED_BY_PROVISIONER.')
     volume_name = f'{name}-nr'
     volume_yaml = textwrap.dedent(f"""\
         name: {volume_name}
@@ -2009,7 +2025,7 @@ def test_volume_not_ready_on_kubernetes():
         size: 1Gi
         config:
           access_mode: ReadWriteMany
-          storage_class_name: {smoke_tests_utils.unprovisionable_storage_class_name(name)}
+          storage_class_name: {smoke_tests_utils.rejecting_storage_class_name(name)}
     """)
     task_yaml = textwrap.dedent(f"""\
         resources:
@@ -2029,12 +2045,15 @@ def test_volume_not_ready_on_kubernetes():
         test = smoke_tests_utils.Test(
             'volume_not_ready_on_kubernetes',
             [
-                smoke_tests_utils.create_unprovisionable_storage_class_cmd(
-                    name),
+                create_sc_cmd,
                 f'sky volumes apply -y {smoke_tests_utils.AGENT_K8S_INFRA} '
                 f'{vol_f.name}',
-                f'vols=$(sky volumes ls) && echo "$vols" && '
-                f'echo "$vols" | grep {volume_name} | grep NOT_READY',
+                # The driver's answer reaches the record on the status
+                # refresh's schedule; until then the reason recorded is that the
+                # volume is being provisioned, which is deliberately not
+                # refused.
+                smoke_tests_utils.wait_until_volume_is_rejected_cmd(volume_name
+                                                                   ),
                 f'! sky launch -y -c {name} {smoke_tests_utils.AGENT_K8S_INFRA} '
                 f'{task_f.name} '
                 f'> {name}-refused.log 2>&1; '
@@ -2047,8 +2066,8 @@ def test_volume_not_ready_on_kubernetes():
             smoke_tests_utils.chain_teardown(
                 f'sky down -y {name} || true',
                 f'sky volumes delete {volume_name} -y || true',
-                smoke_tests_utils.delete_unprovisionable_storage_class_cmd(
-                    name), f'rm -f {name}-refused.log'),
+                smoke_tests_utils.delete_rejecting_storage_class_cmd(name),
+                f'rm -f {name}-refused.log'),
         )
         smoke_tests_utils.run_one_test(test)
 

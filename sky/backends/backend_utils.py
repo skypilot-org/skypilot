@@ -729,6 +729,16 @@ def _reject_not_ready_volume(volume_name: str, record: Dict[str, Any],
     """
     if record.get('status') != status_lib.VolumeStatus.NOT_READY:
         return
+    if volume_utils.volume_error_may_resolve(record.get('error_message')):
+        # Being provisioned is not a reason to refuse a launch: waiting is all
+        # it needs, and the wait loop is the component built to do that -- with
+        # the minutes a network filesystem takes already in its timeout. Doing
+        # otherwise would fail a managed job's relaunch over a volume that was
+        # about to work, and a job that fails prechecks does not retry.
+        logger.debug(f'{description} {volume_name!r} is not ready yet but may '
+                     f'resolve: {record.get("error_message")}. Leaving it to '
+                     f'the provisioning wait.')
+        return
     error_message = (record.get('error_message') or
                      'The last status refresh found it unusable.')
     raise exceptions.VolumeNotReadyError(

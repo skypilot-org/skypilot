@@ -69,15 +69,26 @@ class PvcFailure(enum.Enum):
 
 
 def classify_pvc_failure(message: Optional[str]) -> PvcFailure:
-    """Classifies a PVC failure event message by the gRPC code it carries."""
-    match = _GRPC_CODE_PATTERN.search(message or '')
-    if match is None:
+    """Classifies a PVC failure event message by the gRPC code it carries.
+
+    A message can carry more than one code: grpc-go wraps a status in another
+    status, giving `code = Unknown desc = rpc error: code = InvalidArgument
+    desc = ...`, where the outer code is the less specific of the two. So every
+    code is read, and:
+
+    - any sign that the call may still be running wins outright, wherever it
+      appears. The cost of missing a terminal code is waiting; the cost of
+      inventing one is failing a launch whose volume was going to work.
+    - otherwise the innermost code decides, since that is the one the storage
+      backend actually returned.
+    """
+    codes = _GRPC_CODE_PATTERN.findall(message or '')
+    if not codes:
         return PvcFailure.UNKNOWN
-    code = match.group(1)
-    if code in _TERMINAL_GRPC_CODES:
-        return PvcFailure.TERMINAL
-    if code in _IN_PROGRESS_GRPC_CODES:
+    if any(code in _IN_PROGRESS_GRPC_CODES for code in codes):
         return PvcFailure.IN_PROGRESS
+    if codes[-1] in _TERMINAL_GRPC_CODES:
+        return PvcFailure.TERMINAL
     # Everything else -- ResourceExhausted, Internal, Unknown, PermissionDenied
     # -- is neither provably hopeless nor provably in flight. Quota, for one,
     # can be raised while a launch waits.
@@ -681,10 +692,11 @@ def _get_pvc_error(context: Optional[str], namespace: str,
         # Immediate binding: provisioning has started and has not finished.
         # Word this as in-progress -- provisioning a network volume can
         # legitimately take minutes -- while still reporting it as not ready.
-        return (f'PVC is pending: the PersistentVolume is still being '
-                f'provisioned. If this does not resolve, the storage class '
-                f'may be misconfigured or the cluster may be out of storage '
-                f'capacity. {debug_hint}')
+        # The first sentence is the shared constant, which is what tells a
+        # caller deciding whether to refuse a launch that waiting is enough.
+        return (f'{volume_lib.PVC_PROVISIONING_MESSAGE} If this does not '
+                f'resolve, the storage class may be misconfigured or the '
+                f'cluster may be out of storage capacity. {debug_hint}')
 
     if pvc_phase == 'Lost':
         return ('PVC is in Lost state. The bound PersistentVolume '

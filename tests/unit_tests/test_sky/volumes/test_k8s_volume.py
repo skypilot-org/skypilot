@@ -1806,6 +1806,12 @@ class TestGetAllVolumesErrors:
         assert errors['test-vol'] is not None
         assert 'pending' in errors['test-vol'].lower()
         assert 'kubectl describe pvc' in errors['test-vol']
+        # The message has to carry the shared sentence, not just say something
+        # similar: it is what tells a launch that this volume is on its way
+        # rather than broken, so a launch is not refused over it. If the wording
+        # drifts from the constant, the launch silently starts refusing again.
+        assert volume_lib.PVC_PROVISIONING_MESSAGE in errors['test-vol']
+        assert volume_lib.volume_error_may_resolve(errors['test-vol'])
 
     @patch('sky.provision.kubernetes.volume._get_context_namespace')
     @patch('sky.adaptors.kubernetes.core_api')
@@ -2626,6 +2632,22 @@ class TestClassifyPvcFailure:
     def test_a_message_with_no_code_is_left_undecided(self, message):
         assert k8s_volume.classify_pvc_failure(
             message) == k8s_volume.PvcFailure.UNKNOWN
+
+    def test_a_wrapped_status_is_read_by_its_inner_code(self):
+        """grpc-go wraps a status in another status, and the outer one is
+        usually the less specific of the two."""
+        assert k8s_volume.classify_pvc_failure(
+            'rpc error: code = Unknown desc = rpc error: '
+            'code = InvalidArgument desc = bad tier'
+        ) == k8s_volume.PvcFailure.TERMINAL
+
+    def test_a_call_that_may_be_running_wins_over_a_terminal_wrapper(self):
+        """The asymmetry that matters: waiting longer than needed costs time,
+        failing a launch whose volume was going to work cannot be undone."""
+        assert k8s_volume.classify_pvc_failure(
+            'rpc error: code = InvalidArgument desc = rpc error: '
+            'code = DeadlineExceeded desc = still creating'
+        ) == k8s_volume.PvcFailure.IN_PROGRESS
 
 
 class TestFirstPvcFailureEvent:
