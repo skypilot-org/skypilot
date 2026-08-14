@@ -403,19 +403,23 @@ class PostgresLock(DistributedLock):
         This method exposes a cheap ``SELECT 1`` probe on the very connection
         that holds the lock so the holder can detect the loss and react.
 
-        Reacting by exiting the process is one option, but not the only one and
-        not the cheapest: a holder that also serves traffic takes that traffic
-        down with it. A holder can instead step down in place — stop whatever
-        work the lock guarded, prove it stopped, drop this lock object (see the
-        note below) and go back to contending. ``sky/jobs/
-        managed_job_refresh_thread.py::_step_down_on_lock_loss`` does that.
+        A holder that also serves traffic need not exit on a lost session; it
+        can step down in place, stop whatever work the lock guarded, drop this
+        lock object and go back to contending.
 
-        Note for either path: a failed ``release()`` on the dead connection
-        leaves ``self._acquired`` True, because that flag is only cleared after
-        a successful unlock — and ``is_locked()`` returns exactly that flag. A
-        holder that keeps using this object after a lost session can therefore
-        believe it still holds the lock. Build a fresh lock instead of reusing
-        one whose session died.
+        Either way, do not reuse this object afterwards: a failed ``release()``
+        on the dead connection leaves ``self._acquired`` True, because that flag
+        is only cleared after a successful unlock — and ``is_locked()`` returns
+        exactly that flag. A holder that keeps using this object after a lost
+        session can therefore believe it still holds the lock. Build a fresh
+        lock instead.
+
+        TODO(aylei): this transition belongs to this class rather than to every
+        caller's memory — an explicit ``mark_lost()``, so ``is_locked()`` stops
+        reporting a lock whose session is gone. Note that simply clearing
+        ``_acquired`` in ``release()``'s ``DatabaseError`` branch is not the
+        safe version: that branch also catches non-connection errors, where our
+        own session may still hold the lock.
 
         Returns ``False`` if the lock was never acquired, if the connection
         is missing, or if the probe raises any exception.  Returns ``True``
