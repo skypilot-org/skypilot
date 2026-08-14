@@ -99,6 +99,21 @@ _PENDING_REASON_NORMAL_EVENT_ALLOWLIST = {
     'WaitForFirstConsumer',  # late-binding storage class
 }
 
+# Warning-type pod events that are emitted once during normal startup and
+# then left on the pod after the condition they describe has resolved. The
+# Warning pass skips them, so the scan falls through to a later Warning or to
+# an allow-listed Normal instead of pinning a healthy launch to a stale
+# complaint.
+_PENDING_REASON_WARNING_EVENT_IGNORELIST = {
+    # Kueue's pod reconciler races the creation of a pod group: it fires on
+    # the first pod it observes, sees fewer live pods than
+    # pod-group-total-count, and emits this Warning. It self-resolves within
+    # seconds once the remaining pods exist, but the event object survives
+    # for its full TTL -- see
+    # https://kueue.sigs.k8s.io/docs/tasks/troubleshooting/troubleshooting_pods/
+    'ErrWorkloadCompose',
+}
+
 # Warning-type pod events (emitted by the kubelet, after scheduling) that
 # indicate a volume attach/mount failure. A pod hit by one of these stays in
 # the uninformative 'ContainerCreating' waiting state, so the failure is only
@@ -3278,7 +3293,8 @@ def _get_pod_pending_reason(
     """Get the reason why a pod is pending from its events.
 
     Two-pass scan over the event list (sorted newest-first by _get_pod_events):
-      1. Tier 2 -- the newest event with event.type == 'Warning'.
+      1. Tier 2 -- the newest event with event.type == 'Warning' whose reason
+         is not in _PENDING_REASON_WARNING_EVENT_IGNORELIST.
       2. Tier 3 -- the newest event whose reason is in
          _PENDING_REASON_NORMAL_EVENT_ALLOWLIST.
     A Warning beats an allow-listed Normal -- a FailedScheduling Warning is a
@@ -3288,7 +3304,7 @@ def _get_pod_pending_reason(
     condition that produced it by a long way, and reporting a stale one is not
     just a mislabeled spinner: the reason then never changes while the pod
     makes progress, which is exactly what the no-progress deadline in
-    _wait_for_pods_to_run reads as a stall. Two independent checks demote one:
+    _wait_for_pods_to_run reads as a stall. Three independent checks demote one:
 
       a. A Warning last observed before the pod was bound cannot describe what
          the kubelet is doing, because every caller of this function observes
@@ -3298,13 +3314,17 @@ def _get_pod_pending_reason(
       b. A Warning observed less recently than the allow-listed Normal has
          been overtaken by it -- e.g. a mount the kubelet retried successfully,
          whose FailedMount predates the image pull now under way.
+      c. A Warning whose reason is in _PENDING_REASON_WARNING_EVENT_IGNORELIST
+         is never reported, whatever its timestamps: it is emitted once during
+         normal startup and re-emitted while the condition it names resolves
+         itself, so neither (a) nor (b) can catch it.
 
-    Both compare last-observed times, not creation times: kubernetes folds a
-    repeated event back into the original object, bumping count/last_timestamp
-    while creation_timestamp stays pinned to the first occurrence. So a live
-    Warning being re-emitted survives both checks, and an event that cannot be
-    dated is never treated as stale. Ordering *within* a tier is left to
-    _get_pod_events' newest-first creation order.
+    (a) and (b) compare last-observed times, not creation times: kubernetes
+    folds a repeated event back into the original object, bumping
+    count/last_timestamp while creation_timestamp stays pinned to the first
+    occurrence. So a live Warning being re-emitted survives both checks, and an
+    event that cannot be dated is never treated as stale. Ordering *within* a
+    tier is left to _get_pod_events' newest-first creation order.
 
     With warnings_only, tier 3 is answered with None rather than the Normal
     event: the caller has a reason already and is asking the narrower question
@@ -3331,15 +3351,18 @@ def _get_pod_pending_reason(
                      if e.reason == _POD_BOUND_EVENT_REASON), None)
 
     def _describes_pod_now(event: Any) -> bool:
+        if event.reason in _PENDING_REASON_WARNING_EVENT_IGNORELIST:
+            return False
         if bound_at is None:
             return True
         observed_at = _event_last_observed(event)
         return observed_at is None or observed_at >= bound_at
 
-    # Tier 2: Warning events.
+    # Tier 2: Warning events, minus the ones known to go stale in place.
     warning = next((
         e for e in pod_events if e.type == 'Warning' and _describes_pod_now(e)),
                    None)
+
     # Tier 3: allow-listed Normal events.
     normal = next((e for e in pod_events
                    if e.reason in _PENDING_REASON_NORMAL_EVENT_ALLOWLIST), None)
