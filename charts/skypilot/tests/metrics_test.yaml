@@ -49,6 +49,48 @@ tests:
           path: data["prometheus.yml"]
           pattern: "/endpoints-metrics"
 
+  - it: should NOT render the pgbouncer scrape job by default
+    set:
+      prometheus.enabled: true
+    asserts:
+      - notMatchRegex:
+          path: data["prometheus.yml"]
+          pattern: "skypilot-pgbouncer-metrics"
+
+  - it: should render the pgbouncer scrape job when scrapePgBouncer is enabled
+    set:
+      prometheus.enabled: true
+      prometheus.scrapePgBouncer: true
+    asserts:
+      - matchRegex:
+          path: data["prometheus.yml"]
+          pattern: "job_name: 'skypilot-pgbouncer-metrics'"
+      # The annotation meta-label spelling is load-bearing: a typo yields a job
+      # that silently matches no pods.
+      - matchRegex:
+          path: data["prometheus.yml"]
+          pattern: "__meta_kubernetes_pod_annotation_skypilot_co_pgbouncer_scrape"
+      - matchRegex:
+          path: data["prometheus.yml"]
+          pattern: "__meta_kubernetes_pod_annotation_skypilot_co_pgbouncer_port"
+
+  # The job must survive the minimal/full scrape-config split: extraScrapeConfigs
+  # is appended to prometheus.yml either way, unlike serverFiles.
+  - it: should render the pgbouncer scrape job alongside a custom prometheus.yml
+    set:
+      prometheus.enabled: true
+      prometheus.scrapePgBouncer: true
+      prometheus.serverFiles:
+        prometheus.yml:
+          scrape_configs:
+            - job_name: prometheus
+              static_configs:
+                - targets: [localhost:9090]
+    asserts:
+      - matchRegex:
+          path: data["prometheus.yml"]
+          pattern: "job_name: 'skypilot-pgbouncer-metrics'"
+
 ---
 # yaml-language-server: $schema=https://raw.githubusercontent.com/helm-unittest/helm-unittest/main/schema/helm-testsuite.json
 suite: grafana_ingress_annotations_test

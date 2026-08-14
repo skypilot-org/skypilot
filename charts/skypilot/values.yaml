@@ -725,6 +725,20 @@ prometheus:
   # unless you run model-serving workloads.
   # @schema type: [boolean, null]
   scrapeEndpointMetrics: false
+  # Add a scrape job for a PgBouncer exporter running as an API server sidecar
+  # (apiService.sidecarContainers), which turns the PgBouncer console into
+  # Prometheus metrics — most usefully the number of clients queued for a
+  # server connection and how long the oldest has waited, the signals that
+  # precede pool starvation.
+  #
+  # The exporter shares the API server's pod IP, and a pod can advertise only
+  # one port per annotation set, so it cannot reuse skypilot.co/scrape (which
+  # points at the API server's own metrics port). It advertises its own pair
+  # instead — skypilot.co/pgbouncer-scrape: "true" and
+  # skypilot.co/pgbouncer-port: "<port>" on the API server pod — and this job
+  # keys on that pair. Opt-in: leave false unless you run such a sidecar.
+  # @schema type: [boolean, null]
+  scrapePgBouncer: false
   enabled: false
   # Keep the installation minimal by default. If you want to monitor more resources other than the API server,
   # it is recommended to install and manage prometheus separately.
@@ -770,6 +784,44 @@ prometheus:
       metrics_path: '/endpoints-metrics'
       scrape_interval: 60s
       scrape_timeout: 45s
+    {{- end }}
+    {{- if .Values.scrapePgBouncer }}
+    # PgBouncer exporter sidecar, discovered through the API server pod's
+    # skypilot.co/pgbouncer-* annotations (see prometheus.scrapePgBouncer).
+    # Kubernetes SD spells an annotation as
+    # __meta_kubernetes_pod_annotation_<key>, with every character outside
+    # [a-zA-Z0-9_] replaced by '_'.
+    - job_name: 'skypilot-pgbouncer-metrics'
+      scrape_interval: 30s
+      scrape_timeout: 10s
+      kubernetes_sd_configs:
+        - role: pod
+          namespaces:
+            names:
+            - '{{ .Release.Namespace }}'
+      relabel_configs:
+        - source_labels: [__meta_kubernetes_pod_annotation_skypilot_co_pgbouncer_scrape]
+          action: keep
+          regex: true
+        - source_labels: [__meta_kubernetes_pod_annotation_skypilot_co_pgbouncer_port, __meta_kubernetes_pod_ip]
+          action: replace
+          regex: (\d+);((([0-9]+?)(\.|$)){4})
+          replacement: $2:$1
+          target_label: __address__
+        - source_labels: [__meta_kubernetes_pod_phase]
+          regex: Pending|Succeeded|Failed|Completed
+          action: drop
+        - action: labelmap
+          regex: __meta_kubernetes_pod_label_(.+)
+        - source_labels: [__meta_kubernetes_namespace]
+          action: replace
+          target_label: namespace
+        - source_labels: [__meta_kubernetes_pod_name]
+          action: replace
+          target_label: pod
+        - source_labels: [__meta_kubernetes_pod_node_name]
+          action: replace
+          target_label: node
     {{- end }}
     {{ if .Values.useDedicatedScrapeConfig }}
     - job_name: 'skypilot-api-server-metrics'
