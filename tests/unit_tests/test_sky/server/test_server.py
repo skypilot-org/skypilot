@@ -2,7 +2,6 @@
 
 import argparse
 import asyncio
-import errno
 import json
 import os
 import pathlib
@@ -1151,11 +1150,7 @@ def test_prune_sky_logs_missing_dir_is_noop(tmp_path, monkeypatch):
     assert server._prune_sky_logs(cutoff=1_000_000.0) == 0
 
 
-# --- Tests for _prune_clients_tmp (API server clients dir GC) ---
-
-
-def _set_clients_dir(monkeypatch, path: pathlib.Path) -> None:
-    monkeypatch.setattr(server.common, 'API_SERVER_CLIENT_DIR', path)
+# --- Tests for cleanup_clients_tmp (client tmp dir GC) ---
 
 
 def _set_download_tmp_base(monkeypatch, base) -> None:
@@ -1164,133 +1159,67 @@ def _set_download_tmp_base(monkeypatch, base) -> None:
     monkeypatch.setattr(server.bs, 'get_blob_storage', lambda: storage)
 
 
-def test_prune_clients_tmp_removes_expired_translated_yamls(
-        tmp_path, monkeypatch):
-    """Expired *_translated.yaml files go; other files and dirs stay."""
-    clients_dir = tmp_path / 'clients'
-    _set_clients_dir(monkeypatch, clients_dir)
-    # Backend shares the persistent log dir: no download tree to sweep.
-    _set_download_tmp_base(monkeypatch, None)
-    now = 1_000_000.0
-    old = _touch_file(clients_dir / 'user1' / 'abc_translated.yaml',
-                      now - 10_000)
-    fresh = _touch_file(clients_dir / 'user1' / 'def_translated.yaml',
-                        now - 100)
-    other = _touch_file(clients_dir / 'user2' / 'config.yaml', now - 10_000)
-    logs_dir = _touch_dir(clients_dir / 'user2' / 'sky_logs', now - 10_000)
-    # A stray file where a user dir is expected must be left alone.
-    stray = _touch_file(clients_dir / 'stray_translated.yaml', now - 10_000)
+async def _run_one_cleanup_pass(monkeypatch, daemon) -> None:
+    """Run a single pass of an hourly cleanup daemon, then stop it."""
+    sleeps = []
 
-    removed = server._prune_clients_tmp(cutoff=now - 5_000)
+    async def fake_sleep(delay):
+        sleeps.append(delay)
+        if len(sleeps) > 1:
+            raise asyncio.CancelledError()
 
-    assert removed == 1
-    assert not old.exists()
+    monkeypatch.setattr(server.asyncio, 'sleep', fake_sleep)
+    with pytest.raises(asyncio.CancelledError):
+        await daemon()
+
+
+@pytest.mark.asyncio
+async def test_cleanup_clients_tmp_removes_expired_dirs(tmp_path, monkeypatch):
+    """Expired per-user entries go; fresh ones stay."""
+    tmp_base = tmp_path / 'clients'
+    _set_download_tmp_base(monkeypatch, str(tmp_base))
+    now = time.time()
+    logs = _touch_dir(tmp_base / 'user1' / 'sky_logs', now - 10_000)
+    # Legacy task YAMLs live in a dir, so they go with the dir sweep.
+    tasks = _touch_dir(tmp_base / 'user1' / 'tasks', now - 10_000)
+    fresh = _touch_dir(tmp_base / 'user1' / 'file_mounts', now - 10)
+
+    await _run_one_cleanup_pass(monkeypatch, server.cleanup_clients_tmp)
+
+    assert not logs.exists()
+    assert not tasks.exists()
     assert fresh.exists()
+
+
+@pytest.mark.asyncio
+async def test_cleanup_clients_tmp_removes_translated_yamls_of_any_age(
+        tmp_path, monkeypatch):
+    """*_translated.yaml is deprecated, so age does not matter."""
+    tmp_base = tmp_path / 'clients'
+    _set_download_tmp_base(monkeypatch, str(tmp_base))
+    now = time.time()
+    old = _touch_file(tmp_base / 'user1' / 'abc_translated.yaml', now - 10_000)
+    fresh = _touch_file(tmp_base / 'user1' / 'def_translated.yaml', now)
+    other = _touch_file(tmp_base / 'user1' / 'config.yaml', now - 10_000)
+
+    await _run_one_cleanup_pass(monkeypatch, server.cleanup_clients_tmp)
+
+    assert not old.exists()
+    assert not fresh.exists()
     assert other.exists()
-    assert logs_dir.exists()
-    assert stray.exists()
 
 
-def test_prune_clients_tmp_removes_expired_legacy_task_yamls(
+@pytest.mark.asyncio
+async def test_cleanup_clients_tmp_noop_without_download_tmp_base(
         tmp_path, monkeypatch):
-    """Expired tasks/<task_id>.yaml files go; fresh ones and non-YAMLs stay."""
-    clients_dir = tmp_path / 'clients'
-    _set_clients_dir(monkeypatch, clients_dir)
+    """Backends sharing the persistent log dir need no cleanup."""
     _set_download_tmp_base(monkeypatch, None)
-    now = 1_000_000.0
-    tasks_dir = clients_dir / 'user1' / 'tasks'
-    old = _touch_file(tasks_dir / 'abc.yaml', now - 10_000)
-    fresh = _touch_file(tasks_dir / 'def.yaml', now - 100)
-    other = _touch_file(tasks_dir / 'notes.txt', now - 10_000)
+    kept = _touch_file(tmp_path / 'user1' / 'abc_translated.yaml',
+                       time.time() - 10_000)
 
-    removed = server._prune_clients_tmp(cutoff=now - 5_000)
+    await _run_one_cleanup_pass(monkeypatch, server.cleanup_clients_tmp)
 
-    assert removed == 1
-    assert not old.exists()
-    assert fresh.exists()
-    assert other.exists()
-    assert tasks_dir.exists()
-
-
-def test_prune_clients_tmp_sweeps_download_dirs(tmp_path, monkeypatch):
-    """A dedicated download tmp tree has its expired user entries removed."""
-    clients_dir = tmp_path / 'clients'
-    download_dir = tmp_path / 'downloads'
-    _set_clients_dir(monkeypatch, clients_dir)
-    _set_download_tmp_base(monkeypatch, str(download_dir))
-    now = 1_000_000.0
-    old = _touch_dir(download_dir / 'user1' / 'sky_logs', now - 10_000)
-    fresh = _touch_dir(download_dir / 'user1' / 'sky_logs_fresh', now - 100)
-    old_yaml = _touch_file(clients_dir / 'user1' / 'abc_translated.yaml',
-                           now - 10_000)
-
-    removed = server._prune_clients_tmp(cutoff=now - 5_000)
-
-    assert removed == 2
-    assert not old.exists()
-    assert fresh.exists()
-    assert not old_yaml.exists()
-
-
-def test_prune_clients_tmp_download_base_is_clients_dir(tmp_path, monkeypatch):
-    """Dirs and legacy task YAMLs are both swept when the roots coincide."""
-    clients_dir = tmp_path / 'clients'
-    _set_clients_dir(monkeypatch, clients_dir)
-    _set_download_tmp_base(monkeypatch, str(clients_dir))
-    now = 1_000_000.0
-    old_dir = _touch_dir(clients_dir / 'user1' / 'sky_logs', now - 10_000)
-    fresh_dir = _touch_dir(clients_dir / 'user1' / 'file_mounts', now - 100)
-    old_yaml = _touch_file(clients_dir / 'user1' / 'abc_translated.yaml',
-                           now - 10_000)
-    fresh_yaml = _touch_file(clients_dir / 'user1' / 'def_translated.yaml',
-                             now - 100)
-    # A tasks dir too young for the dir sweep still loses its expired YAMLs.
-    old_task_yaml = _touch_file(clients_dir / 'user1' / 'tasks' / 'abc.yaml',
-                                now - 10_000)
-    os.utime(old_task_yaml.parent, (now - 100, now - 100))
-
-    removed = server._prune_clients_tmp(cutoff=now - 5_000)
-
-    assert removed == 3
-    assert not old_dir.exists()
-    assert fresh_dir.exists()
-    assert not old_yaml.exists()
-    assert fresh_yaml.exists()
-    assert not old_task_yaml.exists()
-    assert old_task_yaml.parent.exists()
-
-
-def test_prune_clients_tmp_unreadable_user_dir_does_not_abort(
-        tmp_path, monkeypatch):
-    """An unreadable user dir is skipped, the rest of the pass still runs."""
-    clients_dir = tmp_path / 'clients'
-    _set_clients_dir(monkeypatch, clients_dir)
-    _set_download_tmp_base(monkeypatch, None)
-    now = 1_000_000.0
-    unreadable = clients_dir / 'user1'
-    unreadable.mkdir(parents=True)
-    old = _touch_file(clients_dir / 'user2' / 'abc_translated.yaml',
-                      now - 10_000)
-
-    real_scandir = os.scandir
-
-    def fake_scandir(path):
-        if str(path) == str(unreadable):
-            raise PermissionError(errno.EACCES, 'permission denied')
-        return real_scandir(path)
-
-    monkeypatch.setattr(server.os, 'scandir', fake_scandir)
-
-    removed = server._prune_clients_tmp(cutoff=now - 5_000)
-
-    assert removed == 1
-    assert not old.exists()
-
-
-def test_prune_clients_tmp_missing_dirs_is_noop(tmp_path, monkeypatch):
-    _set_clients_dir(monkeypatch, tmp_path / 'does-not-exist')
-    _set_download_tmp_base(monkeypatch, str(tmp_path / 'neither-does-this'))
-    assert server._prune_clients_tmp(cutoff=1_000_000.0) == 0
+    assert kept.exists()
 
 
 class _FakeTask:
