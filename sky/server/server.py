@@ -798,6 +798,7 @@ async def cleanup_clients_tmp():
                 elif entry.name.endswith('_translated.yaml'):
                     # Deprecated: task YAMLs are no longer persisted, so any
                     # file left here is unreferenced regardless of its age.
+                    # TODO(aylei): remove in next major release
                     try:
                         os.remove(entry.path)
                     except OSError:
