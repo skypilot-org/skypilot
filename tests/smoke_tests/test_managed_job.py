@@ -4336,6 +4336,116 @@ def test_managed_job_auto_mount_not_ready():
         smoke_tests_utils.run_one_test(test)
 
 
+# ---------- Managed job over a volume used before its rejection lands ----------
+@pytest.mark.managed_jobs
+@pytest.mark.kubernetes
+# See test_managed_job_auto_mount_not_ready: the StorageClass fixture needs
+# cluster-admin kubectl co-located with the API server.
+@pytest.mark.no_remote_server
+@pytest.mark.parametrize('attach_via', ['task', 'auto_mounts'])
+def test_managed_job_volume_used_before_its_rejection_is_recorded(attach_via):
+    """A job submitted before the rejection was recorded still ends, not retries.
+
+    The cluster equivalent is test_volume_used_before_its_rejection_is_recorded:
+    the record still says the volume is being provisioned, which is deliberately
+    not refused, so the job is submitted and its first launch goes ahead. That
+    launch fails on the claim, and by the next attempt the record carries the
+    rejection -- so the job ends in FAILED_PRECHECKS one attempt later rather
+    than working through the retry ceiling.
+
+    This is the sequence a user produces without trying: create a volume, submit
+    a job against it.
+    """
+    if not smoke_tests_utils.server_side_is_consolidation_mode():
+        pytest.skip('Needs consolidation mode: with a separate controller the '
+                    'volume table is not readable from where the job cluster '
+                    'is provisioned, so the volume cannot be judged there.')
+    name = smoke_tests_utils.get_cluster_name()
+    create_sc_cmd = smoke_tests_utils.create_rejecting_storage_class_cmd(
+        name, binding_mode='Immediate')
+    if create_sc_cmd is None:
+        pytest.skip('No CSI driver on this cluster with a known way to refuse '
+                    'a claim; see _REJECTED_BY_PROVISIONER.')
+    volume_name = f'{name}-imm'
+    volume_yaml = textwrap.dedent(f"""\
+        name: {volume_name}
+        type: k8s-pvc
+        size: 1Gi
+        config:
+          access_mode: ReadWriteMany
+          storage_class_name: {smoke_tests_utils.rejecting_storage_class_name(name)}
+    """)
+    attached_on_task = attach_via == 'task'
+    task_yaml = textwrap.dedent(f"""\
+        resources:
+          cpus: 0.1+
+        volumes:
+          /mnt/data: {volume_name}
+        run: echo should not run
+    """) if attached_on_task else textwrap.dedent("""\
+        resources:
+          cpus: 0.1+
+        run: echo should not run
+    """)
+    config_dict = {}
+    if not attached_on_task:
+        config_dict = {
+            'kubernetes': {
+                'auto_mounts': [{
+                    'volume_name': volume_name,
+                    'mount_paths': ['/mnt/auto'],
+                }],
+            },
+        }
+    with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w',
+                                     delete=False) as vol_f, \
+         tempfile.NamedTemporaryFile(suffix='.yaml', mode='w',
+                                     delete=False) as task_f, \
+         tempfile.NamedTemporaryFile(suffix='.yaml', mode='w',
+                                     delete=False) as cfg_f:
+        vol_f.write(volume_yaml)
+        vol_f.flush()
+        task_f.write(task_yaml)
+        task_f.flush()
+        yaml_utils.dump_yaml(cfg_f.name, config_dict)
+        cfg_f.flush()
+        test = smoke_tests_utils.Test(
+            f'managed_job_volume_used_before_rejection_{attach_via}',
+            [
+                create_sc_cmd,
+                # Created without the config in scope, so this step cannot be
+                # tripped up by the auto_mounts entry it is about to become.
+                smoke_tests_utils.with_config(
+                    f'sky volumes apply -y '
+                    f'{smoke_tests_utils.AGENT_K8S_INFRA} {vol_f.name}',
+                    '/dev/null'),
+                # The premise: submitted before the rejection was recorded.
+                f'vols=$(sky volumes ls) && echo "$vols" && '
+                f'! echo "$vols" | grep {volume_name} | grep -q '
+                f'ProvisioningFailed',
+                f'sky jobs launch -n {name} '
+                f'{smoke_tests_utils.AGENT_K8S_INFRA} '
+                f'{smoke_tests_utils.LOW_RESOURCE_ARG} {task_f.name} -y -d',
+                smoke_tests_utils.
+                get_cmd_wait_until_managed_job_status_contains_matching_job_name(
+                    job_name=name,
+                    job_status=[sky.ManagedJobStatus.FAILED_PRECHECKS],
+                    timeout=900),
+                f'logs=$(sky jobs logs --controller -n {name} --no-follow); '
+                f'echo "$logs"; echo "$logs" | grep "{volume_name}"',
+            ],
+            smoke_tests_utils.chain_teardown(
+                f'sky jobs cancel -y -n {name} || true',
+                f'sky volumes delete {volume_name} -y || true',
+                smoke_tests_utils.delete_rejecting_storage_class_cmd(name)),
+            env={
+                skypilot_config.ENV_VAR_GLOBAL_CONFIG: cfg_f.name,
+            },
+            timeout=30 * 60,
+        )
+        smoke_tests_utils.run_one_test(test)
+
+
 # ---------- Managed job over a volume the backend refuses mid-launch ----------
 @pytest.mark.managed_jobs
 @pytest.mark.kubernetes
