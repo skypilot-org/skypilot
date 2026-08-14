@@ -139,7 +139,8 @@ _POD_INITIALIZATION_REASON = 'pod initialization'
 #     image whose 'Pulling' event has already aged out of the event window,
 #   - a running init container, which may be doing arbitrary user work, and an
 #     init container the kubelet is still creating, which may be pulling a
-#     large image of its own.
+#     large image of its own -- the latter only reaches this exemption when no
+#     live Warning event contradicts it, see _inspect_pod_status.
 _STALL_EXEMPT_PENDING_REASONS = frozenset(
     _PENDING_REASON_NORMAL_EVENT_ALLOWLIST | {_CONTAINER_CREATION_REASON})
 # How long a pod may keep reporting the same non-exempt pending reason before
@@ -955,6 +956,11 @@ def _reason_is_exempt_from_stall(reason: Optional[str]) -> bool:
 
     A reason of None is not exempt: a pod that is neither running nor able to
     say why is exactly the case the no-progress deadline exists to catch.
+
+    The _INIT_CONTAINER_REASON_PREFIX exemption is only as good as the reason
+    reaching it: an init container the kubelet is failing to start looks
+    exactly like one it is slowly starting, so _inspect_pod_status resolves
+    that ambiguity against the pod's events before a reason gets here.
     """
     if reason is None:
         return False
@@ -1063,6 +1069,9 @@ def _wait_for_pods_to_run(namespace, context, cluster_name, new_pods):
             # via _unmask_crashloopbackoff_reason when the waiting state is
             # CrashLoopBackOff. msg body (waiting.message) is always preserved.
             init_reason: Optional[str] = None
+            # Whether init_reason is an assumption about what the kubelet is
+            # doing rather than something it reported -- see below.
+            init_reason_is_assumed = False
             if container_statuses is not None:
                 for container_status in container_statuses:
                     if not container_status.state:
@@ -1079,6 +1088,8 @@ def _wait_for_pods_to_run(namespace, context, cluster_name, new_pods):
                                     f'{init_progress.name!r} {verb} '
                                     f'({init_progress.position}/'
                                     f'{init_progress.total})')
+                                init_reason_is_assumed = (
+                                    not init_progress.running)
                             else:
                                 # PodInitializing, yet no init container is
                                 # running or being created -- they have all
@@ -1117,6 +1128,26 @@ def _wait_for_pods_to_run(namespace, context, cluster_name, new_pods):
             if reason is None:
                 pending_reason = _get_pod_pending_reason(
                     context, namespace, pod.metadata.name)
+                if pending_reason is not None:
+                    reason, event_message = pending_reason
+            elif init_reason_is_assumed:
+                # 'init container ... starting' says only that the kubelet has
+                # not started the container yet; that this is legitimately slow
+                # work (an image pull of its own) is an assumption, and it is
+                # the assumption that makes the reason stall-exempt. The same
+                # state is what a pod shows when the kubelet cannot get as far
+                # as starting the container at all -- a sandbox it cannot
+                # create, a volume it cannot mount -- which is reported only
+                # through events. So let a live Warning, one the pod has not
+                # already moved past, replace the assumption: it is both the
+                # truer reason and, unlike the init label, bounded by the
+                # no-progress deadline. An allow-listed Normal is not consulted
+                # -- it is exempt either way, and the init label names which
+                # container the pod is waiting on.
+                pending_reason = _get_pod_pending_reason(context,
+                                                         namespace,
+                                                         pod.metadata.name,
+                                                         warnings_only=True)
                 if pending_reason is not None:
                     reason, event_message = pending_reason
             if reason is None and _pod_is_scheduled(pod):
@@ -3239,8 +3270,11 @@ def _get_pod_pending_reason_from_container_status(pod: Any) -> Optional[str]:
     return None
 
 
-def _get_pod_pending_reason(context: Optional[str], namespace: str,
-                            pod_name: str) -> Optional[Tuple[str, str]]:
+def _get_pod_pending_reason(
+        context: Optional[str],
+        namespace: str,
+        pod_name: str,
+        warnings_only: bool = False) -> Optional[Tuple[str, str]]:
     """Get the reason why a pod is pending from its events.
 
     Two-pass scan over the event list (sorted newest-first by _get_pod_events):
@@ -3271,6 +3305,12 @@ def _get_pod_pending_reason(context: Optional[str], namespace: str,
     Warning being re-emitted survives both checks, and an event that cannot be
     dated is never treated as stale. Ordering *within* a tier is left to
     _get_pod_events' newest-first creation order.
+
+    With warnings_only, tier 3 is answered with None rather than the Normal
+    event: the caller has a reason already and is asking the narrower question
+    of whether the pod is actively failing. The tiering still runs in full --
+    a Normal that demotes a stale Warning under (b) must still demote it here,
+    or the caller would be handed the very Warning the pod has moved past.
 
     Returns a (reason, message) tuple, or None if neither pass matches.
     """
@@ -3313,6 +3353,8 @@ def _get_pod_pending_reason(context: Optional[str], namespace: str,
                 normal_at > warning_at):
             chosen = normal
     if chosen is None:
+        return None
+    if warnings_only and chosen.type != 'Warning':
         return None
     return chosen.reason or 'Unknown', chosen.message or ''
 

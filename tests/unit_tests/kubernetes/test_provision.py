@@ -3135,6 +3135,28 @@ class TestGetPodPendingReasonTieredEventFilter:
         result = instance._get_pod_pending_reason('ctx', 'ns', 'p')
         assert result == ('FailedScheduling', '')
 
+    @pytest.mark.parametrize('warning_at,expect_warning', [
+        pytest.param(3000, True, id='live-warning-answers'),
+        pytest.param(1000, False, id='warning-overtaken-by-the-normal'),
+        pytest.param(None, False, id='no-warning-at-all'),
+    ])
+    def test_warnings_only_withholds_the_normal_tier(self, monkeypatch,
+                                                     warning_at,
+                                                     expect_warning):
+        """warnings_only answers the narrower question its caller is asking --
+        is the pod actively failing? -- so an allow-listed Normal yields None
+        rather than the reason the caller already has. The tiering still runs
+        in full: a Warning the Normal has overtaken must not be resurrected
+        just because the Normal is being withheld.
+        """
+        events = [self._event(*self._NORMAL, last_observed=2000)]
+        if warning_at is not None:
+            events.append(self._event(*self._WARNING, last_observed=warning_at))
+        self._patch_events(monkeypatch, events)
+        assert instance._get_pod_pending_reason(
+            'ctx', 'ns', 'p', warnings_only=True) == (self._expected(
+                self._WARNING) if expect_warning else None)
+
     def test_events_fetch_failure_returns_none(self, monkeypatch):
 
         def raise_for_events(*a, **kw):
@@ -3580,14 +3602,17 @@ class TestWaitForPodsToRunStallEscalation:
     _EVENT_MSG = 'failed to create pod network sandbox: plugin not initialized'
 
     @staticmethod
-    def _make_pending_pod(*, name='pod-0', initializing=False, init_done=False):
+    def _make_pending_pod(*, name='pod-0', init=None):
         """A scheduled pod whose container is still waiting.
 
-        With initializing=True the pod reports PodInitializing: by default an
-        init container is running, and with init_done=True they have all
-        terminated successfully while the kubelet has not moved on.
+        `init` selects the init phase the pod reports, mirroring the three
+        states _check_init_containers distinguishes: 'running' (an init
+        container is doing its own work), 'starting' (the kubelet has not
+        started it yet) and 'done' (they have all terminated successfully while
+        the kubelet has not moved on). None reports plain ContainerCreating.
         """
         from sky.provision import constants as prov_constants
+        assert init in (None, 'running', 'starting', 'done'), init
         pod = mock.MagicMock()
         pod.metadata.name = name
         pod.metadata.deletion_timestamp = None
@@ -3597,23 +3622,26 @@ class TestWaitForPodsToRunStallEscalation:
         pod.status.phase = 'Pending'
         cs = mock.MagicMock()
         cs.state.waiting = mock.MagicMock(
-            reason='PodInitializing' if initializing else 'ContainerCreating',
+            reason='PodInitializing' if init else 'ContainerCreating',
             message=None)
         cs.state.terminated = None
         cs.state.running = None
         cs.last_state.terminated = None
         pod.status.container_statuses = [cs]
-        if initializing:
+        if init:
             init_status = mock.MagicMock()
             init_status.name = 'setup'
             init_status.state.waiting = None
-            if init_done:
+            init_status.state.running = None
+            init_status.state.terminated = None
+            if init == 'starting':
+                init_status.state.waiting = mock.MagicMock(
+                    reason='ContainerCreating', message=None)
+            elif init == 'running':
+                init_status.state.running = mock.MagicMock()
+            else:
                 init_status.state.terminated = mock.MagicMock(exit_code=0,
                                                               message=None)
-                init_status.state.running = None
-            else:
-                init_status.state.terminated = None
-                init_status.state.running = mock.MagicMock()
             pod.status.init_container_statuses = [init_status]
         return pod
 
@@ -3691,11 +3719,20 @@ class TestWaitForPodsToRunStallEscalation:
                                 lambda *a, **kw: pod_events)
         else:
 
-            def _pending_reason(context, namespace, pod_name):
+            def _pending_reason(context,
+                                namespace,
+                                pod_name,
+                                warnings_only=False):
                 del context, namespace, pod_name  # unused
                 idx = min(max(iteration['n'], 0), len(pending_reasons) - 1)
                 reason = pending_reasons[idx]
                 if reason is None:
+                    return None
+                if (warnings_only and reason
+                        in instance._PENDING_REASON_NORMAL_EVENT_ALLOWLIST):
+                    # Stand in for the real tiering: a caller asking only
+                    # whether the pod is actively failing gets nothing back
+                    # from an allow-listed Normal event.
                     return None
                 return reason, self._EVENT_MSG
 
@@ -3755,10 +3792,13 @@ class TestWaitForPodsToRunStallEscalation:
                        pending_reasons=[None],
                        healthy_after=200)
 
-    def test_running_init_container_never_raises(self, monkeypatch):
-        """An init container may run arbitrarily long user work."""
+    @pytest.mark.parametrize('init', ['running', 'starting'])
+    def test_init_container_in_flight_never_raises(self, monkeypatch, init):
+        """An init container may run arbitrarily long user work, and one the
+        kubelet has not started yet is most often pulling an image of its
+        own."""
         self._run_wait(monkeypatch,
-                       pod=self._make_pending_pod(initializing=True),
+                       pod=self._make_pending_pod(init=init),
                        pending_reasons=[None],
                        healthy_after=200)
 
@@ -3771,12 +3811,51 @@ class TestWaitForPodsToRunStallEscalation:
         """
         with pytest.raises(config_lib.KubernetesError) as exc_info:
             self._run_wait(monkeypatch,
-                           pod=self._make_pending_pod(initializing=True,
-                                                      init_done=True),
+                           pod=self._make_pending_pod(init='done'),
                            pending_reasons=[None])
         msg = str(exc_info.value)
         assert instance._POD_INITIALIZATION_REASON in msg
         assert 'pod-0' in msg
+
+    @pytest.mark.parametrize('warning_at,escalates', [
+        pytest.param(3000, True, id='live-warning-bounds-the-wait'),
+        pytest.param(1000, False, id='pre-bind-warning-leaves-it-exempt'),
+    ])
+    def test_a_live_warning_bounds_an_init_container_that_cannot_start(
+            self, monkeypatch, warning_at, escalates):
+        """An init container the kubelet cannot start looks exactly like one it
+        is slowly starting -- both are 'starting', which is exempt -- and the
+        difference is only in the events. Driven through the *real*
+        _get_pod_pending_reason: a live Warning must take over the reason and
+        bring the deadline with it, while one the pod has already moved past
+        must leave the exemption in place for the whole (~16 simulated hour)
+        wait.
+        """
+        events = [
+            _make_pod_event('FailedCreatePodSandBox',
+                            'Warning',
+                            self._EVENT_MSG,
+                            last_observed=warning_at),
+            _make_pod_event('Scheduled',
+                            'Normal',
+                            'Successfully assigned ns/pod-0 to node-1',
+                            last_observed=2000),
+        ]
+
+        def run():
+            self._run_wait(monkeypatch,
+                           pod=self._make_pending_pod(init='starting'),
+                           pod_events=events,
+                           healthy_after=None if escalates else 200)
+
+        if not escalates:
+            run()
+            return
+        with pytest.raises(config_lib.KubernetesError) as exc_info:
+            run()
+        msg = str(exc_info.value)
+        assert 'FailedCreatePodSandBox' in msg
+        assert self._EVENT_MSG in msg
 
     def test_no_reason_at_all_raises(self, monkeypatch):
         """A pod that is neither running nor able to say why is the pure
@@ -4287,6 +4366,96 @@ class TestInspectPodStatusInitContainerReason:
             [self._pod_initializing_with(make_init_statuses()), running])
         assert results[0] == [(False, expected_reason)]
         assert instance._reason_is_exempt_from_stall(expected_reason) is exempt
+
+    @pytest.mark.parametrize('init_state,events,expected_reason', [
+        pytest.param('starting', [
+            ('FailedCreatePodSandBox', 'Warning', 'plugin not initialized',
+             3000),
+        ],
+                     'FailedCreatePodSandBox',
+                     id='live-warning-replaces-the-assumption'),
+        pytest.param('starting', [
+            ('FailedScheduling', 'Warning', 'insufficient cpu', 1000),
+        ],
+                     "init container 'init-copy-home' starting (1/1)",
+                     id='pre-bind-warning-does-not'),
+        pytest.param('starting', [
+            ('Pulling', 'Normal', 'Pulling image "foo:bar"', 3000),
+        ],
+                     "init container 'init-copy-home' starting (1/1)",
+                     id='allow-listed-normal-is-not-consulted'),
+        pytest.param('running', [
+            ('FailedCreatePodSandBox', 'Warning', 'plugin not initialized',
+             3000),
+        ],
+                     "init container 'init-copy-home' running (1/1)",
+                     id='a-running-init-container-outranks-a-live-warning'),
+    ])
+    def test_a_live_warning_replaces_the_starting_assumption(
+            self, monkeypatch, init_state, events, expected_reason):
+        """'starting' says only that the kubelet has not started the container
+        yet; that this is legitimately slow work -- and so stall-exempt -- is an
+        assumption, and the same state is what a pod shows when the kubelet
+        cannot start it at all. So a live Warning replaces it, since it is both
+        truer and bounded by the no-progress deadline.
+
+        Only the assumption gives way: a Warning the pod has already moved past
+        does not displace it, an allow-listed Normal is not consulted (exempt
+        either way, and the init label names the container being waited on), and
+        an init container the kubelet reports as *running* is not an assumption
+        at all.
+        """
+        pod_events = [
+            _make_pod_event(reason, event_type, message, last_observed=at)
+            for reason, event_type, message, at in events
+        ] + [
+            _make_pod_event('Scheduled',
+                            'Normal',
+                            'Successfully assigned ns/p to node-1',
+                            last_observed=2000)
+        ]
+        monkeypatch.setattr(instance, '_get_pod_events',
+                            lambda *a, **kw: pod_events)
+
+        def running(pod):
+            pod.status.phase = 'Running'
+            pod.status.container_statuses = [
+                self._make_running_container_status()
+            ]
+
+        init_status = _make_init_status_with_name(
+            name='init-copy-home',
+            running=init_state == 'running',
+            waiting_reason=('ContainerCreating'
+                            if init_state == 'starting' else None))
+        results, _ = self._run_wait(
+            monkeypatch, [self._pod_initializing_with([init_status]), running])
+        assert results[0] == [(False, expected_reason)]
+
+    def test_a_running_init_container_does_not_read_the_events(
+            self, monkeypatch):
+        """The events lookup is skipped outright, not just outranked: a pod
+        whose init container is running needs no event to explain it, and each
+        poll of every pod would otherwise cost an extra API call."""
+        calls = []
+
+        def _events(*args, **kwargs):
+            calls.append(args)
+            return []
+
+        monkeypatch.setattr(instance, '_get_pod_events', _events)
+
+        def running(pod):
+            pod.status.phase = 'Running'
+            pod.status.container_statuses = [
+                self._make_running_container_status()
+            ]
+
+        init_status = _make_init_status_with_name(name='init-copy-home',
+                                                  running=True)
+        self._run_wait(monkeypatch,
+                       [self._pod_initializing_with([init_status]), running])
+        assert not calls
 
     def test_pod_initializing_multiple_init_containers(self, monkeypatch):
         """With multiple init containers, report the currently running one."""
