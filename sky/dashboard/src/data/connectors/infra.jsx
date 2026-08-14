@@ -1089,6 +1089,29 @@ export async function getDetailedGpuInfo(filter) {
   }
 }
 
+// Pull the failure message raised server-side out of a failed /api/get
+// response. The body is {detail: {error: '<json>'}} where the JSON carries the
+// message of the exception the request died with — e.g. the SSH error of an
+// unreachable Slurm login node. Falls back to the given message when the body
+// doesn't have that shape.
+async function extractRequestError(fetchedData, fallback) {
+  try {
+    const data = await fetchedData.json();
+    if (data.detail && data.detail.error) {
+      const error = JSON.parse(data.detail.error);
+      if (error.message) {
+        return error.message;
+      }
+    }
+  } catch (parseError) {
+    console.error('Error parsing failed request response:', parseError);
+  }
+  return fallback;
+}
+
+// The two SSH-bound Slurm queries return {data, error} instead of throwing:
+// the section still renders the configured clusters when a login node is
+// unreachable, with `error` carrying the actual failure to show for them.
 async function getSlurmClusterGPUs() {
   try {
     const response = await apiClient.post(`/slurm_gpu_availability`, {});
@@ -1102,32 +1125,20 @@ async function getSlurmClusterGPUs() {
       throw new Error(msg);
     }
     const fetchedData = await apiClient.get(`/api/get?request_id=${id}`);
-    if (fetchedData.status === 500) {
-      try {
-        const data = await fetchedData.json();
-        if (data.detail && data.detail.error) {
-          try {
-            const error = JSON.parse(data.detail.error);
-            console.error('Error fetching Slurm cluster GPUs:', error.message);
-          } catch (jsonError) {
-            console.error('Error parsing JSON for Slurm error:', jsonError);
-          }
-        }
-      } catch (parseError) {
-        console.error('Error parsing JSON for Slurm 500 response:', parseError);
-      }
-      return [];
-    }
     if (!fetchedData.ok) {
-      const msg = `Failed to get slurm cluster GPUs result with status ${fetchedData.status}`;
-      throw new Error(msg);
+      const msg = await extractRequestError(
+        fetchedData,
+        `Failed to get slurm cluster GPUs result with status ${fetchedData.status}`
+      );
+      console.error('Error fetching Slurm cluster GPUs:', msg);
+      return { data: [], error: msg };
     }
     const data = await fetchedData.json();
     const clusterGPUs = data.return_value ? JSON.parse(data.return_value) : [];
-    return clusterGPUs;
+    return { data: clusterGPUs, error: null };
   } catch (error) {
     console.error('Error fetching Slurm cluster GPUs:', error);
-    return [];
+    return { data: [], error: error.message || String(error) };
   }
 }
 
@@ -1144,38 +1155,20 @@ async function getSlurmPerNodeGPUs() {
       throw new Error(msg);
     }
     const fetchedData = await apiClient.get(`/api/get?request_id=${id}`);
-    if (fetchedData.status === 500) {
-      try {
-        const data = await fetchedData.json();
-        if (data.detail && data.detail.error) {
-          try {
-            const error = JSON.parse(data.detail.error);
-            console.error('Error fetching Slurm per node GPUs:', error.message);
-          } catch (jsonError) {
-            console.error(
-              'Error parsing JSON for Slurm node error:',
-              jsonError
-            );
-          }
-        }
-      } catch (parseError) {
-        console.error(
-          'Error parsing JSON for Slurm node 500 response:',
-          parseError
-        );
-      }
-      return [];
-    }
     if (!fetchedData.ok) {
-      const msg = `Failed to get slurm node info result with status ${fetchedData.status}`;
-      throw new Error(msg);
+      const msg = await extractRequestError(
+        fetchedData,
+        `Failed to get slurm node info result with status ${fetchedData.status}`
+      );
+      console.error('Error fetching Slurm per node GPUs:', msg);
+      return { data: [], error: msg };
     }
     const data = await fetchedData.json();
     const nodeInfo = data.return_value ? JSON.parse(data.return_value) : [];
-    return nodeInfo;
+    return { data: nodeInfo, error: null };
   } catch (error) {
     console.error('Error fetching Slurm per node GPUs:', error);
-    return [];
+    return { data: [], error: error.message || String(error) };
   }
 }
 
@@ -1183,7 +1176,10 @@ async function getSlurmPerNodeGPUs() {
 // contacting any login node. Independent of the GPU and node queries, so it is
 // fetched alongside them rather than before them: a cluster that is
 // unreachable still comes back here after those two report nothing for it.
-async function getSlurmClusterNames() {
+// Exported so the Infra page can render the cluster rows from it immediately,
+// without waiting on the SSH-bound queries (which can hang on connect
+// timeouts when a login node is unreachable).
+export async function getSlurmClusterNames() {
   try {
     const response = await apiClient.post(`/slurm_cluster_names`, {});
     if (!response.ok) {
@@ -1217,11 +1213,11 @@ async function getSlurmServiceGPUs() {
   try {
     // Fetch the configured cluster names, cluster GPUs and node GPUs in
     // parallel — none of the three depends on another.
-    const [clusterNames, clusterGPUsRaw, nodeGPUsRaw] = await Promise.all([
-      getSlurmClusterNames(),
-      getSlurmClusterGPUs(),
-      getSlurmPerNodeGPUs(),
-    ]);
+    const [clusterNames, clusterGPUsResult, nodeGPUsResult] = await Promise.all(
+      [getSlurmClusterNames(), getSlurmClusterGPUs(), getSlurmPerNodeGPUs()]
+    );
+    const clusterGPUsRaw = clusterGPUsResult.data;
+    const nodeGPUsRaw = nodeGPUsResult.data;
 
     const allSlurmGPUs = {};
     const perClusterSlurmGPUs = {}; // Similar to perContextGPUs for Kubernetes
@@ -1295,6 +1291,10 @@ async function getSlurmServiceGPUs() {
           (a.node_name || '').localeCompare(b.node_name || '') ||
           (a.gpu_name || '').localeCompare(b.gpu_name || '')
       ),
+      // The first failure among the GPU and node queries. Both go over SSH to
+      // the same login nodes, so when a cluster is unreachable they fail with
+      // the same root cause — reporting one of them is enough.
+      slurmError: clusterGPUsResult.error || nodeGPUsResult.error || null,
     };
   } catch (error) {
     console.error('Error fetching Slurm GPUs:', error);
@@ -1303,6 +1303,7 @@ async function getSlurmServiceGPUs() {
       allSlurmGPUs: [],
       perClusterSlurmGPUs: [],
       perNodeSlurmGPUs: [],
+      slurmError: error.message || String(error),
     };
   }
 }

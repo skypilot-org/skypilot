@@ -37,7 +37,9 @@ import {
   getContextJobs,
   getContextClusters,
   getSlurmInfrastructure,
+  getSlurmClusterNames,
 } from '@/data/connectors/infra';
+import { ErrorDisplay } from '@/components/elements/ErrorDisplay';
 import { CLOUDS_LIST } from '@/data/connectors/constants';
 import {
   runSkyCheck,
@@ -348,6 +350,7 @@ export function InfrastructureSection({
   actionButton = null, // Optional action button for the header
   contextWorkspaceMap = {}, // Mapping of contexts to workspaces
   contextErrors = {}, // Mapping of contexts to error messages
+  sectionError = null, // Section-wide fetch failure, shown as a banner
   gpuMetricsRefreshTrigger = 0, // Counter for forcing iframe refresh
   loadedContexts = new Set(), // Set of contexts that have had their GPU data loaded
   isInitialLoad = true, // Controls panel-level loading spinner (not cell spinners)
@@ -481,6 +484,10 @@ export function InfrastructureSection({
             <h3 className="text-lg font-semibold">{title}</h3>
             {actionButton}
           </div>
+          <ErrorDisplay
+            error={sectionError}
+            title={`Failed to query ${title}`}
+          />
           <p className="text-sm text-gray-500">
             No {title} found or {title} is not configured.
           </p>
@@ -542,6 +549,13 @@ export function InfrastructureSection({
               )}
             </div>
           </div>
+          {/* A section-wide fetch failure (e.g. an unreachable Slurm login
+              node) — surface the actual error instead of silently rendering
+              empty cells under the listed rows. */}
+          <ErrorDisplay
+            error={sectionError}
+            title={`Failed to query ${title}`}
+          />
           <GpuTypeSummaryStrip gpus={gpus} />
           {/* Desktop: unified full-width table. No inner vertical scroll —
               per-type sub-rows make row count = contexts x GPU types, so a
@@ -2506,6 +2520,9 @@ export function GPUs() {
   // Slurm loading state (separate from Kubernetes/SSH for parallel loading)
   const [slurmLoading, setSlurmLoading] = useState(true);
   const [slurmDataLoaded, setSlurmDataLoaded] = useState(false);
+  // The actual failure behind an empty Slurm section (e.g. the SSH error of
+  // an unreachable login node), surfaced as a banner in the section.
+  const [slurmError, setSlurmError] = useState(null);
 
   const [sshAndKubeJobsDataLoading, setSshAndKubeJobsDataLoading] =
     useState(true);
@@ -2610,6 +2627,7 @@ export function GPUs() {
         setAllSlurmGPUs([]);
         setPerClusterSlurmGPUs([]);
         setPerNodeSlurmGPUs([]);
+        setSlurmError(null);
         setSshAndKubeJobsData({});
         setSshAndKubeJobsDataLoading(false);
 
@@ -2841,12 +2859,32 @@ export function GPUs() {
   // Fetch Slurm data separately for parallel loading with Kubernetes/SSH
   const fetchSlurmData = async () => {
     try {
+      // The cluster-name query answers from ~/.slurm/config without
+      // contacting any login node, so it returns quickly even when a cluster
+      // is unreachable. Render the cluster rows from it right away instead of
+      // holding the whole section on a spinner behind the GPU/node queries,
+      // which go over SSH and can hang for minutes on connect timeouts.
+      dashboardCache
+        .get(getSlurmClusterNames)
+        .then((names) => {
+          if (Array.isArray(names) && names.length > 0) {
+            // Keep whatever the full fetch set if it won the race.
+            setConfiguredSlurmClusters((prev) =>
+              prev.length > 0 ? prev : names
+            );
+            setSlurmDataLoaded(true);
+          }
+        })
+        .catch(() => {
+          // The full fetch below reports errors.
+        });
       const slurmData = await dashboardCache.get(getSlurmInfrastructure);
       if (slurmData) {
         setConfiguredSlurmClusters(slurmData.slurmClusterNames || []);
         setAllSlurmGPUs(slurmData.allSlurmGPUs || []);
         setPerClusterSlurmGPUs(slurmData.perClusterSlurmGPUs || []);
         setPerNodeSlurmGPUs(slurmData.perNodeSlurmGPUs || []);
+        setSlurmError(slurmData.slurmError || null);
       }
       setSlurmDataLoaded(true);
       setSlurmLoading(false);
@@ -2856,6 +2894,7 @@ export function GPUs() {
       setAllSlurmGPUs([]);
       setPerClusterSlurmGPUs([]);
       setPerNodeSlurmGPUs([]);
+      setSlurmError(error.message || String(error));
       setSlurmDataLoaded(true);
       setSlurmLoading(false);
     }
@@ -3702,6 +3741,7 @@ export function GPUs() {
         isSSH={false}
         isSlurm={true}
         contextWorkspaceMap={{}}
+        sectionError={slurmError}
         isInitialLoad={isInitialLoad}
         statusByKey={extraStatusByKey}
       />

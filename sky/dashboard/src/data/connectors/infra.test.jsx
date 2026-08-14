@@ -97,5 +97,58 @@ describe('getSlurmInfrastructure configured clusters', () => {
     const data = await getSlurmInfrastructure();
 
     expect(data.slurmClusterNames).toEqual([]);
+    expect(data.slurmError).toBeNull();
+  });
+
+  // The failure of the SSH-bound queries must reach the page as the actual
+  // server-side message (e.g. the login node's SSH error), not vanish into an
+  // empty section — that is what the Infra page renders in its error banner.
+  it('surfaces the server error message when the SSH-bound queries fail', async () => {
+    const failure = (message) => ({
+      ok: false,
+      status: 500,
+      json: async () => ({
+        detail: { error: JSON.stringify({ message }) },
+      }),
+    });
+    apiClient.get.mockImplementation(async (path) => {
+      if (path.includes('req-clusters')) return result(['prod']);
+      if (path.includes('req-gpus'))
+        return failure('ssh: connect to host 10.0.0.1 port 22: timed out');
+      return failure('ssh: connect to host 10.0.0.1 port 22: timed out');
+    });
+
+    const data = await getSlurmInfrastructure();
+
+    expect(data.slurmClusterNames).toEqual(['prod']);
+    expect(data.perClusterSlurmGPUs).toEqual([]);
+    expect(data.perNodeSlurmGPUs).toEqual([]);
+    expect(data.slurmError).toEqual(
+      'ssh: connect to host 10.0.0.1 port 22: timed out'
+    );
+  });
+
+  it('reports no error when all queries succeed', async () => {
+    apiClient.get.mockImplementation(async (path) => {
+      if (path.includes('req-clusters')) return result(['prod']);
+      return result([]);
+    });
+
+    const data = await getSlurmInfrastructure();
+
+    expect(data.slurmError).toBeNull();
+  });
+
+  it('falls back to a status message when a failed response has no detail', async () => {
+    apiClient.get.mockImplementation(async (path) => {
+      if (path.includes('req-clusters')) return result(['prod']);
+      return { ok: false, status: 503, json: async () => ({}) };
+    });
+
+    const data = await getSlurmInfrastructure();
+
+    expect(data.slurmError).toEqual(
+      'Failed to get slurm cluster GPUs result with status 503'
+    );
   });
 });
