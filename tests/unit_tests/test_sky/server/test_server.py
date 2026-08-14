@@ -2,6 +2,7 @@
 
 import argparse
 import asyncio
+import errno
 import json
 import os
 import pathlib
@@ -1254,6 +1255,33 @@ def test_prune_clients_tmp_download_base_is_clients_dir(tmp_path, monkeypatch):
     assert fresh_yaml.exists()
     assert not old_task_yaml.exists()
     assert old_task_yaml.parent.exists()
+
+
+def test_prune_clients_tmp_unreadable_user_dir_does_not_abort(
+        tmp_path, monkeypatch):
+    """An unreadable user dir is skipped, the rest of the pass still runs."""
+    clients_dir = tmp_path / 'clients'
+    _set_clients_dir(monkeypatch, clients_dir)
+    _set_download_tmp_base(monkeypatch, None)
+    now = 1_000_000.0
+    unreadable = clients_dir / 'user1'
+    unreadable.mkdir(parents=True)
+    old = _touch_file(clients_dir / 'user2' / 'abc_translated.yaml',
+                      now - 10_000)
+
+    real_scandir = os.scandir
+
+    def fake_scandir(path):
+        if str(path) == str(unreadable):
+            raise PermissionError(errno.EACCES, 'permission denied')
+        return real_scandir(path)
+
+    monkeypatch.setattr(server.os, 'scandir', fake_scandir)
+
+    removed = server._prune_clients_tmp(cutoff=now - 5_000)
+
+    assert removed == 1
+    assert not old.exists()
 
 
 def test_prune_clients_tmp_missing_dirs_is_noop(tmp_path, monkeypatch):

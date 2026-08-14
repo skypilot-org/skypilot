@@ -25,7 +25,8 @@ import threading
 import time
 import traceback
 import typing
-from typing import Any, Dict, List, Literal, Optional, Set, Tuple, Type
+from typing import (Any, Dict, Iterator, List, Literal, Optional, Set, Tuple,
+                    Type)
 import uuid
 import zipfile
 import zlib
@@ -768,10 +769,19 @@ async def cleanup_unreferenced_file_mounts():
                          f'{common_utils.format_exception(e)}')
 
 
+def _scandir_or_skip(dir_path: str) -> Iterator[os.DirEntry]:
+    """Yield dir entries; yields nothing if the dir is gone or unreadable."""
+    try:
+        with os.scandir(dir_path) as entries:
+            yield from entries
+    except OSError:
+        return
+
+
 def _prune_expired_files(dir_path: str, suffix: str, cutoff: float) -> int:
     """Remove files under dir_path matching suffix and older than cutoff."""
     removed = 0
-    for entry in os.scandir(dir_path):
+    for entry in _scandir_or_skip(dir_path):
         try:
             if (entry.name.endswith(suffix) and
                     entry.is_file(follow_symlinks=False) and
@@ -807,12 +817,12 @@ def _prune_clients_tmp(cutoff: float) -> int:
 
     removed = 0
     for root_dir, (sweep_dirs, sweep_yamls) in roots.items():
-        if not os.path.isdir(root_dir):
-            continue
-        for user_entry in os.scandir(root_dir):
+        # Skip rather than raise: a dir can vanish under us (peer replicas
+        # sweep the same tree), and one bad dir must not abort the pass.
+        for user_entry in _scandir_or_skip(root_dir):
             if not user_entry.is_dir():
                 continue
-            for entry in os.scandir(user_entry.path):
+            for entry in _scandir_or_skip(user_entry.path):
                 try:
                     if entry.is_dir(follow_symlinks=False):
                         if sweep_dirs and entry.stat().st_mtime < cutoff:
