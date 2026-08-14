@@ -710,9 +710,19 @@ def _get_volume_name(path: str, cluster_name_on_cloud: str) -> str:
     return f'{cluster_name_on_cloud}-{path_hash}'
 
 
-def _reject_not_ready_auto_mount_volume(volume_name: str,
-                                        record: Dict[str, Any]) -> None:
-    """Raises if a volume about to be auto-mounted is not usable.
+def _reject_not_ready_volume(volume_name: str, record: Dict[str, Any],
+                             description: str, remove_hint: str) -> None:
+    """Raises if a volume about to be mounted is not usable.
+
+    Runs on every launch, not once per task: a volume that was ready when a
+    task was submitted can have become unusable since. A managed job resolves
+    its volumes once and then relaunches for as long as its recovery strategy
+    allows, so without this the same broken volume is retried for hours.
+
+    Args:
+        description: how the volume reached this launch, for the message
+            ('Volume' or 'Auto-mount volume').
+        remove_hint: how to stop mounting it, for the message.
 
     Raises:
         exceptions.VolumeNotReadyError: if the volume is not ready.
@@ -722,9 +732,9 @@ def _reject_not_ready_auto_mount_volume(volume_name: str,
     error_message = (record.get('error_message') or
                      'The last status refresh found it unusable.')
     raise exceptions.VolumeNotReadyError(
-        f'Auto-mount volume {volume_name!r} is not ready, so it cannot be '
+        f'{description} {volume_name!r} is not ready, so it cannot be '
         f'mounted. Error: {error_message}. Check it with `sky volumes ls`, '
-        f'or remove {volume_name!r} from the auto_mounts config.')
+        f'or {remove_hint}.')
 
 
 # TODO: too many things happening here - leaky abstraction. Refactor.
@@ -1039,6 +1049,24 @@ def write_cluster_config(
                                        volume_desc='ephemeral volume')
                 ephemeral_volume_mount_vars.append(vol.to_yaml_config())
             else:
+                # An ephemeral volume is created by this launch, so there is
+                # nothing to have gone wrong yet; a volume named on the task
+                # was resolved when the task was submitted, which for a
+                # managed job can be many relaunches ago.
+                #
+                # A missing record means the volume table is not readable from
+                # here -- a jobs controller running its own API server against
+                # its own state DB -- not that the volume is gone. Mounting
+                # works off the config carried in the task, so refusing would
+                # break launches that work today.
+                record = global_user_state.get_volume_by_name(vol.volume_name)
+                if record is not None:
+                    _reject_not_ready_volume(
+                        vol.volume_name,
+                        record,
+                        description='Volume',
+                        remove_hint=(f'remove {vol.volume_name!r} from the '
+                                     f'task\'s volumes'))
                 volume_info = volume_utils.VolumeInfo(
                     name=vol.volume_name,
                     path=vol.path,
@@ -1091,8 +1119,12 @@ def write_cluster_config(
                 # to someone else's scope, or one that would have been passed
                 # over for its access mode -- and would also raise on the
                 # provision-timeout path.
-                _reject_not_ready_auto_mount_volume(volume_name,
-                                                    auto_mount.record)
+                _reject_not_ready_volume(
+                    volume_name,
+                    auto_mount.record,
+                    description='Auto-mount volume',
+                    remove_hint=(f'remove {volume_name!r} from the '
+                                 f'auto_mounts config'))
                 for path in auto_mount.mount_paths:
                     if path.startswith('/'):
                         mount_path = path
