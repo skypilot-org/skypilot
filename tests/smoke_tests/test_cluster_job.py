@@ -2311,18 +2311,14 @@ def test_ephemeral_pending_volume_on_kubernetes(binding_mode):
                 f'sky logs --provision {name} > {name}-provision.log 2>&1; '
                 f'grep -q "waiting for volume" {name}-provision.log && '
                 f'grep -q "ExternalProvisioning" {name}-provision.log',
-                # The volume is recorded, and recorded as belonging to the
-                # cluster rather than as a volume the user has to clean up.
-                f'vols=$(sky volumes ls) && echo "$vols" && '
-                f'echo "$vols" | grep {name} | grep True',
-                # Tearing the cluster down takes its volume with it. A claim
-                # that never bound is still a claim, and leaking one leaks the
-                # storage behind it on a cluster where the class works.
-                f'sky down -y {name}',
+                # The failed launch takes the volume it created with it, rather
+                # than leaving the user a record to clean up. A claim that never
+                # bound is still a claim, and leaking one leaks the storage
+                # behind it on a cluster where the class works.
                 f'! sky volumes ls | grep -q {name}',
-                # The claim goes with it, though the API server only has to
-                # ask for the deletion -- the pvc-protection finalizer clears
-                # on Kubernetes' own schedule.
+                # The API server only has to ask for the claim's deletion --
+                # the pvc-protection finalizer clears on Kubernetes' own
+                # schedule.
                 f'for i in $(seq 1 12); do '
                 f'  kubectl get pvc -A | grep -q {name} || break; '
                 f'  sleep 5; '
@@ -2429,10 +2425,11 @@ def test_volume_mix_on_kubernetes():
                 f'{pers_f.name}',
                 f'sky volumes apply -y {smoke_tests_utils.AGENT_K8S_INFRA} '
                 f'{auto_f.name}',
-                # An RWX class binds Immediately, so the volume above is still
-                # being provisioned and cannot be mounted yet.
-                smoke_tests_utils.wait_until_volume_ready_cmd(auto_volume),
-                smoke_tests_utils.wait_until_volume_ready_cmd(
+                # An RWX class binds Immediately, so the volume above is
+                # still being provisioned and cannot be mounted yet.
+                smoke_tests_utils.get_cmd_wait_until_volume_is_ready(auto_volume
+                                                                    ),
+                smoke_tests_utils.get_cmd_wait_until_volume_is_ready(
                     persistent_volume),
                 smoke_tests_utils.with_config(
                     f'sky launch -y -c {name} --infra kubernetes '
