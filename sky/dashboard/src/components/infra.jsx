@@ -350,7 +350,10 @@ export function InfrastructureSection({
   actionButton = null, // Optional action button for the header
   contextWorkspaceMap = {}, // Mapping of contexts to workspaces
   contextErrors = {}, // Mapping of contexts to error messages
-  sectionError = null, // Section-wide fetch failure, shown as a banner
+  // Section-wide fetch failure. Only shown as a banner in the empty state,
+  // where there is no row to carry the per-row error icon; when rows exist
+  // the failure is attached to them via contextErrors instead.
+  sectionError = null,
   gpuMetricsRefreshTrigger = 0, // Counter for forcing iframe refresh
   loadedContexts = new Set(), // Set of contexts that have had their GPU data loaded
   isInitialLoad = true, // Controls panel-level loading spinner (not cell spinners)
@@ -553,13 +556,6 @@ export function InfrastructureSection({
               )}
             </div>
           </div>
-          {/* A section-wide fetch failure (e.g. an unreachable Slurm login
-              node) — surface the actual error instead of silently rendering
-              empty cells under the listed rows. */}
-          <ErrorDisplay
-            error={sectionError}
-            title={`Failed to query ${title}`}
-          />
           <GpuTypeSummaryStrip gpus={gpus} />
           {/* Desktop: unified full-width table. No inner vertical scroll —
               per-type sub-rows make row count = contexts x GPU types, so a
@@ -843,18 +839,27 @@ export function InfrastructureSection({
                                 layout; the name cell is its home in the
                                 unified table. */}
                             <AllowedNodesRowBadge id={rowId} kind={rowKind} />
-                            {contextErrors[context] && !statusByKey && (
-                              // Hidden when a plugin is contributing status data
-                              // via the infra.row.namePrefix slot — the plugin's
-                              // status dot + per-context detail page cover this
-                              // information already.
-                              <NonCapitalizedTooltip
-                                content={`Context unreachable: ${contextErrors[context]}`}
-                                className="text-sm text-muted-foreground"
-                              >
-                                <AlertTriangleIcon className="w-4 h-4 text-yellow-500 flex-shrink-0" />
-                              </NonCapitalizedTooltip>
-                            )}
+                            {contextErrors[context] &&
+                              (isSlurm || !statusByKey) && (
+                                // Hidden when a plugin is contributing status
+                                // data via the infra.row.namePrefix slot — the
+                                // plugin's status dot + per-context detail page
+                                // cover this information already. Slurm rows
+                                // are exempt: their errors come from the
+                                // inventory queries, which can fail while a
+                                // plugin still reports the cluster's
+                                // connection healthy, so the status dot does
+                                // not cover them.
+                                <NonCapitalizedTooltip
+                                  content={`${
+                                    contextNoun.charAt(0).toUpperCase() +
+                                    contextNoun.slice(1)
+                                  } unreachable: ${contextErrors[context]}`}
+                                  className="text-sm text-muted-foreground"
+                                >
+                                  <AlertTriangleIcon className="w-4 h-4 text-yellow-500 flex-shrink-0" />
+                                </NonCapitalizedTooltip>
+                              )}
                           </div>
                           {workspaces.length > 0 && (
                             <div className="text-sm text-gray-500 mt-1.5">
@@ -3345,6 +3350,17 @@ export function GPUs() {
     return [...clusterSet].sort();
   }, [configuredSlurmClusters, perClusterSlurmGPUs, perNodeSlurmGPUs]);
 
+  // Attach the Slurm fetch failure to every listed cluster — the same
+  // warning-icon treatment unreachable Kubernetes contexts get. The inventory
+  // queries cover all clusters in one call, so one failure applies to each
+  // row.
+  const slurmContextErrors = React.useMemo(() => {
+    if (!slurmError) return {};
+    return Object.fromEntries(
+      slurmClusters.map((cluster) => [cluster, slurmError])
+    );
+  }, [slurmError, slurmClusters]);
+
   // Group perClusterSlurmGPUs by cluster
   const groupedPerClusterSlurmGPUs = React.useMemo(() => {
     if (!perClusterSlurmGPUs) return {};
@@ -3748,6 +3764,7 @@ export function GPUs() {
         isSSH={false}
         isSlurm={true}
         contextWorkspaceMap={{}}
+        contextErrors={slurmContextErrors}
         sectionError={slurmError}
         isInitialLoad={isInitialLoad}
         statusByKey={extraStatusByKey}

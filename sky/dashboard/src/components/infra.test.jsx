@@ -237,25 +237,43 @@ describe('InfrastructureSection unreachable Slurm cluster', () => {
 // A failed section-wide query (e.g. the SSH error of an unreachable Slurm
 // login node) arrives as `sectionError` and renders as a banner, so the page
 // says what went wrong instead of silently showing empty cells.
-describe('InfrastructureSection section-wide error banner', () => {
+describe('InfrastructureSection Slurm error reporting', () => {
   const sshError =
     'ssh: connect to host 10.0.0.5 port 22: Connection timed out';
+  const rowErrorIcon = (container) =>
+    container.querySelector('table tbody td svg.text-yellow-500');
 
-  it('shows the failure text above the listed cluster rows', () => {
+  it('marks the cluster row with the same warning icon k8s contexts get', () => {
     const { container } = renderSection({
       isSlurm: true,
       contexts: ['offline-cluster'],
       gpus: [],
+      contextErrors: { 'offline-cluster': sshError },
       sectionError: sshError,
     });
-    expect(container.textContent).toContain('Failed to query Slurm');
-    expect(container.textContent).toContain(sshError);
-    // The configured cluster still renders as a row under the banner.
+    // The failure rides on the row (icon + tooltip), not a banner.
+    expect(rowErrorIcon(container)).not.toBeNull();
+    expect(container.textContent).not.toContain('Failed to query Slurm');
     expect(tableRows(container)).toHaveLength(1);
     expect(normalize(tableRows(container)[0])).toContain('offline-cluster');
   });
 
-  it('shows the banner instead of the "not configured" guess when empty', () => {
+  it('keeps the icon when a plugin supplies row status data', () => {
+    // For Kubernetes rows a plugin's status dot suppresses the icon (it
+    // carries the same reachability information). Slurm errors come from the
+    // inventory queries, which can fail while the plugin still reports the
+    // cluster's connection healthy — so the icon must survive.
+    const { container } = renderSection({
+      isSlurm: true,
+      contexts: ['offline-cluster'],
+      gpus: [],
+      contextErrors: { 'offline-cluster': sshError },
+      statusByKey: new Map([['slurm:offline-cluster', { status: 'ready' }]]),
+    });
+    expect(rowErrorIcon(container)).not.toBeNull();
+  });
+
+  it('falls back to the banner when there is no row to carry the icon', () => {
     const { container } = renderSection({
       isSlurm: true,
       contexts: [],
@@ -269,14 +287,16 @@ describe('InfrastructureSection section-wide error banner', () => {
     expect(container.textContent).not.toContain('not configured');
   });
 
-  it('renders no banner when there is no error', () => {
+  it('renders neither icon nor banner when there is no error', () => {
     const { container } = renderSection({
       isSlurm: true,
       contexts: ['healthy-cluster'],
       gpus: [],
+      contextErrors: {},
       sectionError: null,
     });
     expect(container.textContent).not.toContain('Failed to query');
+    expect(rowErrorIcon(container)).toBeNull();
   });
 });
 
