@@ -4527,6 +4527,11 @@ def test_managed_job_volume_mix():
                     f'sky volumes apply -y '
                     f'{smoke_tests_utils.AGENT_K8S_INFRA} {auto_f.name}',
                     '/dev/null'),
+                # An RWX class binds Immediately, so the volume above is still
+                # being provisioned and cannot be mounted yet.
+                smoke_tests_utils.wait_until_volume_ready_cmd(auto_volume),
+                smoke_tests_utils.wait_until_volume_ready_cmd(
+                    persistent_volume),
                 f'sky jobs launch -n {name} '
                 f'{smoke_tests_utils.AGENT_K8S_INFRA} '
                 f'{smoke_tests_utils.LOW_RESOURCE_ARG} {task_f.name} -y -d',

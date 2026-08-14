@@ -1704,6 +1704,31 @@ RWX_STORAGE_CLASS_ENV_VAR = 'PYTEST_SKYPILOT_RWX_STORAGE_CLASS'
 _DEFAULT_RWX_STORAGE_CLASS = 'nfs-rwx'
 
 
+def wait_until_volume_ready_cmd(volume_name: str, timeout: int = 300) -> str:
+    """A step that blocks until a volume can be mounted.
+
+    `sky volumes apply` only starts provisioning. On a StorageClass that binds
+    Immediately -- which the RWX classes are, since they have no pod to wait for
+    -- the PersistentVolume is created asynchronously, so the claim is Pending,
+    and a Pending claim is recorded NOT_READY. Mounting one is refused, so a
+    test that creates a volume has to wait for it, as a user would.
+
+    `sky volumes ls` re-reads the volume's state, so polling it is what advances
+    the record rather than waiting for the refresh daemon's next pass.
+
+    A gate, not best-effort: a volume that never binds fails here rather than
+    further down on a confusing mount error.
+    """
+    # -w so that NOT_READY does not match READY: the `_` before it is a word
+    # character, so there is no word boundary there.
+    ready = f'echo "$vols" | grep {volume_name} | grep -wqE "READY|IN_USE"'
+    return (f'for i in $(seq 1 {max(timeout // 5, 1)}); do '
+            f'  vols=$(sky volumes ls); '
+            f'  {ready} && break; '
+            f'  sleep 5; '
+            f'done; echo "$vols"; {ready}')
+
+
 def storage_class_exists(name: str) -> bool:
     return subprocess.run(['kubectl', 'get', 'sc', name],
                           capture_output=True,

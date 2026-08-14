@@ -2429,6 +2429,11 @@ def test_volume_mix_on_kubernetes():
                 f'{pers_f.name}',
                 f'sky volumes apply -y {smoke_tests_utils.AGENT_K8S_INFRA} '
                 f'{auto_f.name}',
+                # An RWX class binds Immediately, so the volume above is still
+                # being provisioned and cannot be mounted yet.
+                smoke_tests_utils.wait_until_volume_ready_cmd(auto_volume),
+                smoke_tests_utils.wait_until_volume_ready_cmd(
+                    persistent_volume),
                 smoke_tests_utils.with_config(
                     f'sky launch -y -c {name} --infra kubernetes '
                     f'{task_f.name}', cfg_f.name),
