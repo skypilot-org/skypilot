@@ -185,19 +185,6 @@ def _log_timed_out_stragglers(orphans: List[Dict[str, Any]]) -> None:
 # Persistent location for debug dumps
 DEBUG_DUMP_DIR = '~/.sky/debug_dumps'
 
-# Env var names whose values should be redacted (show bool presence only).
-# Used for both server_info environment and request body sanitization.
-_SENSITIVE_ENV_VARS = {
-    'SKYPILOT_DB_CONNECTION_URI',
-    'SKYPILOT_INITIAL_BASIC_AUTH',
-    'SKYPILOT_SERVICE_ACCOUNT_TOKEN',
-    'SKYPILOT_DOCKER_PASSWORD',
-    'AWS_SECRET_ACCESS_KEY',
-    'AWS_SESSION_TOKEN',
-    'AWS_ACCESS_KEY_ID',
-    'AZURE_CLIENT_SECRET',
-}
-
 # Maps request name → field names containing task/dag YAML to redact.
 # Empty tuple means include body verbatim (no YAML fields).
 # Requests not in this dict have their body excluded entirely.
@@ -958,12 +945,14 @@ def _dump_server_info(dump_dir: str,
                 'traceback': _full_traceback()
             })
 
-    # Add all SKYPILOT_*/SKY_* environment variables, redacting sensitive ones
-    env = {}
-    for k, v in sorted(os.environ.items()):
-        if k.startswith(('SKYPILOT_', 'SKY_')):
-            env[k] = bool(v) if k in _SENSITIVE_ENV_VARS else v
-    server_info['environment'] = env
+    # Add all SKYPILOT_*/SKY_* environment variables. Names are kept (which
+    # vars are set is diagnostic signal), but credential-shaped values are
+    # redacted -- see debug_dump_helpers.redact_env_vars.
+    server_info['environment'] = debug_dump_helpers.redact_env_vars({
+        k: v
+        for k, v in sorted(os.environ.items())
+        if k.startswith(('SKYPILOT_', 'SKY_'))
+    })
 
     # Add cloud status (keyed by workspace name, each mapping cloud names
     # to a list of capability strings — already JSON-serializable).
@@ -1028,9 +1017,12 @@ def _sanitize_request_body(request) -> Optional[Dict[str, Any]]:
     # Redact sensitive env var values
     env_vars = data.get('env_vars')
     if isinstance(env_vars, dict):
-        for k in env_vars:
-            if k in _SENSITIVE_ENV_VARS:
-                env_vars[k] = '<redacted>'
+        data['env_vars'] = debug_dump_helpers.redact_env_vars(env_vars)
+    # Redact sensitive fields in any client-supplied config overrides
+    override_config = data.get('override_skypilot_config')
+    if isinstance(override_config, dict) and override_config:
+        data['override_skypilot_config'] = (
+            debug_dump_helpers.redact_config(override_config))
     # Redact task/dag YAML fields
     for field in task_fields:
         if field in data and isinstance(data[field], str):
