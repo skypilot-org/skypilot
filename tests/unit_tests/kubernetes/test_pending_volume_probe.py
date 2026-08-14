@@ -510,6 +510,92 @@ class TestPendingVolumeProbe:
             assert message is not None
             assert 'vol' in message
 
+    def test_the_message_is_short_enough_to_be_a_spinner(self, cluster):
+        """It is the only thing on screen for minutes, so it carries the claim
+        and the reason -- not the paragraph the provisioner writes."""
+        cluster.set('vol', 'Pending', [
+            _event('ExternalProvisioning',
+                   'Waiting for a volume to be created either by the external '
+                   "provisioner 'filestore.csi.storage.gke.io' or manually by "
+                   'the system administrator. If volume creation is delayed, '
+                   'please verify that the provisioner is running and '
+                   'correctly registered.',
+                   event_type='Normal')
+        ])
+        probe = self._probe()
+        self._step(cluster)
+
+        message = probe.probe([_pod(['vol'])])
+
+        assert message == 'waiting for volume(s): vol - ExternalProvisioning'
+
+    def test_several_claims_are_folded_into_a_count(self, cluster):
+        """A pod can mount an auto-mounted volume, an inline one and its own."""
+        for name in ('vol-a', 'vol-b', 'vol-c'):
+            cluster.set(name, 'Pending',
+                        [_event('WaitForFirstConsumer', 'w', 'Normal')])
+        probe = self._probe()
+        self._step(cluster)
+
+        message = probe.probe([_pod(['vol-a', 'vol-b', 'vol-c'])])
+
+        assert message == ('waiting for volume(s): '
+                           'vol-a - WaitForFirstConsumer, +2 more')
+
+    def test_the_claim_that_is_complaining_is_the_one_shown(self, cluster):
+        """Whichever position it is in: a claim that is merely waiting says the
+        same thing for minutes, and only one of them fits on the line."""
+        cluster.set('vol-a', 'Pending',
+                    [_event('WaitForFirstConsumer', 'w', 'Normal')])
+        cluster.set('vol-b', 'Pending',
+                    [_event('ProvisioningFailed', _CSI_IN_PROGRESS_MESSAGE)])
+        probe = self._probe()
+        self._step(cluster)
+
+        message = probe.probe([_pod(['vol-a', 'vol-b'])])
+
+        assert message == ('waiting for volume(s): '
+                           'vol-b - ProvisioningFailed, +1 more')
+
+    def test_the_log_keeps_what_the_spinner_drops(self, cluster):
+        """The spinner is gone by the time anyone reads back why a launch took
+        as long as it did."""
+        cluster.set('vol', 'Pending', [
+            _event('ProvisioningFailed', _CSI_IN_PROGRESS_MESSAGE),
+            _event('Provisioning', 'External provisioner is provisioning it',
+                   'Normal'),
+        ])
+        probe = self._probe()
+        self._step(cluster)
+
+        with mock.patch.object(instance.logger, 'info') as log:
+            message = probe.probe([_pod(['vol'])])
+
+        logged = log.call_args[0][0]
+        assert _CSI_IN_PROGRESS_MESSAGE in logged
+        assert message is not None and _CSI_IN_PROGRESS_MESSAGE not in message
+
+    def test_a_change_the_spinner_hides_is_still_logged(self, cluster):
+        """Only the first claim reaches the spinner, so the log cannot be keyed
+        on it: the others would change in silence."""
+        cluster.set('vol-a', 'Pending',
+                    [_event('WaitForFirstConsumer', 'w', 'Normal')])
+        cluster.set('vol-b', 'Pending',
+                    [_event('WaitForFirstConsumer', 'w', 'Normal')])
+        probe = self._probe()
+        pods = [_pod(['vol-a', 'vol-b'])]
+        self._step(cluster)
+        with mock.patch.object(instance.logger, 'info') as log:
+            probe.probe(pods)
+            assert log.call_count == 1
+
+            cluster.set('vol-b', 'Pending',
+                        [_event('ExternalProvisioning', 'p', 'Normal')])
+            self._step(cluster)
+            probe.probe(pods)
+
+            assert log.call_count == 2
+
     def test_the_last_finding_is_repeated_between_probes(self, cluster):
         """The wait loop polls once a second, far faster than the probe
         interval, and needs something to display in between."""

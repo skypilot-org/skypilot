@@ -341,8 +341,20 @@ class PendingPvc(NamedTuple):
     """A PVC a pod needs that has not been bound yet."""
     name: str
     # '<name> (phase: Pending)', plus ' - <reason>: <message>' when an event
-    # explains it.
+    # explains it. For the log and for the error a failure raises, where the
+    # provisioner's own words are what someone reading back needs.
     detail: str
+    # '<name> - <reason>', for the spinner: one line that has to stay readable
+    # while it is the only thing on screen. The reason is the part of `detail`
+    # that moves (WaitForFirstConsumer -> WaitForPodScheduled ->
+    # ExternalProvisioning), so it says whether the wait is progressing; the
+    # message after it is fixed text that would push the line off the terminal.
+    summary: str
+    # Whether the claim has reported a Warning at all. Not the same as either
+    # of the two below: a failure whose gRPC code says the call may still be
+    # running is deliberately not counted as one, but it is still the most
+    # interesting thing the claim has said, so it is what the spinner shows.
+    warned: bool
     # Whether the storage backend has reported something that cannot succeed
     # however long it is retried, e.g. a size its API rejects.
     terminal: bool
@@ -426,8 +438,10 @@ def _get_pending_pvcs(
                                                             namespace,
                                                             pvc_name,
                                                             reverse=False)
-            event_messages = []
-            warning_messages = []
+            # (reason, message) rather than one string, so the spinner can take
+            # the reason alone while the log and the error keep both.
+            event_explanations: List[Tuple[str, str]] = []
+            warning_explanations: List[Tuple[str, str]] = []
             terminal = False
             failure: Optional[FailureWindow] = None
             for event in sorted_events:
@@ -440,7 +454,7 @@ def _get_pending_pvcs(
                     continue
                 msg = event.message or ''
                 if msg:
-                    event_messages.append(f'{event.reason}: {msg}')
+                    event_explanations.append((event.reason, msg))
                 if not is_failure:
                     continue
                 first, last = _event_window(event)
@@ -449,7 +463,7 @@ def _get_pending_pvcs(
                 if failures_since is not None and last < failures_since:
                     continue
                 if msg:
-                    warning_messages.append(f'{event.reason}: {msg}')
+                    warning_explanations.append((event.reason, msg))
                 kind = volume.classify_pvc_failure(msg)
                 if kind == volume.PvcFailure.TERMINAL:
                     terminal = True
@@ -464,14 +478,19 @@ def _get_pending_pvcs(
                     failure = FailureWindow(first=min(failure.first, first),
                                             last=max(failure.last, last))
             pending_info = f'{pvc_name} (phase: Pending)'
+            summary = pvc_name
             # Prefer the newest warning when there is one: it is the reason the
             # claim is failing, and a Normal event can be newer than it.
-            explanation = warning_messages or event_messages
-            if explanation:
-                pending_info += f' - {explanation[-1]}'
+            explanations = warning_explanations or event_explanations
+            if explanations:
+                reason, msg = explanations[-1]
+                pending_info += f' - {reason}: {msg}'
+                summary += f' - {reason}'
             pending_pvcs.append(
                 PendingPvc(name=pvc_name,
                            detail=pending_info,
+                           summary=summary,
+                           warned=bool(warning_explanations),
                            terminal=terminal,
                            failure=failure))
         except Exception as e:  # pylint: disable=broad-except
@@ -522,6 +541,9 @@ class _PendingVolumeProbe:
         # What the last completed probe found, so that callers polling faster
         # than the probe interval keep reporting it between probes.
         self._message: Optional[str] = None
+        # The same, in full, so that the log fires on any change rather than
+        # only on the part the spinner shows.
+        self._detail: Optional[str] = None
 
     def probe(self,
               pods: List[Any],
@@ -605,14 +627,34 @@ class _PendingVolumeProbe:
                                           namespace=self._namespace))
 
         message = None
+        detail = None
         if pending_pvcs:
-            details = ', '.join(pvc.detail for pvc in pending_pvcs)
-            message = f'waiting for volume(s) to be provisioned: {details}'
-        if message != self._message:
-            # Also log it, on change only: the spinner is gone by the time
-            # anyone reads back why a launch took as long as it did.
-            state = message if message is not None else 'volume(s) provisioned'
+            # The spinner gets one claim and one reason. A pod can mount
+            # several claims -- an auto-mounted volume, an inline one, the
+            # cluster's own -- and each provisioner's message runs to a
+            # paragraph, which together do not fit on a line.
+            #
+            # Show one that is complaining if there is one. A claim that is
+            # merely waiting says the same thing for minutes, while a warning
+            # is the reason someone is watching this line at all. A warning
+            # bad enough to be fatal has already raised by here, so what this
+            # surfaces is the kind that may yet resolve.
+            shown = next((pvc for pvc in pending_pvcs if pvc.warned),
+                         pending_pvcs[0])
+            summary = shown.summary
+            if len(pending_pvcs) > 1:
+                summary += f', +{len(pending_pvcs) - 1} more'
+            message = f'waiting for volume(s): {summary}'
+            detail = ('waiting for volume(s) to be provisioned: ' +
+                      ', '.join(pvc.detail for pvc in pending_pvcs))
+        if detail != self._detail:
+            # Log what the spinner leaves out, on change only: the spinner is
+            # gone by the time anyone reads back why a launch took as long as
+            # it did. Keyed on the full text, so a change the spinner does not
+            # show is still recorded.
+            state = detail if detail is not None else 'volume(s) provisioned'
             logger.info(f'Launching {self._cluster_name}: {state}')
+        self._detail = detail
         self._message = message
         return message
 
