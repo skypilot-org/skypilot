@@ -3141,21 +3141,6 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         # a job (detach_setup, default).
         self._setup_cmd = None
 
-    @staticmethod
-    def _inline_command_quote_levels(handle: CloudVmRayResourceHandle) -> int:
-        # SSHCommandRunner quotes for the remote login shell and local shell.
-        quote_levels = 2
-        if isinstance(handle.launched_resources.cloud, clouds.Slurm):
-            # SlurmCommandRunner adds an srun bash -c shell.
-            quote_levels += 1
-            cluster_info = handle.cached_cluster_info
-            if (cluster_info is not None and
-                    cluster_info.provider_config is not None and
-                    cluster_info.provider_config.get('slurm_user') is not None):
-                # SlurmLoginNodeCommandRunner adds the su --command shell.
-                quote_levels += 1
-        return quote_levels
-
     # --- Implementation of Backend APIs ---
 
     def register_info(self, **kwargs) -> None:
@@ -4078,9 +4063,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 _dump_final_script(setup_script,
                                    constants.PERSISTENT_SETUP_SCRIPT_PATH)
 
-            if (detach_setup or backend_utils.is_command_length_over_limit(
-                    encoded_script,
-                    quote_levels=self._inline_command_quote_levels(handle))):
+            if (detach_setup or
+                    runner.is_command_length_over_limit(encoded_script)):
                 _dump_final_script(setup_script)
                 create_script_code = 'true'
             else:
@@ -4205,10 +4189,15 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             remote_log_dir = self.log_dir
         remote_log_path = os.path.join(remote_log_dir, 'run.log')
 
-        def _dump_code_to_file(codegen: str,
-                               target_dir: str = SKY_REMOTE_APP_DIR) -> None:
-            runners = handle.get_command_runners()
-            head_runner = runners[0]
+        def _dump_code_to_file(
+                codegen: str,
+                target_dir: str = SKY_REMOTE_APP_DIR,
+                runner: Optional[command_runner.CommandRunner] = None) -> None:
+            # Reuse the caller's runner when it has one: for a high
+            # availability Kubernetes cluster get_command_runners() refreshes
+            # cluster info on every call, and uploading is the common path.
+            head_runner = (runner if runner is not None else
+                           handle.get_command_runners()[0])
             with tempfile.NamedTemporaryFile('w', prefix='sky_app_') as fp:
                 fp.write(codegen)
                 fp.flush()
@@ -4299,9 +4288,10 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                         user_id=managed_job_user_id,
                         execution=execution)
 
-                if backend_utils.is_command_length_over_limit(
-                        codegen,
-                        quote_levels=self._inline_command_quote_levels(handle)):
+                # Not a runner check: the codegen rides in a gRPC message here,
+                # so neither shell quoting nor a request URL is involved. This
+                # is just a size cap above which uploading is cheaper.
+                if backend_utils.is_command_length_over_limit(codegen):
                     _dump_code_to_file(codegen)
                     queue_job_request = jobsv1_pb2.QueueJobRequest(
                         job_id=job_id,
@@ -4324,10 +4314,11 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 use_legacy = True
 
         if use_legacy:
-            if backend_utils.is_command_length_over_limit(
-                    job_submit_cmd,
-                    quote_levels=self._inline_command_quote_levels(handle)):
-                _dump_code_to_file(codegen)
+            head_runner = handle.get_command_runners()[0]
+            inlined = not head_runner.is_command_length_over_limit(
+                job_submit_cmd)
+            if not inlined:
+                _dump_code_to_file(codegen, runner=head_runner)
                 job_submit_cmd = f'{mkdir_code} && {code}'
 
             # For Slurm, run in background so that SSH returns immediately.
@@ -4338,7 +4329,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 job_submit_cmd,
                 stream_logs=False,
                 require_outputs=True,
-                run_in_background=is_slurm)
+                run_in_background=is_slurm,
+                head_runner=head_runner)
             # Happens when someone calls `sky exec` but remote is outdated for
             # running a job. Necessitating calling `sky launch`.
             backend_utils.check_stale_runtime_on_remote(returncode, stderr,
@@ -4352,21 +4344,37 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     'Failed to submit job due to command length limit. '
                     'Dumping job to file and running it with SSH. '
                     f'Output: {output}')
-                _dump_code_to_file(codegen)
+                _dump_code_to_file(codegen, runner=head_runner)
                 job_submit_cmd = f'{mkdir_code} && {code}'
+                # This attempt uploads, so a failure of it is not about size.
+                inlined = False
                 # See comment above for why run_in_background=is_slurm.
                 returncode, stdout, stderr = self.run_on_head(
                     handle,
                     job_submit_cmd,
                     stream_logs=False,
                     require_outputs=True,
-                    run_in_background=is_slurm)
+                    run_in_background=is_slurm,
+                    head_runner=head_runner)
 
-            subprocess_utils.handle_returncode(
-                returncode,
-                job_submit_cmd,
-                f'Failed to submit job {job_id}.',
-                stderr=stdout + stderr)
+            failure_reason = f'Failed to submit job {job_id}.'
+            if inlined and isinstance(head_runner,
+                                      command_runner.KubernetesCommandRunner):
+                # The command was small enough to inline, so it went into the
+                # exec request URL. A proxy in front of the Kubernetes API that
+                # caps request size rejects those with little or no explanation,
+                # which is otherwise an unreadable failure.
+                limit = head_runner.max_inline_command_length()
+                failure_reason += (
+                    ' If the Kubernetes API server is behind a proxy that '
+                    'limits request size, lower '
+                    '`kubernetes.max_inline_command_length` (currently '
+                    f'{limit} bytes of request URL) so the driver is uploaded '
+                    'instead of inlined.')
+            subprocess_utils.handle_returncode(returncode,
+                                               job_submit_cmd,
+                                               failure_reason,
+                                               stderr=stdout + stderr)
 
         controller = controller_utils.Controllers.from_name(handle.cluster_name)
         if controller == controller_utils.Controllers.SKY_SERVE_CONTROLLER:
@@ -6040,11 +6048,17 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         separate_stderr: bool = False,
         process_stream: bool = True,
         source_bashrc: bool = False,
+        head_runner: Optional[command_runner.CommandRunner] = None,
         **kwargs,
     ) -> Union[int, Tuple[int, str, str]]:
         """Runs 'cmd' on the cluster's head node.
 
         It will try to fetch the head node IP if it is not cached.
+
+        Pass `head_runner` when the caller already built one: for a high
+        availability Kubernetes cluster `get_command_runners` refreshes cluster
+        info on every call, so letting this build its own would cost a second
+        API round trip.
 
         Args:
             handle: The ResourceHandle to the cluster.
@@ -6080,8 +6094,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         """
         # This will try to fetch the head node IP if it is not cached.
 
-        runners = handle.get_command_runners()
-        head_runner = runners[0]
+        if head_runner is None:
+            head_runner = handle.get_command_runners()[0]
         if under_remote_workdir:
             cmd = f'cd {SKY_REMOTE_WORKDIR} && {cmd}'
 
@@ -6399,6 +6413,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             if task.volume_mounts:
                 # Get existing cluster's volume mounts from cluster yaml
                 existing_volume_names = set()
+                existing_slurm_host_mounts = set()
                 try:
                     if cluster_yaml_obj is not None:
                         # Extract volume names from existing cluster
@@ -6455,6 +6470,17 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                 vol_name = vol_mount.get('VolumeNameOnCloud')
                                 if vol_name:
                                     existing_volume_names.add(vol_name)
+                        elif isinstance(to_provision.cloud, clouds.Slurm):
+                            for vol_mount in node_config.get(
+                                    'volume_mounts', []):
+                                config = vol_mount.get('volume_config',
+                                                       {}).get('config', {})
+                                host_path = config.get('host_path')
+                                mount_path = vol_mount.get('path')
+                                if host_path and mount_path:
+                                    existing_slurm_host_mounts.add(
+                                        (host_path, mount_path,
+                                         config.get('mode')))
                 except Exception as e:  # pylint: disable=broad-except
                     # If we can't get the existing volume mounts, log debug
                     # and skip the warning check
@@ -6465,10 +6491,17 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 new_ephemeral_volumes = []
                 new_persistent_volumes = []
                 for volume_mount in task.volume_mounts:
+                    config = volume_mount.volume_config.config
                     # Compare using volume_name for user-facing name
                     if volume_mount.is_ephemeral:
                         if volume_mount.path not in existing_volume_names:
                             new_ephemeral_volumes.append(volume_mount.path)
+                    elif (isinstance(to_provision.cloud, clouds.Slurm) and
+                          config.get('host_path')):
+                        identity = (config['host_path'], volume_mount.path,
+                                    config.get('mode'))
+                        if identity not in existing_slurm_host_mounts:
+                            new_persistent_volumes.append(volume_mount.path)
                     elif (volume_mount.volume_name not in existing_volume_names
                           and volume_mount.volume_config.name_on_cloud
                           not in existing_volume_names):
@@ -6961,13 +6994,32 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         else:
             return task_codegen.RayCodeGen()
 
+    @staticmethod
+    def _get_task_demands_dict(handle: CloudVmRayResourceHandle,
+                               task: task_lib.Task) -> Dict[str, float]:
+        """Returns task demands for the handle's execution backend."""
+        resources_dict = backend_utils.get_task_demands_dict(task)
+        if (not isinstance(handle.launched_resources.cloud, clouds.Slurm) or
+                task.is_controller_task()):
+            return resources_dict
+
+        resources = task.best_resources
+        if resources is None:
+            assert len(task.resources) == 1, task.resources
+            resources = next(iter(task.resources))
+        requested_cpus = resources.cpus
+        if requested_cpus is None:
+            requested_cpus = handle.launched_resources.cpus
+        if requested_cpus is not None:
+            resources_dict['CPU'] = float(requested_cpus.rstrip('+'))
+        return resources_dict
+
     def _execute_task_one_node(self, handle: CloudVmRayResourceHandle,
                                task: task_lib.Task, job_id: int,
                                remote_log_dir: str) -> None:
         # Launch the command as a Ray task.
         log_dir = os.path.join(remote_log_dir, 'tasks')
-
-        resources_dict = backend_utils.get_task_demands_dict(task)
+        resources_dict = self._get_task_demands_dict(handle, task)
         internal_ips = handle.internal_ips()
         assert internal_ips is not None, 'internal_ips is not cached in handle'
 
@@ -6985,13 +7037,13 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             setup_cmd=self._setup_cmd,
         )
 
-        codegen.add_task(
-            1,
-            bash_script=task.run,
-            env_vars=task_env_vars,
-            task_name=task.name,
-            resources_dict=backend_utils.get_task_demands_dict(task),
-            log_dir=log_dir)
+        codegen.add_task(1,
+                         bash_script=task.run,
+                         env_vars=task_env_vars,
+                         task_name=task.name,
+                         resources_dict=self._get_task_demands_dict(
+                             handle, task),
+                         log_dir=log_dir)
 
         codegen.add_epilogue()
 
@@ -7011,7 +7063,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         #   for node:
         #     submit _run_cmd(cmd) with resource {node_i: 1}
         log_dir = os.path.join(remote_log_dir, 'tasks')
-        resources_dict = backend_utils.get_task_demands_dict(task)
+        resources_dict = self._get_task_demands_dict(handle, task)
         internal_ips = handle.internal_ips()
         assert internal_ips is not None, 'internal_ips is not cached in handle'
 
@@ -7031,13 +7083,13 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             setup_cmd=self._setup_cmd,
         )
 
-        codegen.add_task(
-            num_actual_nodes,
-            bash_script=task.run,
-            env_vars=task_env_vars,
-            task_name=task.name,
-            resources_dict=backend_utils.get_task_demands_dict(task),
-            log_dir=log_dir)
+        codegen.add_task(num_actual_nodes,
+                         bash_script=task.run,
+                         env_vars=task_env_vars,
+                         task_name=task.name,
+                         resources_dict=self._get_task_demands_dict(
+                             handle, task),
+                         log_dir=log_dir)
 
         codegen.add_epilogue()
         # TODO(zhanghao): Add help info for downloading logs.

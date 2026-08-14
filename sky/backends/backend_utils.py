@@ -153,18 +153,12 @@ CLUSTER_TUNNEL_LOCK_TIMEOUT_SECONDS = 10.0
 # Remote dir that holds our runtime files.
 _REMOTE_RUNTIME_FILES_DIR = '~/.sky/.runtime_files'
 
-# The maximum size of a command line arguments is 128 KB, i.e. the command
-# executed with /bin/sh should be less than 128KB.
-# https://github.com/torvalds/linux/blob/master/include/uapi/linux/binfmts.h
-#
-# If a user have very long run or setup commands, the generated command may
-# exceed the limit, as we directly include scripts in job submission commands.
-# If the command is too long, we instead write it to a file, rsync and execute
-# it.
-#
-# We use 100KB as a threshold to be safe for other arguments that
-# might be added during ssh.
-_MAX_INLINE_SCRIPT_LENGTH = 100 * 1024
+# If a user has very long run or setup commands, the generated command may
+# exceed the local command line limit, as we directly include scripts in job
+# submission commands. If the command is too long, we instead write it to a
+# file, rsync and execute it. Same ceiling the runners use for a shell
+# transport, kept in one place so the two cannot drift.
+_MAX_INLINE_SCRIPT_LENGTH = command_runner.MAX_INLINE_COMMAND_LENGTH
 
 _ENDPOINTS_RETRY_MESSAGE = ('If the cluster was recently started, '
                             'please retry after a while.')
@@ -295,7 +289,14 @@ def _caller_is_viewer() -> bool:
 
 
 def is_command_length_over_limit(command: str, quote_levels: int = 2) -> bool:
-    """Check if the quoted command exceeds the inline command limit."""
+    """Check if the quoted command exceeds the local command line limit.
+
+    For a command SkyPilot is about to *transmit* to a cluster, use
+    ``CommandRunner.is_command_length_over_limit`` instead: the ceiling there
+    belongs to the runner's transport, which for Kubernetes is a request URL
+    rather than a shell. This function is the plain local-shell check, and is
+    called from generated code that runs on the cluster.
+    """
     for _ in range(quote_levels):
         command = shlex.quote(command)
     return len(command) > _MAX_INLINE_SCRIPT_LENGTH
@@ -775,6 +776,23 @@ def _get_modal_cloud_bucket_mounts(
     return bucket_mounts
 
 
+def _reject_not_ready_auto_mount_volume(volume_name: str,
+                                        record: Dict[str, Any]) -> None:
+    """Raises if a volume about to be auto-mounted is not usable.
+
+    Raises:
+        exceptions.VolumeNotReadyError: if the volume is not ready.
+    """
+    if record.get('status') != status_lib.VolumeStatus.NOT_READY:
+        return
+    error_message = (record.get('error_message') or
+                     'The last status refresh found it unusable.')
+    raise exceptions.VolumeNotReadyError(
+        f'Auto-mount volume {volume_name!r} is not ready, so it cannot be '
+        f'mounted. Error: {error_message}. Check it with `sky volumes ls`, '
+        f'or remove {volume_name!r} from the auto_mounts config.')
+
+
 # TODO: too many things happening here - leaky abstraction. Refactor.
 @timeline.event
 def write_cluster_config(
@@ -1119,7 +1137,6 @@ def write_cluster_config(
             active_workspace = skypilot_config.get_active_workspace()
             for entry in auto_mounts_config:
                 volume_name = entry['volume_name']
-                mount_paths = entry.get('mount_paths', [])
                 record = global_user_state.get_volume_by_name(volume_name)
                 if record is None:
                     logger.warning(
@@ -1155,6 +1172,18 @@ def write_cluster_config(
                         f'ReadWriteMany PVC volumes are supported for '
                         f'auto_mounts. Skipping.')
                     continue
+                # Reject before a pod is created. Mounting a volume whose
+                # backing storage is not usable does not fail loudly -- the pod
+                # just sits unschedulable or stuck in ContainerCreating -- so
+                # the launch has to be refused here, as it already is for a
+                # volume declared on the task.
+                #
+                # Keep this last: the checks above skip entries that this
+                # launch will not mount at all. Moving it earlier would refuse
+                # a launch over a volume belonging to someone else's scope, or
+                # one that would have been passed over for its access mode.
+                _reject_not_ready_auto_mount_volume(volume_name, record)
+                mount_paths = entry.get('mount_paths', [])
                 for path in mount_paths:
                     if path.startswith('/'):
                         mount_path = path

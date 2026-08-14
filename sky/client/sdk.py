@@ -428,6 +428,23 @@ def kubernetes_label_gpus(
     return server_common.get_request_id(response)
 
 
+def _check_slurm_host_path_volume_api_version(dag: 'sky.Dag') -> None:
+    if not any(
+            isinstance(volume_config, dict) and 'host_path' in volume_config
+            for task in dag.tasks
+            for volume_config in task.volumes.values()):
+        return
+    remote_api_version = versions.get_remote_api_version()
+    if (remote_api_version is None or remote_api_version <
+            server_constants.MIN_SLURM_HOST_PATH_VOLUME_API_VERSION):
+        with ux_utils.print_exception_no_traceback():
+            raise exceptions.APINotSupportedError(
+                'Slurm host_path volumes are not supported by this API '
+                'server. Please upgrade the API server to a version that '
+                f'supports API_VERSION >= '
+                f'{server_constants.MIN_SLURM_HOST_PATH_VOLUME_API_VERSION}.')
+
+
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @annotations.client_api
@@ -456,6 +473,7 @@ def optimize(
             for a task.
         exceptions.NoCloudAccessError: if no public clouds are enabled.
     """
+    _check_slurm_host_path_volume_api_version(dag)
     dag_str = dag_utils.dump_dag_to_yaml_str(dag)
 
     body = payloads.OptimizeBody(dag=dag_str,
@@ -588,6 +606,7 @@ def validate(
             validation. This is only required when a admin policy is in use,
             see: https://docs.skypilot.co/en/latest/cloud-setup/policy.html
     """
+    _check_slurm_host_path_volume_api_version(dag)
     remote_api_version = versions.get_remote_api_version()
 
     def _omit(version: int) -> bool:

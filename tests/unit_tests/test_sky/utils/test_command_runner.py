@@ -15,6 +15,7 @@ import paramiko
 import pytest
 
 from sky import exceptions
+from sky import skypilot_config
 from sky.utils import auth_utils
 from sky.utils import command_runner
 from sky.utils import common_utils
@@ -1102,3 +1103,101 @@ class TestRsyncTimeout:
         assert 'timed out' in str(exc_info.value).lower()
         # Deadline tripped before max_retry was exhausted.
         assert len(calls) == 1
+
+
+class TestInlineCommandLimit:
+    """Inline-vs-upload decision, per runner transport."""
+
+    def _slurm_runner(self, slurm_user, via_srun):
+        cls = (command_runner.SlurmCommandRunner
+               if via_srun else command_runner.SlurmLoginNodeCommandRunner)
+        extra = dict(sky_dir='/d',
+                     skypilot_runtime_dir='/r',
+                     job_id='1',
+                     slurm_node='n',
+                     container_args=None) if via_srun else {}
+        return cls(('h', 22), 'root', None, slurm_user=slurm_user, **extra)
+
+    def test_ssh_counts_shell_quoting(self):
+        runner = command_runner.SSHCommandRunner(('1.2.3.4', 22), 'sky', None)
+        command = "a'b" * 5000
+        assert runner.inline_command_size(command) == len(
+            shlex.quote(shlex.quote(command)))
+        assert runner.max_inline_command_length() == 100 * 1024
+
+    @pytest.mark.parametrize('slurm_user,via_srun,expected', [
+        (None, False, 2),
+        ('alice', False, 3),
+        (None, True, 3),
+        ('alice', True, 4),
+    ])
+    def test_slurm_quote_levels(self, slurm_user, via_srun, expected):
+        # srun adds a `bash -c` shell and a slurm_user adds a `su --command`
+        # one; each layer re-quotes the payload.
+        runner = self._slurm_runner(slurm_user, via_srun)
+        assert runner._inline_command_quote_levels() == expected
+
+    def test_slurm_user_quoting_pushes_command_over_limit(self):
+        # A command that fits at 2 quote levels but not at 4.
+        command = "a'b" * 5000
+        assert not self._slurm_runner(
+            None, False).is_command_length_over_limit(command)
+        assert self._slurm_runner('alice',
+                                  True).is_command_length_over_limit(command)
+
+    def test_kubernetes_counts_url_bytes_not_shell_bytes(self):
+        # `kubectl exec` sends the command as URL query params, so what counts
+        # is the percent-encoded length -- which for a script is far larger than
+        # the shell-quoted length that a shell transport would care about.
+        runner = command_runner.KubernetesCommandRunner((('ns', None), 'pod'))
+        script = 'echo "hello world"\nexit 0\n' * 500
+        ssh_runner = command_runner.SSHCommandRunner(('1.2.3.4', 22), 'sky',
+                                                     None)
+        assert runner.inline_command_size(
+            script) > 1.5 * ssh_runner.inline_command_size(script)
+
+    def test_kubernetes_default_limit_is_proxy_sized(self):
+        runner = command_runner.KubernetesCommandRunner((('ns', None), 'pod'))
+        assert runner.max_inline_command_length() == 32 * 1024
+
+    def test_kubernetes_limit_read_from_config(self, monkeypatch, tmp_path):
+        config = tmp_path / 'config.yaml'
+        config.write_text('kubernetes:\n'
+                          '  max_inline_command_length: 8192\n'
+                          '  context_configs:\n'
+                          '    tight-proxy:\n'
+                          '      max_inline_command_length: 2048\n')
+        monkeypatch.setenv(skypilot_config.ENV_VAR_GLOBAL_CONFIG, str(config))
+        skypilot_config.reload_config()
+
+        def limit(context):
+            return command_runner.KubernetesCommandRunner(
+                (('ns', context), 'pod')).max_inline_command_length()
+
+        # Per-context wins; other contexts fall back to the cloud-level value.
+        assert limit('tight-proxy') == 2048
+        assert limit('other-ctx') == 8192
+        assert limit(None) == 8192
+
+    def test_kubernetes_limit_for_ssh_node_pool(self, monkeypatch, tmp_path):
+        # SSH node pools run through this runner but are configured under their
+        # own cloud, keyed by the pool name without the `ssh-` context prefix.
+        config = tmp_path / 'config.yaml'
+        config.write_text('kubernetes:\n'
+                          '  max_inline_command_length: 8192\n'
+                          'ssh:\n'
+                          '  max_inline_command_length: 20480\n'
+                          '  context_configs:\n'
+                          '    mypool:\n'
+                          '      max_inline_command_length: 4096\n')
+        monkeypatch.setenv(skypilot_config.ENV_VAR_GLOBAL_CONFIG, str(config))
+        skypilot_config.reload_config()
+
+        def limit(context):
+            return command_runner.KubernetesCommandRunner(
+                (('ns', context), 'pod')).max_inline_command_length()
+
+        assert limit('ssh-mypool') == 4096
+        assert limit('ssh-other') == 20480
+        # A real Kubernetes context still reads the kubernetes block.
+        assert limit('gke-x') == 8192

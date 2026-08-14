@@ -699,6 +699,52 @@ def test_sdk_launch_no_resize_skips_version_guard(_stub_launch_preamble,
         sdk.launch(task, cluster_name='my-cluster', resize=False)
 
 
+@pytest.mark.parametrize('api_version', [None, 24, 56])
+def test_sdk_validate_slurm_host_path_errors_on_old_server(
+        api_version, monkeypatch):
+    """sdk.validate should error for host_path volumes if remote API
+    version < 57."""
+    import sky
+    from sky.client import sdk
+
+    monkeypatch.setattr('sky.client.sdk.versions.get_remote_api_version',
+                        lambda: api_version)
+    task = sky.Task(resources=sky.Resources(cloud=clouds.Slurm()),
+                    volumes={'/data': {
+                        'host_path': '/shared/data'
+                    }})
+    with sky.Dag() as dag:
+        dag.add(task)
+
+    with pytest.raises(exceptions.APINotSupportedError,
+                       match='Slurm host_path volumes'):
+        sdk.validate(dag)
+
+
+def test_sdk_validate_slurm_host_path_allowed_on_new_server(monkeypatch):
+    """sdk.validate should pass the guard for host_path volumes when remote
+    API version >= 57. We short-circuit the server request with a sentinel
+    so reaching it proves the guard didn't raise."""
+    import sky
+    from sky.client import sdk
+
+    monkeypatch.setattr('sky.client.sdk.versions.get_remote_api_version',
+                        lambda: 57)
+    sentinel = RuntimeError('reached server request')
+    monkeypatch.setattr(
+        'sky.client.sdk.server_common.make_authenticated_request',
+        mock.Mock(side_effect=sentinel))
+    task = sky.Task(resources=sky.Resources(cloud=clouds.Slurm()),
+                    volumes={'/data': {
+                        'host_path': '/shared/data'
+                    }})
+
+    with sky.Dag() as dag:
+        dag.add(task)
+    with pytest.raises(RuntimeError, match='reached server request'):
+        sdk.validate(dag)
+
+
 def test_launch_body_accepts_resize_field():
     """New server should accept resize=True in the request body."""
     from sky.server.requests import payloads

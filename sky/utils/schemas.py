@@ -1508,6 +1508,31 @@ _GPU_PARTITION_MAP_SCHEMA = {
     },
 }
 
+_CONTAINER_MOUNTS_SCHEMA = {
+    'type': 'object',
+    'required': [],
+    # Maps a container path to a host path string (read-only) or
+    # {host_path: ..., mode: ro|rw}.
+    'additionalProperties': {
+        'anyOf': [{
+            'type': 'string',
+        }, {
+            'type': 'object',
+            'required': ['host_path'],
+            'additionalProperties': False,
+            'properties': {
+                'host_path': {
+                    'type': 'string',
+                },
+                'mode': {
+                    'type': 'string',
+                    'enum': ['ro', 'rw'],
+                },
+            },
+        }],
+    },
+}
+
 _PRICING_SCHEMA = {
     'type': 'object',
     'required': [],
@@ -1541,6 +1566,16 @@ _CONTEXT_CONFIG_SCHEMA_MINIMAL = {
     },
     'provision_timeout': {
         'type': 'integer',
+    },
+    'max_inline_command_length': {
+        # Largest command, in bytes of request URL, that SkyPilot will inline
+        # into a `kubectl exec` instead of uploading as a file. Lower this if a
+        # proxy in front of the Kubernetes API rejects large requests; the only
+        # cost of a lower value is an extra file upload per job submission.
+        # Lives here rather than in the Kubernetes-only schema so SSH node
+        # pools, which run through the same runner, can set it too.
+        'type': 'integer',
+        'minimum': 1024,
     },
     'custom_metadata': {
         'type': 'object',
@@ -2099,6 +2134,7 @@ def get_config_schema():
                 'cpu_partition': {
                     'type': 'string',
                 },
+                'container_mounts': _CONTAINER_MOUNTS_SCHEMA,
                 'cluster_configs': {
                     'type': 'object',
                     'required': [],
@@ -2123,6 +2159,7 @@ def get_config_schema():
                             'cpu_partition': {
                                 'type': 'string',
                             },
+                            'container_mounts': _CONTAINER_MOUNTS_SCHEMA,
                             'partition_configs': {
                                 'type': 'object',
                                 'required': [],

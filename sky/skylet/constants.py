@@ -711,10 +711,16 @@ ENV_VAR_DB_CONNECTION_URI = (f'{SKYPILOT_ENV_VAR_PREFIX}DB_CONNECTION_URI')
 # case the state DB is reached directly via ENV_VAR_DB_CONNECTION_URI.
 #
 # ENV_VAR_DB_POOL_CONNECTION_URI: a full replacement connection URI for the
-# pooled engines (escape hatch, e.g. an entirely separate pooler endpoint).
+# pooled engines, used verbatim (escape hatch, e.g. an entirely separate
+# pooler endpoint or a TLS-terminating/remote pooler).
 # ENV_VAR_DB_POOL_HOSTPORT: a `host:port` that replaces just the host:port of
-# ENV_VAR_DB_CONNECTION_URI, preserving user/password/dbname/query — so no DB
-# credentials need re-plumbing when the pooler runs as a local sidecar.
+# ENV_VAR_DB_CONNECTION_URI, preserving user/password/dbname and non-ssl query
+# params — so no DB credentials need re-plumbing when the pooler runs as a
+# local loopback sidecar. Because such a sidecar (e.g. PgBouncer on
+# 127.0.0.1) typically does not terminate client TLS, the rewrite drops any
+# ssl* libpq query params from the direct URI and forces `sslmode=disable`
+# toward the pooler; a pooler that requires client TLS must be configured via
+# ENV_VAR_DB_POOL_CONNECTION_URI instead.
 ENV_VAR_DB_POOL_CONNECTION_URI = (
     f'{SKYPILOT_ENV_VAR_PREFIX}DB_POOL_CONNECTION_URI')
 ENV_VAR_DB_POOL_HOSTPORT = (f'{SKYPILOT_ENV_VAR_PREFIX}DB_POOL_HOSTPORT')

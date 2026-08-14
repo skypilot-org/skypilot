@@ -83,6 +83,7 @@ Below is the configuration syntax and some example values. See detailed explanat
       annotations:
         myannotation: myvalue
     :ref:`provision_timeout <config-yaml-kubernetes-provision-timeout>`: 10
+    :ref:`max_inline_command_length <config-yaml-kubernetes-max-inline-command-length>`: 32768
     :ref:`autoscaler <config-yaml-kubernetes-autoscaler>`: gke
     :ref:`pod_config <config-yaml-kubernetes-pod-config>`:
       metadata:
@@ -149,6 +150,8 @@ Below is the configuration syntax and some example values. See detailed explanat
     :ref:`gpu_partition_map <config-yaml-slurm-gpu-partition-map>`:
       H100: h100-partition
     :ref:`cpu_partition <config-yaml-slurm-cpu-partition>`: cpu-batch
+    :ref:`container_mounts <config-yaml-slurm-container-mounts>`:
+      /datasets: /shared/datasets
     :ref:`cluster_configs <config-yaml-slurm-cluster-configs>`:
       mycluster1:
         submit_as_user: true
@@ -1736,6 +1739,38 @@ Custom metadata for Kubernetes resources (optional).
 
 Custom labels and annotations to apply to all Kubernetes resources.
 
+.. _config-yaml-kubernetes-max-inline-command-length:
+
+``kubernetes.max_inline_command_length``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Largest command to inline into a ``kubectl exec``, in bytes of request URL
+(optional).
+
+``kubectl exec`` passes the command as query parameters, so a command SkyPilot
+inlines travels in the request URL. Proxies in front of the Kubernetes API
+(e.g. Cloudflare, nginx-ingress) cap request size well below the operating
+system's command line limit and reject anything larger, sometimes without a
+usable error. Above this many bytes SkyPilot writes the script to a file and
+uploads it instead.
+
+Lower this if your API server sits behind a proxy stricter than the default
+assumes; the only cost of a lower value is an extra file upload per job
+submission. The same key is available for SSH Node Pools under ``ssh``, keyed
+by pool name without the ``ssh-`` prefix.
+
+Default: ``32768`` (32 KB), about half of what Cloudflare-fronted endpoints and
+nginx-ingress accept by default, leaving room for the path, the remaining query
+parameters and the headers.
+
+.. code-block:: yaml
+
+    kubernetes:
+      max_inline_command_length: 16384
+      context_configs:
+        my-strict-proxy-context:
+          max_inline_command_length: 8192
+
 .. _config-yaml-kubernetes-provision-timeout:
 
 ``kubernetes.provision_timeout``
@@ -2361,6 +2396,37 @@ Example:
 using the ``config:`` block in a task YAML. Per-cluster values override
 global values.
 
+.. _config-yaml-slurm-container-mounts:
+
+``slurm.container_mounts``
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Host path bind mounts applied to every containerized (Pyxis/Enroot) Slurm job
+(optional).
+
+Each entry maps a container path to either a host path string, mounted
+read-only, or a mapping with ``host_path`` and an optional ``mode``
+(``ro``, the default, or ``rw``).
+
+Jobs without a container image ignore these mounts. If a task YAML
+:ref:`volume <yaml-spec-new-volumes>` binds the same container path, the task
+YAML entry wins.
+
+Example:
+
+.. code-block:: yaml
+
+  slurm:
+    container_mounts:
+      /datasets: /shared/datasets
+      /scratch:
+        host_path: /nvme/$SLURM_JOB_ID
+        mode: rw
+
+``container_mounts`` can also be set per-cluster using
+:ref:`cluster_configs <config-yaml-slurm-cluster-configs>`. Entries are merged
+per container path, with per-cluster values overriding global values.
+
 .. _config-yaml-slurm-cluster-configs:
 
 ``slurm.cluster_configs``
@@ -2397,6 +2463,11 @@ Supported fields:
 - ``cpu_partition``:
   :ref:`CPU partition <config-yaml-slurm-cpu-partition>` override at the
   cluster level. Per-cluster values override the global value.
+
+- ``container_mounts``:
+  :ref:`Container mounts <config-yaml-slurm-container-mounts>` overrides at
+  the cluster level. Entries are merged per container path, with per-cluster
+  values overriding global values.
 
 Example:
 
