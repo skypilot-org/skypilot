@@ -768,36 +768,82 @@ async def cleanup_unreferenced_file_mounts():
                          f'{common_utils.format_exception(e)}')
 
 
-async def cleanup_download_tmp():
-    """Delete expired download tmp directories.
+def _prune_clients_tmp(cutoff: float) -> int:
+    """Remove client tmp artifacts older than cutoff; returns count removed.
 
-    Downloaded logs are transient — synced from the cluster for the client
-    to download, then no longer needed.  Clean up anything older than the
-    blob GC grace period (1 hour by default).
+    Two kinds of transient state pile up under the per-user client dirs:
+
+    - Download staging dirs: logs synced from the cluster for the client to
+      download, then no longer needed. Only swept for backends that keep them
+      in a dedicated tree (``download_tmp_base_dir()``); the ones sharing the
+      persistent log dir need no separate cleanup.
+    - ``*_translated.yaml`` files: the translated client task used to be
+      persisted next to the client dir to ease debugging. Task YAMLs are
+      translated in memory now, so any file still on disk was left behind by
+      an older server version and can be reclaimed.
+    """
+    # Both sweeps walk clients/<user_hash>/, and for backends whose download
+    # staging tree *is* the clients dir the two roots coincide, so they are
+    # keyed by root to walk each tree only once. The tree can be on a shared
+    # filesystem with hundreds of user dirs, where a redundant walk is far
+    # from free.
+    # Value: (sweep expired dirs, sweep expired translated task YAMLs).
+    roots: Dict[str, Tuple[bool, bool]] = {}
+
+    def add_root(path: str, sweep_dirs: bool, sweep_yamls: bool) -> None:
+        root_dir = os.path.realpath(os.path.expanduser(path))
+        prev_dirs, prev_yamls = roots.get(root_dir, (False, False))
+        roots[root_dir] = (prev_dirs or sweep_dirs, prev_yamls or sweep_yamls)
+
+    add_root(str(common.API_SERVER_CLIENT_DIR), False, True)
+    download_tmp_base = bs.get_blob_storage().download_tmp_base_dir()
+    if download_tmp_base is not None:
+        add_root(download_tmp_base, True, False)
+
+    removed = 0
+    for root_dir, (sweep_dirs, sweep_yamls) in roots.items():
+        if not os.path.isdir(root_dir):
+            continue
+        for user_entry in os.scandir(root_dir):
+            if not user_entry.is_dir():
+                continue
+            for entry in os.scandir(user_entry.path):
+                try:
+                    if sweep_dirs and entry.is_dir(follow_symlinks=False):
+                        if entry.stat().st_mtime < cutoff:
+                            shutil.rmtree(entry.path, ignore_errors=True)
+                            removed += 1
+                    elif (sweep_yamls and
+                          entry.name.endswith('_translated.yaml') and
+                          entry.is_file(follow_symlinks=False) and
+                          entry.stat().st_mtime < cutoff):
+                        os.remove(entry.path)
+                        removed += 1
+                except OSError:
+                    pass
+    return removed
+
+
+async def cleanup_clients_tmp():
+    """Hourly GC of expired tmp artifacts under the API server clients dir.
+
+    Everything older than the blob GC grace period (1 hour by default) is
+    removed. The walk runs in a worker thread: the clients dir can be on a
+    shared filesystem where a full pass takes minutes, and this event loop
+    also serves the metrics server and the other background daemons.
     """
     while True:
         await asyncio.sleep(3600)
         try:
-            tmp_dir = bs.get_blob_storage().download_tmp_base_dir()
-            if tmp_dir is None:
-                # Backend shares the persistent log dir; no separate
-                # cleanup needed.
-                continue
-            if not os.path.exists(tmp_dir):
-                continue
             cutoff = time.time() - bs.GC_GRACE_SECONDS
-            for user_entry in os.scandir(tmp_dir):
-                if not user_entry.is_dir():
-                    continue
-                for entry in os.scandir(user_entry.path):
-                    if entry.is_dir():
-                        try:
-                            if entry.stat().st_mtime < cutoff:
-                                shutil.rmtree(entry.path, ignore_errors=True)
-                        except OSError:
-                            pass
+            removed = await anyio.to_thread.run_sync(_prune_clients_tmp,
+                                                     cutoff,
+                                                     abandon_on_cancel=True)
+            if removed:
+                logger.info(f'Cleaned up {removed} expired client tmp '
+                            'artifact(s)')
         except Exception as e:  # pylint: disable=broad-except
-            logger.error('Error in cleanup_download_tmp: '
+            logger.error('Error in cleanup_clients_tmp: '
                          f'{common_utils.format_exception(e)}')
 
 
@@ -4073,7 +4119,7 @@ if __name__ == '__main__':
         # be a singleton task.
         global_tasks.append(
             background.create_task(cleanup_unreferenced_file_mounts()))
-        global_tasks.append(background.create_task(cleanup_download_tmp()))
+        global_tasks.append(background.create_task(cleanup_clients_tmp()))
         global_tasks.append(background.create_task(cleanup_sky_logs()))
         threading.Thread(target=background.run_forever, daemon=True).start()
 

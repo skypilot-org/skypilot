@@ -1150,6 +1150,92 @@ def test_prune_sky_logs_missing_dir_is_noop(tmp_path, monkeypatch):
     assert server._prune_sky_logs(cutoff=1_000_000.0) == 0
 
 
+# --- Tests for _prune_clients_tmp (API server clients dir GC) ---
+
+
+def _set_clients_dir(monkeypatch, path: pathlib.Path) -> None:
+    monkeypatch.setattr(server.common, 'API_SERVER_CLIENT_DIR', path)
+
+
+def _set_download_tmp_base(monkeypatch, base) -> None:
+    storage = mock.Mock()
+    storage.download_tmp_base_dir.return_value = base
+    monkeypatch.setattr(server.bs, 'get_blob_storage', lambda: storage)
+
+
+def test_prune_clients_tmp_removes_expired_translated_yamls(
+        tmp_path, monkeypatch):
+    """Expired *_translated.yaml files go; other files and dirs stay."""
+    clients_dir = tmp_path / 'clients'
+    _set_clients_dir(monkeypatch, clients_dir)
+    # Backend shares the persistent log dir: nothing to sweep besides the
+    # leftover translated task YAMLs.
+    _set_download_tmp_base(monkeypatch, None)
+    now = 1_000_000.0
+    old = _touch_file(clients_dir / 'user1' / 'abc_translated.yaml',
+                      now - 10_000)
+    fresh = _touch_file(clients_dir / 'user1' / 'def_translated.yaml',
+                        now - 100)
+    other = _touch_file(clients_dir / 'user2' / 'config.yaml', now - 10_000)
+    logs_dir = _touch_dir(clients_dir / 'user2' / 'sky_logs', now - 10_000)
+
+    removed = server._prune_clients_tmp(cutoff=now - 5_000)
+
+    assert removed == 1
+    assert not old.exists()
+    assert fresh.exists()
+    assert other.exists()
+    assert logs_dir.exists()
+
+
+def test_prune_clients_tmp_sweeps_download_dirs(tmp_path, monkeypatch):
+    """A dedicated download tmp tree has its expired user entries removed."""
+    clients_dir = tmp_path / 'clients'
+    download_dir = tmp_path / 'downloads'
+    _set_clients_dir(monkeypatch, clients_dir)
+    _set_download_tmp_base(monkeypatch, str(download_dir))
+    now = 1_000_000.0
+    old = _touch_dir(download_dir / 'user1' / 'sky_logs', now - 10_000)
+    fresh = _touch_dir(download_dir / 'user1' / 'sky_logs_fresh', now - 100)
+    old_yaml = _touch_file(clients_dir / 'user1' / 'abc_translated.yaml',
+                           now - 10_000)
+
+    removed = server._prune_clients_tmp(cutoff=now - 5_000)
+
+    assert removed == 2
+    assert not old.exists()
+    assert fresh.exists()
+    assert not old_yaml.exists()
+
+
+def test_prune_clients_tmp_download_base_is_clients_dir(tmp_path, monkeypatch):
+    """Dirs and translated YAMLs are both swept when the two roots coincide."""
+    clients_dir = tmp_path / 'clients'
+    _set_clients_dir(monkeypatch, clients_dir)
+    _set_download_tmp_base(monkeypatch, str(clients_dir))
+    now = 1_000_000.0
+    old_dir = _touch_dir(clients_dir / 'user1' / 'sky_logs', now - 10_000)
+    fresh_dir = _touch_dir(clients_dir / 'user1' / 'file_mounts', now - 100)
+    old_yaml = _touch_file(clients_dir / 'user1' / 'abc_translated.yaml',
+                           now - 10_000)
+    fresh_yaml = _touch_file(clients_dir / 'user1' / 'def_translated.yaml',
+                             now - 100)
+
+    removed = server._prune_clients_tmp(cutoff=now - 5_000)
+
+    assert removed == 2
+    assert not old_dir.exists()
+    assert fresh_dir.exists()
+    assert not old_yaml.exists()
+    assert fresh_yaml.exists()
+
+
+def test_prune_clients_tmp_missing_dirs_is_noop(tmp_path, monkeypatch):
+    _set_clients_dir(monkeypatch, tmp_path / 'does-not-exist')
+    _set_download_tmp_base(monkeypatch, str(tmp_path / 'neither-does-this'))
+    assert server._prune_clients_tmp(cutoff=1_000_000.0) == 0
+
+
 class _FakeTask:
     """Minimal stand-in for a Request row (only the fields get_expanded uses)."""
 
