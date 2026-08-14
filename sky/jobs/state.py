@@ -3529,6 +3529,45 @@ async def set_failed_async(
     logger.info(failure_reason)
 
 
+async def set_cleanup_failed_async(job_id: int, cleanup_failure: str):
+    """Record a cleanup failure without changing the job's status.
+
+    Used when the job has already reached a legitimate terminal state
+    (SUCCEEDED / CANCELLED / FAILED / ...) and only the best-effort cleanup
+    afterwards failed. The terminal status is the outcome the user cares
+    about, so it is kept as-is; the cleanup failure (and its
+    resources-may-have-leaked warning) is surfaced through the job's
+    failure_reason and the event log instead of overwriting the status
+    with FAILED_CONTROLLER.
+    """
+    status = await get_status_async(job_id)
+    assert status is not None, job_id
+    await add_job_event_async(job_id, None, status,
+                              f'Cleanup failed: {cleanup_failure}')
+
+    async def _op(session):
+        # Get existing failure_reason with row lock to prevent race
+        # conditions.
+        result = await session.execute(
+            sqlalchemy.select(spot_table.c.failure_reason).where(
+                spot_table.c.spot_job_id == job_id).with_for_update())
+        existing_reason_row = result.fetchone()
+        new_reason = cleanup_failure
+        if existing_reason_row and existing_reason_row[0]:
+            # Keep the original failure first: it describes the job's
+            # actual outcome; the cleanup failure is secondary.
+            new_reason = (f'{existing_reason_row[0]}. In addition: '
+                          f'{cleanup_failure}')
+        await session.execute(
+            sqlalchemy.update(spot_table).where(
+                spot_table.c.spot_job_id == job_id).values(
+                    {spot_table.c.failure_reason: new_reason}))
+        await session.commit()
+
+    await _retry_session(_op)
+    logger.warning(cleanup_failure)
+
+
 async def update_links_async(job_id: int, task_id: int,
                              links: Dict[str, str]) -> None:
     """Update the links for a managed job task.
