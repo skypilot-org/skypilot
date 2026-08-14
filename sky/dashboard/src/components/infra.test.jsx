@@ -234,6 +234,52 @@ describe('InfrastructureSection unreachable Slurm cluster', () => {
   });
 });
 
+// A failed section-wide query (e.g. the SSH error of an unreachable Slurm
+// login node) arrives as `sectionError` and renders as a banner, so the page
+// says what went wrong instead of silently showing empty cells.
+describe('InfrastructureSection section-wide error banner', () => {
+  const sshError =
+    'ssh: connect to host 10.0.0.5 port 22: Connection timed out';
+
+  it('shows the failure text above the listed cluster rows', () => {
+    const { container } = renderSection({
+      isSlurm: true,
+      contexts: ['offline-cluster'],
+      gpus: [],
+      sectionError: sshError,
+    });
+    expect(container.textContent).toContain('Failed to query Slurm');
+    expect(container.textContent).toContain(sshError);
+    // The configured cluster still renders as a row under the banner.
+    expect(tableRows(container)).toHaveLength(1);
+    expect(normalize(tableRows(container)[0])).toContain('offline-cluster');
+  });
+
+  it('shows the banner instead of the "not configured" guess when empty', () => {
+    const { container } = renderSection({
+      isSlurm: true,
+      contexts: [],
+      gpus: [],
+      sectionError: sshError,
+    });
+    expect(container.textContent).toContain('Failed to query Slurm');
+    expect(container.textContent).toContain(sshError);
+    // The banner already explains why nothing is listed; guessing "not
+    // configured" next to it would contradict it.
+    expect(container.textContent).not.toContain('not configured');
+  });
+
+  it('renders no banner when there is no error', () => {
+    const { container } = renderSection({
+      isSlurm: true,
+      contexts: ['healthy-cluster'],
+      gpus: [],
+      sectionError: null,
+    });
+    expect(container.textContent).not.toContain('Failed to query');
+  });
+});
+
 // Mirrors slurm_catalog.list_accelerators_realtime, which feeds the
 // "Requestable: N / node" tooltip. If the backend rule changes, this is the
 // copy that has to move with it.

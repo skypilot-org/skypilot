@@ -488,9 +488,13 @@ export function InfrastructureSection({
             error={sectionError}
             title={`Failed to query ${title}`}
           />
-          <p className="text-sm text-gray-500">
-            No {title} found or {title} is not configured.
-          </p>
+          {/* The banner already explains why nothing is listed, so don't
+              guess "not configured" under it. */}
+          {!sectionError && (
+            <p className="text-sm text-gray-500">
+              No {title} found or {title} is not configured.
+            </p>
+          )}
         </div>
       </div>
     );
@@ -3101,6 +3105,9 @@ export function GPUs() {
     dashboardCache.invalidate(getCloudInfrastructure, [false]); // Keep for backwards compatibility
     dashboardCache.invalidate(getSSHNodePools);
     dashboardCache.invalidate(getSlurmInfrastructure);
+    // The fast row-render path reads the config-backed name list through the
+    // cache too; without this, Refresh keeps serving stale cluster names.
+    dashboardCache.invalidate(getSlurmClusterNames);
 
     // Increment GPU metrics refresh trigger to force iframe reload
     setGpuMetricsRefreshTrigger((prev) => prev + 1);
