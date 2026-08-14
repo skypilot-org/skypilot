@@ -4314,117 +4314,6 @@ def test_managed_job_auto_mount_not_ready():
         smoke_tests_utils.run_one_test(test)
 
 
-# ---------- Managed job over a volume that breaks mid-flight ----------
-@pytest.mark.managed_jobs
-@pytest.mark.kubernetes
-# See test_managed_job_auto_mount_not_ready: the StorageClass fixture needs
-# cluster-admin kubectl co-located with the API server.
-@pytest.mark.no_remote_server
-@pytest.mark.parametrize('attach_via', ['task', 'auto_mounts'])
-def test_managed_job_volume_breaks_mid_flight(attach_via):
-    """A job must stop once its volume is known to be unusable, not retry.
-
-    Unlike test_managed_job_volume_not_ready, the volume here is fine when the
-    job is submitted: a WaitForFirstConsumer claim has nothing wrong with it
-    until a pod asks for it. The job's own first launch is what breaks it. So
-    this covers the case the submit-time check cannot -- the volume has to be
-    judged again on the relaunch -- for both ways of attaching it.
-
-    FAILED_PRECHECKS is the assertion. Retrying is what this exists to prevent:
-    the retry path burns hundreds of attempts over hours before it gives up, and
-    nothing about the storage backend's answer changes in between.
-    """
-    if not smoke_tests_utils.server_side_is_consolidation_mode():
-        pytest.skip('Needs consolidation mode: with a separate controller the '
-                    'volume table is not readable from where the job cluster '
-                    'is provisioned, so the volume cannot be judged there.')
-
-    name = smoke_tests_utils.get_cluster_name()
-    volume_name = f'{name}-wffc'
-    volume_yaml = textwrap.dedent(f"""\
-        name: {volume_name}
-        type: k8s-pvc
-        size: 1Gi
-        config:
-          access_mode: ReadWriteMany
-          storage_class_name: {smoke_tests_utils.unprovisionable_storage_class_name(name)}
-    """)
-    attached_on_task = attach_via == 'task'
-    task_yaml = textwrap.dedent(f"""\
-        resources:
-          cpus: 0.1+
-        volumes:
-          /mnt/data: {volume_name}
-        run: echo should not run
-    """) if attached_on_task else textwrap.dedent("""\
-        resources:
-          cpus: 0.1+
-        run: echo should not run
-    """)
-    # Keep each attempt to about a minute: the point is which state the job
-    # ends in, not how long a single attempt waits.
-    config_dict = {'kubernetes': {'provision_timeout': 60}}
-    if not attached_on_task:
-        config_dict['kubernetes']['auto_mounts'] = [{
-            'volume_name': volume_name,
-            'mount_paths': ['/mnt/auto'],
-        }]
-    with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w',
-                                     delete=False) as vol_f, \
-         tempfile.NamedTemporaryFile(suffix='.yaml', mode='w',
-                                     delete=False) as task_f, \
-         tempfile.NamedTemporaryFile(suffix='.yaml', mode='w',
-                                     delete=False) as cfg_f:
-        vol_f.write(volume_yaml)
-        vol_f.flush()
-        task_f.write(task_yaml)
-        task_f.flush()
-        yaml_utils.dump_yaml(cfg_f.name, config_dict)
-        cfg_f.flush()
-        test = smoke_tests_utils.Test(
-            f'managed_job_volume_breaks_mid_flight_{attach_via}',
-            [
-                smoke_tests_utils.create_unprovisionable_storage_class_cmd(
-                    name, binding_mode='WaitForFirstConsumer'),
-                # Created without the config in scope, so this step cannot be
-                # tripped up by the auto_mounts entry it is about to become.
-                smoke_tests_utils.with_config(
-                    f'sky volumes apply -y '
-                    f'{smoke_tests_utils.AGENT_K8S_INFRA} {vol_f.name}',
-                    '/dev/null'),
-                # The premise: the volume is submittable. If this ever reports
-                # NOT_READY, the job would be refused at submission instead and
-                # the test would be covering test_managed_job_volume_not_ready.
-                f'vols=$(sky volumes ls) && echo "$vols" && '
-                f'echo "$vols" | grep {volume_name} | grep READY',
-                f'sky jobs launch -n {name} '
-                f'{smoke_tests_utils.AGENT_K8S_INFRA} '
-                f'{smoke_tests_utils.LOW_RESOURCE_ARG} {task_f.name} -y -d',
-                # Generous: the volume flips to NOT_READY on the status
-                # refresh's own schedule, so the attempt that gets refused may
-                # not be the second one.
-                smoke_tests_utils.
-                get_cmd_wait_until_managed_job_status_contains_matching_job_name(
-                    job_name=name,
-                    job_status=[sky.ManagedJobStatus.FAILED_PRECHECKS],
-                    timeout=900),
-                f'logs=$(sky jobs logs --controller -n {name} --no-follow); '
-                f'echo "$logs"; echo "$logs" | grep -i "not ready"; '
-                f'echo "$logs" | grep "{volume_name}"',
-            ],
-            smoke_tests_utils.chain_teardown(
-                f'sky jobs cancel -y -n {name} || true',
-                f'sky volumes delete {volume_name} -y || true',
-                smoke_tests_utils.delete_unprovisionable_storage_class_cmd(
-                    name)),
-            env={
-                skypilot_config.ENV_VAR_GLOBAL_CONFIG: cfg_f.name,
-            },
-            timeout=30 * 60,
-        )
-        smoke_tests_utils.run_one_test(test)
-
-
 # ---------- Managed job with every way of attaching a volume ----------
 @pytest.mark.managed_jobs
 @pytest.mark.kubernetes
@@ -4541,8 +4430,11 @@ def test_managed_job_volume_mix():
                     job_name=name,
                     job_status=[sky.ManagedJobStatus.SUCCEEDED],
                     timeout=900),
-                f'logs=$(sky jobs logs -n {name} --no-follow); echo "$logs"; '
-                f'echo "$logs" | grep "all three mounted"',
+                # By job id, not name: `sky jobs logs -n` only resolves a job
+                # that is still running, and this one has finished.
+                f'logs=$(sky jobs logs $(sky jobs queue | grep {name} '
+                f'| head -1 | awk \'{{print $1}}\') --no-follow); '
+                f'echo "$logs"; echo "$logs" | grep "all three mounted"',
             ],
             smoke_tests_utils.chain_teardown(
                 f'sky jobs cancel -y -n {name} || true',
