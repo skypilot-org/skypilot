@@ -1873,13 +1873,6 @@ def test_hostpath_volume_on_kubernetes():
 
 # ---------- Auto-mount refuses a volume that is not ready ----------
 @pytest.mark.kubernetes
-# The unprovisionable-StorageClass fixture needs the agent's kubectl to have
-# cluster-admin on the same cluster the API server schedules onto. A remote
-# server's agent is a plain client with no kubeconfig, and routing the fixture
-# through the cloud-cmd helper does not work either: the helper pod's kubectl
-# runs as skypilot-service-account, whose ClusterRole has no storage.k8s.io
-# verbs, so a cluster-scoped StorageClass write is Forbidden.
-@pytest.mark.no_remote_server
 def test_auto_mount_not_ready_on_kubernetes():
     """A volume whose storage cannot be provisioned must stop the launch.
 
@@ -1988,9 +1981,6 @@ def test_auto_mount_not_ready_on_kubernetes():
 
 # ---------- A volume declared on the task must be ready ----------
 @pytest.mark.kubernetes
-# See test_auto_mount_not_ready_on_kubernetes: the StorageClass fixture
-# needs cluster-admin kubectl co-located with the API server.
-@pytest.mark.no_remote_server
 def test_volume_not_ready_on_kubernetes():
     """The reference behaviour the auto-mount check is modelled on.
 
