@@ -770,12 +770,12 @@ async def cleanup_unreferenced_file_mounts():
 
 
 def _scandir_or_skip(dir_path: str) -> Iterator[os.DirEntry]:
-    """Yield dir entries; yields nothing if the dir is gone or unreadable."""
+    """Yield dir entries; yields nothing if dir_path is not a readable dir."""
     try:
         with os.scandir(dir_path) as entries:
             yield from entries
-    except OSError:
-        return
+    except OSError as e:
+        logger.debug(f'Skipping {dir_path}: {e}')
 
 
 def _prune_expired_files(dir_path: str, suffix: str, cutoff: float) -> int:
@@ -817,11 +817,11 @@ def _prune_clients_tmp(cutoff: float) -> int:
 
     removed = 0
     for root_dir, (sweep_dirs, sweep_yamls) in roots.items():
-        # Skip rather than raise: a dir can vanish under us (peer replicas
-        # sweep the same tree), and one bad dir must not abort the pass.
+        # Every filesystem touch below is guarded: a dir can vanish under us
+        # (peer replicas sweep the same tree) or go stale on a shared FS, and
+        # one bad entry must not abort the pass. Non-dir entries need no
+        # is_dir() check — scandir rejects them and _scandir_or_skip absorbs it.
         for user_entry in _scandir_or_skip(root_dir):
-            if not user_entry.is_dir():
-                continue
             for entry in _scandir_or_skip(user_entry.path):
                 try:
                     if entry.is_dir(follow_symlinks=False):

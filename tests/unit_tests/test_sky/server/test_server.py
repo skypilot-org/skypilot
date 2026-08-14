@@ -1178,6 +1178,8 @@ def test_prune_clients_tmp_removes_expired_translated_yamls(
                         now - 100)
     other = _touch_file(clients_dir / 'user2' / 'config.yaml', now - 10_000)
     logs_dir = _touch_dir(clients_dir / 'user2' / 'sky_logs', now - 10_000)
+    # A stray file where a user dir is expected must be left alone.
+    stray = _touch_file(clients_dir / 'stray_translated.yaml', now - 10_000)
 
     removed = server._prune_clients_tmp(cutoff=now - 5_000)
 
@@ -1186,6 +1188,7 @@ def test_prune_clients_tmp_removes_expired_translated_yamls(
     assert fresh.exists()
     assert other.exists()
     assert logs_dir.exists()
+    assert stray.exists()
 
 
 def test_prune_clients_tmp_removes_expired_legacy_task_yamls(
