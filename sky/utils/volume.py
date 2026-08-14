@@ -109,6 +109,21 @@ def is_read_write_many_pvc(volume_config: models.VolumeConfig) -> bool:
             == VolumeAccessMode.READ_WRITE_MANY.value)
 
 
+def mount_is_read_write_many_pvc(volume_mount: 'VolumeMount') -> bool:
+    """`is_read_write_many_pvc` for a volume declared on a task.
+
+    An ephemeral volume's type is only resolved when it is provisioned
+    (`sky.provision.volume._resolve_volume_type`), which happens after the
+    provision timeout has been computed. On Kubernetes it can only resolve to
+    a PVC (`EPHEMERAL_VOLUME_TYPES`), so an unset type is read as one.
+    """
+    volume_config = volume_mount.volume_config
+    if volume_mount.is_ephemeral and not volume_config.type:
+        return (volume_config.config.get('access_mode') ==
+                VolumeAccessMode.READ_WRITE_MANY.value)
+    return is_read_write_many_pvc(volume_config)
+
+
 @dataclass
 class AutoMount:
     """An `auto_mounts` config entry that a launch will mount."""

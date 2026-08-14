@@ -38,6 +38,15 @@ def _task_volume(**kwargs):
                                   volume_config=_volume_config(**kwargs))
 
 
+def _ephemeral_volume(**kwargs):
+    """A volume declared inline on the task, as the task parser leaves it."""
+    return volume_lib.VolumeMount.resolve_ephemeral_config(
+        '/mnt/vol', {
+            'size': '10',
+            **kwargs
+        })
+
+
 def _auto_mount(**kwargs):
     return volume_lib.AutoMount(volume_name='vol',
                                 record={'handle': _volume_config(**kwargs)},
@@ -76,6 +85,30 @@ class TestProvisionTimeoutWithAutoMounts:
         whether it is declared on the task or mounted from the config."""
         assert (_timeout(volume_mounts=[_task_volume()]) == _timeout(
             auto_mounts=[_auto_mount()]))
+
+    def test_an_ephemeral_read_write_many_volume_extends_the_timeout(self):
+        """Its type is only resolved when it is provisioned, which is after
+        this runs; on Kubernetes an unset type can only mean a PVC."""
+        assert _timeout(volume_mounts=[
+            _ephemeral_volume(config={'access_mode': 'ReadWriteMany'})
+        ]) == _RWX_TIMEOUT
+
+    def test_an_ephemeral_volume_with_an_explicit_type_agrees(self):
+        assert _timeout(volume_mounts=[
+            _ephemeral_volume(type='k8s-pvc',
+                              config={'access_mode': 'ReadWriteMany'})
+        ]) == _RWX_TIMEOUT
+
+    def test_an_ephemeral_single_writer_volume_leaves_the_timeout_alone(self):
+        """The default access mode, resolved during provisioning."""
+        assert _timeout(volume_mounts=[_ephemeral_volume()]) == _BASE_TIMEOUT
+
+    def test_only_an_ephemeral_volume_may_leave_its_type_unset(self):
+        """A persistent volume's type comes from the volume DB, so an unset
+        one is not a PVC waiting to be resolved."""
+        mount = _task_volume()
+        mount.volume_config.type = ''
+        assert _timeout(volume_mounts=[mount]) == _BASE_TIMEOUT
 
     def test_no_volumes_leaves_the_timeout_alone(self):
         assert _timeout() == _BASE_TIMEOUT

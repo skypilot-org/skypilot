@@ -698,16 +698,12 @@ class Kubernetes(clouds.Cloud):
             per_node_timeout = 10
             max_timeout = 2400
         else:
-            volume_configs = [
-                volume_mount.volume_config
-                for volume_mount in (volume_mounts or [])
-            ]
-            volume_configs += [
-                auto_mount.volume_config for auto_mount in (auto_mounts or [])
-            ]
-            if any(
-                    volume_lib.is_read_write_many_pvc(volume_config)
-                    for volume_config in volume_configs):
+            slow_volume = any(
+                volume_lib.mount_is_read_write_many_pvc(volume_mount)
+                for volume_mount in (volume_mounts or [])) or any(
+                    volume_lib.is_read_write_many_pvc(auto_mount.volume_config)
+                    for auto_mount in (auto_mounts or []))
+            if slow_volume:
                 # Creating the network filesystem behind a READ_WRITE_MANY PV
                 # takes minutes: a 1 TiB GKE Filestore instance on the
                 # enterprise tier measured ~7 minutes end to end. The previous
