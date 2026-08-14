@@ -1695,6 +1695,45 @@ def delete_unprovisionable_storage_class_cmd(test_name: str) -> str:
     return f'kubectl delete sc {sc_name} --ignore-not-found'
 
 
+# A ReadWriteMany StorageClass cannot be fabricated the way the unprovisionable
+# one above can: RWX needs a real backend behind it. The Buildkite kind lane
+# installs a non-default 'nfs-rwx' class (provisioner nfs.csi.k8s.io); a cloud
+# lane has Filestore or EFS under whatever name the cluster gave it, so point
+# this at that name.
+RWX_STORAGE_CLASS_ENV_VAR = 'PYTEST_SKYPILOT_RWX_STORAGE_CLASS'
+_DEFAULT_RWX_STORAGE_CLASS = 'nfs-rwx'
+
+
+def storage_class_exists(name: str) -> bool:
+    return subprocess.run(['kubectl', 'get', 'sc', name],
+                          capture_output=True,
+                          check=False).returncode == 0
+
+
+def rwx_storage_class_name() -> Optional[str]:
+    """The ReadWriteMany StorageClass to test against, if the cluster has one.
+
+    Returns None when it does not, for the caller to fall back to a volume type
+    that needs no storage backend. Falling back rather than skipping keeps the
+    rest of the test -- everything that is not specific to RWX -- running on
+    every lane.
+
+    Raises:
+        AssertionError: if RWX_STORAGE_CLASS_ENV_VAR names a class the cluster
+            does not have. An explicit request that cannot be honoured is an
+            error, not a reason to quietly test something else.
+    """
+    explicit = os.environ.get(RWX_STORAGE_CLASS_ENV_VAR)
+    if explicit is not None:
+        assert storage_class_exists(explicit), (
+            f'{RWX_STORAGE_CLASS_ENV_VAR}={explicit!r} is not a StorageClass '
+            f'on the cluster kubectl points at.')
+        return explicit
+    if storage_class_exists(_DEFAULT_RWX_STORAGE_CLASS):
+        return _DEFAULT_RWX_STORAGE_CLASS
+    return None
+
+
 # Pins a command to the cluster the agent's kubectl points at, so a volume and
 # the storage class created for it land together.
 AGENT_K8S_INFRA = '--infra k8s/$(kubectl config current-context)'
