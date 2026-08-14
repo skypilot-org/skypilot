@@ -23,27 +23,13 @@ logger = sky_logging.init_logger(__name__)
 _LOCK_PROBE_INTERVAL_SECONDS = 5
 _ACQUIRE_RETRY_INTERVAL_SECONDS = 5
 
-# Step-down controller drain. On losing the lock this replica must stop its own
-# job controllers, and stepping down in place (rather than exiting) means there
-# is no container teardown afterwards to reap whatever survives a SIGTERM — so
-# we wait for them to actually exit and escalate to SIGKILL.
-#
-# How this races the new leader's recovery sweep, precisely, because the two
-# clocks do NOT start together: the new leader's
-# _RECOVERY_WAIT_AFTER_ACQUIRE_SECONDS (15s) starts when it ACQUIRES the lock,
-# which it can do the moment our session dies server-side. Our drain starts only
-# once we NOTICE, which on the steady-state path is up to
-# _LOCK_PROBE_INTERVAL_SECONDS (5s) later, and on the exception path (a raise
-# out of _become_leader_and_run) can be arbitrarily later. So the budget below
-# buys margin on the steady-state path only:
-#
-#     5s detection + (3s SIGTERM + 3s SIGKILL) drain = 11s  <  15s recovery wait
-#
-# It does not make the exception path safe, and it is not the thing the
-# correctness of the step-down rests on. What that rests on is the drain either
-# confirming the controllers are gone or admitting it could not — see
-# _step_down_on_lock_loss, which falls back to exiting the process in the second
-# case rather than assuming the wait covered us.
+# Step-down controller drain. Stepping down in place leaves no container
+# teardown to reap controllers that ignore SIGTERM, so wait for them to exit and
+# escalate to SIGKILL. The budget (5s to detect + 3s + 3s) fits inside the new
+# leader's 15s recovery wait on the steady-state path only: the two clocks start
+# at different times, and the exception path can notice arbitrarily late. What
+# correctness rests on is the drain confirming or admitting failure, not on that
+# margin — see _step_down_on_lock_loss.
 _STEP_DOWN_SIGTERM_GRACE_SECONDS = 3
 _STEP_DOWN_SIGKILL_GRACE_SECONDS = 3
 _STEP_DOWN_DRAIN_POLL_SECONDS = 0.2
@@ -63,9 +49,8 @@ _STEP_DOWN_DRAIN_POLL_SECONDS = 0.2
 # is marked FAILED_CONTROLLER in the meantime.
 _RECOVERY_WAIT_AFTER_ACQUIRE_SECONDS = 15
 
-# Pin the margin the step-down comment above reasons about, so retuning any one
-# of these three constants cannot silently delete it. The drain tests
-# monkeypatch the budgets to 0, so they would not catch it either.
+# Pin the margin above: retuning any one constant must not silently delete it
+# (the drain tests zero the budgets, so they would not catch it).
 assert (_LOCK_PROBE_INTERVAL_SECONDS + _STEP_DOWN_SIGTERM_GRACE_SECONDS +
         _STEP_DOWN_SIGKILL_GRACE_SECONDS < _RECOVERY_WAIT_AFTER_ACQUIRE_SECONDS
        ), ('a step-down must be able to detect the loss and drain before the '
@@ -90,25 +75,19 @@ class ManagedJobRefreshDaemonThread(threading.Thread):
 
         while True:
             try:
-                # Returns only after a step-down; the value says whether it is
-                # safe to contend for leadership again. Looping on True is safe
-                # because the step-down confirmed our own controllers are gone
-                # and replaced the lock object — so the next pass really does
-                # acquire() before it leads, instead of running recovery on a
-                # stale local `_acquired` flag. False means the step-down
-                # already asked this process to exit (it logs why), so stop the
-                # thread and let the shutdown proceed.
+                # Returns only after a step-down. True: it confirmed our
+                # controllers are gone and replaced the lock object, so the next
+                # pass really does acquire() before leading. False: it already
+                # asked this process to exit, and logged why.
                 if not self._become_leader_and_run():
                     return
             except Exception:  # pylint: disable=broad-except
                 logger.exception(
                     'managed-job refresh error; '
                     f'retrying in {_ACQUIRE_RETRY_INTERVAL_SECONDS}s')
-                # If we previously held the lock and lost the session
-                # mid-recovery, retrying would run as a stale leader
-                # (local `_acquired` flag still True, server-side lock
-                # released, another replica can grab it). Step down first,
-                # same as the steady-state probe path.
+                # A stale leader (local `_acquired` still True, lock released
+                # server-side) must not retry as leader; step down first, same
+                # as the steady-state probe path.
                 if self._lock.is_locked() and not self._lock_still_held():
                     if not self._step_down_on_lock_loss():
                         return
@@ -123,22 +102,14 @@ class ManagedJobRefreshDaemonThread(threading.Thread):
         """
         assert self._lock is not None
 
-        # Touch the signal file BEFORE acquiring the lock: it holds off the
-        # FAILED_CONTROLLER sweep (update_managed_jobs_statuses in
-        # sky/jobs/utils.py, and job_lib), and that has to be in place for the
-        # whole time we are contending, not just once we win. During a rolling
-        # update we block on acquire() while the old API server still holds the
-        # lock; jobs whose controllers are moving between replicas must not be
-        # marked FAILED_CONTROLLER for it in that window. See step 1 of
-        # _step_down_on_lock_loss for what the file does and does not gate.
-        # NOTE: the acquire is deliberately NOT inside the try/finally that
-        # wraps recovery below. The finally unlinks the signal file, but the
-        # lock-loss step-down path (_step_down_on_lock_loss) re-touches it to
-        # hold off the sweep for as long as we are not the leader — so that
-        # path must not be followed by an unlink. Scoping the finally to
-        # recovery only keeps those two concerns from fighting. It also means a
-        # raise from acquire() leaves the file in place while run() retries,
-        # which is what we want.
+        # Touch BEFORE acquiring: the file holds off the FAILED_CONTROLLER sweep
+        # and has to cover the whole time we contend, since acquire() can block
+        # for a long time during a rolling update. See step 1 of
+        # _step_down_on_lock_loss for what it does and does not gate.
+        # NOTE: acquire stays outside the try/finally below on purpose — the
+        # finally unlinks this file while the step-down re-touches it, so
+        # scoping the finally to recovery keeps the two from fighting, and a
+        # raise from acquire() leaves the file in place while run() retries.
         signal_file = pathlib.Path(
             constants.PERSISTENT_RUN_RESTARTING_SIGNAL_FILE).expanduser()
         signal_file.touch()
@@ -148,24 +119,18 @@ class ManagedJobRefreshDaemonThread(threading.Thread):
             self._lock.acquire()
             logger.info('Consolidation mode lock acquired')
 
-        # Wait before recovery so a prior leader (e.g. the old pod during a
-        # rolling update) is fully gone first; see the comment on
-        # _RECOVERY_WAIT_AFTER_ACQUIRE_SECONDS. The signal file touched above
-        # stays in place, holding off the FAILED_CONTROLLER sweep until recovery
-        # completes.
+        # Let a prior leader finish shutting down first; see
+        # _RECOVERY_WAIT_AFTER_ACQUIRE_SECONDS. The signal file stays in place.
         logger.info(
             f'Waiting {_RECOVERY_WAIT_AFTER_ACQUIRE_SECONDS}s after acquiring '
             'the consolidation mode lock before running recovery, to let any '
             'previous leader finish shutting down')
         time.sleep(_RECOVERY_WAIT_AFTER_ACQUIRE_SECONDS)
 
-        # The wait above widens the window between acquiring the lock and
-        # running recovery, during which the lock's underlying session could go
-        # silently stale (PostgresLock only). Re-verify we still hold the lock
-        # before recovery; otherwise another replica may have taken it and
-        # could be recovering concurrently, so step down rather than run a
-        # second recovery loop. _step_down_on_lock_loss re-touches the signal
-        # file, so leave the file in place here.
+        # The wait widens the window in which the session can go silently stale
+        # (PostgresLock only), so re-verify before recovery: another replica may
+        # hold the lock and be recovering by now. Leave the signal file in place
+        # — the step-down re-touches it.
         if not self._lock_still_held():
             return self._step_down_on_lock_loss()
 
@@ -210,12 +175,10 @@ class ManagedJobRefreshDaemonThread(threading.Thread):
         deadline = time.monotonic() + timeout
         remaining = list(records)
         while True:
-            # Poll only the survivors. The alive set can only shrink —
-            # controller_process_alive matches on (pid, started_at), so a record
-            # that is gone cannot come back under a recycled pid — and *records*
-            # is every pid this replica ever recorded, not the live pool: the
-            # pid file is append-only and nothing truncates it in consolidation
-            # mode.
+            # Poll only the survivors: the alive set can only shrink (liveness
+            # matches on (pid, started_at)), and *records* is every pid this
+            # replica ever recorded — the pid file is append-only in
+            # consolidation mode, not the live pool.
             remaining = [
                 r for r in remaining
                 if managed_job_utils.controller_process_alive(r)
@@ -231,49 +194,30 @@ class ManagedJobRefreshDaemonThread(threading.Thread):
     def _drain_local_controllers(self) -> bool:
         """Stop this replica's job controllers and confirm they are gone.
 
-        This is the anti-split-brain mechanism of a step-down, and now that the
-        process no longer exits it is the *only* one. The new leader's recovery
-        sweep decides a job needs re-adopting by checking whether its recorded
-        controller pid is alive, and that check is a local ``psutil`` lookup
-        (``controller_process_alive``) — so it can never see another replica's
-        controllers and always concludes they are dead. If one of ours outlives
-        our leadership, that job ends up with two controllers.
+        The anti-split-brain mechanism of a step-down, and now that the process
+        no longer exits, the only one: the new leader decides a job needs
+        re-adopting from a *local* psutil check (``controller_process_alive``),
+        so it never sees another replica's controllers and always concludes they
+        are dead — a survivor of ours means two controllers on one job.
 
-        TODO(aylei): this is a local compensation for a fact that is missing
-        from the shared state, and it is the second one —
-        maybe_start_controllers already refuses to start controllers off the
-        request path for the same reason. The deeper fix is to make controller
-        ownership DB-visible (e.g.
-        record the owning replica alongside job_info's controller_pid, so
-        controller_process_alive can answer "not mine" instead of "dead"), which
-        would also let the fallback below go away. Out of scope here: schema
-        change plus every controller_process_alive call site.
+        Signalling alone is therefore not enough, because stepping down in place
+        removes the container teardown that used to reap controllers ignoring
+        SIGTERM (they are detached subprocesses): SIGTERM, wait, escalate to
+        SIGKILL, report. Assumes the recorded pid is the controller rather than
+        its shell wrapper — bash execs the final simple command of a ``-c``
+        script, and ``scheduler.py``'s ``run_cmd`` carries the matching note
+        since that is where the assumption can be broken.
 
-        Signalling is therefore not enough. Previously the process SIGTERMed
-        itself here and the container teardown that followed reaped anything
-        that ignored the signal (controllers are detached subprocesses, so the
-        parent exiting does not kill them); stepping down in place removes that
-        backstop. So: SIGTERM, wait for exit, escalate to SIGKILL, and report
-        whether they are actually gone.
-
-        Load-bearing assumption, recorded because it is easy to break from far
-        away: the recorded pid must be the controller itself, not a shell
-        wrapper. ``launch_new_process_tree`` runs ``nohup bash -c '<export>;
-        <activate>; python -m sky.jobs.controller'`` and records ``$!``, i.e.
-        the bash pid — but bash execs the final simple command of a ``-c``
-        script, so that pid becomes the controller. Verified live: a
-        cmdline-based process count over the leader's pod showed exactly one
-        process per controller (a surviving wrapper would have doubled it) and
-        dropped to zero after this drain. ``scheduler.py``'s ``run_cmd`` carries
-        a matching note, since that is where the assumption can be broken.
+        TODO(aylei): make controller ownership DB-visible (the owning replica
+        alongside job_info's controller_pid, so liveness can answer "not mine"
+        instead of "dead") and this drain's fallback can go away.
 
         Returns True iff no controller recorded for this replica is still alive.
         """
         records = managed_job_scheduler.get_controller_process_records()
         if records is None:
-            # The pid file could not be read, so we can neither enumerate our
-            # controllers nor confirm their death. Report failure rather than
-            # assume there were none.
+            # Unreadable pid file: we can neither enumerate our controllers nor
+            # confirm their death, so report failure rather than assume none.
             logger.error(
                 'Cannot read the controller pid file, so this replica cannot '
                 'confirm its job controllers are gone')
@@ -294,33 +238,26 @@ class ManagedJobRefreshDaemonThread(threading.Thread):
     def _step_down_on_lock_loss(self) -> bool:
         """Give up leadership without killing the API server process.
 
-        The API server keeps serving; only the leader role is handed over. This
-        replica holds off the FAILED_CONTROLLER sweep, stops the controllers it
-        owns, drops its lock object, and returns to contending as a follower.
+        The server keeps serving; only the leader role moves. Holds off the
+        FAILED_CONTROLLER sweep, stops the controllers this replica owns, drops
+        the lock object, and returns to contending as a follower.
 
-        Returns True iff it is safe to contend for leadership again — i.e. we
-        proved our own controllers are gone. If we could not, this exits the
-        process (see below) and returns False so the caller stops the thread.
+        Returns True iff it is safe to lead again, i.e. we proved our
+        controllers are gone; otherwise it exits the process and returns False.
         """
         assert self._lock is not None
         logger.error(f'Lost consolidation mode lock {self._lock}; stepping '
                      'down to follower')
 
-        # 1. Re-touch the recovery signal file, kept for what it actually does
-        #    rather than what the surrounding comments have long claimed. It is
-        #    consulted by update_managed_jobs_statuses (sky/jobs/utils.py) and
-        #    job_lib, NOT by scheduler.maybe_start_controllers — so it does not
-        #    itself gate controller starts. What keeps a non-leader from
-        #    starting controllers in consolidation mode is
-        #    maybe_start_controllers' unconditional early return on the request
-        #    path; the leader's recovery is the only starter. The file's job
-        #    here is to hold off the FAILED_CONTROLLER sweep across the
-        #    handoff, so jobs whose controllers we are about to stop are not
-        #    marked failed for it.
-        #    Note it can be fleet-wide, not replica-local: the HA chart has a
-        #    configuration that mounts the shared state volume at ~/.sky, and
-        #    this path lives directly under it. The next leader's recovery
-        #    unlinks it (in a finally), which bounds the window.
+        # 1. Re-touch the recovery signal file: it holds off the
+        #    FAILED_CONTROLLER sweep (update_managed_jobs_statuses in
+        #    sky/jobs/utils.py, and job_lib) so the jobs whose controllers we
+        #    are about to stop are not marked failed across the handoff. It does
+        #    NOT gate controller starts — maybe_start_controllers never reads
+        #    it; what stops a non-leader is its own unconditional early return.
+        #    The effect can be fleet-wide rather than replica-local, since one
+        #    HA chart configuration mounts the shared state volume at ~/.sky;
+        #    the next leader's recovery unlinks it, which bounds the window.
         try:
             signal_file = pathlib.Path(
                 constants.PERSISTENT_RUN_RESTARTING_SIGNAL_FILE).expanduser()
@@ -329,27 +266,22 @@ class ManagedJobRefreshDaemonThread(threading.Thread):
         except OSError:
             logger.warning('Failed to touch recovery signal file on lock-loss')
 
-        # 2. Stop the controllers we own and confirm it. The lock is already
-        #    released server-side, so a new leader can be recovering within
-        #    milliseconds.
+        # 2. Stop the controllers we own and confirm it — the lock is already
+        #    released server-side, so a new leader can be recovering by now.
         try:
             drained = self._drain_local_controllers()
         except Exception:  # pylint: disable=broad-except
             logger.exception('Failed to drain local controllers on lock-loss')
             drained = False
 
-        # 3. Replace the lock object. A release() whose connection is already
-        #    dead leaves `_acquired` True — it is only cleared after a
-        #    successful unlock — and is_locked() reads exactly that flag, so
-        #    reusing this object would make the next _become_leader_and_run
-        #    skip acquire() and run recovery believing it leads. Release
-        #    best-effort first so the pooled connection is returned or
-        #    invalidated rather than leaked, then start from a clean object.
-        #    Same discipline as AdvisoryLockElector.release() + try_acquire() in
-        #    sky/utils/leader_election.py; this loop cannot use
-        #    that elector yet because its try_acquire is non-blocking and the
-        #    blocking acquire() above is load-bearing for the rolling-update
-        #    handoff. Keep the two in sync until they are merged.
+        # 3. Replace the lock object: a release() on a dead connection leaves
+        #    `_acquired` True (only cleared after a successful unlock) and
+        #    is_locked() reads exactly that flag, so reusing it would make the
+        #    next pass skip acquire() and run recovery believing it leads.
+        #    Release best-effort first so the pooled connection is not leaked.
+        #    Same discipline as leader_election.AdvisoryLockElector, which this
+        #    cannot use yet: its try_acquire is non-blocking, and the blocking
+        #    acquire() above is load-bearing for the rolling-update handoff.
         try:
             self._lock.release()
         except Exception:  # pylint: disable=broad-except
@@ -359,16 +291,11 @@ class ManagedJobRefreshDaemonThread(threading.Thread):
             managed_job_constants.CONSOLIDATION_MODE_LOCK_ID)
 
         if not drained:
-            # Last resort: exit, so the container teardown reaps the survivors —
-            # which is what actually closed this hole before this change.
-            # Declining to lead instead is not equivalent, because another
-            # replica cannot see our controllers and re-adopts their jobs
-            # regardless; see _drain_local_controllers.
-            #
-            # Exiting also covers the single-replica case (the chart's default
-            # apiService.replicas is 1): there, stopping this thread would leave
-            # nobody running recovery, controller top-ups or the
-            # FAILED_CONTROLLER sweep, with nothing to restart it.
+            # Last resort: exit so the container teardown reaps the survivors,
+            # which is what closed this hole before. Declining to lead is not
+            # equivalent (see _drain_local_controllers), and with the chart's
+            # default of one replica it would leave nobody running recovery at
+            # all, with nothing to restart it.
             logger.error(
                 'Step-down could not confirm this replica\'s job controllers '
                 'are gone; exiting so the orchestrator restarts this replica '

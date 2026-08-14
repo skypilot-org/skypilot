@@ -408,18 +408,15 @@ class PostgresLock(DistributedLock):
         lock object and go back to contending.
 
         Either way, do not reuse this object afterwards: a failed ``release()``
-        on the dead connection leaves ``self._acquired`` True, because that flag
-        is only cleared after a successful unlock — and ``is_locked()`` returns
-        exactly that flag. A holder that keeps using this object after a lost
-        session can therefore believe it still holds the lock. Build a fresh
-        lock instead.
+        on a dead connection leaves ``self._acquired`` True (it is only cleared
+        after a successful unlock) and ``is_locked()`` returns that flag, so the
+        holder would believe it still holds the lock. Build a fresh one.
 
-        TODO(aylei): this transition belongs to this class rather than to every
-        caller's memory — an explicit ``mark_lost()``, so ``is_locked()`` stops
-        reporting a lock whose session is gone. Note that simply clearing
-        ``_acquired`` in ``release()``'s ``DatabaseError`` branch is not the
-        safe version: that branch also catches non-connection errors, where our
-        own session may still hold the lock.
+        TODO(aylei): that transition belongs to this class rather than to every
+        caller's memory — an explicit ``mark_lost()``. Note that simply clearing
+        ``_acquired`` in ``release()``'s ``DatabaseError`` branch is not it: the
+        branch also catches non-connection errors, where our own session may
+        still hold the lock.
 
         Returns ``False`` if the lock was never acquired, if the connection
         is missing, or if the probe raises any exception.  Returns ``True``

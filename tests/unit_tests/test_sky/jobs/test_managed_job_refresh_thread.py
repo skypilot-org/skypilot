@@ -3,21 +3,17 @@
 These tests cover the state machine of the leader-elected refresh thread,
 not the full daemon loop:
 
-* ``_lock_still_held`` dispatches correctly between ``PostgresLock``
-  (probes the underlying PG session) and any other ``DistributedLock``
-  (trusts the local ``is_locked`` flag).
-* ``_step_down_on_lock_loss`` hands leadership over *without* killing the
-  API server process in the common case: it stops the job controllers
-  this replica owns, confirms they are gone, and replaces the lock object
-  so the next acquire is real. When it *cannot* confirm they are gone it
-  falls back to exiting the process, because declining to lead does not
-  stop another replica from re-adopting those jobs.
-* the outer ``run`` loop re-contends after a clean step-down, and stops
-  the thread after an unconfirmed one (where the process is exiting).
-* ``start_managed_job_refresh_daemon`` gates on consolidation mode,
-  preserving the historical ``should_skip_managed_job_status_refresh``
-  semantics now that the daemon no longer lives in
-  ``INTERNAL_REQUEST_DAEMONS``.
+* ``_lock_still_held`` probes the PG session for a ``PostgresLock`` and trusts
+  the local ``is_locked`` flag for any other ``DistributedLock``.
+* ``_step_down_on_lock_loss`` hands leadership over *without* killing the API
+  server process: it stops the controllers this replica owns, confirms they are
+  gone, and replaces the lock object so the next acquire is real. When it cannot
+  confirm, it exits the process, because declining to lead does not stop another
+  replica from re-adopting those jobs.
+* the outer ``run`` loop re-contends after a clean step-down and stops the
+  thread after an unconfirmed one (where the process is exiting).
+* ``start_managed_job_refresh_daemon`` gates on consolidation mode, preserving
+  the historical ``should_skip_managed_job_status_refresh`` semantics.
 """
 import contextlib
 import signal
@@ -122,9 +118,8 @@ class TestStepDownOnLockLoss:
     def signal_file(self, tmp_path, monkeypatch):
         """Redirect the recovery signal file, and make the drain never sleep.
 
-        Zeroing both budgets is safe for every test here: ``_controllers_gone``
-        evaluates liveness before checking its deadline, so a drain that
-        succeeds still succeeds — it just cannot wait.
+        Zeroing both budgets is safe here: ``_controllers_gone`` checks liveness
+        before its deadline, so a drain that succeeds still succeeds.
         """
         path = tmp_path / 'restart_signal'
         monkeypatch.setattr(mjrt.constants,
@@ -135,11 +130,10 @@ class TestStepDownOnLockLoss:
 
     @pytest.mark.parametrize('records', [[], _records(101), _records(101, 102)])
     def test_clean_drain_hands_over_without_exiting(self, records):
-        """The headline behaviour. The API server keeps serving; only the leader
-        role moves. Killing the process here takes this replica's share of the
-        Service's traffic down with it, which is a far larger blast radius than
-        the leadership change requires. SIGTERM is enough and there is no
-        escalation, whether we own no controllers, one, or several."""
+        """The headline behaviour: the server keeps serving and only the leader
+        role moves, whether we own no controllers, one, or several. Killing the
+        process here would take this replica's share of the Service's traffic
+        with it — a far larger blast radius than the handover needs."""
         thread = _thread_with_lock()
         with _drain_patched(records) as m:
             assert thread._step_down_on_lock_loss() is True
@@ -149,11 +143,10 @@ class TestStepDownOnLockLoss:
         assert m.kill.call_args_list == ([] if not records else [mock.call()])
 
     def test_touches_the_gate_file_before_draining(self, signal_file):
-        """The recovery signal file must be in place before we start killing, so
-        the FAILED_CONTROLLER sweep does not run against jobs whose controllers
-        we are in the middle of stopping. (It does not gate controller starts —
-        maybe_start_controllers never reads it; see the comment on step 1 of
-        _step_down_on_lock_loss.)"""
+        """The file must be in place before we start killing, so the
+        FAILED_CONTROLLER sweep does not run against jobs whose controllers we
+        are mid-way through stopping. (It does not gate controller starts — see
+        step 1 of _step_down_on_lock_loss.)"""
         thread = _thread_with_lock()
         order = []
 
@@ -184,22 +177,19 @@ class TestStepDownOnLockLoss:
         assert m.kill.call_args_list == [mock.call(), mock.call(signal.SIGKILL)]
 
     def test_exits_the_process_when_controllers_survive(self):
-        """An undead controller is the two-controllers-on-one-job case, and
-        merely declining to lead does not prevent it: the new leader on another
-        replica cannot see our survivors (its liveness check is a local psutil
-        lookup) and re-adopts their jobs regardless. Only the process exiting —
-        and the container teardown that follows — reaps them, so fall back to
-        that."""
+        """A survivor is the two-controllers-on-one-job case, and declining to
+        lead does not prevent it: the new leader cannot see our survivors (local
+        psutil check) and re-adopts their jobs regardless. Only exiting — and
+        the container teardown that follows — reaps them."""
         thread = _thread_with_lock()
         with _drain_patched(_records(101), alive=True) as m:
             assert thread._step_down_on_lock_loss() is False
         m.os_kill.assert_called_once_with(_PID, signal.SIGTERM)
 
     def test_exits_the_process_when_pid_file_unreadable(self):
-        """``get_controller_process_records`` returns None when the pid file
-        cannot be read. That is 'unknown', not 'none': we cannot even enumerate
-        our controllers, so nothing is signalled and the process must exit for
-        the teardown to reap whatever is there."""
+        """A None from ``get_controller_process_records`` is 'unknown', not
+        'none': we cannot even enumerate our controllers, so nothing is
+        signalled and the process must exit for the teardown to reap them."""
         thread = _thread_with_lock()
         with _drain_patched(None) as m:
             assert thread._step_down_on_lock_loss() is False
@@ -211,20 +201,18 @@ class TestStepDownOnLockLoss:
         [
             # Clean step-down.
             ([], False, None, True),
-            # Releasing a lock whose session already died routinely raises;
-            # that must not leave the stale object in place.
+            # A release() on an already-dead session routinely raises.
             ([], False, RuntimeError('conn already dead'), True),
-            # Even when we cannot prove the controllers are gone, the lock
-            # object must be dropped — otherwise a later retry could lead on a
-            # stale flag.
+            # Unconfirmed drain: the object must still be dropped, or a later
+            # retry could lead on a stale flag.
             (_records(101), True, None, False),
-            # ... including when enumerating them fails outright.
+            # ... including when enumerating the controllers fails outright.
             (RuntimeError('boom'), False, None, False),
         ])
     def test_always_replaces_the_lock_object(self, records, alive, release_exc,
                                              verdict):
-        """A release() on a dead connection leaves PostgresLock._acquired True,
-        and is_locked() returns that flag — so reusing the object would make the
+        """A release() on a dead connection leaves PostgresLock._acquired True
+        and is_locked() returns that flag, so reusing the object would make the
         next _become_leader_and_run skip acquire() and lead without the lock."""
         thread = _thread_with_lock()
         old_lock = thread._lock
@@ -385,16 +373,11 @@ class TestBecomeLeaderOrdering:
     """The recovery signal file must exist BEFORE the lock is acquired, and
     recovery must wait briefly after acquiring it.
 
-    During a rolling update we block on acquire() while the old API server
-    still holds the lock. The signal file holds off the FAILED_CONTROLLER
-    sweep, and jobs whose controllers are moving between replicas must not be
-    marked failed for it in that window — so it must be touched up-front, not
-    after we win the lock.
-
-    After acquiring the lock we also wait briefly before recovery: the old
-    pod's detached controllers can outlive the lock release by a moment, and
-    recovery resetting jobs while they are still alive lets them re-claim and
-    re-stamp soon-dead PIDs (split brain across the upgrade overlap).
+    Touched up-front because acquire() blocks for the whole rolling update while
+    the old server holds the lock, and the FAILED_CONTROLLER sweep must be held
+    off for all of it. Waiting after acquiring covers the old pod's detached
+    controllers, which outlive the lock release by a moment and would re-claim
+    the jobs recovery had just reset, stamping soon-dead PIDs back onto them.
     """
 
     def test_signal_file_touched_before_lock_acquire(self, tmp_path,
