@@ -786,24 +786,13 @@ def _prune_expired_files(dir_path: str, suffix: str, cutoff: float) -> int:
 def _prune_clients_tmp(cutoff: float) -> int:
     """Remove client tmp artifacts older than cutoff; returns count removed.
 
-    Two kinds of transient state pile up under the per-user client dirs:
-
-    - Download staging dirs: logs synced from the cluster for the client to
-      download, then no longer needed. Only swept for backends that keep them
-      in a dedicated tree (``download_tmp_base_dir()``); the ones sharing the
-      persistent log dir need no separate cleanup.
-    - Task YAMLs: the submitted task (``tasks/<task_id>.yaml``) and its
-      translated form (``<task_id>_translated.yaml``) used to be persisted per
-      submission to ease debugging. Task YAMLs are processed in memory now, so
-      whatever is still on disk was left behind by an older server version and
-      can be reclaimed.
+    Swept per user dir: download staging dirs (only for backends with a
+    dedicated ``download_tmp_base_dir()``) and legacy task YAMLs, no longer
+    written now that task YAMLs are processed in memory.
     """
-    # Both sweeps walk clients/<user_hash>/, and for backends whose download
-    # staging tree *is* the clients dir the two roots coincide, so they are
-    # keyed by root to walk each tree only once. The tree can be on a shared
-    # filesystem with hundreds of user dirs, where a redundant walk is far
-    # from free.
-    # Value: (sweep expired dirs, sweep expired legacy task YAMLs).
+    # Keyed by root so backends whose download staging tree *is* the clients
+    # dir walk it once, not twice.
+    # root -> (sweep expired dirs, sweep expired legacy task YAMLs)
     roots: Dict[str, Tuple[bool, bool]] = {}
 
     def add_root(path: str, sweep_dirs: bool, sweep_yamls: bool) -> None:
@@ -830,8 +819,7 @@ def _prune_clients_tmp(cutoff: float) -> int:
                             shutil.rmtree(entry.path, ignore_errors=True)
                             removed += 1
                         elif sweep_yamls and entry.name == 'tasks':
-                            # The legacy submitted-task dir; it holds nothing
-                            # but per-submission YAMLs.
+                            # Legacy dir, holds per-submission YAMLs only.
                             removed += _prune_expired_files(
                                 entry.path, '.yaml', cutoff)
                     elif sweep_yamls:
@@ -848,10 +836,8 @@ def _prune_clients_tmp(cutoff: float) -> int:
 async def cleanup_clients_tmp():
     """Hourly GC of expired tmp artifacts under the API server clients dir.
 
-    Everything older than the blob GC grace period (1 hour by default) is
-    removed. The walk runs in a worker thread: the clients dir can be on a
-    shared filesystem where a full pass takes minutes, and this event loop
-    also serves the metrics server and the other background daemons.
+    The walk runs in a worker thread: it takes minutes on a shared filesystem,
+    and this loop also serves the metrics server and the sibling daemons.
     """
     while True:
         await asyncio.sleep(3600)

@@ -1168,8 +1168,7 @@ def test_prune_clients_tmp_removes_expired_translated_yamls(
     """Expired *_translated.yaml files go; other files and dirs stay."""
     clients_dir = tmp_path / 'clients'
     _set_clients_dir(monkeypatch, clients_dir)
-    # Backend shares the persistent log dir: nothing to sweep besides the
-    # leftover translated task YAMLs.
+    # Backend shares the persistent log dir: no download tree to sweep.
     _set_download_tmp_base(monkeypatch, None)
     now = 1_000_000.0
     old = _touch_file(clients_dir / 'user1' / 'abc_translated.yaml',
@@ -1241,8 +1240,7 @@ def test_prune_clients_tmp_download_base_is_clients_dir(tmp_path, monkeypatch):
                            now - 10_000)
     fresh_yaml = _touch_file(clients_dir / 'user1' / 'def_translated.yaml',
                              now - 100)
-    # A tasks dir too young for the dir sweep still gets its expired YAMLs
-    # pruned individually.
+    # A tasks dir too young for the dir sweep still loses its expired YAMLs.
     old_task_yaml = _touch_file(clients_dir / 'user1' / 'tasks' / 'abc.yaml',
                                 now - 10_000)
     os.utime(old_task_yaml.parent, (now - 100, now - 100))
