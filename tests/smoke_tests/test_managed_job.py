@@ -4430,11 +4430,12 @@ def test_managed_job_volume_mix():
                     job_name=name,
                     job_status=[sky.ManagedJobStatus.SUCCEEDED],
                     timeout=900),
-                # By job id, not name: `sky jobs logs -n` only resolves a job
-                # that is still running, and this one has finished.
-                f'logs=$(sky jobs logs $(sky jobs queue | grep {name} '
-                f'| head -1 | awk \'{{print $1}}\') --no-follow); '
-                f'echo "$logs"; echo "$logs" | grep "all three mounted"',
+                # SUCCEEDED is the assertion that all three mounted: the task
+                # runs under `set -e` and writes to each mount path, so a
+                # missing one fails the job. Reading the run output back would
+                # add nothing -- and a finished job's log needs its id, which
+                # cannot be scraped from `sky jobs queue` while SKYPILOT_DEBUG
+                # is on, since the debug lines carry the job's name too.
             ],
             smoke_tests_utils.chain_teardown(
                 f'sky jobs cancel -y -n {name} || true',
