@@ -256,6 +256,29 @@ class TestQueryInstances:
         expected_rounds = 1 + instance._MAX_QUERY_INSTANCES_RETRIES
         assert mock_client.query_jobs.call_count == 7 * expected_rounds
 
+    def test_does_not_retry_filtered_terminated_job(self, mock_client,
+                                                    monkeypatch):
+
+        def query_jobs(job_name, state_filters):
+            assert job_name == _CLUSTER
+            return ['386700'] if state_filters == ['completed'] else []
+
+        mock_client.query_jobs.side_effect = query_jobs
+        mock_client.get_job_reason.return_value = 'Completed'
+        sleep = mock.MagicMock()
+        monkeypatch.setattr(instance.time, 'sleep', sleep)
+
+        result = instance.query_instances(_CLUSTER,
+                                          _CLUSTER,
+                                          provider_config=_PROVIDER_CONFIG,
+                                          non_terminated_only=True,
+                                          retry_if_missing=True)
+
+        assert not result
+        assert mock_client.query_jobs.call_count == 7
+        mock_client.get_job_reason.assert_called_once_with('386700')
+        sleep.assert_not_called()
+
     def test_retry_observes_request_cancellation(self, mock_client,
                                                  monkeypatch):
         mock_client.query_jobs.return_value = []

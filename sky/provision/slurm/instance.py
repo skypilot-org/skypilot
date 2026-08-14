@@ -877,11 +877,13 @@ def query_instances(
     while True:
         statuses: Dict[str, Tuple[Optional[status_lib.ClusterStatus],
                                   Optional[str]]] = {}
+        found_any_job = False
         for state, sky_status in status_map.items():
             jobs = client.query_jobs(
                 cluster_name_on_cloud,
                 [state],
             )
+            found_any_job = found_any_job or bool(jobs)
 
             for job_id in jobs:
                 if state in ('pending', 'failed', 'node_fail', 'cancelled',
@@ -908,7 +910,7 @@ def query_instances(
             # MinJobAge seconds (default 300s). Or could be earlier if it
             # reaches MaxJobCount first (default 10_000).
 
-        if (statuses or not retry_if_missing or
+        if (found_any_job or not retry_if_missing or
                 attempts >= _MAX_QUERY_INSTANCES_RETRIES):
             return statuses
 
