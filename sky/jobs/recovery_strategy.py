@@ -56,6 +56,7 @@ logger = sky_logging.init_logger(__name__)
 PRECHECK_FAILURES = (
     exceptions.InvalidClusterNameError,
     exceptions.NoCloudAccessError,
+    exceptions.NotSupportedError,
     exceptions.ResourcesMismatchError,
     exceptions.StorageSpecError,
     exceptions.StorageError,
@@ -985,6 +986,7 @@ class StrategyExecutor:
                                     )
                                     logger.debug('sdk.launch request ID: '
                                                  f'{request_id}')
+                                    assert request_id is not None
                                     stream_task = self._start_stream_task(
                                         request_id)
                                 else:
@@ -1043,6 +1045,7 @@ class StrategyExecutor:
                                                 asyncio.get_running_loop(
                                                 ).create_future())
                                             stream_task.set_result(result)
+                                assert request_id is not None
                                 assert stream_task is not None
                                 await self._await_launch_request(
                                     request_id, stream_task)

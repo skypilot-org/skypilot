@@ -2664,6 +2664,13 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
                 self.is_grpc_enabled and
                 not isinstance(self.launched_resources.cloud, clouds.Slurm))
 
+    @property
+    def has_durable_autodown_grpc(self) -> bool:
+        """Returns whether durable autodown can use the Skylet gRPC RPC."""
+        return (self.provision_runtime_metadata.has_skylet and
+                self.is_grpc_enabled and self.launched_resources is not None and
+                not isinstance(self.launched_resources.cloud, clouds.Slurm))
+
     def to_dict(self) -> dict:
         """Serialize to a JSON-compatible dict."""
         return {
@@ -6081,10 +6088,10 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
     def _probe_durable_autodown(self, handle: CloudVmRayResourceHandle) -> None:
         strategy = handle.teardown_execution_strategy.value
-        if not handle.is_grpc_enabled_with_flag:
+        if not handle.has_durable_autodown_grpc:
             raise exceptions.NotSupportedError(
-                'Strict durable autodown requires gRPC; the legacy SSH path '
-                f'is disabled for execution strategy {strategy!r}.')
+                'Strict durable autodown requires gRPC from a compatible '
+                f'Skylet endpoint for execution strategy {strategy!r}.')
         try:
             response = self.get_durable_autodown_status(handle)
         except exceptions.SkyletMethodNotImplementedError as e:
@@ -6534,10 +6541,10 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         self, handle: CloudVmRayResourceHandle
     ) -> 'autostopv1_pb2.IsAutostoppingResponse':
         """Return the skylet's durable autodown status via retrying gRPC."""
-        if not handle.is_grpc_enabled_with_flag:
+        if not handle.has_durable_autodown_grpc:
             raise exceptions.NotSupportedError(
-                'Durable autodown status requires gRPC; the legacy SSH path '
-                'does not expose durable intent state.')
+                'Durable autodown status requires a compatible Skylet gRPC '
+                'endpoint.')
         return backend_utils.invoke_skylet_with_retries(lambda: SkyletClient(
             handle.get_grpc_channel()).get_autodown_status())
 
@@ -6560,7 +6567,11 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
         is_autostopping = False
 
-        if handle.is_grpc_enabled_with_flag:
+        is_strict_autodown = self._is_strict_autodown_strategy(
+            handle.teardown_execution_strategy.value)
+        use_durable_autodown_status = (is_strict_autodown and
+                                       handle.has_durable_autodown_grpc)
+        if use_durable_autodown_status or handle.is_grpc_enabled_with_flag:
             try:
                 response = self.get_durable_autodown_status(handle)
                 is_autostopping = response.is_autostopping
