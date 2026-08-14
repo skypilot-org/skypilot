@@ -1606,12 +1606,21 @@ def test_volumes_on_kubernetes():
             f'sky volumes apply -y -n existing0 --type k8s-pvc --size 2GB --use-existing',
             f'sky volumes apply -y -n vol-existing1 --type k8s-pvc --size 2GB --use-existing',
             f'vols=$(sky volumes ls) && echo "$vols" && echo "$vols" | grep "pvc0" && echo "$vols" | grep "existing0" && echo "$vols" | grep "vol-existing1"',
+            # `apply` only starts provisioning; launching before the claims
+            # bind is refused with VolumeNotReadyError.
+            smoke_tests_utils.get_cmd_wait_until_volume_is_ready('pvc0'),
+            smoke_tests_utils.get_cmd_wait_until_volume_is_ready('existing0'),
+            smoke_tests_utils.get_cmd_wait_until_volume_is_ready(
+                'vol-existing1'),
             f'sky launch -y -c {name} --infra kubernetes tests/test_yamls/pvc_volume.yaml',
             f'sky logs {name} 1 --status',  # Ensure the job succeeded.
             f'vols=$(sky volumes ls) && echo "$vols" && echo "$vols" | grep "{name}"',
             # Test volume mounting warning on relaunch with new volume
             # Create a new volume pvc1
             f'sky volumes apply -y -n pvc1 --type k8s-pvc --size 2GB',
+            # pvc1 is mounted by the last launch below, so it has to bind
+            # first; readiness does not make the relaunch mount it.
+            smoke_tests_utils.get_cmd_wait_until_volume_is_ready('pvc1'),
             # Launch with the new volume - should show warning that pvc1 and /mnt/data4 won't be mounted
             f's=$(sky launch -y -c {name} --infra kubernetes tests/test_yamls/pvc_volume_with_new.yaml 2>&1 | tee /dev/stderr) && echo "$s" | grep -i "WARNING: New ephemeral volume(s) with path /mnt/data4 and new volume(s) pvc1 specified in task but not mounted"',
             f'sky logs {name} 2 --status',  # Ensure the second job succeeded.
@@ -1690,6 +1699,10 @@ def test_enable_docker_on_kubernetes(yaml_file, volumes_needed, sidecar,
     for vol in volumes_needed:
         setup_cmds.append(
             f'sky volumes apply -y -n {vol} --type k8s-pvc --size 2GB')
+        # `apply` only starts provisioning; the launch below mounts the volume
+        # and is refused with VolumeNotReadyError until the claim binds.
+        setup_cmds.append(
+            smoke_tests_utils.get_cmd_wait_until_volume_is_ready(vol))
 
     # kubectl exec into the sidecar to verify cache mount exists.
     # For _dv cases the mount is a PVC; for default cases it is an emptyDir.
@@ -1747,10 +1760,20 @@ def test_volume_env_mount_kubernetes():
             'volume_env_mount_kubernetes',
             [
                 f'sky volumes apply -y -n {full_pvc_name} --type k8s-pvc --size 2GB',
+                # `apply` only starts provisioning; launching before the claim
+                # binds is refused with VolumeNotReadyError.
+                smoke_tests_utils.get_cmd_wait_until_volume_is_ready(
+                    full_pvc_name),
                 f's=$(sky jobs launch -y --infra kubernetes {f.name} --env USERNAME=user); echo "$s"; echo "$s" | grep "Job finished (status: SUCCEEDED)"',
             ],
             smoke_tests_utils.chain_teardown(
-                'sky jobs cancel -a -y || true',
+                # Cancel by name, never -a: on a shared remote API server all
+                # concurrently running smoke tests submit jobs as the same
+                # service-account user, so `-a` cancels *their* in-flight jobs
+                # too (observed in enterprise CI: one such teardown killed an
+                # unrelated job-group test's job and another lane's kueue
+                # blocker mid-run).
+                f'sky jobs cancel -y -n {name}-job || true',
                 # The managed job's worker cluster is torn down in the
                 # controller's `finally` block, and the controller only sets
                 # schedule_state=DONE after that cleanup completes — so DONE
@@ -1850,6 +1873,13 @@ def test_hostpath_volume_on_kubernetes():
 
 # ---------- Auto-mount refuses a volume that is not ready ----------
 @pytest.mark.kubernetes
+# The unprovisionable-StorageClass fixture needs the agent's kubectl to have
+# cluster-admin on the same cluster the API server schedules onto. A remote
+# server's agent is a plain client with no kubeconfig, and routing the fixture
+# through the cloud-cmd helper does not work either: the helper pod's kubectl
+# runs as skypilot-service-account, whose ClusterRole has no storage.k8s.io
+# verbs, so a cluster-scoped StorageClass write is Forbidden.
+@pytest.mark.no_remote_server
 def test_auto_mount_not_ready_on_kubernetes():
     """A volume whose storage cannot be provisioned must stop the launch.
 
@@ -1958,6 +1988,9 @@ def test_auto_mount_not_ready_on_kubernetes():
 
 # ---------- A volume declared on the task must be ready ----------
 @pytest.mark.kubernetes
+# See test_auto_mount_not_ready_on_kubernetes: the StorageClass fixture
+# needs cluster-admin kubectl co-located with the API server.
+@pytest.mark.no_remote_server
 def test_volume_not_ready_on_kubernetes():
     """The reference behaviour the auto-mount check is modelled on.
 

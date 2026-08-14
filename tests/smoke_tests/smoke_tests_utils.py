@@ -251,6 +251,59 @@ def get_cmd_wait_until_volume_is_not_found(volume_name: str,
                                                   timeout=timeout)
 
 
+_WAIT_UNTIL_VOLUME_IS_READY = (
+    # A while loop to wait until a volume is mountable, or timeout.
+    # `sky volumes apply` only *starts* provisioning: on a storage class with
+    # `volumeBindingMode: Immediate` the PersistentVolume is created
+    # asynchronously, so the claim stays Pending -- and the volume NOT_READY --
+    # after the command returns. Mounting it before then is refused with
+    # VolumeNotReadyError, so a test that creates a volume must wait for it,
+    # exactly as a user would.
+    # Deliberately not `--refresh`: that re-probes the backing resource and so
+    # would end the wait the moment the claim binds, but it refreshes the whole
+    # volume table -- a file lock and a database round-trip per volume -- and
+    # would contend with the volume operations of every other test sharing the
+    # API server. Read the row the refresh daemon maintains instead, which
+    # costs the server nothing and bounds the wait by its 60s interval.
+    'start_time=$SECONDS; '
+    'while true; do '
+    'vols=$(sky volumes ls); '
+    # Read the status out of the volume's own row -- matched on the whole first
+    # field, so a longer name containing this one is not mistaken for it -- at
+    # the character offset the header gives for the STATUS column. The table is
+    # space-padded and left-aligned, and columns before STATUS hold spaces of
+    # their own ("alice (SA)", "3 secs"), so splitting the row on whitespace
+    # would not line up. Taking the column rather than searching the row also
+    # keeps NOT_READY, or a stray word in MESSAGE, from passing for READY.
+    'status=$(echo "$vols" | awk -v n="{volume_name}" '
+    '\'$1 == "NAME" {{c = index($0, "STATUS")}} '
+    '$1 == n && c {{split(substr($0, c), f, " "); print f[1]; exit}}\'); '
+    # IN_USE is READY plus a mount; both are mountable.
+    'if [ "$status" = READY ] || [ "$status" = IN_USE ]; then '
+    '  echo "Volume {volume_name} is ready."; break; '
+    'fi; '
+    'if (( $SECONDS - $start_time > {timeout} )); then '
+    '  echo "$vols"; '
+    '  echo "Timeout after {timeout} seconds waiting for volume '
+    '{volume_name} to be ready"; exit 1; '
+    'fi; '
+    'echo "Waiting for volume {volume_name}: ${{status:-not found}}"; '
+    'sleep 5; '
+    'done')
+
+
+def get_cmd_wait_until_volume_is_ready(volume_name: str, timeout: int = 300):
+    """Blocks until a volume is mountable.
+
+    The default timeout leaves room for a cloud storage class to provision its
+    first volume plus the up-to-60s lag of the status refresh daemon this reads
+    from, and is still short enough that a genuinely broken volume fails the
+    step well inside the test timeout.
+    """
+    return _WAIT_UNTIL_VOLUME_IS_READY.format(volume_name=volume_name,
+                                              timeout=timeout)
+
+
 _WAIT_UNTIL_JOB_STATUS_CONTAINS_MATCHING_JOB_ID = (
     # A while loop to wait until the job status
     # contains certain status, with timeout.

@@ -57,6 +57,7 @@ from sky.utils import status_lib
 from sky.utils import ux_utils
 from sky.utils.plugin_extensions import ExternalClusterFailure
 from sky.utils.plugin_extensions import ExternalFailureSource
+from sky.utils.plugin_extensions import LogDeliverySource
 
 if typing.TYPE_CHECKING:
     import psutil
@@ -339,15 +340,31 @@ class JobController:
         logs are forwarded but there is no reader to read them back (e.g. a
         write-only logging store), we still keep the local copy so ``sky jobs
         logs`` can serve a finished job's logs.
+
+        Being configured is not the same as having worked: the agent may never
+        have run on the cluster this job landed on. A registered
+        ``LogDeliverySource`` (the component that deploys the agent) can report
+        that, and we then keep the local copy instead of leaving the job with no
+        readable logs anywhere.
         """
         if (logs.is_logging_agent_configured() and
                 logs.get_log_reader() is not None):
-            logger.info(
-                f'Logging agent and log reader are configured for job '
-                f'{self._job_id}; logs are forwarded to the external store and '
-                'read back on demand. Skipping downloading and streaming the '
-                'logs to the controller.')
-            return
+            undelivered_reason = None
+            if handle is not None:
+                undelivered_reason = LogDeliverySource.undelivered_reason(
+                    cluster_name=handle.cluster_name,
+                    cluster_name_on_cloud=handle.cluster_name_on_cloud)
+            if undelivered_reason is None:
+                logger.info(
+                    f'Logging agent and log reader are configured for job '
+                    f'{self._job_id}; logs are forwarded to the external store '
+                    'and read back on demand. Skipping downloading and '
+                    'streaming the logs to the controller.')
+                return
+            logger.warning(
+                f'Logs of job {self._job_id} are not confirmed to have reached '
+                f'the external log store ({undelivered_reason}); keeping a '
+                'copy on the controller so they stay readable.')
         if handle is None:
             logger.info(f'Cluster for job {self._job_id} is not found. '
                         'Skipping downloading and streaming the logs.')
