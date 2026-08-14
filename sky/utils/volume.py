@@ -324,10 +324,14 @@ class VolumeMount:
                 f'Volume {volume_name} not found.')
         if record.get('status') == status_lib.VolumeStatus.NOT_READY:
             error_message = record.get('error_message')
-            msg = f'Volume {volume_name} is not ready.'
-            if error_message:
-                msg += f' Error: {error_message}'
-            raise exceptions.VolumeNotReadyError(msg)
+            # Same rule as the check that runs on every launch (see
+            # `_reject_not_ready_volume`): a volume that is being provisioned is
+            # not-ready and is not a reason to refuse.
+            if not volume_error_may_resolve(error_message):
+                msg = f'Volume {volume_name} is not ready.'
+                if error_message:
+                    msg += f' Error: {error_message}'
+                raise exceptions.VolumeNotReadyError(msg)
         assert 'handle' in record, 'Volume handle is None.'
         volume_config: models.VolumeConfig = record['handle']
         return cls(path, volume_name, volume_config, sub_path=sub_path)
