@@ -199,7 +199,8 @@ def test_skylet_client_apply_autodown_intent_uses_dedicated_rpc():
 
 
 def test_backend_durable_status_helper_uses_retrying_grpc_query(monkeypatch):
-    monkeypatch.setenv('SKYPILOT_ENABLE_GRPC', '1')
+    """Durable status queries bypass the general gRPC migration flag."""
+    monkeypatch.delenv('SKYPILOT_ENABLE_GRPC', raising=False)
     handle = _make_handle()
     expected = _durable_status(is_autostopping=True, generation=3)
     get_status, _, _ = _patch_skylet(monkeypatch, status=expected)
@@ -215,16 +216,39 @@ def test_backend_durable_status_helper_uses_retrying_grpc_query(monkeypatch):
 
 
 def test_is_definitely_autostopping_reuses_backend_status_helper(monkeypatch):
-    monkeypatch.setenv('SKYPILOT_ENABLE_GRPC', '1')
+    """Strict durable teardown reads Skylet status when the flag is unset."""
+    monkeypatch.delenv('SKYPILOT_ENABLE_GRPC', raising=False)
     handle = _make_handle()
     handle.stable_internal_external_ips = [('10.0.0.1', '34.1.2.3')]
     backend = cloud_vm_ray_backend.CloudVmRayBackend()
     get_status = mock.Mock(return_value=_durable_status(is_autostopping=True))
+    run_on_head = mock.Mock()
     monkeypatch.setattr(backend, 'get_durable_autodown_status', get_status)
+    monkeypatch.setattr(backend, 'run_on_head', run_on_head)
 
     assert backend.is_definitely_autostopping(handle)
 
     get_status.assert_called_once_with(handle)
+    run_on_head.assert_not_called()
+
+
+@pytest.mark.usefixtures('fresh_state_db')
+def test_strict_autodown_applies_when_feature_flag_is_unset(monkeypatch):
+    """Strict durable intents use their Skylet RPC without the global flag."""
+    monkeypatch.delenv('SKYPILOT_ENABLE_GRPC', raising=False)
+    handle = _make_handle()
+    _add_cluster(handle)
+    get_status, apply_autodown_intent, _ = _patch_skylet(monkeypatch)
+    backend = cloud_vm_ray_backend.CloudVmRayBackend()
+
+    backend.set_autostop(handle,
+                         15,
+                         autostop_lib.DEFAULT_AUTOSTOP_WAIT_FOR,
+                         down=True)
+
+    get_status.assert_called_once_with()
+    apply_autodown_intent.assert_called_once()
+    assert global_user_state.get_autodown_intent('cluster') is not None
 
 
 @pytest.mark.usefixtures('fresh_state_db')
@@ -280,6 +304,8 @@ def test_unimplemented_capability_probe_fails_before_mutation(monkeypatch):
 
 @pytest.mark.usefixtures('fresh_state_db')
 def test_strict_autodown_requires_grpc_before_mutation(monkeypatch):
+    """Strict durable teardown rejects handles without actual gRPC support."""
+    monkeypatch.delenv('SKYPILOT_ENABLE_GRPC', raising=False)
     handle = _make_handle()
     handle.is_grpc_enabled = False
     _add_cluster(handle)
