@@ -1734,6 +1734,76 @@ def rwx_storage_class_name() -> Optional[str]:
     return None
 
 
+# How to make each CSI driver refuse to provision. A class whose provisioner
+# does not exist is not enough for the tests that need a *rejection*: nothing
+# answers such a claim at all, so it only ever collects Normal events, and a
+# claim that reports nothing cannot be told from one that is merely slow. What
+# these entries produce is a ProvisioningFailed carrying a terminal gRPC code,
+# which is what a launch is supposed to fail on at once.
+#
+# Both were confirmed against the driver rather than assumed: nfs.csi.k8s.io
+# answers a class with no parameters with `code = InvalidArgument desc = server
+# is a required parameter`, and the Filestore driver answers a tier its API does
+# not have with `code = InvalidArgument desc = Invalid value at 'instance.tier'`.
+# Two other candidates do not work and are recorded so they are not retried: an
+# unreachable `server` binds anyway (the driver does not check connectivity, so
+# the failure only shows up at mount time), and an absurd capacity binds anyway
+# too (an NFS volume is a directory, whatever size it claims).
+_REJECTED_BY_PROVISIONER = {
+    'nfs.csi.k8s.io': '',
+    'filestore.csi.storage.gke.io': '  tier: not-a-real-tier\n',
+}
+
+
+def _storage_class_provisioner(name: str) -> Optional[str]:
+    proc = subprocess.run(
+        ['kubectl', 'get', 'sc', name, '-o', 'jsonpath={.provisioner}'],
+        capture_output=True,
+        text=True,
+        check=False)
+    return proc.stdout.strip() or None
+
+
+def rejecting_storage_class_name(test_name: str) -> str:
+    return f'{test_name}-reject'
+
+
+def create_rejecting_storage_class_cmd(test_name: str) -> Optional[str]:
+    """Command creating a class whose driver refuses the claims made on it.
+
+    Bound to WaitForFirstConsumer on purpose: until a pod asks for the claim the
+    driver is never called, so the volume is correctly ready, and the rejection
+    arrives only once a launch is under way. That is the one situation no
+    pre-launch check can catch.
+
+    Borrows the provisioner from the cluster's RWX class, which is the one
+    driver a lane is known to have. Returns None when that driver has no known
+    way to refuse, for the caller to skip: guessing risks the opposite of the
+    intended failure, a class that provisions real storage.
+    """
+    rwx_class = rwx_storage_class_name()
+    if rwx_class is None:
+        return None
+    provisioner = _storage_class_provisioner(rwx_class)
+    parameters = _REJECTED_BY_PROVISIONER.get(provisioner)
+    if parameters is None:
+        return None
+    body = (f'apiVersion: storage.k8s.io/v1\n'
+            f'kind: StorageClass\n'
+            f'metadata:\n'
+            f'  name: {rejecting_storage_class_name(test_name)}\n'
+            f'provisioner: {provisioner}\n'
+            f'volumeBindingMode: WaitForFirstConsumer\n')
+    if parameters:
+        body += f'parameters:\n{parameters}'
+    return f'kubectl apply -f - <<EOF\n{body}EOF'
+
+
+def delete_rejecting_storage_class_cmd(test_name: str) -> str:
+    sc_name = rejecting_storage_class_name(test_name)
+    return f'kubectl delete sc {sc_name} --ignore-not-found'
+
+
 # Pins a command to the cluster the agent's kubectl points at, so a volume and
 # the storage class created for it land together.
 AGENT_K8S_INFRA = '--infra k8s/$(kubectl config current-context)'

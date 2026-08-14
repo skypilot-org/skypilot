@@ -2148,6 +2148,115 @@ def test_auto_mount_pending_volume_on_kubernetes():
         smoke_tests_utils.run_one_test(test)
 
 
+# ---------- A volume the storage backend refuses mid-launch ----------
+@pytest.mark.kubernetes
+# See test_auto_mount_not_ready_on_kubernetes: the StorageClass fixture
+# needs cluster-admin kubectl co-located with the API server.
+@pytest.mark.no_remote_server
+def test_volume_refused_after_it_breaks_on_kubernetes():
+    """The two things a rejected claim has to produce, in one launch each.
+
+    A WaitForFirstConsumer claim is nothing to worry about until a pod asks for
+    it, so the volume is correctly ready and the first launch is correctly
+    allowed to proceed. Then the driver rejects it, and both halves of this PR's
+    behaviour follow:
+
+      1. the launch fails on what the driver said, in seconds, rather than
+         holding the volume's minutes-long timeout open for an answer that has
+         already arrived;
+      2. the volume is now on record as unusable, and the next launch reads that
+         record rather than the resolution its task arrived with -- which is
+         what stops a managed job relaunching over it for hours.
+
+    The two refusals are told apart by which component produces them: the wait
+    loop reports the claim it is waiting on, the readiness check refuses the
+    volume itself.
+    """
+    name = smoke_tests_utils.get_cluster_name()
+    create_sc_cmd = smoke_tests_utils.create_rejecting_storage_class_cmd(name)
+    if create_sc_cmd is None:
+        pytest.skip('No CSI driver on this cluster with a known way to refuse '
+                    'a claim; see _REJECTED_BY_PROVISIONER. A provisioner that '
+                    'does not exist cannot stand in: nothing answers such a '
+                    'claim, so it never reports a failure at all.')
+    volume_name = f'{name}-rej'
+    volume_yaml = textwrap.dedent(f"""\
+        name: {volume_name}
+        type: k8s-pvc
+        size: 1Gi
+        config:
+          access_mode: ReadWriteMany
+          storage_class_name: {smoke_tests_utils.rejecting_storage_class_name(name)}
+    """)
+    task_yaml = textwrap.dedent(f"""\
+        resources:
+          cpus: 0.1+
+        volumes:
+          /mnt/data: {volume_name}
+        run: echo should not run
+    """)
+    # Comfortably under the timeout a ReadWriteMany volume gets (600s), so that
+    # failing this fast can only be the driver's answer being acted on.
+    max_seconds_to_fail = 300
+    with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w',
+                                     delete=False) as vol_f, \
+         tempfile.NamedTemporaryFile(suffix='.yaml', mode='w',
+                                     delete=False) as task_f:
+        vol_f.write(volume_yaml)
+        vol_f.flush()
+        task_f.write(task_yaml)
+        task_f.flush()
+        test = smoke_tests_utils.Test(
+            'volume_refused_after_it_breaks_on_kubernetes',
+            [
+                create_sc_cmd,
+                f'sky volumes apply -y {smoke_tests_utils.AGENT_K8S_INFRA} '
+                f'{vol_f.name}',
+                # Nothing has asked for the claim, so the driver has not been
+                # called and there is nothing wrong with it yet. If this ever
+                # reports NOT_READY the premise is gone.
+                f'vols=$(sky volumes ls) && echo "$vols" && '
+                f'echo "$vols" | grep {volume_name} | grep READY',
+                # First launch: allowed through, then fails on the rejection,
+                # quoting it, well before the timeout would have expired.
+                f'start=$(date +%s); '
+                f'! sky launch -y -c {name} --infra kubernetes '
+                f'{task_f.name} > {name}-first.log 2>&1; '
+                f'elapsed=$(( $(date +%s) - start )); '
+                f'cat {name}-first.log && '
+                f'echo "launch took ${{elapsed}}s" && '
+                f'grep -q "PVC binding issue" {name}-first.log && '
+                f'grep -q "InvalidArgument" {name}-first.log && '
+                f'[ "$elapsed" -lt {max_seconds_to_fail} ]',
+                # The status refresh runs on its own schedule, so poll rather
+                # than assume it has already happened. If it never flips, the
+                # launch below would pass for the wrong reason.
+                f'for i in $(seq 1 18); do '
+                f'  vols=$(sky volumes ls); '
+                f'  echo "$vols" | grep {volume_name} | grep -q NOT_READY '
+                f'    && break; '
+                f'  sleep 10; '
+                f'done; echo "$vols" && '
+                f'echo "$vols" | grep {volume_name} | grep NOT_READY',
+                # Second launch: refused over the volume itself, without
+                # waiting on a claim again.
+                f'! sky launch -y -c {name} --infra kubernetes '
+                f'{task_f.name} > {name}-second.log 2>&1; '
+                f'cat {name}-second.log && '
+                f'grep -q "not ready" {name}-second.log && '
+                f'grep -q "{volume_name}" {name}-second.log && '
+                f'! grep -q "waiting for volume" {name}-second.log',
+            ],
+            smoke_tests_utils.chain_teardown(
+                f'sky down -y {name} || true',
+                f'sky volumes delete {volume_name} -y || true',
+                smoke_tests_utils.delete_rejecting_storage_class_cmd(name),
+                f'rm -f {name}-first.log {name}-second.log'),
+            timeout=20 * 60,
+        )
+        smoke_tests_utils.run_one_test(test)
+
+
 # ---------- An inline volume that cannot be provisioned ----------
 @pytest.mark.kubernetes
 # See test_auto_mount_not_ready_on_kubernetes: the StorageClass fixture
