@@ -3546,22 +3546,33 @@ async def set_cleanup_failed_async(job_id: int, cleanup_failure: str):
                               f'Cleanup failed: {cleanup_failure}')
 
     async def _op(session):
-        # Get existing failure_reason with row lock to prevent race
-        # conditions.
+        # Compose the new reason per task row (with a row lock to prevent
+        # race conditions): a task that already recorded a failure keeps
+        # its own reason first — it describes the job's actual outcome;
+        # the cleanup failure is secondary. Rows without a reason are left
+        # NULL so get_failure_reason() keeps surfacing the real failure.
+        # Only when no task has a reason at all (e.g. a SUCCEEDED or
+        # CANCELLED job) is the cleanup failure written to every row.
         result = await session.execute(
-            sqlalchemy.select(spot_table.c.failure_reason).where(
-                spot_table.c.spot_job_id == job_id).with_for_update())
-        existing_reason_row = result.fetchone()
-        new_reason = cleanup_failure
-        if existing_reason_row and existing_reason_row[0]:
-            # Keep the original failure first: it describes the job's
-            # actual outcome; the cleanup failure is secondary.
-            new_reason = (f'{existing_reason_row[0]}. In addition: '
-                          f'{cleanup_failure}')
-        await session.execute(
-            sqlalchemy.update(spot_table).where(
-                spot_table.c.spot_job_id == job_id).values(
-                    {spot_table.c.failure_reason: new_reason}))
+            sqlalchemy.select(
+                spot_table.c.task_id, spot_table.c.failure_reason).where(
+                    spot_table.c.spot_job_id == job_id).with_for_update())
+        rows = result.fetchall()
+        any_existing = any(reason for _, reason in rows)
+        for row_task_id, existing_reason in rows:
+            if existing_reason:
+                new_reason = (f'{existing_reason}. In addition: '
+                              f'{cleanup_failure}')
+            elif not any_existing:
+                new_reason = cleanup_failure
+            else:
+                continue
+            await session.execute(
+                sqlalchemy.update(spot_table).where(
+                    sqlalchemy.and_(
+                        spot_table.c.spot_job_id == job_id,
+                        spot_table.c.task_id == row_task_id)).values(
+                            {spot_table.c.failure_reason: new_reason}))
         await session.commit()
 
     await _retry_session(_op)

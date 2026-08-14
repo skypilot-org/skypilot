@@ -8,6 +8,7 @@ from unittest import mock
 
 import filelock
 import pytest
+import sqlalchemy
 from sqlalchemy import create_engine
 from sqlalchemy.ext.asyncio import create_async_engine
 
@@ -1579,3 +1580,59 @@ class TestSetCleanupFailed:
 
         assert state.get_status(job_id) == state.ManagedJobStatus.CANCELLED
         assert state.get_failure_reason(job_id) == self._CLEANUP_FAILURE
+
+    @pytest.mark.asyncio
+    async def test_pipeline_keeps_failed_task_reason(
+            self, _mock_managed_jobs_db_conn):
+        """A multi-task job's real failure reason must survive the cleanup
+        note: it is appended per row, and rows without a reason stay NULL
+        so get_failure_reason() keeps surfacing the actual failure."""
+
+        async def mock_callback(status: str):
+            del status
+
+        job_id = state.set_job_info_without_job_id(name='pipeline-job',
+                                                   workspace='ws1',
+                                                   entrypoint='ep',
+                                                   pool=None,
+                                                   pool_hash=None,
+                                                   user_hash='user1')
+        for task_id in (0, 1):
+            state.set_pending(job_id,
+                              task_id=task_id,
+                              task_name=f'task{task_id}',
+                              resources_str='{}',
+                              metadata='{}')
+        state.scheduler_set_waiting([job_id], '/tmp/dag.yaml', '/tmp/user.yaml',
+                                    '/tmp/env', None, 100)
+        # Task 0 succeeds, task 1 fails with a meaningful reason.
+        await state.set_starting_async(job_id, 0, 'run_p0', time.time(), '{}',
+                                       {}, mock_callback)
+        await state.set_started_async(job_id, 0, time.time(), mock_callback)
+        await state.set_succeeded_async(job_id, 0, time.time(), mock_callback)
+        await state.set_starting_async(job_id, 1, 'run_p1', time.time(), '{}',
+                                       {}, mock_callback)
+        await state.set_started_async(job_id, 1, time.time(), mock_callback)
+        await state.set_failed_async(job_id, 1, state.ManagedJobStatus.FAILED,
+                                     'User program exited with code 1',
+                                     mock_callback)
+
+        await state.set_cleanup_failed_async(job_id, self._CLEANUP_FAILURE)
+
+        # The surfaced reason keeps the real failure first.
+        assert state.get_failure_reason(job_id) == (
+            'User program exited with code 1. In addition: '
+            f'{self._CLEANUP_FAILURE}')
+        # The succeeded task's row stays NULL: writing the cleanup note
+        # there would shadow the real failure in get_failure_reason(),
+        # which returns the first non-NULL reason ordered by task_id.
+        engine = _mock_managed_jobs_db_conn
+        with engine.connect() as conn:
+            rows = dict(
+                conn.execute(
+                    sqlalchemy.select(state.spot_table.c.task_id,
+                                      state.spot_table.c.failure_reason).
+                    where(state.spot_table.c.spot_job_id == job_id)).fetchall())
+        assert rows[0] is None
+        assert rows[1] == ('User program exited with code 1. In addition: '
+                           f'{self._CLEANUP_FAILURE}')
