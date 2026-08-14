@@ -768,6 +768,21 @@ async def cleanup_unreferenced_file_mounts():
                          f'{common_utils.format_exception(e)}')
 
 
+def _prune_expired_files(dir_path: str, suffix: str, cutoff: float) -> int:
+    """Remove files under dir_path matching suffix and older than cutoff."""
+    removed = 0
+    for entry in os.scandir(dir_path):
+        try:
+            if (entry.name.endswith(suffix) and
+                    entry.is_file(follow_symlinks=False) and
+                    entry.stat().st_mtime < cutoff):
+                os.remove(entry.path)
+                removed += 1
+        except OSError:
+            pass
+    return removed
+
+
 def _prune_clients_tmp(cutoff: float) -> int:
     """Remove client tmp artifacts older than cutoff; returns count removed.
 
@@ -777,17 +792,18 @@ def _prune_clients_tmp(cutoff: float) -> int:
       download, then no longer needed. Only swept for backends that keep them
       in a dedicated tree (``download_tmp_base_dir()``); the ones sharing the
       persistent log dir need no separate cleanup.
-    - ``*_translated.yaml`` files: the translated client task used to be
-      persisted next to the client dir to ease debugging. Task YAMLs are
-      translated in memory now, so any file still on disk was left behind by
-      an older server version and can be reclaimed.
+    - Task YAMLs: the submitted task (``tasks/<task_id>.yaml``) and its
+      translated form (``<task_id>_translated.yaml``) used to be persisted per
+      submission to ease debugging. Task YAMLs are processed in memory now, so
+      whatever is still on disk was left behind by an older server version and
+      can be reclaimed.
     """
     # Both sweeps walk clients/<user_hash>/, and for backends whose download
     # staging tree *is* the clients dir the two roots coincide, so they are
     # keyed by root to walk each tree only once. The tree can be on a shared
     # filesystem with hundreds of user dirs, where a redundant walk is far
     # from free.
-    # Value: (sweep expired dirs, sweep expired translated task YAMLs).
+    # Value: (sweep expired dirs, sweep expired legacy task YAMLs).
     roots: Dict[str, Tuple[bool, bool]] = {}
 
     def add_root(path: str, sweep_dirs: bool, sweep_yamls: bool) -> None:
@@ -809,16 +825,21 @@ def _prune_clients_tmp(cutoff: float) -> int:
                 continue
             for entry in os.scandir(user_entry.path):
                 try:
-                    if sweep_dirs and entry.is_dir(follow_symlinks=False):
-                        if entry.stat().st_mtime < cutoff:
+                    if entry.is_dir(follow_symlinks=False):
+                        if sweep_dirs and entry.stat().st_mtime < cutoff:
                             shutil.rmtree(entry.path, ignore_errors=True)
                             removed += 1
-                    elif (sweep_yamls and
-                          entry.name.endswith('_translated.yaml') and
-                          entry.is_file(follow_symlinks=False) and
-                          entry.stat().st_mtime < cutoff):
-                        os.remove(entry.path)
-                        removed += 1
+                        elif sweep_yamls and entry.name == 'tasks':
+                            # The legacy submitted-task dir; it holds nothing
+                            # but per-submission YAMLs.
+                            removed += _prune_expired_files(
+                                entry.path, '.yaml', cutoff)
+                    elif sweep_yamls:
+                        if (entry.name.endswith('_translated.yaml') and
+                                entry.is_file(follow_symlinks=False) and
+                                entry.stat().st_mtime < cutoff):
+                            os.remove(entry.path)
+                            removed += 1
                 except OSError:
                     pass
     return removed

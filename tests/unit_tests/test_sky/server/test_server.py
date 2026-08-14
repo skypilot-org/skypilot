@@ -1188,6 +1188,27 @@ def test_prune_clients_tmp_removes_expired_translated_yamls(
     assert logs_dir.exists()
 
 
+def test_prune_clients_tmp_removes_expired_legacy_task_yamls(
+        tmp_path, monkeypatch):
+    """Expired tasks/<task_id>.yaml files go; fresh ones and non-YAMLs stay."""
+    clients_dir = tmp_path / 'clients'
+    _set_clients_dir(monkeypatch, clients_dir)
+    _set_download_tmp_base(monkeypatch, None)
+    now = 1_000_000.0
+    tasks_dir = clients_dir / 'user1' / 'tasks'
+    old = _touch_file(tasks_dir / 'abc.yaml', now - 10_000)
+    fresh = _touch_file(tasks_dir / 'def.yaml', now - 100)
+    other = _touch_file(tasks_dir / 'notes.txt', now - 10_000)
+
+    removed = server._prune_clients_tmp(cutoff=now - 5_000)
+
+    assert removed == 1
+    assert not old.exists()
+    assert fresh.exists()
+    assert other.exists()
+    assert tasks_dir.exists()
+
+
 def test_prune_clients_tmp_sweeps_download_dirs(tmp_path, monkeypatch):
     """A dedicated download tmp tree has its expired user entries removed."""
     clients_dir = tmp_path / 'clients'
@@ -1209,7 +1230,7 @@ def test_prune_clients_tmp_sweeps_download_dirs(tmp_path, monkeypatch):
 
 
 def test_prune_clients_tmp_download_base_is_clients_dir(tmp_path, monkeypatch):
-    """Dirs and translated YAMLs are both swept when the two roots coincide."""
+    """Dirs and legacy task YAMLs are both swept when the roots coincide."""
     clients_dir = tmp_path / 'clients'
     _set_clients_dir(monkeypatch, clients_dir)
     _set_download_tmp_base(monkeypatch, str(clients_dir))
@@ -1220,14 +1241,21 @@ def test_prune_clients_tmp_download_base_is_clients_dir(tmp_path, monkeypatch):
                            now - 10_000)
     fresh_yaml = _touch_file(clients_dir / 'user1' / 'def_translated.yaml',
                              now - 100)
+    # A tasks dir too young for the dir sweep still gets its expired YAMLs
+    # pruned individually.
+    old_task_yaml = _touch_file(clients_dir / 'user1' / 'tasks' / 'abc.yaml',
+                                now - 10_000)
+    os.utime(old_task_yaml.parent, (now - 100, now - 100))
 
     removed = server._prune_clients_tmp(cutoff=now - 5_000)
 
-    assert removed == 2
+    assert removed == 3
     assert not old_dir.exists()
     assert fresh_dir.exists()
     assert not old_yaml.exists()
     assert fresh_yaml.exists()
+    assert not old_task_yaml.exists()
+    assert old_task_yaml.parent.exists()
 
 
 def test_prune_clients_tmp_missing_dirs_is_noop(tmp_path, monkeypatch):
