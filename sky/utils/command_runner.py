@@ -100,14 +100,32 @@ def wrap_command_as_user(command: str,
                          shell_argv0: Optional[str] = None,
                          use_sudo: bool = False) -> str:
     """Build a command that a privileged SSH user runs as a Unix user."""
-    argv = [
-        'su', '--login', '--shell', '/bin/bash', '--command', command, '--',
-        user
-    ]
+    # A login shell is required: Slurm clients (squeue, sbatch, scancel, ...)
+    # are invoked by bare name, so sites that install Slurm outside sudoers'
+    # `secure_path` need the target user's profile to set PATH. `su --login`
+    # also chdir's to the target's home; `sudo -u` stays in the caller's cwd,
+    # so restore it here to keep both forms equivalent.
+    payload = f'cd -- "$HOME" || exit 1; {command}'
+    if use_sudo:
+        # `-u <user>` is load-bearing: without it sudo runs the command as
+        # root, which would require granting the SSH user passwordless sudo to
+        # `su` (root-equivalent and not constrainable in sudoers). `-H` sets
+        # HOME for sites that do not enable `env_reset`. `sudo -i` is not
+        # usable here: it re-serializes argv through the target's login shell,
+        # evaluating the command string twice and pre-expanding `$0`/`$@`.
+        argv = [
+            'sudo', '--non-interactive', '-H', '-u', user, '--', '/bin/bash',
+            '--login', '-c', payload
+        ]
+    else:
+        # The SSH user is already root, so no sudo grant is needed and root's
+        # `su` never authenticates.
+        argv = [
+            'su', '--login', '--shell', '/bin/bash', '--command', payload, '--',
+            user
+        ]
     if shell_argv0 is not None:
         argv.append(shell_argv0)
-    if use_sudo:
-        argv = ['sudo', '--non-interactive', '--'] + argv
     return shlex.join(argv)
 
 
@@ -2043,7 +2061,7 @@ class SlurmLoginNodeCommandRunner(SSHCommandRunner):
         self._use_sudo = ssh_user != 'root'
 
     def _inline_command_quote_levels(self) -> int:
-        # wrap_command_as_user adds a `su --command` shell.
+        # wrap_command_as_user adds one inner login-shell `-c` command.
         extra = 1 if self.slurm_user is not None else 0
         return super()._inline_command_quote_levels() + extra
 
