@@ -294,26 +294,26 @@ grant to a group holding those accounts:
 .. code-block:: text
 
     Runas_Alias SLURM_USERS = %slurm-users
-    Defaults>SLURM_USERS !requiretty, !use_pty
+    Defaults>SLURM_USERS !requiretty
     slurm-admin ALL=(SLURM_USERS) NOPASSWD: /bin/bash
 
-This bounds impersonation to members of ``slurm-users`` and logs every
-invocation. It is not a per-command allowlist — SkyPilot runs job setup and
-run scripts, ``rsync``, and an interactive SSH helper as the submitting user,
-so the runas set is the security boundary. Avoid ``(ALL, !root)``: it still
-allows impersonating the ``slurm`` account (Slurm's ``SlurmUser``), which is
-equivalent to controlling the scheduler.
+This limits impersonation to members of ``slurm-users`` and records each
+invocation according to the host's sudo logging configuration. It is not a
+per-command allowlist: SkyPilot runs job setup and run scripts, ``rsync``, and
+an interactive SSH helper as the submitting user.
 
-The ``Defaults>`` line keeps ``requiretty`` and ``use_pty`` off this path while
-leaving them in force for the rest of the host. SkyPilot runs these commands
-over SSH without allocating a terminal, so under ``requiretty`` sudo refuses
-with ``sorry, you must have a tty to run sudo`` and file transfers fail; and
-``rsync`` carries a binary stream that must not cross a pty line discipline.
-``requiretty`` is off by default on Debian and Ubuntu but was historically on
-for RHEL and CentOS. Scope on the runas alias rather than on ``/bin/bash``:
-sudoers cannot combine a runas and a command scope in one entry, and a
-command-scoped entry would also relax the settings for every other sudo grant
-to that shell.
+Treat membership in ``slurm-users`` as privileged access. Every member must be
+a workload account without ``sudo``, Slurm administrative privileges, or
+another escalation path. Any privileges available to a member are transitively
+available to the shared SSH user. Avoid ``(ALL, !root)``: it still allows
+impersonating the ``slurm`` account (Slurm's ``SlurmUser``), which is equivalent
+to controlling the scheduler.
+
+The ``Defaults>`` line disables ``requiretty`` for commands run as members of
+``SLURM_USERS`` while leaving it in force elsewhere. SkyPilot invokes sudo over
+SSH without allocating a terminal, so a global ``requiretty`` setting makes
+sudo refuse the command with ``sorry, you must have a tty to run sudo``. This
+also prevents file transfers and other job lifecycle operations from running.
 
 SkyPilot maps the authenticated username to the portion before ``@``. For
 example, ``alice@example.com`` maps to the Unix account ``alice``. The account

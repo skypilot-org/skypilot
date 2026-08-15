@@ -2235,22 +2235,26 @@ SkyPilot may submit as:
 .. code-block:: text
 
   Runas_Alias SLURM_USERS = %slurm-users
-  Defaults>SLURM_USERS !requiretty, !use_pty
+  Defaults>SLURM_USERS !requiretty
   skypilot ALL=(SLURM_USERS) NOPASSWD: /bin/bash
 
-This bounds impersonation to members of ``slurm-users`` and records every
-invocation in the sudo log. It is not a per-command allowlist — SkyPilot must
-run job setup and run scripts, ``rsync``, and an interactive SSH helper as the
-submitting user, so the runas set is the security boundary. Do not use
-``(ALL, !root)`` instead: it still permits impersonating the ``slurm`` account
-(Slurm's ``SlurmUser``), which is equivalent to controlling the scheduler.
+This limits impersonation to members of ``slurm-users`` and records each
+invocation according to the host's sudo logging configuration. It is not a
+per-command allowlist: SkyPilot must run job setup and run scripts, ``rsync``,
+and an interactive SSH helper as the submitting user.
 
-The ``Defaults>`` line keeps ``requiretty`` and ``use_pty`` off this path
-without relaxing them elsewhere on the host. SkyPilot runs these commands over
-SSH without a terminal, so a global ``requiretty`` — historically on for RHEL
-and CentOS, off on Debian and Ubuntu — makes sudo refuse and file transfers
-fail, and ``rsync`` carries a binary stream that must not cross a pty line
-discipline.
+Treat membership in ``slurm-users`` as privileged access. Every member must be
+a workload account without ``sudo``, Slurm administrative privileges, or
+another escalation path. Any privileges available to a member are transitively
+available to the shared SSH user. Do not use ``(ALL, !root)`` instead: it still
+permits impersonating the ``slurm`` account (Slurm's ``SlurmUser``), which is
+equivalent to controlling the scheduler.
+
+The ``Defaults>`` line disables ``requiretty`` for commands run as members of
+``SLURM_USERS`` while leaving it in force elsewhere. SkyPilot invokes sudo over
+SSH without allocating a terminal, so a global ``requiretty`` setting makes
+sudo refuse the command with ``sorry, you must have a tty to run sudo``. This
+also prevents file transfers and other job lifecycle operations from running.
 
 Cluster-wide inventory commands run as the SSH user so monitoring and capacity
 views do not depend on the user requesting them. The SSH user must have
