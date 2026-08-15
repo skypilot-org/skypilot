@@ -138,7 +138,6 @@ logger = sky_logging.init_logger(__name__)
 # through posix_spawn instead of fork_exec.
 _KUBECTL_PATH: Optional[str] = shutil.which('kubectl')
 
-
 _DEFAULT_METRICS_PORT = 9090
 
 

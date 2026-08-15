@@ -39,8 +39,8 @@ def test_metrics_port_reads_environment_override(monkeypatch):
 
 def test_metrics_port_rejects_api_port_collision():
     """Keep the API and metrics listeners on separate ports."""
-    with pytest.raises(
-            ValueError, match='port and metrics-port cannot be the same'):
+    with pytest.raises(ValueError,
+                       match='port and metrics-port cannot be the same'):
         server._validate_api_server_ports(46580, 46580)
 
 
