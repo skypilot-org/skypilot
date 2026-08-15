@@ -1,5 +1,6 @@
 """Tests for Slurm cloud implementation."""
 
+import contextlib
 import os
 from pathlib import Path
 import re
@@ -1761,3 +1762,109 @@ class TestExpandPathVars:
         result = slurm_utils.expand_path_vars('/home/; rm -rf /',
                                               self.REMOTE_ENV)
         assert result == '/home/; rm -rf /'
+
+
+class TestCheckComputeCredentials:
+    """Test Slurm._check_compute_credentials()."""
+
+    CLUSTER = 'my-cluster'
+    SSH_CONFIG_DICT = {
+        'hostname': 'login.example.com',
+        'port': '22',
+        'user': 'ubuntu',
+    }
+
+    def _make_client_mock(self, home: str = '/home/ubuntu'):
+        client = mock.MagicMock(spec=slurm.SlurmClient)
+        client.info.return_value = 'PARTITION AVAIL'
+        client.get_env.return_value = {'HOME': home, 'USER': 'ubuntu'}
+        client.check_dir_shared_fs.return_value = 'nfs'
+        return client
+
+    @contextlib.contextmanager
+    def _patched(self, submit_user, clients):
+        """Patches everything _check_compute_credentials touches.
+
+        Args:
+            submit_user: the value get_submit_user() returns.
+            clients: the clients SlurmClient() returns, in order.
+        """
+        ssh_config = mock.MagicMock()
+        ssh_config.lookup.return_value = dict(self.SSH_CONFIG_DICT)
+        with patch('sky.clouds.slurm.slurm_utils.get_slurm_ssh_config',
+                   return_value=ssh_config), \
+             patch('sky.clouds.slurm.Slurm.existing_allowed_clusters',
+                   return_value=[self.CLUSTER]), \
+             patch('sky.clouds.slurm.slurm_utils.get_submit_user',
+                   return_value=submit_user), \
+             patch('sky.clouds.slurm.skypilot_config.'
+                   'get_effective_region_config',
+                   return_value=None), \
+             patch('sky.clouds.slurm.slurm.SlurmClient',
+                   side_effect=list(clients)) as mock_client_class:
+            yield mock_client_class
+
+    @pytest.mark.parametrize('submit_user', [None, 'alice'])
+    def test_reachability_probe_is_not_impersonated(self, submit_user):
+        """sinfo, which decides enabled/disabled, runs as the SSH user."""
+        check_client = self._make_client_mock()
+        fs_client = self._make_client_mock(home='/home/alice')
+        with self._patched(submit_user,
+                           [check_client, fs_client]) as mock_client_class:
+            success, ctx2text = slurm_cloud.Slurm._check_compute_credentials()
+
+        assert success, ctx2text
+        assert mock_client_class.call_args_list[0].kwargs['slurm_user'] is None
+        check_client.info.assert_called_once()
+
+    def test_filesystem_probe_is_impersonated(self):
+        """The env/stat probes keep running as the submit user."""
+        check_client = self._make_client_mock()
+        fs_client = self._make_client_mock(home='/home/alice')
+
+        with self._patched('alice',
+                           [check_client, fs_client]) as mock_client_class:
+            success, ctx2text = slurm_cloud.Slurm._check_compute_credentials()
+
+        assert success
+        # Same login node, but impersonating the submit user.
+        assert mock_client_class.call_args_list[1].args == ('login.example.com',
+                                                            22, 'ubuntu', None)
+        assert mock_client_class.call_args_list[1].kwargs[
+            'slurm_user'] == 'alice'
+        # The home directory probed is the submit user's, not the SSH user's.
+        fs_client.check_dir_shared_fs.assert_called_once_with('/home/alice')
+        check_client.get_env.assert_not_called()
+        check_client.check_dir_shared_fs.assert_not_called()
+        assert 'Warning' not in ctx2text[self.CLUSTER]
+
+    def test_impersonation_failure_warns_but_stays_enabled(self):
+        check_client = self._make_client_mock()
+        fs_client = self._make_client_mock()
+        # get_env() returns {} when the command could not be run, e.g. the
+        # submit user has no account on the login node.
+        fs_client.get_env.return_value = {}
+
+        with self._patched('alice', [check_client, fs_client]):
+            success, ctx2text = slurm_cloud.Slurm._check_compute_credentials()
+
+        assert success
+        reason = ctx2text[self.CLUSTER]
+        assert 'enabled' in reason
+        assert 'disabled' not in reason
+        assert "submit user 'alice'" in reason
+        assert 'fail at launch' in reason
+        # The vague filesystem warning is not emitted instead.
+        assert 'Could not determine filesystem type' not in reason
+        fs_client.check_dir_shared_fs.assert_not_called()
+
+    def test_no_submit_user_reuses_the_single_client(self):
+        check_client = self._make_client_mock()
+
+        with self._patched(None, [check_client]) as mock_client_class:
+            success, ctx2text = slurm_cloud.Slurm._check_compute_credentials()
+
+        assert success
+        assert mock_client_class.call_count == 1
+        assert 'Warning' not in ctx2text[self.CLUSTER]
+        check_client.check_dir_shared_fs.assert_called_once_with('/home/ubuntu')
