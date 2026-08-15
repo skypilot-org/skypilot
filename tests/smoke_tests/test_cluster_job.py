@@ -2258,15 +2258,17 @@ def test_volume_used_before_its_rejection_is_recorded(attach_via):
                 f'vols=$(sky volumes ls) && echo "$vols" && '
                 f'echo "$vols" | grep {volume_name} | grep NOT_READY && '
                 f'echo "$vols" | grep {volume_name} | grep "still being"',
-                # Allowed through, and stopped by the wait loop instead: the
-                # claim is named, and the failure does not say the volume is
-                # not ready, which is what a refusal would have said.
+                # Allowed through, and stopped by the wait loop instead. Told
+                # apart by the exception: both checks raise VolumeNotReadyError
+                # when they refuse, and neither the wait loop nor the log line
+                # the check writes when it lets a volume through can produce it.
                 smoke_tests_utils.with_config(
                     f'! sky launch -y -c {name} --infra kubernetes '
                     f'{task_f.name} > {name}-imm.log 2>&1; '
                     f'cat {name}-imm.log && '
                     f'grep -q "PVC binding issue" {name}-imm.log && '
-                    f'! grep -q "is not ready" {name}-imm.log', cfg_f.name),
+                    f'! grep -q "VolumeNotReadyError" {name}-imm.log',
+                    cfg_f.name),
             ],
             smoke_tests_utils.chain_teardown(
                 f'sky down -y {name} || true',
