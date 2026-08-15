@@ -2218,12 +2218,19 @@ def test_volume_used_before_its_rejection_is_recorded(attach_via):
     """)
     # The timeout is what ends this launch, so keep it short -- but long
     # enough for the wait loop to have reported the claim at least once.
-    auto_mounts = textwrap.dedent(f"""\
+    # Written as two whole blocks rather than assembled from pieces: dedent
+    # strips the common indent, so a fragment ends up at the top level and the
+    # auto_mounts entry is silently not configured at all.
+    config = textwrap.dedent("""\
+        kubernetes:
+          provision_timeout: 120
+    """) if attached_on_task else textwrap.dedent(f"""\
+        kubernetes:
+          provision_timeout: 120
           auto_mounts:
             - volume_name: {volume_name}
               mount_paths: [/mnt/auto]
-    """) if not attached_on_task else ''
-    config = f'kubernetes:\n  provision_timeout: 120\n{auto_mounts}'
+    """)
     with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w',
                                      delete=False) as vol_f, \
          tempfile.NamedTemporaryFile(suffix='.yaml', mode='w',
