@@ -279,7 +279,7 @@ Enable this behavior in the API server's configuration:
 
 Configure each Slurm host entry with the shared SSH user and private key. The
 SSH user must be ``root`` or have passwordless ``sudo`` permission to run
-``su``:
+``/bin/bash`` as the accounts SkyPilot submits for:
 
 .. code-block:: text
 
@@ -287,6 +287,21 @@ SSH user must be ``root`` or have passwordless ``sudo`` permission to run
         HostName login.mycluster.myorg.com
         User slurm-admin
         IdentityFile ~/.ssh/slurm_admin
+
+For a non-root SSH user, add a sudoers rule on each login node that scopes the
+grant to a group holding those accounts:
+
+.. code-block:: text
+
+    Runas_Alias SLURM_USERS = %slurm-users
+    slurm-admin ALL=(SLURM_USERS) NOPASSWD: /bin/bash
+
+This bounds impersonation to members of ``slurm-users`` and logs every
+invocation. It is not a per-command allowlist — SkyPilot runs job setup and
+run scripts, ``rsync``, and an interactive SSH helper as the submitting user,
+so the runas set is the security boundary. Avoid ``(ALL, !root)``: it still
+allows impersonating the ``slurm`` account (Slurm's ``SlurmUser``), which is
+equivalent to controlling the scheduler.
 
 SkyPilot maps the authenticated username to the portion before ``@``. For
 example, ``alice@example.com`` maps to the Unix account ``alice``. The account
