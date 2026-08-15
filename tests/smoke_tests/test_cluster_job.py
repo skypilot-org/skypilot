@@ -2174,27 +2174,27 @@ def test_auto_mount_pending_volume_on_kubernetes():
 @pytest.mark.no_remote_server
 @pytest.mark.parametrize('attach_via', ['task', 'auto_mounts'])
 def test_volume_used_before_its_rejection_is_recorded(attach_via):
-    """Launching straight after creating a volume must not be refused.
+    """A volume recorded as being provisioned must not refuse a launch.
 
-    The record starts out saying the volume is being provisioned -- that is all
-    `volume_apply` can see without waiting -- and the driver's answer only
-    reaches it on the status refresh's schedule. Refusing on that reason is what
-    made creating a network filesystem and using it two steps, for the minutes
-    it takes; both the submit-time check and the per-launch one now let it
-    through.
+    A class that binds Immediately provisions asynchronously, so a volume reads
+    not-ready from the moment it is created until its backend finishes -- for a
+    network filesystem, minutes. Refusing on that is what made creating one and
+    using it two steps. Both checks now let it through, and they sit in different
+    places: `VolumeMount.resolve` when the task is submitted, the readiness check
+    on every launch. Hence both ways of attaching it.
 
-    So the launch proceeds, and the wait loop is what stops it: the claim's own
-    events carry the rejection within seconds, whatever the record says. Both
-    ways of attaching the volume are covered because they are checked in
-    different places -- `VolumeMount.resolve` when the task is submitted, the
-    readiness check on every launch -- and both have to let this through.
+    The class here has a provisioner that does not exist, which is what makes the
+    recorded reason deterministic: nothing answers such a claim, so no failure
+    event can appear to overwrite it. A class whose driver *refuses* the claim
+    cannot be used -- whether the rejection reaches the record before the launch
+    is a race between the driver and `volume_apply`'s own status read, and CI
+    showed it landing on both sides.
+
+    What stops the launch is then the wait loop running out of time, having named
+    the claim throughout. That the launch got that far is the assertion: a
+    refusal would have said the volume is not ready instead.
     """
     name = smoke_tests_utils.get_cluster_name()
-    create_sc_cmd = smoke_tests_utils.create_rejecting_storage_class_cmd(
-        name, binding_mode='Immediate')
-    if create_sc_cmd is None:
-        pytest.skip('No CSI driver on this cluster with a known way to refuse '
-                    'a claim; see _REJECTED_BY_PROVISIONER.')
     volume_name = f'{name}-imm'
     volume_yaml = textwrap.dedent(f"""\
         name: {volume_name}
@@ -2202,7 +2202,7 @@ def test_volume_used_before_its_rejection_is_recorded(attach_via):
         size: 1Gi
         config:
           access_mode: ReadWriteMany
-          storage_class_name: {smoke_tests_utils.rejecting_storage_class_name(name)}
+          storage_class_name: {smoke_tests_utils.unprovisionable_storage_class_name(name)}
     """)
     attached_on_task = attach_via == 'task'
     task_yaml = textwrap.dedent(f"""\
@@ -2216,15 +2216,14 @@ def test_volume_used_before_its_rejection_is_recorded(attach_via):
           cpus: 0.1+
         run: echo should not run
     """)
-    config = textwrap.dedent(f"""\
-        kubernetes:
+    # The timeout is what ends this launch, so keep it short -- but long
+    # enough for the wait loop to have reported the claim at least once.
+    auto_mounts = textwrap.dedent(f"""\
           auto_mounts:
             - volume_name: {volume_name}
               mount_paths: [/mnt/auto]
-    """) if not attached_on_task else 'kubernetes: {}\n'
-    # Comfortably under the 600s a ReadWriteMany volume is allowed, so that
-    # failing this fast can only be the driver's answer being acted on.
-    max_seconds_to_fail = 300
+    """) if not attached_on_task else ''
+    config = f'kubernetes:\n  provision_timeout: 120\n{auto_mounts}'
     with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w',
                                      delete=False) as vol_f, \
          tempfile.NamedTemporaryFile(suffix='.yaml', mode='w',
@@ -2238,40 +2237,35 @@ def test_volume_used_before_its_rejection_is_recorded(attach_via):
         test = smoke_tests_utils.Test(
             f'volume_used_before_its_rejection_is_recorded_{attach_via}',
             [
-                create_sc_cmd,
+                smoke_tests_utils.create_unprovisionable_storage_class_cmd(
+                    name),
                 # Created without the config in scope, so this step cannot be
                 # tripped up by the auto_mounts entry it is about to become.
                 smoke_tests_utils.with_config(
                     f'sky volumes apply -y '
                     f'{smoke_tests_utils.AGENT_K8S_INFRA} {vol_f.name}',
                     '/dev/null'),
-                # The premise: the record says the volume is being provisioned,
-                # not that it was refused. If this ever shows the rejection
-                # already, the launch below is covering
-                # test_volume_refused_after_it_breaks_on_kubernetes instead.
+                # The premise: not-ready, and for the one reason that is not
+                # grounds for refusing a launch. Deterministic here, since
+                # nothing will ever answer this claim with a failure.
                 f'vols=$(sky volumes ls) && echo "$vols" && '
                 f'echo "$vols" | grep {volume_name} | grep NOT_READY && '
-                f'! echo "$vols" | grep {volume_name} | grep -q '
-                f'ProvisioningFailed',
-                # Launched at once: allowed through, then failed by the wait
-                # loop on what the driver said, not by a readiness check.
+                f'echo "$vols" | grep {volume_name} | grep "still being"',
+                # Allowed through, and stopped by the wait loop instead: the
+                # claim is named, and the failure does not say the volume is
+                # not ready, which is what a refusal would have said.
                 smoke_tests_utils.with_config(
-                    f'start=$(date +%s); '
                     f'! sky launch -y -c {name} --infra kubernetes '
                     f'{task_f.name} > {name}-imm.log 2>&1; '
-                    f'elapsed=$(( $(date +%s) - start )); '
                     f'cat {name}-imm.log && '
-                    f'echo "launch took ${{elapsed}}s" && '
                     f'grep -q "PVC binding issue" {name}-imm.log && '
-                    f'grep -q "InvalidArgument" {name}-imm.log && '
-                    f'! grep -q "is not ready" {name}-imm.log && '
-                    f'[ "$elapsed" -lt {max_seconds_to_fail} ]', cfg_f.name),
+                    f'! grep -q "is not ready" {name}-imm.log', cfg_f.name),
             ],
             smoke_tests_utils.chain_teardown(
                 f'sky down -y {name} || true',
                 f'sky volumes delete {volume_name} -y || true',
-                smoke_tests_utils.delete_rejecting_storage_class_cmd(name),
-                f'rm -f {name}-imm.log'),
+                smoke_tests_utils.delete_unprovisionable_storage_class_cmd(
+                    name), f'rm -f {name}-imm.log'),
             timeout=20 * 60,
         )
         smoke_tests_utils.run_one_test(test)
