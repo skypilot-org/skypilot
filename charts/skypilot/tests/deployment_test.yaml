@@ -7,9 +7,8 @@ tests:
     set:
       apiService.metrics.enabled: true
     asserts:
-      - equal:
+      - notExists:
           path: spec.template.metadata.annotations["prometheus.io/scrape"]
-          value: "true"
       - contains:
           path: spec.template.spec.containers[0].env
           content:
@@ -57,9 +56,10 @@ tests:
           path: spec.template.spec.containers[0].args[2]
           pattern: "--metrics-port"
 
-  - it: should preserve standard Pod annotations for external scrapers
+  - it: should preserve standard Pod annotations when explicitly requested
     set:
       apiService.metrics.enabled: true
+      prometheus.preservePodScrapeAnnotations: true
     asserts:
       - equal:
           path: spec.template.metadata.annotations["prometheus.io/scrape"]
@@ -76,7 +76,7 @@ tests:
       - notExists:
           path: spec.template.metadata.annotations["prometheus.io/scrape"]
 
-  - it: should preserve standard Pod annotations when explicitly requested
+  - it: should preserve standard Pod annotations with bundled Prometheus when explicitly requested
     set:
       apiService.metrics.enabled: true
       prometheus.enabled: true

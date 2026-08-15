@@ -720,9 +720,8 @@ prometheus:
   # @schema type: [boolean, null]
   useDedicatedScrapeConfig: false
   # Keep legacy prometheus.io/* Pod annotations alongside the Service annotations
-  # when bundled Prometheus is enabled. This is useful for manually managed
-  # Pod-based scrapers, but may create duplicate targets unless they are filtered.
-  # Pod annotations are kept automatically when bundled Prometheus is disabled.
+  # when explicitly requested. This is useful for manually managed Pod-based
+  # scrapers, but may create duplicate targets unless they are filtered.
   # @schema type: [boolean, null]
   preservePodScrapeAnnotations: false
   # Add a scrape job for the API server's /endpoints-metrics federation

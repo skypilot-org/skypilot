@@ -138,10 +138,9 @@ images must read this environment variable to use a non-default port. Images
 that retain the historical 9090 default continue to work when ``port`` remains
 9090.
 
-For external, manually managed Pod-based scrapers, the chart keeps the legacy
-``prometheus.io/*`` Pod annotations automatically when ``prometheus.enabled`` is
-false. If bundled Prometheus is enabled, those annotations are omitted by
-default to avoid duplicate discovery; set
-``prometheus.preservePodScrapeAnnotations: true`` only when the duplicate-target
-trade-off is understood and the bundled scrape configuration is filtered as
-needed. Dedicated mode uses only the ``skypilot.co/*`` Pod annotations.
+The chart does not add standard ``prometheus.io/*`` annotations to the API
+server Pod by default. This avoids duplicate discovery when an external agent
+has both Service- and Pod-based scrape jobs. Set
+``prometheus.preservePodScrapeAnnotations: true`` only when a manually managed
+Pod scraper requires the legacy annotations and the duplicate-target trade-off
+is understood. Dedicated mode uses only the ``skypilot.co/*`` Pod annotations.

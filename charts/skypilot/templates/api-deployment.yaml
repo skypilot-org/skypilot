@@ -5,7 +5,7 @@
        storage mounts / ephemeral ~/.sky / env below key off this rather than
        storage.enabled alone. */ -}}
 {{- $statePersist := or .Values.storage.enabled .Values.storage.existingClaim -}}
-{{- $preservePodScrapeAnnotations := and .Values.apiService.metrics.enabled (not .Values.prometheus.useDedicatedScrapeConfig) (or (not .Values.prometheus.enabled) .Values.prometheus.preservePodScrapeAnnotations) -}}
+{{- $preservePodScrapeAnnotations := and .Values.apiService.metrics.enabled (not .Values.prometheus.useDedicatedScrapeConfig) .Values.prometheus.preservePodScrapeAnnotations -}}
 apiVersion: apps/v1
 kind: Deployment
 metadata:

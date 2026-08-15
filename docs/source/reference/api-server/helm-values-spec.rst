@@ -2586,9 +2586,8 @@ Default: ``false``
 
 Keep the legacy ``prometheus.io/*`` annotations on the API server Pod in
 addition to the Service annotations. This supports manually managed
-Pod-based scrapers when the bundled Prometheus is enabled, but can create
-duplicate targets. Pod annotations are preserved automatically when
-``prometheus.enabled`` is ``false``; dedicated scrape mode uses only
+Pod-based scrapers, but can create duplicate targets when a scraper also
+discovers the annotated Service. Dedicated scrape mode uses only
 ``skypilot.co/*`` annotations.
 
 Default: ``false``
