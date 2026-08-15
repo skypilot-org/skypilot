@@ -1150,6 +1150,78 @@ def test_prune_sky_logs_missing_dir_is_noop(tmp_path, monkeypatch):
     assert server._prune_sky_logs(cutoff=1_000_000.0) == 0
 
 
+# --- Tests for cleanup_clients_tmp (client tmp dir GC) ---
+
+
+def _set_download_tmp_base(monkeypatch, base) -> None:
+    storage = mock.Mock()
+    storage.download_tmp_base_dir.return_value = base
+    monkeypatch.setattr(server.bs, 'get_blob_storage', lambda: storage)
+
+
+async def _run_one_cleanup_pass(monkeypatch, daemon) -> None:
+    """Run a single pass of an hourly cleanup daemon, then stop it."""
+    sleeps = []
+
+    async def fake_sleep(delay):
+        sleeps.append(delay)
+        if len(sleeps) > 1:
+            raise asyncio.CancelledError()
+
+    monkeypatch.setattr(server.asyncio, 'sleep', fake_sleep)
+    with pytest.raises(asyncio.CancelledError):
+        await daemon()
+
+
+@pytest.mark.asyncio
+async def test_cleanup_clients_tmp_removes_expired_dirs(tmp_path, monkeypatch):
+    """Expired per-user entries go; fresh ones stay."""
+    tmp_base = tmp_path / 'clients'
+    _set_download_tmp_base(monkeypatch, str(tmp_base))
+    now = time.time()
+    logs = _touch_dir(tmp_base / 'user1' / 'sky_logs', now - 10_000)
+    # Legacy task YAMLs live in a dir, so they go with the dir sweep.
+    tasks = _touch_dir(tmp_base / 'user1' / 'tasks', now - 10_000)
+    fresh = _touch_dir(tmp_base / 'user1' / 'file_mounts', now - 10)
+
+    await _run_one_cleanup_pass(monkeypatch, server.cleanup_clients_tmp)
+
+    assert not logs.exists()
+    assert not tasks.exists()
+    assert fresh.exists()
+
+
+@pytest.mark.asyncio
+async def test_cleanup_clients_tmp_removes_translated_yamls_of_any_age(
+        tmp_path, monkeypatch):
+    """*_translated.yaml is deprecated, so age does not matter."""
+    tmp_base = tmp_path / 'clients'
+    _set_download_tmp_base(monkeypatch, str(tmp_base))
+    now = time.time()
+    old = _touch_file(tmp_base / 'user1' / 'abc_translated.yaml', now - 10_000)
+    fresh = _touch_file(tmp_base / 'user1' / 'def_translated.yaml', now)
+    other = _touch_file(tmp_base / 'user1' / 'config.yaml', now - 10_000)
+
+    await _run_one_cleanup_pass(monkeypatch, server.cleanup_clients_tmp)
+
+    assert not old.exists()
+    assert not fresh.exists()
+    assert other.exists()
+
+
+@pytest.mark.asyncio
+async def test_cleanup_clients_tmp_noop_without_download_tmp_base(
+        tmp_path, monkeypatch):
+    """Backends sharing the persistent log dir need no cleanup."""
+    _set_download_tmp_base(monkeypatch, None)
+    kept = _touch_file(tmp_path / 'user1' / 'abc_translated.yaml',
+                       time.time() - 10_000)
+
+    await _run_one_cleanup_pass(monkeypatch, server.cleanup_clients_tmp)
+
+    assert kept.exists()
+
+
 class _FakeTask:
     """Minimal stand-in for a Request row (only the fields get_expanded uses)."""
 
