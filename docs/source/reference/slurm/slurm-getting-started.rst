@@ -294,6 +294,7 @@ grant to a group holding those accounts:
 .. code-block:: text
 
     Runas_Alias SLURM_USERS = %slurm-users
+    Defaults>SLURM_USERS !requiretty, !use_pty
     slurm-admin ALL=(SLURM_USERS) NOPASSWD: /bin/bash
 
 This bounds impersonation to members of ``slurm-users`` and logs every
@@ -302,6 +303,17 @@ run scripts, ``rsync``, and an interactive SSH helper as the submitting user,
 so the runas set is the security boundary. Avoid ``(ALL, !root)``: it still
 allows impersonating the ``slurm`` account (Slurm's ``SlurmUser``), which is
 equivalent to controlling the scheduler.
+
+The ``Defaults>`` line keeps ``requiretty`` and ``use_pty`` off this path while
+leaving them in force for the rest of the host. SkyPilot runs these commands
+over SSH without allocating a terminal, so under ``requiretty`` sudo refuses
+with ``sorry, you must have a tty to run sudo`` and file transfers fail; and
+``rsync`` carries a binary stream that must not cross a pty line discipline.
+``requiretty`` is off by default on Debian and Ubuntu but was historically on
+for RHEL and CentOS. Scope on the runas alias rather than on ``/bin/bash``:
+sudoers cannot combine a runas and a command scope in one entry, and a
+command-scoped entry would also relax the settings for every other sudo grant
+to that shell.
 
 SkyPilot maps the authenticated username to the portion before ``@``. For
 example, ``alice@example.com`` maps to the Unix account ``alice``. The account

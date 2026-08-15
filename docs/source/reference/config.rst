@@ -2235,6 +2235,7 @@ SkyPilot may submit as:
 .. code-block:: text
 
   Runas_Alias SLURM_USERS = %slurm-users
+  Defaults>SLURM_USERS !requiretty, !use_pty
   skypilot ALL=(SLURM_USERS) NOPASSWD: /bin/bash
 
 This bounds impersonation to members of ``slurm-users`` and records every
@@ -2243,6 +2244,13 @@ run job setup and run scripts, ``rsync``, and an interactive SSH helper as the
 submitting user, so the runas set is the security boundary. Do not use
 ``(ALL, !root)`` instead: it still permits impersonating the ``slurm`` account
 (Slurm's ``SlurmUser``), which is equivalent to controlling the scheduler.
+
+The ``Defaults>`` line keeps ``requiretty`` and ``use_pty`` off this path
+without relaxing them elsewhere on the host. SkyPilot runs these commands over
+SSH without a terminal, so a global ``requiretty`` — historically on for RHEL
+and CentOS, off on Debian and Ubuntu — makes sudo refuse and file transfers
+fail, and ``rsync`` carries a binary stream that must not cross a pty line
+discipline.
 
 Cluster-wide inventory commands run as the SSH user so monitoring and capacity
 views do not depend on the user requesting them. The SSH user must have
