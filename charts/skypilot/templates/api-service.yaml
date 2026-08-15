@@ -4,6 +4,12 @@ kind: Service
 metadata:
   name: {{ $fullName }}-api-service
   namespace: {{ .Release.Namespace }}
+  {{- if and .Values.apiService.metrics.enabled (not .Values.prometheus.useDedicatedScrapeConfig) }}
+  annotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/path: "/metrics"
+    prometheus.io/port: {{ .Values.apiService.metrics.port | quote }}
+  {{- end }}
 spec:
   type: ClusterIP  # Use clusterIP to allow ingress to authenticate
   {{- if and .Values.apiService.host (contains ":" .Values.apiService.host) }}
@@ -20,7 +26,7 @@ spec:
   {{- if .Values.apiService.metrics.enabled }}
     - port: {{ .Values.apiService.metrics.port }}
       name: metrics
-      targetPort: {{ .Values.apiService.metrics.port }}
+      targetPort: metrics
       protocol: TCP
   {{- end }}
   selector:

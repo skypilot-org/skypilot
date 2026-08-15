@@ -3,6 +3,44 @@ suite: server_deployment_test
 templates:
   - templates/api-deployment.yaml
 tests:
+  - it: should declare and advertise the API metrics port in normal mode
+    set:
+      apiService.metrics.enabled: true
+    asserts:
+      - notExists:
+          path: spec.template.metadata.annotations["prometheus.io/scrape"]
+      - contains:
+          path: spec.template.spec.containers[0].ports
+          content:
+            containerPort: 9090
+            name: metrics
+      - matchRegex:
+          path: spec.template.spec.containers[0].args[2]
+          pattern: "--metrics-port=9090"
+
+  - it: should retain dedicated Pod annotations and use a custom metrics port
+    set:
+      apiService.metrics.enabled: true
+      apiService.metrics.port: 9190
+      prometheus.useDedicatedScrapeConfig: true
+    asserts:
+      - equal:
+          path: spec.template.metadata.annotations["skypilot.co/scrape"]
+          value: "true"
+      - equal:
+          path: spec.template.metadata.annotations["skypilot.co/port"]
+          value: "9190"
+      - notExists:
+          path: spec.template.metadata.annotations["prometheus.io/scrape"]
+      - contains:
+          path: spec.template.spec.containers[0].ports
+          content:
+            containerPort: 9190
+            name: metrics
+      - matchRegex:
+          path: spec.template.spec.containers[0].args[2]
+          pattern: "--metrics-port=9190"
+
   - it: should mount kubeconfig correctly when useKubeconfig is enabled
     set:
       kubernetesCredentials.useKubeconfig: true

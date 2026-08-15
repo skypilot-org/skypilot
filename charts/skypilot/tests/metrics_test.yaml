@@ -3,10 +3,9 @@ suite: prometheus_extra_scrape_configs_test
 templates:
   - charts/prometheus/templates/cm.yaml
 tests:
-  - it: should render extraScrapeConfigs with resolved service target
+  - it: should discover GPU metrics through the named API Service endpoint
     set:
       prometheus.enabled: true
-      prometheus.useDedicatedScrapeConfig: true
     asserts:
       - hasDocuments:
           count: 1
@@ -14,20 +13,39 @@ tests:
           of: ConfigMap
       - matchRegex:
           path: data["prometheus.yml"]
-          pattern: "RELEASE-NAME-api-service\\.NAMESPACE\\.svc\\.cluster\\.local:9090"
+          pattern: "job_name: 'skypilot-api-server-gpu-metrics'"
+      - matchRegex:
+          path: data["prometheus.yml"]
+          pattern: "__meta_kubernetes_endpoint_port_name"
+      - matchRegex:
+          path: data["prometheus.yml"]
+          pattern: "RELEASE-NAME-api-service;metrics"
 
-  - it: should render extraScrapeConfigs using fullnameOverride for service name
+  - it: should use fullnameOverride when filtering the API Service endpoint
     set:
       prometheus.enabled: true
-      prometheus.useDedicatedScrapeConfig: true
       fullnameOverride: custom-name
       prometheus.fullnameOverride: custom-name
     asserts:
       - hasDocuments:
           count: 1
+      - isKind:
+          of: ConfigMap
       - matchRegex:
           path: data["prometheus.yml"]
-          pattern: "custom-name-api-service\\.NAMESPACE\\.svc\\.cluster\\.local:9090"
+          pattern: "custom-name-api-service;metrics"
+
+  - it: should render the dedicated Pod scrape job when requested
+    set:
+      prometheus.enabled: true
+      prometheus.useDedicatedScrapeConfig: true
+    asserts:
+      - matchRegex:
+          path: data["prometheus.yml"]
+          pattern: "job_name: 'skypilot-api-server-metrics'"
+      - matchRegex:
+          path: data["prometheus.yml"]
+          pattern: "skypilot_co_scrape"
 
   - it: should NOT render the endpoints-metrics scrape job by default
     set:

@@ -3,6 +3,44 @@ suite: api_service_test
 templates:
   - templates/api-service.yaml
 tests:
+  - it: should expose metrics discovery annotations on the Service
+    set:
+      apiService.metrics.enabled: true
+    asserts:
+      - equal:
+          path: metadata.annotations["prometheus.io/scrape"]
+          value: "true"
+      - equal:
+          path: metadata.annotations["prometheus.io/path"]
+          value: /metrics
+      - equal:
+          path: metadata.annotations["prometheus.io/port"]
+          value: "9090"
+      - contains:
+          path: spec.ports
+          content:
+            port: 9090
+            name: metrics
+            targetPort: metrics
+            protocol: TCP
+
+  - it: should omit standard Service annotations in dedicated scrape mode
+    set:
+      apiService.metrics.enabled: true
+      prometheus.useDedicatedScrapeConfig: true
+    asserts:
+      - notExists:
+          path: metadata.annotations["prometheus.io/scrape"]
+
+  - it: should omit metrics discovery and the metrics port when disabled
+    asserts:
+      - notExists:
+          path: metadata.annotations["prometheus.io/scrape"]
+      - notContains:
+          path: spec.ports
+          content:
+            name: metrics
+
   - it: should not set ipFamilyPolicy by default (single-stack)
     asserts:
       - isKind:
