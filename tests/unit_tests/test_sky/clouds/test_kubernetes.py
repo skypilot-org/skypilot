@@ -574,6 +574,8 @@ class TestKubernetesSecurityContextMerging(unittest.TestCase):
         self.resources.zone = None
         self.resources.cluster_config_overrides = {}
         self.resources.image_id = None  # Set image_id to None to use default
+        self.resources.disk_size = 256  # DEFAULT_DISK_SIZE_GB
+        self.resources.disk_size_specified = False
 
         # Mock the assert_launchable method to return itself
         # Use setattr to avoid the assertion detection issue
@@ -896,6 +898,82 @@ class TestKubernetesSecurityContextMerging(unittest.TestCase):
         self.assertEqual(deploy_vars['k8s_acc_label_values'], ['H100'])
         self.assertEqual(deploy_vars['k8s_resource_key'], 'nvidia.com/gpu')
         self.assertFalse(deploy_vars['tpu_requested'])  # H100 is GPU, not TPU
+
+    @patch('sky.provision.kubernetes.utils.get_kubernetes_nodes')
+    @patch('sky.provision.kubernetes.utils.get_current_kube_config_context_name'
+          )
+    @patch('sky.provision.kubernetes.utils.get_kube_config_context_namespace')
+    @patch('sky.provision.kubernetes.utils.get_accelerator_label_keys')
+    @patch('sky.provision.kubernetes.utils.get_accelerator_label_key_values')
+    @patch('sky.provision.kubernetes.utils.get_gpu_resource_key')
+    @patch('sky.provision.kubernetes.utils.is_kubeconfig_exec_auth')
+    @patch('sky.skypilot_config.get_effective_region_config')
+    @patch('sky.skypilot_config.get_workspace_cloud')
+    @patch('sky.provision.kubernetes.network_utils.get_port_mode')
+    @patch('sky.catalog.get_image_id_from_tag')
+    @patch('sky.clouds.kubernetes.Kubernetes._detect_network_type')
+    def test_neuron_routes_to_neuron_resource_key(
+            self, mock_detect_network_type, mock_get_image, mock_get_port_mode,
+            mock_get_workspace_cloud, mock_get_cloud_config_value,
+            mock_is_exec_auth, mock_get_gpu_resource_key,
+            mock_get_accelerator_label_key_values,
+            mock_get_accelerator_label_keys, mock_get_namespace,
+            mock_get_current_context, mock_get_k8s_nodes):
+        """AWS Neuron (Trainium/Inferentia) routes to aws.amazon.com/neuron."""
+        neuron_resources = mock.MagicMock()
+        neuron_resources.instance_type = '8CPU--32GB--Trainium:16'
+        neuron_resources.accelerators = {'Trainium': 16}
+        neuron_resources.use_spot = False
+        neuron_resources.region = 'eks-context'
+        neuron_resources.zone = None
+        neuron_resources.cluster_config_overrides = {}
+        neuron_resources.image_id = None
+        setattr(neuron_resources, 'assert_launchable', lambda: neuron_resources)
+        neuron_resources.network_tier = resources_utils.NetworkTier.STANDARD
+
+        from sky.provision.kubernetes.utils import (
+            KubernetesHighPerformanceNetworkType)
+        mock_detect_network_type.return_value = (
+            KubernetesHighPerformanceNetworkType.NONE, None)
+        mock_get_current_context.return_value = 'eks-context'
+        mock_get_namespace.return_value = 'default'
+        mock_get_accelerator_label_keys.return_value = []
+        mock_get_workspace_cloud.return_value.get.return_value = None
+        mock_is_exec_auth.return_value = (False, None)
+        # Karpenter surfaces Neuron via the instance-accelerator-name label
+        # (NOT the TPU label), so routing falls to the Neuron branch.
+        mock_get_accelerator_label_key_values.return_value = (
+            'karpenter.k8s.aws/instance-accelerator-name', ['trainium'
+                                                           ], None, None)
+        mock_get_gpu_resource_key.return_value = 'nvidia.com/gpu'
+        mock_get_cloud_config_value.side_effect = (
+            lambda cloud, keys, region, default_value=None, override_configs=
+            None: {
+                ('kubernetes', 'remote_identity'): 'SERVICE_ACCOUNT',
+                ('kubernetes', 'provision_timeout'): 10,
+                ('kubernetes', 'high_availability', 'storage_class_name'): None,
+            }.get((cloud,) + keys, default_value))
+        mock_port_mode = mock.MagicMock()
+        mock_port_mode.value = 'portforward'
+        mock_get_port_mode.return_value = mock_port_mode
+        mock_get_image.return_value = 'test-neuron-image:latest'
+
+        k8s_cloud = kubernetes.Kubernetes()
+        deploy_vars = k8s_cloud.make_deploy_resources_variables(
+            resources=neuron_resources,
+            cluster_name=resources_utils.ClusterName(
+                display_name='test-neuron-cluster',
+                name_on_cloud='test-neuron-cluster'),
+            region=mock.MagicMock(name='eks-context'),
+            zones=None,
+            num_nodes=1,
+            dryrun=False)
+
+        self.assertEqual(deploy_vars['accelerator_count'], '16')
+        self.assertEqual(deploy_vars['k8s_resource_key'],
+                         'aws.amazon.com/neuron')
+        # Neuron is neither GPU nor TPU.
+        self.assertFalse(deploy_vars['tpu_requested'])
 
     @patch('sky.provision.kubernetes.utils.get_kubernetes_nodes')
     @patch('sky.provision.kubernetes.utils.get_current_kube_config_context_name'
@@ -1612,13 +1690,13 @@ class TestKubernetesMakeDeployResourcesVariables(unittest.TestCase):
     @patch('sky.provision.kubernetes.network_utils.get_port_mode')
     @patch('sky.catalog.get_image_id_from_tag')
     @patch('sky.clouds.kubernetes.Kubernetes._detect_network_type')
-    def test_ephemeral_storage_in_deploy_vars(
+    def test_disk_size_sets_ephemeral_storage_in_deploy_vars(
             self, mock_detect_network_type, mock_get_image, mock_get_port_mode,
             mock_get_workspace_cloud, mock_get_workspace_region_config,
             mock_get_cloud_config_value, mock_is_exec_auth,
             mock_get_accelerator_label_keys, mock_get_namespace,
             mock_get_current_context, mock_get_k8s_nodes):
-        """Test that ephemeral_storage is included in deploy_vars."""
+        """Test that non-default disk_size sets ephemeral-storage."""
         self._setup_mocks_for_pod_resource_limits_test(
             mock_detect_network_type,
             mock_get_image,
@@ -1632,8 +1710,9 @@ class TestKubernetesMakeDeployResourcesVariables(unittest.TestCase):
             mock_get_current_context,
             set_pod_resource_limits_value=False)
 
-        # Set ephemeral_storage on resources
-        self.resources.ephemeral_storage = 50
+        # Set disk_size to a non-default value
+        self.resources.disk_size = 50
+        self.resources.disk_size_specified = True
 
         k8s_cloud = kubernetes.Kubernetes()
         deploy_vars = k8s_cloud.make_deploy_resources_variables(
@@ -1663,13 +1742,13 @@ class TestKubernetesMakeDeployResourcesVariables(unittest.TestCase):
     @patch('sky.provision.kubernetes.network_utils.get_port_mode')
     @patch('sky.catalog.get_image_id_from_tag')
     @patch('sky.clouds.kubernetes.Kubernetes._detect_network_type')
-    def test_ephemeral_storage_with_resource_limits(
+    def test_disk_size_with_resource_limits(
             self, mock_detect_network_type, mock_get_image, mock_get_port_mode,
             mock_get_workspace_cloud, mock_get_workspace_region_config,
             mock_get_cloud_config_value, mock_is_exec_auth,
             mock_get_accelerator_label_keys, mock_get_namespace,
             mock_get_current_context, mock_get_k8s_nodes):
-        """Test ephemeral_storage limits with set_pod_resource_limits."""
+        """Test disk_size ephemeral-storage limits with set_pod_resource_limits."""
         self._setup_mocks_for_pod_resource_limits_test(
             mock_detect_network_type,
             mock_get_image,
@@ -1683,8 +1762,9 @@ class TestKubernetesMakeDeployResourcesVariables(unittest.TestCase):
             mock_get_current_context,
             set_pod_resource_limits_value=1.5)
 
-        # Set ephemeral_storage on resources
-        self.resources.ephemeral_storage = 50
+        # Set disk_size to a non-default value
+        self.resources.disk_size = 50
+        self.resources.disk_size_specified = True
 
         k8s_cloud = kubernetes.Kubernetes()
         deploy_vars = k8s_cloud.make_deploy_resources_variables(
@@ -1715,13 +1795,13 @@ class TestKubernetesMakeDeployResourcesVariables(unittest.TestCase):
     @patch('sky.provision.kubernetes.network_utils.get_port_mode')
     @patch('sky.catalog.get_image_id_from_tag')
     @patch('sky.clouds.kubernetes.Kubernetes._detect_network_type')
-    def test_no_ephemeral_storage_when_not_set(
+    def test_no_ephemeral_storage_with_default_disk_size(
             self, mock_detect_network_type, mock_get_image, mock_get_port_mode,
             mock_get_workspace_cloud, mock_get_workspace_region_config,
             mock_get_cloud_config_value, mock_is_exec_auth,
             mock_get_accelerator_label_keys, mock_get_namespace,
             mock_get_current_context, mock_get_k8s_nodes):
-        """Test no ephemeral-storage in deploy_vars when not specified."""
+        """Test no ephemeral-storage when disk_size is the default."""
         self._setup_mocks_for_pod_resource_limits_test(
             mock_detect_network_type,
             mock_get_image,
@@ -1735,9 +1815,8 @@ class TestKubernetesMakeDeployResourcesVariables(unittest.TestCase):
             mock_get_current_context,
             set_pod_resource_limits_value=True)
 
-        # ephemeral_storage is None (not set)
-        self.resources.ephemeral_storage = None
-
+        # disk_size not explicitly specified — should NOT set ephemeral-storage
+        self.resources.disk_size_specified = False
         k8s_cloud = kubernetes.Kubernetes()
         deploy_vars = k8s_cloud.make_deploy_resources_variables(
             resources=self.resources,
@@ -2071,36 +2150,6 @@ class TestKubernetesRayTemplateAptErrorHandling(unittest.TestCase):
         self.assertIn('dump_apt_log', snippet)
         self.assertIn('exit 1', snippet)
         self.assertLess(snippet.index('dump_apt_log'), snippet.index('exit 1'))
-
-
-class TestEphemeralStorageValidation(unittest.TestCase):
-    """Test that ephemeral_storage is rejected on non-Kubernetes clouds."""
-
-    def test_ephemeral_storage_rejected_on_non_k8s_cloud(self):
-        """Test that ephemeral_storage raises ValueError on non-K8s cloud."""
-        from sky import resources as resources_lib
-        from sky.clouds import aws
-        r = resources_lib.Resources(cloud=aws.AWS(), ephemeral_storage=50)
-        with self.assertRaises(ValueError) as cm:
-            r.validate()
-        self.assertIn('only supported on Kubernetes', str(cm.exception))
-
-    def test_ephemeral_storage_accepted_on_kubernetes(self):
-        """Test that ephemeral_storage is accepted on Kubernetes."""
-        from sky import resources as resources_lib
-        r = resources_lib.Resources(cloud=kubernetes.Kubernetes(),
-                                    ephemeral_storage=50)
-        # validate() should not raise for Kubernetes
-        r.validate()
-        self.assertEqual(r.ephemeral_storage, 50)
-
-    def test_ephemeral_storage_accepted_when_no_cloud(self):
-        """Test that ephemeral_storage is accepted when no cloud specified."""
-        from sky import resources as resources_lib
-        r = resources_lib.Resources(ephemeral_storage=50)
-        # validate() should not raise when cloud is not specified
-        r.validate()
-        self.assertEqual(r.ephemeral_storage, 50)
 
 
 class TestKubernetesSecurityContext(unittest.TestCase):
@@ -3094,7 +3143,9 @@ class TestKubernetesRegionsWithOffering(unittest.TestCase):
         """Test that unreachable contexts are excluded."""
         mock_existing_allowed_contexts.return_value = ['ctx1', 'ctx2']
 
-        def check_instance_side_effect(context, instance_type):
+        def check_instance_side_effect(context,
+                                       instance_type,
+                                       ephemeral_storage_gb=None):
             if context == 'ctx1':
                 from sky import exceptions as sky_exceptions
                 raise sky_exceptions.KubeAPIUnreachableError('API unreachable')
@@ -3163,7 +3214,9 @@ class TestKubernetesRegionsWithOffering(unittest.TestCase):
         mock_check_features.side_effect = check_features_side_effect
 
         # ctx3 doesn't have enough resources
-        def check_instance_side_effect(context, instance_type):
+        def check_instance_side_effect(context,
+                                       instance_type,
+                                       ephemeral_storage_gb=None):
             if context == 'ctx3':
                 return (False, 'Not enough resources')
             return (True, None)

@@ -247,11 +247,29 @@ def get_user_workspace(
                             if e.note else 'multiple workspaces accessible; '
                             'no preferred or active workspace set')
     except exceptions.NoWorkspaceAccessError as e:
-        # One-line message from the raise site ("User <name> (<id>) has
-        # no accessible workspaces.") — short enough to fit in the tree
-        # row and more informative than a generic stand-in.
-        response['source'] = workspace_constants.WORKSPACE_SOURCE_NO_ACCESS
-        response['note'] = str(e)
+        # The resolver answers "where would a *write* land", so it reports no
+        # access for a user whose every accessible workspace is read-only.
+        # Re-resolve at read level to report where that user's reads land,
+        # under a distinct state so the CLI / dashboard can say "read-only".
+        response['source'] = workspace_constants.WORKSPACE_SOURCE_READ_ONLY
+        try:
+            resolution = workspaces_core.resolve_workspace_for_user(
+                user_for_resolve,
+                requested=requested,
+                action=workspace_constants.WORKSPACE_ACTION_READ)
+        except (exceptions.NoWorkspaceAccessError,
+                exceptions.PermissionDeniedError):
+            # No read access either, so the original message is the truth.
+            # One-line message from the raise site ("User <name> (<id>) has
+            # no accessible workspaces.") — short enough to fit in the tree
+            # row and more informative than a generic stand-in.
+            response['source'] = workspace_constants.WORKSPACE_SOURCE_NO_ACCESS
+            response['note'] = str(e)
+        else:
+            response['workspace'] = resolution.workspace
+            response['note'] = ('read-only access only: reads land here, but '
+                                'launching requires membership of a writable '
+                                'workspace')
     except exceptions.PermissionDeniedError as e:
         # Per-workspace deny — raised when an explicit `requested`
         # workspace exists but the user can't access it. We keep the
@@ -265,8 +283,15 @@ def get_user_workspace(
         response['workspace'] = resolution.workspace
         response['source'] = resolution.source
         response['note'] = resolution.note
-    response['accessible'] = sorted(
-        workspaces_core.get_accessible_workspace_names())
+    # `accessible` keeps its historical meaning: the workspaces the user can
+    # launch into. Everything downstream treats it as a set of usable choices
+    # (dropdowns, "where do I create this"), so read-only-visible workspaces
+    # must NOT be folded in — they go in `read_only`, additively.
+    readable, writable = workspaces_core.get_workspace_access_sets()
+    response['accessible'] = sorted(writable)
+    # Workspaces the user can only view (read-only visibility for non-members):
+    # visible but not writable. Lets the CLI/dashboard list them separately.
+    response['read_only'] = sorted(readable - writable)
     return response
 
 
@@ -820,6 +845,24 @@ def create_service_account_token(
             status_code=400,
             detail='Expiration days must be positive or 0 for never expire')
 
+    # Validate the optional role up front so we fail before creating anything.
+    if token_body.role is not None:
+        if token_body.role not in rbac.get_supported_roles():
+            raise fastapi.HTTPException(
+                status_code=400,
+                detail=f'Invalid role {token_body.role!r}. Supported roles: '
+                f'{", ".join(rbac.get_supported_roles())}.')
+        # Only admins may create an admin-role service account; otherwise a
+        # non-admin could escalate by minting an admin-scoped token.
+        if token_body.role == rbac.RoleName.ADMIN.value:
+            caller_roles = permission.permission_service.get_user_roles(
+                auth_user.id)
+            if not caller_roles or caller_roles[0] != rbac.RoleName.ADMIN.value:
+                raise fastapi.HTTPException(
+                    status_code=403,
+                    detail='Only admins can create a service account with the '
+                    'admin role.')
+
     try:
         # Generate a unique service account user ID
         service_account_user_id = _generate_service_account_user_id()
@@ -844,6 +887,11 @@ def create_service_account_token(
         # an admin's runtime `rbac.default_role` change then applies without a
         # server restart.
         permission.seed_new_user_role(service_account_user_id)
+        # If a role was requested, apply it now so the token is created with the
+        # intended role atomically (no separate update-role round trip).
+        if token_body.role is not None:
+            permission.permission_service.update_role(service_account_user_id,
+                                                      token_body.role)
 
         # Handle expiration: 0 means "never expire"
         expires_in_days = token_body.expires_in_days

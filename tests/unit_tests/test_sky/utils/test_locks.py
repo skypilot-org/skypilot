@@ -429,28 +429,30 @@ class TestPostgresLock:
         connection.commit.assert_not_called()
         connection.close.assert_called_once()
 
-    @mock.patch.object(global_user_state, 'initialize_and_get_db')
-    def test_postgres_lock_get_connection_success(self, mock_init_db):
-        """Test successful database connection."""
+    @mock.patch.object(db_utils, 'get_engine')
+    def test_postgres_lock_get_connection_success(self, mock_get_engine):
+        """Test successful database connection via a direct engine."""
         mock_engine = mock.Mock()
         mock_engine.dialect.name = db_utils.SQLAlchemyDialect.POSTGRESQL.value
         mock_connection = mock.Mock()
         mock_engine.raw_connection.return_value = mock_connection
-        mock_init_db.return_value = mock_engine
+        mock_get_engine.return_value = mock_engine
 
         lock = locks.PostgresLock('test_lock')
         result = lock._get_connection()
 
         assert result is mock_connection
-        mock_init_db.assert_called_once()
+        mock_get_engine.assert_called_once()
+        # The lock must bypass any configured pooler.
+        assert mock_get_engine.call_args.kwargs.get('direct') is True
         mock_engine.raw_connection.assert_called_once()
 
-    @mock.patch.object(global_user_state, 'initialize_and_get_db')
-    def test_postgres_lock_get_connection_wrong_dialect(self, mock_init_db):
+    @mock.patch.object(db_utils, 'get_engine')
+    def test_postgres_lock_get_connection_wrong_dialect(self, mock_get_engine):
         """Test database connection with wrong dialect."""
         mock_engine = mock.Mock()
         mock_engine.dialect.name = 'sqlite'
-        mock_init_db.return_value = mock_engine
+        mock_get_engine.return_value = mock_engine
 
         lock = locks.PostgresLock('test_lock')
 
@@ -588,6 +590,85 @@ class TestPostgresLock:
         error_msg = str(exc_info.value).lower()
         assert 'immediately' in error_msg
         assert 'shared' in error_msg
+
+
+class _RaisingAutocommitDriverConn:
+    """Driver connection stub whose autocommit setter raises (dead conn)."""
+
+    @property
+    def autocommit(self):
+        return True
+
+    @autocommit.setter
+    def autocommit(self, value):
+        raise RuntimeError('server closed the connection unexpectedly')
+
+
+class TestPostgresLockAutocommit:
+    """Test that lock connections run in autocommit mode.
+
+    Session-level advisory locks need no transaction; without autocommit
+    the first lock statement opens an implicit transaction that stays open
+    for the whole lock hold, leaving the session 'idle in transaction'.
+    """
+
+    @mock.patch.object(db_utils, 'get_engine')
+    def test_get_connection_enables_autocommit(self, mock_get_engine):
+        """_get_connection puts the borrowed connection in autocommit."""
+        mock_engine = mock.Mock()
+        mock_engine.dialect.name = db_utils.SQLAlchemyDialect.POSTGRESQL.value
+        mock_connection = mock.Mock()
+        mock_engine.raw_connection.return_value = mock_connection
+        mock_get_engine.return_value = mock_engine
+
+        lock = locks.PostgresLock('test_lock')
+        result = lock._get_connection()
+
+        assert result is mock_connection
+        assert result.driver_connection.autocommit is True
+
+    def test_close_connection_restores_transactional_mode(self):
+        """_close_connection restores autocommit=False before returning the
+        connection to the pool (other borrowers expect transactional mode)."""
+        connection = mock.Mock()
+        lock = locks.PostgresLock('test_lock')
+        lock._connection = connection
+
+        lock._close_connection()
+
+        assert connection.driver_connection.autocommit is False
+        connection.close.assert_called_once()
+        connection.invalidate.assert_not_called()
+        assert lock._connection is None
+
+    def test_close_connection_invalidate_skips_restore(self):
+        """The invalidate path discards the connection without touching
+        autocommit (the connection never returns to the pool)."""
+        connection = mock.Mock()
+        lock = locks.PostgresLock('test_lock')
+        lock._connection = connection
+
+        lock._close_connection(invalidate=True)
+
+        connection.invalidate.assert_called_once()
+        connection.close.assert_not_called()
+        # autocommit must not have been assigned a bool by the restore path.
+        assert not isinstance(connection.driver_connection.autocommit, bool)
+
+    def test_close_connection_restore_failure_invalidates(self):
+        """If restoring transactional mode fails (dead connection), the
+        connection is invalidated instead of being returned to the pool in
+        autocommit mode."""
+        connection = mock.Mock()
+        connection.driver_connection = _RaisingAutocommitDriverConn()
+        lock = locks.PostgresLock('test_lock')
+        lock._connection = connection
+
+        lock._close_connection()
+
+        connection.invalidate.assert_called_once()
+        connection.close.assert_not_called()
+        assert lock._connection is None
 
 
 class TestGetLock:
@@ -754,3 +835,68 @@ class TestDistributedLockIntegration:
             assert isinstance(lock, locks.FileLock)
 
         mock_detect.assert_called_once()
+
+
+class TestLockAcquirableCondition:
+    """LockAcquirableCondition: resume a paused request when a lock frees."""
+
+    @staticmethod
+    def _acquirable_lock():
+        """A lock whose non-blocking acquire succeeds, as a context manager."""
+        lock = mock.MagicMock()
+        proxy = mock.MagicMock()
+        proxy.__enter__ = mock.MagicMock(return_value=lock)
+        proxy.__exit__ = mock.MagicMock(return_value=None)
+        lock.acquire.return_value = proxy
+        return lock, proxy
+
+    def test_resumes_when_lock_free(self, monkeypatch):
+        held_probes = 2
+        lock, proxy = self._acquirable_lock()
+        probes = []
+
+        def fake_get_lock(lock_id):
+            probes.append(lock_id)
+            if len(probes) <= held_probes:
+                held = mock.MagicMock()
+                held.acquire.side_effect = locks.LockTimeout('held')
+                return held
+            return lock
+
+        monkeypatch.setattr(locks, 'get_lock', fake_get_lock)
+        monkeypatch.setattr(locks.time, 'sleep', lambda s: None)
+
+        cond = locks.LockAcquirableCondition('my-cluster_status')
+        assert cond.wait(is_cancelled=lambda: False,
+                         fallback_wait_seconds=30) is True
+        assert probes == ['my-cluster_status'] * (held_probes + 1)
+        # The probe must release the lock immediately: it is a probe, not a
+        # reservation; the resumed request re-acquires the lock itself.
+        lock.acquire.assert_called_once_with(blocking=False)
+        proxy.__exit__.assert_called_once()
+
+    def test_drops_when_cancelled(self, monkeypatch):
+        held = mock.MagicMock()
+        held.acquire.side_effect = locks.LockTimeout('held')
+        monkeypatch.setattr(locks, 'get_lock', lambda lock_id: held)
+        monkeypatch.setattr(locks.time, 'sleep', lambda s: None)
+
+        calls = []
+
+        def is_cancelled():
+            calls.append(None)
+            return len(calls) > 3
+
+        cond = locks.LockAcquirableCondition('my-cluster_status')
+        assert cond.wait(is_cancelled=is_cancelled,
+                         fallback_wait_seconds=30) is False
+
+    def test_is_picklable(self):
+        # Pickled onto ExecutionPausedError; crosses the worker/scheduler
+        # process boundary.
+        import pickle
+        cond = locks.LockAcquirableCondition('my-cluster_status',
+                                             poll_interval_seconds=1.0)
+        restored = pickle.loads(pickle.dumps(cond))
+        assert restored._lock_id == 'my-cluster_status'
+        assert restored._poll_interval_seconds == 1.0

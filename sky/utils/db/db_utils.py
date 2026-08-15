@@ -8,6 +8,7 @@ import sqlite3
 import threading
 import typing
 from typing import Any, Callable, Dict, Iterable, Literal, Optional, Union
+import urllib.parse
 
 import aiosqlite
 import aiosqlite.context
@@ -448,7 +449,15 @@ class DatabaseManager:
             if self._engine is not None:
                 return self._engine
             engine = get_engine(self._db_name)
-            self._create_table_fn(engine)
+            # Run schema creation / migrations on a direct (unpooled)
+            # connection: Alembic's autocommit_block DDL relies on
+            # session-scoped COMMIT/BEGIN control that a transaction-mode
+            # pooler does not preserve, whereas the runtime engine returned to
+            # callers may be pooled. Tables live in the same physical database
+            # either way, so the pooled runtime engine sees them. When no
+            # pooler is configured, direct == pooled (same cached engine), so
+            # this is a no-op.
+            self._create_table_fn(get_engine(self._db_name, direct=True))
             # Set _engine before post_init_fn so that post_init_fn
             # can access self.engine (e.g. _sqlite_supports_returning).
             self._engine = engine
@@ -519,27 +528,119 @@ def _make_asyncpg_creator(dsn: str) -> Callable[[], Any]:
     import asyncpg
 
     async def _connect() -> Any:
-        return await asyncpg.connect(dsn, timeout=15)
+        # statement_cache_size=0 disables asyncpg's per-connection
+        # prepared-statement cache so the connection is safe behind a
+        # transaction-mode pooler (e.g. PgBouncer), where a statement prepared
+        # on one backend connection may not exist on the next. Harmless (a
+        # small perf trade-off) on a direct connection, so set unconditionally.
+        return await asyncpg.connect(dsn, timeout=15, statement_cache_size=0)
 
     return _connect
 
 
+def _rewrite_hostport(uri: str, hostport: str) -> str:
+    """Return *uri* with its netloc host:port replaced by *hostport*.
+
+    Userinfo (``user:password@``) is preserved verbatim so an already
+    percent-encoded password is not re-encoded. Non-PostgreSQL URIs are
+    returned unchanged (only PostgreSQL URIs have a rewritable host:port
+    netloc).
+
+    ``ENV_VAR_DB_POOL_HOSTPORT`` targets a plaintext loopback sidecar (e.g.
+    PgBouncer on 127.0.0.1) that typically does not terminate client TLS, so
+    every ``ssl*`` libpq query param carried by the direct URI (``sslmode``,
+    ``sslcert``, ``sslkey``, ``sslrootcert``, ``sslcrl``, ...) is dropped and
+    ``sslmode=disable`` is set explicitly — otherwise a direct URI with e.g.
+    ``?sslmode=require`` would demand TLS from the pooler and every pooled
+    connect would fail with "server does not support SSL, but SSL was
+    required". Setting ``disable`` explicitly (rather than merely stripping
+    the params) matters because URI params take precedence over libpq
+    environment variables such as ``PGSSLMODE``, making the pooled DSN
+    deterministic regardless of process environment. All non-ssl query params
+    are preserved. A TLS-terminating or remote pooler must be configured via
+    ``ENV_VAR_DB_POOL_CONNECTION_URI`` instead, which is used verbatim.
+    """
+    parts = urllib.parse.urlsplit(uri)
+    if not parts.scheme.startswith('postgres'):
+        return uri
+    at = parts.netloc.rfind('@')
+    userinfo = parts.netloc[:at + 1] if at != -1 else ''
+    # The pooler is a plaintext loopback sidecar: drop every ssl* libpq param
+    # and force sslmode=disable (see docstring).
+    query_params = [(key, value)
+                    for key, value in urllib.parse.parse_qsl(
+                        parts.query, keep_blank_values=True)
+                    if not key.lower().startswith('ssl')]
+    query_params.append(('sslmode', 'disable'))
+    query = urllib.parse.urlencode(query_params)
+    return urllib.parse.urlunsplit(
+        (parts.scheme, userinfo + hostport, parts.path, query, parts.fragment))
+
+
+def _resolve_conn_string(direct: bool) -> Optional[str]:
+    """Resolve the Postgres connection string for a state-DB engine.
+
+    Returns None when the server is not configured for Postgres, so the caller
+    falls back to SQLite.
+
+    When ``direct`` is True, always returns the unpooled
+    ``ENV_VAR_DB_CONNECTION_URI`` so session-scoped advisory locks keep a
+    direct, session-pinned connection. When False, routes through a pooler if
+    one is configured (``ENV_VAR_DB_POOL_CONNECTION_URI`` wins and is used
+    verbatim, else a host:port rewrite via ``ENV_VAR_DB_POOL_HOSTPORT`` that
+    also forces ``sslmode=disable`` for the plaintext loopback sidecar — see
+    ``_rewrite_hostport``); otherwise returns the direct URI unchanged, so
+    deployments without a pooler are unaffected.
+    """
+    if os.environ.get(constants.ENV_VAR_IS_SKYPILOT_SERVER) is None:
+        return None
+    base = os.environ.get(constants.ENV_VAR_DB_CONNECTION_URI)
+    if not base or direct:
+        return base
+    override = os.environ.get(constants.ENV_VAR_DB_POOL_CONNECTION_URI)
+    if override:
+        return override
+    hostport = os.environ.get(constants.ENV_VAR_DB_POOL_HOSTPORT)
+    if hostport:
+        return _rewrite_hostport(base, hostport)
+    return base
+
+
+def _pooler_configured() -> bool:
+    """Whether a connection pooler is configured for non-direct engines."""
+    return bool(
+        os.environ.get(constants.ENV_VAR_DB_POOL_CONNECTION_URI) or
+        os.environ.get(constants.ENV_VAR_DB_POOL_HOSTPORT))
+
+
+# Bound on the connect phase of a no_pool engine. Unlike a pooled checkout,
+# connection establishment is part of every operation on a NullPool engine,
+# and a server-side statement_timeout cannot bound it — an unresponsive
+# database would otherwise hang the caller for the OS default.
+_NO_POOL_CONNECT_TIMEOUT_SECONDS = 10
+
+
 @typing.overload
-def get_engine(
-        db_name: Optional[str],
-        async_engine: Literal[False] = False) -> sqlalchemy.engine.Engine:
+def get_engine(db_name: Optional[str],
+               async_engine: Literal[False] = False,
+               direct: bool = False,
+               no_pool: bool = False) -> sqlalchemy.engine.Engine:
     ...
 
 
 @typing.overload
 def get_engine(db_name: Optional[str],
-               async_engine: Literal[True]) -> sqlalchemy_async.AsyncEngine:
+               async_engine: Literal[True],
+               direct: bool = False,
+               no_pool: bool = False) -> sqlalchemy_async.AsyncEngine:
     ...
 
 
 def get_engine(
     db_name: Optional[str],
-    async_engine: bool = False
+    async_engine: bool = False,
+    direct: bool = False,
+    no_pool: bool = False,
 ) -> Union[sqlalchemy.engine.Engine, sqlalchemy_async.AsyncEngine]:
     """Get the engine for the given database name.
 
@@ -547,22 +648,49 @@ def get_engine(
         db_name: The name of the database. ONLY used for SQLite. On Postgres,
         we use a single database, which we get from the connection string.
         async_engine: Whether to return an async engine.
+        direct: When True, bypass any configured connection pooler and connect
+        directly to ``ENV_VAR_DB_CONNECTION_URI``. Used for session-scoped
+        advisory locks and schema migrations, which are unsafe through a
+        transaction-mode pooler. When no pooler is configured (the default),
+        direct and non-direct resolve to the same connection string and thus
+        the same cached engine.
+        no_pool: When True (Postgres, sync only), return a dedicated
+        ``NullPool`` engine: every operation opens a fresh connection and
+        closes it afterwards, and the engine shares no pool state with the
+        default engine for the same connection string. For low-frequency
+        control-plane calls (e.g. the leader-election heartbeat) that must
+        not queue behind application traffic on a shared pool — a pool
+        exhausted by slow application queries would otherwise starve exactly
+        the calls that need to stay reliable under DB pressure. The connect
+        phase is bounded by ``connect_timeout``, since unlike a pooled
+        checkout it is part of every call. No effect on SQLite (a file open
+        is effectively unpooled already).
     """
-    conn_string = None
-    if os.environ.get(constants.ENV_VAR_IS_SKYPILOT_SERVER) is not None:
-        conn_string = os.environ.get(constants.ENV_VAR_DB_CONNECTION_URI)
+    conn_string = _resolve_conn_string(direct)
     if conn_string:
         # We use the same cache for both sync and async engines
         # because we prefix the cache key in the async case,
         # so they would not overlap.
         cache_key = f'async:{conn_string}' if async_engine else conn_string
+        if no_pool and not async_engine:
+            cache_key = f'nopool:{conn_string}'
         with _db_creation_lock:
             if cache_key not in _postgres_engine_cache:
                 engine_type = 'sync' if not async_engine else 'async'
                 logger.debug(
                     f'Creating a new postgres {engine_type} engine with '
                     f'maximum {_max_connections} connections')
-                if async_engine:
+                if no_pool and not async_engine:
+                    # Isolated per-operation engine: never shares (or starves
+                    # on) the default engine's pool. See the docstring.
+                    engine_no_pool = sqlalchemy.create_engine(
+                        conn_string,
+                        poolclass=sqlalchemy.NullPool,
+                        connect_args={
+                            'connect_timeout': _NO_POOL_CONNECT_TIMEOUT_SECONDS
+                        })
+                    _postgres_engine_cache[cache_key] = engine_no_pool
+                elif async_engine:
                     # Use NullPool for async engines to avoid event loop binding
                     # issues. asyncpg connection pools bind to the event loop on
                     # first use, which causes "Future attached to a different
@@ -577,7 +705,17 @@ def get_engine(
                             'postgresql+asyncpg://',
                             poolclass=sqlalchemy.NullPool,
                             async_creator=_make_asyncpg_creator(conn_string)))
-                elif _max_connections == 0:
+                elif _max_connections == 0 or (direct and _pooler_configured()):
+                    # NullPool: no persistent connections. Used when no pool
+                    # size is configured, and — crucially — for the direct
+                    # engine when a pooler IS configured. The direct engine
+                    # then only serves brief advisory-lock holds and one-time
+                    # startup migrations; a reuse pool (QueuePool) would pin
+                    # one idle direct backend per process for the process's
+                    # whole life, defeating the pooling (each process would
+                    # keep a direct connection on top of its pooled one). With
+                    # NullPool the direct path opens a connection only while a
+                    # lock or migration actively needs it and closes it after.
                     _postgres_engine_cache[cache_key] = (
                         sqlalchemy.create_engine(conn_string,
                                                  poolclass=sqlalchemy.NullPool))

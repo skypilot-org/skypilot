@@ -32,6 +32,7 @@ from smoke_tests import smoke_tests_utils
 import sky
 from sky import catalog
 from sky import skypilot_config
+from sky.adaptors import azure
 from sky.skylet import constants
 
 
@@ -90,6 +91,35 @@ def test_azure_images():
             f'sky logs {name} --status | grep "Job 2: SUCCEEDED"',  # Equivalent.
             f'sky exec {name} \'echo $SKYPILOT_CLUSTER_INFO | jq .cloud | grep -i azure\'',
             f'sky logs {name} 3 --status',  # Ensure the job succeeded.
+        ],
+        f'sky down -y {name}',
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.azure
+def test_azure_private_image():
+    # Exercises booting from a private Shared Image Gallery (SIG) image-version
+    # resource ID (see parse_shared_image_gallery_id in
+    # sky/clouds/utils/azure_utils.py). The image is a copy of the SkyPilot CPU
+    # image maintained in SkyPilot's Azure CI subscription; it lives in the same
+    # subscription the CI authenticates to and is replicated only to East US, so
+    # the region is pinned below.
+    name = smoke_tests_utils.get_cluster_name()
+    # Build the resource ID from the active subscription so the subscription
+    # GUID is not committed to source.
+    subscription_id = azure.get_subscription_id()
+    image_id = (f'/subscriptions/{subscription_id}/resourceGroups/'
+                'skypilot-sig-test/providers/Microsoft.Compute/galleries/'
+                'skypilot_sig_test_gallery/images/skypilot-sig-test-cpu/'
+                'versions/1.0.0')
+    test = smoke_tests_utils.Test(
+        'azure_private_image',
+        [
+            f'sky launch -y -c {name} {smoke_tests_utils.LOW_RESOURCE_ARG} --image-id {image_id} --infra azure/eastus tests/test_yamls/minimal.yaml',
+            f'sky logs {name} 1 --status',  # Ensure the job succeeded.
+            f'sky exec {name} \'echo $SKYPILOT_CLUSTER_INFO | jq .cloud | grep -i azure\'',
+            f'sky logs {name} 2 --status',  # Ensure the job succeeded.
         ],
         f'sky down -y {name}',
     )
@@ -419,7 +449,11 @@ def test_gcp_mig():
                      f'"(labels.ray-cluster-name:{name}-cpu)" '
                      f'--zones={zone} --format="value(name)" | wc -l | grep 0'))
         ],
-        f'sky down -y {name} && {smoke_tests_utils.down_cluster_for_cloud_cmd(name)}',
+        smoke_tests_utils.chain_teardown(
+            # `{name}-cpu` is only downed by a test command, which is skipped
+            # when the test fails before it.
+            f'sky down -y {name} {name}-cpu',
+            smoke_tests_utils.down_cluster_for_cloud_cmd(name)),
         env={
             skypilot_config.ENV_VAR_PROJECT_CONFIG: 'tests/test_yamls/use_mig_config.yaml',
         })
@@ -492,6 +526,41 @@ def test_image_no_conda():
     smoke_tests_utils.run_one_test(test)
 
 
+@pytest.mark.kubernetes
+def test_kubernetes_default_image_no_conda():
+    """The default K8s image ships no conda, but tasks get a writable py env.
+
+    Regression guard: conda was removed from the default K8s images and
+    install_conda now defaults to false. A user task must:
+      1. find no conda on PATH (fails if conda is baked back in), and
+      2. still `pip install` successfully — i.e. land in the auto-activated,
+         user-writable venv rather than a non-writable system site-packages.
+    Dropping the default venv (or its .bashrc activation) makes `pip install`
+    hit `Permission denied` on /usr/local/lib/.../dist-packages and fails (2).
+    """
+    name = smoke_tests_utils.get_cluster_name()
+    # Use single quotes inside; the whole command is wrapped in double quotes
+    # by the launch string below.
+    check_cmd = (
+        "if which conda; then echo 'conda unexpectedly present'; exit 1; fi && "
+        'python --version && '
+        # Must install into a writable env, not system site-packages.
+        'pip install --quiet requests && '
+        "python -c 'import requests' && "
+        'echo CONDA_FREE_OK')
+    test = smoke_tests_utils.Test(
+        'kubernetes_default_image_no_conda',
+        [
+            f'sky launch -y -c {name} {smoke_tests_utils.LOW_RESOURCE_ARG} '
+            f'--infra kubernetes "{check_cmd}"',
+            f'sky logs {name} 1 --status',
+            f'sky logs {name} 1 --no-follow | grep CONDA_FREE_OK',
+        ],
+        f'sky down -y {name}',
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
 @pytest.mark.no_fluidstack  # FluidStack does not support stopping instances in SkyPilot implementation
 @pytest.mark.no_kubernetes  # Kubernetes does not support stopping instances
 @pytest.mark.no_hyperbolic  # Hyperbolic does not support autodown
@@ -505,23 +574,31 @@ def test_custom_default_conda_env(generic_cloud: str):
     elif generic_cloud == 'nebius':
         timeout *= 6
     name = smoke_tests_utils.get_cluster_name()
-    test = smoke_tests_utils.Test('custom_default_conda_env', [
-        f'sky launch -c {name} -y {smoke_tests_utils.LOW_RESOURCE_ARG} --infra {generic_cloud} tests/test_yamls/test_custom_default_conda_env.yaml',
-        f'sky status -r {name} | grep "UP"',
-        f'sky logs {name} 1 --status',
-        f'sky logs {name} 1 --no-follow | grep -E "myenv\\s+\\*"',
-        f'sky exec {name} tests/test_yamls/test_custom_default_conda_env.yaml',
-        f'sky logs {name} 2 --status',
-        f'sky autostop -y -i 0 {name}',
-        smoke_tests_utils.get_cmd_wait_until_cluster_status_contains(
-            cluster_name=name,
-            cluster_status=[sky.ClusterStatus.STOPPED],
-            timeout=timeout),
-        f'sky start -y {name}',
-        f'sky logs {name} 2 --no-follow | grep -E "myenv\\s+\\*"',
-        f'sky exec {name} tests/test_yamls/test_custom_default_conda_env.yaml',
-        f'sky logs {name} 3 --status',
-    ], f'sky down -y {name}')
+    test = smoke_tests_utils.Test(
+        'custom_default_conda_env',
+        [
+            # conda is not installed by default; opt in via a temporary config so
+            # this test can exercise the custom-default-conda-env behavior (and the
+            # install_conda=true opt-in path). install_conda is provisioning-time,
+            # and conda persists on disk across stop/start, so it is only needed at
+            # launch. `sky start` does not accept --config.
+            f'sky launch -c {name} -y {smoke_tests_utils.LOW_RESOURCE_ARG} --config provision.install_conda=true --infra {generic_cloud} tests/test_yamls/test_custom_default_conda_env.yaml',
+            f'sky status -r {name} | grep "UP"',
+            f'sky logs {name} 1 --status',
+            f'sky logs {name} 1 --no-follow | grep -E "myenv\\s+\\*"',
+            f'sky exec {name} tests/test_yamls/test_custom_default_conda_env.yaml',
+            f'sky logs {name} 2 --status',
+            f'sky autostop -y -i 0 {name}',
+            smoke_tests_utils.get_cmd_wait_until_cluster_status_contains(
+                cluster_name=name,
+                cluster_status=[sky.ClusterStatus.STOPPED],
+                timeout=timeout),
+            f'sky start -y {name}',
+            f'sky logs {name} 2 --no-follow | grep -E "myenv\\s+\\*"',
+            f'sky exec {name} tests/test_yamls/test_custom_default_conda_env.yaml',
+            f'sky logs {name} 3 --status',
+        ],
+        f'sky down -y {name}')
     smoke_tests_utils.run_one_test(test)
 
 

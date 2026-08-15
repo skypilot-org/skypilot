@@ -7,6 +7,7 @@ import re
 import subprocess
 import sys
 import tempfile
+import typing
 from typing import Any, Dict, Iterator, List, Optional, Set, Tuple, Union
 
 import colorama
@@ -14,7 +15,6 @@ import colorama
 from sky import catalog
 from sky import clouds
 from sky import exceptions
-from sky import resources as resources_lib
 from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import kubernetes
@@ -38,6 +38,9 @@ from sky.utils import resources_utils
 from sky.utils import schemas
 from sky.utils import ux_utils
 from sky.utils import volume as volume_lib
+
+if typing.TYPE_CHECKING:
+    from sky import resources as resources_lib
 
 logger = sky_logging.init_logger(__name__)
 
@@ -233,8 +236,21 @@ class Kubernetes(clouds.Cloud):
             (f'Local disk is not supported on {_REPR}'),
     }
 
-    IMAGE_CPU = 'skypilot:custom-cpu-ubuntu-2204'
-    IMAGE_GPU = 'skypilot:custom-gpu-ubuntu-2204'
+    # Default images. The `-vN` suffix is the *image contract version*: it is
+    # resolved to a concrete, immutable image via the service catalog
+    # (kubernetes/images.csv), so a given tag always maps to one built image.
+    #
+    # When to bump `-vN` (e.g. -v1 -> -v2): ONLY for a breaking image change
+    # that an older API server cannot use correctly (e.g. removing conda, which
+    # older servers assume is present). Bumping keeps the old tag frozen to the
+    # old image, so old servers keep working while new servers get the new one.
+    #
+    # When NOT to bump (most cases): routine / CVE rebuilds that keep the
+    # same contract. Do not change this string; instead repoint the same tag to
+    # the new image (a new concrete datetag) in the catalog, so existing servers
+    # pick up the update.
+    IMAGE_CPU = 'skypilot:custom-cpu-ubuntu-2204-v1'
+    IMAGE_GPU = 'skypilot:custom-gpu-ubuntu-2204-v1'
 
     PROVISIONER_VERSION = clouds.ProvisionerVersion.SKYPILOT
     STATUS_VERSION = clouds.StatusVersion.SKYPILOT
@@ -470,8 +486,17 @@ class Kubernetes(clouds.Cloud):
         for r in regions:
             context = r.name
             try:
+                # On Kubernetes, disk_size maps to ephemeral-storage requests,
+                # but only when the user explicitly set it (see
+                # `make_deploy_resources_variables`). Only then do we check
+                # that a node can fit the requested ephemeral storage.
+                ephemeral_storage_gb = (resources.disk_size
+                                        if resources is not None and
+                                        resources.disk_size_specified else None)
                 fits, reason = kubernetes_utils.check_instance_fits(
-                    context, instance_type)
+                    context,
+                    instance_type,
+                    ephemeral_storage_gb=ephemeral_storage_gb)
             except exceptions.KubeAPIUnreachableError as e:
                 cls._log_unreachable_context(context, str(e))
                 continue
@@ -652,8 +677,12 @@ class Kubernetes(clouds.Cloud):
             Timeout in seconds
         """
         if is_using_queueing:
-            # Return a large timeout to let the
-            # queue system handle the provisioning
+            # Queued (e.g. Kueue) workloads wait for quota admission before
+            # they can schedule. The scheduling wait loop separately pauses
+            # the provisioning clock while pods are held by scheduling gates
+            # (see provision/kubernetes/instance.py), so this large default
+            # keeps the post-admission scheduling wait generous for
+            # deployments that have not set provision_timeout explicitly.
             return 24 * 60 * 60  # 24 hours
 
         base_timeout = 10  # Base timeout for single node
@@ -768,6 +797,10 @@ class Kubernetes(clouds.Cloud):
                     kubernetes_utils.GKELabelFormatter.TPU_LABEL_KEY):
                 tpu_requested = True
                 k8s_resource_key = kubernetes_utils.TPU_RESOURCE_KEY
+            elif kubernetes_utils.is_neuron_accelerator(acc_type):
+                # AWS Neuron (Trainium/Inferentia) uses its own resource key;
+                # the pod requests aws.amazon.com/neuron instead of a GPU key.
+                k8s_resource_key = kubernetes_utils.NEURON_RESOURCE_KEY
             else:
                 k8s_resource_key = kubernetes_utils.get_gpu_resource_key(
                     context)
@@ -876,8 +909,9 @@ class Kubernetes(clouds.Cloud):
             if clouds.CloudImplementationFeatures.CUSTOM_NETWORK_TIER \
                     not in unsupported_features:
                 # Add high-performance networking environment variables for
-                # clusters with high performance networking
-                network_env_vars = network_type.get_network_env_vars()
+                # clusters with high performance networking. Pass acc_type so
+                # OCI can pick a shape-specific NCCL profile (e.g. GB200).
+                network_env_vars = network_type.get_network_env_vars(acc_type)
                 k8s_env_vars.update(network_env_vars)
 
         # We specify object-store-memory to be 500MB to avoid taking up too
@@ -995,6 +1029,8 @@ class Kubernetes(clouds.Cloud):
             'k8s_port_mode': port_mode.value,
             'k8s_acc_label_key': k8s_acc_label_key,
             'k8s_acc_label_values': k8s_acc_label_values,
+            'k8s_node_affinity': kubernetes_utils.get_node_affinity(
+                k8s_acc_label_key, k8s_acc_label_values, avoid_label_keys),
             'k8s_service_account_name': k8s_service_account_name,
             'k8s_automount_sa_token': 'true',
             'k8s_fuse_device_required': fuse_device_required,
@@ -1058,10 +1094,10 @@ class Kubernetes(clouds.Cloud):
         if preemption_timeout is not None:
             deploy_vars['preemption_hook_timeout'] = preemption_timeout
 
-        # Add ephemeral storage to deploy vars if specified.
-        ephemeral_storage = resources.ephemeral_storage
-        if ephemeral_storage is not None:
-            deploy_vars['k8s_ephemeral_storage'] = str(ephemeral_storage)
+        # On Kubernetes, disk_size maps to ephemeral-storage requests.
+        disk_size = resources.disk_size
+        if resources.disk_size_specified:
+            deploy_vars['k8s_ephemeral_storage'] = str(disk_size)
 
         # Calculate CPU/memory limits if set_pod_resource_limits is configured.
         # Convert config: False -> no limits, True -> multiplier 1.0,
@@ -1086,9 +1122,9 @@ class Kubernetes(clouds.Cloud):
             else:
                 deploy_vars['k8s_cpu_limit'] = round(k.cpus * mul, 3)
                 deploy_vars['k8s_memory_limit'] = round(k.memory * mul, 3)
-            if ephemeral_storage is not None:
+            if resources.disk_size_specified:
                 deploy_vars['k8s_ephemeral_storage_limit'] = round(
-                    ephemeral_storage * mul, 3)
+                    disk_size * mul, 3)
 
         # Add backward compatibility template variables for GPUDirect variants
         deploy_vars['k8s_enable_gpudirect_tcpx'] = (
@@ -1154,12 +1190,7 @@ class Kubernetes(clouds.Cloud):
         return deploy_vars
 
     @staticmethod
-    def _warn_on_disk_size(resources: 'resources_lib.Resources'):
-        if resources.disk_size != resources_lib.DEFAULT_DISK_SIZE_GB:
-            logger.info(f'{colorama.Style.DIM}Disk size {resources.disk_size} '
-                        'is not supported by Kubernetes. '
-                        'To add additional disk, use volumes.'
-                        f'{colorama.Style.RESET_ALL}')
+    def _warn_on_disk_tier(resources: 'resources_lib.Resources'):
         if resources.disk_tier is not None:
             logger.info(f'{colorama.Style.DIM}Disk tier {resources.disk_tier} '
                         'is not supported by Kubernetes. '
@@ -1171,7 +1202,7 @@ class Kubernetes(clouds.Cloud):
     ) -> 'resources_utils.FeasibleResources':
         # TODO(zhwu): This needs to be updated to return the correct region
         # (context) that has enough resources.
-        self._warn_on_disk_size(resources)
+        self._warn_on_disk_tier(resources)
         fuzzy_candidate_list: List[str] = []
         if resources.instance_type is not None:
             assert resources.is_launchable(), resources

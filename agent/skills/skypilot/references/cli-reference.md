@@ -716,6 +716,7 @@ Starts the SkyPilot API server locally.
 - `--host` (default: `127.0.0.1`) — The host to bind the SkyPilot API server to. To allow remote access, set this to 0.0.0.0; use :: for IPv6 dual-stack.
 - `--foreground` — Run the SkyPilot API server in the foreground and output its logs to stdout/stderr. Allowing external systems to manage the process lifecycle and collect logs directly. This is useful when the API ser...
 - `--enable-basic-auth` — Enable basic authentication in the SkyPilot API server.
+- `--port` — The port to bind the SkyPilot API server to. Defaults to the SKYPILOT_API_SERVER_LOCAL_PORT environment variable, or 46580. Other client commands only find a server on a non-default port if the same e...
 
 ### `sky api status`
 

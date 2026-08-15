@@ -1,10 +1,12 @@
 """Slurm adaptor for SkyPilot."""
 
+import base64
+import binascii
 import ipaddress
 import logging
 import re
 import shlex
-from typing import Dict, List, NamedTuple, Optional, Tuple
+from typing import Dict, List, NamedTuple, Optional, Sequence, Tuple
 
 from sky.adaptors import common
 from sky.utils import command_runner
@@ -16,6 +18,14 @@ logger = logging.getLogger(__name__)
 # ASCII Unit Separator (\x1f) to handle values with spaces
 # and other special characters.
 SEP = r'\x1f'
+
+_INFO_NODES_CMD = (f'sinfo -h --Node -o '
+                   f'"%N{SEP}%t{SEP}%G{SEP}%c{SEP}%m{SEP}%P"')
+_ALL_NODE_DETAILS_CMD = 'scontrol show node -o'
+_ALL_JOBS_INFO_CMD = (f'squeue -h --states=running,completing '
+                      f'-o "%i{SEP}%j{SEP}%u{SEP}%N{SEP}%b"')
+_PARTITIONS_INFO_CMD = 'scontrol show partitions -o'
+_BATCH_OUTPUT_HEADER = 'SKYPILOT_SLURM_BATCH\n'
 
 # Regex pattern to extract partition names from scontrol output
 # Matches PartitionName=<name> and captures until the next field
@@ -64,6 +74,25 @@ class NodeInfo(NamedTuple):
     partition: str
 
 
+class JobGresInfo(NamedTuple):
+    """Per-node GRES allocation of a running job from squeue."""
+    job_id: str
+    job_name: str
+    # The user who submitted the job (squeue %u).
+    user: str
+    # The job's per-node GRES request (squeue %b, TRES_PER_NODE), e.g.
+    # 'gres/gpu:h100:4'.
+    gres_str: str
+
+
+class SlurmInventorySnapshot(NamedTuple):
+    """Cluster-wide Slurm inventory collected in one remote invocation."""
+    node_infos: List[NodeInfo]
+    node_details: Dict[str, Dict[str, str]]
+    jobs: Optional[Dict[str, List[JobGresInfo]]]
+    partitions: Optional[List[SlurmPartition]]
+
+
 def _parse_maxtime(line: str) -> Optional[int]:
     """Parse the maximum time a job can run from the scontrol output."""
     maxtime_match = _MAXTIME_REGEX.search(line)
@@ -101,6 +130,97 @@ def _parse_default_time(line: str) -> Optional[str]:
     return raw
 
 
+def _parse_scontrol_node_output(output: str) -> Dict[str, str]:
+    """Parses the key=value output of 'scontrol show node'."""
+    node_info = {}
+    # Split by space, handling values that might have spaces
+    # if quoted. This is simplified; scontrol can be complex.
+    parts = output.split()
+    for part in parts:
+        if '=' in part:
+            key, value = part.split('=', 1)
+            # Simple quote removal, might need refinement
+            value = value.strip('\'"')
+            node_info[key] = value
+    return node_info
+
+
+def _parse_info_nodes_output(stdout: str) -> List[NodeInfo]:
+    nodes = []
+    for line in stdout.splitlines():
+        parts = line.split(SEP)
+        if len(parts) != 6:
+            raise RuntimeError(f'Unexpected output format from sinfo: {line!r}')
+        try:
+            node_info = NodeInfo(node=parts[0],
+                                 state=parts[1],
+                                 gres=parts[2],
+                                 cpus=int(parts[3]),
+                                 memory_gb=int(parts[4]) / 1024.0,
+                                 partition=parts[5])
+            nodes.append(node_info)
+        except ValueError as e:
+            raise RuntimeError(
+                f'Failed to parse node info from line: {line!r}. '
+                f'Error: {e}') from e
+    return nodes
+
+
+def _parse_all_node_details_output(stdout: str) -> Dict[str, Dict[str, str]]:
+    details: Dict[str, Dict[str, str]] = {}
+    for line in stdout.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        node_info = _parse_scontrol_node_output(line)
+        node_name = node_info.get('NodeName')
+        if node_name:
+            details[node_name] = node_info
+    return details
+
+
+def _parse_all_jobs_info_output(stdout: str) -> Dict[str, List[JobGresInfo]]:
+    nodes_to_jobs: Dict[str, List[JobGresInfo]] = {}
+    for line in stdout.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        parts = line.split(SEP)
+        if len(parts) != 5:
+            continue
+        job_id, job_name, user, nodelist_str, gres_str = parts
+        if not gres_str or gres_str == 'N/A':
+            continue
+
+        job_info = JobGresInfo(job_id=job_id,
+                               job_name=job_name,
+                               user=user,
+                               gres_str=gres_str)
+        for node in hostlist.expand_hostlist(nodelist_str):
+            nodes_to_jobs.setdefault(node, []).append(job_info)
+    return nodes_to_jobs
+
+
+def _parse_partitions_info_output(stdout: str) -> List[SlurmPartition]:
+    partitions = []
+    for line in stdout.strip().splitlines():
+        is_default = False
+        match = _PARTITION_NAME_REGEX.search(line)
+        if 'Default=YES' in line:
+            is_default = True
+        maxtime = _parse_maxtime(line)
+        default_time = _parse_default_time(line)
+        if match:
+            partition = match.group(1).strip()
+            if partition:
+                partitions.append(
+                    SlurmPartition(name=partition,
+                                   is_default=is_default,
+                                   maxtime=maxtime,
+                                   default_time=default_time))
+    return partitions
+
+
 class SlurmClient:
     """Client for Slurm control plane operations."""
 
@@ -114,6 +234,7 @@ class SlurmClient:
         ssh_proxy_jump: Optional[str] = None,
         is_inside_slurm_cluster: bool = False,
         identities_only: Optional[bool] = None,
+        slurm_user: Optional[str] = None,
     ):
         """Initialize SlurmClient.
 
@@ -129,6 +250,8 @@ class SlurmClient:
             identities_only: If True, only use the specified identity file and
                 don't try ssh-agent keys. If None, defaults to False (allows
                 ssh-agent fallback for backward compatibility).
+            slurm_user: Unix user to run remote Slurm commands as. None runs
+                commands as the SSH user.
         """
         self.ssh_host = ssh_host
         self.ssh_port = ssh_port
@@ -150,7 +273,7 @@ class SlurmClient:
             assert ssh_user is not None
             # If user has IdentitiesOnly=yes in their config, respect it by
             # NOT disabling IdentitiesOnly. Otherwise, allow ssh-agent fallback.
-            self._runner = command_runner.SSHCommandRunner(
+            self._runner = command_runner.SlurmLoginNodeCommandRunner(
                 (ssh_host, ssh_port),
                 ssh_user,
                 ssh_key,
@@ -158,6 +281,7 @@ class SlurmClient:
                 ssh_proxy_jump=ssh_proxy_jump,
                 enable_interactive_auth=True,
                 disable_identities_only=not identities_only,
+                slurm_user=slurm_user,
             )
 
     def _run_slurm_cmd(self, cmd: str) -> Tuple[int, str, str]:
@@ -165,6 +289,120 @@ class SlurmClient:
                                 require_outputs=True,
                                 separate_stderr=True,
                                 stream_logs=False)
+
+    def _run_slurm_cmds(self,
+                        commands: Sequence[str]) -> List[Tuple[int, str, str]]:
+        """Run independent commands concurrently in one remote invocation."""
+        if not commands:
+            return []
+
+        script_lines = [
+            'snapshot_dir=$(mktemp -d) || exit $?',
+            'cleanup_snapshot() { rm -rf -- "${snapshot_dir:?}"; }',
+            'trap cleanup_snapshot EXIT',
+        ]
+        for index, command in enumerate(commands):
+            stdout_path = f'"${{snapshot_dir}}/{index}.stdout"'
+            stderr_path = f'"${{snapshot_dir}}/{index}.stderr"'
+            returncode_path = f'"${{snapshot_dir}}/{index}.returncode"'
+            script_lines.append(
+                f'( ( {command} ) > {stdout_path} 2> {stderr_path}; '
+                f'printf \'%s\\n\' "$?" > {returncode_path} ) &')
+        batch_output_header = _BATCH_OUTPUT_HEADER.rstrip('\n')
+        script_lines.extend([
+            'wait',
+            f'printf \'%s\\n\' {shlex.quote(batch_output_header)}',
+        ])
+        for index in range(len(commands)):
+            stdout_path = f'"${{snapshot_dir}}/{index}.stdout"'
+            stderr_path = f'"${{snapshot_dir}}/{index}.stderr"'
+            encoded_stdout_path = f'"${{snapshot_dir}}/{index}.stdout.b64"'
+            encoded_stderr_path = f'"${{snapshot_dir}}/{index}.stderr.b64"'
+            returncode_path = f'"${{snapshot_dir}}/{index}.returncode"'
+            script_lines.extend([
+                f'returncode=$(cat {returncode_path}) || exit $?',
+                # Keep the framed transport ASCII-only because command runners
+                # decode and filter subprocess output as text.
+                f'base64 < {stdout_path} > {encoded_stdout_path} || exit $?',
+                f'base64 < {stderr_path} > {encoded_stderr_path} || exit $?',
+                f'stdout_size=$(wc -c < {encoded_stdout_path}) || exit $?',
+                f'stderr_size=$(wc -c < {encoded_stderr_path}) || exit $?',
+                'printf \'%s %s %s\\n\' "$returncode" "$stdout_size" '
+                '"$stderr_size"',
+                f'cat {encoded_stdout_path} || exit $?',
+                f'cat {encoded_stderr_path} || exit $?',
+            ])
+
+        script = '\n'.join(script_lines)
+        rc, stdout, stderr = self._run_slurm_cmd(script)
+        subprocess_utils.handle_returncode(
+            rc,
+            'concurrent Slurm inventory commands',
+            'Failed to run concurrent Slurm inventory commands.',
+            stderr=f'{stdout}\n{stderr}',
+            stream_logs=False)
+
+        try:
+            output_bytes = stdout.encode('ascii')
+        except UnicodeEncodeError as e:
+            raise RuntimeError('Unexpected output from concurrent Slurm '
+                               'inventory commands: non-ASCII transport '
+                               'output.') from e
+        header_bytes = _BATCH_OUTPUT_HEADER.encode('ascii')
+        if not output_bytes.startswith(header_bytes):
+            raise RuntimeError('Unexpected output from concurrent Slurm '
+                               'inventory commands: missing header.')
+        offset = len(header_bytes)
+        results = []
+        for _ in commands:
+            header_end = output_bytes.find(b'\n', offset)
+            if header_end == -1:
+                raise RuntimeError('Unexpected output from concurrent Slurm '
+                                   'inventory commands: missing frame header.')
+            frame_header_bytes = output_bytes[offset:header_end]
+            try:
+                frame_header = frame_header_bytes.decode('ascii')
+                returncode_str, stdout_size_str, stderr_size_str = (
+                    frame_header.split())
+                returncode = int(returncode_str)
+                stdout_size = int(stdout_size_str)
+                stderr_size = int(stderr_size_str)
+                if stdout_size < 0 or stderr_size < 0:
+                    raise ValueError('negative output size')
+            except (UnicodeDecodeError, ValueError) as e:
+                raise RuntimeError(
+                    'Unexpected output from concurrent Slurm inventory '
+                    f'commands: invalid frame header '
+                    f'{frame_header_bytes!r}.') from e
+            offset = header_end + 1
+            frame_end = offset + stdout_size + stderr_size
+            if frame_end > len(output_bytes):
+                raise RuntimeError('Unexpected output from concurrent Slurm '
+                                   'inventory commands: truncated frame.')
+            stdout_end = offset + stdout_size
+            encoded_stdout = output_bytes[offset:stdout_end]
+            encoded_stderr = output_bytes[stdout_end:frame_end]
+            try:
+                command_stdout_bytes = base64.b64decode(b''.join(
+                    encoded_stdout.split()),
+                                                        validate=True)
+                command_stderr_bytes = base64.b64decode(b''.join(
+                    encoded_stderr.split()),
+                                                        validate=True)
+            except binascii.Error as e:
+                raise RuntimeError('Unexpected output from concurrent Slurm '
+                                   'inventory commands: invalid encoded '
+                                   'output.') from e
+            command_stdout = command_stdout_bytes.decode('utf-8',
+                                                         errors='replace')
+            command_stderr = command_stderr_bytes.decode('utf-8',
+                                                         errors='replace')
+            results.append((returncode, command_stdout, command_stderr))
+            offset = frame_end
+        if offset != len(output_bytes):
+            raise RuntimeError('Unexpected output from concurrent Slurm '
+                               'inventory commands: trailing data.')
+        return results
 
     def query_jobs(
         self,
@@ -249,8 +487,7 @@ class SlurmClient:
         Returns node names, states, GRES (generic resources like GPUs),
         CPUs, memory (MB), and partitions.
         """
-        cmd = (f'sinfo -h --Node -o '
-               f'"%N{SEP}%t{SEP}%G{SEP}%c{SEP}%m{SEP}%P"')
+        cmd = _INFO_NODES_CMD
         rc, stdout, stderr = self._run_slurm_cmd(cmd)
         subprocess_utils.handle_returncode(
             rc,
@@ -259,26 +496,95 @@ class SlurmClient:
             stderr=f'{stdout}\n{stderr}',
             stream_logs=False)
 
-        nodes = []
-        for line in stdout.splitlines():
-            parts = line.split(SEP)
-            if len(parts) != 6:
-                raise RuntimeError(
-                    f'Unexpected output format from sinfo: {line!r}')
-            try:
-                node_info = NodeInfo(node=parts[0],
-                                     state=parts[1],
-                                     gres=parts[2],
-                                     cpus=int(parts[3]),
-                                     memory_gb=int(parts[4]) / 1024.0,
-                                     partition=parts[5])
-                nodes.append(node_info)
-            except ValueError as e:
-                raise RuntimeError(
-                    f'Failed to parse node info from line: {line!r}. '
-                    f'Error: {e}') from e
+        return _parse_info_nodes_output(stdout)
 
-        return nodes
+    def get_node_inventory(
+            self) -> Tuple[List[NodeInfo], Dict[str, Dict[str, str]]]:
+        """Get node information and details in one remote invocation."""
+        outputs = self._run_slurm_cmds([_INFO_NODES_CMD, _ALL_NODE_DETAILS_CMD])
+        node_returncode, node_stdout, node_stderr = outputs[0]
+        details_returncode, details_stdout, details_stderr = outputs[1]
+        subprocess_utils.handle_returncode(
+            node_returncode,
+            _INFO_NODES_CMD,
+            'Failed to get Slurm node information.',
+            stderr=f'{node_stdout}\n{node_stderr}',
+            stream_logs=False)
+        node_infos = _parse_info_nodes_output(node_stdout)
+
+        node_details: Dict[str, Dict[str, str]] = {}
+        if details_returncode != 0:
+            logger.debug('Failed to get detailed Slurm node information: %s',
+                         details_stderr)
+        else:
+            try:
+                node_details = _parse_all_node_details_output(details_stdout)
+            except Exception as e:  # pylint: disable=broad-except
+                logger.debug(
+                    'Failed to parse detailed Slurm node '
+                    'information: %s', e)
+        return node_infos, node_details
+
+    def get_inventory_snapshot(self) -> SlurmInventorySnapshot:
+        """Get cluster-wide nodes, jobs, and partitions in one SSH call.
+
+        Node information is required. Node details, running jobs, and
+        partitions are best-effort and use empty or None values when their
+        individual Slurm commands fail.
+        """
+        outputs = self._run_slurm_cmds([
+            _INFO_NODES_CMD,
+            _ALL_NODE_DETAILS_CMD,
+            _ALL_JOBS_INFO_CMD,
+            _PARTITIONS_INFO_CMD,
+        ])
+        node_returncode, node_stdout, node_stderr = outputs[0]
+        details_returncode, details_stdout, details_stderr = outputs[1]
+        jobs_returncode, jobs_stdout, jobs_stderr = outputs[2]
+        partitions_returncode, partitions_stdout, partitions_stderr = outputs[3]
+        subprocess_utils.handle_returncode(
+            node_returncode,
+            _INFO_NODES_CMD,
+            'Failed to get Slurm node information.',
+            stderr=f'{node_stdout}\n{node_stderr}',
+            stream_logs=False)
+        node_infos = _parse_info_nodes_output(node_stdout)
+
+        node_details: Dict[str, Dict[str, str]] = {}
+        if details_returncode != 0:
+            logger.debug('Failed to get detailed Slurm node information: %s',
+                         details_stderr)
+        else:
+            try:
+                node_details = _parse_all_node_details_output(details_stdout)
+            except Exception as e:  # pylint: disable=broad-except
+                logger.debug(
+                    'Failed to parse detailed Slurm node '
+                    'information: %s', e)
+
+        jobs = None
+        if jobs_returncode != 0:
+            logger.debug('Failed to get running Slurm jobs: %s', jobs_stderr)
+        else:
+            try:
+                jobs = _parse_all_jobs_info_output(jobs_stdout)
+            except Exception as e:  # pylint: disable=broad-except
+                logger.debug('Failed to parse running Slurm jobs: %s', e)
+
+        partitions = None
+        if partitions_returncode != 0:
+            logger.debug('Failed to get Slurm partitions: %s',
+                         partitions_stderr)
+        else:
+            try:
+                partitions = _parse_partitions_info_output(partitions_stdout)
+            except Exception as e:  # pylint: disable=broad-except
+                logger.debug('Failed to parse Slurm partitions: %s', e)
+
+        return SlurmInventorySnapshot(node_infos=node_infos,
+                                      node_details=node_details,
+                                      jobs=jobs,
+                                      partitions=partitions)
 
     def node_details(self, node_name: str) -> Dict[str, str]:
         """Get detailed Slurm node information.
@@ -286,21 +592,6 @@ class SlurmClient:
         Returns:
             A dictionary of node attributes.
         """
-
-        def _parse_scontrol_node_output(output: str) -> Dict[str, str]:
-            """Parses the key=value output of 'scontrol show node'."""
-            node_info = {}
-            # Split by space, handling values that might have spaces
-            # if quoted. This is simplified; scontrol can be complex.
-            parts = output.split()
-            for part in parts:
-                if '=' in part:
-                    key, value = part.split('=', 1)
-                    # Simple quote removal, might need refinement
-                    value = value.strip('\'"')
-                    node_info[key] = value
-            return node_info
-
         cmd = f'scontrol show node {node_name}'
         rc, node_details, stderr = self._run_slurm_cmd(cmd)
         subprocess_utils.handle_returncode(
@@ -311,6 +602,27 @@ class SlurmClient:
             stream_logs=False)
         node_info = _parse_scontrol_node_output(node_details)
         return node_info
+
+    def get_all_node_details(self) -> Dict[str, Dict[str, str]]:
+        """Get detailed attributes for every node in a single scontrol call.
+
+        Uses ``scontrol show node -o`` (one line per node) so per-node
+        attributes that sinfo's format codes cannot express (CPUAlloc,
+        AllocMem, FreeMem, CPULoad, GresUsed, ...) are available without a
+        round-trip per node.
+
+        Returns:
+            A dictionary mapping node name to its attribute dictionary.
+        """
+        cmd = _ALL_NODE_DETAILS_CMD
+        rc, stdout, stderr = self._run_slurm_cmd(cmd)
+        subprocess_utils.handle_returncode(
+            rc,
+            cmd,
+            'Failed to get detailed node information.',
+            stderr=f'{stdout}\n{stderr}',
+            stream_logs=False)
+        return _parse_all_node_details_output(stdout)
 
     def get_jobs_gres(self, node_name: str) -> List[str]:
         """Get the list of jobs GRES for a given node name.
@@ -361,6 +673,29 @@ class SlurmClient:
                 nodes_to_gres.setdefault(node, []).append(gres_str)
 
         return nodes_to_gres
+
+    def get_all_jobs_info(self) -> Dict[str, List[JobGresInfo]]:
+        """Get id, name, user and GRES of all running jobs, grouped by node.
+
+        Like ``get_all_jobs_gres`` but keeps the job identity, so callers can
+        attribute per-node GPU allocations to specific jobs. A multi-node job
+        appears in the list of every node it runs on, each time with its
+        per-node GRES request (squeue's ``%b``, TRES_PER_NODE). Jobs without
+        GRES (``%b`` empty or ``N/A``) are skipped.
+
+        Returns:
+            Dict mapping node_name -> list of JobGresInfo for jobs on that
+            node.
+        """
+        cmd = _ALL_JOBS_INFO_CMD
+        rc, stdout, stderr = self._run_slurm_cmd(cmd)
+        subprocess_utils.handle_returncode(rc,
+                                           cmd,
+                                           'Failed to get all jobs info.',
+                                           stderr=f'{stdout}\n{stderr}',
+                                           stream_logs=False)
+
+        return _parse_all_jobs_info_output(stdout)
 
     def get_job_state(self, job_id: str) -> Optional[str]:
         """Get the state of a Slurm job.
@@ -605,7 +940,7 @@ class SlurmClient:
         Returns:
             List of SlurmPartition objects.
         """
-        cmd = 'scontrol show partitions -o'
+        cmd = _PARTITIONS_INFO_CMD
         rc, stdout, stderr = self._run_slurm_cmd(cmd)
         subprocess_utils.handle_returncode(rc,
                                            cmd,
@@ -613,23 +948,7 @@ class SlurmClient:
                                            stderr=f'{stdout}\n{stderr}',
                                            stream_logs=False)
 
-        partitions = []
-        for line in stdout.strip().splitlines():
-            is_default = False
-            match = _PARTITION_NAME_REGEX.search(line)
-            if 'Default=YES' in line:
-                is_default = True
-            maxtime = _parse_maxtime(line)
-            default_time = _parse_default_time(line)
-            if match:
-                partition = match.group(1).strip()
-                if partition:
-                    partitions.append(
-                        SlurmPartition(name=partition,
-                                       is_default=is_default,
-                                       maxtime=maxtime,
-                                       default_time=default_time))
-        return partitions
+        return _parse_partitions_info_output(stdout)
 
     def get_default_partition(self) -> Optional[str]:
         """Get the default partition name for the Slurm cluster.

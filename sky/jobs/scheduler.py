@@ -64,6 +64,7 @@ from sky.jobs import file_content_utils
 from sky.jobs import state
 from sky.jobs import utils as managed_job_utils
 from sky.skylet import constants
+from sky.skylet import runtime_utils
 from sky.utils import controller_utils
 from sky.utils import dag_utils
 from sky.utils import subprocess_utils
@@ -79,11 +80,11 @@ logger = sky_logging.init_logger('sky.jobs.controller')
 
 # Job controller lock. This is used to synchronize writing/reading the
 # controller pid file.
-JOB_CONTROLLER_PID_LOCK = os.path.expanduser(
+JOB_CONTROLLER_PID_LOCK = runtime_utils.expanduser(
     '~/.sky/locks/job_controller_pid.lock')
 
-JOB_CONTROLLER_PID_PATH = os.path.expanduser('~/.sky/job_controller_pid')
-JOB_CONTROLLER_ENV_PATH = os.path.expanduser('~/.sky/job_controller_env')
+JOB_CONTROLLER_PID_PATH = runtime_utils.expanduser('~/.sky/job_controller_pid')
+JOB_CONTROLLER_ENV_PATH = runtime_utils.expanduser('~/.sky/job_controller_env')
 
 CURRENT_HASH = os.path.expanduser('~/.sky/wheels/current_sky_wheel_hash')
 
@@ -158,7 +159,7 @@ def start_controller() -> None:
 
     This requires that the env file is already set up.
     """
-    logs_dir = os.path.expanduser(
+    logs_dir = runtime_utils.expanduser(
         managed_job_constants.JOBS_CONTROLLER_LOGS_DIR)
     os.makedirs(logs_dir, exist_ok=True)
     controller_uuid = str(uuid.uuid4())

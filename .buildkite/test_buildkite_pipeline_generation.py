@@ -183,6 +183,58 @@ def test_no_auto_retry_marker():
         f"no_auto_retry step should allow manual retry: {retry}"
 
 
+def test_concurrency_group_marker():
+    """Test that a concurrency_group(name) marker serializes a test globally.
+
+    The marker should make the generated step carry that concurrency_group with
+    a limit of 1, so instances of the test serialize across all builds and
+    pipelines while every other step is unaffected.
+    """
+    # The generator only walks tests/smoke_tests, so the marked test must live
+    # there. Use a throwaway file (removed in the finally block) rather than
+    # marking a real test, so no real test's CI concurrency is changed.
+    test_file = pathlib.Path(
+        'tests/smoke_tests/test_concurrency_group_marker_tmp.py')
+    test_file.write_text('import pytest\n'
+                         '\n'
+                         '\n'
+                         '@pytest.mark.kubernetes\n'
+                         '@pytest.mark.concurrency_group("my-global-lock")\n'
+                         'def test_concurrency_group_example():\n'
+                         '    pass\n')
+    try:
+        env = dict(os.environ)
+        env['PYTHONPATH'] = f"{pathlib.Path.cwd()}/tests:" \
+                            f"{env.get('PYTHONPATH', '')}"
+
+        subprocess.run([
+            'python', '.buildkite/generate_pipeline.py', '--args',
+            '--kubernetes', '--file_pattern',
+            'test_concurrency_group_marker_tmp'
+        ],
+                       env=env,
+                       check=True)
+
+        pipeline_path = pathlib.Path(
+            '.buildkite/pipeline_smoke_tests_release.yaml')
+        steps = _extract_steps_from_pipeline(pipeline_path)
+
+        target_steps = [
+            s for s in steps
+            if 'test_concurrency_group_example' in s.get('label', '')
+        ]
+        assert len(target_steps) == 1, \
+            f"Expected 1 step, got {len(target_steps)}"
+
+        step = target_steps[0]
+        assert step.get('concurrency') == 1, \
+            f"concurrency_group step should have concurrency 1: {step}"
+        assert step.get('concurrency_group') == 'my-global-lock', \
+            f"concurrency_group step should carry the marker name: {step}"
+    finally:
+        test_file.unlink(missing_ok=True)
+
+
 @pytest.mark.parametrize('args', [
     '',
     '--aws',

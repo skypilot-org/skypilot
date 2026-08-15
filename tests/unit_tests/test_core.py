@@ -13,6 +13,7 @@ from sky.skylet import job_lib
 from sky.utils import common
 from sky.utils import common_utils
 from sky.utils import status_lib
+from sky.workspaces import constants as workspace_constants
 
 
 @mock.patch('sky.backends.backend_utils.check_cluster_available')
@@ -104,7 +105,28 @@ class TestEnabledCloudsWorkspacePermission:
             with pytest.raises(exceptions.PermissionDeniedError,
                                match='no access'):
                 core.enabled_clouds(workspace='restricted')
-        mock_check.assert_called_once_with(mock_user, 'restricted')
+        mock_check.assert_called_once_with(
+            mock_user,
+            'restricted',
+            action=workspace_constants.WORKSPACE_ACTION_READ)
+
+    @mock.patch('sky.core.global_user_state.get_cached_enabled_clouds',
+                return_value=[])
+    @mock.patch('sky.core.workspaces_core.check_workspace_permission')
+    def test_checks_at_read_level(self, mock_check, _):
+        """Reporting a workspace's enabled clouds is a read.
+
+        Checking at write level would deny a workspace the caller can
+        legitimately see (read-only visibility for non-members) and, via
+        `enabled_clouds_batch`, fail the whole fan-out.
+        """
+        mock_user = models.User(id='user-1', name='User1')
+        with mock.patch('sky.core.common_utils.get_current_user',
+                        return_value=mock_user), \
+             mock.patch('sky.core.skypilot_config.local_active_workspace_ctx'):
+            core.enabled_clouds(workspace='read-only-ws')
+        assert mock_check.call_args.kwargs['action'] == (
+            workspace_constants.WORKSPACE_ACTION_READ)
 
     @mock.patch('sky.core.global_user_state.get_cached_enabled_clouds',
                 return_value=[])
@@ -675,6 +697,52 @@ def test_sdk_launch_no_resize_skips_version_guard(_stub_launch_preamble,
     task = sky.Task(run='echo hi', num_nodes=2)
     with pytest.raises(RuntimeError, match='reached _launch'):
         sdk.launch(task, cluster_name='my-cluster', resize=False)
+
+
+@pytest.mark.parametrize('api_version', [None, 24, 56])
+def test_sdk_validate_slurm_host_path_errors_on_old_server(
+        api_version, monkeypatch):
+    """sdk.validate should error for host_path volumes if remote API
+    version < 57."""
+    import sky
+    from sky.client import sdk
+
+    monkeypatch.setattr('sky.client.sdk.versions.get_remote_api_version',
+                        lambda: api_version)
+    task = sky.Task(resources=sky.Resources(cloud=clouds.Slurm()),
+                    volumes={'/data': {
+                        'host_path': '/shared/data'
+                    }})
+    with sky.Dag() as dag:
+        dag.add(task)
+
+    with pytest.raises(exceptions.APINotSupportedError,
+                       match='Slurm host_path volumes'):
+        sdk.validate(dag)
+
+
+def test_sdk_validate_slurm_host_path_allowed_on_new_server(monkeypatch):
+    """sdk.validate should pass the guard for host_path volumes when remote
+    API version >= 57. We short-circuit the server request with a sentinel
+    so reaching it proves the guard didn't raise."""
+    import sky
+    from sky.client import sdk
+
+    monkeypatch.setattr('sky.client.sdk.versions.get_remote_api_version',
+                        lambda: 57)
+    sentinel = RuntimeError('reached server request')
+    monkeypatch.setattr(
+        'sky.client.sdk.server_common.make_authenticated_request',
+        mock.Mock(side_effect=sentinel))
+    task = sky.Task(resources=sky.Resources(cloud=clouds.Slurm()),
+                    volumes={'/data': {
+                        'host_path': '/shared/data'
+                    }})
+
+    with sky.Dag() as dag:
+        dag.add(task)
+    with pytest.raises(RuntimeError, match='reached server request'):
+        sdk.validate(dag)
 
 
 def test_launch_body_accepts_resize_field():

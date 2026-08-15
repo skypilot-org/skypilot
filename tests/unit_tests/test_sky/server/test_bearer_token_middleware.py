@@ -1,13 +1,50 @@
 """Tests for Bearer token middleware."""
 
+import asyncio
 import os
+import time
 import unittest.mock as mock
 
 import fastapi
 import pytest
 
+from sky.server.server import _SA_LAST_USED_UPDATE_INTERVAL_SECONDS
 from sky.server.server import BearerTokenMiddleware
 from sky.skylet import constants
+
+# The service-account auth path runs on the request event loop for every
+# request, so its DB lookups must be offloaded. A slow (mocked) DB call that
+# runs on the loop balloons the worst loop tick to ~its duration; an offloaded
+# one keeps ticks near their target. 0.25s sits between the two regimes.
+_SLOW_DB_SECONDS = 0.5
+_MAX_ACCEPTABLE_LOOP_LAG_SECONDS = 0.25
+
+
+async def _measure_max_loop_lag(stop: asyncio.Event,
+                                interval: float = 0.01) -> float:
+    """Tick every ``interval`` s and return the worst scheduling overshoot.
+
+    If a callback blocks the loop, the pending sleep fires late and its
+    overshoot equals how long the loop was starved.
+    """
+    loop = asyncio.get_running_loop()
+    worst = 0.0
+    while not stop.is_set():
+        start = loop.time()
+        await asyncio.sleep(interval)
+        worst = max(worst, loop.time() - start - interval)
+    return worst
+
+
+def _blocking(return_value, delay: float = _SLOW_DB_SECONDS):
+    """A synchronous (loop-blocking if not offloaded) stand-in for a slow DB
+    call."""
+
+    def _call(*args, **kwargs):
+        time.sleep(delay)
+        return return_value
+
+    return _call
 
 
 class TestBearerTokenMiddleware:
@@ -255,7 +292,85 @@ class TestBearerTokenMiddleware:
             assert base_mock_request.state.auth_user.name == 'test-service-account'
             # last_used must be updated with the DB row's token_id, not
             # the JWT's.
-            mock_update_last_used.assert_called_once_with('token_db_id_456')
+            mock_update_last_used.assert_called_once_with(
+                'token_db_id_456', _SA_LAST_USED_UPDATE_INTERVAL_SECONDS)
+
+    @pytest.mark.asyncio
+    async def test_fresh_last_used_skips_update(self, middleware,
+                                                base_mock_request,
+                                                mock_call_next, mock_token_row):
+        """A row whose last_used_at is fresh must NOT be re-written.
+
+        The write UPDATEs the token's single row, so per-request writes from
+        a concurrent fleet sharing one token serialize on the row lock and
+        can exhaust the auth executor; the middleware throttles the write to
+        once per _SA_LAST_USED_UPDATE_INTERVAL_SECONDS per token.
+        """
+        base_mock_request.headers = {'authorization': 'Bearer sky_valid_token'}
+        mock_token_row['last_used_at'] = int(time.time()) - 1
+
+        mock_payload = {
+            'sub': 'sa-123456',
+            'name': 'test-service-account',
+            'token_id': 'token_123'
+        }
+        mock_user_info = mock.Mock()
+        mock_user_info.name = 'test-service-account'
+
+        with mock.patch.dict(
+                os.environ,
+            {constants.ENV_VAR_ENABLE_SERVICE_ACCOUNTS: 'true'}), \
+                mock.patch('sky.users.token_service.token_service') as mock_token_service, \
+                mock.patch('sky.global_user_state.get_service_account_token_by_hash') as mock_get_by_hash, \
+                mock.patch('sky.global_user_state.get_user') as mock_get_user, \
+                mock.patch('sky.global_user_state.update_service_account_token_last_used') as mock_update_last_used:
+
+            mock_token_service.verify_token.return_value = mock_payload
+            mock_get_by_hash.return_value = mock_token_row
+            mock_get_user.return_value = mock_user_info
+
+            response = await middleware.dispatch(base_mock_request,
+                                                 mock_call_next)
+
+            # Authentication still succeeds; only the write is skipped.
+            assert response.status_code == 200
+            assert base_mock_request.state.auth_user.id == 'sa-123456'
+            mock_update_last_used.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_stale_last_used_is_updated(self, middleware,
+                                              base_mock_request, mock_call_next,
+                                              mock_token_row):
+        """A row whose last_used_at is older than the interval IS re-written."""
+        base_mock_request.headers = {'authorization': 'Bearer sky_valid_token'}
+        mock_token_row['last_used_at'] = int(time.time()) - 3600
+
+        mock_payload = {
+            'sub': 'sa-123456',
+            'name': 'test-service-account',
+            'token_id': 'token_123'
+        }
+        mock_user_info = mock.Mock()
+        mock_user_info.name = 'test-service-account'
+
+        with mock.patch.dict(
+                os.environ,
+            {constants.ENV_VAR_ENABLE_SERVICE_ACCOUNTS: 'true'}), \
+                mock.patch('sky.users.token_service.token_service') as mock_token_service, \
+                mock.patch('sky.global_user_state.get_service_account_token_by_hash') as mock_get_by_hash, \
+                mock.patch('sky.global_user_state.get_user') as mock_get_user, \
+                mock.patch('sky.global_user_state.update_service_account_token_last_used') as mock_update_last_used:
+
+            mock_token_service.verify_token.return_value = mock_payload
+            mock_get_by_hash.return_value = mock_token_row
+            mock_get_user.return_value = mock_user_info
+
+            response = await middleware.dispatch(base_mock_request,
+                                                 mock_call_next)
+
+            assert response.status_code == 200
+            mock_update_last_used.assert_called_once_with(
+                'token_db_id_456', _SA_LAST_USED_UPDATE_INTERVAL_SECONDS)
 
     @pytest.mark.asyncio
     async def test_missing_user_id_in_token(self, middleware, base_mock_request,
@@ -530,3 +645,63 @@ class TestBearerTokenMiddleware:
             # User should be the service account user from Bearer auth
             assert base_mock_request.state.auth_user.id == 'sa-123456'
             assert base_mock_request.state.auth_user.name == 'test-service-account'
+
+    @pytest.mark.asyncio
+    async def test_sa_auth_does_not_block_event_loop(self, middleware,
+                                                     base_mock_request,
+                                                     mock_call_next,
+                                                     mock_token_row):
+        """The service-account auth path must not run its DB lookups
+        synchronously on the request event loop.
+
+        get_service_account_token_by_hash / get_user /
+        update_service_account_token_last_used all run on the loop for every
+        SA-authenticated request; if they block, a slow DB stalls the whole
+        loop. This drives the real dispatch() with deliberately-slow DB calls
+        and asserts the loop stays responsive (measured by a concurrent
+        heartbeat). Fails if any lookup runs inline; passes once offloaded.
+        """
+        base_mock_request.headers = {'authorization': 'Bearer sky_valid_token'}
+
+        mock_payload = {
+            'sub': 'sa-123456',
+            'name': 'test-service-account',
+            'token_id': 'token_123'
+        }
+        mock_user_info = mock.Mock()
+        mock_user_info.name = 'test-service-account'
+
+        with mock.patch.dict(
+                os.environ,
+            {constants.ENV_VAR_ENABLE_SERVICE_ACCOUNTS: 'true'}), \
+                mock.patch('sky.users.token_service.token_service') as mock_token_service, \
+                mock.patch('sky.global_user_state.get_service_account_token_by_hash',
+                           side_effect=_blocking(mock_token_row)), \
+                mock.patch('sky.global_user_state.get_user',
+                           side_effect=_blocking(mock_user_info)), \
+                mock.patch('sky.global_user_state.update_service_account_token_last_used',
+                           side_effect=_blocking(None)):
+
+            mock_token_service.verify_token.return_value = mock_payload
+
+            stop = asyncio.Event()
+            monitor = asyncio.create_task(_measure_max_loop_lag(stop))
+            # Let the monitor establish a steady tick before the slow calls.
+            await asyncio.sleep(0.05)
+
+            response = await middleware.dispatch(base_mock_request,
+                                                 mock_call_next)
+
+            stop.set()
+            worst_lag = await monitor
+
+            # Sanity: the SA request still authenticated successfully.
+            assert response.status_code == 200
+            assert base_mock_request.state.auth_user.id == 'sa-123456'
+
+            assert worst_lag < _MAX_ACCEPTABLE_LOOP_LAG_SECONDS, (
+                f'BearerTokenMiddleware starved the event loop for '
+                f'{worst_lag:.2f}s while slow ({_SLOW_DB_SECONDS}s) DB lookups '
+                f'were in flight — the service-account user/token lookups run '
+                f'synchronously on the request loop. Offload them (e.g. '
+                f'asyncio.to_thread).')

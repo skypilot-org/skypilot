@@ -11,6 +11,13 @@ from sky.skylet import autostop_lib
 from sky.skylet import constants
 from sky.utils import kubernetes_enums
 
+# Valid values for the `scope` field of a dashboard.external_links entry:
+# the dashboard pages a link may appear on. 'cluster' is the cluster detail
+# page; 'jobs' covers job detail pages (both cluster jobs and managed jobs).
+# Keep in sync with EXTERNAL_LINK_SCOPES in
+# sky/dashboard/src/utils/externalLinks.js.
+DASHBOARD_EXTERNAL_LINK_SCOPES = ('cluster', 'jobs')
+
 # Registry for plugin-provided job_recovery schema properties.
 # Plugins call register_job_recovery_property() to add strategy-specific
 # config fields. On the server, once plugins have loaded, their properties
@@ -446,6 +453,9 @@ def _get_single_resources_schema():
                     'type': 'integer',
                 }],
             },
+            # Deprecated: use disk_size instead. Kept for backward
+            # compatibility with configs written by older versions.
+            # TODO (kyuds): remove v0.14.0.
             'ephemeral_storage': {
                 'anyOf': [{
                     'type': 'string',
@@ -1134,7 +1144,13 @@ def _task_config_schema():
         constants.OVERRIDEABLE_CONFIG_KEYS_IN_TASK)['properties']
     return {
         'type': 'object',
-        'additionalProperties': False,
+        # On the client, let unknown keys pass through so config keys
+        # registered as task-overrideable on the server (via
+        # skypilot_config.register_task_overrideable_config_key) are not
+        # rejected by a client that does not know about them — mirroring
+        # how the global config schema handles plugin-registered
+        # properties. The server enforces the full set.
+        'additionalProperties': _allow_additional_properties(),
         'properties': {
             **overrideable,
             'hooks': _HOOKS_SCHEMA,
@@ -1489,6 +1505,31 @@ _GPU_PARTITION_MAP_SCHEMA = {
     },
 }
 
+_CONTAINER_MOUNTS_SCHEMA = {
+    'type': 'object',
+    'required': [],
+    # Maps a container path to a host path string (read-only) or
+    # {host_path: ..., mode: ro|rw}.
+    'additionalProperties': {
+        'anyOf': [{
+            'type': 'string',
+        }, {
+            'type': 'object',
+            'required': ['host_path'],
+            'additionalProperties': False,
+            'properties': {
+                'host_path': {
+                    'type': 'string',
+                },
+                'mode': {
+                    'type': 'string',
+                    'enum': ['ro', 'rw'],
+                },
+            },
+        }],
+    },
+}
+
 _PRICING_SCHEMA = {
     'type': 'object',
     'required': [],
@@ -1522,6 +1563,16 @@ _CONTEXT_CONFIG_SCHEMA_MINIMAL = {
     },
     'provision_timeout': {
         'type': 'integer',
+    },
+    'max_inline_command_length': {
+        # Largest command, in bytes of request URL, that SkyPilot will inline
+        # into a `kubectl exec` instead of uploading as a file. Lower this if a
+        # proxy in front of the Kubernetes API rejects large requests; the only
+        # cost of a lower value is an extra file upload per job submission.
+        # Lives here rather than in the Kubernetes-only schema so SSH node
+        # pools, which run through the same runner, can set it too.
+        'type': 'integer',
+        'minimum': 1024,
     },
     'custom_metadata': {
         'type': 'object',
@@ -1609,6 +1660,11 @@ _CONTEXT_CONFIG_SCHEMA_KUBERNETES = {
             'local_queue_name': {
                 'type': 'string',
             },
+            # Seconds a launch may wait for queue admission (pods held by
+            # a scheduling gate) before failing; -1 waits indefinitely.
+            'admission_timeout': {
+                'type': 'integer',
+            },
         },
     },
     # Alias of `kueue.local_queue_name`; `quota.queue` takes precedence
@@ -1694,6 +1750,17 @@ _CONTEXT_CONFIG_SCHEMA_KUBERNETES = {
                         'pattern': '^(/|~/|~$)',
                     },
                     'minItems': 1,
+                },
+                # Whose launches this auto-mount applies to, mirroring the
+                # personal/workspace/global scopes used by secrets:
+                # - personal: only launches by the volume's owner
+                # - workspace: only launches in the volume's workspace
+                # - global: every launch (default; original behavior)
+                # Values must match volume.AutoMountScope (not imported here
+                # to avoid a circular import).
+                'scope': {
+                    'type': 'string',
+                    'enum': ['personal', 'workspace', 'global'],
                 },
             },
         },
@@ -2055,12 +2122,16 @@ def get_config_schema():
                 'provision_timeout': {
                     'type': 'integer',
                 },
+                'submit_as_user': {
+                    'type': 'boolean',
+                },
                 'pricing': _PRICING_SCHEMA,
                 'sbatch_options': _SBATCH_OPTIONS_SCHEMA,
                 'gpu_partition_map': _GPU_PARTITION_MAP_SCHEMA,
                 'cpu_partition': {
                     'type': 'string',
                 },
+                'container_mounts': _CONTAINER_MOUNTS_SCHEMA,
                 'cluster_configs': {
                     'type': 'object',
                     'required': [],
@@ -2076,12 +2147,16 @@ def get_config_schema():
                             'tmpdir': {
                                 'type': 'string',
                             },
+                            'submit_as_user': {
+                                'type': 'boolean',
+                            },
                             'pricing': _PRICING_SCHEMA,
                             'sbatch_options': _SBATCH_OPTIONS_SCHEMA,
                             'gpu_partition_map': _GPU_PARTITION_MAP_SCHEMA,
                             'cpu_partition': {
                                 'type': 'string',
                             },
+                            'container_mounts': _CONTAINER_MOUNTS_SCHEMA,
                             'partition_configs': {
                                 'type': 'object',
                                 'required': [],
@@ -2161,6 +2236,9 @@ def get_config_schema():
                 },
                 'domain': {
                     'type': 'string',
+                },
+                'use_personal_pricing': {
+                    'type': 'boolean',
                 },
                 'security_group_name':
                     (_PROPERTY_NAME_OR_CLUSTER_NAME_TO_PROPERTY),
@@ -2411,6 +2489,17 @@ def get_config_schema():
                         'type': 'string',
                     },
                 },
+                # Who may read a (private) workspace. 'allowed_users'
+                # (default): only the workspace's allowed users (members)
+                # and admins can see it; it is hidden from everyone else.
+                # 'all': anyone can see the workspace and its clusters/jobs, but
+                # writes stay members-only, so non-members get read-only access.
+                # Only meaningful for private workspaces; an open (non-private)
+                # workspace is usable by everyone regardless.
+                'read_access': {
+                    'type': 'string',
+                    'enum': ['allowed_users', 'all'],
+                },
                 'gcp': {
                     'type': 'object',
                     'properties': {
@@ -2484,6 +2573,9 @@ def get_config_schema():
                             'properties': {
                                 'local_queue_name': {
                                     'type': 'string',
+                                },
+                                'admission_timeout': {
+                                    'type': 'integer',
                                 },
                             },
                         },
@@ -2680,6 +2772,36 @@ def get_config_schema():
         },
     }
 
+    metrics_schema = {
+        'type': 'object',
+        'required': [],
+        'additionalProperties': False,
+        'properties': {
+            # The Prometheus deployment that /gpu-metrics federates from
+            # in each context. Defaults match the SkyPilot Helm chart
+            # (service `skypilot-prometheus-server` in namespace
+            # `skypilot`, port 80).
+            'prometheus': {
+                'type': 'object',
+                'required': [],
+                'additionalProperties': False,
+                'properties': {
+                    'namespace': {
+                        'type': 'string',
+                    },
+                    'service': {
+                        'type': 'string',
+                    },
+                    'port': {
+                        'type': 'integer',
+                        'minimum': 1,
+                        'maximum': 65535,
+                    },
+                },
+            },
+        },
+    }
+
     dashboard_schema = {
         'type': 'object',
         'required': [],
@@ -2703,6 +2825,17 @@ def get_config_schema():
                         'url': {
                             'type': 'string',
                             'minLength': 1,
+                        },
+                        # Pages the link may appear on. Omitted means all
+                        # pages (subject to template-variable resolution).
+                        'scope': {
+                            'type': 'array',
+                            'minItems': 1,
+                            'uniqueItems': True,
+                            'items': {
+                                'type': 'string',
+                                'enum': list(DASHBOARD_EXTERNAL_LINK_SCOPES),
+                            },
                         },
                     },
                     # Each entry is either a log-scanning pattern (regex) or
@@ -2743,12 +2876,28 @@ def get_config_schema():
             'api_server': api_server,
             'active_workspace': workspace_schema,
             'workspaces': workspaces_schema,
+            # Org-wide defaults applied to every workspace unless the
+            # workspace overrides them under `workspaces.<name>`.
+            'workspace_config': {
+                'type': 'object',
+                'required': [],
+                'additionalProperties': False,
+                'properties': {
+                    # Default read access for private workspaces. A
+                    # per-workspace `read_access` overrides this.
+                    'read_access': {
+                        'type': 'string',
+                        'enum': ['allowed_users', 'all'],
+                    },
+                },
+            },
             'provision': provision_configs,
             'rbac': rbac_schema,
             'logs': logs_schema,
             'daemons': daemon_schema,
             'data': data_schema,
             'dashboard': dashboard_schema,
+            'metrics': metrics_schema,
             **cloud_configs,
             # For plugin-specific config.
             'plugins': {

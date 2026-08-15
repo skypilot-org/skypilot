@@ -14,6 +14,7 @@ from sky import sky_logging as sky_logging
 from sky.skylet import log_lib as log_lib
 from sky.utils import subprocess_utils as subprocess_utils
 
+MAX_INLINE_COMMAND_LENGTH: int
 GIT_EXCLUDE: str
 RSYNC_DISPLAY_OPTION: str
 RSYNC_FILTER_GITIGNORE: str
@@ -21,6 +22,13 @@ RSYNC_FILTER_SKYIGNORE: str
 RSYNC_EXCLUDE_OPTION: str
 ALIAS_SUDO_TO_EMPTY_FOR_ROOT_CMD: str
 DEFAULT_SSH_CONTROL_NAME: str
+
+
+def wrap_command_as_user(command: str,
+                         user: str,
+                         shell_argv0: Optional[str] = ...,
+                         use_sudo: bool = ...) -> str:
+    ...
 
 
 def ssh_options_list(
@@ -54,6 +62,15 @@ class CommandRunner:
         node: Tuple[Any, ...],
         **kwargs,
     ) -> None:
+        ...
+
+    def inline_command_size(self, command: str) -> int:
+        ...
+
+    def max_inline_command_length(self) -> int:
+        ...
+
+    def is_command_length_over_limit(self, command: str) -> bool:
         ...
 
     @typing.overload
@@ -304,6 +321,8 @@ class SSHCommandRunner(CommandRunner):
         stream_logs: bool = ...,
         max_retry: int = ...,
         get_remote_home_dir: Callable[[], str] = ...,
+        timeout: Optional[int] = ...,
+        remote_rsync_command: Optional[str] = ...,
     ) -> None:
         ...
 
@@ -400,7 +419,23 @@ class KubernetesCommandRunner(CommandRunner):
         ...
 
 
-class SlurmCommandRunner(SSHCommandRunner):
+class SlurmLoginNodeCommandRunner(SSHCommandRunner):
+    """SSH runner that can execute login-node commands as a Unix user."""
+    slurm_user: Optional[str]
+
+    def __init__(
+        self,
+        node: Tuple[str, int],
+        ssh_user: str,
+        ssh_private_key: Optional[str],
+        *,
+        slurm_user: Optional[str],
+        **kwargs,
+    ) -> None:
+        ...
+
+
+class SlurmCommandRunner(SlurmLoginNodeCommandRunner):
     """Runner for Slurm commands."""
     sky_dir: str
     skypilot_runtime_dir: str
@@ -419,6 +454,7 @@ class SlurmCommandRunner(SSHCommandRunner):
         job_id: str,
         slurm_node: str,
         container_args: Optional[str] = ...,
+        slurm_user: Optional[str] = ...,
         **kwargs,
     ) -> None:
         ...

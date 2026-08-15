@@ -14,6 +14,18 @@ from sky.utils import status_lib
 from sky.volumes.server import core
 
 
+@pytest.fixture
+def mock_no_volume_errors(monkeypatch):
+    """Reports every volume as error-free.
+
+    volume_refresh holds a volume's status when the error check cannot reach
+    the cloud, so a test that asserts on the refresh outcome has to say what
+    the check found.
+    """
+    monkeypatch.setattr(provision, 'get_all_volumes_errors',
+                        mock.MagicMock(return_value=({}, set())))
+
+
 class TestVolumeCore:
     """Test cases for volume core functions."""
 
@@ -1325,7 +1337,7 @@ class TestVolumeCore:
         assert result[1]['usedby_clusters'] == ['cluster-b']
 
     def test_volume_refresh_with_config_refresh_multiple_volumes(
-            self, monkeypatch):
+            self, monkeypatch, mock_no_volume_errors):
         """Test volume_refresh with multiple volumes, some needing refresh."""
         # Mock volume data
         mock_handle1 = mock.MagicMock(
@@ -1481,8 +1493,9 @@ class TestVolumeCore:
 
         # Mock get_all_volumes_errors to return an error
         error_msg = 'PVC access mode mismatch: PVC requests ReadWriteOnce'
-        mock_get_errors = mock.MagicMock(
-            return_value={'test-volume': error_msg})
+        mock_get_errors = mock.MagicMock(return_value=({
+            'test-volume': error_msg
+        }, set()))
         monkeypatch.setattr(provision, 'get_all_volumes_errors',
                             mock_get_errors)
 
@@ -1847,3 +1860,332 @@ class TestVolumeStatus:
         """Test that NOT_READY status exists."""
         assert hasattr(status_lib.VolumeStatus, 'NOT_READY')
         assert status_lib.VolumeStatus.NOT_READY.value == 'NOT_READY'
+
+
+class TestInitialVolumeStatus:
+    """Tests for _initial_volume_status."""
+
+    def test_bound_volume_is_ready(self, monkeypatch):
+        config = _make_volume_config()
+        monkeypatch.setattr(provision, 'get_all_volumes_errors',
+                            lambda cloud, configs: ({
+                                'test-vol': None
+                            }, set()))
+
+        status, error = core._initial_volume_status('Kubernetes', config)
+
+        assert status == status_lib.VolumeStatus.READY
+        assert error is None
+
+    def test_unbound_volume_is_not_ready(self, monkeypatch):
+        """Creating a PVC does not provision the PersistentVolume, so a
+        just-created volume must not be advertised as usable."""
+        config = _make_volume_config()
+        monkeypatch.setattr(
+            provision, 'get_all_volumes_errors', lambda cloud, configs: ({
+                'test-vol': 'PVC is pending.'
+            }, set()))
+
+        status, error = core._initial_volume_status('Kubernetes', config)
+
+        assert status == status_lib.VolumeStatus.NOT_READY
+        assert error == 'PVC is pending.'
+
+    def test_unqueryable_volume_is_ready(self, monkeypatch):
+        config = _make_volume_config()
+        monkeypatch.setattr(provision, 'get_all_volumes_errors',
+                            lambda cloud, configs: ({}, {'test-vol'}))
+
+        status, error = core._initial_volume_status('Kubernetes', config)
+
+        assert status == status_lib.VolumeStatus.READY
+        assert error is None
+
+    def test_check_failure_is_ready(self, monkeypatch):
+        """A creation must not fail just because the status probe did."""
+
+        def _raise(cloud, configs):
+            raise RuntimeError('kube API unreachable')
+
+        config = _make_volume_config()
+        monkeypatch.setattr(provision, 'get_all_volumes_errors', _raise)
+
+        status, error = core._initial_volume_status('Kubernetes', config)
+
+        assert status == status_lib.VolumeStatus.READY
+        assert error is None
+
+
+class TestVolumeRefreshErrorFetchFailure:
+    """A failed error check must not be read as "no error"."""
+
+    @staticmethod
+    def _setup(monkeypatch, recorded_status, recorded_error):
+        mock_handle = mock.MagicMock(cloud='kubernetes',
+                                     type='k8s-pvc',
+                                     region='my-context',
+                                     zone=None,
+                                     size='100Gi',
+                                     config={},
+                                     name_on_cloud='test-pvc',
+                                     spec=models.VolumeConfig)
+        mock_handle.name = 'test-volume'
+        mock_volumes = [{
+            'name': 'test-volume',
+            'launched_at': 1234567890,
+            'user_hash': 'user123',
+            'workspace': 'default',
+            'last_attached_at': None,
+            'last_use': None,
+            'handle': mock_handle,
+            'status': recorded_status,
+            'is_ephemeral': False,
+            'error_message': recorded_error,
+            'usedby_pods': [],
+            'usedby_clusters': [],
+        }]
+        monkeypatch.setattr(global_user_state, 'get_volumes',
+                            mock.MagicMock(return_value=mock_volumes))
+        monkeypatch.setattr(global_user_state, 'get_volume_by_name',
+                            mock.MagicMock(return_value=mock_volumes[0]))
+        monkeypatch.setattr(provision, 'get_all_volumes_usedby',
+                            mock.MagicMock(return_value=({}, {}, set())))
+        monkeypatch.setattr(provision, 'map_all_volumes_usedby',
+                            mock.MagicMock(return_value=([], [])))
+        monkeypatch.setattr(provision, 'refresh_volume_config',
+                            mock.MagicMock(return_value=(False, mock_handle)))
+        monkeypatch.setattr('sky.volumes.server.core.filelock.FileLock',
+                            mock.MagicMock())
+        mock_update_status = mock.MagicMock()
+        monkeypatch.setattr(global_user_state, 'update_volume_status',
+                            mock_update_status)
+        return mock_update_status
+
+    def test_broken_volume_keeps_its_status(self, monkeypatch):
+        mock_update_status = self._setup(monkeypatch,
+                                         status_lib.VolumeStatus.NOT_READY,
+                                         'PVC is pending.')
+
+        def _raise(cloud, configs):
+            raise RuntimeError('kube API unreachable')
+
+        monkeypatch.setattr(provision, 'get_all_volumes_errors', _raise)
+
+        core.volume_refresh()
+
+        mock_update_status.assert_not_called()
+
+    def test_cloud_without_error_check_still_updates(self, monkeypatch):
+        """A cloud that does not implement the check returns both empty; its
+        volumes must not get frozen by the failed-fetch guard."""
+        mock_update_status = self._setup(monkeypatch,
+                                         status_lib.VolumeStatus.READY, None)
+        monkeypatch.setattr(provision, 'get_all_volumes_errors',
+                            lambda cloud, configs: ({}, set()))
+        monkeypatch.setattr(provision, 'map_all_volumes_usedby',
+                            mock.MagicMock(return_value=(['pod-a'], [])))
+
+        core.volume_refresh()
+
+        mock_update_status.assert_called_once()
+        assert mock_update_status.call_args[1][
+            'status'] == status_lib.VolumeStatus.IN_USE
+
+    def test_unreported_volume_still_updates(self, monkeypatch):
+        """Only volumes the provider flags as unqueryable are held back."""
+        mock_update_status = self._setup(monkeypatch,
+                                         status_lib.VolumeStatus.READY, None)
+        monkeypatch.setattr(
+            provision, 'get_all_volumes_errors', lambda cloud, configs: ({
+                'test-volume': 'PVC is pending.'
+            }, set()))
+
+        core.volume_refresh()
+
+        mock_update_status.assert_called_once()
+        assert mock_update_status.call_args[1][
+            'status'] == status_lib.VolumeStatus.NOT_READY
+
+
+class TestVolumeApplyRecordsInitialStatus:
+    """volume_apply must record what the volume actually looks like."""
+
+    @staticmethod
+    def _setup(monkeypatch):
+        mock_cloud = mock.MagicMock()
+        mock_cloud.max_cluster_name_length.return_value = 63
+        mock_cloud.validate_region_zone.return_value = ('my-context', None)
+        mock_cloud_registry = mock.MagicMock()
+        mock_cloud_registry.from_str.return_value = mock_cloud
+        monkeypatch.setattr('sky.utils.registry.CLOUD_REGISTRY',
+                            mock_cloud_registry)
+        monkeypatch.setattr(
+            'sky.volumes.server.core.common_utils.make_cluster_name_on_cloud',
+            mock.MagicMock(return_value='test-vol'))
+        monkeypatch.setattr(global_user_state, 'get_volume_by_name',
+                            mock.MagicMock(return_value=None))
+        monkeypatch.setattr(provision, 'apply_volume',
+                            mock.MagicMock(side_effect=lambda cloud, c: c))
+        monkeypatch.setattr('sky.volumes.server.core.filelock.FileLock',
+                            mock.MagicMock())
+        mock_add_volume = mock.MagicMock()
+        monkeypatch.setattr(global_user_state, 'add_volume', mock_add_volume)
+        return mock_add_volume
+
+    def test_unbound_volume_is_recorded_not_ready(self, monkeypatch):
+        mock_add_volume = self._setup(monkeypatch)
+        monkeypatch.setattr(
+            provision, 'get_all_volumes_errors', lambda cloud, configs: ({
+                'test-vol': 'PVC is pending.'
+            }, set()))
+
+        core.volume_apply(name='test-vol',
+                          volume_type='k8s-pvc',
+                          cloud='kubernetes',
+                          region='my-context',
+                          zone=None,
+                          size='1000',
+                          config={})
+
+        mock_add_volume.assert_called_once()
+        assert mock_add_volume.call_args[0][
+            2] == status_lib.VolumeStatus.NOT_READY
+        assert mock_add_volume.call_args[1][
+            'error_message'] == 'PVC is pending.'
+
+    def test_bound_volume_is_recorded_ready(self, monkeypatch):
+        mock_add_volume = self._setup(monkeypatch)
+        monkeypatch.setattr(provision, 'get_all_volumes_errors',
+                            lambda cloud, configs: ({
+                                'test-vol': None
+                            }, set()))
+
+        core.volume_apply(name='test-vol',
+                          volume_type='k8s-pvc',
+                          cloud='kubernetes',
+                          region='my-context',
+                          zone=None,
+                          size='1000',
+                          config={})
+
+        mock_add_volume.assert_called_once()
+        assert mock_add_volume.call_args[0][2] == status_lib.VolumeStatus.READY
+        assert mock_add_volume.call_args[1]['error_message'] is None
+
+
+class TestEphemeralVolumeSkipsStatusProbe:
+    """add_volume forces ephemeral volumes to IN_USE, so probing is waste."""
+
+    def test_probe_is_not_called(self, monkeypatch):
+        mock_cloud = mock.MagicMock()
+        mock_cloud.max_cluster_name_length.return_value = 63
+        mock_cloud.validate_region_zone.return_value = ('my-context', None)
+        mock_registry = mock.MagicMock()
+        mock_registry.from_str.return_value = mock_cloud
+        monkeypatch.setattr('sky.utils.registry.CLOUD_REGISTRY', mock_registry)
+        monkeypatch.setattr(
+            'sky.volumes.server.core.common_utils.make_cluster_name_on_cloud',
+            mock.MagicMock(return_value='eph-vol'))
+        monkeypatch.setattr(global_user_state, 'get_volume_by_name',
+                            mock.MagicMock(return_value=None))
+        monkeypatch.setattr(provision, 'apply_volume',
+                            mock.MagicMock(side_effect=lambda cloud, c: c))
+        monkeypatch.setattr('sky.volumes.server.core.filelock.FileLock',
+                            mock.MagicMock())
+        monkeypatch.setattr(global_user_state, 'add_volume', mock.MagicMock())
+        mock_get_errors = mock.MagicMock(return_value=({}, set()))
+        monkeypatch.setattr(provision, 'get_all_volumes_errors',
+                            mock_get_errors)
+
+        core.volume_apply(name='eph-vol',
+                          volume_type='k8s-pvc',
+                          cloud='kubernetes',
+                          region='my-context',
+                          zone=None,
+                          size='10',
+                          config={},
+                          is_ephemeral=True)
+
+        mock_get_errors.assert_not_called()
+
+
+class TestVolumeRefreshScopedToNames:
+    """A caller waiting on one volume must not pay for the whole table.
+
+    volume_refresh takes a file lock and a database round-trip per volume it
+    walks, and those are the same locks concurrent volume operations take, so
+    polling it unscoped puts the whole table in the poll loop's path.
+    """
+
+    def _volume(self, name):
+        return {
+            'name': name,
+            'launched_at': 1234567890,
+            'user_hash': 'user123',
+            'workspace': 'default',
+            'last_attached_at': None,
+            'last_use': None,
+            'handle': mock.MagicMock(name=name,
+                                     cloud='kubernetes',
+                                     type='k8s-pvc',
+                                     region='my-context',
+                                     zone=None,
+                                     size='1Gi',
+                                     config={},
+                                     name_on_cloud=f'{name}-on-cloud',
+                                     spec=models.VolumeConfig),
+            'status': status_lib.VolumeStatus.NOT_READY,
+            'is_ephemeral': False,
+        }
+
+    def _patch_common(self, monkeypatch, wanted):
+        monkeypatch.setattr(provision, 'get_all_volumes_errors',
+                            mock.MagicMock(return_value=({}, set())))
+        monkeypatch.setattr(provision, 'get_all_volumes_usedby',
+                            mock.MagicMock(return_value=({}, {}, set())))
+        monkeypatch.setattr(provision, 'map_all_volumes_usedby',
+                            mock.MagicMock(return_value=([], [])))
+        monkeypatch.setattr(
+            provision, 'refresh_volume_config',
+            mock.MagicMock(side_effect=lambda cloud, c: (False, c)))
+        monkeypatch.setattr(
+            global_user_state, 'get_volume_by_name',
+            mock.MagicMock(side_effect=lambda n: self._volume(n)))
+        monkeypatch.setattr('sky.volumes.server.core.filelock.FileLock',
+                            mock.MagicMock())
+        mock_update = mock.MagicMock()
+        monkeypatch.setattr(global_user_state, 'update_volume_status',
+                            mock_update)
+        mock_scoped = mock.MagicMock(
+            return_value=[self._volume(n) for n in wanted])
+        monkeypatch.setattr(global_user_state, 'get_volumes_from_names',
+                            mock_scoped)
+        mock_all = mock.MagicMock(
+            return_value=[self._volume(n) for n in ('vol-a', 'vol-b')])
+        monkeypatch.setattr(global_user_state, 'get_volumes', mock_all)
+        return mock_all, mock_scoped, mock_update
+
+    def test_only_the_named_volume_is_touched(self, monkeypatch):
+        mock_all, mock_scoped, mock_update = self._patch_common(
+            monkeypatch, ['vol-a'])
+
+        core.volume_refresh(volume_names=['vol-a'])
+
+        mock_all.assert_not_called()
+        mock_scoped.assert_called_once_with(['vol-a'], is_ephemeral=False)
+        # vol-b is never locked, read, or written.
+        assert [c.args[0] for c in mock_update.call_args_list] == ['vol-a']
+
+    def test_no_names_still_refreshes_everything(self, monkeypatch):
+        """The daemon and `sky volumes ls --refresh` pass nothing and must
+        keep their existing behavior."""
+        mock_all, mock_scoped, mock_update = self._patch_common(
+            monkeypatch, ['vol-a'])
+
+        core.volume_refresh()
+
+        mock_all.assert_called_once_with(is_ephemeral=False)
+        mock_scoped.assert_not_called()
+        assert sorted(c.args[0] for c in mock_update.call_args_list) == [
+            'vol-a', 'vol-b'
+        ]

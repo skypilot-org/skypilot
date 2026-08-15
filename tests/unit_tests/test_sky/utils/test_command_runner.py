@@ -3,6 +3,7 @@
 from contextlib import suppress
 import os
 import select
+import shlex
 import socket
 import subprocess
 import tempfile
@@ -14,6 +15,7 @@ import paramiko
 import pytest
 
 from sky import exceptions
+from sky import skypilot_config
 from sky.utils import auth_utils
 from sky.utils import command_runner
 from sky.utils import common_utils
@@ -350,6 +352,180 @@ class TestSSHCommandRunnerInteractiveAuth:
             handler_thread.join(timeout=2)
             if os.path.exists(log_path):
                 os.unlink(log_path)
+
+
+class TestSlurmCommandRunnerUserImpersonation:
+
+    @staticmethod
+    def _login_runner(slurm_user, ssh_user='root'):
+        return command_runner.SlurmLoginNodeCommandRunner(
+            node=('login.example.com', 22),
+            ssh_user=ssh_user,
+            ssh_private_key=None,
+            slurm_user=slurm_user)
+
+    @staticmethod
+    def _slurm_runner(slurm_user, ssh_user='root'):
+        return command_runner.SlurmCommandRunner(
+            node=('login.example.com', 22),
+            ssh_user=ssh_user,
+            ssh_private_key=None,
+            sky_dir='/home/alice/.sky_clusters/test',
+            skypilot_runtime_dir='/tmp/test',
+            job_id='123',
+            slurm_node='node-1',
+            container_args=None,
+            slurm_user=slurm_user)
+
+    @staticmethod
+    def _payload(command):
+        """The inner login-shell command wrap_command_as_user builds."""
+        return f'cd -- "$HOME" || exit 1; {command}'
+
+    def test_wrap_command_as_user(self):
+        command = 'echo "$HOME" && printf %s "a b"'
+
+        wrapped = command_runner.wrap_command_as_user(command, 'alice')
+
+        assert shlex.split(wrapped) == [
+            'su', '--login', '--shell', '/bin/bash', '--command',
+            self._payload(command), '--', 'alice'
+        ]
+
+    def test_wrap_command_as_user_with_sudo_targets_user_not_root(self):
+        command = 'echo "$HOME" && printf %s "a b"'
+
+        wrapped = command_runner.wrap_command_as_user(command,
+                                                      'alice',
+                                                      use_sudo=True)
+
+        argv = shlex.split(wrapped)
+        assert argv == [
+            'sudo', '--non-interactive', '-H', '-u', 'alice', '--', '/bin/bash',
+            '--login', '-c',
+            self._payload(command)
+        ]
+        # sudo must drop to the target user rather than running as root, so
+        # that deployers never need to grant passwordless sudo to `su`.
+        assert argv[argv.index('-u') + 1] == 'alice'
+        assert 'su' not in argv
+
+    def test_wrap_command_as_user_preserves_shell_argv0(self):
+        # `$0`/`$@` must survive to the inner shell verbatim: the rsync
+        # integration relies on `exec rsync "$@"` being expanded once, by the
+        # inner shell, with `$0` set to the passed argv0.
+        command = 'exec rsync "$@"'
+
+        for use_sudo in (False, True):
+            wrapped = command_runner.wrap_command_as_user(command,
+                                                          'alice',
+                                                          shell_argv0='rsync',
+                                                          use_sudo=use_sudo)
+            argv = shlex.split(wrapped)
+            assert argv[-1] == 'rsync'
+            assert self._payload(command) in argv
+            # Exactly one inner shell, as _inline_command_quote_levels assumes.
+            assert argv.count('/bin/bash') == 1
+
+    def test_login_node_run_as_user(self):
+        runner = self._login_runner('alice')
+        with mock.patch.object(command_runner.SSHCommandRunner,
+                               'run',
+                               autospec=True,
+                               return_value=(0, '', '')) as mock_run:
+            runner.run('squeue --me', require_outputs=True)
+
+        remote_command = mock_run.call_args.args[1]
+        assert shlex.split(remote_command) == [
+            'su', '--login', '--shell', '/bin/bash', '--command',
+            self._payload('squeue --me'), '--', 'alice'
+        ]
+
+    def test_login_node_run_as_user_with_sudo(self):
+        runner = self._login_runner('alice', ssh_user='ubuntu')
+        with mock.patch.object(command_runner.SSHCommandRunner,
+                               'run',
+                               autospec=True,
+                               return_value=(0, '', '')) as mock_run:
+            runner.run('squeue --me', require_outputs=True)
+
+        remote_command = mock_run.call_args.args[1]
+        assert shlex.split(remote_command) == [
+            'sudo', '--non-interactive', '-H', '-u', 'alice', '--', '/bin/bash',
+            '--login', '-c',
+            self._payload('squeue --me')
+        ]
+
+    def test_login_node_sudo_failure_propagates(self):
+        runner = self._login_runner('alice', ssh_user='ubuntu')
+        with mock.patch.object(
+                command_runner.SSHCommandRunner,
+                'run',
+                autospec=True,
+                return_value=(1, '',
+                              'sudo: a password is required')) as mock_run:
+            result = runner.run('squeue --me', require_outputs=True)
+
+        assert result == (1, '', 'sudo: a password is required')
+        assert mock_run.call_count == 1
+
+    def test_login_node_run_unchanged_when_disabled(self):
+        runner = self._login_runner(None, ssh_user='ubuntu')
+        with mock.patch.object(command_runner.SSHCommandRunner,
+                               'run',
+                               autospec=True,
+                               return_value=(0, '', '')) as mock_run:
+            runner.run('squeue --me', require_outputs=True)
+
+        assert mock_run.call_args.args[1] == 'squeue --me'
+
+    def test_login_node_rsync_as_user(self):
+        runner = self._login_runner('alice', ssh_user='ubuntu')
+        with mock.patch.object(command_runner.SSHCommandRunner,
+                               'rsync',
+                               autospec=True) as mock_rsync:
+            runner.rsync('/tmp/source', '~/.sky/file', up=True)
+
+        remote_command = mock_rsync.call_args.kwargs['remote_rsync_command']
+        assert shlex.split(remote_command) == [
+            'sudo', '--non-interactive', '-H', '-u', 'alice', '--', '/bin/bash',
+            '--login', '-c',
+            self._payload('exec rsync "$@"'), 'rsync'
+        ]
+
+    def test_srun_as_user(self):
+        runner = self._slurm_runner('alice', ssh_user='ubuntu')
+        with mock.patch.object(command_runner.SSHCommandRunner,
+                               'run',
+                               autospec=True,
+                               return_value=0) as mock_run:
+            runner.run('whoami')
+
+        remote_command = shlex.split(mock_run.call_args.args[1])
+        assert remote_command[:9] == [
+            'sudo', '--non-interactive', '-H', '-u', 'alice', '--', '/bin/bash',
+            '--login', '-c'
+        ]
+        assert len(remote_command) == 10
+        assert remote_command[9].startswith(self._payload('srun --unbuffered'))
+        assert 'whoami' in remote_command[9]
+
+    def test_srun_rsync_as_user(self):
+        runner = self._slurm_runner('alice', ssh_user='ubuntu')
+        with mock.patch.object(command_runner.SSHCommandRunner,
+                               'rsync',
+                               autospec=True) as mock_rsync:
+            runner.rsync('/tmp/source', '~/file', up=True)
+
+        remote_command = mock_rsync.call_args.kwargs['remote_rsync_command']
+        argv = shlex.split(remote_command)
+        assert argv[:9] == [
+            'sudo', '--non-interactive', '-H', '-u', 'alice', '--', '/bin/bash',
+            '--login', '-c'
+        ]
+        assert argv[9].startswith(self._payload('exec srun --unbuffered'))
+        assert argv[9].endswith('rsync "$@"')
+        assert argv[10:] == ['rsync']
 
 
 def test_kubernetes_runner_adds_container_flag_to_kubectl_exec() -> None:
@@ -969,3 +1145,101 @@ class TestRsyncTimeout:
         assert 'timed out' in str(exc_info.value).lower()
         # Deadline tripped before max_retry was exhausted.
         assert len(calls) == 1
+
+
+class TestInlineCommandLimit:
+    """Inline-vs-upload decision, per runner transport."""
+
+    def _slurm_runner(self, slurm_user, via_srun):
+        cls = (command_runner.SlurmCommandRunner
+               if via_srun else command_runner.SlurmLoginNodeCommandRunner)
+        extra = dict(sky_dir='/d',
+                     skypilot_runtime_dir='/r',
+                     job_id='1',
+                     slurm_node='n',
+                     container_args=None) if via_srun else {}
+        return cls(('h', 22), 'root', None, slurm_user=slurm_user, **extra)
+
+    def test_ssh_counts_shell_quoting(self):
+        runner = command_runner.SSHCommandRunner(('1.2.3.4', 22), 'sky', None)
+        command = "a'b" * 5000
+        assert runner.inline_command_size(command) == len(
+            shlex.quote(shlex.quote(command)))
+        assert runner.max_inline_command_length() == 100 * 1024
+
+    @pytest.mark.parametrize('slurm_user,via_srun,expected', [
+        (None, False, 2),
+        ('alice', False, 3),
+        (None, True, 3),
+        ('alice', True, 4),
+    ])
+    def test_slurm_quote_levels(self, slurm_user, via_srun, expected):
+        # srun adds a `bash -c` shell and a slurm_user adds a `su --command`
+        # one; each layer re-quotes the payload.
+        runner = self._slurm_runner(slurm_user, via_srun)
+        assert runner._inline_command_quote_levels() == expected
+
+    def test_slurm_user_quoting_pushes_command_over_limit(self):
+        # A command that fits at 2 quote levels but not at 4.
+        command = "a'b" * 5000
+        assert not self._slurm_runner(
+            None, False).is_command_length_over_limit(command)
+        assert self._slurm_runner('alice',
+                                  True).is_command_length_over_limit(command)
+
+    def test_kubernetes_counts_url_bytes_not_shell_bytes(self):
+        # `kubectl exec` sends the command as URL query params, so what counts
+        # is the percent-encoded length -- which for a script is far larger than
+        # the shell-quoted length that a shell transport would care about.
+        runner = command_runner.KubernetesCommandRunner((('ns', None), 'pod'))
+        script = 'echo "hello world"\nexit 0\n' * 500
+        ssh_runner = command_runner.SSHCommandRunner(('1.2.3.4', 22), 'sky',
+                                                     None)
+        assert runner.inline_command_size(
+            script) > 1.5 * ssh_runner.inline_command_size(script)
+
+    def test_kubernetes_default_limit_is_proxy_sized(self):
+        runner = command_runner.KubernetesCommandRunner((('ns', None), 'pod'))
+        assert runner.max_inline_command_length() == 32 * 1024
+
+    def test_kubernetes_limit_read_from_config(self, monkeypatch, tmp_path):
+        config = tmp_path / 'config.yaml'
+        config.write_text('kubernetes:\n'
+                          '  max_inline_command_length: 8192\n'
+                          '  context_configs:\n'
+                          '    tight-proxy:\n'
+                          '      max_inline_command_length: 2048\n')
+        monkeypatch.setenv(skypilot_config.ENV_VAR_GLOBAL_CONFIG, str(config))
+        skypilot_config.reload_config()
+
+        def limit(context):
+            return command_runner.KubernetesCommandRunner(
+                (('ns', context), 'pod')).max_inline_command_length()
+
+        # Per-context wins; other contexts fall back to the cloud-level value.
+        assert limit('tight-proxy') == 2048
+        assert limit('other-ctx') == 8192
+        assert limit(None) == 8192
+
+    def test_kubernetes_limit_for_ssh_node_pool(self, monkeypatch, tmp_path):
+        # SSH node pools run through this runner but are configured under their
+        # own cloud, keyed by the pool name without the `ssh-` context prefix.
+        config = tmp_path / 'config.yaml'
+        config.write_text('kubernetes:\n'
+                          '  max_inline_command_length: 8192\n'
+                          'ssh:\n'
+                          '  max_inline_command_length: 20480\n'
+                          '  context_configs:\n'
+                          '    mypool:\n'
+                          '      max_inline_command_length: 4096\n')
+        monkeypatch.setenv(skypilot_config.ENV_VAR_GLOBAL_CONFIG, str(config))
+        skypilot_config.reload_config()
+
+        def limit(context):
+            return command_runner.KubernetesCommandRunner(
+                (('ns', context), 'pod')).max_inline_command_length()
+
+        assert limit('ssh-mypool') == 4096
+        assert limit('ssh-other') == 20480
+        # A real Kubernetes context still reads the kubernetes block.
+        assert limit('gke-x') == 8192

@@ -1,4 +1,5 @@
-{% set user = ssh_user if image_id is none else 'root' %}
+{% set host_user = slurm_user | default(ssh_user, true) %}
+{% set user = host_user if image_id is none else 'root' %}
 {% set has_image = image_id is not none %}
 cluster_name: {{cluster_name_on_cloud}}
 
@@ -14,6 +15,9 @@ provider:
   cluster: "{{slurm_cluster}}"
   partition: "{{slurm_partition}}"
   provision_timeout: {{provision_timeout}}
+{% if slurm_user is defined and slurm_user is not none %}
+  slurm_user: {{slurm_user | tojson}}
+{% endif %}
 
   ssh:
     hostname: {{ssh_hostname}}
@@ -50,6 +54,9 @@ available_node_types:
 {% endif %}
 {% if sbatch_options is defined and sbatch_options %}
       sbatch_options: {{sbatch_options | tojson}}
+{% endif %}
+{% if slurm_volume_mounts is defined and slurm_volume_mounts %}
+      volume_mounts: {{slurm_volume_mounts | tojson}}
 {% endif %}
 
       # TODO: more configs that is required by the provisioner to create new

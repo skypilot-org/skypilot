@@ -92,7 +92,11 @@ def apply_and_use_config_in_current_request(
 
     Refer to `apply()` for more details.
     """
-    original_config = skypilot_config.to_dict()
+    # Mirror the resolved-workspace injection done in `apply()` so the
+    # comparison below only triggers a config replacement when the policy
+    # actually mutated the config, not merely because `apply()` surfaced the
+    # resolved active workspace.
+    original_config = skypilot_config.resolved_config()
     dag, mutated_config = apply(entrypoint, request_name, request_options,
                                 at_client_side)
     if mutated_config != original_config:
@@ -133,7 +137,7 @@ def apply(
     policy_location = skypilot_config.get_nested(('admin_policy',), None)
     policy = _get_policy_impl(policy_location)
     if policy is None:
-        return dag, skypilot_config.to_dict()
+        return dag, skypilot_config.resolved_config()
 
     user = None
     client_api_version = None
@@ -148,13 +152,20 @@ def apply(
         client_api_version = versions.get_remote_api_version()
         client_version = versions.get_remote_version()
         logger.info(f'Applying server admin policy: {policy}')
-    config = copy.deepcopy(skypilot_config.to_dict())
+    config = copy.deepcopy(skypilot_config.resolved_config())
     mutated_dag = dag_lib.Dag()
     mutated_dag.name = dag.name
     # Preserve DAG execution properties if set
     if dag.is_job_group():
         assert dag.execution is not None
         mutated_dag.set_execution(dag.execution)
+        # Preserve the rest of the JobGroup header: these live on the Dag,
+        # not on the tasks the policy mutates, so a fresh Dag would
+        # silently drop them (e.g., an explicit `inter_connection: false`
+        # would revert to unset, which behaves as enabled).
+        mutated_dag.inter_connection = dag.inter_connection
+        mutated_dag.primary_tasks = dag.primary_tasks
+        mutated_dag.termination_delay = dag.termination_delay
 
     mutated_config = None
     for task in dag.tasks:

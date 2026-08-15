@@ -25,6 +25,12 @@ class VolumeAccessMode(enum.Enum):
     READ_ONLY_MANY = 'ReadOnlyMany'
 
 
+class VolumeMountMode(enum.Enum):
+    """Per-mount permission for host path bind mounts."""
+    RO = 'ro'
+    RW = 'rw'
+
+
 class VolumeType(enum.Enum):
     """Volume type."""
     PVC = 'k8s-pvc'
@@ -38,6 +44,56 @@ class VolumeType(enum.Enum):
 
 
 EPHEMERAL_VOLUME_TYPES = [VolumeType.PVC.value]
+
+
+class AutoMountScope(enum.Enum):
+    """Scope of an auto_mounts config entry.
+
+    Controls whose launches an auto-mount volume is mounted onto,
+    mirroring the personal/workspace/global scopes used by secrets.
+    """
+    # Mount only on launches by the user who owns the volume.
+    PERSONAL = 'personal'
+    # Mount only on launches in the volume's workspace.
+    WORKSPACE = 'workspace'
+    # Mount on every launch (default; the original auto_mounts behavior).
+    GLOBAL = 'global'
+
+    @classmethod
+    def supported_scopes(cls) -> list:
+        """Return list of supported scope values."""
+        return [s.value for s in cls]
+
+
+def auto_mount_in_scope(scope: str, volume_user_hash: Optional[str],
+                        volume_workspace: Optional[str],
+                        current_user_hash: Optional[str],
+                        active_workspace: Optional[str]) -> bool:
+    """Whether an auto-mount entry applies to the current launch.
+
+    Args:
+        scope: The entry's scope ('personal', 'workspace', or 'global').
+        volume_user_hash: user_hash of the volume record (its owner).
+        volume_workspace: workspace of the volume record.
+        current_user_hash: user hash of the user performing the launch.
+        active_workspace: workspace the launch is running in.
+
+    Returns:
+        True if the volume should be auto-mounted onto this launch.
+
+    Raises:
+        ValueError: if scope is not a supported scope value.
+    """
+    if scope == AutoMountScope.GLOBAL.value:
+        return True
+    if scope == AutoMountScope.PERSONAL.value:
+        return (volume_user_hash is not None and
+                volume_user_hash == current_user_hash)
+    if scope == AutoMountScope.WORKSPACE.value:
+        return (volume_workspace is not None and
+                volume_workspace == active_workspace)
+    raise ValueError(f'Invalid auto-mount scope {scope!r}. Supported '
+                     f'scopes: {AutoMountScope.supported_scopes()}')
 
 
 @dataclass
@@ -69,8 +125,8 @@ class VolumeMount:
 
     def pre_mount(self) -> None:
         """Update the volume status before actual mounting."""
-        # Skip pre_mount for ephemeral volumes as they don't exist yet
-        if self.is_ephemeral:
+        # Inline and ephemeral volumes have no global volume record.
+        if not self.volume_name:
             return
         # TODO(aylei): for ReadWriteOnce volume, we also need to queue the
         # mount request if the target volume is already mounted to another
@@ -110,6 +166,37 @@ class VolumeMount:
         assert 'handle' in record, 'Volume handle is None.'
         volume_config: models.VolumeConfig = record['handle']
         return cls(path, volume_name, volume_config, sub_path=sub_path)
+
+    @classmethod
+    def resolve_host_path_config(cls, path: str,
+                                 config: Dict[str, Any]) -> 'VolumeMount':
+        """Create a non-provisioned host path mount from inline config."""
+        host_path = config.get('host_path')
+        if not isinstance(host_path, str) or not host_path.startswith('/'):
+            raise ValueError(
+                f'host_path must be an absolute path, got: {host_path!r}')
+        if host_path == '/':
+            raise ValueError('host_path must not be the root directory \'/\'')
+        mode = config.get('mode', VolumeMountMode.RO.value)
+        if mode not in (VolumeMountMode.RO.value, VolumeMountMode.RW.value):
+            raise ValueError(f'Invalid host_path volume mode {mode!r}. '
+                             'Supported modes are "ro" and "rw".')
+        unexpected_fields = set(config) - {'host_path', 'mode'}
+        if unexpected_fields:
+            raise ValueError(f'Invalid host_path volume config fields: '
+                             f'{sorted(unexpected_fields)}')
+        volume_config = models.VolumeConfig(name='',
+                                            type='',
+                                            cloud='Slurm',
+                                            region=None,
+                                            zone=None,
+                                            name_on_cloud=host_path,
+                                            size=None,
+                                            config={
+                                                'host_path': host_path,
+                                                'mode': mode,
+                                            })
+        return cls(path, '', volume_config)
 
     @classmethod
     def from_yaml_config(cls, config: Dict[str, Any]) -> 'VolumeMount':

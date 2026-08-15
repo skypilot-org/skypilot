@@ -136,6 +136,52 @@ def test_check_server_healthy_or_start_rechecks_status(
         versions.set_remote_version('unknown')
 
 
+@mock.patch('sky.server.common._start_api_server')
+@mock.patch('sky.server.common.filelock.FileLock')
+@mock.patch('sky.server.common.make_authenticated_request')
+@mock.patch('sky.server.common.is_api_server_local', return_value=True)
+@mock.patch('sky.server.common.get_server_url',
+            return_value='http://127.0.0.1:1111')
+def test_check_server_healthy_or_start_disabled_local_api_server(
+        unused_mock_server_url, unused_mock_is_local, mock_make_request,
+        mock_filelock, mock_start_server):
+    """SKYPILOT_DISABLE_LOCAL_API_SERVER=1 blocks the silent auto-start.
+
+    When no healthy API server is reachable at a local endpoint, the client
+    normally starts one in the background. With the env var set, it must
+    fail with an actionable error instead, and never attempt the start.
+    """
+    mock_make_request.side_effect = requests.exceptions.ConnectionError()
+
+    with mock.patch.dict(os.environ,
+                         {'SKYPILOT_DISABLE_LOCAL_API_SERVER': '1'}):
+        with pytest.raises(RuntimeError) as exc_info:
+            common.check_server_healthy_or_start_fn()
+
+    assert 'sky api login' in str(exc_info.value)
+    assert 'SKYPILOT_DISABLE_LOCAL_API_SERVER' in str(exc_info.value)
+    mock_start_server.assert_not_called()
+    # The guard fires before the server-creation lock is taken.
+    mock_filelock.assert_not_called()
+
+
+def test_start_api_server_disabled_by_env_var():
+    """_start_api_server itself is guarded (covers `sky api start` too)."""
+    with mock.patch.dict(os.environ,
+                         {'SKYPILOT_DISABLE_LOCAL_API_SERVER': '1'}):
+        with pytest.raises(RuntimeError) as exc_info:
+            common._start_api_server()
+    assert 'SKYPILOT_DISABLE_LOCAL_API_SERVER' in str(exc_info.value)
+
+
+def test_local_api_server_not_disabled_by_default():
+    """Without the env var, the guard is a no-op."""
+    env = os.environ.copy()
+    env.pop('SKYPILOT_DISABLE_LOCAL_API_SERVER', None)
+    with mock.patch.dict(os.environ, env, clear=True):
+        common.check_local_api_server_enabled_or_raise()
+
+
 @mock.patch('sky.server.common.get_api_server_status')
 @mock.patch('sky.server.common.is_api_server_local')
 def test_local_client_server_mismatch(mock_is_local, mock_get_status):
@@ -341,16 +387,46 @@ def test_get_server_url_ipv6(monkeypatch):
     assert common.get_server_url('localhost') == 'http://localhost:46580'
 
 
+def test_local_port_env_var_override(monkeypatch):
+    """SKYPILOT_API_SERVER_LOCAL_PORT changes the local port everywhere."""
+    _isolate_server_url(monkeypatch)
+    monkeypatch.setenv(common.constants.SKY_API_SERVER_LOCAL_PORT_ENV_VAR,
+                       '46590')
+    common.get_server_url.cache_clear()
+    common.is_api_server_local.cache_clear()
+    assert common.get_local_api_server_port() == 46590
+    assert common.get_default_server_url() == 'http://127.0.0.1:46590'
+    assert common.get_server_url() == 'http://127.0.0.1:46590'
+    assert common.get_server_url('localhost') == 'http://localhost:46590'
+    urls = common.get_available_local_api_server_urls()
+    assert 'http://127.0.0.1:46590' in urls
+    assert all(url.endswith(':46590') for url in urls)
+    assert common.is_api_server_local('http://127.0.0.1:46590')
+    # The default port is no longer considered the local server.
+    assert not common.is_api_server_local('http://127.0.0.1:46580')
+    common.get_server_url.cache_clear()
+    common.is_api_server_local.cache_clear()
+
+
+def test_local_port_env_var_invalid(monkeypatch):
+    """A non-integer port override raises a clear error."""
+    monkeypatch.setenv(common.constants.SKY_API_SERVER_LOCAL_PORT_ENV_VAR,
+                       'not-a-port')
+    with pytest.raises(ValueError, match='SKYPILOT_API_SERVER_LOCAL_PORT'):
+        common.get_local_api_server_port()
+
+
 def test_available_local_api_server_urls_are_wellformed():
     """The precomputed local URLs bracket IPv6 and parse correctly."""
     from urllib.parse import urlparse
 
+    local_urls = common.get_available_local_api_server_urls()
     # IPv6 hosts are present and bracketed; IPv4 hosts are plain.
-    assert 'http://[::]:46580' in common.AVAILABLE_LOCAL_API_SERVER_URLS
-    assert 'http://[::1]:46580' in common.AVAILABLE_LOCAL_API_SERVER_URLS
-    assert 'http://127.0.0.1:46580' in common.AVAILABLE_LOCAL_API_SERVER_URLS
+    assert 'http://[::]:46580' in local_urls
+    assert 'http://[::1]:46580' in local_urls
+    assert 'http://127.0.0.1:46580' in local_urls
     # Every entry is a well-formed URL that urlparse can decompose.
-    for url in common.AVAILABLE_LOCAL_API_SERVER_URLS:
+    for url in local_urls:
         parsed = urlparse(url)
         assert parsed.scheme == 'http'
         assert parsed.port == 46580
@@ -556,6 +632,7 @@ def test_process_mounts_removes_file_mounts_mapping(tmp_path, monkeypatch):
     task is submitted again (e.g., in jobs scenarios).
     """
     from sky.skylet import constants as skylet_constants
+    from sky.utils import dag_utils
     from sky.utils import yaml_utils
 
     # Mock the API_SERVER_CLIENT_DIR to use tmp_path
@@ -587,19 +664,8 @@ run: python /remote/script.py
                                                       env_vars=env_vars,
                                                       workdir_only=False)
 
-    # Find the translated YAML file
-    user_hash = 'test-user'
-    client_dir = api_server_dir / user_hash
-
-    # Find the translated file (it has _translated.yaml suffix)
-    translated_files = list(client_dir.glob('**/*_translated.yaml'))
-    assert len(translated_files) == 1, \
-        f'Expected 1 translated file, found {len(translated_files)}'
-
-    translated_file = translated_files[0]
-
-    # Read the translated YAML and verify file_mounts_mapping is removed
-    translated_configs = yaml_utils.read_yaml_all(str(translated_file))
+    translated_yaml = dag_utils.dump_dag_to_yaml_str(dag)
+    translated_configs = yaml_utils.read_yaml_all_str(translated_yaml)
 
     for task_config in translated_configs:
         if task_config is None:
@@ -625,6 +691,8 @@ run: python /remote/script.py
                     if isinstance(source, str):
                         assert 'uploaded/' in source, \
                             f'file_mount source should be translated: {source}'
+
+    assert not list(api_server_dir.rglob('*.yaml'))
 
 
 def test_process_mounts_without_mapping(tmp_path, monkeypatch):
@@ -657,3 +725,100 @@ run: echo "hello world"
     # Verify the dag was created successfully
     assert dag is not None
     assert len(dag.tasks) == 1
+    assert not list(api_server_dir.rglob('*.yaml'))
+
+
+def _fake_response(status_code, json_body=None, json_raises=False):
+    """Build a fake requests.Response for handle_request_error tests."""
+    resp = mock.Mock(spec=requests.Response)
+    resp.status_code = status_code
+    resp.url = 'http://api/test'
+    resp.text = 'body-text'
+    if json_raises:
+        resp.json.side_effect = ValueError('no json')
+    else:
+        resp.json.return_value = json_body
+
+    def _raise_for_status():
+        if status_code >= 400:
+            raise requests.exceptions.HTTPError(str(status_code), response=resp)
+
+    resp.raise_for_status.side_effect = _raise_for_status
+    return resp
+
+
+def test_handle_request_error_403_detail_clean_message():
+    """A 403 with a server `detail` is surfaced as a clean, typed
+    PermissionDeniedError (no raw HTTPError traceback) so permission denials
+    read as one line and callers can distinguish authz failures."""
+    resp = _fake_response(403,
+                          {'detail': 'You are not a member of workspace X.'})
+    with pytest.raises(exceptions.PermissionDeniedError) as exc_info:
+        common.handle_request_error(resp)
+    assert 'not a member of workspace X' in str(exc_info.value)
+    # Must be the clean typed error, not the raw HTTPError.
+    assert not isinstance(exc_info.value, requests.exceptions.HTTPError)
+
+
+def test_handle_request_error_403_no_detail_falls_through():
+    """A 403 without a usable `detail` keeps the original HTTPError."""
+    resp = _fake_response(403, {})
+    with pytest.raises(requests.exceptions.HTTPError):
+        common.handle_request_error(resp)
+
+
+def test_handle_request_error_5xx_stays_httperror():
+    """5xx must remain an HTTPError (retryable by retry_transient_errors),
+    i.e. the 403 handling must not broaden to all >=400 statuses."""
+    resp = _fake_response(500, {'detail': 'server boom'})
+    with pytest.raises(requests.exceptions.HTTPError):
+        common.handle_request_error(resp)
+
+
+def test_redact_url_password_masks_password():
+    """The password is masked while the rest of the URL is preserved."""
+    redacted = common.redact_url_password(
+        'http://alice:s3cr3t@example.com:8080')
+    assert redacted == 'http://alice:<redacted>@example.com:8080'
+    # The real password must not survive anywhere in the output.
+    assert 's3cr3t' not in redacted
+
+
+def test_redact_url_password_preserves_path_and_query():
+    """Scheme, host, port, path and query are all kept intact."""
+    url = 'https://user:hunter2@host:443/api/v1?token=abc'
+    redacted = common.redact_url_password(url)
+    assert redacted == 'https://user:<redacted>@host:443/api/v1?token=abc'
+    assert 'hunter2' not in redacted
+
+
+def test_redact_url_password_without_password_is_unchanged():
+    # No credentials at all.
+    assert common.redact_url_password(
+        'http://example.com:46580') == 'http://example.com:46580'
+    # A username but no password should be left alone.
+    assert common.redact_url_password(
+        'http://alice@example.com') == 'http://alice@example.com'
+
+
+def test_redact_url_password_ipv6_keeps_brackets():
+    """IPv6 hosts must stay bracketed so the ':port' is unambiguous."""
+    redacted = common.redact_url_password('http://user:pw@[::1]:8080')
+    assert redacted == 'http://user:<redacted>@[::1]:8080'
+
+
+def test_redact_url_password_non_url_is_unchanged():
+    # Something that isn't a URL should pass through untouched.
+    assert common.redact_url_password('not-a-url') == 'not-a-url'
+    assert common.redact_url_password('') == ''
+
+
+def test_redact_url_password_bad_port_is_returned_unchanged():
+    """A malformed port must not raise, even with a password present.
+
+    urlsplit() accepts these, but SplitResult.port only validates when read,
+    so the read has to happen inside the guard. Otherwise `sky check` and
+    `sky api info` would abort instead of printing their summary line.
+    """
+    for url in ('http://user:pw@host:notaport', 'http://user:pw@host:99999'):
+        assert common.redact_url_password(url) == url

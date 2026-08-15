@@ -43,9 +43,11 @@ import {
 import {
   getClusters,
   getClusterHistory,
+  getOtherUsersClustersCount,
   useClusterData,
 } from '@/data/connectors/clusters';
 import { getWorkspaces } from '@/data/connectors/workspaces';
+import { useWorkspacesConfig } from '@/hooks/useWorkspacesConfig';
 import { sortData } from '@/data/utils';
 import { SquareCode, Terminal, RotateCwIcon, Brackets } from 'lucide-react';
 import { ServerIcon } from '@/components/elements/icons';
@@ -71,7 +73,10 @@ import cachePreloader from '@/lib/cache-preloader';
 import { ChevronDownIcon, ChevronRightIcon, InfoIcon } from 'lucide-react';
 import yaml from 'js-yaml';
 import { UserDisplay } from '@/components/elements/UserDisplay';
-import { evaluateCondition } from '@/components/shared/FilterSystem';
+import {
+  evaluateCondition,
+  updateFiltersByURLParams as sharedUpdateFiltersByURLParams,
+} from '@/components/shared/FilterSystem';
 import { SegmentedToggle } from '@/components/elements/SegmentedToggle';
 import { getCurrentUserInfo } from '@/data/connectors/client';
 import { trackClusterAction, trackFilterUsed } from '@/lib/analytics';
@@ -432,7 +437,7 @@ export function Clusters() {
     let values = [];
 
     filters.map((filter, _index) => {
-      properties.push(filter.property.toLowerCase() ?? '');
+      properties.push((filter.property ?? '').toLowerCase());
       operators.push(filter.operator);
       values.push(filter.value);
     });
@@ -485,45 +490,21 @@ export function Clusters() {
   };
 
   const updateFiltersByURLParams = () => {
-    const query = { ...router.query };
-
-    const properties = query.property;
-    const operators = query.operator;
-    const values = query.value;
-
-    if (properties === undefined) {
+    if (router.query.property === undefined) {
       return;
     }
+    // Keys match PROPERTY_OPTIONS above; a URL naming anything else is dropped
+    // by the shared decoder.
+    const propertyMap = new Map([
+      ['status', 'Status'],
+      ['cluster', 'Cluster'],
+      ['user', 'User'],
+      ['workspace', 'Workspace'],
+      ['infra', 'Infra'],
+      ['labels', 'Labels'],
+    ]);
 
-    let filters = [];
-
-    const length = Array.isArray(properties) ? properties.length : 1;
-
-    const propertyMap = new Map();
-    propertyMap.set('', '');
-    propertyMap.set('status', 'Status');
-    propertyMap.set('cluster', 'Cluster');
-    propertyMap.set('user', 'User');
-    propertyMap.set('workspace', 'Workspace');
-    propertyMap.set('infra', 'Infra');
-
-    if (length === 1) {
-      filters.push({
-        property: propertyMap.get(properties),
-        operator: operators,
-        value: values,
-      });
-    } else {
-      for (let i = 0; i < length; i++) {
-        filters.push({
-          property: propertyMap.get(properties[i]),
-          operator: operators[i],
-          value: values[i],
-        });
-      }
-    }
-
-    setFilters(filters);
+    setFilters(sharedUpdateFiltersByURLParams(router, propertyMap));
   };
 
   const selectScope = (scope) => {
@@ -776,6 +757,12 @@ export function ClusterTable({
     direction: 'ascending',
   });
 
+  // Per-workspace writability, so the per-row Connect/VSCode actions can be
+  // disabled for clusters in workspaces the user can only read (read-only
+  // visibility). Shared with the cluster detail page; missing entry -> treated
+  // as writable (open/default).
+  const { isWorkspaceWritable } = useWorkspacesConfig();
+
   // Read initial page/limit from URL
   const getInitialPage = () => {
     if (typeof window !== 'undefined') {
@@ -989,9 +976,9 @@ export function ClusterTable({
   // "All Clusters" would actually reveal. Used to gate the empty-state CTA so
   // we don't nudge to All when there's nothing to show. Because the table is
   // now scoped to the current user server-side, the scoped data no longer
-  // contains other users' clusters; probe the shared all-users cache (already
-  // warm from the preloader, so this is typically a free read) only when the
-  // "My Clusters" view comes back empty.
+  // contains other users' clusters; probe for the all-users count (a cheap
+  // single-row page on the server-pagination path, or the shared all-users
+  // cache otherwise) only when the "My Clusters" view comes back empty.
   const [othersTotal, setOthersTotal] = useState(0);
   const scopedEmpty = isServerPagination
     ? total === 0
@@ -1011,12 +998,8 @@ export function ClusterTable({
     }
     (async () => {
       try {
-        const all = await dashboardCache.get(getClusters);
+        const others = await getOtherUsersClustersCount(currentUser);
         if (cancelled) return;
-        const others = (all || []).filter(
-          (item) =>
-            item.user_hash !== currentUser.id && item.user !== currentUser.name
-        ).length;
         setOthersTotal(others);
       } catch (e) {
         if (!cancelled) setOthersTotal(0);
@@ -1361,6 +1344,7 @@ export function ClusterTable({
               status={item.status}
               onOpenSSHModal={onOpenSSHModal}
               onOpenVSCodeModal={onOpenVSCodeModal}
+              writable={isWorkspaceWritable(item.workspace)}
             />
           )}
         </TableCell>
@@ -1558,6 +1542,11 @@ export function Status2Actions({
   status,
   onOpenSSHModal,
   onOpenVSCodeModal,
+  // False when the cluster is in a workspace the current user cannot write to
+  // (e.g. a read-only workspace they are not a member of). Connect (SSH) and
+  // VSCode both open an interactive shell, so they are write operations and
+  // must be disabled for non-members.
+  writable = true,
 }) {
   const actions = enabledActions(status);
   const isMobile = useMobile();
@@ -1596,7 +1585,11 @@ export function Status2Actions({
           if (!withLabel) {
             label = '';
           }
-          if (actions.includes(actionName)) {
+          if (!writable) {
+            tooltipText =
+              'Read-only: you are not a member of this cluster’s workspace';
+          }
+          if (writable && actions.includes(actionName)) {
             return (
               <Tooltip
                 key={actionName}
@@ -1613,8 +1606,11 @@ export function Status2Actions({
               </Tooltip>
             );
           }
+          // The read-only hint is a full sentence, so it must not be
+          // title-cased.
+          const DisabledTooltip = !writable ? NonCapitalizedTooltip : Tooltip;
           return (
-            <Tooltip
+            <DisabledTooltip
               key={actionName}
               content={tooltipText}
               className="capitalize text-sm text-muted-foreground"
@@ -1626,7 +1622,7 @@ export function Status2Actions({
                 {actionIcon}
                 {!isMobile && <span className="ml-1.5">{label}</span>}
               </span>
-            </Tooltip>
+            </DisabledTooltip>
           );
         })}
       </div>

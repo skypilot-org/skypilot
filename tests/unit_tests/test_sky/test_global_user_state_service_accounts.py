@@ -218,6 +218,28 @@ class TestServiceAccountDatabaseOperations:
             )
             mock_session.commit.assert_called_once()
 
+    def test_update_service_account_token_last_used_conditional(
+            self, mock_engine, mock_session):
+        """With min_interval_seconds set, staleness rides the WHERE clause.
+
+        The conditional filter (last_used_at IS NULL OR older than the
+        interval) must be part of the UPDATE itself so concurrent callers
+        that all read a stale timestamp cannot herd on the row: only the
+        first commit writes, the rest match zero rows.
+        """
+        with mock.patch('time.time', return_value=1234567999):
+            global_user_state.update_service_account_token_last_used(
+                'token123', min_interval_seconds=60)
+
+            filter_by = mock_session.query.return_value.filter_by
+            filter_by.assert_called_once_with(token_id='token123')
+            # The staleness condition is applied as an additional filter...
+            filter_by.return_value.filter.assert_called_once()
+            # ...and the update runs on the filtered query.
+            filter_by.return_value.filter.return_value.update.assert_called_once(
+            )
+            mock_session.commit.assert_called_once()
+
     def test_delete_service_account_token_success(self, mock_engine,
                                                   mock_session):
         """Test successfully deleting a service account token."""

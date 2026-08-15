@@ -336,6 +336,53 @@ users who cannot access the workspace, they cannot see/access/operate on the wor
    The ``allowed_users`` field can be a list of user names or IDs. Note, if you
    have multiple users with the same name, you need to specify the user IDs instead.
 
+Read-only visibility for non-members
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+By default a private workspace is readable only by its ``allowed_users`` (its
+members) and admins, and is hidden from everyone else. To instead let *anyone*
+see a private workspace (read-only), set ``read_access: all``:
+
+.. code-block:: yaml
+
+   workspaces:
+     private-ws:
+       private: true
+       read_access: all
+       allowed_users:
+         - alice@example.com
+
+With ``read_access: all``, non-members can see the workspace and list the
+clusters and managed jobs running in it (including viewing their logs), but
+cannot launch into it or modify/cancel its **clusters and managed jobs**.
+Members (the ``allowed_users``) and admins retain full access.
+
+``read_access`` accepts:
+
+- ``allowed_users`` (default): only the workspace's ``allowed_users`` (its
+  members) and admins can see it; it is hidden from everyone else.
+- ``all``: anyone can view the workspace and its workloads, but writes stay
+  members-only, so non-members get read-only access.
+
+It only applies to private workspaces; an open (non-private) workspace is usable
+by everyone regardless.
+
+To open up read access org-wide by default for private workspaces (each
+workspace can still override with its own ``read_access``), set
+``workspace_config.read_access``:
+
+.. code-block:: yaml
+
+   workspace_config:
+     read_access: all                     # org-wide default
+
+   workspaces:
+     locked-ws:
+       private: true
+       read_access: allowed_users         # opt this one back to members-only
+       allowed_users:
+         - alice@example.com
+
 Service accounts in private workspaces
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 

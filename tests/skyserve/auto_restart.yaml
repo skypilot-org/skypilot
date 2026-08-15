@@ -7,7 +7,10 @@ service:
 
 resources:
   ports: 8080
-  infra: gcp
+  # Pin the zone so that terminate_gcp_replica in
+  # test_skyserve_auto_restart, which queries instances with
+  # --zones=us-central1-a, can find the replica to terminate.
+  infra: gcp/*/us-central1-a
 
 workdir: examples/serve/http_server
 

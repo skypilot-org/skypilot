@@ -16,6 +16,19 @@ import { apiClient } from './client';
 import { trackJobAction } from '@/lib/analytics';
 import { applyEnhancements } from '@/plugins/dataEnhancement';
 
+/**
+ * Tooltip for a job's status badge: pending reason for PENDING jobs, and
+ * the failure details (which carry the failure attribution and exit code,
+ * e.g. "Job exited with exit code 7 (user program failure). ...") for
+ * FAILED* jobs. Same text as the details column, surfaced on hover.
+ */
+function getStatusTooltip(job) {
+  if (job.status === 'PENDING' || job.status?.startsWith('FAILED')) {
+    return job.details || job.failure_reason || null;
+  }
+  return null;
+}
+
 // ============ Pagination Plugin Integration ============
 
 /**
@@ -115,6 +128,41 @@ export function computeJobGroupStatus(tasks) {
   }
   return 'SUCCEEDED';
 }
+
+/**
+ * Shared fetch args for the cross-page managed-jobs summary cache entry
+ * (the `getManagedJobsForOtherPages` preload key, also read directly by the
+ * infra/users/workspaces pages).
+ *
+ * Every reader and the preloader MUST use this exact object so the cache key
+ * (function name + JSON.stringify(args), see lib/cache.js) stays shared.
+ *
+ * `fields` is the union of what those consumers actually read (plus the
+ * request fields the connector transform derives them from: `infra` and
+ * `resources_str_full` come from cloud/region/cluster_resources*). Without
+ * the trim, this fetch returns every non-finished job with its full inline
+ * YAML — tens of MB at 10k+ pending jobs — and each visit both writes that
+ * blob into the API server's requests DB and reads it back out through a
+ * per-process serialized reader, which is measurably what makes the
+ * dashboard's critical-path /api/get calls (and hence perceived page load)
+ * slow under concurrent use.
+ */
+export const MANAGED_JOBS_SUMMARY_ARGS = Object.freeze({
+  allUsers: true,
+  skipFinished: true,
+  fields: Object.freeze([
+    'job_id',
+    'job_name',
+    'status',
+    'user_hash',
+    'workspace',
+    'cloud',
+    'region',
+    'accelerators',
+    'cluster_resources',
+    'cluster_resources_full',
+  ]),
+});
 
 export async function getManagedJobs(options = {}) {
   try {
@@ -292,6 +340,11 @@ export async function getManagedJobs(options = {}) {
         full_infra: full_infra,
         recoveries: job.recovery_count,
         details: job.details || job.failure_reason,
+        // Mirror the cluster INIT tooltip: surface the pending reason on
+        // the status badge so users can see why a job is stuck in PENDING,
+        // and the failure attribution (user program vs SkyPilot/infra) on
+        // FAILED* badges, without opening the job details view.
+        statusTooltip: getStatusTooltip(job),
         user: job.user_name,
         user_hash: job.user_hash,
         submitted_at: job.submitted_at

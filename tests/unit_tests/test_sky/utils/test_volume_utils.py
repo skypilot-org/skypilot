@@ -525,6 +525,47 @@ class TestVolumeMount:
         assert volume_mount.volume_config == mock_volume_config
         assert volume_mount.is_ephemeral is False
 
+    @mock.patch('sky.global_user_state.update_volume')
+    def test_pre_mount_inline_host_path_skips_state_update(self, mock_update):
+        volume_config = models.VolumeConfig(name='',
+                                            type='',
+                                            cloud='slurm',
+                                            region=None,
+                                            zone=None,
+                                            name_on_cloud='/host/data',
+                                            size=None,
+                                            config={
+                                                'host_path': '/host/data',
+                                                'mode': 'ro',
+                                            })
+        volume_mount = volume.VolumeMount('/data', '', volume_config)
+
+        volume_mount.pre_mount()
+
+        mock_update.assert_not_called()
+
+    @mock.patch('sky.global_user_state.update_volume')
+    def test_pre_mount_named_host_path_updates_state(self, mock_update):
+        volume_config = models.VolumeConfig(name='host-volume',
+                                            type='k8s-hostpath',
+                                            cloud='kubernetes',
+                                            region=None,
+                                            zone=None,
+                                            name_on_cloud='host-volume',
+                                            size=None,
+                                            config={
+                                                'host_path': '/host/data',
+                                                'access_mode': 'ReadOnlyMany',
+                                            })
+        volume_mount = volume.VolumeMount('/data', 'host-volume', volume_config)
+
+        volume_mount.pre_mount()
+
+        mock_update.assert_called_once_with(
+            'host-volume',
+            last_attached_at=mock.ANY,
+            status=status_lib.VolumeStatus.IN_USE)
+
 
 PVC_TYPE = 'k8s-pvc'
 HOSTPATH_TYPE = 'k8s-hostpath'
@@ -705,3 +746,71 @@ class TestVolumeMountConflictChecker:
         identity = volume.VolumeMountConflictChecker._get_vol_source_identity(
             'runpod-network-volume')
         assert identity is None
+
+
+class TestAutoMountScope:
+    """Tests for auto_mount_in_scope."""
+
+    def test_global_applies_to_everyone(self):
+        assert volume.auto_mount_in_scope('global',
+                                          volume_user_hash='owner',
+                                          volume_workspace='ws-a',
+                                          current_user_hash='someone-else',
+                                          active_workspace='ws-b')
+
+    def test_personal_applies_to_owner(self):
+        assert volume.auto_mount_in_scope('personal',
+                                          volume_user_hash='owner',
+                                          volume_workspace='ws-a',
+                                          current_user_hash='owner',
+                                          active_workspace='ws-b')
+
+    def test_personal_skips_other_users(self):
+        assert not volume.auto_mount_in_scope('personal',
+                                              volume_user_hash='owner',
+                                              volume_workspace='ws-a',
+                                              current_user_hash='someone-else',
+                                              active_workspace='ws-a')
+
+    def test_personal_skips_when_owner_unknown(self):
+        """Volume records without user_hash never match personal scope."""
+        assert not volume.auto_mount_in_scope('personal',
+                                              volume_user_hash=None,
+                                              volume_workspace='ws-a',
+                                              current_user_hash=None,
+                                              active_workspace='ws-a')
+
+    def test_workspace_applies_within_workspace(self):
+        assert volume.auto_mount_in_scope('workspace',
+                                          volume_user_hash='owner',
+                                          volume_workspace='ws-a',
+                                          current_user_hash='someone-else',
+                                          active_workspace='ws-a')
+
+    def test_workspace_skips_other_workspaces(self):
+        assert not volume.auto_mount_in_scope('workspace',
+                                              volume_user_hash='owner',
+                                              volume_workspace='ws-a',
+                                              current_user_hash='owner',
+                                              active_workspace='ws-b')
+
+    def test_workspace_skips_when_workspace_unknown(self):
+        """Volume records without workspace never match workspace scope."""
+        assert not volume.auto_mount_in_scope('workspace',
+                                              volume_user_hash='owner',
+                                              volume_workspace=None,
+                                              current_user_hash='owner',
+                                              active_workspace=None)
+
+    def test_invalid_scope_raises(self):
+        with pytest.raises(ValueError, match='Invalid auto-mount scope'):
+            volume.auto_mount_in_scope('team',
+                                       volume_user_hash='owner',
+                                       volume_workspace='ws-a',
+                                       current_user_hash='owner',
+                                       active_workspace='ws-a')
+
+    def test_supported_scopes(self):
+        assert volume.AutoMountScope.supported_scopes() == [
+            'personal', 'workspace', 'global'
+        ]
