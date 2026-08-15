@@ -20,6 +20,18 @@ tests:
       - matchRegex:
           path: data["prometheus.yml"]
           pattern: "RELEASE-NAME-api-service;metrics"
+      - matchRegex:
+          path: data["prometheus.yml"]
+          pattern: "target_label: pod"
+      - matchRegex:
+          path: data["prometheus.yml"]
+          pattern: "target_label: instance"
+      - matchRegex:
+          path: data["prometheus.yml"]
+          pattern: "__meta_kubernetes_endpoint_port_number"
+      - matchRegex:
+          path: data["prometheus.yml"]
+          pattern: "replacement: \\$1\\.\\$2\\.svc\\.cluster\\.local:\\$3"
 
   - it: should use fullnameOverride when filtering the API Service endpoint
     set:

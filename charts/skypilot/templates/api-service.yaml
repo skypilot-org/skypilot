@@ -4,6 +4,8 @@ kind: Service
 metadata:
   name: {{ $fullName }}-api-service
   namespace: {{ .Release.Namespace }}
+  labels:
+    app: {{ $fullName }}-api
   {{- if and .Values.apiService.metrics.enabled (not .Values.prometheus.useDedicatedScrapeConfig) }}
   annotations:
     prometheus.io/scrape: "true"

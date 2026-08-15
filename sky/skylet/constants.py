@@ -696,6 +696,8 @@ SERVE_OVERRIDE_CONCURRENT_LAUNCHES = (
 
 # Environment variable that is set to 'true' if metrics are enabled.
 ENV_VAR_SERVER_METRICS_ENABLED = 'SKY_API_SERVER_METRICS_ENABLED'
+# Environment variable that configures the API server metrics port.
+ENV_VAR_SERVER_METRICS_PORT = 'SKY_API_SERVER_METRICS_PORT'
 
 # If set, overrides the header that we can use to get the user name.
 ENV_VAR_SERVER_AUTH_USER_HEADER = f'{SKYPILOT_ENV_VAR_PREFIX}AUTH_USER_HEADER'

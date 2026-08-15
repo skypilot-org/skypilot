@@ -719,6 +719,12 @@ prometheus:
   # you do not want the API server to be discovered by other Prometheus instances.
   # @schema type: [boolean, null]
   useDedicatedScrapeConfig: false
+  # Keep legacy prometheus.io/* Pod annotations alongside the Service annotations
+  # when bundled Prometheus is enabled. This is useful for manually managed
+  # Pod-based scrapers, but may create duplicate targets unless they are filtered.
+  # Pod annotations are kept automatically when bundled Prometheus is disabled.
+  # @schema type: [boolean, null]
+  preservePodScrapeAnnotations: false
   # Add a scrape job for the API server's /endpoints-metrics federation
   # (model-serving engine metrics, e.g. vLLM, from every connected Kubernetes
   # context) and provision the serving Grafana dashboards. Opt-in: leave false
@@ -752,6 +758,14 @@ prometheus:
         - source_labels: [__meta_kubernetes_service_name, __meta_kubernetes_endpoint_port_name]
           action: keep
           regex: '{{ include "skypilot.fullname" . }}-api-service;metrics'
+        - source_labels: [__meta_kubernetes_pod_name]
+          action: replace
+          target_label: pod
+        - source_labels: [__meta_kubernetes_service_name, __meta_kubernetes_namespace, __meta_kubernetes_endpoint_port_number]
+          action: replace
+          regex: (.+);(.+);(.+)
+          replacement: $1.$2.svc.cluster.local:$3
+          target_label: instance
       metrics_path: '/gpu-metrics'
       scrape_interval: 60s
       scrape_timeout: 45s
@@ -780,6 +794,14 @@ prometheus:
         - source_labels: [__meta_kubernetes_service_name, __meta_kubernetes_endpoint_port_name]
           action: keep
           regex: '{{ include "skypilot.fullname" . }}-api-service;metrics'
+        - source_labels: [__meta_kubernetes_pod_name]
+          action: replace
+          target_label: pod
+        - source_labels: [__meta_kubernetes_service_name, __meta_kubernetes_namespace, __meta_kubernetes_endpoint_port_number]
+          action: replace
+          regex: (.+);(.+);(.+)
+          replacement: $1.$2.svc.cluster.local:$3
+          target_label: instance
       metrics_path: '/endpoints-metrics'
       scrape_interval: 60s
       scrape_timeout: 45s

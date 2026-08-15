@@ -8,6 +8,9 @@ tests:
       apiService.metrics.enabled: true
     asserts:
       - equal:
+          path: metadata.labels.app
+          value: RELEASE-NAME-api
+      - equal:
           path: metadata.annotations["prometheus.io/scrape"]
           value: "true"
       - equal:

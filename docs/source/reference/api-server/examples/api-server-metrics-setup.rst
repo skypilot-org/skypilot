@@ -130,3 +130,18 @@ All three default to ``false`` so you can mix & match:
 * **Fully managed Prometheus + Grafana** – set ``apiService.metrics.enabled: true``, ``prometheus.enabled: true``, and ``grafana.enabled: true``. The chart will deploy a fully managed Prometheus + Grafana stack.
 * **External Prometheus / Grafana** – set *only* ``apiService.metrics.enabled: true``. The API server will expose the metrics on the ``/metrics`` endpoint and its Service will be annotated with ``prometheus.io/scrape: true`` so Prometheus-compatible service scrapers can discover it automatically.
 * **External Grafana, internal Prometheus** – enable ``prometheus`` but disable ``grafana``. Point your existing Grafana at the Prometheus service created by the chart.
+
+The chart passes the configured metrics port to the API server through
+``SKY_API_SERVER_METRICS_PORT`` and exposes the same port through the Service.
+The chart does not add a ``--metrics-port`` CLI argument, so custom API server
+images must read this environment variable to use a non-default port. Images
+that retain the historical 9090 default continue to work when ``port`` remains
+9090.
+
+For external, manually managed Pod-based scrapers, the chart keeps the legacy
+``prometheus.io/*`` Pod annotations automatically when ``prometheus.enabled`` is
+false. If bundled Prometheus is enabled, those annotations are omitted by
+default to avoid duplicate discovery; set
+``prometheus.preservePodScrapeAnnotations: true`` only when the duplicate-target
+trade-off is understood and the bundled scrape configuration is filtered as
+needed. Dedicated mode uses only the ``skypilot.co/*`` Pod annotations.

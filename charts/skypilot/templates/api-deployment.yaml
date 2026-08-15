@@ -5,6 +5,7 @@
        storage mounts / ephemeral ~/.sky / env below key off this rather than
        storage.enabled alone. */ -}}
 {{- $statePersist := or .Values.storage.enabled .Values.storage.existingClaim -}}
+{{- $preservePodScrapeAnnotations := and .Values.apiService.metrics.enabled (not .Values.prometheus.useDedicatedScrapeConfig) (or (not .Values.prometheus.enabled) .Values.prometheus.preservePodScrapeAnnotations) -}}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -42,6 +43,11 @@ spec:
         skypilot.co/scrape: "true"
         skypilot.co/path: "/metrics"
         skypilot.co/port: {{ .Values.apiService.metrics.port | quote }}
+        {{- end }}
+        {{- if $preservePodScrapeAnnotations }}
+        prometheus.io/scrape: "true"
+        prometheus.io/path: "/metrics"
+        prometheus.io/port: {{ .Values.apiService.metrics.port | quote }}
         {{- end }}
         {{- if .Values.apiService.annotations }}
         {{- toYaml .Values.apiService.annotations | nindent 8 }}
@@ -168,6 +174,8 @@ spec:
         {{- if .Values.apiService.metrics.enabled }}
         - name: SKY_API_SERVER_METRICS_ENABLED
           value: "true"
+        - name: SKY_API_SERVER_METRICS_PORT
+          value: {{ .Values.apiService.metrics.port | quote }}
         {{- end }}
         {{- if .Values.auth.disableBasicAuthMiddleware }}
         - name: SKYPILOT_DISABLE_BASIC_AUTH_MIDDLEWARE
