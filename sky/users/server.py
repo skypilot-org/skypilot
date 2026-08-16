@@ -47,6 +47,42 @@ _INTERNAL_USER_IDS = (
 router = fastapi.APIRouter()
 
 
+def _is_admin(roles: List[str]) -> bool:
+    """Whether a role list means admin, i.e. `admin` is the only role.
+
+    Holding a second, more restricted role alongside `admin` is not reachable
+    through any normal path (`update_role` replaces rather than adds), and a
+    leftover one must not be trusted by an authorization gate: the blocklist
+    in `check_endpoint_permission` matches on *any* of the caller's roles, so
+    such a caller is still denied the admin-only endpoints.
+    """
+    return roles == [rbac.RoleName.ADMIN.value]
+
+
+def _caller_is_admin(user_id: str) -> bool:
+    """`_is_admin` for a caller whose roles have not been fetched yet."""
+    return _is_admin(permission.permission_service.get_user_roles(user_id))
+
+
+def _check_role_grantable(role: str, caller_user_id: str) -> None:
+    """Reject a role the caller may not grant, before anything is written.
+
+    An unrecognized role name must be rejected rather than passed through:
+    it has no Casbin policy at all, and the blocklist reads "no matching
+    policy" as allow, so such a role grants *more* than `user`, not less.
+    """
+    supported_roles = rbac.get_supported_roles()
+    if role not in supported_roles:
+        raise fastapi.HTTPException(
+            status_code=400,
+            detail=f'Invalid role {role!r}. Supported roles: '
+            f'{", ".join(supported_roles)}.')
+    if (role == rbac.RoleName.ADMIN.value and
+            not _caller_is_admin(caller_user_id)):
+        raise fastapi.HTTPException(
+            status_code=403, detail='Only admins can grant the admin role.')
+
+
 def get_user_type(user: models.User) -> str:
     """Get user type for a user for backward compatibility.
 
@@ -370,7 +406,7 @@ def user_update(request: fastapi.Request,
             current_user.id)
         if not current_user_roles:
             raise fastapi.HTTPException(status_code=403, detail='Invalid user')
-        if current_user_roles[0] != rbac.RoleName.ADMIN.value:
+        if not _is_admin(current_user_roles):
             if need_update_role:
                 raise fastapi.HTTPException(
                     status_code=403, detail='Only admin can update user role')
@@ -446,7 +482,7 @@ def user_batch_update(request: fastapi.Request,
             current_user.id)
         if not current_user_roles:
             raise fastapi.HTTPException(status_code=403, detail='Invalid user')
-        if current_user_roles[0] != rbac.RoleName.ADMIN.value:
+        if not _is_admin(current_user_roles):
             raise fastapi.HTTPException(
                 status_code=403, detail='Only admin can update user roles')
 
@@ -847,21 +883,7 @@ def create_service_account_token(
 
     # Validate the optional role up front so we fail before creating anything.
     if token_body.role is not None:
-        if token_body.role not in rbac.get_supported_roles():
-            raise fastapi.HTTPException(
-                status_code=400,
-                detail=f'Invalid role {token_body.role!r}. Supported roles: '
-                f'{", ".join(rbac.get_supported_roles())}.')
-        # Only admins may create an admin-role service account; otherwise a
-        # non-admin could escalate by minting an admin-scoped token.
-        if token_body.role == rbac.RoleName.ADMIN.value:
-            caller_roles = permission.permission_service.get_user_roles(
-                auth_user.id)
-            if not caller_roles or caller_roles[0] != rbac.RoleName.ADMIN.value:
-                raise fastapi.HTTPException(
-                    status_code=403,
-                    detail='Only admins can create a service account with the '
-                    'admin role.')
+        _check_role_grantable(token_body.role, auth_user.id)
 
     try:
         # Generate a unique service account user ID
@@ -1034,13 +1056,10 @@ def update_service_account_role(
             'Only admins can update roles for service accounts owned by other '
             'users.')
 
-    # Only admin can grant the admin role (mirrors user_update guard).
-    if role_body.role == rbac.RoleName.ADMIN.value:
-        caller_roles = permission.permission_service.get_user_roles(
-            auth_user.id)
-        if rbac.RoleName.ADMIN.value not in caller_roles:
-            raise fastapi.HTTPException(
-                status_code=403, detail='Only admin can grant the admin role.')
+    # Owning a service account does not entitle the caller to raise its role
+    # above their own. Kept outside the try below so the 400/403 is not
+    # swallowed into a 500 by the broad handler.
+    _check_role_grantable(role_body.role, auth_user.id)
 
     try:
         # Update service account role

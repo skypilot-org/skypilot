@@ -397,11 +397,15 @@ class PermissionService:
             self.invalidate_user_permission_cache(user_id)
 
     def get_user_roles(self, user_id: str) -> List[str]:
-        """Get all roles for a user.
+        """Get the roles directly assigned to a user.
 
-        This method returns all roles that the user has, including inherited
-        roles. For example, if a user has role 'admin' and 'admin' inherits
-        from 'user', this method will return ['admin', 'user'].
+        Roles do not inherit from one another: the only grouping policies
+        this module ever writes are `(user_id, role)`, never `(role, role)`,
+        and `get_roles_for_user` does not expand transitively anyway (that
+        would be `get_implicit_roles_for_user`). Every user therefore has
+        exactly zero or one role in practice, since `update_role` replaces
+        rather than adds. Callers deciding *authorization* should not treat a
+        second role as additive — see `sky.users.server._caller_is_admin`.
 
         Args:
             user: The user ID to get roles for.

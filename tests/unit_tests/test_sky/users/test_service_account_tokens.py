@@ -172,3 +172,88 @@ class TestCreateServiceAccountTokenRole:
         users_server.create_service_account_token(_fake_request(), body)
         mock_perm.seed_new_user_role.assert_called_once()
         mock_perm.permission_service.update_role.assert_not_called()
+
+
+def _update_role_body(role):
+    return payloads.ServiceAccountTokenUpdateRoleBody(token_id='tid', role=role)
+
+
+def _token_info(creator='regular-user'):
+    return {
+        'creator_user_hash': creator,
+        'service_account_user_id': 'sa-1234',
+    }
+
+
+class TestUpdateServiceAccountRole:
+    """Owning a service account does not entitle raising its role."""
+
+    # 'Admin' and '' are the same escalation as 'bogus': an unrecognized role
+    # has no Casbin policy, and the blocklist reads that as allow-everything.
+    @pytest.mark.parametrize('role', ['bogus', 'Admin', ''])
+    @mock.patch('sky.users.server.global_user_state')
+    @mock.patch('sky.users.server.permission')
+    def test_unsupported_role_rejected(self, mock_perm, mock_gus, role):
+        mock_gus.get_service_account_token.return_value = _token_info()
+        mock_perm.permission_service.get_user_roles.return_value = ['user']
+        with pytest.raises(fastapi.HTTPException) as exc:
+            users_server.update_service_account_role(
+                _fake_request(user_id='regular-user'), _update_role_body(role))
+        assert exc.value.status_code == 400
+        assert 'Invalid role' in exc.value.detail
+        mock_perm.permission_service.update_role.assert_not_called()
+
+    @mock.patch('sky.users.server.global_user_state')
+    @mock.patch('sky.users.server.permission')
+    def test_non_admin_cannot_grant_admin(self, mock_perm, mock_gus):
+        mock_gus.get_service_account_token.return_value = _token_info()
+        mock_perm.permission_service.get_user_roles.return_value = ['user']
+        with pytest.raises(fastapi.HTTPException) as exc:
+            users_server.update_service_account_role(
+                _fake_request(user_id='regular-user'),
+                _update_role_body('admin'))
+        assert exc.value.status_code == 403
+        assert 'Only admins' in exc.value.detail
+        mock_perm.permission_service.update_role.assert_not_called()
+
+    @mock.patch('sky.users.server.global_user_state')
+    @mock.patch('sky.users.server.permission')
+    def test_residual_admin_role_does_not_grant(self, mock_perm, mock_gus):
+        """A leftover `admin` next to a restricted role is not admin.
+
+        `check_endpoint_permission` still applies the `user` blocklist to such
+        a caller, so treating them as admin here would be an escalation.
+        """
+        mock_gus.get_service_account_token.return_value = _token_info()
+        mock_perm.permission_service.get_user_roles.return_value = [
+            'user', 'admin'
+        ]
+        with pytest.raises(fastapi.HTTPException) as exc:
+            users_server.update_service_account_role(
+                _fake_request(user_id='regular-user'),
+                _update_role_body('admin'))
+        assert exc.value.status_code == 403
+        mock_perm.permission_service.update_role.assert_not_called()
+
+    @mock.patch('sky.users.server.global_user_state')
+    @mock.patch('sky.users.server.permission')
+    def test_non_admin_can_grant_non_admin(self, mock_perm, mock_gus):
+        mock_gus.get_service_account_token.return_value = _token_info()
+        mock_perm.permission_service.get_user_roles.return_value = ['user']
+        result = users_server.update_service_account_role(
+            _fake_request(user_id='regular-user'), _update_role_body('viewer'))
+        assert result['new_role'] == 'viewer'
+        assert mock_perm.permission_service.update_role.call_args[0] == (
+            'sa-1234', 'viewer')
+
+    @mock.patch('sky.users.server.global_user_state')
+    @mock.patch('sky.users.server.permission')
+    def test_admin_can_grant_admin(self, mock_perm, mock_gus):
+        mock_gus.get_service_account_token.return_value = _token_info(
+            creator='admin-user')
+        mock_perm.permission_service.get_user_roles.return_value = ['admin']
+        result = users_server.update_service_account_role(
+            _fake_request(), _update_role_body('admin'))
+        assert result['new_role'] == 'admin'
+        assert mock_perm.permission_service.update_role.call_args[0] == (
+            'sa-1234', 'admin')
