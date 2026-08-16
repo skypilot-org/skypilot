@@ -127,8 +127,8 @@ def _offer_matches_gpu(offer: Any, gpu_name: str, num_gpus: int) -> bool:
         normalized_num_gpus = int(offer_num_gpus)
     except (TypeError, ValueError):
         return False
-    return (_normalize_gpu_name(offer.get('gpu_name')) ==
-            _normalize_gpu_name(gpu_name) and
+    return (_normalize_gpu_name(
+        offer.get('gpu_name')) == _normalize_gpu_name(gpu_name) and
             normalized_num_gpus == num_gpus)
 
 
@@ -158,10 +158,10 @@ def _validate_created_instance(instance: Any, gpu_name: str,
                                num_gpus: int) -> None:
     """Raise when a created contract does not identify the requested GPU."""
     if not _offer_matches_gpu(instance, gpu_name, num_gpus):
-        actual_gpu_name = (instance.get('gpu_name')
-                           if isinstance(instance, dict) else None)
-        actual_num_gpus = (instance.get('num_gpus')
-                           if isinstance(instance, dict) else None)
+        actual_gpu_name = (instance.get('gpu_name') if isinstance(
+            instance, dict) else None)
+        actual_num_gpus = (instance.get('num_gpus') if isinstance(
+            instance, dict) else None)
         raise ValueError(
             f'Vast reported gpu_name={actual_gpu_name!r}, '
             f'num_gpus={actual_num_gpus!r}; expected gpu_name={gpu_name!r}, '
@@ -330,8 +330,8 @@ def launch(name: str,
         instance_list = [
             offer for offer in instance_list
             if str(offer.get('machine_id')) not in excluded_machine_id_strings
-            and _offer_matches_gpu(offer, gpu_name, num_gpus)
-            and (not reliable_hosts or _offer_meets_reliability(offer))
+            and _offer_matches_gpu(offer, gpu_name, num_gpus) and
+            (not reliable_hosts or _offer_meets_reliability(offer))
         ]
         instance_list.sort(key=_offer_price)
 

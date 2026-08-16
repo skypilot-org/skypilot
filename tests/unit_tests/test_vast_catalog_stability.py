@@ -33,6 +33,7 @@ def test_vast_sdk_exposes_launcher_api_key_contract():
     if sys.version_info < (3, 10):
         pytest.skip("Vast SDK requires Python >=3.10.")
 
+    pytest.importorskip("vastai.sdk")
     from vastai.sdk import VastAI  # pylint: disable=import-outside-toplevel
 
     client = VastAI(api_key="test-api-key")
@@ -338,6 +339,7 @@ def test_launch_uses_reliable_filters_and_excludes_failed_machine(monkeypatch):
 
 def test_live_query_survives_vast_sdk_preprocessing(monkeypatch):
     """Ensure every launch filter reaches Vast SDK 1.5.0's query parser."""
+    pytest.importorskip("vastai.api.query")
     client = _make_vast_client("search_offers", "create_instance",
                                "show_instance")
     client.search_offers.return_value = [{
@@ -369,14 +371,10 @@ def test_live_query_survives_vast_sdk_preprocessing(monkeypatch):
     )
 
     from vastai.api.query import (  # pylint: disable=import-outside-toplevel
-        offers_alias,
-        offers_fields,
-        offers_mult,
-        parse_query,
+        offers_alias, offers_fields, offers_mult, parse_query,
     )
     from vastai.utils import (  # pylint: disable=import-outside-toplevel
-        preprocess_search_query,
-    )
+        preprocess_search_query,)
 
     query = client.search_offers.call_args.kwargs["query"]
     _, _, preprocessed_query = preprocess_search_query(query)
@@ -441,8 +439,7 @@ def test_launch_rejects_empty_exact_gpu_match(monkeypatch):
     }]
     monkeypatch.setattr(vast_utils.vast, "vast", lambda: client)
 
-    with pytest.raises(exceptions.VastOfferUnavailableError,
-                       match="A100"):
+    with pytest.raises(exceptions.VastOfferUnavailableError, match="A100"):
         vast_utils.launch(
             name="test-head",
             instance_type="1x-A100-4-8192",
@@ -457,8 +454,7 @@ def test_launch_rejects_empty_exact_gpu_match(monkeypatch):
     client.create_instance.assert_not_called()
 
 
-def test_launch_orders_matching_offers_and_logs_selected_price(
-        monkeypatch, caplog):
+def test_launch_orders_matching_offers_and_logs_selected_price(monkeypatch):
     """Select the cheapest valid live offer and expose its actual price."""
     client = _make_vast_client("search_offers", "create_instance",
                                "show_instance")
@@ -481,7 +477,7 @@ def test_launch_orders_matching_offers_and_logs_selected_price(
     }
     monkeypatch.setattr(vast_utils.vast, "vast", lambda: client)
 
-    with caplog.at_level("INFO"):
+    with mock.patch.object(vast_utils.logger, "info") as log_info:
         vast_utils.launch(
             name="test-head",
             instance_type="1x-A100-4-8192",
@@ -495,7 +491,7 @@ def test_launch_orders_matching_offers_and_logs_selected_price(
 
     assert client.search_offers.call_args.kwargs["order"] == "dph_total"
     assert client.create_instance.call_args.kwargs["id"] == 456
-    assert "dph_total=0.2" in caplog.text
+    assert log_info.call_args.args[-1] == 0.2
 
 
 def test_launch_destroys_contract_when_created_gpu_mismatches(monkeypatch):
