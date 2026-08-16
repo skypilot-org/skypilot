@@ -366,9 +366,14 @@ def test_manual_teardown_handles_unavailable_skylet_by_outcome(
                          15,
                          autostop_lib.DEFAULT_AUTOSTOP_WAIT_FOR,
                          down=True)
+    get_status.reset_mock()
     get_status.side_effect = _DeadlineExceededRpcError()
     close_tunnel = mock.Mock()
-    monkeypatch.setattr(handle, 'close_skylet_ssh_tunnel', close_tunnel)
+    monkeypatch.setattr(
+        cloud_vm_ray_backend.CloudVmRayResourceHandle,
+        'close_skylet_ssh_tunnel',
+        lambda self: close_tunnel(),
+    )
 
     with mock.patch.object(backend, 'teardown_no_lock') as teardown:
         if terminate:
@@ -381,6 +386,52 @@ def test_manual_teardown_handles_unavailable_skylet_by_outcome(
             teardown.assert_not_called()
 
     get_status.assert_called_once_with()
+    close_tunnel.assert_called_once_with()
+
+
+@pytest.mark.usefixtures('fresh_state_db')
+@pytest.mark.parametrize(
+    'channel_error',
+    [
+        pytest.param(grpc.FutureTimeoutError(), id='future-timeout'),
+        pytest.param(RuntimeError('tunnel open failed'), id='tunnel-error'),
+    ])
+@pytest.mark.parametrize('terminate', [False, True])
+def test_manual_teardown_handles_tunnel_setup_failure_by_outcome(
+        monkeypatch, channel_error, terminate):
+    """Allow termination past Skylet tunnel setup failures, but not stop."""
+    handle = _make_handle()
+    _add_cluster(handle)
+    get_status, _, _ = _patch_skylet(monkeypatch)
+    backend = cloud_vm_ray_backend.CloudVmRayBackend()
+    backend.set_autostop(handle,
+                         15,
+                         autostop_lib.DEFAULT_AUTOSTOP_WAIT_FOR,
+                         down=True)
+    get_status.reset_mock()
+    monkeypatch.setattr(
+        cloud_vm_ray_backend.CloudVmRayResourceHandle,
+        'get_grpc_channel',
+        mock.Mock(side_effect=channel_error),
+    )
+    close_tunnel = mock.Mock()
+    monkeypatch.setattr(
+        cloud_vm_ray_backend.CloudVmRayResourceHandle,
+        'close_skylet_ssh_tunnel',
+        lambda self: close_tunnel(),
+    )
+
+    with mock.patch.object(backend, 'teardown_no_lock') as teardown:
+        if terminate:
+            backend._teardown(handle, terminate=True)
+            teardown.assert_called_once()
+        else:
+            with pytest.raises(RuntimeError,
+                               match='cannot be manually stopped'):
+                backend._teardown(handle, terminate=False)
+            teardown.assert_not_called()
+
+    get_status.assert_not_called()
     close_tunnel.assert_called_once_with()
 
 

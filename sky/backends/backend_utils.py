@@ -4978,14 +4978,6 @@ def _handle_grpc_error(e: 'grpc.RpcError', current_backoff: float) -> None:
     if e.code() == grpc.StatusCode.INTERNAL:
         with ux_utils.print_exception_no_traceback():
             raise exceptions.SkyletInternalError(e.details())
-    elif e.code() == grpc.StatusCode.DEADLINE_EXCEEDED:
-        # A deadline on a Skylet RPC means that the transport cannot be
-        # trusted for a state-changing operation. Treat it like an unavailable
-        # Skylet so callers can apply their normal fail-open/fail-closed
-        # policy instead of leaking the raw gRPC error.
-        details = e.details() or ''
-        raise exceptions.SkyletUnavailableError(
-            f'Skylet request deadline exceeded: {details}') from e
     elif e.code() == grpc.StatusCode.UNAVAILABLE:
         details = e.details() or ''
         if 'Connection refused' in details:

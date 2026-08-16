@@ -2,6 +2,7 @@ import os
 import pathlib
 from unittest import mock
 
+import grpc
 import pytest
 
 from sky import backends
@@ -24,6 +25,26 @@ from sky.utils import registry
 from sky.utils import schemas
 from sky.utils import status_lib
 from sky.utils import yaml_utils
+
+
+class _DeadlineExceededRpcError(grpc.RpcError):
+    """Minimal deadline error used to verify retry classification."""
+
+    def code(self):
+        return grpc.StatusCode.DEADLINE_EXCEEDED
+
+    def details(self):
+        return 'Deadline Exceeded'
+
+
+def test_deadline_exceeded_is_not_converted_to_skylet_fallback():
+    """Keep ambiguous deadlines raw so state-changing RPCs are not replayed."""
+    error = _DeadlineExceededRpcError()
+
+    with pytest.raises(grpc.RpcError) as raised:
+        backend_utils._handle_grpc_error(error, current_backoff=0)
+
+    assert raised.value is error
 
 
 def _write_minimal_cluster_yaml(*args, **kwargs):

@@ -4718,7 +4718,17 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 stream_logs=False,
                 cluster_lock_already_held=True,
             )
-        except exceptions.SkyletUnavailableError as e:
+        except _DurableAutodownAlreadyClaimedError as e:
+            if terminate:
+                # Manual down is the same irreversible outcome. Keep the
+                # exact claimed generation actionable for reconciliation.
+                return handle
+            raise RuntimeError(
+                f'Cluster {handle.cluster_name!r} cannot be manually stopped '
+                'because durable autodown teardown has already begun.') from e
+        except Exception as e:  # pylint: disable=broad-except
+            if not self._is_durable_autodown_transport_failure(e):
+                raise
             if terminate:
                 # Manual down and durable autodown have the same irreversible
                 # outcome. Provider teardown must remain reachable even when
@@ -4733,14 +4743,6 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 f'Cluster {handle.cluster_name!r} cannot be manually stopped '
                 'because its durable autodown intent could not be cancelled '
                 'while Skylet was unavailable.') from e
-        except _DurableAutodownAlreadyClaimedError as e:
-            if terminate:
-                # Manual down is the same irreversible outcome. Keep the
-                # exact claimed generation actionable for reconciliation.
-                return handle
-            raise RuntimeError(
-                f'Cluster {handle.cluster_name!r} cannot be manually stopped '
-                'because durable autodown teardown has already begun.') from e
         return handle
 
     def _teardown(self,
@@ -6407,8 +6409,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         request.execution_strategy = self._strategy_to_protobuf(strategy)
         try:
             response = backend_utils.invoke_skylet_with_retries(
-                lambda: SkyletClient(current_handle.get_grpc_channel()
-                                    ).apply_autodown_intent(request))
+                lambda: self._get_durable_autodown_skylet_client(
+                    current_handle).apply_autodown_intent(request))
             if not response.supports_durable_autodown:
                 raise RuntimeError(
                     'Skylet did not acknowledge durable autodown application.')
@@ -6564,8 +6566,33 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             raise exceptions.NotSupportedError(
                 'Durable autodown status requires a compatible Skylet gRPC '
                 'endpoint.')
-        return backend_utils.invoke_skylet_with_retries(lambda: SkyletClient(
-            handle.get_grpc_channel()).get_autodown_status())
+        return backend_utils.invoke_skylet_with_retries(
+            lambda: self._get_durable_autodown_skylet_client(
+                handle).get_autodown_status())
+
+    @staticmethod
+    def _is_durable_autodown_transport_failure(error: BaseException) -> bool:
+        """Return whether a fence failure means Skylet cannot be reached."""
+        if isinstance(error, exceptions.SkyletUnavailableError):
+            return True
+        return (isinstance(error, grpc.RpcError) and
+                error.code() == grpc.StatusCode.DEADLINE_EXCEEDED)
+
+    @staticmethod
+    def _get_durable_autodown_skylet_client(
+            handle: CloudVmRayResourceHandle) -> SkyletClient:
+        """Create a durable-autodown client, normalizing setup failures.
+
+        The channel is established before an RPC is created, so these failures
+        cannot represent an ambiguously committed state-changing request. They
+        are therefore safe to classify as Skylet-unavailable for the fence.
+        """
+        try:
+            return SkyletClient(handle.get_grpc_channel())
+        except (exceptions.CommandError, grpc.FutureTimeoutError,
+                RuntimeError) as e:
+            raise exceptions.SkyletUnavailableError(
+                'Failed to establish a Skylet gRPC channel.') from e
 
     def is_definitely_autostopping(self,
                                    handle: CloudVmRayResourceHandle,
