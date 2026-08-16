@@ -17,6 +17,7 @@ import uvicorn
 
 from sky import serve
 from sky import sky_logging
+from sky.serve import constants as serve_constants
 from sky.serve import autoscalers
 from sky.serve import replica_managers
 from sky.serve import serve_state
@@ -54,6 +55,15 @@ class SkyServeController:
                                                     version=version))
         self._autoscaler: autoscalers.Autoscaler = (
             autoscalers.Autoscaler.from_spec(service_name, service_spec))
+
+        # Restore autoscaler version to avoid scale churn on controller restart.
+        # This matches the logic in the live update path (/controller/update).
+        if version > serve_constants.INITIAL_VERSION:
+            self._autoscaler.update_version(
+                version,
+                service_spec,
+                update_mode=serve_utils.DEFAULT_UPDATE_MODE,
+            )
         self._host = host
         self._port = port
         self._app = fastapi.FastAPI(lifespan=self.lifespan)
