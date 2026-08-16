@@ -17,8 +17,8 @@ import uvicorn
 
 from sky import serve
 from sky import sky_logging
-from sky.serve import constants as serve_constants
 from sky.serve import autoscalers
+from sky.serve import constants as serve_constants
 from sky.serve import replica_managers
 from sky.serve import serve_state
 from sky.serve import serve_utils
