@@ -390,12 +390,10 @@ def test_manual_teardown_handles_unavailable_skylet_by_outcome(
 
 
 @pytest.mark.usefixtures('fresh_state_db')
-@pytest.mark.parametrize(
-    'channel_error',
-    [
-        pytest.param(grpc.FutureTimeoutError(), id='future-timeout'),
-        pytest.param(RuntimeError('tunnel open failed'), id='tunnel-error'),
-    ])
+@pytest.mark.parametrize('channel_error', [
+    pytest.param(grpc.FutureTimeoutError(), id='future-timeout'),
+    pytest.param(RuntimeError('tunnel open failed'), id='tunnel-error'),
+])
 @pytest.mark.parametrize('terminate', [False, True])
 def test_manual_teardown_handles_tunnel_setup_failure_by_outcome(
         monkeypatch, channel_error, terminate):
