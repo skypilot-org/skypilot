@@ -370,11 +370,13 @@ def test_live_query_survives_vast_sdk_preprocessing(monkeypatch):
         network_tier=resources_utils.NetworkTier.BEST,
     )
 
+    # isort: off
     from vastai.api.query import (  # pylint: disable=import-outside-toplevel
         offers_alias, offers_fields, offers_mult, parse_query,
     )
     from vastai.utils import (  # pylint: disable=import-outside-toplevel
         preprocess_search_query,)
+    # isort: on
 
     query = client.search_offers.call_args.kwargs["query"]
     _, _, preprocessed_query = preprocess_search_query(query)

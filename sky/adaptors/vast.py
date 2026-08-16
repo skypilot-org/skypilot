@@ -13,7 +13,9 @@ def import_package(func):
 
         if _vast_sdk is None:
             try:
+                # isort: off
                 from vastai.sdk import VastAI  # pylint: disable=import-outside-toplevel
+                # isort: on
                 _vast_sdk = VastAI()
             except ImportError as e:
                 raise ImportError(f'Fail to import dependencies for vast: {e}\n'
