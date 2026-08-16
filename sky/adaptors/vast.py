@@ -13,8 +13,8 @@ def import_package(func):
 
         if _vast_sdk is None:
             try:
-                import vastai_sdk as _vast  # pylint: disable=import-outside-toplevel
-                _vast_sdk = _vast.VastAI()
+                from vastai.sdk import VastAI  # pylint: disable=import-outside-toplevel
+                _vast_sdk = VastAI()
             except ImportError as e:
                 raise ImportError(f'Fail to import dependencies for vast: {e}\n'
                                   'Try pip install "skypilot[vast]"') from None

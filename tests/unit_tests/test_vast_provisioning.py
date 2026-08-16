@@ -71,9 +71,17 @@ def _mock_vast_sdk(monkeypatch):
     sdk.search_offers.return_value = [{
         'id': 1,
         'machine_id': 2,
+        'gpu_name': 'A100',
+        'num_gpus': 1,
+        'dph_total': 0.4,
+        'reliability': 0.99,
     }]
     sdk.create_instance.return_value = {'new_contract': '3'}
-    sdk.show_instance.return_value = {'id': '3'}
+    sdk.show_instance.return_value = {
+        'id': '3',
+        'gpu_name': 'A100',
+        'num_gpus': 1,
+    }
     monkeypatch.setattr(vast_utils.vast, 'vast', lambda: sdk)
     return sdk
 

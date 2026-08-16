@@ -333,7 +333,7 @@ class Vast(clouds.Cloud):
 
         dependency_error_msg = ('Failed to import vast. '
                                 'To install, run: pip install skypilot[vast]')
-        if not common.can_import_modules(['vastai_sdk']):
+        if not common.can_import_modules(['vastai']):
             return False, dependency_error_msg
 
         if not os.path.exists(os.path.expanduser(_CREDENTIAL_PATH)):

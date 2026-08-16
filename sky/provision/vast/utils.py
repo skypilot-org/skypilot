@@ -5,6 +5,7 @@
 # python sdk.
 #
 """Vast library wrapper for SkyPilot."""
+import math
 from pathlib import Path
 import re
 import shlex
@@ -108,6 +109,53 @@ def get_instance_logs(instance_id: str,
                               tail=str(tail),
                               daemon_logs=daemon_logs)
     return str(output)
+
+
+def _normalize_gpu_name(gpu_name: Any) -> str:
+    """Normalize Vast's equivalent space and underscore GPU spellings."""
+    return str(gpu_name or '').replace('_', ' ').strip().casefold()
+
+
+def _offer_matches_gpu(offer: Any, gpu_name: str, num_gpus: int) -> bool:
+    """Return whether a search result exactly matches the requested GPU."""
+    if not isinstance(offer, dict):
+        return False
+    try:
+        offer_num_gpus = int(offer.get('num_gpus'))
+    except (TypeError, ValueError):
+        return False
+    return (_normalize_gpu_name(offer.get('gpu_name')) ==
+            _normalize_gpu_name(gpu_name) and offer_num_gpus == num_gpus)
+
+
+def _offer_price(offer: Dict[str, Any]) -> float:
+    """Return a sortable on-demand price, putting malformed values last."""
+    try:
+        return float(offer.get('dph_total'))
+    except (TypeError, ValueError):
+        return math.inf
+
+
+def _offer_meets_reliability(offer: Dict[str, Any]) -> bool:
+    """Enforce the decimal reliability threshold outside SDK 1.5 parsing."""
+    try:
+        return float(offer.get('reliability')) >= 0.99
+    except (TypeError, ValueError):
+        return False
+
+
+def _validate_created_instance(instance: Any, gpu_name: str,
+                               num_gpus: int) -> None:
+    """Raise when a created contract does not identify the requested GPU."""
+    if not _offer_matches_gpu(instance, gpu_name, num_gpus):
+        actual_gpu_name = (instance.get('gpu_name')
+                           if isinstance(instance, dict) else None)
+        actual_num_gpus = (instance.get('num_gpus')
+                           if isinstance(instance, dict) else None)
+        raise ValueError(
+            f'Vast reported gpu_name={actual_gpu_name!r}, '
+            f'num_gpus={actual_num_gpus!r}; expected gpu_name={gpu_name!r}, '
+            f'num_gpus={num_gpus}.')
 
 
 def list_instances() -> Dict[str, Dict[str, Any]]:
@@ -225,22 +273,28 @@ def launch(name: str,
     gpu_name = instance_type.split('-')[1].replace('_', ' ')
     num_gpus = int(instance_type.split('-')[0].replace('x', ''))
 
+    # Vast SDK 1.5.0 preprocesses query values with an alphanumeric parser.
+    # Decimal and quoted values silently truncate the remainder of the query.
+    # Catalog instance types use integral GiB values; round non-integral values
+    # up so the preprocessor-safe query remains a valid minimum requirement.
+    cpu_ram_query = str(math.ceil(cpu_ram))
+    gpu_name_query = gpu_name.replace(' ', '_')
+
     query = [
         'chunked=true',
         'georegion=true',
         f'disk_space>={disk_size}',
         f'num_gpus={num_gpus}',
-        f'gpu_name="{gpu_name}"',
-        f'cpu_ram>="{cpu_ram}"',
+        f'gpu_name={gpu_name_query}',
+        f'cpu_ram>={cpu_ram_query}',
     ]
     if region and region.lower() != 'any':
-        query.insert(2, f'geolocation="{region[-2:].upper()}"')
+        query.insert(2, f'geolocation={region[-2:].upper()}')
     if secure_only:
         query.append('datacenter=true')
         query.append('hosting_type>=1')
     if reliable_hosts:
         query.extend([
-            'reliability>=0.99',
             'verified=true',
             'datacenter=true',
             'hosting_type>=1',
@@ -252,24 +306,37 @@ def launch(name: str,
         query.append('inet_up>=1000')
     query_str = ' '.join(query)
 
-    instance_list = vast.vast().search_offers(query=query_str)
+    instance_list = vast.vast().search_offers(query=query_str,
+                                              order='dph_total')
 
     excluded_machine_id_strings = {
         str(machine_id) for machine_id in excluded_machine_ids or []
     }
-    if not isinstance(instance_list, int):
+    if isinstance(instance_list, int):
+        instance_list = []
+    elif not isinstance(instance_list, list):
+        instance_list = []
+    else:
         instance_list = [
             offer for offer in instance_list
             if str(offer.get('machine_id')) not in excluded_machine_id_strings
+            and _offer_matches_gpu(offer, gpu_name, num_gpus)
+            and (not reliable_hosts or _offer_meets_reliability(offer))
         ]
+        instance_list.sort(key=_offer_price)
 
-    if isinstance(instance_list, int) or len(instance_list) == 0:
+    if len(instance_list) == 0:
         raise exceptions.VastOfferUnavailableError(
             'Failed to create instances, could not find an '
             'offer that satisfies the requirements '
-            f'"{query_str}".')
+            f'"{query_str}" for gpu_name={gpu_name!r}, '
+            f'num_gpus={num_gpus}.')
 
     instance_touse = instance_list[0]
+    logger.info(
+        'Selected Vast offer id=%s gpu_name=%s num_gpus=%s dph_total=%s',
+        instance_touse.get('id'), instance_touse.get('gpu_name'),
+        instance_touse.get('num_gpus'), instance_touse.get('dph_total'))
 
     # Start with user-provided kwargs as the base
     launch_params: Dict[str, Any] = dict(create_instance_kwargs)
@@ -364,7 +431,22 @@ def launch(name: str,
         if _is_offer_unavailable_error(exc):
             raise exceptions.VastOfferUnavailableError(str(exc)) from exc
         raise
-    new_instance = _get_created_instance(new_instance_contract['new_contract'])
+    contract_id = new_instance_contract['new_contract']
+    new_instance = _get_created_instance(contract_id)
+    try:
+        _validate_created_instance(new_instance, gpu_name, num_gpus)
+    except ValueError as exc:
+        try:
+            vast.vast().destroy_instance(id=contract_id)
+        except Exception as cleanup_exc:  # pylint: disable=broad-except
+            logger.warning('Failed to destroy mismatched Vast contract %s: %s',
+                           contract_id, cleanup_exc)
+            cleanup_status = 'failed to destroy'
+        else:
+            cleanup_status = 'destroyed'
+        raise exceptions.VastProvisioningError(
+            f'Vast created contract {contract_id} did not match the requested '
+            f'GPU ({exc}); {cleanup_status} the contract.') from exc
 
     return new_instance['id']
 
