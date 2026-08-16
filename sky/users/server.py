@@ -50,11 +50,11 @@ router = fastapi.APIRouter()
 def _is_admin(roles: List[str]) -> bool:
     """Whether a role list means admin, i.e. `admin` is the only role.
 
-    Holding a second, more restricted role alongside `admin` is not reachable
-    through any normal path (`update_role` replaces rather than adds), and a
-    leftover one must not be trusted by an authorization gate: the blocklist
-    in `check_endpoint_permission` matches on *any* of the caller's roles, so
-    such a caller is still denied the admin-only endpoints.
+    Deliberately stricter than the `admin in roles` reads elsewhere, which
+    answer "does the viewer allowlist apply" rather than gating a grant. A
+    leftover role beside `admin` is unreachable (`update_role` replaces), and
+    `check_endpoint_permission` matches the blocklist against *any* of the
+    caller's roles, so it would still deny such a caller the admin endpoints.
     """
     return roles == [rbac.RoleName.ADMIN.value]
 
