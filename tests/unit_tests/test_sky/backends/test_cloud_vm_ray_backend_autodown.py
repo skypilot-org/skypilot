@@ -343,6 +343,47 @@ def test_strict_autodown_requires_skylet_before_mutation():
     assert global_user_state.get_autodown_intent('cluster') is None
 
 
+class _DeadlineExceededRpcError(grpc.RpcError):
+    """Minimal deadline error used to exercise Skylet transport handling."""
+
+    def code(self):
+        return grpc.StatusCode.DEADLINE_EXCEEDED
+
+    def details(self):
+        return 'Deadline Exceeded'
+
+
+@pytest.mark.usefixtures('fresh_state_db')
+@pytest.mark.parametrize('terminate', [False, True])
+def test_manual_teardown_handles_unavailable_skylet_by_outcome(
+        monkeypatch, terminate):
+    """Allow down to proceed past an unavailable Skylet only for terminate."""
+    handle = _make_handle()
+    _add_cluster(handle)
+    get_status, _, _ = _patch_skylet(monkeypatch)
+    backend = cloud_vm_ray_backend.CloudVmRayBackend()
+    backend.set_autostop(handle,
+                         15,
+                         autostop_lib.DEFAULT_AUTOSTOP_WAIT_FOR,
+                         down=True)
+    get_status.side_effect = _DeadlineExceededRpcError()
+    close_tunnel = mock.Mock()
+    monkeypatch.setattr(handle, 'close_skylet_ssh_tunnel', close_tunnel)
+
+    with mock.patch.object(backend, 'teardown_no_lock') as teardown:
+        if terminate:
+            backend._teardown(handle, terminate=True)
+            teardown.assert_called_once()
+        else:
+            with pytest.raises(RuntimeError,
+                               match='cannot be manually stopped'):
+                backend._teardown(handle, terminate=False)
+            teardown.assert_not_called()
+
+    get_status.assert_called_once_with()
+    close_tunnel.assert_called_once_with()
+
+
 @pytest.mark.usefixtures('fresh_state_db')
 def test_strict_arm_update_and_cancel_use_newer_generations(monkeypatch):
     handle = _make_handle(TeardownExecutionStrategy.SERVER_ONLY)

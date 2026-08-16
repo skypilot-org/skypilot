@@ -4706,6 +4706,10 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 f'Cluster {handle.cluster_name!r} cannot be manually stopped '
                 'because durable autodown teardown has already begun.')
         try:
+            # The health check only verifies that the local forwarding port
+            # accepts TCP. Close it before probing so a half-dead tunnel cannot
+            # make the cancellation RPC hang until its deadline.
+            handle.close_skylet_ssh_tunnel()
             self._set_autostop(
                 handle,
                 -1,
@@ -4714,6 +4718,21 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 stream_logs=False,
                 cluster_lock_already_held=True,
             )
+        except exceptions.SkyletUnavailableError as e:
+            if terminate:
+                # Manual down and durable autodown have the same irreversible
+                # outcome. Provider teardown must remain reachable even when
+                # Skylet has already disappeared or is no longer responsive.
+                logger.warning(
+                    'Could not cancel durable autodown for cluster %r before '
+                    'termination because Skylet is unavailable; continuing '
+                    'with provider teardown. Details: %s', handle.cluster_name,
+                    common_utils.format_exception(e, use_bracket=True))
+                return handle
+            raise RuntimeError(
+                f'Cluster {handle.cluster_name!r} cannot be manually stopped '
+                'because its durable autodown intent could not be cancelled '
+                'while Skylet was unavailable.') from e
         except _DurableAutodownAlreadyClaimedError as e:
             if terminate:
                 # Manual down is the same irreversible outcome. Keep the
