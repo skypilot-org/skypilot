@@ -120,26 +120,36 @@ def _offer_matches_gpu(offer: Any, gpu_name: str, num_gpus: int) -> bool:
     """Return whether a search result exactly matches the requested GPU."""
     if not isinstance(offer, dict):
         return False
+    offer_num_gpus = offer.get('num_gpus')
+    if offer_num_gpus is None:
+        return False
     try:
-        offer_num_gpus = int(offer.get('num_gpus'))
+        normalized_num_gpus = int(offer_num_gpus)
     except (TypeError, ValueError):
         return False
     return (_normalize_gpu_name(offer.get('gpu_name')) ==
-            _normalize_gpu_name(gpu_name) and offer_num_gpus == num_gpus)
+            _normalize_gpu_name(gpu_name) and
+            normalized_num_gpus == num_gpus)
 
 
 def _offer_price(offer: Dict[str, Any]) -> float:
     """Return a sortable on-demand price, putting malformed values last."""
+    price = offer.get('dph_total')
+    if price is None:
+        return math.inf
     try:
-        return float(offer.get('dph_total'))
+        return float(price)
     except (TypeError, ValueError):
         return math.inf
 
 
 def _offer_meets_reliability(offer: Dict[str, Any]) -> bool:
     """Enforce the decimal reliability threshold outside SDK 1.5 parsing."""
+    reliability = offer.get('reliability')
+    if reliability is None:
+        return False
     try:
-        return float(offer.get('reliability')) >= 0.99
+        return float(reliability) >= 0.99
     except (TypeError, ValueError):
         return False
 
