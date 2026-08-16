@@ -582,3 +582,114 @@ def test_launch_converts_disappeared_offer_to_typed_capacity_error(monkeypatch):
             preemptible=True,
             secure_only=False,
         )
+
+
+def test_launch_retries_next_offer_when_selected_offer_disappears(monkeypatch):
+    """Try the next exact GPU offer after a definitive marketplace race."""
+    client = _make_vast_client("search_offers", "create_instance",
+                               "show_instance")
+    client.search_offers.return_value = [{
+        "id": 123,
+        "gpu_name": "A100",
+        "num_gpus": 1,
+        "dph_total": 0.2,
+    }, {
+        "id": 456,
+        "gpu_name": "A100",
+        "num_gpus": 1,
+        "dph_total": 0.3,
+    }]
+    client.create_instance.side_effect = [
+        RuntimeError("offer 123 is no longer rentable"),
+        {
+            "new_contract": 789
+        },
+    ]
+    client.show_instance.return_value = {
+        "id": 789,
+        "gpu_name": "A100",
+        "num_gpus": 1,
+    }
+    monkeypatch.setattr(vast_utils.vast, "vast", lambda: client)
+
+    assert vast_utils.launch(
+        name="test-head",
+        instance_type="1x-A100-4-8192",
+        region="US",
+        disk_size=30,
+        image_name="vastai/base:0.0.2",
+        ports=None,
+        preemptible=False,
+        secure_only=False,
+    ) == 789
+
+    assert [
+        call.kwargs["id"] for call in client.create_instance.call_args_list
+    ] == [123, 456]
+
+
+def test_launch_retries_delayed_contract_visibility(monkeypatch):
+    """Retry transient None reads before accepting a newly created contract."""
+    client = _make_vast_client("search_offers", "create_instance",
+                               "show_instance", "destroy_instance")
+    client.search_offers.return_value = [{
+        "id": 123,
+        "gpu_name": "A100",
+        "num_gpus": 1,
+        "dph_total": 0.2,
+    }]
+    client.create_instance.return_value = {"new_contract": 789}
+    client.show_instance.side_effect = [
+        None, None, {
+            "id": 789,
+            "gpu_name": "A100",
+            "num_gpus": 1,
+        }
+    ]
+    monkeypatch.setattr(vast_utils.vast, "vast", lambda: client)
+    monkeypatch.setattr(vast_utils.time, "sleep", lambda _seconds: None)
+
+    assert vast_utils.launch(
+        name="test-head",
+        instance_type="1x-A100-4-8192",
+        region="US",
+        disk_size=30,
+        image_name="vastai/base:0.0.2",
+        ports=None,
+        preemptible=False,
+        secure_only=False,
+    ) == 789
+
+    assert client.show_instance.call_count == 3
+    client.destroy_instance.assert_not_called()
+
+
+def test_launch_destroys_contract_when_visibility_never_materializes(
+        monkeypatch):
+    """Destroy a paid contract when Vast never exposes its identity."""
+    client = _make_vast_client("search_offers", "create_instance",
+                               "show_instance", "destroy_instance")
+    client.search_offers.return_value = [{
+        "id": 123,
+        "gpu_name": "A100",
+        "num_gpus": 1,
+        "dph_total": 0.2,
+    }]
+    client.create_instance.return_value = {"new_contract": 789}
+    client.show_instance.return_value = None
+    monkeypatch.setattr(vast_utils.vast, "vast", lambda: client)
+    monkeypatch.setattr(vast_utils.time, "sleep", lambda _seconds: None)
+
+    with pytest.raises(exceptions.VastProvisioningError, match="visible"):
+        vast_utils.launch(
+            name="test-head",
+            instance_type="1x-A100-4-8192",
+            region="US",
+            disk_size=30,
+            image_name="vastai/base:0.0.2",
+            ports=None,
+            preemptible=False,
+            secure_only=False,
+        )
+
+    client.destroy_instance.assert_called_once_with(id=789)

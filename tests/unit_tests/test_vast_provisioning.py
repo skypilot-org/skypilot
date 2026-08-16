@@ -21,14 +21,19 @@ def _instance(instance_id: str,
               status: str,
               ssh_port=None,
               machine_id=None,
-              status_msg=None):
+              status_msg=None,
+              name='test-head',
+              gpu_name='A100',
+              num_gpus=1):
     return {
         'id': instance_id,
-        'name': 'test-head',
+        'name': name,
         'status': status,
         'ssh_port': ssh_port,
         'machine_id': machine_id,
         'status_msg': status_msg,
+        'gpu_name': gpu_name,
+        'num_gpus': num_gpus,
     }
 
 
@@ -348,6 +353,30 @@ def test_run_instances_returns_resumed_instance_ids(monkeypatch):
     assert record.created_instance_ids == []
 
 
+def test_run_instances_rejects_mismatched_adopted_gpu(monkeypatch):
+    """Reject an existing cluster node whose GPU differs from the request."""
+    configuration = _provision_config()
+    mismatched_instance = _instance(
+        'instance-1',
+        'RUNNING',
+        ssh_port=22,
+        gpu_name='H100',
+    )
+    monkeypatch.setattr(
+        vast_instance, '_wait_for_no_pending_instances',
+        lambda *_args, **_kwargs: {'instance-1': mismatched_instance})
+    start = mock.Mock()
+    monkeypatch.setattr(vast_utils, 'start', start)
+    launch = mock.Mock()
+    monkeypatch.setattr(vast_utils, 'launch', launch)
+
+    with pytest.raises(exceptions.VastProvisioningError, match='H100'):
+        vast_instance.run_instances('US', 'test', 'test', configuration)
+
+    start.assert_not_called()
+    launch.assert_not_called()
+
+
 @pytest.mark.parametrize('status',
                          ['EXITED', 'STOPPED', 'FROZEN', 'UNKNOWN', 'OFFLINE'])
 def test_wait_for_instances_ready_fails_for_terminal_or_lost_host(
@@ -387,8 +416,19 @@ def test_run_instances_retries_once_on_a_different_machine(monkeypatch):
     first_failure = exceptions.VastProvisioningError(
         'Vast instance provisioning failed for instance-1 (EXITED).',
         instance_ids=['instance-1'])
-    monkeypatch.setattr(vast_instance, '_filter_instances',
-                        lambda *_args, **_kwargs: {})
+    filter_instances = mock.Mock(side_effect=[
+        {},
+        {},
+        {
+            'instance-2': _instance(
+                'instance-2',
+                'RUNNING',
+                ssh_port=22,
+                machine_id=20,
+            )
+        },
+    ])
+    monkeypatch.setattr(vast_instance, '_filter_instances', filter_instances)
     monkeypatch.setattr(vast_instance.time, 'monotonic', lambda: 0)
     monkeypatch.setattr(
         vast_instance, '_wait_for_instances_ready',
@@ -421,6 +461,38 @@ def test_run_instances_retries_once_on_a_different_machine(monkeypatch):
         'excluded_machine_ids'] == [10]
     assert record.head_instance_id == 'instance-2'
     assert record.created_instance_ids == ['instance-2']
+
+
+def test_run_instances_selects_head_from_requested_cluster(monkeypatch):
+    """Return the requested cluster head when another cluster is present."""
+    configuration = _provision_config()
+    owned_instance = _instance(
+        'owned-head',
+        'RUNNING',
+        ssh_port=22,
+        name='test-head',
+    )
+    foreign_instance = _instance(
+        'foreign-head',
+        'RUNNING',
+        ssh_port=22,
+        name='other-cluster-head',
+    )
+    monkeypatch.setattr(
+        vast_instance, '_wait_for_no_pending_instances',
+        lambda *_args, **_kwargs: {'owned-head': owned_instance})
+    monkeypatch.setattr(
+        vast_instance, '_wait_for_instances_ready',
+        lambda *_args, **_kwargs: {'owned-head': owned_instance})
+    monkeypatch.setattr(
+        vast_utils, 'list_instances', lambda: {
+            'foreign-head': foreign_instance,
+            'owned-head': owned_instance,
+        })
+
+    record = vast_instance.run_instances('US', 'test', 'test', configuration)
+
+    assert record.head_instance_id == 'owned-head'
 
 
 def test_diagnostics_redact_known_secrets(monkeypatch, caplog):

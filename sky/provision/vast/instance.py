@@ -55,6 +55,29 @@ def _get_head_instance_id(instances: Dict[str, Any]) -> Optional[str]:
     return None
 
 
+def _validate_existing_gpus(instances: Dict[str, Any],
+                            instance_type: str) -> None:
+    """Reject adopted nodes whose reported GPU does not match the request."""
+    gpu_name, num_gpus = utils.gpu_requirements(instance_type)
+    mismatched_instances = {
+        instance_id: instance
+        for instance_id, instance in instances.items()
+        if not utils.matches_gpu(instance, gpu_name, num_gpus)
+    }
+    if not mismatched_instances:
+        return
+
+    details = '; '.join(
+        f'id={instance_id}, gpu_name={instance.get("gpu_name")!r}, '
+        f'num_gpus={instance.get("num_gpus")!r}'
+        for instance_id, instance in mismatched_instances.items())
+    raise exceptions.VastProvisioningError(
+        f'Vast cluster has existing instances that do not match the '
+        f'requested GPU gpu_name={gpu_name!r}, num_gpus={num_gpus}: {details}.',
+        instance_ids=list(mismatched_instances),
+    )
+
+
 def _format_instance_details(instances: Dict[str, Any]) -> str:
     """Return safe, user-facing Vast status metadata for a failure."""
     details = []
@@ -321,6 +344,7 @@ def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
     sensitive_values = _get_sensitive_values(create_instance_kwargs, login_args,
                                              login_config)
     instances = _wait_for_no_pending_instances(cluster_name_on_cloud, deadline)
+    _validate_existing_gpus(instances, config.node_config['InstanceType'])
 
     running_instances = status_filter(instances, ['RUNNING'])
     head_instance_id = _get_head_instance_id(running_instances)
@@ -429,7 +453,8 @@ def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
                 to_start_count, replacement_head_instance_id,
                 excluded_machine_ids)
 
-    head_instance_id = _get_head_instance_id(utils.list_instances())
+    head_instance_id = _get_head_instance_id(
+        _filter_instances(cluster_name_on_cloud, ['RUNNING'], head_only=True))
     assert head_instance_id is not None, 'head_instance_id should not be None'
     return common.ProvisionRecord(provider_name='vast',
                                   cluster_name=cluster_name_on_cloud,
