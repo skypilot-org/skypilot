@@ -204,7 +204,11 @@ def _build_task_specs(
     base_specs: Dict[str, Any] = {
         'max_restarts_on_errors': executor.max_restarts_on_errors,
         'recover_on_exit_codes': executor.recover_on_exit_codes,
-        'max_duration': executor.dag.tasks[executor.task_id].max_duration,
+        # The executor's DAG always contains exactly one task (the task being
+        # executed), regardless of its job-wide task_id. Indexing by task_id
+        # would raise IndexError for task_id >= 1 in multi-stage jobs and job
+        # groups, so always access the single task at index 0.
+        'max_duration': executor.dag.tasks[0].max_duration,
     }
     strategy_specs = executor.task_specs()
     overlap = set(base_specs) & set(strategy_specs)
@@ -1064,6 +1068,40 @@ class JobController:
             # value never leaks into the on_before_recovery hook.
             exit_codes: Optional[List[int]] = None
 
+            # Enforce max_duration unconditionally each iteration, before any
+            # status-based branching. The deadline is derived from the
+            # persisted start_at, not the live status, so it must also fire
+            # while the job is recovering, relaunching, or when the status
+            # probe is failing -- a job stuck flapping in RECOVERING or hidden
+            # behind a network/status-fetch outage would otherwise exceed its
+            # max_duration indefinitely. Guard against already-terminal tasks
+            # (e.g. SUCCEEDED) via the persisted state so a finished job is
+            # never force-failed.
+            if task.max_duration is not None:
+                persisted_status = (
+                    await managed_job_state.get_job_status_with_task_id_async(
+                        job_id=self._job_id, task_id=task_id))
+                if (persisted_status is None or
+                        not persisted_status.is_terminal()):
+                    start_time = await asyncio.to_thread(
+                        _get_task_start_time, self._job_id, task_id)
+                    if start_time is not None and _should_timeout(
+                            start_time, task.max_duration):
+                        logger.info(
+                            f'Task {task_id} exceeded max_duration '
+                            f'({task.max_duration}). Terminating the job.')
+                        failure_reason = (
+                            f'Job exceeded max_duration of {task.max_duration}. '
+                            'The job was terminated by the controller.')
+                        await managed_job_state.set_failed_async(
+                            self._job_id,
+                            task_id,
+                            failure_type=managed_job_state.ManagedJobStatus.
+                            FAILED,
+                            failure_reason=failure_reason,
+                            callback_func=callback_func)
+                        return False
+
             if not force_transit_to_recovering:
                 await asyncio.sleep(
                     managed_job_utils.JOB_STATUS_CHECK_GAP_SECONDS)
@@ -1136,29 +1174,6 @@ class JobController:
             else:
                 transient_job_check_error_start_time = None
                 job_check_backoff = None
-
-            # Enforce max_duration: if the task has been running longer than
-            # its configured max_duration, terminate it. This is checked only
-            # while the job is still running (non-terminal), so a job that
-            # finishes on its own is never affected.
-            if (task.max_duration is not None and job_status is not None and
-                    not job_status.is_terminal()):
-                start_time = await asyncio.to_thread(_get_task_start_time,
-                                                     self._job_id, task_id)
-                if start_time is not None and _should_timeout(
-                        start_time, task.max_duration):
-                    logger.info(f'Task {task_id} exceeded max_duration '
-                                f'({task.max_duration}). Terminating the job.')
-                    failure_reason = (
-                        f'Job exceeded max_duration of {task.max_duration}. '
-                        'The job was terminated by the controller.')
-                    await managed_job_state.set_failed_async(
-                        self._job_id,
-                        task_id,
-                        failure_type=managed_job_state.ManagedJobStatus.FAILED,
-                        failure_reason=failure_reason,
-                        callback_func=callback_func)
-                    return False
 
             # Handle success
             if job_status == job_lib.JobStatus.SUCCEEDED:
