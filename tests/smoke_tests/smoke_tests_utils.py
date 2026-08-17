@@ -1662,7 +1662,9 @@ def unprovisionable_storage_class_name(test_name: str) -> str:
     return f'{test_name}-noprov'
 
 
-def create_unprovisionable_storage_class_cmd(test_name: str) -> str:
+def create_unprovisionable_storage_class_cmd(test_name: str,
+                                             binding_mode: str = 'Immediate'
+                                            ) -> str:
     """Creates a storage class whose provisioner does not exist.
 
     This is how a test gets a volume that is genuinely not ready without
@@ -1670,6 +1672,12 @@ def create_unprovisionable_storage_class_cmd(test_name: str) -> str:
     `sky volumes apply` rejects the volume up front when it validates the
     storage class; with the class present the claim is accepted and then sits
     unbound forever, because nothing is watching for it.
+
+    `binding_mode` picks which of the two situations to reproduce. Immediate
+    claims are unbound as soon as they are created, so the volume is knowably
+    unusable before any launch. WaitForFirstConsumer claims are not touched
+    until a pod needs them, so nothing about them looks wrong until a launch is
+    already under way.
     """
     sc_name = unprovisionable_storage_class_name(test_name)
     return (f'kubectl apply -f - <<EOF\n'
@@ -1678,13 +1686,157 @@ def create_unprovisionable_storage_class_cmd(test_name: str) -> str:
             f'metadata:\n'
             f'  name: {sc_name}\n'
             f'provisioner: skypilot.co/does-not-exist\n'
-            f'volumeBindingMode: Immediate\n'
+            f'volumeBindingMode: {binding_mode}\n'
             f'EOF')
 
 
 def delete_unprovisionable_storage_class_cmd(test_name: str) -> str:
     sc_name = unprovisionable_storage_class_name(test_name)
     return f'kubectl delete sc {sc_name} --ignore-not-found'
+
+
+# A ReadWriteMany StorageClass cannot be fabricated the way the unprovisionable
+# one above can: RWX needs a real backend behind it. The Buildkite kind lane
+# installs a non-default 'nfs-rwx' class (provisioner nfs.csi.k8s.io); a cloud
+# lane has Filestore or EFS under whatever name the cluster gave it, so point
+# this at that name.
+RWX_STORAGE_CLASS_ENV_VAR = 'PYTEST_SKYPILOT_RWX_STORAGE_CLASS'
+_DEFAULT_RWX_STORAGE_CLASS = 'nfs-rwx'
+
+
+def storage_class_exists(name: str) -> bool:
+    return subprocess.run(['kubectl', 'get', 'sc', name],
+                          capture_output=True,
+                          check=False).returncode == 0
+
+
+def rwx_storage_class_name() -> Optional[str]:
+    """The ReadWriteMany StorageClass to test against, if the cluster has one.
+
+    Returns None when it does not, for the caller to fall back to a volume type
+    that needs no storage backend. Falling back rather than skipping keeps the
+    rest of the test -- everything that is not specific to RWX -- running on
+    every lane.
+
+    Raises:
+        AssertionError: if RWX_STORAGE_CLASS_ENV_VAR names a class the cluster
+            does not have. An explicit request that cannot be honoured is an
+            error, not a reason to quietly test something else.
+    """
+    explicit = os.environ.get(RWX_STORAGE_CLASS_ENV_VAR)
+    if explicit is not None:
+        assert storage_class_exists(explicit), (
+            f'{RWX_STORAGE_CLASS_ENV_VAR}={explicit!r} is not a StorageClass '
+            f'on the cluster kubectl points at.')
+        return explicit
+    if storage_class_exists(_DEFAULT_RWX_STORAGE_CLASS):
+        return _DEFAULT_RWX_STORAGE_CLASS
+    return None
+
+
+# How to make each CSI driver refuse to provision. A class whose provisioner
+# does not exist is not enough for the tests that need a *rejection*: nothing
+# answers such a claim at all, so it only ever collects Normal events, and a
+# claim that reports nothing cannot be told from one that is merely slow. What
+# these entries produce is a ProvisioningFailed carrying a terminal gRPC code,
+# which is what a launch is supposed to fail on at once.
+#
+# Both were confirmed against the driver rather than assumed: nfs.csi.k8s.io
+# answers a class with no parameters with `code = InvalidArgument desc = server
+# is a required parameter`, and the Filestore driver answers a tier its API does
+# not have with `code = InvalidArgument desc = Invalid value at 'instance.tier'`.
+# Two other candidates do not work and are recorded so they are not retried: an
+# unreachable `server` binds anyway (the driver does not check connectivity, so
+# the failure only shows up at mount time), and an absurd capacity binds anyway
+# too (an NFS volume is a directory, whatever size it claims).
+_REJECTED_BY_PROVISIONER = {
+    'nfs.csi.k8s.io': '',
+    'filestore.csi.storage.gke.io': '  tier: not-a-real-tier\n',
+}
+
+
+def _storage_class_provisioner(name: str) -> Optional[str]:
+    proc = subprocess.run(
+        ['kubectl', 'get', 'sc', name, '-o', 'jsonpath={.provisioner}'],
+        capture_output=True,
+        text=True,
+        check=False)
+    return proc.stdout.strip() or None
+
+
+def rejecting_storage_class_name(test_name: str) -> str:
+    return f'{test_name}-reject'
+
+
+def create_rejecting_storage_class_cmd(
+        test_name: str,
+        binding_mode: str = 'WaitForFirstConsumer') -> Optional[str]:
+    """Command creating a class whose driver refuses the claims made on it.
+
+    `binding_mode` picks when the refusal arrives. Under
+    WaitForFirstConsumer the driver is not called until a pod asks for the
+    claim, so the volume is correctly ready right up to the launch that breaks
+    it -- the one situation no pre-launch check can catch. Under Immediate the
+    driver is called when the claim is created, so the volume is knowably
+    unusable before any launch.
+
+    Borrows the provisioner from the cluster's RWX class, which is the one
+    driver a lane is known to have. Returns None when that driver has no known
+    way to refuse, for the caller to skip: guessing risks the opposite of the
+    intended failure, a class that provisions real storage.
+    """
+    rwx_class = rwx_storage_class_name()
+    if rwx_class is None:
+        return None
+    provisioner = _storage_class_provisioner(rwx_class)
+    parameters = _REJECTED_BY_PROVISIONER.get(provisioner)
+    if parameters is None:
+        return None
+    body = (f'apiVersion: storage.k8s.io/v1\n'
+            f'kind: StorageClass\n'
+            f'metadata:\n'
+            f'  name: {rejecting_storage_class_name(test_name)}\n'
+            f'provisioner: {provisioner}\n'
+            f'volumeBindingMode: {binding_mode}\n')
+    if parameters:
+        body += f'parameters:\n{parameters}'
+    return f'kubectl apply -f - <<EOF\n{body}EOF'
+
+
+def delete_rejecting_storage_class_cmd(test_name: str) -> str:
+    sc_name = rejecting_storage_class_name(test_name)
+    return f'kubectl delete sc {sc_name} --ignore-not-found'
+
+
+def wait_until_volume_is_rejected_cmd(volume_name: str,
+                                      timeout: int = 180) -> str:
+    """A step that blocks until the volume's record carries a rejection.
+
+    A volume on a rejecting class is not-ready from the moment it is created,
+    but for the first refresh cycle the recorded reason is that it is still
+    being provisioned -- which is what `volume_apply` can see without waiting.
+    Only once the status refresh has read the driver's answer does the record
+    say it was refused, and that is what a launch is refused over: the reason,
+    not the not-ready flag, since being provisioned is also not-ready.
+
+    Measured on the kind lane: the driver answers within seconds, the record
+    catches up in about a minute (the refresh daemon's interval).
+    """
+    return (f'start_time=$SECONDS; '
+            f'while true; do '
+            f'  vols=$(sky volumes ls); '
+            f'  row=$(echo "$vols" | grep {volume_name} || true); '
+            f'  echo "$row"; '
+            f'  if echo "$row" | grep -q ProvisioningFailed; then '
+            f'    echo "Volume {volume_name} is recorded as refused."; break; '
+            f'  fi; '
+            f'  if (( $SECONDS - $start_time > {timeout} )); then '
+            f'    echo "$vols"; '
+            f'    echo "Timeout after {timeout} seconds waiting for volume '
+            f'{volume_name} to be recorded as refused"; exit 1; '
+            f'  fi; '
+            f'  sleep 10; '
+            f'done')
 
 
 # Pins a command to the cluster the agent's kubectl points at, so a volume and
