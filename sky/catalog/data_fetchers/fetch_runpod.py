@@ -674,9 +674,10 @@ def fetch_runpod_catalog(no_gpu: bool, no_cpu: bool) -> pd.DataFrame:
     """
     try:
         # Initialize RunPod client
-        runpod.api_key = os.getenv('RUNPOD_API_KEY')
+        runpod.api_key = (os.getenv('RUNPOD_API_KEY') or
+                          getattr(runpod, 'api_key', None))
         if not runpod.api_key:
-            raise ValueError('RUNPOD_API_KEY environment variable not set')
+            raise ValueError('RunPod API key is not configured')
 
         # Get GPU list from API
         instances = []

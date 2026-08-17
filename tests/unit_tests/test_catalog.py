@@ -88,6 +88,21 @@ def test_runpod_invalid_gpu_warning_includes_vcpu_value(capsys):
     assert 'vCPUs must be a positive number, not None' in warning
 
 
+def test_lazy_catalog_reloads_after_external_atomic_replacement(tmp_path):
+    """Reload a dataframe after a daemon atomically replaces its CSV file."""
+    catalog_path = tmp_path / 'vms.csv'
+    catalog_path.write_text('value\nold\n', encoding='utf-8')
+    dataframe = catalog_common.LazyDataFrame(str(catalog_path), lambda: False)
+
+    assert dataframe.iloc[0]['value'] == 'old'
+    replacement = tmp_path / '.vms.csv.tmp'
+    replacement.write_text('value\nnew\n', encoding='utf-8')
+    os.replace(replacement, catalog_path)
+    annotations.clear_request_level_cache()
+
+    assert dataframe.iloc[0]['value'] == 'new'
+
+
 @mock.patch('sky.catalog.common.requests.get')
 def test_read_catalog_triggers_update_on_stale_file(mock_get):
     """Test that read_catalog (and the LazyDataFrame it returns)

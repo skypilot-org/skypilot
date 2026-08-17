@@ -64,6 +64,50 @@ def test_successful_autodown_reconciler_event_sleeps_configured_interval(
     sleep.assert_called_once_with(7)
 
 
+def test_runpod_catalog_refresh_daemon_is_optional_and_short():
+    """Register RunPod refresh as a short internal daemon when configured."""
+    matching = [
+        daemon for daemon in daemons.INTERNAL_REQUEST_DAEMONS
+        if daemon.name is (
+            request_names.RequestName.REQUEST_DAEMON_RUNPOD_CATALOG_REFRESH)
+    ]
+
+    assert len(matching) == 1
+    assert matching[0].id == 'runpod-catalog-refresh-daemon'
+    assert matching[0].name in daemons.HIDDEN_REQUEST_NAMES
+    assert requests.build_internal_daemon_request(
+        matching[0]).schedule_type is ScheduleType.SHORT
+
+
+def test_runpod_catalog_refresh_event_refreshes_and_sleeps(monkeypatch):
+    """Refresh the catalog once and honor the configured daemon interval."""
+    refresh = mock.Mock()
+    sleep = mock.Mock()
+    monkeypatch.setattr('sky.catalog.runpod_refresh.refresh_catalog', refresh)
+    monkeypatch.setattr(daemons.time, 'sleep', sleep)
+
+    def get_nested(keys, default=None):
+        assert keys == ('daemons', 'runpod-catalog-refresh-daemon',
+                        'interval_seconds')
+        assert default == server_constants.RUNPOD_CATALOG_REFRESH_DAEMON_INTERVAL_SECONDS
+        return 17
+
+    monkeypatch.setattr(skypilot_config, 'get_nested', get_nested)
+
+    daemons.refresh_runpod_catalog_event()
+
+    refresh.assert_called_once_with()
+    sleep.assert_called_once_with(17)
+
+
+def test_runpod_catalog_refresh_daemon_skips_without_credentials(monkeypatch):
+    """Do not schedule RunPod refresh when neither credential source exists."""
+    monkeypatch.delenv('RUNPOD_API_KEY', raising=False)
+    monkeypatch.setattr(daemons.os.path, 'isfile', lambda _path: False)
+
+    assert daemons.should_skip_runpod_catalog_refresh()
+
+
 class TestDaemonLogRotation:
     """Tests for daemon log rotation."""
 

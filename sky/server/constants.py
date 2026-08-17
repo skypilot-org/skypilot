@@ -185,3 +185,7 @@ SERVER_HEARTBEAT_INTERVAL_SECONDS = 600  # 10 minutes
 # that leak (e.g., due to controller crash mid-cleanup) are eventually
 # removed once their TTL has passed.
 EXPIRED_TOKEN_CLEANUP_DAEMON_INTERVAL_SECONDS = 3600  # 1 hour
+
+# RunPod marketplace stock changes frequently.  Keep the catalog metadata
+# current without making every launch fetch the full provider catalog.
+RUNPOD_CATALOG_REFRESH_DAEMON_INTERVAL_SECONDS = 20 * 60

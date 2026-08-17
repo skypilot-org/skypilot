@@ -98,6 +98,25 @@ class RunPod(clouds.Cloud):
         regions = catalog.get_region_zones_for_instance_type(
             instance_type, use_spot, 'runpod')
 
+        # The catalog describes the supported RunPod zones, while marketplace
+        # stock changes much faster.  Filter candidates with the live API when
+        # it is available; provisioning retains its own final check because
+        # capacity can disappear between selection and pod creation.
+        if instance_type is not None:
+            # pylint: disable=import-outside-toplevel
+            from sky.provision.runpod import utils as runpod_utils
+            available = (
+                runpod_utils.available_data_center_ids_for_instance_type(
+                    instance_type))
+            if available is not None:
+                for candidate_region in regions:
+                    if candidate_region.zones is not None:
+                        candidate_region.set_zones([
+                            zone for zone in candidate_region.zones
+                            if zone.name in available
+                        ])
+                regions = [r for r in regions if r.zones]
+
         if region is not None:
             regions = [r for r in regions if r.name == region]
 

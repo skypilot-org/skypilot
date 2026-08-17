@@ -511,6 +511,14 @@ Following tabs describe how to configure credentials for different clouds on the
 
         When installing or upgrading the Helm chart, enable RunPod credentials by setting ``runpodCredentials.enabled=true``
 
+        With RunPod credentials enabled, the API server periodically refreshes
+        its RunPod GPU catalog (every 20 minutes by default). The scheduler
+        also checks live marketplace capacity immediately before selecting a
+        zone, so a stale catalog entry does not by itself make an unavailable
+        zone launchable. To override the refresh interval, set
+        ``daemons.runpod-catalog-refresh-daemon.interval_seconds`` in the
+        SkyPilot server configuration.
+
         .. dropdown:: Use existing RunPod credentials
 
             You can also set the following values to use a secret that already contains your RunPod API key:

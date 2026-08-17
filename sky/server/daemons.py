@@ -358,6 +358,30 @@ def autodown_reconciliation_event():
     time.sleep(interval)
 
 
+def should_skip_runpod_catalog_refresh():
+    """Skip the RunPod catalog daemon when RunPod is not configured."""
+    # Keep this check dependency-free; the daemon itself imports the optional
+    # RunPod SDK only when credentials are present.
+    return not (os.environ.get('RUNPOD_API_KEY') or
+                os.path.isfile(os.path.expanduser('~/.runpod/config.toml')))
+
+
+def refresh_runpod_catalog_event():
+    """Refresh the RunPod catalog and sleep until the next sweep."""
+    # pylint: disable=import-outside-toplevel
+    from sky.catalog import runpod_refresh
+
+    logger.info('=== Refreshing RunPod catalog ===')
+    runpod_refresh.refresh_catalog()
+    interval = skypilot_config.get_nested(
+        ('daemons', 'runpod-catalog-refresh-daemon', 'interval_seconds'),
+        server_constants.RUNPOD_CATALOG_REFRESH_DAEMON_INTERVAL_SECONDS)
+    logger.info(
+        'RunPod catalog refreshed. Sleeping %s seconds for the next '
+        'refresh...', interval)
+    time.sleep(interval)
+
+
 def server_heartbeat_event():
     """Periodically send server-side plugin metrics to Loki."""
     # pylint: disable=import-outside-toplevel
@@ -424,11 +448,17 @@ INTERNAL_REQUEST_DAEMONS = [
         id='autodown-reconciler-daemon',
         name=request_names.RequestName.REQUEST_DAEMON_AUTODOWN,
         event_fn=autodown_reconciliation_event),
+    InternalRequestDaemon(
+        id='runpod-catalog-refresh-daemon',
+        name=request_names.RequestName.REQUEST_DAEMON_RUNPOD_CATALOG_REFRESH,
+        event_fn=refresh_runpod_catalog_event,
+        should_skip=should_skip_runpod_catalog_refresh),
 ]
 
 HIDDEN_REQUEST_NAMES = [
     request_names.RequestName.REQUEST_DAEMON_SERVER_HEARTBEAT,
     request_names.RequestName.REQUEST_DAEMON_AUTODOWN,
+    request_names.RequestName.REQUEST_DAEMON_RUNPOD_CATALOG_REFRESH,
 ]
 
 _DAEMON_IDS = set(d.id for d in INTERNAL_REQUEST_DAEMONS)

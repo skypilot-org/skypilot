@@ -101,6 +101,7 @@ class RequestName(str, enum.Enum):
     REQUEST_DAEMON_SERVER_HEARTBEAT = 'server-heartbeat'
     REQUEST_DAEMON_EXPIRED_TOKEN_CLEANUP = 'expired-token-cleanup'
     REQUEST_DAEMON_AUTODOWN = 'autodown-reconciler'
+    REQUEST_DAEMON_RUNPOD_CATALOG_REFRESH = 'runpod-catalog-refresh'
 
     def __repr__(self):
         return self.value

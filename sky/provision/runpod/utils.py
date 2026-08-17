@@ -93,6 +93,29 @@ def _available_data_center_ids(gpu_type_id: str, gpu_count: int,
     return available
 
 
+def available_data_center_ids_for_instance_type(
+        instance_type: str) -> Optional[set]:
+    """Return live RunPod zones for a catalog instance type.
+
+    ``None`` means that the availability API could not be queried and the
+    catalog should remain usable as a fallback.  An empty set is authoritative
+    and means that the instance type currently has no capacity anywhere.
+    """
+    if instance_type.startswith('cpu'):
+        return None
+    try:
+        count_text, gpu_name, cloud_type = instance_type.split('_')
+        gpu_count = int(
+            count_text[:-1] if count_text.endswith('x') else count_text)
+        gpu_type_id = GPU_NAME_MAP[gpu_name]
+    except (KeyError, TypeError, ValueError):
+        logger.debug('Could not derive live availability query from %s',
+                     instance_type)
+        return None
+    return _available_data_center_ids(gpu_type_id, gpu_count,
+                                      cloud_type == 'SECURE')
+
+
 def _ensure_api_key_configured() -> None:
     """Load the default RunPod credential into the SDK when needed."""
     sdk = runpod.runpod.load_module()
