@@ -358,7 +358,7 @@ function VolumeDetailCard({ volumeData }) {
               {volumeData.error_message && (
                 <div className="col-span-2">
                   <div className="text-gray-600 font-medium text-base">
-                    Status details
+                    Status Details
                   </div>
                   <div
                     className="text-base mt-1"
