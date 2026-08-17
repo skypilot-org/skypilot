@@ -735,10 +735,11 @@ class TestPermissionService:
     def test_delete_user_with_role(self, mock_kv_cache):
         """Test deleting a user who has a role."""
         mock_enforcer = mock.Mock()
-        # User has a role
+        # User has a role, no workspace grants
         mock_enforcer.remove_filtered_grouping_policy.return_value = [[
             'user1', 'user'
         ]]
+        mock_enforcer.remove_filtered_policy.return_value = []
 
         with mock.patch.object(permission.PermissionService,
                                '__init__',
@@ -762,8 +763,9 @@ class TestPermissionService:
     def test_delete_user_without_role(self, mock_kv_cache):
         """Test deleting a user who has no roles."""
         mock_enforcer = mock.Mock()
-        # User has no roles: nothing matched the filter.
+        # User has neither roles nor workspace grants: nothing matched.
         mock_enforcer.remove_filtered_grouping_policy.return_value = []
+        mock_enforcer.remove_filtered_policy.return_value = []
 
         with mock.patch.object(permission.PermissionService,
                                '__init__',
@@ -2199,3 +2201,21 @@ class TestRoleReplacement:
 
         # An orphan grant would be inherited by whoever next takes this id.
         assert _grouping_rows(worker_a, 'multi') == []
+
+    def test_delete_user_removes_workspace_grants(self, two_workers):
+        """Deleting a user must revoke their private-workspace membership.
+
+        User ids are derived from the username, so recreating a deleted user
+        reuses the id and would silently inherit whatever was left behind.
+        """
+        worker_a, _ = two_workers
+        worker_a.update_role('leaver', 'user')
+        worker_a.add_workspace_policy('team_private', ['leaver', 'stayer'])
+
+        worker_a.delete_user('leaver')
+
+        worker_a.enforcer.load_policy()
+        remaining = worker_a.enforcer.get_policy()
+        assert ['leaver', 'team_private', '*'] not in remaining
+        # Only that user's grant goes; the workspace's other members stay.
+        assert ['stayer', 'team_private', '*'] in remaining

@@ -369,15 +369,25 @@ class PermissionService:
         return False
 
     def delete_user(self, user_id: str) -> None:
-        """Remove every role held by a user."""
+        """Remove every policy naming a user: their role and workspace grants.
+
+        User ids are derived from the username, so a delete followed by a
+        recreate reuses the id -- anything left behind is silently inherited by
+        the next holder. Both row types are keyed by user id at field 0, and a
+        filtered removal also clears duplicates, which a loop over the
+        deduplicated role list cannot reach.
+        """
         with _policy_lock():
             self._load_policy_no_lock()
             enforcer = self._ensure_enforcer()
-            # Filtered removal takes every grouping row for this user in one
-            # call, duplicates included. Dropping only the first would leave a
-            # live grant for whoever next occupies this user id.
-            if not enforcer.remove_filtered_grouping_policy(0, user_id):
-                logger.debug(f'User {user_id} has no roles')
+            removed_roles = enforcer.remove_filtered_grouping_policy(0, user_id)
+            # Private-workspace membership is a `p` row (user, workspace, '*').
+            # Role names also sit at field 0 of `p` rows (the blocklist rules),
+            # but a user id is an 8-char hash or an `sa-` prefixed id, so it can
+            # never collide with one.
+            removed_grants = enforcer.remove_filtered_policy(0, user_id)
+            if not removed_roles and not removed_grants:
+                logger.debug(f'User {user_id} has no policies')
                 return
             enforcer.save_policy()
             self.invalidate_user_permission_cache(user_id)
