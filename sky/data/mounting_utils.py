@@ -696,11 +696,12 @@ def get_cos_mount_cmd(rclone_config: str,
 
 
 def get_mount_cached_cmd(
-        rclone_config: str,
-        rclone_profile_name: str,
-        bucket_name: str,
-        mount_path: str,
-        mount_cached_config: Optional['storage.MountCachedConfig'] = None
+    rclone_config: str,
+    rclone_profile_name: str,
+    bucket_name: str,
+    mount_path: str,
+    mount_cached_config: Optional['storage.MountCachedConfig'] = None,
+    backend_flag_prefix: Optional[str] = None,
 ) -> str:
     """Returns a command to mount a bucket using rclone with vfs cache."""
     # stores bucket profile in rclone config file at the remote nodes.
@@ -763,7 +764,7 @@ def get_mount_cached_cmd(
         # Recommended by rclone documentation for buckets like s3.
         '--vfs-fast-fingerprint '
         # Other customizable rclone flags. Refer to `MountCachedConfig`.
-        f'{mount_cached_config.to_rclone_flags()} '
+        f'{mount_cached_config.to_rclone_flags(backend_flag_prefix)} '
         # This command produces children processes, which need to be
         # detached from the current process's terminal. The command doesn't
         # produce any output, so we aren't dropping any logs.
