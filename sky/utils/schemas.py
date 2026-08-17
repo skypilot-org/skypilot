@@ -813,6 +813,17 @@ def get_storage_schema():
                             'read_only': {
                                 'type': 'boolean',
                             },
+                            # Multipart-upload tuning; applies to S3-family and
+                            # Azure backends. Ignored on GCS, whose rclone
+                            # backend has no equivalent flags.
+                            'upload_concurrency': {
+                                'type': 'integer',
+                                'minimum': 1,
+                            },
+                            'chunk_size': {
+                                'type': 'string',
+                                'pattern': rclone_memory_pattern,
+                            },
                         },
                     },
                     'mount': {

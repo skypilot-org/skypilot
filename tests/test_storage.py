@@ -1,5 +1,6 @@
 import tempfile
 import time
+from unittest import mock
 
 import pytest
 
@@ -176,6 +177,38 @@ class TestMountCachedConfig:
     def test_read_only_false_not_emitted(self):
         config = storage_lib.MountCachedConfig(read_only=False)
         assert '--read-only' not in config.to_rclone_flags()
+
+    def test_upload_tuning_flags_use_backend_prefix(self):
+        config = storage_lib.MountCachedConfig(upload_concurrency=8,
+                                               chunk_size='64m')
+        s3_flags = config.to_rclone_flags(backend_flag_prefix='s3')
+        assert '--s3-upload-concurrency 8' in s3_flags
+        assert '--s3-chunk-size 64M' in s3_flags
+        azure_flags = config.to_rclone_flags(backend_flag_prefix='azureblob')
+        assert '--azureblob-upload-concurrency 8' in azure_flags
+        assert '--azureblob-chunk-size 64M' in azure_flags
+
+    def test_upload_tuning_flags_skipped_without_backend(self):
+        # No backend context (None) -> can't emit backend-prefixed flags.
+        config = storage_lib.MountCachedConfig(upload_concurrency=8,
+                                               chunk_size='64M')
+        flags = config.to_rclone_flags(backend_flag_prefix=None)
+        assert 'upload-concurrency' not in flags
+        assert 'chunk-size' not in flags
+
+    def test_upload_tuning_flags_warn_on_unsupported_backend(self):
+        # GCS is a real backend but defines no multipart-upload tuning flags,
+        # so setting them warns and emits nothing.
+        config = storage_lib.MountCachedConfig(upload_concurrency=8)
+        with mock.patch.object(storage_lib.logger, 'warning') as mock_warn:
+            flags = config.to_rclone_flags(backend_flag_prefix='gcs')
+        mock_warn.assert_called_once()
+        assert 'upload-concurrency' not in flags
+        # No warning when the fields are unset.
+        with mock.patch.object(storage_lib.logger, 'warning') as mock_warn:
+            storage_lib.MountCachedConfig().to_rclone_flags(
+                backend_flag_prefix='gcs')
+        mock_warn.assert_not_called()
 
     def test_round_trip_yaml(self):
         config = storage_lib.MountCachedConfig(transfers=8, read_only=True)
