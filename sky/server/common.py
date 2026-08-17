@@ -20,7 +20,6 @@ from typing import (Any, Callable, cast, Dict, Generic, List, Literal, Optional,
                     Tuple, TypeVar, Union)
 import urllib.parse
 from urllib.request import Request
-import uuid
 
 import cachetools
 import click
@@ -1172,16 +1171,7 @@ def process_mounts_in_task_on_api_server(
 
     user_hash = env_vars.get(constants.USER_ID_ENV_VAR, 'unknown')
 
-    # We should not use int(time.time()) as there can be multiple requests at
-    # the same second.
-    task_id = str(uuid.uuid4().hex)
     client_dir = (API_SERVER_CLIENT_DIR.expanduser().resolve() / user_hash)
-    client_task_dir = client_dir / 'tasks'
-    client_task_dir.mkdir(parents=True, exist_ok=True)
-
-    client_task_path = client_task_dir / f'{task_id}.yaml'
-    client_task_path.write_text(task)
-
     client_file_mounts_dir = client_dir / 'file_mounts'
     client_file_mounts_dir.mkdir(parents=True, exist_ok=True)
 
@@ -1198,7 +1188,7 @@ def process_mounts_in_task_on_api_server(
         return str(file_mounts_base /
                    file_mounts_mapping[original_path].lstrip('/'))
 
-    task_configs = yaml_utils.read_yaml_all(str(client_task_path))
+    task_configs = yaml_utils.read_yaml_all_str(task)
     for task_config in task_configs:
         if task_config is None:
             continue
@@ -1247,13 +1237,8 @@ def process_mounts_in_task_on_api_server(
                         tls[key] = _get_client_file_mounts_path(
                             tls[key], file_mounts_mapping)
 
-    # We can switch to using string, but this is to make it easier to debug, by
-    # persisting the translated task yaml file.
-    translated_client_task_path = client_dir / f'{task_id}_translated.yaml'
-    yaml_utils.dump_yaml(str(translated_client_task_path), task_configs)
-
-    dag = dag_utils.load_dag_from_yaml(str(translated_client_task_path))
-    return dag
+    translated_task = yaml_utils.dump_yaml_str(task_configs)
+    return dag_utils.load_dag_from_yaml_str(translated_task)
 
 
 def api_server_user_logs_dir_prefix(

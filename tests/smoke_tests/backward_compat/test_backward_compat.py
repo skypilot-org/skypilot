@@ -939,6 +939,12 @@ class TestBackwardCompatibility:
                 # Use volume in current version
                 f'{self.ACTIVATE_CURRENT} && {smoke_tests_utils.SKY_API_RESTART} && '
                 f'sky volumes ls | grep "{volume_name}"',
+                # `apply` above only started provisioning; the launch below
+                # mounts the volume and is refused with VolumeNotReadyError
+                # until the claim binds. Waited for on the current side, the
+                # one that does the mounting.
+                f'{self.ACTIVATE_CURRENT} && '
+                f'{smoke_tests_utils.get_cmd_wait_until_volume_is_ready(volume_name)}',
                 # Launch new task with volume
                 f'{self.ACTIVATE_CURRENT} && sky launch -y -c {cluster_name} --infra k8s {task_yaml_path}',
                 f'{self.ACTIVATE_CURRENT} && sky logs {cluster_name} 1 --status',

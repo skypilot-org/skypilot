@@ -768,36 +768,49 @@ async def cleanup_unreferenced_file_mounts():
                          f'{common_utils.format_exception(e)}')
 
 
-async def cleanup_download_tmp():
-    """Delete expired download tmp directories.
+async def cleanup_clients_tmp():
+    """Delete expired client tmp directories and deprecated task YAMLs.
 
     Downloaded logs are transient — synced from the cluster for the client
     to download, then no longer needed.  Clean up anything older than the
     blob GC grace period (1 hour by default).
     """
+
+    def _do_cleanup():
+        tmp_dir = bs.get_blob_storage().download_tmp_base_dir()
+        if tmp_dir is None:
+            # Backend shares the persistent log dir; no separate
+            # cleanup needed.
+            return
+        if not os.path.exists(tmp_dir):
+            return
+        cutoff = time.time() - bs.GC_GRACE_SECONDS
+        for user_entry in os.scandir(tmp_dir):
+            if not user_entry.is_dir():
+                continue
+            for entry in os.scandir(user_entry.path):
+                if entry.is_dir():
+                    try:
+                        if entry.stat().st_mtime < cutoff:
+                            shutil.rmtree(entry.path, ignore_errors=True)
+                    except OSError:
+                        pass
+                elif entry.name.endswith('_translated.yaml'):
+                    # Deprecated: task YAMLs are no longer persisted, so any
+                    # file left here is unreferenced regardless of its age.
+                    # TODO(aylei): remove in next major release
+                    try:
+                        os.remove(entry.path)
+                    except OSError:
+                        pass
+
     while True:
         await asyncio.sleep(3600)
         try:
-            tmp_dir = bs.get_blob_storage().download_tmp_base_dir()
-            if tmp_dir is None:
-                # Backend shares the persistent log dir; no separate
-                # cleanup needed.
-                continue
-            if not os.path.exists(tmp_dir):
-                continue
-            cutoff = time.time() - bs.GC_GRACE_SECONDS
-            for user_entry in os.scandir(tmp_dir):
-                if not user_entry.is_dir():
-                    continue
-                for entry in os.scandir(user_entry.path):
-                    if entry.is_dir():
-                        try:
-                            if entry.stat().st_mtime < cutoff:
-                                shutil.rmtree(entry.path, ignore_errors=True)
-                        except OSError:
-                            pass
+            # Offloaded to a worker thread: the event loop must not block.
+            await anyio.to_thread.run_sync(_do_cleanup, abandon_on_cancel=True)
         except Exception as e:  # pylint: disable=broad-except
-            logger.error('Error in cleanup_download_tmp: '
+            logger.error('Error in cleanup_clients_tmp: '
                          f'{common_utils.format_exception(e)}')
 
 
@@ -4073,7 +4086,7 @@ if __name__ == '__main__':
         # be a singleton task.
         global_tasks.append(
             background.create_task(cleanup_unreferenced_file_mounts()))
-        global_tasks.append(background.create_task(cleanup_download_tmp()))
+        global_tasks.append(background.create_task(cleanup_clients_tmp()))
         global_tasks.append(background.create_task(cleanup_sky_logs()))
         threading.Thread(target=background.run_forever, daemon=True).start()
 

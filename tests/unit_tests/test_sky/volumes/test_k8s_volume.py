@@ -1806,6 +1806,12 @@ class TestGetAllVolumesErrors:
         assert errors['test-vol'] is not None
         assert 'pending' in errors['test-vol'].lower()
         assert 'kubectl describe pvc' in errors['test-vol']
+        # The message has to carry the shared sentence, not just say something
+        # similar: it is what tells a launch that this volume is on its way
+        # rather than broken, so a launch is not refused over it. If the wording
+        # drifts from the constant, the launch silently starts refusing again.
+        assert volume_lib.PVC_PROVISIONING_MESSAGE in errors['test-vol']
+        assert volume_lib.volume_error_may_resolve(errors['test-vol'])
 
     @patch('sky.provision.kubernetes.volume._get_context_namespace')
     @patch('sky.adaptors.kubernetes.core_api')
@@ -2570,3 +2576,110 @@ class TestCreatePVCWithUseExisting:
 
         assert 'Failed to search for PVC' in str(exc_info.value)
         assert 'skypilot-name=myvolume' in str(exc_info.value)
+
+
+# Verbatim messages from a GKE Filestore cluster: the first from a claim whose
+# storage class named a tier that does not exist, the next two from a claim that
+# emitted them for minutes and then bound.
+_TERMINAL_MESSAGE = (
+    'Volume provisioning failed with infeasible error. Retries will be '
+    'delayed. rpc error: code = InvalidArgument desc = Invalid value at '
+    "'instance.tier' \"not-a-real-tier\", invalid")
+_DEADLINE_MESSAGE = ('rpc error: code = DeadlineExceeded desc = Volume '
+                     'pvc-6ae55004 not ready, current state: CREATING')
+_ABORTED_MESSAGE = ('rpc error: code = Aborted desc = An operation with the '
+                    'given volume key modeInstance/us-central1/pvc-6ae55004/'
+                    'vol1 already exists.\n --- Most likely a long process is '
+                    'still running to completion. Retrying.')
+
+
+class TestClassifyPvcFailure:
+    """Whether a reported failure says anything about waiting longer.
+
+    The codes come from the CreateVolume error table in the CSI spec and from
+    external-provisioner's own checkError(); the messages are real.
+    """
+
+    def test_a_rejected_request_is_terminal(self):
+        assert k8s_volume.classify_pvc_failure(
+            _TERMINAL_MESSAGE) == k8s_volume.PvcFailure.TERMINAL
+
+    @pytest.mark.parametrize('message', [_DEADLINE_MESSAGE, _ABORTED_MESSAGE])
+    def test_a_call_that_may_still_be_running_is_not(self, message):
+        """These are what a network filesystem reports while being created."""
+        assert k8s_volume.classify_pvc_failure(
+            message) == k8s_volume.PvcFailure.IN_PROGRESS
+
+    @pytest.mark.parametrize('code',
+                             ['AlreadyExists', 'OutOfRange', 'NotFound'])
+    def test_the_other_codes_that_need_the_request_changed(self, code):
+        assert k8s_volume.classify_pvc_failure(
+            f'rpc error: code = {code} desc = nope'
+        ) == k8s_volume.PvcFailure.TERMINAL
+
+    @pytest.mark.parametrize('code', ['ResourceExhausted', 'Internal'])
+    def test_an_obstacle_that_may_clear_is_left_undecided(self, code):
+        """Quota can be raised while a launch waits, so neither hopeless nor
+        provably in flight."""
+        assert k8s_volume.classify_pvc_failure(
+            f'rpc error: code = {code} desc = nope'
+        ) == k8s_volume.PvcFailure.UNKNOWN
+
+    @pytest.mark.parametrize('message', [
+        None, '', 'failed to provision volume with StorageClass "slow"',
+        'rpc error: something else entirely'
+    ])
+    def test_a_message_with_no_code_is_left_undecided(self, message):
+        assert k8s_volume.classify_pvc_failure(
+            message) == k8s_volume.PvcFailure.UNKNOWN
+
+    def test_a_wrapped_status_is_read_by_its_inner_code(self):
+        """grpc-go wraps a status in another status, and the outer one is
+        usually the less specific of the two."""
+        assert k8s_volume.classify_pvc_failure(
+            'rpc error: code = Unknown desc = rpc error: '
+            'code = InvalidArgument desc = bad tier'
+        ) == k8s_volume.PvcFailure.TERMINAL
+
+    def test_a_call_that_may_be_running_wins_over_a_terminal_wrapper(self):
+        """The asymmetry that matters: waiting longer than needed costs time,
+        failing a launch whose volume was going to work cannot be undone."""
+        assert k8s_volume.classify_pvc_failure(
+            'rpc error: code = InvalidArgument desc = rpc error: '
+            'code = DeadlineExceeded desc = still creating'
+        ) == k8s_volume.PvcFailure.IN_PROGRESS
+
+
+class TestFirstPvcFailureEvent:
+    """What the volume-status refresh counts as evidence a claim is unusable."""
+
+    @staticmethod
+    def _events(*messages):
+        events = []
+        for message in messages:
+            event = MagicMock()
+            event.type = 'Warning'
+            event.reason = 'ProvisioningFailed'
+            event.message = message
+            events.append(event)
+        return events
+
+    def _first(self, monkeypatch, *messages):
+        monkeypatch.setattr(k8s_volume.kubernetes_utils, 'get_pvc_events',
+                            lambda *a, **kw: self._events(*messages))
+        return k8s_volume._first_pvc_failure_event('ctx', 'ns', 'pvc')
+
+    def test_a_rejected_request_is_evidence(self, monkeypatch):
+        assert 'instance.tier' in self._first(monkeypatch, _TERMINAL_MESSAGE)
+
+    def test_a_call_that_may_still_be_running_is_not(self, monkeypatch):
+        """A volume being created reported these for minutes and then bound.
+        Counting them made it read as unusable for the middle of its own
+        creation, which refused every launch that wanted it."""
+        assert self._first(monkeypatch, _DEADLINE_MESSAGE,
+                           _ABORTED_MESSAGE) is None
+
+    def test_a_real_failure_behind_an_in_progress_one_is_still_found(
+            self, monkeypatch):
+        assert 'instance.tier' in self._first(monkeypatch, _DEADLINE_MESSAGE,
+                                              _TERMINAL_MESSAGE)
