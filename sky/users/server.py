@@ -100,9 +100,12 @@ def _clamped_default_role(caller_user_id: str) -> str:
     caller_roles = permission.permission_service.get_user_roles(caller_user_id)
     if _is_admin(caller_roles):
         return default_role
-    # Fall back to the least privilege we can name if the caller somehow holds
-    # no role: an unrecognized or absent role matches no blocklist policy.
-    return caller_roles[0] if caller_roles else rbac.RoleName.USER.value
+    if not caller_roles:
+        logger.warning(f'User {caller_user_id} holds no role; seeding their '
+                       f'service account with the most restricted role.')
+    # A caller can hold more than one role, and the order they come back in is
+    # not stable, so cap at the least privileged rather than the first.
+    return rbac.least_privileged_role(caller_roles)
 
 
 def get_user_type(user: models.User) -> str:

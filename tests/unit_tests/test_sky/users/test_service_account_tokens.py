@@ -197,9 +197,19 @@ class TestDefaultRoleClamp:
             _fake_request(user_id='caller'), body)
         return mock_perm.seed_new_user_role.call_args.kwargs['role']
 
-    @pytest.mark.parametrize('caller_roles,expected',
-                             [(['user'], 'user'), (['viewer'], 'viewer'),
-                              ([], 'user'), (['user', 'admin'], 'user')])
+    # The multi-role cases are the point: `get_user_roles` does not order its
+    # result deterministically, so both orderings must land on `user`, and an
+    # unrecognized name must not be mistaken for a low-privilege one.
+    @pytest.mark.parametrize('caller_roles,expected', [
+        (['user'], 'user'),
+        (['viewer'], 'viewer'),
+        ([], 'viewer'),
+        (['user', 'admin'], 'user'),
+        (['admin', 'user'], 'user'),
+        (['viewer', 'admin'], 'viewer'),
+        (['admin', 'bogus'], 'admin'),
+        (['bogus'], 'viewer'),
+    ])
     @mock.patch('sky.users.rbac.get_default_role', return_value='admin')
     @mock.patch('sky.users.server.global_user_state')
     @mock.patch('sky.users.server.token_service')
