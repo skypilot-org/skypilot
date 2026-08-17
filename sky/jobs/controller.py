@@ -1089,11 +1089,11 @@ class JobController:
                             start_time, task.max_duration):
                         logger.info(
                             f'Task {task_id} exceeded max_duration '
-                            f'({task.max_duration}). Terminating the job.'
-                            )
+                            f'({task.max_duration}). Terminating the job.')
                         failure_reason = (
                             f'Job exceeded max_duration of {task.max_duration}. '
-                            'The job was terminated by the controller.')
+                            'The job was terminated by the controller.'
+                            )
                         await managed_job_state.set_failed_async(
                             self._job_id,
                             task_id,
