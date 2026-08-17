@@ -209,7 +209,10 @@ class PermissionService:
                      f'{len(self._read_only_endpoints)}')
 
     def _maybe_initialize_basic_auth_user(self) -> None:
-        """Initialize basic auth user if it is enabled."""
+        """Initialize basic auth user if it is enabled.
+
+        Caller holds `_policy_lock()`.
+        """
         basic_auth = os.environ.get(constants.SKYPILOT_INITIAL_BASIC_AUTH)
         if not basic_auth:
             return
@@ -229,13 +232,28 @@ class PermissionService:
                             password=password,
                             user_type=models.UserType.BASIC.value))
             enforcer = self._ensure_enforcer()
+            # Same reason as `_maybe_initialize_policies`: `save_policy()`
+            # rewrites the whole table from this model, which predates the
+            # lock unless refreshed.
+            self._load_policy_no_lock()
             enforcer.add_grouping_policy(user_hash, rbac.RoleName.ADMIN.value)
             enforcer.save_policy()
             logger.info(f'Basic auth user {username} initialized')
 
     def _maybe_initialize_policies(self) -> None:
-        """Initialize policies if they don't already exist."""
+        """Initialize policies if they don't already exist.
+
+        Caller holds `_policy_lock()`.
+        """
         logger.debug(f'Initializing policies in process: {os.getpid()}')
+
+        # The model was loaded by the enforcer's constructor, before the lock
+        # was acquired -- and waiting for it can take seconds. Anything another
+        # replica wrote in that window is missing here, and this method both
+        # ends in a full-table `save_policy()` and deletes whatever it
+        # considers redundant, so it would erase those writes rather than
+        # merely miss them.
+        self._load_policy_no_lock()
 
         policy_updated = False
 

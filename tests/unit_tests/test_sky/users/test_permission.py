@@ -2154,6 +2154,43 @@ class TestStalePolicyWrites:
         # default on top, leaving ['admin', 'viewer'] -- which reads as admin.
         assert _grouping_rows(worker_a, 'victim') == ['viewer']
 
+    @mock.patch('sky.global_user_state.add_or_update_user')
+    @mock.patch('sky.global_user_state.get_all_users', return_value=[])
+    @mock.patch('sky.users.rbac.get_workspace_policy_permissions',
+                return_value={})
+    @mock.patch('sky.users.rbac.get_role_permissions',
+                return_value={'user': {
+                    'permissions': {
+                        'blocklist': []
+                    }
+                }})
+    @mock.patch.object(permission.PermissionService,
+                       '_get_plugin_rbac_rules',
+                       return_value={})
+    def test_startup_initialization_keeps_other_writes(self, _rules, _perms,
+                                                       _ws, _users, _add,
+                                                       two_workers):
+        """Startup rewrites the whole table, so it must refresh first.
+
+        The enforcer loads in its constructor, before `_policy_lock()` is
+        acquired -- and waiting for that lock can take seconds. A replica that
+        booted earlier can write in the window, and this path both saves the
+        whole table and deletes what it thinks is redundant.
+        """
+        worker_a, worker_b = two_workers
+        # B is mid-boot: model loaded, still waiting for the lock.
+        worker_b.enforcer.load_policy()
+        worker_a.update_role('early', 'admin')
+
+        worker_b._maybe_initialize_policies()
+
+        # Role assignments are not derived from config, so this method has no
+        # basis for dropping one -- it only does so by rewriting the table from
+        # a model that never saw it. (Workspace `p` rows are a different
+        # matter: reconciling those against config is this method's job, so a
+        # grant the config no longer lists is *meant* to go.)
+        assert _grouping_rows(worker_a, 'early') == ['admin']
+
     def test_remove_workspace_policy_keeps_other_writes(self, two_workers):
         worker_a, worker_b = two_workers
         worker_a.add_workspace_policy('ws_victim', ['bob'])
