@@ -11,7 +11,7 @@ from sky.skylet import runtime_utils
 # based on version info is needed.
 # For more details and code guidelines, refer to:
 # https://docs.skypilot.co/en/latest/developers/CONTRIBUTING.html#backward-compatibility-guidelines
-API_VERSION = 58  # mount_cached upload_concurrency / chunk_size
+API_VERSION = 58  # mount_cached rclone_flags
 
 # The minimum peer API version that the code should still work with.
 # Notes (dev):

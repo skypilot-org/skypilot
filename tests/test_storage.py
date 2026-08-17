@@ -1,6 +1,5 @@
 import tempfile
 import time
-from unittest import mock
 
 import pytest
 
@@ -178,37 +177,32 @@ class TestMountCachedConfig:
         config = storage_lib.MountCachedConfig(read_only=False)
         assert '--read-only' not in config.to_rclone_flags()
 
-    def test_upload_tuning_flags_use_backend_prefix(self):
-        config = storage_lib.MountCachedConfig(upload_concurrency=8,
-                                               chunk_size='64m')
-        s3_flags = config.to_rclone_flags(backend_flag_prefix='s3')
-        assert '--s3-upload-concurrency 8' in s3_flags
-        assert '--s3-chunk-size 64M' in s3_flags
-        azure_flags = config.to_rclone_flags(backend_flag_prefix='azureblob')
-        assert '--azureblob-upload-concurrency 8' in azure_flags
-        assert '--azureblob-chunk-size 64M' in azure_flags
+    def test_rclone_flags_appended_and_quoted(self):
+        config = storage_lib.MountCachedConfig(
+            transfers=8, rclone_flags=['--no-modtime', '--exclude', '*.tmp'])
+        flags = config.to_rclone_flags()
+        # Appended last, after the generated flags.
+        assert flags.endswith("--no-modtime --exclude '*.tmp'")
+        # A token with shell metacharacters is quoted.
+        assert "'*.tmp'" in flags
 
-    def test_upload_tuning_flags_skipped_without_backend(self):
-        # No backend context (None) -> can't emit backend-prefixed flags.
-        config = storage_lib.MountCachedConfig(upload_concurrency=8,
-                                               chunk_size='64M')
-        flags = config.to_rclone_flags(backend_flag_prefix=None)
-        assert 'upload-concurrency' not in flags
-        assert 'chunk-size' not in flags
+    def test_rclone_flags_none_emits_nothing_extra(self):
+        base = storage_lib.MountCachedConfig(transfers=8).to_rclone_flags()
+        with_empty = storage_lib.MountCachedConfig(
+            transfers=8, rclone_flags=[]).to_rclone_flags()
+        assert base == with_empty
 
-    def test_upload_tuning_flags_warn_on_unsupported_backend(self):
-        # GCS is a real backend but defines no multipart-upload tuning flags,
-        # so setting them warns and emits nothing.
-        config = storage_lib.MountCachedConfig(upload_concurrency=8)
-        with mock.patch.object(storage_lib.logger, 'warning') as mock_warn:
-            flags = config.to_rclone_flags(backend_flag_prefix='gcs')
-        mock_warn.assert_called_once()
-        assert 'upload-concurrency' not in flags
-        # No warning when the fields are unset.
-        with mock.patch.object(storage_lib.logger, 'warning') as mock_warn:
-            storage_lib.MountCachedConfig().to_rclone_flags(
-                backend_flag_prefix='gcs')
-        mock_warn.assert_not_called()
+    def test_mount_binary_is_explicit_not_inferred(self):
+        # The binary is passed explicitly, so a mount command carrying another
+        # binary's name in an arbitrary flag (e.g. rclone_flags with "goofys")
+        # does not select the wrong binary.
+        mount_cmd = 'rclone mount foo --exclude goofys-cache/'
+        script = mounting_utils.get_mounting_script(mount_path='/mnt/x',
+                                                    mount_cmd=mount_cmd,
+                                                    install_cmd='true',
+                                                    mount_binary='rclone')
+        assert 'MOUNT_BINARY=rclone' in script
+        assert 'MOUNT_BINARY=goofys' not in script
 
     def test_round_trip_yaml(self):
         config = storage_lib.MountCachedConfig(transfers=8, read_only=True)

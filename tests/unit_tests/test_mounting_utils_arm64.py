@@ -161,20 +161,6 @@ class TestMountingUtilsArm64(unittest.TestCase):
         self.assertIn(f':s3:{self.bucket_name}{expected_sub_path}', cmd)
         self.assertIn(f'{self.bucket_name}{expected_sub_path}', cmd)
 
-    def test_mount_binary_detection_rclone(self):
-        """Test mount binary detection for rclone commands."""
-        # Test with rclone command
-        rclone_cmd = 'rclone mount :s3:bucket /mnt/test --daemon'
-        binary = mounting_utils._get_mount_binary(rclone_cmd)
-        self.assertEqual(binary, 'rclone')
-
-    def test_mount_binary_detection_goofys(self):
-        """Test mount binary detection for goofys commands."""
-        # Test with goofys command
-        goofys_cmd = 'goofys -o allow_other bucket /mnt/test'
-        binary = mounting_utils._get_mount_binary(goofys_cmd)
-        self.assertEqual(binary, 'goofys')
-
     def test_fusermount3_soft_link_in_rclone_commands(self):
         """Test that rclone commands include fusermount3 soft link setup."""
         # Test S3 mount command
@@ -206,12 +192,14 @@ class TestMountingUtilsArm64(unittest.TestCase):
         self.assertIn(mounting_utils.RCLONE_VERSION, rclone_install)
 
     def test_mount_script_generation_with_rclone(self):
-        """Test mount script generation includes proper rclone binary detection."""
+        """Test mount script generation for the explicit rclone binary."""
         mount_cmd = 'rclone mount :s3:bucket /mnt/test --daemon'
         install_cmd = 'echo "install rclone"'
 
-        script = mounting_utils.get_mounting_script(self.mount_path, mount_cmd,
-                                                    install_cmd)
+        script = mounting_utils.get_mounting_script(self.mount_path,
+                                                    mount_cmd,
+                                                    install_cmd,
+                                                    mount_binary='rclone')
 
         # Should set MOUNT_BINARY to rclone
         self.assertIn('MOUNT_BINARY=rclone', script)
@@ -219,12 +207,14 @@ class TestMountingUtilsArm64(unittest.TestCase):
         self.assertIn('[ -x "$(command -v rclone)" ]', script)
 
     def test_mount_script_generation_with_goofys(self):
-        """Test mount script generation includes proper goofys binary detection."""
+        """Test mount script generation for the explicit goofys binary."""
         mount_cmd = 'goofys -o allow_other bucket /mnt/test'
         install_cmd = 'echo "install goofys"'
 
-        script = mounting_utils.get_mounting_script(self.mount_path, mount_cmd,
-                                                    install_cmd)
+        script = mounting_utils.get_mounting_script(self.mount_path,
+                                                    mount_cmd,
+                                                    install_cmd,
+                                                    mount_binary='goofys')
 
         # Should set MOUNT_BINARY to goofys
         self.assertIn('MOUNT_BINARY=goofys', script)

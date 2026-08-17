@@ -701,7 +701,6 @@ def get_mount_cached_cmd(
     bucket_name: str,
     mount_path: str,
     mount_cached_config: Optional['storage.MountCachedConfig'] = None,
-    backend_flag_prefix: Optional[str] = None,
 ) -> str:
     """Returns a command to mount a bucket using rclone with vfs cache."""
     # stores bucket profile in rclone config file at the remote nodes.
@@ -764,7 +763,7 @@ def get_mount_cached_cmd(
         # Recommended by rclone documentation for buckets like s3.
         '--vfs-fast-fingerprint '
         # Other customizable rclone flags. Refer to `MountCachedConfig`.
-        f'{mount_cached_config.to_rclone_flags(backend_flag_prefix)} '
+        f'{mount_cached_config.to_rclone_flags()} '
         # This command produces children processes, which need to be
         # detached from the current process's terminal. The command doesn't
         # produce any output, so we aren't dropping any logs.
@@ -803,33 +802,13 @@ def get_rclone_version_check_cmd() -> str:
     return f'rclone --version | grep -q {RCLONE_VERSION}'
 
 
-def _get_mount_binary(mount_cmd: str) -> str:
-    """Returns mounting binary in string given as the mount command.
-
-    Args:
-        mount_cmd: Command used to mount a cloud storage.
-
-    Returns:
-        str: Name of the binary used to mount a cloud storage.
-    """
-    if 'goofys' in mount_cmd:
-        return 'goofys'
-    elif 'gcsfuse' in mount_cmd:
-        return 'gcsfuse'
-    elif 'blobfuse2' in mount_cmd:
-        return 'blobfuse2'
-    elif 'hf-mount' in mount_cmd:
-        return 'hf-mount'
-    else:
-        assert 'rclone' in mount_cmd
-        return 'rclone'
-
-
 def get_mounting_script(
     mount_path: str,
     mount_cmd: str,
     install_cmd: str,
     version_check_cmd: Optional[str] = None,
+    *,
+    mount_binary: str,
 ) -> str:
     """Generates the mounting script.
 
@@ -844,11 +823,14 @@ def get_mounting_script(
         mount_cmd: Command to mount the bucket. Should be single line.
         version_check_cmd: Command to check the version of already installed
           mounting util.
+        mount_binary: The mounting binary (e.g. "rclone", "goofys"). Passed
+          explicitly by each caller rather than inferred from ``mount_cmd``,
+          which is unreliable once the command can carry arbitrary
+          user-provided tokens (e.g. rclone_flags).
 
     Returns:
         str: Mounting script as a str.
     """
-    mount_binary = _get_mount_binary(mount_cmd)
     installed_check = f'[ -x "$(command -v {mount_binary})" ]'
     if version_check_cmd is not None:
         installed_check += f' && {version_check_cmd}'
@@ -975,6 +957,8 @@ def get_mounting_command(
     install_cmd: str,
     mount_cmd: str,
     version_check_cmd: Optional[str] = None,
+    *,
+    mount_binary: str,
 ) -> str:
     """Generates the mounting command for a given bucket.
 
@@ -989,12 +973,17 @@ def get_mounting_command(
         mount_cmd: Command to mount the bucket. Should be single line.
         version_check_cmd: Command to check the version of already installed
           mounting util.
+        mount_binary: The mounting binary (e.g. "rclone"); forwarded to
+          get_mounting_script. Passed explicitly by each caller.
 
     Returns:
         str: Mounting command with the mounting script as a heredoc.
     """
-    script = get_mounting_script(mount_path, mount_cmd, install_cmd,
-                                 version_check_cmd)
+    script = get_mounting_script(mount_path,
+                                 mount_cmd,
+                                 install_cmd,
+                                 version_check_cmd,
+                                 mount_binary=mount_binary)
 
     # While these commands are run sequentially for each storage object,
     # we add random int to be on the safer side and avoid collisions.

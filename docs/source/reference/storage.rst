@@ -455,10 +455,10 @@ FAQ
 
   AWS SSO credentials are only supported when accessing S3 from EC2 or EKS clusters with ``mode: MOUNT_CACHED``.
   ``mode: MOUNT`` is not supported when using AWS SSO credentials.
-  
-  On EKS clusters, you must set up IAM roles (via Pod Identity or IRSA) to 
-  allow SkyPilot pods to access S3 buckets without static AWS credentials. 
-  See :ref:`aws-eks-iam-roles` for setup instructions. 
+
+  On EKS clusters, you must set up IAM roles (via Pod Identity or IRSA) to
+  allow SkyPilot pods to access S3 buckets without static AWS credentials.
+  See :ref:`aws-eks-iam-roles` for setup instructions.
 
   When accessing S3 buckets outside of EC2 or EKS, static AWS credentials
   (e.g., ``~/.aws/credentials``) are required.
@@ -617,12 +617,8 @@ Storage YAML reference
                 Delay before uploading dirty files to remote.
             - read_only: bool; default: false
                 Whether the mount is read-only.
-            - upload_concurrency: int; e.g. 8
-                Chunks uploaded concurrently per transfer for multipart
-                uploads. Only applies to backends with multipart-upload
-                tuning (S3-family, Azure); ignored on GCS.
-            - chunk_size: str; e.g. "64M"
-                Chunk size for multipart uploads. Same backend support as
-                upload_concurrency.
+            - rclone_flags: list of str; e.g. ["--no-modtime"]
+                Extra `rclone mount` flags forwarded verbatim, as shell
+                tokens. Override flags set by config options from above.
             Size values accept suffixes: K, M, G, T, P (e.g. "64M", "10G").
             Duration values accept suffixes: ns, us, ms, s, m, h (e.g. "5s", "1h").

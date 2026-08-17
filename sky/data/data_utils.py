@@ -748,23 +748,6 @@ class Rclone:
         VASTDATA = 'VASTDATA'
         OCI = 'OCI'
 
-        @property
-        def backend_flag_prefix(self) -> str:
-            """rclone backend name used as the prefix for backend-specific
-            flags (e.g. "s3" -> --s3-region, --s3-chunk-size).
-            """
-            return {
-                Rclone.RcloneStores.S3: 's3',
-                Rclone.RcloneStores.GCS: 'gcs',
-                Rclone.RcloneStores.IBM: 's3',
-                Rclone.RcloneStores.R2: 's3',
-                Rclone.RcloneStores.AZURE: 'azureblob',
-                Rclone.RcloneStores.NEBIUS: 's3',
-                Rclone.RcloneStores.COREWEAVE: 's3',
-                Rclone.RcloneStores.VASTDATA: 's3',
-                Rclone.RcloneStores.OCI: 's3',
-            }[self]
-
         def get_profile_name(self, bucket_name: str) -> str:
             """Gets the Rclone profile name for a given bucket.
 
