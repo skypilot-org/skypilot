@@ -2227,10 +2227,37 @@ a lowercase letter or ``_`` and contain only lowercase letters, digits, ``_``,
 ``.``, or ``-``. The account must already exist on the Slurm cluster.
 
 When enabled, the ``User`` in ``~/.slurm/config`` must be ``root`` or have
-passwordless ``sudo`` permission to run ``su``. SkyPilot connects as that SSH
-user, then runs job lifecycle commands and file transfers as the mapped Unix
-user. A missing account or insufficient privilege causes the operation to fail
-without falling back to the SSH user.
+passwordless ``sudo`` permission to run ``/bin/bash`` as the mapped Unix users.
+SkyPilot connects as that SSH user, then runs job lifecycle commands and file
+transfers as the mapped Unix user. A missing account or insufficient privilege
+causes the operation to fail without falling back to the SSH user.
+
+For a non-root SSH user, scope the grant to a group that contains the accounts
+SkyPilot may submit as:
+
+.. code-block:: text
+
+  Runas_Alias SLURM_USERS = %slurm-users
+  Defaults>SLURM_USERS !requiretty
+  skypilot ALL=(SLURM_USERS) NOPASSWD: /bin/bash
+
+This limits impersonation to members of ``slurm-users`` and records each
+invocation according to the host's sudo logging configuration. It is not a
+per-command allowlist: SkyPilot must run job setup and run scripts, ``rsync``,
+and an interactive SSH helper as the submitting user.
+
+Treat membership in ``slurm-users`` as privileged access. Every member must be
+a workload account without ``sudo``, Slurm administrative privileges, or
+another escalation path. Any privileges available to a member are transitively
+available to the shared SSH user. Do not use ``(ALL, !root)`` instead: it still
+permits impersonating the ``slurm`` account (Slurm's ``SlurmUser``), which is
+equivalent to controlling the scheduler.
+
+The ``Defaults>`` line disables ``requiretty`` for commands run as members of
+``SLURM_USERS`` while leaving it in force elsewhere. SkyPilot invokes sudo over
+SSH without allocating a terminal, so a global ``requiretty`` setting makes
+sudo refuse the command with ``sorry, you must have a tty to run sudo``. This
+also prevents file transfers and other job lifecycle operations from running.
 
 Cluster-wide inventory commands run as the SSH user so monitoring and capacity
 views do not depend on the user requesting them. The SSH user must have
