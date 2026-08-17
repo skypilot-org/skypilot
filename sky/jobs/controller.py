@@ -1097,10 +1097,6 @@ class JobController:
                     f'status. Reason: {transient_job_check_error_reason}.\n'
                     'Check cluster status to determine if the job is '
                     'preempted or failed.')
-                if transient_job_check_error_start_time is None:
-                    transient_job_check_error_start_time = time.time()
-                    job_check_backoff = common_utils.Backoff(
-                        initial_backoff=1, max_backoff_factor=5)
             else:
                 transient_job_check_error_start_time = None
                 job_check_backoff = None
@@ -1457,6 +1453,12 @@ class JobController:
                     # job status. Try to recover the job (will not restart the
                     # cluster, if the cluster is healthy).
                     if transient_job_check_error_reason is not None:
+                        # Do not let the first forced refresh exhaust the retry
+                        # budget before a retry.
+                        if transient_job_check_error_start_time is None:
+                            transient_job_check_error_start_time = time.time()
+                            job_check_backoff = common_utils.Backoff(
+                                initial_backoff=1, max_backoff_factor=5)
                         assert (transient_job_check_error_start_time
                                 is not None), (
                                     transient_job_check_error_start_time,
