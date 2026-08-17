@@ -1583,16 +1583,22 @@ class TestSeedNewUserRole:
         calls = []
         monkeypatch.setattr(permission.skypilot_config, 'safe_reload_config',
                             lambda: calls.append('reload'))
-        monkeypatch.setattr(permission.permission_service,
-                            'add_user_if_not_exists',
-                            lambda user_id: calls.append(f'add:{user_id}'))
+        monkeypatch.setattr(
+            permission.permission_service,
+            'add_user_if_not_exists',
+            lambda user_id, role=None: calls.append(f'add:{user_id}:{role}'))
         monkeypatch.setattr(permission.permission_service,
                             'resync_workspace_policies_for_new_user',
                             lambda user_id: calls.append(f'resync:{user_id}'))
 
         permission.seed_new_user_role('u1')
 
-        assert calls == ['reload', 'add:u1', 'resync:u1']
+        assert calls == ['reload', 'add:u1:None', 'resync:u1']
+
+        # An explicit role overrides the default and is forwarded as-is.
+        calls.clear()
+        permission.seed_new_user_role('u2', role='viewer')
+        assert calls == ['reload', 'add:u2:viewer', 'resync:u2']
 
     def test_resync_failure_does_not_fail_seed(self, monkeypatch):
         # A transient re-sync failure (lock timeout, DB error) must not fail
@@ -1602,9 +1608,10 @@ class TestSeedNewUserRole:
         calls = []
         monkeypatch.setattr(permission.skypilot_config, 'safe_reload_config',
                             lambda: calls.append('reload'))
-        monkeypatch.setattr(permission.permission_service,
-                            'add_user_if_not_exists',
-                            lambda user_id: calls.append(f'add:{user_id}'))
+        monkeypatch.setattr(
+            permission.permission_service,
+            'add_user_if_not_exists',
+            lambda user_id, role=None: calls.append(f'add:{user_id}:{role}'))
 
         def _boom(user_id):
             raise RuntimeError('lock timeout')
@@ -1614,7 +1621,7 @@ class TestSeedNewUserRole:
 
         permission.seed_new_user_role('u1')  # Must not raise.
 
-        assert calls == ['reload', 'add:u1']
+        assert calls == ['reload', 'add:u1:None']
 
 
 @pytest.mark.usefixtures("cleanup_env_vars")
