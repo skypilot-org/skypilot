@@ -28,6 +28,7 @@ import {
 import { buildContextStatsKey } from '@/utils/infraUtils';
 import { canonicalizeGpuName } from '@/utils/gpuUtils';
 import { getPersistedPageSize, persistPageSize } from '@/lib/utils';
+import { PaginationControls } from '@/components/elements/PaginationControls';
 import {
   getWorkspaceInfrastructure,
   getWorkspaceContexts,
@@ -1051,6 +1052,41 @@ export function ContextDetails({
   const isSSHContext = contextName.startsWith('ssh-');
   const displayTitle = isSSHContext ? 'Node Pool' : 'Context';
 
+  // Pagination for the node table — contexts can have hundreds of nodes.
+  const [nodesCurrentPage, setNodesCurrentPage] = useState(1);
+  const [nodesPageSize, setNodesPageSize] = useState(() =>
+    getPersistedPageSize(
+      INFRA_PAGE_SIZE_STORAGE_KEY,
+      INFRA_PAGE_SIZE_OPTIONS,
+      10
+    )
+  );
+  const nodesTotalPages = Math.ceil(nodesInContext.length / nodesPageSize);
+  const nodesStartIndex = (nodesCurrentPage - 1) * nodesPageSize;
+  const nodesEndIndex = Math.min(
+    nodesStartIndex + nodesPageSize,
+    nodesInContext.length
+  );
+  const paginatedNodes = nodesInContext.slice(nodesStartIndex, nodesEndIndex);
+
+  // Reset to the first page when switching contexts; clamp when the node
+  // list shrinks under the current page (e.g. on a data refresh).
+  useEffect(() => {
+    setNodesCurrentPage(1);
+  }, [contextName]);
+  useEffect(() => {
+    if (nodesCurrentPage > 1 && nodesCurrentPage > nodesTotalPages) {
+      setNodesCurrentPage(Math.max(1, nodesTotalPages));
+    }
+  }, [nodesCurrentPage, nodesTotalPages]);
+
+  const handleNodesPageSizeChange = (e) => {
+    const newSize = parseInt(e.target.value, 10);
+    setNodesPageSize(newSize);
+    persistPageSize(INFRA_PAGE_SIZE_STORAGE_KEY, newSize);
+    setNodesCurrentPage(1);
+  };
+
   // State for filtering controls
   const [availableHosts, setAvailableHosts] = useState([]);
   const [selectedHosts, setSelectedHosts] = useState('$__all');
@@ -1248,189 +1284,218 @@ export function ContextDetails({
           )}
 
           {nodesInContext.length > 0 && (
-            <div className="overflow-x-auto rounded-md border border-gray-200 shadow-sm">
-              <table className="min-w-full text-sm">
-                <thead className="bg-gray-100">
-                  <tr>
-                    <th className="p-3 text-left font-medium text-gray-600">
-                      Node
-                    </th>
-                    {!isSlurm && (
-                      <>
-                        <th className="p-3 text-left font-medium text-gray-600">
-                          IP Address
-                        </th>
-                        <th className="p-3 text-left font-medium text-gray-600">
-                          vCPU
-                        </th>
-                        <th className="p-3 text-left font-medium text-gray-600">
-                          Memory (GB)
-                        </th>
-                      </>
-                    )}
-                    {isSlurm && (
+            <div className="rounded-md border border-gray-200 shadow-sm">
+              <div className="overflow-x-auto">
+                <table className="min-w-full text-sm">
+                  <thead className="bg-gray-100">
+                    <tr>
                       <th className="p-3 text-left font-medium text-gray-600">
-                        Partitions
+                        Node
                       </th>
-                    )}
-                    <th className="p-3 text-left font-medium text-gray-600">
-                      GPU
-                    </th>
-                    <th className="p-3 text-left font-medium text-gray-600">
-                      GPU Utilization
-                    </th>
-                    <th className="p-3 text-left font-medium text-gray-600">
-                      Node Status
-                    </th>
-                  </tr>
-                </thead>
-                <tbody className="bg-white divide-y divide-gray-200">
-                  {nodesInContext.map((node, index) => {
-                    // Format CPU display: "X of Y free" or just "Y" if free is unknown
-                    let cpuDisplay = '-';
-                    if (
-                      node.cpu_count !== null &&
-                      node.cpu_count !== undefined
-                    ) {
-                      const cpuTotal = formatCpu(node.cpu_count);
+                      {!isSlurm && (
+                        <>
+                          <th className="p-3 text-left font-medium text-gray-600">
+                            IP Address
+                          </th>
+                          <th className="p-3 text-left font-medium text-gray-600">
+                            vCPU
+                          </th>
+                          <th className="p-3 text-left font-medium text-gray-600">
+                            Memory (GB)
+                          </th>
+                        </>
+                      )}
+                      {isSlurm && (
+                        <th className="p-3 text-left font-medium text-gray-600">
+                          Partitions
+                        </th>
+                      )}
+                      <th className="p-3 text-left font-medium text-gray-600">
+                        GPU
+                      </th>
+                      <th className="p-3 text-left font-medium text-gray-600">
+                        GPU Utilization
+                      </th>
+                      <th className="p-3 text-left font-medium text-gray-600">
+                        Node Status
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody className="bg-white divide-y divide-gray-200">
+                    {paginatedNodes.map((node, index) => {
+                      // Format CPU display: "X of Y free" or just "Y" if free is unknown
+                      let cpuDisplay = '-';
                       if (
-                        node.cpu_free !== null &&
-                        node.cpu_free !== undefined
+                        node.cpu_count !== null &&
+                        node.cpu_count !== undefined
                       ) {
-                        const cpuFree = formatCpu(node.cpu_free);
-                        cpuDisplay = `${cpuFree} of ${cpuTotal} free`;
-                      } else {
-                        cpuDisplay = cpuTotal;
-                      }
-                    }
-
-                    // Format memory display: "X of Y free" or just "Y" if free is unknown
-                    // (GB is in column header, so don't include it in values)
-                    let memoryDisplay = '-';
-                    if (
-                      node.memory_gb !== null &&
-                      node.memory_gb !== undefined
-                    ) {
-                      const memoryTotal = node.memory_gb.toFixed(1);
-                      if (
-                        node.memory_free_gb !== null &&
-                        node.memory_free_gb !== undefined
-                      ) {
-                        const memoryFree = node.memory_free_gb.toFixed(1);
-                        memoryDisplay = `${memoryFree} of ${memoryTotal} free`;
-                      } else {
-                        memoryDisplay = memoryTotal;
-                      }
-                    }
-
-                    // Build utilization string
-                    const utilizationStr = `${node.gpu_free} of ${node.gpu_total} free`;
-
-                    // Build node status string
-                    const statusInfo = [];
-
-                    // Add not ready info
-                    if (node.is_ready === false) {
-                      statusInfo.push('NotReady');
-                    }
-
-                    // Add cordoned info
-                    if (node.is_cordoned === true) {
-                      statusInfo.push('Cordoned');
-                    }
-
-                    // Build taint info separately. Taints whose
-                    // `tolerated` flag is set by the backend (i.e. matched
-                    // by `kubernetes.pod_config.spec.tolerations`) do not
-                    // count against node health on the Infra page — they're
-                    // surfaced in the GPU Manager drawer instead.
-                    const taints = node.taints || [];
-                    const untoleratedTaints = taints.filter(
-                      (t) => t && t.tolerated !== true
-                    );
-                    let taintInfo = null;
-                    if (untoleratedTaints.length > 0) {
-                      const taintsByEffect = {};
-                      for (const taint of untoleratedTaints) {
-                        const effect = taint.effect;
-                        const key = taint.key;
-                        if (!taintsByEffect[effect]) {
-                          taintsByEffect[effect] = [];
+                        const cpuTotal = formatCpu(node.cpu_count);
+                        if (
+                          node.cpu_free !== null &&
+                          node.cpu_free !== undefined
+                        ) {
+                          const cpuFree = formatCpu(node.cpu_free);
+                          cpuDisplay = `${cpuFree} of ${cpuTotal} free`;
+                        } else {
+                          cpuDisplay = cpuTotal;
                         }
-                        taintsByEffect[effect].push(key);
                       }
-                      const taintStrs = Object.entries(taintsByEffect).map(
-                        ([effect, keys]) =>
-                          `${effect} Taint [${keys.join(', ')}]`
+
+                      // Format memory display: "X of Y free" or just "Y" if free is unknown
+                      // (GB is in column header, so don't include it in values)
+                      let memoryDisplay = '-';
+                      if (
+                        node.memory_gb !== null &&
+                        node.memory_gb !== undefined
+                      ) {
+                        const memoryTotal = node.memory_gb.toFixed(1);
+                        if (
+                          node.memory_free_gb !== null &&
+                          node.memory_free_gb !== undefined
+                        ) {
+                          const memoryFree = node.memory_free_gb.toFixed(1);
+                          memoryDisplay = `${memoryFree} of ${memoryTotal} free`;
+                        } else {
+                          memoryDisplay = memoryTotal;
+                        }
+                      }
+
+                      // Build utilization string
+                      const utilizationStr = `${node.gpu_free} of ${node.gpu_total} free`;
+
+                      // Build node status string
+                      const statusInfo = [];
+
+                      // Add not ready info
+                      if (node.is_ready === false) {
+                        statusInfo.push('NotReady');
+                      }
+
+                      // Add cordoned info
+                      if (node.is_cordoned === true) {
+                        statusInfo.push('Cordoned');
+                      }
+
+                      // Build taint info separately. Taints whose
+                      // `tolerated` flag is set by the backend (i.e. matched
+                      // by `kubernetes.pod_config.spec.tolerations`) do not
+                      // count against node health on the Infra page — they're
+                      // surfaced in the GPU Manager drawer instead.
+                      const taints = node.taints || [];
+                      const untoleratedTaints = taints.filter(
+                        (t) => t && t.tolerated !== true
                       );
-                      if (taintStrs.length > 0) {
-                        taintInfo = taintStrs.join(', ');
+                      let taintInfo = null;
+                      if (untoleratedTaints.length > 0) {
+                        const taintsByEffect = {};
+                        for (const taint of untoleratedTaints) {
+                          const effect = taint.effect;
+                          const key = taint.key;
+                          if (!taintsByEffect[effect]) {
+                            taintsByEffect[effect] = [];
+                          }
+                          taintsByEffect[effect].push(key);
+                        }
+                        const taintStrs = Object.entries(taintsByEffect).map(
+                          ([effect, keys]) =>
+                            `${effect} Taint [${keys.join(', ')}]`
+                        );
+                        if (taintStrs.length > 0) {
+                          taintInfo = taintStrs.join(', ');
+                        }
                       }
-                    }
 
-                    const nodeStatusStr =
-                      statusInfo.length > 0 || taintInfo
-                        ? statusInfo.join(', ')
-                        : 'Healthy';
-                    const isNodeHealthy = statusInfo.length === 0 && !taintInfo;
+                      const nodeStatusStr =
+                        statusInfo.length > 0 || taintInfo
+                          ? statusInfo.join(', ')
+                          : 'Healthy';
+                      const isNodeHealthy =
+                        statusInfo.length === 0 && !taintInfo;
 
-                    return (
-                      <tr
-                        key={`${node.node_name}-${index}`}
-                        className="hover:bg-gray-50"
-                      >
-                        <td className="p-3 whitespace-nowrap text-gray-700">
-                          {node.node_name}
-                        </td>
-                        {!isSlurm && (
-                          <>
-                            <td className="p-3 whitespace-nowrap text-gray-700">
-                              {node.ip_address || '-'}
-                            </td>
-                            <td className="p-3 whitespace-nowrap text-gray-700">
-                              {cpuDisplay}
-                            </td>
-                            <td className="p-3 whitespace-nowrap text-gray-700">
-                              {memoryDisplay}
-                            </td>
-                          </>
-                        )}
-                        {isSlurm && (
+                      return (
+                        <tr
+                          key={`${node.node_name}-${nodesStartIndex + index}`}
+                          className="hover:bg-gray-50"
+                        >
                           <td className="p-3 whitespace-nowrap text-gray-700">
-                            {formatSlurmPartitions(node.partition)}
+                            {node.node_name}
                           </td>
-                        )}
-                        <td className="p-3 whitespace-nowrap text-gray-700">
-                          {canonicalizeGpuName(node.gpu_name)}
-                        </td>
-                        <td className="p-3 whitespace-nowrap text-gray-700">
-                          {utilizationStr}
-                        </td>
-                        <td className="p-3 max-w-xs">
-                          <div className="flex flex-col gap-1.5">
-                            {nodeStatusStr && (
-                              <span
-                                className={`inline-flex items-center px-2.5 py-1 rounded-md text-xs font-medium w-fit ${
-                                  isNodeHealthy
-                                    ? 'bg-emerald-50 text-emerald-700 ring-1 ring-inset ring-emerald-600/20'
-                                    : 'bg-amber-50 text-amber-700 ring-1 ring-inset ring-amber-600/20'
-                                }`}
-                              >
-                                {nodeStatusStr}
-                              </span>
-                            )}
-                            {taintInfo && (
-                              <span className="inline-flex items-center px-2.5 py-1 rounded-md text-xs font-medium w-fit bg-gray-50 text-gray-700 ring-1 ring-inset ring-gray-600/20">
-                                {taintInfo}
-                              </span>
-                            )}
-                          </div>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
+                          {!isSlurm && (
+                            <>
+                              <td className="p-3 whitespace-nowrap text-gray-700">
+                                {node.ip_address || '-'}
+                              </td>
+                              <td className="p-3 whitespace-nowrap text-gray-700">
+                                {cpuDisplay}
+                              </td>
+                              <td className="p-3 whitespace-nowrap text-gray-700">
+                                {memoryDisplay}
+                              </td>
+                            </>
+                          )}
+                          {isSlurm && (
+                            <td className="p-3 whitespace-nowrap text-gray-700">
+                              {formatSlurmPartitions(node.partition)}
+                            </td>
+                          )}
+                          <td className="p-3 whitespace-nowrap text-gray-700">
+                            {canonicalizeGpuName(node.gpu_name)}
+                          </td>
+                          <td className="p-3 whitespace-nowrap text-gray-700">
+                            {utilizationStr}
+                          </td>
+                          <td className="p-3 max-w-xs">
+                            <div className="flex flex-col gap-1.5">
+                              {nodeStatusStr && (
+                                <span
+                                  className={`inline-flex items-center px-2.5 py-1 rounded-md text-xs font-medium w-fit ${
+                                    isNodeHealthy
+                                      ? 'bg-emerald-50 text-emerald-700 ring-1 ring-inset ring-emerald-600/20'
+                                      : 'bg-amber-50 text-amber-700 ring-1 ring-inset ring-amber-600/20'
+                                  }`}
+                                >
+                                  {nodeStatusStr}
+                                </span>
+                              )}
+                              {taintInfo && (
+                                <span className="inline-flex items-center px-2.5 py-1 rounded-md text-xs font-medium w-fit bg-gray-50 text-gray-700 ring-1 ring-inset ring-gray-600/20">
+                                  {taintInfo}
+                                </span>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+              {nodesInContext.length > nodesPageSize && (
+                <PaginationControls
+                  currentPage={nodesCurrentPage}
+                  totalPages={nodesTotalPages}
+                  totalCount={nodesInContext.length}
+                  startIndex={nodesStartIndex}
+                  endIndex={nodesEndIndex}
+                  onPageChange={setNodesCurrentPage}
+                  onPreviousPage={() =>
+                    setNodesCurrentPage((page) => Math.max(page - 1, 1))
+                  }
+                  onNextPage={() =>
+                    setNodesCurrentPage((page) =>
+                      Math.min(page + 1, nodesTotalPages)
+                    )
+                  }
+                  isPrevDisabled={nodesCurrentPage === 1}
+                  isNextDisabled={
+                    nodesCurrentPage === nodesTotalPages ||
+                    nodesTotalPages === 0
+                  }
+                  pageSize={nodesPageSize}
+                  onPageSizeChange={handleNodesPageSizeChange}
+                  pageSizeOptions={INFRA_PAGE_SIZE_OPTIONS}
+                />
+              )}
             </div>
           )}
 
