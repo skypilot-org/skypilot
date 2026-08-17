@@ -1050,9 +1050,9 @@ class JobController:
                 # NOTE: we do not check cluster status first because race
                 # condition can occur, i.e. cluster can be down during the job
                 # status check.
-                # NOTE: If fetching the job status fails or we force to transit
-                # to recovering, we will set the job status to None, which will
-                # force enter the recovering logic.
+                # NOTE: A failed status lookup leaves job_status as None.  The
+                # cluster-status branch below distinguishes an unconfirmed
+                # lookup on an UP cluster from affirmative recovery evidence.
                 try:
                     job_status, transient_job_check_error_reason = (
                         await managed_job_utils.get_job_status(
@@ -1064,7 +1064,8 @@ class JobController:
                 except exceptions.FetchClusterInfoError as fetch_e:
                     status_logger.reset()
                     logger.info(
-                        'Failed to fetch the job status. Start recovery.\n'
+                        'Failed to fetch the job status. Checking the cluster '
+                        'before deciding whether recovery is safe.\n'
                         f'Exception: {common_utils.format_exception(fetch_e)}\n'
                         f'Traceback: {traceback.format_exc()}')
                     # Fall through to recovery logic below
@@ -1452,43 +1453,25 @@ class JobController:
                         callback_func=callback_func)
                     return False
                 else:
-                    # job_status is None but cluster is UP - transient error
-                    # Although the cluster is healthy, we fail to access the
-                    # job status. Try to recover the job (will not restart the
-                    # cluster, if the cluster is healthy).
-                    if transient_job_check_error_reason is not None:
-                        assert (transient_job_check_error_start_time
-                                is not None), (
-                                    transient_job_check_error_start_time,
-                                    transient_job_check_error_reason)
-                        assert job_check_backoff is not None, (
-                            job_check_backoff, transient_job_check_error_reason)
-                        elapsed = time.time(
-                        ) - transient_job_check_error_start_time
-                        timeout = (managed_job_utils.
-                                   JOB_STATUS_FETCH_TOTAL_TIMEOUT_SECONDS)
-                        if elapsed < timeout:
-                            remaining_timeout = timeout - elapsed
-                            backoff_time = min(
-                                job_check_backoff.current_backoff(),
-                                remaining_timeout)
-                            logger.info(
-                                'Failed to fetch the job status while the '
-                                'cluster is healthy. Retrying to avoid false'
-                                'alarm for job failure. Retrying in '
-                                f'{backoff_time:.1f} seconds...')
-                            await asyncio.sleep(backoff_time)
-                            continue
-                        else:
-                            logger.info(
-                                'Failed to fetch the job status after retrying '
-                                f'for {elapsed:.1f} seconds. Try to recover '
-                                'the job by restarting the job/cluster.')
-                    else:
-                        logger.info(
-                            'Failed to fetch the job status due to '
-                            'unrecoverable error. Try to recover the job by'
-                            ' restarting the job/cluster.')
+                    # An UP cluster is affirmative evidence that a recovery
+                    # would be destructive, but not evidence that the remote
+                    # process has exited. Keep monitoring with backoff until a
+                    # later lookup proves a terminal process or non-UP cluster.
+                    # A forced resume is different: its prior controller state
+                    # was not RUNNING, so it deliberately falls through to the
+                    # existing recovery path to avoid a duplicate submission.
+                    if not force_transit_to_recovering:
+                        if job_check_backoff is None:
+                            job_check_backoff = common_utils.Backoff(
+                                initial_backoff=1, max_backoff_factor=5)
+                        backoff_time = job_check_backoff.current_backoff()
+                        logger.warning(
+                            'Unable to fetch the remote job status while the '
+                            f'cluster {cluster_name} is UP. Keeping the '
+                            'workload running and retrying degraded monitoring '
+                            f'in {backoff_time:.1f} seconds.')
+                        await asyncio.sleep(backoff_time)
+                        continue
 
             # Before tearing down or relaunching, give the runtime a chance
             # to capture the about-to-be-lost run's logs. Side-effecting
@@ -2629,6 +2612,12 @@ class JobController:
         # event is emitted once (so a re-run cannot append a duplicate).
         self._emergency_attempt: Optional[int] = None
         self._emergency_event_emitted = False
+        # Job groups already reconcile every member independently on re-entry.
+        # Do not choose an arbitrary "latest" member for this single-task
+        # reattachment rule.
+        if (not self._dag.is_job_group() and await
+                self._reattach_running_task_after_controller_error(error)):
+            return None
         backoff = common_utils.Backoff(initial_backoff=10, max_backoff_factor=5)
         for round_idx in range(_EMERGENCY_BOOKKEEPING_ROUNDS):
             try:
@@ -2643,6 +2632,44 @@ class JobController:
                 await asyncio.sleep(backoff.current_backoff())
         return ('(Also, emergency recovery was attempted but its '
                 'bookkeeping failed repeatedly.)')
+
+    async def _reattach_running_task_after_controller_error(
+            self, error: Union[Exception, SystemExit]) -> bool:
+        """Prepare a non-destructive retry when durable state proves RUNNING.
+
+        A controller exception does not establish that the remote workload is
+        unhealthy.  Only a fresh, durable RUNNING state allows reattachment;
+        lookup or reload failures retain the bounded emergency path instead.
+        """
+        try:
+            task_id, task_status = (
+                await
+                managed_job_state.get_latest_task_id_status_async(self._job_id))
+            if task_id is None or task_status != (
+                    managed_job_state.ManagedJobStatus.RUNNING):
+                return False
+            await asyncio.to_thread(self._load_dag)
+        except asyncio.CancelledError:  # pylint: disable=try-except-raise
+            raise
+        except Exception as reattach_error:  # pylint: disable=broad-except
+            formatted_error = common_utils.format_exception(reattach_error)
+            logger.warning(
+                'Could not establish a safe reattachment after an unexpected '
+                f'controller error: {formatted_error}. '
+                'Using bounded emergency recovery instead.')
+            return False
+
+        # Keep the same pacing as emergency recovery, but do not transition
+        # the task or alter its cluster: _run_one_task() sees RUNNING and
+        # resumes observation without force_transit_to_recovering.
+        self._emergency_backoff_seconds = (
+            jobs_constants.EMERGENCY_RECOVERY_BACKOFF_BASE_SECONDS)
+        formatted_error = common_utils.format_exception(error, use_bracket=True)
+        logger.warning(
+            f'Controller error {formatted_error} while task {task_id} is '
+            'still RUNNING. Reattaching to the '
+            'existing workload after a monitoring backoff.')
+        return True
 
     async def _release_launch_slot(self) -> None:
         """Free this job's shared launching slot for the backoff.

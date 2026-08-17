@@ -496,12 +496,15 @@ class _RetryLoopHarness:
                  body_effects,
                  is_job_group=False,
                  num_tasks=1,
-                 task_statuses=None):
+                 task_statuses=None,
+                 latest_task_status=state.ManagedJobStatus.STARTING):
         """body_effects: side_effect list for the job body.
 
         Drives _run_one_task for single jobs, _run_job_group when
         is_job_group is set. task_statuses feeds the group branch's
-        per-member status probe (defaults to all RUNNING).
+        per-member status probe (defaults to all RUNNING). A single task
+        defaults to STARTING so existing emergency-relaunch cases remain
+        explicit; tests for a live task must request RUNNING.
         """
         jc = controller.JobController.__new__(controller.JobController)
         jc._job_id = 1
@@ -538,8 +541,7 @@ class _RetryLoopHarness:
         # transitions apply, schedule state is clean.
         self.get_budget = AsyncMock(return_value=(0, None))
         self.record_attempt = AsyncMock()
-        self.get_latest_task = AsyncMock(
-            return_value=(0, state.ManagedJobStatus.RUNNING))
+        self.get_latest_task = AsyncMock(return_value=(0, latest_task_status))
         self.set_emergency = AsyncMock(return_value=True)
         self.normalize = AsyncMock()
         self.set_cancelling = AsyncMock()
@@ -599,6 +601,49 @@ class TestEmergencyRetryLoop:
         # Normal finally ran exactly once.
         h.set_cancelling.assert_awaited_once()
         h.set_cancelled.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize('error', [RuntimeError('boom'), SystemExit(143)])
+    async def test_running_task_reattaches_without_emergency_teardown(
+            self, monkeypatch, error):
+        """A controller error leaves a previously RUNNING task attached.
+
+        Retrying observation must not consume recovery budget, mark the task
+        RECOVERING, or terminate the healthy cluster.
+        """
+        h = _RetryLoopHarness(monkeypatch, [error, True],
+                              latest_task_status=state.ManagedJobStatus.RUNNING)
+
+        await h.jc.run()
+
+        assert h.jc._run_one_task.call_count == 2
+        h.record_attempt.assert_not_awaited()
+        h.set_emergency.assert_not_awaited()
+        h.normalize.assert_not_awaited()
+        h.jc._cleanup_cluster.assert_not_awaited()
+        assert h.sleeps == [
+            jobs_constants.EMERGENCY_RECOVERY_BACKOFF_BASE_SECONDS
+        ]
+
+    @pytest.mark.asyncio
+    async def test_unverified_task_state_uses_bounded_emergency_recovery(
+            self, monkeypatch):
+        """A failed reattachment check retains the bounded emergency fallback.
+
+        The controller only preserves a cluster when durable state positively
+        proves it was RUNNING; unavailable state must not bypass safeguards.
+        """
+        h = _RetryLoopHarness(monkeypatch, [RuntimeError('boom'), True])
+        h.get_latest_task.side_effect = [
+            ConnectionError('state unavailable'),
+            (0, state.ManagedJobStatus.STARTING),
+        ]
+
+        await h.jc.run()
+
+        h.record_attempt.assert_awaited_once()
+        h.set_emergency.assert_awaited_once()
+        h.jc._cleanup_cluster.assert_awaited_once()
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize('error,expected_status', [

@@ -1658,63 +1658,36 @@ class TestDunderMainDispatchesToImportedModule:
         mock_main.assert_called_once_with('test-uuid')
 
 
-class TestTransientJobStatusRecoveryWindow:
-    """Tests for the transient job-status-check retry window across recovery.
-
-    When the controller cannot fetch a task's job status but the cluster is
-    healthy, it retries for up to JOB_STATUS_FETCH_TOTAL_TIMEOUT_SECONDS before
-    recovering, to avoid a false alarm from a transient control-plane error.
-    That window (`transient_job_check_error_start_time`) must be reset after a
-    recovery; otherwise the first status-fetch failure after a recovery is
-    measured from before the recovery, exceeds the timeout immediately, and
-    triggers another recovery with no retries -- turning one transient error
-    into an unbounded recovery loop.
-    """
+class TestDegradedJobStatusMonitoring:
+    """Tests for preserving workloads during degraded status monitoring."""
 
     class _StopLoop(Exception):
         """Sentinel to break the otherwise-infinite monitoring loop."""
 
     @pytest.mark.asyncio
-    async def test_window_reset_after_recovery(self, monkeypatch):
-        """A transient failure after a recovery starts a fresh retry window.
+    async def test_missing_status_on_healthy_cluster_never_recovers(
+            self, monkeypatch):
+        """A prolonged remote-status outage leaves an UP cluster untouched.
 
-        Drives ``_monitor_one_task_impl`` through: transient failure (retry) ->
-        transient failure past the timeout (recover) -> transient failure
-        again. With the window reset, the third failure retries instead of
-        recovering, so ``recover`` is called exactly once. Without the reset it
-        would recover a second time immediately.
-
-        Calls the ``_impl`` body rather than ``_monitor_one_task``: the retry
-        window lives entirely in the body, and the wrapper only owns the status
-        logger's lifecycle (covered by
-        ``test_status_logger_flushed_when_body_raises``).
+        The controller continues degraded monitoring rather than cancelling or
+        relaunching a workload whose remote terminal state is unconfirmed.
         """
         monkeypatch.setattr(managed_job_utils,
                             'JOB_STATUS_FETCH_TOTAL_TIMEOUT_SECONDS', 60)
         monkeypatch.setattr(managed_job_utils, 'JOB_STATUS_CHECK_GAP_SECONDS',
                             0)
 
-        # A logical clock advanced at the top of each loop iteration (inside
-        # the get_job_status stub) so `elapsed` is fully deterministic:
-        #   iter 1: +0   -> elapsed 0   < 60 -> retry
-        #   iter 2: +100 -> elapsed 100 >= 60 -> recover (#1); window reset
-        #   iter 3: +50  -> fresh window, elapsed 0 < 60 -> retry
-        #   iter 4: stub raises _StopLoop to end the loop
+        # The second failed lookup is deliberately beyond the former
+        # JOB_STATUS_FETCH_TOTAL_TIMEOUT_SECONDS recovery window.
         clock = {'t': 1000.0}
-        deltas = iter([0.0, 100.0, 50.0])
-        recover_calls = 0
+        deltas = iter([0.0, 100.0])
 
         async def fake_get_job_status(*args, **kwargs):
             try:
                 clock['t'] += next(deltas)
             except StopIteration:
-                raise TestTransientJobStatusRecoveryWindow._StopLoop()
+                raise TestDegradedJobStatusMonitoring._StopLoop()
             return None, 'Job status check timed out after 30s.'
-
-        async def fake_recover(*args, **kwargs):
-            nonlocal recover_calls
-            recover_calls += 1
-            return clock['t']
 
         handle = MagicMock()
         handle.launched_resources.need_cleanup_after_preemption_or_failure.\
@@ -1728,9 +1701,11 @@ class TestTransientJobStatusRecoveryWindow:
         mock_self._pool = None
 
         executor = MagicMock()
-        executor.recover = AsyncMock(side_effect=fake_recover)
+        executor.recover = AsyncMock()
+        mock_self._cleanup_cluster = AsyncMock()
 
         state = controller_module.managed_job_state
+        set_recovering = AsyncMock(return_value=None)
         with patch.object(controller_module.time, 'time',
                           side_effect=lambda: clock['t']), \
              patch.object(managed_job_utils, 'get_job_status',
@@ -1744,14 +1719,14 @@ class TestTransientJobStatusRecoveryWindow:
              patch.object(controller_module.managed_job_runtime,
                           'is_registered', return_value=False), \
              patch.object(state, 'set_recovering_async',
-                          new=AsyncMock(return_value=None)), \
+                          new=set_recovering), \
              patch.object(state, 'set_recovered_async',
                           new=AsyncMock(return_value=None)), \
              patch.object(state, 'set_started_async',
                           new=AsyncMock(return_value=None)), \
              patch.object(controller_module.asyncio, 'sleep',
                           new=AsyncMock(return_value=None)):
-            with pytest.raises(TestTransientJobStatusRecoveryWindow._StopLoop):
+            with pytest.raises(TestDegradedJobStatusMonitoring._StopLoop):
                 await controller_module.JobController._monitor_one_task_impl(
                     mock_self,
                     task_id=0,
@@ -1762,9 +1737,9 @@ class TestTransientJobStatusRecoveryWindow:
                     callback_func=MagicMock(),
                     force_transit_to_recovering=False)
 
-        assert recover_calls == 1, (
-            'expected exactly one recovery; a second recovery means the '
-            'transient retry window was not reset after the first recovery')
+        executor.recover.assert_not_awaited()
+        set_recovering.assert_not_awaited()
+        mock_self._cleanup_cluster.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_status_logger_flushed_when_body_raises(self, monkeypatch):
@@ -1782,12 +1757,12 @@ class TestTransientJobStatusRecoveryWindow:
                             lambda: status_logger)
 
         async def raise_stop_loop(*args, **kwargs):
-            raise TestTransientJobStatusRecoveryWindow._StopLoop()
+            raise TestDegradedJobStatusMonitoring._StopLoop()
 
         mock_self = MagicMock()
         mock_self._monitor_one_task_impl = raise_stop_loop
 
-        with pytest.raises(TestTransientJobStatusRecoveryWindow._StopLoop):
+        with pytest.raises(TestDegradedJobStatusMonitoring._StopLoop):
             await controller_module.JobController._monitor_one_task(
                 mock_self,
                 task_id=0,
