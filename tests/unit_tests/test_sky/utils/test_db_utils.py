@@ -502,7 +502,7 @@ class TestGetEngine:
             db_utils.get_engine(db_name='ignored')
 
             assert mock_create.call_args[0][0] == (
-                'postgresql://user:pass@127.0.0.1:6432/db')
+                'postgresql://user:pass@127.0.0.1:6432/db?sslmode=disable')
 
     def test_direct_bypasses_pooler(self, monkeypatch):
         """direct=True keeps the raw URI even when a pooler is configured."""
@@ -571,8 +571,9 @@ class TestGetEngine:
             db_utils.get_engine(db_name='ignored')  # pooled
             db_utils.get_engine(db_name='ignored', direct=True)  # direct
 
-        assert pools['postgresql://user:pass@127.0.0.1:6432/db'] == (
-            sqlalchemy.pool.QueuePool)
+        assert pools[
+            'postgresql://user:pass@127.0.0.1:6432/db?sslmode=disable'] == (
+                sqlalchemy.pool.QueuePool)
         assert pools['postgresql://user:pass@10.0.0.5:5432/db'] == (
             sqlalchemy.NullPool)
 
@@ -602,22 +603,48 @@ class TestConnStringResolution:
         monkeypatch.delenv('SKYPILOT_DB_POOL_HOSTPORT', raising=False)
         monkeypatch.delenv('SKYPILOT_DB_POOL_CONNECTION_URI', raising=False)
 
-    def test_rewrite_preserves_userinfo_dbname_query(self):
+    def test_rewrite_preserves_userinfo_and_dbname(self):
         out = db_utils._rewrite_hostport(
-            'postgresql://u:p%40ss@10.0.0.5:5432/staging-db?sslmode=require',
-            '127.0.0.1:6432')
+            'postgresql://u:p%40ss@10.0.0.5:5432/staging-db', '127.0.0.1:6432')
         assert out == (
-            'postgresql://u:p%40ss@127.0.0.1:6432/staging-db?sslmode=require')
+            'postgresql://u:p%40ss@127.0.0.1:6432/staging-db?sslmode=disable')
 
     def test_rewrite_no_userinfo(self):
         out = db_utils._rewrite_hostport('postgresql://10.0.0.5:5432/db',
                                          '127.0.0.1:6432')
-        assert out == 'postgresql://127.0.0.1:6432/db'
+        assert out == 'postgresql://127.0.0.1:6432/db?sslmode=disable'
 
     def test_rewrite_no_explicit_port(self):
         out = db_utils._rewrite_hostport('postgresql://u:p@host/db',
                                          '127.0.0.1:6432')
-        assert out == 'postgresql://u:p@127.0.0.1:6432/db'
+        assert out == 'postgresql://u:p@127.0.0.1:6432/db?sslmode=disable'
+
+    def test_rewrite_drops_ssl_params_and_forces_disable(self):
+        """ssl* params from the direct URI must not reach the plaintext
+        pooler; sslmode=disable is set explicitly and the other params are
+        kept."""
+        out = db_utils._rewrite_hostport(
+            'postgresql://u:p@10.0.0.5:5432/db'
+            '?sslmode=require&sslrootcert=/x.pem&connect_timeout=10',
+            '127.0.0.1:6432')
+        assert out == ('postgresql://u:p@127.0.0.1:6432/db'
+                       '?connect_timeout=10&sslmode=disable')
+
+    def test_rewrite_no_query_gains_sslmode_disable(self):
+        """Even without ssl params in the direct URI, the pooled DSN must
+        say sslmode=disable explicitly: URI params take precedence over
+        libpq env (e.g. PGSSLMODE), so this makes the pooled connection
+        deterministic regardless of process environment."""
+        out = db_utils._rewrite_hostport('postgresql://u:p@10.0.0.5:5432/db',
+                                         '127.0.0.1:6432')
+        assert out == 'postgresql://u:p@127.0.0.1:6432/db?sslmode=disable'
+
+    def test_rewrite_keeps_non_ssl_params(self):
+        out = db_utils._rewrite_hostport(
+            'postgresql://u:p@10.0.0.5:5432/db'
+            '?application_name=sky&sslmode=verify-full', '127.0.0.1:6432')
+        assert out == ('postgresql://u:p@127.0.0.1:6432/db'
+                       '?application_name=sky&sslmode=disable')
 
     def test_rewrite_non_postgres_is_noop(self):
         uri = 'sqlite:////var/lib/sky/state.db'
@@ -641,11 +668,22 @@ class TestConnStringResolution:
         monkeypatch.setenv('SKYPILOT_DB_CONNECTION_URI',
                            'postgresql://u:p@h:5432/db')
         monkeypatch.setenv('SKYPILOT_DB_POOL_HOSTPORT', '127.0.0.1:6432')
-        assert db_utils._resolve_conn_string(
-            direct=False) == 'postgresql://u:p@127.0.0.1:6432/db'
+        assert db_utils._resolve_conn_string(direct=False) == (
+            'postgresql://u:p@127.0.0.1:6432/db?sslmode=disable')
         # direct always bypasses the pooler.
         assert db_utils._resolve_conn_string(
             direct=True) == 'postgresql://u:p@h:5432/db'
+
+    def test_resolve_direct_keeps_ssl_params_untouched(self, monkeypatch):
+        """direct=True returns the base URI verbatim, ssl params included,
+        even when a pooler hostport is configured."""
+        monkeypatch.setenv('IS_SKYPILOT_SERVER', 'true')
+        monkeypatch.setenv(
+            'SKYPILOT_DB_CONNECTION_URI',
+            'postgresql://u:p@h:5432/db?sslmode=require&sslrootcert=/x.pem')
+        monkeypatch.setenv('SKYPILOT_DB_POOL_HOSTPORT', '127.0.0.1:6432')
+        assert db_utils._resolve_conn_string(direct=True) == (
+            'postgresql://u:p@h:5432/db?sslmode=require&sslrootcert=/x.pem')
 
     def test_resolve_full_override_wins(self, monkeypatch):
         monkeypatch.setenv('IS_SKYPILOT_SERVER', 'true')
@@ -656,3 +694,16 @@ class TestConnStringResolution:
                            'postgresql://u:p@pooler:6432/db')
         assert db_utils._resolve_conn_string(
             direct=False) == 'postgresql://u:p@pooler:6432/db'
+
+    def test_resolve_full_override_is_verbatim_including_ssl(self, monkeypatch):
+        """ENV_VAR_DB_POOL_CONNECTION_URI is the explicit escape hatch (e.g.
+        a TLS-terminating or remote pooler): it is used verbatim, including
+        any ssl params it carries."""
+        monkeypatch.setenv('IS_SKYPILOT_SERVER', 'true')
+        monkeypatch.setenv('SKYPILOT_DB_CONNECTION_URI',
+                           'postgresql://u:p@h:5432/db')
+        monkeypatch.setenv(
+            'SKYPILOT_DB_POOL_CONNECTION_URI',
+            'postgresql://u:p@pooler:6432/db?sslmode=verify-full')
+        assert db_utils._resolve_conn_string(direct=False) == (
+            'postgresql://u:p@pooler:6432/db?sslmode=verify-full')

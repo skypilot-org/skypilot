@@ -551,14 +551,36 @@ def _rewrite_hostport(uri: str, hostport: str) -> str:
     percent-encoded password is not re-encoded. Non-PostgreSQL URIs are
     returned unchanged (only PostgreSQL URIs have a rewritable host:port
     netloc).
+
+    ``ENV_VAR_DB_POOL_HOSTPORT`` targets a plaintext loopback sidecar (e.g.
+    PgBouncer on 127.0.0.1) that typically does not terminate client TLS, so
+    every ``ssl*`` libpq query param carried by the direct URI (``sslmode``,
+    ``sslcert``, ``sslkey``, ``sslrootcert``, ``sslcrl``, ...) is dropped and
+    ``sslmode=disable`` is set explicitly — otherwise a direct URI with e.g.
+    ``?sslmode=require`` would demand TLS from the pooler and every pooled
+    connect would fail with "server does not support SSL, but SSL was
+    required". Setting ``disable`` explicitly (rather than merely stripping
+    the params) matters because URI params take precedence over libpq
+    environment variables such as ``PGSSLMODE``, making the pooled DSN
+    deterministic regardless of process environment. All non-ssl query params
+    are preserved. A TLS-terminating or remote pooler must be configured via
+    ``ENV_VAR_DB_POOL_CONNECTION_URI`` instead, which is used verbatim.
     """
     parts = urllib.parse.urlsplit(uri)
     if not parts.scheme.startswith('postgres'):
         return uri
     at = parts.netloc.rfind('@')
     userinfo = parts.netloc[:at + 1] if at != -1 else ''
-    return urllib.parse.urlunsplit((parts.scheme, userinfo + hostport,
-                                    parts.path, parts.query, parts.fragment))
+    # The pooler is a plaintext loopback sidecar: drop every ssl* libpq param
+    # and force sslmode=disable (see docstring).
+    query_params = [(key, value)
+                    for key, value in urllib.parse.parse_qsl(
+                        parts.query, keep_blank_values=True)
+                    if not key.lower().startswith('ssl')]
+    query_params.append(('sslmode', 'disable'))
+    query = urllib.parse.urlencode(query_params)
+    return urllib.parse.urlunsplit(
+        (parts.scheme, userinfo + hostport, parts.path, query, parts.fragment))
 
 
 def _resolve_conn_string(direct: bool) -> Optional[str]:
@@ -570,9 +592,11 @@ def _resolve_conn_string(direct: bool) -> Optional[str]:
     When ``direct`` is True, always returns the unpooled
     ``ENV_VAR_DB_CONNECTION_URI`` so session-scoped advisory locks keep a
     direct, session-pinned connection. When False, routes through a pooler if
-    one is configured (``ENV_VAR_DB_POOL_CONNECTION_URI`` wins, else a
-    host:port rewrite via ``ENV_VAR_DB_POOL_HOSTPORT``); otherwise returns the
-    direct URI unchanged, so deployments without a pooler are unaffected.
+    one is configured (``ENV_VAR_DB_POOL_CONNECTION_URI`` wins and is used
+    verbatim, else a host:port rewrite via ``ENV_VAR_DB_POOL_HOSTPORT`` that
+    also forces ``sslmode=disable`` for the plaintext loopback sidecar — see
+    ``_rewrite_hostport``); otherwise returns the direct URI unchanged, so
+    deployments without a pooler are unaffected.
     """
     if os.environ.get(constants.ENV_VAR_IS_SKYPILOT_SERVER) is None:
         return None
