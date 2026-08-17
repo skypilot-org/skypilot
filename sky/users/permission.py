@@ -344,6 +344,12 @@ class PermissionService:
         """Add user role relationship. `role` overrides the default role."""
         self._lazy_initialize()
         with _policy_lock():
+            # Refresh before deciding: the callee reads this process's
+            # in-memory model, which may predate another worker's write, and
+            # would then add a *second* role for a user who already has one.
+            # Deliberately here rather than in the callee, which
+            # `_maybe_initialize_policies` calls once per user in a loop.
+            self._load_policy_no_lock()
             self._add_user_if_not_exists_no_lock(user_id, role)
 
     def _add_user_if_not_exists_no_lock(self,
@@ -363,35 +369,32 @@ class PermissionService:
         return False
 
     def delete_user(self, user_id: str) -> None:
-        """Delete user role relationship."""
+        """Remove every role held by a user."""
         with _policy_lock():
             self._load_policy_no_lock()
             enforcer = self._ensure_enforcer()
-            current_roles = enforcer.get_roles_for_user(user_id)
-            if not current_roles:
+            # Filtered removal takes every grouping row for this user in one
+            # call, duplicates included. Dropping only the first would leave a
+            # live grant for whoever next occupies this user id.
+            if not enforcer.remove_filtered_grouping_policy(0, user_id):
                 logger.debug(f'User {user_id} has no roles')
                 return
-            enforcer.remove_grouping_policy(user_id, current_roles[0])
             enforcer.save_policy()
             self.invalidate_user_permission_cache(user_id)
 
     def update_role(self, user_id: str, new_role: str) -> None:
-        """Update user role relationship."""
+        """Replace every role held by a user with `new_role`."""
         with _policy_lock():
             self._load_policy_no_lock()
             enforcer = self._ensure_enforcer()
-            current_roles = enforcer.get_roles_for_user(user_id)
-            if not current_roles:
-                logger.debug(f'User {user_id} has no roles')
-            else:
-                # TODO(hailong): how to handle multiple roles?
-                current_role = current_roles[0]
-                if current_role == new_role:
-                    logger.debug(f'User {user_id} already has role {new_role}')
-                    return
-                enforcer.remove_grouping_policy(user_id, current_role)
-
-            # Update user role
+            if enforcer.get_roles_for_user(user_id) == [new_role]:
+                logger.debug(f'User {user_id} already has role {new_role}')
+                return
+            # Replace, don't add: a user is only ever meant to hold one role,
+            # and a leftover `admin` would survive a demotion -- silently
+            # restoring what the demotion took away, since the blocklist check
+            # lets admin win over the other role.
+            enforcer.remove_filtered_grouping_policy(0, user_id)
             enforcer.add_grouping_policy(user_id, new_role)
             enforcer.save_policy()
             # Always invalidate: even a first role assignment can grant
@@ -912,6 +915,12 @@ class PermissionService:
     def remove_workspace_policy(self, workspace_name: str) -> None:
         """Remove workspace policy."""
         with _policy_lock():
+            # Reload from the DB inside the lock before mutating: save_policy()
+            # rewrites the whole table from this process's in-memory model, so
+            # without this a stale worker deleting a workspace also erases
+            # every policy another worker wrote since this one last loaded.
+            # Same reason as `add_workspace_policy` / `update_workspace_policy`.
+            self._load_policy_no_lock()
             enforcer = self._ensure_enforcer()
             enforcer.remove_filtered_policy(1, workspace_name)
             enforcer.save_policy()
