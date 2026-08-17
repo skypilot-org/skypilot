@@ -3,6 +3,5 @@
 
 from sky.catalog.runpod_refresh import refresh_catalog
 
-
 if __name__ == '__main__':
     refresh_catalog()
