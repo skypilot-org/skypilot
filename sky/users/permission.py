@@ -338,11 +338,13 @@ class PermissionService:
         if policy_updated:
             enforcer.save_policy()
 
-    def add_user_if_not_exists(self, user_id: str) -> None:
-        """Add user role relationship."""
+    def add_user_if_not_exists(self,
+                               user_id: str,
+                               role: Optional[str] = None) -> None:
+        """Add user role relationship. `role` overrides the default role."""
         self._lazy_initialize()
         with _policy_lock():
-            self._add_user_if_not_exists_no_lock(user_id)
+            self._add_user_if_not_exists_no_lock(user_id, role)
 
     def _add_user_if_not_exists_no_lock(self,
                                         user_id: str,
@@ -939,13 +941,13 @@ def _policy_lock() -> Generator[None, None, None]:
 permission_service = PermissionService()
 
 
-def seed_new_user_role(user_id: str) -> None:
+def seed_new_user_role(user_id: str, role: Optional[str] = None) -> None:
     """Reload config, then set up policies for a newly-created user.
 
-    Assigns the default role and grants any private-workspace access that
-    the config's `allowed_users` lists owe this user (see
-    `resync_workspace_policies_for_new_user` for why this can only happen
-    once the user record exists).
+    Assigns `role` (the default role when omitted) and grants any
+    private-workspace access that the config's `allowed_users` lists owe this
+    user (see `resync_workspace_policies_for_new_user` for why this can only
+    happen once the user record exists).
 
     Refreshes the in-memory config first so a runtime change to
     `rbac.default_role` or `workspaces` is honored without a server restart:
@@ -957,7 +959,7 @@ def seed_new_user_role(user_id: str) -> None:
     via `asyncio.to_thread` so it does not block the event loop.
     """
     skypilot_config.safe_reload_config()
-    permission_service.add_user_if_not_exists(user_id)
+    permission_service.add_user_if_not_exists(user_id, role)
     try:
         permission_service.resync_workspace_policies_for_new_user(user_id)
     except Exception as e:  # pylint: disable=broad-except

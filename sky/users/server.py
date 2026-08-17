@@ -83,6 +83,28 @@ def _check_role_grantable(role: str, caller_user_id: str) -> None:
             status_code=403, detail='Only admins can grant the admin role.')
 
 
+def _clamped_default_role(caller_user_id: str) -> str:
+    """The default role to seed a service account with, capped at the caller's.
+
+    `rbac.default_role` falls back to `admin`, so an operator who leaves it
+    unset while demoting individual people to `user` would otherwise hand a
+    non-admin an admin-scoped token just by omitting `role` -- the same
+    escalation `_check_role_grantable` blocks on the explicit path. A service
+    account must not out-rank the identity that created it.
+
+    Assumes the config was reloaded by the caller.
+    """
+    default_role = rbac.get_default_role()
+    if default_role != rbac.RoleName.ADMIN.value:
+        return default_role
+    caller_roles = permission.permission_service.get_user_roles(caller_user_id)
+    if _is_admin(caller_roles):
+        return default_role
+    # Fall back to the least privilege we can name if the caller somehow holds
+    # no role: an unrecognized or absent role matches no blocklist policy.
+    return caller_roles[0] if caller_roles else rbac.RoleName.USER.value
+
+
 def get_user_type(user: models.User) -> str:
     """Get user type for a user for backward compatibility.
 
@@ -881,9 +903,17 @@ def create_service_account_token(
             status_code=400,
             detail='Expiration days must be positive or 0 for never expire')
 
-    # Validate the optional role up front so we fail before creating anything.
-    if token_body.role is not None:
-        _check_role_grantable(token_body.role, auth_user.id)
+    # Resolve the account's role up front, so we fail before creating anything
+    # and can seed the right role in one write. Refresh the config first for
+    # the same reason `seed_new_user_role` does: this handler runs in the main
+    # API-server process, which has no per-request config reload, so a runtime
+    # `rbac.default_role` change would otherwise be missed.
+    skypilot_config.safe_reload_config()
+    seed_role = token_body.role
+    if seed_role is not None:
+        _check_role_grantable(seed_role, auth_user.id)
+    else:
+        seed_role = _clamped_default_role(auth_user.id)
 
     try:
         # Generate a unique service account user ID
@@ -903,17 +933,9 @@ def create_service_account_token(
                 f'already exists ({service_account_user_id}). '
                 'Please use a different name.')
 
-        # Add the service account to the permission system with the default
-        # role. This handler runs in the main API-server process (no per-request
-        # config reload), so seed via the helper that refreshes config first —
-        # an admin's runtime `rbac.default_role` change then applies without a
-        # server restart.
-        permission.seed_new_user_role(service_account_user_id)
-        # If a role was requested, apply it now so the token is created with the
-        # intended role atomically (no separate update-role round trip).
-        if token_body.role is not None:
-            permission.permission_service.update_role(service_account_user_id,
-                                                      token_body.role)
+        # Seed the resolved role directly, so the account is never briefly
+        # more privileged than it ends up.
+        permission.seed_new_user_role(service_account_user_id, role=seed_role)
 
         # Handle expiration: 0 means "never expire"
         expires_in_days = token_body.expires_in_days
