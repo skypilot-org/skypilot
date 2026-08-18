@@ -160,23 +160,22 @@ class OAuth2ProxyMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
                                 'setup.'
                         })
                 newly_added = global_user_state.add_or_update_user(auth_user)
-                # `needs_role_seed` also retries a seed that never completed:
-                # it only ever ran under `newly_added`, so a policy-lock
-                # timeout on someone's first request left them with a `users`
-                # row and no role, and nothing to try again. It answers from
-                # memory for anyone who already has one.
-                if newly_added or permission.permission_service.needs_role_seed(
-                        auth_user.id):
-                    # Offload the blocking config reload + role seed to a
-                    # worker thread so this async middleware doesn't block the
-                    # event loop. The reload lets a runtime `rbac.default_role`
-                    # change take effect for this new user without a restart.
-                    if not newly_added:
-                        logger.warning(
-                            f'User {auth_user.id} has no role; re-seeding with '
-                            f'the default role. Their first seed did not '
-                            f'complete.')
+                # Offload the blocking config reload + role seed to a
+                # worker thread so this async middleware doesn't block the
+                # event loop. The reload lets a runtime `rbac.default_role`
+                # change take effect for this new user without a restart.
+                if newly_added:
                     await asyncio.to_thread(permission.seed_new_user_role,
+                                            auth_user.id)
+                elif not permission.permission_service.probably_has_role(
+                        auth_user.id):
+                    # A seed only ever ran under `newly_added`, so a
+                    # policy-lock timeout on someone's first request left them
+                    # with a `users` row and no role, and nothing to try again.
+                    # The guard reads only in-memory state; confirming and
+                    # repairing it can reload the policy, so that goes to a
+                    # thread as well.
+                    await asyncio.to_thread(permission.reseed_role_if_missing,
                                             auth_user.id)
                 request.state.auth_user = auth_user
                 return await call_next(request)

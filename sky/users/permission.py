@@ -101,6 +101,9 @@ class PermissionService:
         # user_id -> when this worker last reloaded on their behalf. See
         # `_probe_unknown_principal`.
         self._no_role_probe_cache: Dict[str, float] = {}
+        # user_id -> when this worker last tried to seed a missing role. See
+        # `needs_role_seed`.
+        self._seed_attempt_cache: Dict[str, float] = {}
 
     def initialize(self):
         self._lazy_initialize(full_initialize=True)
@@ -561,24 +564,66 @@ class PermissionService:
         self._load_policy_no_lock()
         return self._ensure_enforcer().get_roles_for_user(user_id)
 
+    def _confinement_role(self) -> str:
+        """The role an unidentified principal is evaluated against.
+
+        The deployment's own default, so one that defaults to `viewer` does not
+        hand an unidentified principal more access than it gives everyone else
+        -- but never `admin`, which is what `rbac.default_role` falls back to
+        when it was never configured.
+        """
+        default_role = rbac.get_default_role()
+        if default_role == rbac.RoleName.ADMIN.value:
+            return rbac.RoleName.USER.value
+        return default_role
+
+    def probably_has_role(self, user_id: str) -> bool:
+        """Cheap, non-blocking: answers from whatever is already in memory.
+
+        Never initializes the enforcer and never touches the database, so it is
+        safe to call from the event loop. A worker that has not built an
+        enforcer yet answers False, and the caller is expected to do the real
+        work off the loop.
+        """
+        enforcer = self.enforcer
+        if enforcer is None:
+            return False
+        return bool(enforcer.get_roles_for_user(user_id))
+
     def needs_role_seed(self, user_id: str) -> bool:
-        """Whether this principal looks like it never got a role.
+        """Whether this principal has no role row at all, so one is owed.
 
-        For the login path, which already seeds new users: `seed_new_user_role`
-        is only called when the `users` row was newly inserted, so a seed that
-        failed (the policy lock has a bounded wait) is never retried and the
-        user stays role-less -- and therefore unrestricted -- until the next
-        restart re-seeds them.
+        For the login paths, which seed only when the `users` row was newly
+        inserted: a seed that failed (the policy lock has a bounded wait) is
+        otherwise never retried, and the user stays role-less -- and therefore
+        unrestricted -- until a restart re-seeds them.
 
-        Shares `_probe_unknown_principal`'s cache, so a worker whose model is
-        merely stale does not take the distributed policy lock on every one of
-        that user's requests, which is the contention that strands them in the
-        first place.
+        Deliberately False for a principal holding an *unrecognized* role.
+        Seeding only ever adds a role when there is none, so answering True
+        there would take the distributed lock on every request and repair
+        nothing; `check_endpoint_permission` confines such a principal instead.
+        Replacing a role nobody recognizes is an administrative act, not
+        something a login should do behind the operator's back.
+
+        Blocking (may reload the policy). Call from a worker thread.
         """
         enforcer = self._ensure_enforcer()
-        if _recognized_roles(enforcer.get_roles_for_user(user_id)):
+        if enforcer.get_roles_for_user(user_id):
             return False
-        return not _recognized_roles(self._probe_unknown_principal(user_id))
+        if self._probe_unknown_principal(user_id):
+            # Only this worker was behind; the role exists.
+            return False
+        # Rate-limit the attempt itself, not just the probe: if the seed keeps
+        # failing because the policy lock is contended, retrying on every
+        # request would feed the contention that caused it.
+        now = time.time()
+        if now - self._seed_attempt_cache.get(user_id,
+                                              0.0) < _NO_ROLE_PROBE_TTL_SECONDS:
+            return False
+        if len(self._seed_attempt_cache) >= _NO_ROLE_PROBE_CACHE_MAX:
+            self._seed_attempt_cache.clear()
+        self._seed_attempt_cache[user_id] = now
+        return True
 
     def check_endpoint_permission(self, user_id: str, path: str,
                                   method: str) -> bool:
@@ -618,9 +663,12 @@ class PermissionService:
             # reload is its own outage.
             roles = self._probe_unknown_principal(user_id)
             if not _recognized_roles(roles):
+                confine_to = self._confinement_role()
+                if confine_to == rbac.RoleName.VIEWER.value:
+                    return not self._is_viewer_allowed(path, method)
                 # Casbin's `g` is reflexive, so passing the role name as the
                 # subject evaluates that role's rules directly.
-                return enforcer.enforce(rbac.RoleName.USER.value, path, method)
+                return enforcer.enforce(confine_to, path, method)
         # Admin wins over viewer when a user holds both — viewer's
         # default-deny semantics shouldn't restrict an admin.
         if (rbac.RoleName.VIEWER.value in roles and
@@ -1020,6 +1068,28 @@ def _policy_lock() -> Generator[None, None, None]:
 
 # Singleton instance of PermissionService for other modules to use.
 permission_service = PermissionService()
+
+
+def reseed_role_if_missing(user_id: str) -> None:
+    """Add a role to a principal whose original seed never completed.
+
+    Blocking (policy reload plus, at most once per user per TTL, the policy
+    lock) -- call it from a worker thread.
+
+    Failures are swallowed on purpose. The only reason this runs at all is that
+    a contended policy lock stranded the user once already; letting a second
+    timeout surface would turn their request into a 500, and the next request
+    retries anyway.
+    """
+    try:
+        if not permission_service.needs_role_seed(user_id):
+            return
+        logger.warning(f'User {user_id} has no role; seeding one now. Their '
+                       f'original seed did not complete.')
+        seed_new_user_role(user_id)
+    except Exception as e:  # pylint: disable=broad-except
+        logger.warning(f'Failed to re-seed a role for {user_id}; will retry on '
+                       f'a later request: {common_utils.format_exception(e)}')
 
 
 def seed_new_user_role(user_id: str, role: Optional[str] = None) -> None:

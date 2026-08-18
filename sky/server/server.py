@@ -680,23 +680,23 @@ class AuthProxyMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
                 logger.error(f'Concurrent worker exhausted during auth proxy '
                              f'user upsert: {e}')
                 return db_lookup.worker_exhausted_response()
-            # `needs_role_seed` also covers a user whose original seed failed:
-            # it only ever ran under `newly_added`, so a policy-lock timeout on
-            # someone's first request left them with a `users` row, no role,
-            # and nothing to retry it. It answers from memory for anyone who
-            # already has a role, so this costs a dict lookup per request.
-            if newly_added or permission.permission_service.needs_role_seed(
-                    auth_user.id):
-                # Offload the blocking config reload + role seed to a worker
-                # thread so this async middleware doesn't block the event loop.
-                # The reload lets a runtime `rbac.default_role` change take
-                # effect for this new user without a restart (the main
-                # API-server process does not reload config per request).
-                if not newly_added:
-                    logger.warning(
-                        f'User {auth_user.id} has no role; re-seeding with the '
-                        f'default role. Their first seed did not complete.')
+            # Offload the blocking config reload + role seed to a worker
+            # thread so this async middleware doesn't block the event loop.
+            # The reload lets a runtime `rbac.default_role` change take
+            # effect for this new user without a restart (the main
+            # API-server process does not reload config per request).
+            if newly_added:
                 await asyncio.to_thread(permission.seed_new_user_role,
+                                        auth_user.id)
+            elif not permission.permission_service.probably_has_role(
+                    auth_user.id):
+                # A seed only ever ran under `newly_added`, so a policy-lock
+                # timeout on someone's first request left them with a `users`
+                # row, no role, and nothing to retry it -- and a role-less
+                # principal matches no blocklist rule. The guard above reads
+                # only what is already in memory; confirming it and repairing
+                # it can reload the policy, so that part goes to a thread too.
+                await asyncio.to_thread(permission.reseed_role_if_missing,
                                         auth_user.id)
 
         # Store user info in request.state for access by GET endpoints

@@ -2113,6 +2113,10 @@ def policy_db(tmp_path):
         adapter = sqlalchemy_adapter.Adapter(
             engine, db_class=sqlalchemy_adapter.CasbinRule)
         service.enforcer = casbin.SyncedEnforcer(model_path, adapter)
+        # The viewer allowlist is in-process state, not casbin policy. Without
+        # it every path looks disallowed and the viewer branch would block
+        # everything for the wrong reason.
+        service._build_viewer_allowlist_no_lock()
         return service
 
     seed = _worker()
@@ -2201,3 +2205,88 @@ class TestNeedsRoleSeed:
         writer.enforcer.save_policy()
 
         assert not worker.needs_role_seed('elsewhere')
+
+    def test_false_for_an_unrecognized_role(self, policy_db):
+        """Seeding cannot repair this, so asking for it is a pure lock storm.
+
+        `_add_user_if_not_exists_no_lock` only adds a role when there is none,
+        so it is a no-op for a principal holding `pwned` -- every request would
+        take the distributed lock and change nothing. Confinement in
+        `check_endpoint_permission` handles them instead.
+        """
+        worker = policy_db()
+        worker.enforcer.add_grouping_policy('weird', 'pwned')
+        worker.enforcer.load_policy()
+
+        assert not worker.needs_role_seed('weird')
+
+    def test_attempts_are_rate_limited(self, policy_db):
+        """A seed that keeps failing must not be retried on every request."""
+        worker = policy_db()
+        worker.enforcer.load_policy()
+        # First ask says yes; the seed is assumed to have failed, so the role is
+        # still missing -- but the next asks must back off.
+        assert worker.needs_role_seed('stranded')
+        assert not worker.needs_role_seed('stranded')
+        assert not worker.needs_role_seed('stranded')
+
+    def test_probably_has_role_never_initializes(self):
+        """Safe on the event loop: no enforcer, no database, no answer but False."""
+        service = permission.PermissionService()
+        assert service.enforcer is None
+        assert not service.probably_has_role('anyone')
+        assert service.enforcer is None
+
+
+class TestConfinementRole:
+    """An unidentified principal is held to the deployment's own default."""
+
+    @mock.patch('sky.users.rbac.get_default_role', return_value='viewer')
+    def test_viewer_default_confines_via_the_allowlist(self, _default,
+                                                       policy_db):
+        # `/users` is on the viewer allowlist, `/dashboard/x` is not... but the
+        # allowlist is what decides, not the blocklist.
+        worker = policy_db()
+        worker.enforcer.load_policy()
+
+        assert worker.check_endpoint_permission('ghost', '/users/export', 'GET')
+        assert not worker.check_endpoint_permission('ghost', '/users', 'GET')
+        # Outside the viewer allowlist: blocked, where the `user` blocklist
+        # would have allowed it.
+        assert worker.check_endpoint_permission('ghost', '/jobs/launch', 'POST')
+
+    @mock.patch('sky.users.rbac.get_default_role', return_value='admin')
+    def test_unconfigured_default_never_confines_to_admin(
+            self, _default, policy_db):
+        """`rbac.default_role` falls back to admin; confinement must not."""
+        worker = policy_db()
+        worker.enforcer.load_policy()
+
+        assert worker.check_endpoint_permission('ghost', '/users/export', 'GET')
+
+
+class TestReseedRoleIfMissing:
+    """The repair entry point the middlewares call from a worker thread."""
+
+    def test_swallows_a_failure_so_a_request_is_not_a_500(self, policy_db):
+        worker = policy_db()
+        worker.enforcer.load_policy()
+        with mock.patch.object(permission,
+                               'permission_service',
+                               worker), \
+             mock.patch.object(permission,
+                               'seed_new_user_role',
+                               side_effect=RuntimeError('lock timeout')):
+            # A second lock timeout must not surface: the next request retries.
+            permission.reseed_role_if_missing('stranded')
+
+    def test_seeds_when_the_role_is_missing(self, policy_db):
+        worker = policy_db()
+        worker.enforcer.load_policy()
+        seeded = []
+        with mock.patch.object(permission, 'permission_service', worker), \
+             mock.patch.object(permission,
+                               'seed_new_user_role',
+                               side_effect=lambda uid: seeded.append(uid)):
+            permission.reseed_role_if_missing('stranded')
+        assert seeded == ['stranded']
