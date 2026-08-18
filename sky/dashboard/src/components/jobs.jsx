@@ -633,7 +633,10 @@ export function ManagedJobsTable({
       url.searchParams.delete('pageSize');
     }
     if (url.href !== window.location.href) {
-      window.history.replaceState(null, '', url.toString());
+      // Keep the existing state: Next.js keeps its router entry there
+      // (`__N`, `key`, the resolved url), and nulling it makes a later
+      // popstate change the address bar without re-rendering the page.
+      window.history.replaceState(window.history.state, '', url.toString());
     }
   }, [currentPage, pageSize]);
 
