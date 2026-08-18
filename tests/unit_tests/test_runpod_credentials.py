@@ -135,6 +135,30 @@ def test_catalog_gpu_availability_excludes_unavailable_data_centers(
     )
 
 
+def test_catalog_gpu_availability_accepts_entries_without_aggregate_status(
+        monkeypatch):
+    """Use valid per-data-center stock when the list entry lacks an aggregate.
+
+    The list response may omit its aggregate status for an otherwise valid GPU.
+    """
+    monkeypatch.setattr(runpod_adaptor, '_get_api_key', lambda: 'test-key')
+    monkeypatch.setattr(
+        runpod_adaptor.requests, 'get',
+        mock.Mock(return_value=_JsonResponse({
+            'gpus': [{
+                'id': 'NVIDIA A40',
+                'dataCenters': [{
+                    'id': 'OC-AU-1',
+                    'availability': 'LOW',
+                }],
+            }],
+        })))
+
+    data_centers = runpod_adaptor.get_catalog_gpu_data_center_ids(1, 'SECURE')
+
+    assert data_centers == {'NVIDIA A40': {'OC-AU-1'}}
+
+
 @pytest.mark.parametrize(
     ('installed_version', 'expected_valid'),
     [('1.7.9', False), ('1.7.10', True), ('2.0.0', True)],

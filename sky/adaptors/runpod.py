@@ -33,6 +33,7 @@ _MAX_POD_ID_LENGTH = 128
 _UNSAFE_POD_ID_CHARACTERS = frozenset('/\\?#')
 _GPU_AVAILABILITY_TTL_SECONDS = 20
 _AVAILABLE_GPU_STATUSES = frozenset(('LOW', 'MEDIUM', 'HIGH'))
+_GPU_AVAILABILITY_STATUSES = _AVAILABLE_GPU_STATUSES | frozenset(('NONE',))
 _gpu_availability_cache: Dict[Tuple[str, int, str, Tuple[str, ...]],
                               Tuple[float, Set[str]]] = {}
 
@@ -151,14 +152,20 @@ def _catalog_v2_request(path: str, params: Dict[str, Any]) -> Dict[str, Any]:
     return result
 
 
-def _data_center_ids_from_gpu_response(response: Dict[str, Any]) -> Set[str]:
-    """Return available data-center IDs from an exact v2 GPU response."""
+def _data_center_ids_from_gpu_response(
+        response: Dict[str, Any],
+        *,
+        require_aggregate_availability: bool = False) -> Set[str]:
+    """Return available data-center IDs from a v2 GPU response."""
     availability = response.get('availability')
-    data_centers = response.get('dataCenters', [])
-    if availability == 'NONE' and data_centers in (None, []):
+    data_centers = response.get('dataCenters')
+    if data_centers is None and availability == 'NONE':
         return set()
-    if availability not in _AVAILABLE_GPU_STATUSES or not isinstance(
-            data_centers, list):
+    if data_centers is None and require_aggregate_availability:
+        raise ValueError('RunPod v2 GPU availability response is malformed.')
+    if data_centers is None:
+        return set()
+    if not isinstance(data_centers, list):
         raise ValueError('RunPod v2 GPU availability response is malformed.')
     available_data_centers = set()
     for data_center in data_centers:
@@ -166,10 +173,12 @@ def _data_center_ids_from_gpu_response(response: Dict[str, Any]) -> Set[str]:
             raise ValueError(
                 'RunPod v2 GPU availability response is malformed.')
         data_center_id = data_center.get('id')
-        if not isinstance(data_center_id, str):
+        data_center_availability = data_center.get('availability')
+        if (not isinstance(data_center_id, str) or
+                data_center_availability not in _GPU_AVAILABILITY_STATUSES):
             raise ValueError(
                 'RunPod v2 GPU availability response is malformed.')
-        if data_center.get('availability') in _AVAILABLE_GPU_STATUSES:
+        if data_center_availability in _AVAILABLE_GPU_STATUSES:
             available_data_centers.add(data_center_id)
     return available_data_centers
 
@@ -206,7 +215,8 @@ def get_live_gpu_data_center_ids(
     try:
         response = _catalog_v2_request(f'/gpus/{quote(gpu_type_id, safe="")}',
                                        params)
-        available_data_centers = _data_center_ids_from_gpu_response(response)
+        available_data_centers = _data_center_ids_from_gpu_response(
+            response, require_aggregate_availability=True)
     except Exception:  # pylint: disable=broad-except
         return None
     _gpu_availability_cache[cache_key] = (time.time(), available_data_centers)
