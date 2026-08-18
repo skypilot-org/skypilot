@@ -196,6 +196,7 @@ class TestMountCachedConfig:
             vfs_read_chunk_streams=4,
             vfs_write_back='5s',
             read_only=True,
+            env_vars={'RCLONE_S3_UPLOAD_CONCURRENCY': '8'},
         )
         yaml_dict = config.to_yaml_config()
         restored = storage_lib.MountCachedConfig.from_yaml_config(yaml_dict)
@@ -617,6 +618,22 @@ class TestMountCachedSchemaValidation:
         with pytest.raises(ValueError):
             storage_lib.Storage.from_yaml_config(config)
 
+    def test_env_vars_accepted(self):
+        config = self._make_yaml_config(
+            {'env_vars': {
+                'RCLONE_S3_UPLOAD_CONCURRENCY': '8'
+            }})
+        storage_obj = storage_lib.Storage.from_yaml_config(config)
+        assert storage_obj.mount_cached_config.env_vars == {
+            'RCLONE_S3_UPLOAD_CONCURRENCY': '8'
+        }
+
+    def test_env_vars_invalid_key_rejected(self):
+        # Keys must be valid env var names (no spaces/shell metacharacters).
+        config = self._make_yaml_config({'env_vars': {'BAD KEY': 'v'}})
+        with pytest.raises(ValueError):
+            storage_lib.Storage.from_yaml_config(config)
+
 
 class TestGetMountCachedCmdWithConfig:
     """Tests for mounting_utils.get_mount_cached_cmd with MountCachedConfig."""
@@ -706,6 +723,41 @@ class TestGetMountCachedCmdWithConfig:
         assert 'rclone mount myprofile:my-bucket /mnt/data' in cmd
         assert '--daemon' in cmd
         assert '> /dev/null 2>&1' in cmd
+
+    def test_env_vars_exported_before_rclone(self):
+        config = storage_lib.MountCachedConfig(env_vars={
+            'RCLONE_S3_UPLOAD_CONCURRENCY': '8',
+            'RCLONE_S3_ENV_AUTH': 'true',
+        })
+        cmd = mounting_utils.get_mount_cached_cmd(
+            rclone_config='[test]\ntype = s3',
+            rclone_profile_name='test',
+            bucket_name='my-bucket',
+            mount_path='/mnt/data',
+            mount_cached_config=config)
+        # Exported inline immediately before the rclone invocation so the
+        # backgrounded daemon inherits them.
+        assert ('RCLONE_S3_UPLOAD_CONCURRENCY=8 RCLONE_S3_ENV_AUTH=true '
+                'rclone mount') in cmd
+
+    def test_env_vars_values_are_quoted(self):
+        config = storage_lib.MountCachedConfig(
+            env_vars={'RCLONE_CONFIG_PASS': 'a b;rm -rf'})
+        cmd = mounting_utils.get_mount_cached_cmd(
+            rclone_config='[test]\ntype = s3',
+            rclone_profile_name='test',
+            bucket_name='my-bucket',
+            mount_path='/mnt/data',
+            mount_cached_config=config)
+        assert "RCLONE_CONFIG_PASS='a b;rm -rf' rclone mount" in cmd
+
+    def test_no_env_prefix_when_unset(self):
+        cmd = mounting_utils.get_mount_cached_cmd(
+            rclone_config='[test]\ntype = s3',
+            rclone_profile_name='test',
+            bucket_name='my-bucket',
+            mount_path='/mnt/data')
+        assert '&& rclone mount' in cmd
 
 
 class TestVastDataStorage:

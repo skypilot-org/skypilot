@@ -736,13 +736,22 @@ def get_mount_cached_cmd(
     if sequential_upload and mount_cached_config.transfers is None:
         mount_cached_config.transfers = 1
 
+    # User-provided environment variables for the rclone process, exported
+    # inline so the backgrounded (--daemon) rclone process inherits them. An
+    # escape hatch for rclone options settable via RCLONE_* env vars.
+    env_prefix = ''
+    if mount_cached_config.env_vars:
+        env_prefix = ''.join(
+            f'{key}={shlex.quote(value)} '
+            for key, value in mount_cached_config.env_vars.items())
+
     # when mounting multiple directories with vfs cache mode, it's handled by
     # rclone to create separate cache directories at ~/.cache/rclone/vfs. It is
     # not necessary to specify separate cache directories.
     mount_cmd = (
         f'{create_log_cmd} && '
         f'{configure_rclone_profile} && '
-        'rclone mount '
+        f'{env_prefix}rclone mount '
         f'{rclone_profile_name}:{bucket_name} {mount_path} '
         # '--daemon' keeps the mounting process running in the background.
         # fail in 10 seconds if mount cannot complete by then,
