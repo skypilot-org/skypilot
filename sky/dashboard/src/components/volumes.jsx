@@ -45,6 +45,11 @@ import { useRouter } from 'next/router';
 import { TimestampWithTooltip, LastUpdatedTimestamp } from '@/components/utils';
 import { StatusBadge } from '@/components/elements/StatusBadge';
 import {
+  TruncatedDetails,
+  ExpandedDetailsRow,
+  isDetailsToggle,
+} from '@/components/elements/TruncatedDetails';
+import {
   FilterDropdown,
   Filters,
   filterData,
@@ -481,7 +486,7 @@ export function Volumes() {
   );
 }
 
-function VolumesTable({
+export function VolumesTable({
   refreshInterval,
   setLoading,
   refreshDataRef,
@@ -507,6 +512,26 @@ function VolumesTable({
       10
     )
   );
+  // Held at table level so at most one row is expanded at a time.
+  const [expandedRowId, setExpandedRowId] = useState(null);
+  const expandedRowRef = useRef(null);
+
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (
+        expandedRowId &&
+        expandedRowRef.current &&
+        !expandedRowRef.current.contains(event.target) &&
+        !isDetailsToggle(event.target)
+      ) {
+        setExpandedRowId(null);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [expandedRowId]);
 
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -654,6 +679,14 @@ function VolumesTable({
 
   const pluginColumns = useTableColumns('volumes');
 
+  // Volumes are usable most of the time, so a column of dashes would be noise.
+  // Judge over the whole dataset, not the current page or filter, so the column
+  // does not come and go while paging.
+  const anyVolumeHasDetails = useMemo(
+    () => data.some((volume) => volume.error_message),
+    [data]
+  );
+
   const sortableHeader = (label, sortKey) => (
     <TableHead
       className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50"
@@ -740,6 +773,33 @@ function VolumesTable({
         </TableCell>
       ),
     },
+    // What the status means: a CSI provisioner's own words on why the volume is
+    // not ready, which until now only a tooltip on the badge revealed. Last
+    // before the actions, as in the jobs table: the text is wide, and it reads
+    // as an aside rather than a property of the volume.
+    ...(anyVolumeHasDetails
+      ? [
+          {
+            id: 'details',
+            order: 999,
+            renderHeader: () => <TableHead>Details</TableHead>,
+            renderCell: (volume) => (
+              <TableCell>
+                {volume.error_message ? (
+                  <TruncatedDetails
+                    text={volume.error_message}
+                    rowId={volume.name}
+                    expandedRowId={expandedRowId}
+                    setExpandedRowId={setExpandedRowId}
+                  />
+                ) : (
+                  '-'
+                )}
+              </TableCell>
+            ),
+          },
+        ]
+      : []),
     {
       id: 'actions',
       order: 1000,
@@ -846,13 +906,24 @@ function VolumesTable({
                 </TableRow>
               ) : paginatedData.length > 0 && !isForceEmpty() ? (
                 paginatedData.map((volume) => (
-                  <TableRow key={volume.name}>
-                    {visibleColumns.map((col) =>
-                      React.cloneElement(col.renderCell(volume), {
-                        key: col.id,
-                      })
+                  <React.Fragment key={volume.name}>
+                    <TableRow>
+                      {visibleColumns.map((col) =>
+                        React.cloneElement(col.renderCell(volume), {
+                          key: col.id,
+                        })
+                      )}
+                    </TableRow>
+                    {/* A volume can become ready while its reason is
+                        expanded, taking the column with it. */}
+                    {expandedRowId === volume.name && volume.error_message && (
+                      <ExpandedDetailsRow
+                        text={volume.error_message}
+                        colSpan={totalColSpan}
+                        innerRef={expandedRowRef}
+                      />
                     )}
-                  </TableRow>
+                  </React.Fragment>
                 ))
               ) : (
                 <EmptyTableState

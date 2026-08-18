@@ -353,6 +353,22 @@ function VolumeDetailCard({ volumeData }) {
                 </div>
               </div>
 
+              {/* Why the status is what it is, in the provisioner's own words.
+                  Spans both columns: a CSI error runs long. */}
+              {volumeData.error_message && (
+                <div className="col-span-2">
+                  <div className="text-gray-600 font-medium text-base">
+                    Status Details
+                  </div>
+                  <div
+                    className="text-base mt-1"
+                    style={{ whiteSpace: 'pre-wrap' }}
+                  >
+                    {volumeData.error_message}
+                  </div>
+                </div>
+              )}
+
               {/* Used By - spans both columns */}
               <div className="col-span-2">
                 <div className="text-gray-600 font-medium text-base">

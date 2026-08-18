@@ -42,6 +42,9 @@ Below is the configuration syntax and some example values. See detailed explanat
   :ref:`jobs <config-yaml-jobs>`:
     :ref:`bucket <config-yaml-jobs-bucket>`: s3://my-bucket/
     :ref:`force_disable_cloud_bucket <config-yaml-jobs-force-disable-cloud-bucket>`: false
+    :ref:`status_check <config-yaml-jobs-status-check>`:
+      min_elapsed_seconds: 60
+      min_retries: 5
     controller:
       :ref:`resources <config-yaml-jobs-controller-resources>`:  # same spec as 'resources' in a task YAML
         infra: gcp/us-central1
@@ -462,6 +465,35 @@ Example:
 
   jobs:
     force_disable_cloud_bucket: true
+
+.. _config-yaml-jobs-status-check:
+
+``jobs.status_check``
+~~~~~~~~~~~~~~~~~~~~~
+
+Tune how long the managed jobs controller tolerates consecutive failures of its job-status check before treating the job as unhealthy and recovering it (which cancels the job and relaunches it).
+
+A status check can fail for reasons that say nothing about whether the job is alive -- for example a transport error on the way to the cluster, or a provider API error while refreshing cluster status. The controller retries such failures, and recovers the job only once **both** of these budgets are exhausted:
+
+- ``min_elapsed_seconds``: seconds elapsed since the first failure in the run.
+- ``min_retries``: retries made since the first failure in the run.
+
+Requiring both matters, because either alone is unreliable. A single status-check round can itself take longer than the time budget, since the cluster-status refresh performed before recovery does its own retried probes of the cluster; an elapsed-time-only budget can therefore be spent within the round that opened it, and the job is recovered without ever being retried. Conversely, a burst of failures that each return immediately can exhaust a retry-count-only budget within a couple of seconds, before a transient condition has had a chance to clear.
+
+Raise either value if the controller reaches its clusters over a link that is known to be slow or intermittent, and you would rather wait than have a long-running job relaunched.
+
+A successful status check ends the run and resets both budgets.
+
+Defaults: ``min_elapsed_seconds: 60``, ``min_retries: 5``.
+
+Example:
+
+.. code-block:: yaml
+
+  jobs:
+    status_check:
+      min_elapsed_seconds: 600
+      min_retries: 10
 
 .. _config-yaml-jobs-controller:
 .. _config-yaml-jobs-controller-consolidation-mode:
@@ -2224,10 +2256,37 @@ a lowercase letter or ``_`` and contain only lowercase letters, digits, ``_``,
 ``.``, or ``-``. The account must already exist on the Slurm cluster.
 
 When enabled, the ``User`` in ``~/.slurm/config`` must be ``root`` or have
-passwordless ``sudo`` permission to run ``su``. SkyPilot connects as that SSH
-user, then runs job lifecycle commands and file transfers as the mapped Unix
-user. A missing account or insufficient privilege causes the operation to fail
-without falling back to the SSH user.
+passwordless ``sudo`` permission to run ``/bin/bash`` as the mapped Unix users.
+SkyPilot connects as that SSH user, then runs job lifecycle commands and file
+transfers as the mapped Unix user. A missing account or insufficient privilege
+causes the operation to fail without falling back to the SSH user.
+
+For a non-root SSH user, scope the grant to a group that contains the accounts
+SkyPilot may submit as:
+
+.. code-block:: text
+
+  Runas_Alias SLURM_USERS = %slurm-users
+  Defaults>SLURM_USERS !requiretty
+  skypilot ALL=(SLURM_USERS) NOPASSWD: /bin/bash
+
+This limits impersonation to members of ``slurm-users`` and records each
+invocation according to the host's sudo logging configuration. It is not a
+per-command allowlist: SkyPilot must run job setup and run scripts, ``rsync``,
+and an interactive SSH helper as the submitting user.
+
+Treat membership in ``slurm-users`` as privileged access. Every member must be
+a workload account without ``sudo``, Slurm administrative privileges, or
+another escalation path. Any privileges available to a member are transitively
+available to the shared SSH user. Do not use ``(ALL, !root)`` instead: it still
+permits impersonating the ``slurm`` account (Slurm's ``SlurmUser``), which is
+equivalent to controlling the scheduler.
+
+The ``Defaults>`` line disables ``requiretty`` for commands run as members of
+``SLURM_USERS`` while leaving it in force elsewhere. SkyPilot invokes sudo over
+SSH without allocating a terminal, so a global ``requiretty`` setting makes
+sudo refuse the command with ``sorry, you must have a tty to run sudo``. This
+also prevents file transfers and other job lifecycle operations from running.
 
 Cluster-wide inventory commands run as the SSH user so monitoring and capacity
 views do not depend on the user requesting them. The SSH user must have

@@ -662,6 +662,7 @@ class Kubernetes(clouds.Cloud):
         volume_mounts: Optional[List['volume_lib.VolumeMount']],
         enable_flex_start: bool,
         is_using_queueing: bool,
+        auto_mounts: Optional[List['volume_lib.AutoMount']] = None,
     ) -> int:
         """Calculate provision timeout based on number of nodes.
 
@@ -672,6 +673,9 @@ class Kubernetes(clouds.Cloud):
             num_nodes: Number of nodes being provisioned
             volume_mounts: Volume mounts for the pod
             enable_flex_start: Whether flex start is enabled
+            auto_mounts: Volumes this launch will mount from the auto_mounts
+                config. They are not in volume_mounts, which only holds the
+                volumes declared on the task.
 
         Returns:
             Timeout in seconds
@@ -693,18 +697,25 @@ class Kubernetes(clouds.Cloud):
             base_timeout = 1200
             per_node_timeout = 10
             max_timeout = 2400
-        elif volume_mounts is not None:
-            for volume_mount in volume_mounts:
-                if (volume_mount.volume_config.type ==
-                        volume_lib.VolumeType.PVC.value):
-                    if (volume_mount.volume_config.config.get(
-                            'access_mode', '') ==
-                            volume_lib.VolumeAccessMode.READ_WRITE_MANY.value):
-                        # GKE may take several minutes to provision a PV
-                        # supporting READ_WRITE_MANY with filestore.
-                        base_timeout = 180
-                        max_timeout = 240
-                        break
+        else:
+            slow_volume = any(
+                volume_lib.mount_is_read_write_many_pvc(volume_mount)
+                for volume_mount in (volume_mounts or [])) or any(
+                    volume_lib.is_read_write_many_pvc(auto_mount.volume_config)
+                    for auto_mount in (auto_mounts or []))
+            if slow_volume:
+                # Creating the network filesystem behind a READ_WRITE_MANY PV
+                # takes minutes: a 1 TiB GKE Filestore instance on the
+                # enterprise tier measured ~7 minutes end to end. The previous
+                # 180-240s could not cover that, so such a launch timed out
+                # while its volume was being created normally.
+                #
+                # Waiting this long is only reasonable because a volume that
+                # will not bind no longer needs the timeout to report it -- the
+                # scheduling wait loop fails on what the storage backend says
+                # (see _PendingVolumeProbe), whatever the timeout is.
+                base_timeout = 600
+                max_timeout = 900
 
         return int(
             min(base_timeout + (per_node_timeout * (num_nodes - 1)),
@@ -969,9 +980,17 @@ class Kubernetes(clouds.Cloud):
         # We use a linear scaling formula to determine the timeout based on the
         # number of nodes.
         is_using_kueue = k8s_kueue_local_queue_name is not None
+        # auto_mounts volumes are injected later, in write_cluster_config(), so
+        # they never reach volume_mounts. Resolve them here as well, or an
+        # auto-mounted ReadWriteMany volume would be held to the base timeout
+        # while the same volume declared on the task gets the extended one.
+        auto_mounts = volume_lib.resolve_auto_mounts(context).mounted
         timeout = self._calculate_provision_timeout(
-            num_nodes, volume_mounts, enable_flex_start or
-            enable_flex_start_queued_provisioning, is_using_kueue)
+            num_nodes,
+            volume_mounts,
+            enable_flex_start or enable_flex_start_queued_provisioning,
+            is_using_kueue,
+            auto_mounts=auto_mounts)
 
         # Use _REPR, instead of directly using 'kubernetes' as the config key,
         # because it could be SSH node pool as well.

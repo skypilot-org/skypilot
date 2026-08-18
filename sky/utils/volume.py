@@ -3,11 +3,12 @@ from dataclasses import dataclass
 import enum
 import re
 import time
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from sky import exceptions
 from sky import global_user_state
 from sky import models
+from sky import skypilot_config
 from sky.skylet import constants
 from sky.utils import common_utils
 from sky.utils import resources_utils
@@ -96,6 +97,170 @@ def auto_mount_in_scope(scope: str, volume_user_hash: Optional[str],
                      f'scopes: {AutoMountScope.supported_scopes()}')
 
 
+def is_read_write_many_pvc(volume_config: models.VolumeConfig) -> bool:
+    """Whether a volume is a PVC that may take minutes to provision.
+
+    ReadWriteMany PVCs are backed by a network filesystem (GKE Filestore, EFS,
+    ...), which is the slow case the Kubernetes provision timeout has to
+    accommodate.
+    """
+    return (volume_config.type == VolumeType.PVC.value and
+            volume_config.config.get('access_mode')
+            == VolumeAccessMode.READ_WRITE_MANY.value)
+
+
+# The one reason a volume can be recorded not-ready and still become usable on
+# its own: a StorageClass that binds Immediately starts provisioning when the
+# claim is created, so the claim is Pending for as long as the backend takes,
+# and a network filesystem takes minutes. `_get_pvc_error` builds its message
+# from this, and `volume_error_may_resolve` reads it back.
+PVC_PROVISIONING_MESSAGE = ('PVC is pending: the PersistentVolume is still '
+                            'being provisioned.')
+
+
+def volume_error_may_resolve(error_message: Optional[str]) -> bool:
+    """Whether a not-ready volume may still become usable without a change.
+
+    Refusing a launch over a volume is for volumes that will not work until
+    someone fixes them. This tells that case from the one where waiting is all
+    that is needed, so a launch is not refused over the minutes a network
+    filesystem legitimately takes.
+
+    A recorded message with no reason to expect it to resolve is read as needing
+    a change -- including one carrying no gRPC code at all, e.g. an access mode
+    the available PersistentVolumes do not support, which is permanent. Deciding
+    the other way round (refuse only what is provably terminal) would let that
+    class of misconfiguration through.
+    """
+    if not error_message:
+        return False
+    return PVC_PROVISIONING_MESSAGE in error_message
+
+
+def mount_is_read_write_many_pvc(volume_mount: 'VolumeMount') -> bool:
+    """`is_read_write_many_pvc` for a volume declared on a task.
+
+    An ephemeral volume's type is only resolved when it is provisioned
+    (`sky.provision.volume._resolve_volume_type`), which happens after the
+    provision timeout has been computed. On Kubernetes it can only resolve to
+    a PVC (`EPHEMERAL_VOLUME_TYPES`), so an unset type is read as one.
+    """
+    volume_config = volume_mount.volume_config
+    if volume_mount.is_ephemeral and not volume_config.type:
+        return (volume_config.config.get('access_mode') ==
+                VolumeAccessMode.READ_WRITE_MANY.value)
+    return is_read_write_many_pvc(volume_config)
+
+
+@dataclass
+class AutoMount:
+    """An `auto_mounts` config entry that a launch will mount."""
+    volume_name: str
+    # The volume's row in the volume DB, as returned by
+    # `global_user_state.get_volume_by_name`.
+    record: Dict[str, Any]
+    # The entry's mount_paths, unexpanded (`~` is resolved against the image's
+    # home directory, which only the provisioning code knows).
+    mount_paths: List[str]
+
+    @property
+    def volume_config(self) -> models.VolumeConfig:
+        return self.record['handle']
+
+
+@dataclass
+class SkippedAutoMount:
+    """An `auto_mounts` config entry that a launch will not mount."""
+    volume_name: str
+    message: str
+    # A missing volume or an unusable access mode is a misconfiguration the
+    # user has to see; an out-of-scope entry is normal operation.
+    is_warning: bool
+
+
+@dataclass
+class AutoMountResolution:
+    """Which `auto_mounts` entries apply to a launch, and which do not."""
+    mounted: List[AutoMount]
+    skipped: List[SkippedAutoMount]
+
+
+def resolve_auto_mounts(region: Optional[str]) -> AutoMountResolution:
+    """Resolves which `auto_mounts` volumes a launch will mount.
+
+    Applies the three filters that decide whether an entry is mounted at all:
+    the volume exists, its scope covers this launch, and its access mode
+    permits the concurrent multi-pod access auto-mounting implies.
+
+    Readiness is deliberately not checked here. Refusing a launch belongs to
+    the injection path, and this also runs while computing the provision
+    timeout, which must not raise. Nor does this log: it runs more than once
+    per launch, so the caller on the launch path logs `skipped` and the others
+    ignore it.
+
+    `auto_mounts` is a Kubernetes config key; `region` is the context whose
+    effective config to read.
+    """
+    auto_mounts_config = skypilot_config.get_effective_region_config(
+        cloud='kubernetes',
+        region=region,
+        keys=('auto_mounts',),
+        default_value=None)
+    if not auto_mounts_config:
+        return AutoMountResolution(mounted=[], skipped=[])
+
+    mounted: List[AutoMount] = []
+    skipped: List[SkippedAutoMount] = []
+    current_user_hash = common_utils.get_current_user().id
+    active_workspace = skypilot_config.get_active_workspace()
+    for entry in auto_mounts_config:
+        volume_name = entry['volume_name']
+        record = global_user_state.get_volume_by_name(volume_name)
+        if record is None:
+            skipped.append(
+                SkippedAutoMount(
+                    volume_name,
+                    f'Auto-mount volume {volume_name!r} not found in SkyPilot '
+                    f'volume DB. Skipping. Create it with: sky volumes apply',
+                    is_warning=True))
+            continue
+        scope = entry.get('scope', AutoMountScope.GLOBAL.value)
+        if not auto_mount_in_scope(scope,
+                                   volume_user_hash=record['user_hash'],
+                                   volume_workspace=record['workspace'],
+                                   current_user_hash=current_user_hash,
+                                   active_workspace=active_workspace):
+            skipped.append(
+                SkippedAutoMount(
+                    volume_name,
+                    f'Auto-mount volume {volume_name!r} has scope {scope!r} '
+                    f'and does not apply to this launch (user '
+                    f'{current_user_hash!r}, workspace {active_workspace!r}). '
+                    f'Skipping.',
+                    is_warning=False))
+            continue
+        volume_config = record['handle']
+        # Only hostPath and ReadWriteMany PVC volumes support the concurrent
+        # multi-pod access auto_mounts requires.
+        if (volume_config.type == VolumeType.PVC.value and
+                not is_read_write_many_pvc(volume_config)):
+            skipped.append(
+                SkippedAutoMount(
+                    volume_name,
+                    f'Auto-mount volume {volume_name!r} has access mode '
+                    f'{volume_config.config.get("access_mode")!r}, which does '
+                    f'not support concurrent multi-pod access. Only hostPath '
+                    f'volumes and ReadWriteMany PVC volumes are supported for '
+                    f'auto_mounts. Skipping.',
+                    is_warning=True))
+            continue
+        mounted.append(
+            AutoMount(volume_name=volume_name,
+                      record=record,
+                      mount_paths=entry.get('mount_paths', [])))
+    return AutoMountResolution(mounted=mounted, skipped=skipped)
+
+
 @dataclass
 class VolumeInfo:
     """Represents volume info."""
@@ -159,10 +324,14 @@ class VolumeMount:
                 f'Volume {volume_name} not found.')
         if record.get('status') == status_lib.VolumeStatus.NOT_READY:
             error_message = record.get('error_message')
-            msg = f'Volume {volume_name} is not ready.'
-            if error_message:
-                msg += f' Error: {error_message}'
-            raise exceptions.VolumeNotReadyError(msg)
+            # Same rule as the check that runs on every launch (see
+            # `_reject_not_ready_volume`): a volume that is being provisioned is
+            # not-ready and is not a reason to refuse.
+            if not volume_error_may_resolve(error_message):
+                msg = f'Volume {volume_name} is not ready.'
+                if error_message:
+                    msg += f' Error: {error_message}'
+                raise exceptions.VolumeNotReadyError(msg)
         assert 'handle' in record, 'Volume handle is None.'
         volume_config: models.VolumeConfig = record['handle']
         return cls(path, volume_name, volume_config, sub_path=sub_path)
