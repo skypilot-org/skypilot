@@ -209,7 +209,10 @@ class PermissionService:
                      f'{len(self._read_only_endpoints)}')
 
     def _maybe_initialize_basic_auth_user(self) -> None:
-        """Initialize basic auth user if it is enabled."""
+        """Initialize basic auth user if it is enabled.
+
+        Caller holds `_policy_lock()`.
+        """
         basic_auth = os.environ.get(constants.SKYPILOT_INITIAL_BASIC_AUTH)
         if not basic_auth:
             return
@@ -229,13 +232,28 @@ class PermissionService:
                             password=password,
                             user_type=models.UserType.BASIC.value))
             enforcer = self._ensure_enforcer()
+            # Same reason as `_maybe_initialize_policies`: `save_policy()`
+            # rewrites the whole table from this model, which predates the
+            # lock unless refreshed.
+            self._load_policy_no_lock()
             enforcer.add_grouping_policy(user_hash, rbac.RoleName.ADMIN.value)
             enforcer.save_policy()
             logger.info(f'Basic auth user {username} initialized')
 
     def _maybe_initialize_policies(self) -> None:
-        """Initialize policies if they don't already exist."""
+        """Initialize policies if they don't already exist.
+
+        Caller holds `_policy_lock()`.
+        """
         logger.debug(f'Initializing policies in process: {os.getpid()}')
+
+        # The model was loaded by the enforcer's constructor, before the lock
+        # was acquired -- and waiting for it can take seconds. Anything another
+        # replica wrote in that window is missing here, and this method both
+        # ends in a full-table `save_policy()` and deletes whatever it
+        # considers redundant, so it would erase those writes rather than
+        # merely miss them.
+        self._load_policy_no_lock()
 
         policy_updated = False
 
@@ -344,6 +362,12 @@ class PermissionService:
         """Add user role relationship. `role` overrides the default role."""
         self._lazy_initialize()
         with _policy_lock():
+            # Refresh before deciding: the callee reads this process's
+            # in-memory model, which may predate another worker's write, and
+            # would then add a *second* role for a user who already has one.
+            # Deliberately here rather than in the callee, which
+            # `_maybe_initialize_policies` calls once per user in a loop.
+            self._load_policy_no_lock()
             self._add_user_if_not_exists_no_lock(user_id, role)
 
     def _add_user_if_not_exists_no_lock(self,
@@ -363,35 +387,44 @@ class PermissionService:
         return False
 
     def delete_user(self, user_id: str) -> None:
-        """Delete user role relationship."""
+        """Remove every policy naming a user: their role and workspace grants.
+
+        User ids are derived from the username, so a delete followed by a
+        recreate reuses the id -- anything left behind is silently inherited by
+        the next holder. Both row types are keyed by user id at field 0, and a
+        filtered removal also clears duplicates, which a loop over the
+        deduplicated role list cannot reach.
+        """
         with _policy_lock():
             self._load_policy_no_lock()
             enforcer = self._ensure_enforcer()
-            current_roles = enforcer.get_roles_for_user(user_id)
-            if not current_roles:
-                logger.debug(f'User {user_id} has no roles')
+            removed_roles = enforcer.remove_filtered_grouping_policy(0, user_id)
+            # Private-workspace membership is a `p` row (user, workspace, '*').
+            # Role names also sit at field 0 of `p` rows (the blocklist rules),
+            # so match the '*' action as well instead of field 0 alone: no user
+            # id is a role name today, but taking out a role's whole blocklist
+            # would leave that role unrestricted rather than merely wrong. ''
+            # matches any value, in the model and in the sqlalchemy adapter.
+            removed_grants = enforcer.remove_filtered_policy(
+                0, user_id, '', '*')
+            if not removed_roles and not removed_grants:
+                # Nothing to persist, and nothing to invalidate.
                 return
-            enforcer.remove_grouping_policy(user_id, current_roles[0])
             enforcer.save_policy()
             self.invalidate_user_permission_cache(user_id)
 
     def update_role(self, user_id: str, new_role: str) -> None:
-        """Update user role relationship."""
+        """Replace every role held by a user with `new_role`."""
         with _policy_lock():
             self._load_policy_no_lock()
             enforcer = self._ensure_enforcer()
-            current_roles = enforcer.get_roles_for_user(user_id)
-            if not current_roles:
-                logger.debug(f'User {user_id} has no roles')
-            else:
-                # TODO(hailong): how to handle multiple roles?
-                current_role = current_roles[0]
-                if current_role == new_role:
-                    logger.debug(f'User {user_id} already has role {new_role}')
-                    return
-                enforcer.remove_grouping_policy(user_id, current_role)
-
-            # Update user role
+            if enforcer.get_roles_for_user(user_id) == [new_role]:
+                return
+            # Replace, don't add: a user is only ever meant to hold one role,
+            # and a leftover `admin` would survive a demotion -- silently
+            # restoring what the demotion took away, since the blocklist check
+            # lets admin win over the other role.
+            enforcer.remove_filtered_grouping_policy(0, user_id)
             enforcer.add_grouping_policy(user_id, new_role)
             enforcer.save_policy()
             # Always invalidate: even a first role assignment can grant
@@ -912,6 +945,12 @@ class PermissionService:
     def remove_workspace_policy(self, workspace_name: str) -> None:
         """Remove workspace policy."""
         with _policy_lock():
+            # Reload from the DB inside the lock before mutating: save_policy()
+            # rewrites the whole table from this process's in-memory model, so
+            # without this a stale worker deleting a workspace also erases
+            # every policy another worker wrote since this one last loaded.
+            # Same reason as `add_workspace_policy` / `update_workspace_policy`.
+            self._load_policy_no_lock()
             enforcer = self._ensure_enforcer()
             enforcer.remove_filtered_policy(1, workspace_name)
             enforcer.save_policy()

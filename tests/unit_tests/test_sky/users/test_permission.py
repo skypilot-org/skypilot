@@ -5,7 +5,9 @@ import threading
 import time
 from unittest import mock
 
+import casbin
 import pytest
+import sqlalchemy
 import sqlalchemy_adapter
 
 from sky import models
@@ -279,7 +281,9 @@ class TestPermissionService:
 
         mock_enforcer = mock.Mock()
         mock_enforcer.get_roles_for_user.return_value = ['user']  # Current role
-        mock_enforcer.remove_grouping_policy.return_value = True
+        mock_enforcer.remove_filtered_grouping_policy.return_value = [[
+            'user1', 'user'
+        ]]
         mock_enforcer.add_grouping_policy.return_value = True
 
         service = permission.PermissionService()
@@ -288,9 +292,9 @@ class TestPermissionService:
 
         service.update_role('user1', 'admin')
 
-        # Verify old role was removed and new role was added
-        mock_enforcer.remove_grouping_policy.assert_called_once_with(
-            'user1', 'user')
+        # Every existing role is dropped, then the new one added.
+        mock_enforcer.remove_filtered_grouping_policy.assert_called_once_with(
+            0, 'user1')
         mock_enforcer.add_grouping_policy.assert_called_once_with(
             'user1', 'admin')
         mock_enforcer.save_policy.assert_called_once()
@@ -731,9 +735,11 @@ class TestPermissionService:
     def test_delete_user_with_role(self, mock_kv_cache):
         """Test deleting a user who has a role."""
         mock_enforcer = mock.Mock()
-        # User has a role
-        mock_enforcer.get_roles_for_user.return_value = ['user']
-        mock_enforcer.remove_grouping_policy.return_value = True
+        # User has a role, no workspace grants
+        mock_enforcer.remove_filtered_grouping_policy.return_value = [[
+            'user1', 'user'
+        ]]
+        mock_enforcer.remove_filtered_policy.return_value = []
 
         with mock.patch.object(permission.PermissionService,
                                '__init__',
@@ -743,9 +749,8 @@ class TestPermissionService:
 
             service.delete_user('user1')
 
-            mock_enforcer.get_roles_for_user.assert_called_once_with('user1')
-            mock_enforcer.remove_grouping_policy.assert_called_once_with(
-                'user1', 'user')
+            mock_enforcer.remove_filtered_grouping_policy.assert_called_once_with(
+                0, 'user1')
             mock_enforcer.save_policy.assert_called_once()
             # Verify cache invalidation
             mock_kv_cache.delete_cache_entries_by_prefix_suffix.assert_called_once(
@@ -758,8 +763,9 @@ class TestPermissionService:
     def test_delete_user_without_role(self, mock_kv_cache):
         """Test deleting a user who has no roles."""
         mock_enforcer = mock.Mock()
-        # User has no roles
-        mock_enforcer.get_roles_for_user.return_value = []
+        # User has neither roles nor workspace grants: nothing matched.
+        mock_enforcer.remove_filtered_grouping_policy.return_value = []
+        mock_enforcer.remove_filtered_policy.return_value = []
 
         with mock.patch.object(permission.PermissionService,
                                '__init__',
@@ -769,8 +775,8 @@ class TestPermissionService:
 
             service.delete_user('user2')
 
-            mock_enforcer.get_roles_for_user.assert_called_once_with('user2')
-            mock_enforcer.remove_grouping_policy.assert_not_called()
+            mock_enforcer.remove_filtered_grouping_policy.assert_called_once_with(
+                0, 'user2')
             mock_enforcer.save_policy.assert_not_called()
             # No cache invalidation for user without role (early return)
             mock_kv_cache.delete_cache_entries_by_prefix_suffix.assert_not_called(
@@ -2093,3 +2099,192 @@ class TestWorkspaceReadOnlyAccess:
         assert ('u2', 'ws', '*') in calls
         # No materialized read-only wildcard is ever written.
         assert all(c[2] == '*' for c in calls)
+
+
+@pytest.fixture
+def two_workers(tmp_path):
+    """Two PermissionServices over one database, as two API-server workers.
+
+    Each uvicorn worker holds its own in-memory casbin model, so a write by one
+    is invisible to the other until it reloads. Two enforcers over one SQLite
+    file reproduce that exactly, without needing two processes.
+    """
+    engine = sqlalchemy.create_engine(f'sqlite:///{tmp_path}/policy.db')
+    model_path = os.path.join(os.path.dirname(permission.__file__),
+                              'model.conf')
+
+    def _worker():
+        service = permission.PermissionService()
+        adapter = sqlalchemy_adapter.Adapter(
+            engine, db_class=sqlalchemy_adapter.CasbinRule)
+        service.enforcer = casbin.SyncedEnforcer(model_path, adapter)
+        return service
+
+    with mock.patch('sky.users.permission._policy_lock'), \
+         mock.patch.object(permission.PermissionService,
+                           'invalidate_user_permission_cache'), \
+         mock.patch.object(permission.PermissionService,
+                           'invalidate_workspace_permission_cache'):
+        yield _worker(), _worker()
+
+
+def _grouping_rows(service, user_id):
+    """The user's grouping rows as persisted, read through a fresh model."""
+    service.enforcer.load_policy()
+    return sorted(service.enforcer.get_roles_for_user(user_id))
+
+
+class TestStalePolicyWrites:
+    """A worker must reload inside the lock before it mutates the policy.
+
+    Every one of these fails if the corresponding `_load_policy_no_lock()` is
+    removed, because worker B's in-memory model is deliberately older than
+    worker A's write.
+    """
+
+    def test_add_user_if_not_exists_does_not_duplicate_role(self, two_workers):
+        worker_a, worker_b = two_workers
+        # B snapshots the empty policy, then A assigns a role behind its back.
+        worker_b.enforcer.load_policy()
+        worker_a.update_role('victim', 'viewer')
+
+        worker_b.add_user_if_not_exists('victim')
+
+        # Without the reload, B believes victim is role-less and adds the
+        # default on top, leaving ['admin', 'viewer'] -- which reads as admin.
+        assert _grouping_rows(worker_a, 'victim') == ['viewer']
+
+    @mock.patch('sky.global_user_state.add_or_update_user')
+    @mock.patch('sky.global_user_state.get_all_users', return_value=[])
+    @mock.patch('sky.users.rbac.get_workspace_policy_permissions',
+                return_value={})
+    @mock.patch('sky.users.rbac.get_role_permissions',
+                return_value={'user': {
+                    'permissions': {
+                        'blocklist': []
+                    }
+                }})
+    @mock.patch.object(permission.PermissionService,
+                       '_get_plugin_rbac_rules',
+                       return_value={})
+    def test_startup_initialization_keeps_other_writes(self, _rules, _perms,
+                                                       _ws, _users, _add,
+                                                       two_workers):
+        """Startup rewrites the whole table, so it must refresh first.
+
+        The enforcer loads in its constructor, before `_policy_lock()` is
+        acquired -- and waiting for that lock can take seconds. A replica that
+        booted earlier can write in the window, and this path both saves the
+        whole table and deletes what it thinks is redundant.
+        """
+        worker_a, worker_b = two_workers
+        # B is mid-boot: model loaded, still waiting for the lock.
+        worker_b.enforcer.load_policy()
+        worker_a.update_role('early', 'admin')
+
+        worker_b._maybe_initialize_policies()
+
+        # Role assignments are not derived from config, so this method has no
+        # basis for dropping one -- it only does so by rewriting the table from
+        # a model that never saw it. (Workspace `p` rows are a different
+        # matter: reconciling those against config is this method's job, so a
+        # grant the config no longer lists is *meant* to go.)
+        assert _grouping_rows(worker_a, 'early') == ['admin']
+
+    @mock.patch('sky.global_user_state.add_or_update_user')
+    @mock.patch('sky.global_user_state.get_user', return_value=None)
+    def test_basic_auth_initialization_keeps_other_writes(
+            self, _get_user, _add_user, monkeypatch, two_workers):
+        """The basic-auth seed also ends in a whole-table rewrite."""
+        monkeypatch.setenv(constants.SKYPILOT_INITIAL_BASIC_AUTH,
+                           'admin:password123')
+        worker_a, worker_b = two_workers
+        worker_b.enforcer.load_policy()
+        worker_a.update_role('early', 'viewer')
+
+        worker_b._maybe_initialize_basic_auth_user()
+
+        assert _grouping_rows(worker_a, 'early') == ['viewer']
+
+    def test_remove_workspace_policy_keeps_other_writes(self, two_workers):
+        worker_a, worker_b = two_workers
+        worker_a.add_workspace_policy('ws_victim', ['bob'])
+        worker_b.enforcer.load_policy()
+        # A demotes alice and grants her a workspace, after B's snapshot.
+        worker_a.update_role('alice', 'viewer')
+        worker_a.add_workspace_policy('ws_keep', ['alice'])
+
+        worker_b.remove_workspace_policy('ws_victim')
+
+        # save_policy() rewrites the whole table from the caller's model, so
+        # without the reload this also erases everything A just wrote.
+        worker_a.enforcer.load_policy()
+        remaining = worker_a.enforcer.get_policy()
+        assert ['alice', 'ws_keep', '*'] in remaining
+        assert ['bob', 'ws_victim', '*'] not in remaining
+        assert _grouping_rows(worker_a, 'alice') == ['viewer']
+
+
+class TestRoleReplacement:
+    """A user is only ever meant to hold one role."""
+
+    def test_update_role_replaces_every_role(self, two_workers):
+        worker_a, _ = two_workers
+        worker_a.enforcer.add_grouping_policy('multi', 'admin')
+        worker_a.enforcer.add_grouping_policy('multi', 'user')
+
+        worker_a.update_role('multi', 'viewer')
+
+        # A leftover 'admin' would silently undo the demotion.
+        assert _grouping_rows(worker_a, 'multi') == ['viewer']
+
+    def test_update_role_to_the_only_held_role_is_a_noop(self, two_workers):
+        worker_a, _ = two_workers
+        worker_a.update_role('solo', 'user')
+        worker_a.update_role('solo', 'user')
+        assert _grouping_rows(worker_a, 'solo') == ['user']
+
+    def test_delete_user_removes_every_role(self, two_workers):
+        worker_a, _ = two_workers
+        worker_a.enforcer.add_grouping_policy('multi', 'admin')
+        worker_a.enforcer.add_grouping_policy('multi', 'user')
+
+        worker_a.delete_user('multi')
+
+        # An orphan grant would be inherited by whoever next takes this id.
+        assert _grouping_rows(worker_a, 'multi') == []
+
+    def test_delete_user_removes_workspace_grants(self, two_workers):
+        """Deleting a user must revoke their private-workspace membership.
+
+        User ids are derived from the username, so recreating a deleted user
+        reuses the id and would silently inherit whatever was left behind.
+        """
+        worker_a, _ = two_workers
+        worker_a.update_role('leaver', 'user')
+        worker_a.add_workspace_policy('team_private', ['leaver', 'stayer'])
+
+        worker_a.delete_user('leaver')
+
+        worker_a.enforcer.load_policy()
+        remaining = worker_a.enforcer.get_policy()
+        assert ['leaver', 'team_private', '*'] not in remaining
+        # Only that user's grant goes; the workspace's other members stay.
+        assert ['stayer', 'team_private', '*'] in remaining
+
+    def test_delete_user_keeps_a_blocklist_of_the_same_name(self, two_workers):
+        """A user id equal to a role name must not take the role's rules.
+
+        Nothing produces such an id today, but the failure is fail-open: a role
+        with no blocklist rows is permitted everywhere.
+        """
+        worker_a, _ = two_workers
+        worker_a.enforcer.add_policy('user', '/workspaces/update', 'POST')
+        worker_a.enforcer.add_policy('user', 'team_private', '*')
+
+        worker_a.delete_user('user')
+
+        worker_a.enforcer.load_policy()
+        remaining = worker_a.enforcer.get_policy()
+        assert ['user', '/workspaces/update', 'POST'] in remaining
+        assert ['user', 'team_private', '*'] not in remaining
