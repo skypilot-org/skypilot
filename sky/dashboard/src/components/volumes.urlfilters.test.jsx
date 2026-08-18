@@ -41,14 +41,15 @@ const volume = (name, status, user = 'alice') => ({
   user_name: user,
 });
 
-// Statuses deliberately share no substring: the shared `evaluateCondition`
-// matches on substring, so `READY` would otherwise also select `NOT_READY`
-// and the assertions below would not mean what they say.
+// The real VolumeStatus values. The shared `evaluateCondition` matches on
+// substring, and `READY` is a substring of `NOT_READY`, so the assertions below
+// filter on `IN_USE` / `NOT_READY`. Names are chosen the same way -- none is a
+// substring of another.
 const VOLUMES = [
   volume('ready-one', 'READY'),
-  volume('ready-two', 'READY', 'bob'),
   volume('inuse-one', 'IN_USE'),
-  volume('failed-one', 'FAILED', 'bob'),
+  volume('inuse-two', 'IN_USE', 'bob'),
+  volume('blocked-one', 'NOT_READY', 'bob'),
 ];
 
 const openAt = async (search) => {
@@ -94,22 +95,22 @@ describe('volumes filters in the URL', () => {
   });
 
   it('opens a shared link already filtered', async () => {
-    await openAt('?status=READY');
+    await openAt('?status=IN_USE');
     await waitFor(() =>
-      expect(volumeNames()).toEqual(['ready-one', 'ready-two'])
+      expect(volumeNames()).toEqual(['inuse-one', 'inuse-two'])
     );
   });
 
   it('reads several values on one property as alternatives', async () => {
-    await openAt('?status=READY,FAILED');
+    await openAt('?status=IN_USE,NOT_READY');
     await waitFor(() =>
-      expect(volumeNames()).toEqual(['ready-one', 'ready-two', 'failed-one'])
+      expect(volumeNames()).toEqual(['inuse-one', 'inuse-two', 'blocked-one'])
     );
   });
 
   it('combines different properties as conditions', async () => {
-    await openAt('?status=READY&user=bob');
-    await waitFor(() => expect(volumeNames()).toEqual(['ready-two']));
+    await openAt('?status=IN_USE&user=bob');
+    await waitFor(() => expect(volumeNames()).toEqual(['inuse-two']));
   });
 
   it('names the parameter after the property when a chip is added', async () => {
@@ -121,24 +122,24 @@ describe('volumes filters in the URL', () => {
 
   it('replaces rather than stacks a single-valued property', async () => {
     await openAt('?name=ready-one');
-    await addNameChip('failed-one');
+    await addNameChip('blocked-one');
     // One chip, one value: the chip bar cannot show a filter that the URL and
     // the table would disagree about.
-    expect(search()).toBe('?name=failed-one');
-    await waitFor(() => expect(volumeNames()).toEqual(['failed-one']));
+    expect(search()).toBe('?name=blocked-one');
+    await waitFor(() => expect(volumeNames()).toEqual(['blocked-one']));
   });
 
   it('keeps a comma readable rather than percent-encoding it', async () => {
     // The hook rewrites the address bar from its own state on mount, so this
     // is the round trip, not just the link it was handed.
-    await openAt('?status=READY,FAILED');
-    await waitFor(() => expect(search()).toBe('?status=READY,FAILED'));
+    await openAt('?status=IN_USE,NOT_READY');
+    await waitFor(() => expect(search()).toBe('?status=IN_USE,NOT_READY'));
   });
 
   it('ignores a parameter no property claims', async () => {
-    await openAt('?nonsense=1&status=READY');
+    await openAt('?nonsense=1&status=IN_USE');
     await waitFor(() =>
-      expect(volumeNames()).toEqual(['ready-one', 'ready-two'])
+      expect(volumeNames()).toEqual(['inuse-one', 'inuse-two'])
     );
   });
 });
