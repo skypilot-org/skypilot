@@ -1967,9 +1967,12 @@ def test_auto_mount_not_ready_on_kubernetes():
                 smoke_tests_utils.wait_until_volume_is_rejected_cmd(
                     broken_volume),
                 # Auto-mounting it must refuse the launch, name the volume, and
-                # leave no cluster behind.
+                # leave no cluster behind. Pinned to the same context as the
+                # volumes: a multi-context server could otherwise land the
+                # launch where neither volume exists.
                 smoke_tests_utils.with_config(
-                    f'! sky launch -y -c {name} --infra kubernetes '
+                    f'! sky launch -y -c {name} '
+                    f'{smoke_tests_utils.AGENT_K8S_INFRA} '
                     f'{task_f.name} > {name}-refused.log 2>&1; '
                     f'cat {name}-refused.log && '
                     f'grep -q "not ready" {name}-refused.log && '
@@ -1980,7 +1983,8 @@ def test_auto_mount_not_ready_on_kubernetes():
                 # A usable auto-mount volume still mounts, so the check is not
                 # simply refusing everything.
                 smoke_tests_utils.with_config(
-                    f'sky launch -y -c {name} --infra kubernetes '
+                    f'sky launch -y -c {name} '
+                    f'{smoke_tests_utils.AGENT_K8S_INFRA} '
                     f'{task_f.name}', good_cfg_f.name),
                 f'sky logs {name} 1 --status',
                 f'sky logs {name} 1 | grep "auto mount ok"',
