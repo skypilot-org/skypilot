@@ -104,7 +104,13 @@ _LOG_STREAM_CHECK_CONTROLLER_GAP_SECONDS = 5
 _PROVISION_LOG_POLL_GAP_SECONDS = 1
 
 _JOB_STATUS_FETCH_TIMEOUT_SECONDS = 30
-JOB_STATUS_FETCH_TOTAL_TIMEOUT_SECONDS = 60
+
+# Defaults for the transient status-check window; see
+# TransientStatusCheckWindow for why both a time and a retry budget are
+# needed. Both are overridable under `jobs.status_check` in
+# ~/.sky/config.yaml.
+JOB_STATUS_FETCH_MIN_ELAPSED_SECONDS = 60
+JOB_STATUS_FETCH_MIN_RETRIES = 5
 
 # Pattern matching the "From controller <UUID>" line that the controller
 # emits at job-claim time (see sky/jobs/controller.py: run_job). Used by
@@ -518,6 +524,106 @@ class JobStatusLogger:
         """
         self.flush()
         self._message = None
+
+
+class TransientStatusCheckWindow:
+    """Tracks a run of consecutive transient job-status-check failures.
+
+    The controller polls its job's status every
+    JOB_STATUS_CHECK_GAP_SECONDS. A check can fail for reasons that say
+    nothing about whether the job is alive: a transport error on the way to
+    the cluster, or a provider API error while refreshing cluster status. To
+    avoid tearing down a healthy job on such a blip, the controller retries
+    before escalating to recovery -- which cancels the job and relaunches it.
+
+    A run is only treated as the job being unhealthy once *both* budgets are
+    exhausted: at least ``min_elapsed_seconds`` have passed since the first
+    failure in the run, *and* at least ``min_retries`` retries have been
+    made. Requiring both is deliberate, because either alone is unreliable:
+
+    - Elapsed time alone: a single status-check round can itself take far
+      longer than the time budget, because the cluster-status refresh that
+      runs before recovery does its own retried probes of the cluster. The
+      budget can therefore be fully consumed within the round that opened
+      the window, and the job is torn down without ever being retried --
+      the retry exists on paper only.
+    - Retry count alone: a burst of failures that each return immediately
+      (a connection error, say) can exhaust a retry count in a couple of
+      seconds, long before a transient condition has had a chance to clear.
+
+    A successful status check ends the run; see ``reset()``.
+    """
+
+    def __init__(self,
+                 min_elapsed_seconds: Optional[float] = None,
+                 min_retries: Optional[int] = None) -> None:
+        if min_elapsed_seconds is None:
+            min_elapsed_seconds = skypilot_config.get_nested(
+                ('jobs', 'status_check', 'min_elapsed_seconds'),
+                JOB_STATUS_FETCH_MIN_ELAPSED_SECONDS)
+        if min_retries is None:
+            min_retries = skypilot_config.get_nested(
+                ('jobs', 'status_check', 'min_retries'),
+                JOB_STATUS_FETCH_MIN_RETRIES)
+        self._min_elapsed_seconds = min_elapsed_seconds
+        self._min_retries = min_retries
+        self._start_time: Optional[float] = None
+        self._retries = 0
+        self._backoff: Optional[common_utils.Backoff] = None
+
+    def record_failure(self) -> None:
+        """Opens the run if it is not already open."""
+        if self._start_time is None:
+            self._start_time = time.time()
+            self._backoff = common_utils.Backoff(initial_backoff=1,
+                                                 max_backoff_factor=5)
+
+    def reset(self) -> None:
+        """Ends the run, e.g. after a successful check or after a recovery."""
+        self._start_time = None
+        self._retries = 0
+        self._backoff = None
+
+    @property
+    def active(self) -> bool:
+        return self._start_time is not None
+
+    @property
+    def elapsed(self) -> float:
+        """Seconds since the first failure in the current run."""
+        if self._start_time is None:
+            return 0.0
+        return time.time() - self._start_time
+
+    @property
+    def retries(self) -> int:
+        """Retries made in the current run."""
+        return self._retries
+
+    @property
+    def exhausted(self) -> bool:
+        """Whether both budgets are spent, i.e. the job looks unhealthy."""
+        return (self.elapsed >= self._min_elapsed_seconds and
+                self._retries >= self._min_retries)
+
+    def next_backoff(self) -> float:
+        """Records a retry and returns how long to wait before making it."""
+        assert self._backoff is not None, (
+            'record_failure() must be called before next_backoff()')
+        self._retries += 1
+        backoff_time = self._backoff.current_backoff()
+        remaining = self._min_elapsed_seconds - self.elapsed
+        if remaining > 0:
+            # Do not sleep past the time budget: the retry budget may already
+            # be satisfied, in which case the run should be re-evaluated as
+            # soon as the time budget expires.
+            return min(backoff_time, remaining)
+        return backoff_time
+
+    def summary(self) -> str:
+        """Human-readable description of what has been spent so far."""
+        return (f'{self.elapsed:.1f} seconds and {self._retries} '
+                f'{"retry" if self._retries == 1 else "retries"}')
 
 
 async def get_job_status(
