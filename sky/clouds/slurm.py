@@ -895,11 +895,9 @@ class Slurm(clouds.Cloud):
             # Retrieve the config options for a given SlurmctldHost name alias.
             ssh_config_dict = ssh_config.lookup(cluster)
             try:
-                # Run the reachability check as the SSH user, like the
-                # cluster-wide inventory commands do (see
-                # slurm_utils._get_slurm_inventory_client): whether a Slurm
-                # cluster is enabled must not depend on the user requesting
-                # the check having a Unix account on the login node.
+                # Run the reachability check as the SSH user so connection
+                # failures can be distinguished from submit-user access
+                # failures.
                 client = _make_slurm_client(ssh_config_dict, slurm_user=None)
                 info = client.info()
                 logger.debug(f'Slurm cluster {cluster} sinfo: {info}')
@@ -925,20 +923,26 @@ class Slurm(clouds.Cloud):
                 # Resolve the check path to an absolute path so that
                 # stat (via shlex.quote) gets a literal path with no
                 # shell variables or ~.
-                remote_env = fs_client.get_env()
-                if submit_user is not None and not remote_env:
-                    # Commands could not be run as the submit user, e.g. the
-                    # user has no matching account on the login node, or
-                    # running commands as that user is not permitted. The
-                    # cluster itself is reachable, so keep it enabled and say
-                    # what went wrong instead of reporting the vague
-                    # filesystem warnings below.
-                    warning_msg = (
-                        'Warning: Could not run commands on the login node as '
-                        f'submit user {submit_user!r}, so the shared '
-                        'filesystem check was skipped. Jobs submitted by this '
-                        'user will fail at launch until a matching account '
-                        'exists on the login node.')
+                access_error = None
+                if submit_user is not None:
+                    ssh_user = ssh_config_dict['user']
+                    access_error = (
+                        'disabled. Could not run commands on the login node '
+                        f'as submit user {submit_user!r}. Ensure the submit '
+                        'user has a login-node account and SSH user '
+                        f'{ssh_user!r} is permitted to run commands as that '
+                        'user.')
+                try:
+                    remote_env = fs_client.get_env(
+                        raise_on_error=submit_user is not None)
+                except exceptions.CommandError as e:
+                    assert access_error is not None
+                    ctx2text[cluster] = (f'{access_error} '
+                                         f'{common_utils.format_exception(e)}')
+                    continue
+                if access_error is not None and not remote_env:
+                    ctx2text[cluster] = access_error
+                    continue
                 else:
                     if workdir is not None:
                         check_path = slurm_utils.expand_path_vars(

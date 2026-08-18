@@ -9,6 +9,7 @@ import unittest.mock as mock
 
 import pytest
 
+from sky import exceptions
 from sky import resources as resources_lib
 from sky.adaptors import slurm
 from sky.clouds import slurm as slurm_cloud
@@ -1730,6 +1731,16 @@ class TestGetEnv:
         env = slurm.SlurmClient.get_env(client)
         assert env == {}
 
+    def test_command_failure_raises_when_required(self):
+        client = mock.MagicMock(spec=slurm.SlurmClient)
+        client._run_slurm_cmd.return_value = (1, '', 'Connection refused')
+
+        with pytest.raises(exceptions.CommandError) as exc_info:
+            slurm.SlurmClient.get_env(client, raise_on_error=True)
+
+        assert exc_info.value.returncode == 1
+        assert exc_info.value.detailed_reason == '\nConnection refused'
+
 
 class TestExpandPathVars:
     """Test expand_path_vars with Python-side variable expansion."""
@@ -1827,6 +1838,7 @@ class TestCheckComputeCredentials:
             success, ctx2text = slurm_cloud.Slurm._check_compute_credentials()
 
         assert success
+        assert isinstance(ctx2text, dict)
         # Same login node, but impersonating the submit user.
         assert mock_client_class.call_args_list[1].args == ('login.example.com',
                                                             22, 'ubuntu', None)
@@ -1838,24 +1850,40 @@ class TestCheckComputeCredentials:
         check_client.check_dir_shared_fs.assert_not_called()
         assert 'Warning' not in ctx2text[self.CLUSTER]
 
-    def test_impersonation_failure_warns_but_stays_enabled(self):
+    def test_submit_user_command_failure_disables_cluster(self):
         check_client = self._make_client_mock()
         fs_client = self._make_client_mock()
-        # get_env() returns {} when the command could not be run, e.g. the
-        # submit user has no account on the login node.
+        fs_client.get_env.side_effect = exceptions.CommandError(
+            1, 'env', 'Failed to fetch remote environment.',
+            'sudo: a password is required')
+
+        with self._patched('alice', [check_client, fs_client]):
+            success, ctx2text = slurm_cloud.Slurm._check_compute_credentials()
+
+        assert not success
+        assert isinstance(ctx2text, dict)
+        reason = ctx2text[self.CLUSTER]
+        assert 'disabled' in reason
+        assert 'enabled' not in reason
+        assert 'submit user \'alice\'' in reason
+        assert 'SSH user \'ubuntu\'' in reason
+        assert 'permitted to run commands' in reason
+        assert 'sudo: a password is required' in reason
+        fs_client.get_env.assert_called_once_with(raise_on_error=True)
+        fs_client.check_dir_shared_fs.assert_not_called()
+
+    def test_empty_submit_user_environment_disables_cluster(self):
+        check_client = self._make_client_mock()
+        fs_client = self._make_client_mock()
         fs_client.get_env.return_value = {}
 
         with self._patched('alice', [check_client, fs_client]):
             success, ctx2text = slurm_cloud.Slurm._check_compute_credentials()
 
-        assert success
-        reason = ctx2text[self.CLUSTER]
-        assert 'enabled' in reason
-        assert 'disabled' not in reason
-        assert "submit user 'alice'" in reason
-        assert 'fail at launch' in reason
-        # The vague filesystem warning is not emitted instead.
-        assert 'Could not determine filesystem type' not in reason
+        assert not success
+        assert isinstance(ctx2text, dict)
+        assert 'disabled' in ctx2text[self.CLUSTER]
+        fs_client.get_env.assert_called_once_with(raise_on_error=True)
         fs_client.check_dir_shared_fs.assert_not_called()
 
     def test_no_submit_user_reuses_the_single_client(self):
@@ -1865,6 +1893,7 @@ class TestCheckComputeCredentials:
             success, ctx2text = slurm_cloud.Slurm._check_compute_credentials()
 
         assert success
+        assert isinstance(ctx2text, dict)
         assert mock_client_class.call_count == 1
         assert 'Warning' not in ctx2text[self.CLUSTER]
         check_client.check_dir_shared_fs.assert_called_once_with('/home/ubuntu')
