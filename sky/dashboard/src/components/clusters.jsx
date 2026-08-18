@@ -241,6 +241,38 @@ const readStoredOwnerScope = () => {
   }
 };
 
+// The chosen history window is a preference, not part of the view: `history=off`
+// carries no day count, so remember it the way the page already remembers the
+// owner scope and the page size. A window named in the URL wins and is stored,
+// like a manual choice.
+const HISTORY_DAYS_STORAGE_KEY = 'skypilot-dashboard-clusters-history-days';
+
+const readStoredHistoryDays = () => {
+  if (typeof window === 'undefined') {
+    return null;
+  }
+  try {
+    const stored = parseInt(
+      window.localStorage.getItem(HISTORY_DAYS_STORAGE_KEY),
+      10
+    );
+    return HISTORY_DAY_OPTIONS.includes(stored) ? stored : null;
+  } catch (e) {
+    return null;
+  }
+};
+
+const writeStoredHistoryDays = (days) => {
+  if (typeof window === 'undefined') {
+    return;
+  }
+  try {
+    window.localStorage.setItem(HISTORY_DAYS_STORAGE_KEY, String(days));
+  } catch (e) {
+    // Ignore: the window still applies for this session via state/URL.
+  }
+};
+
 const writeStoredOwnerScope = (scope) => {
   if (typeof window === 'undefined') {
     return;
@@ -423,11 +455,14 @@ export function Clusters() {
   // Remember the chosen window across an Active/All round trip: `history=off`
   // carries no day count, so without this the toggle would silently reset a
   // 30-day view to 1 day.
-  const lastHistoryDays = useRef(historyDays);
+  const lastHistoryDays = useRef(
+    parseHistory(view.history) ?? readStoredHistoryDays() ?? 1
+  );
   useEffect(() => {
     const days = parseHistory(view.history);
     if (days !== null) {
       lastHistoryDays.current = days;
+      writeStoredHistoryDays(days);
     }
   }, [view.history]);
 
@@ -756,7 +791,10 @@ export function ClusterTable({
       url.searchParams.delete('pageSize');
     }
     if (url.href !== window.location.href) {
-      window.history.replaceState(null, '', url.toString());
+      // Keep the existing state so Next's router entry (`__N`, `key`) survives;
+      // nulling it makes a later popstate change the address bar without
+      // re-rendering the page.
+      window.history.replaceState(window.history.state, '', url.toString());
     }
   }, [page, limit]);
 

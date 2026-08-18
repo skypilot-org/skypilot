@@ -127,7 +127,11 @@ export function useUrlFilterState(filterSchema, viewSchema = []) {
       next !==
       `${window.location.pathname}${window.location.search}${window.location.hash}`
     ) {
-      window.history.replaceState(null, '', next);
+      // Preserve the existing state: Next.js keeps its router entry there
+      // (`__N`, `key`, the resolved url), and replacing it with null makes a
+      // later popstate look like a non-Next navigation -- the address bar
+      // changes while the rendered page does not.
+      window.history.replaceState(window.history.state, '', next);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filters, view, readQuery]);
