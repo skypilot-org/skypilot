@@ -1,5 +1,6 @@
 import {
   buildQueryString,
+  hrefWithQueryKey,
   filtersToQuery,
   hasLegacyFilters,
   legacyFiltersToQuery,
@@ -224,5 +225,50 @@ describe('buildQueryString', () => {
   it('returns an empty string when nothing is set', () => {
     expect(buildQueryString({})).toBe('');
     expect(buildQueryString({ user: '' })).toBe('');
+  });
+});
+
+// Switching a tab is a same-page navigation that changes one query key. It must
+// not drop the filter params the hook wrote straight to history, and must not
+// percent-encode a comma list on the way through.
+describe('hrefWithQueryKey', () => {
+  it('keeps the other keys when setting one', () => {
+    expect(
+      hrefWithQueryKey(
+        '/users',
+        '?gpu=A100&role=admin',
+        'tab',
+        'service-accounts'
+      )
+    ).toBe('/users?gpu=A100&role=admin&tab=service-accounts');
+  });
+
+  it('keeps a comma list readable', () => {
+    expect(
+      hrefWithQueryKey('/volumes', '?status=READY,IN_USE', 'tab', 'buckets')
+    ).toBe('/volumes?status=READY,IN_USE&tab=buckets');
+  });
+
+  it('removes the key when the value is dropped', () => {
+    expect(
+      hrefWithQueryKey(
+        '/users',
+        '?gpu=A100&tab=service-accounts',
+        'tab',
+        undefined
+      )
+    ).toBe('/users?gpu=A100');
+  });
+
+  it('returns a bare path when nothing is left', () => {
+    expect(
+      hrefWithQueryKey('/users', '?tab=service-accounts', 'tab', undefined)
+    ).toBe('/users');
+  });
+
+  it('preserves a repeated key', () => {
+    expect(
+      hrefWithQueryKey('/clusters', '?labels=a%3D1&labels=b%3D2', 'tab', 'x')
+    ).toBe('/clusters?labels=a%3D1&labels=b%3D2&tab=x');
   });
 });

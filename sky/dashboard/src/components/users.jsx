@@ -87,6 +87,7 @@ import {
   filterData,
 } from '@/components/shared/FilterSystem';
 import { useUrlFilterState } from '@/hooks/useUrlFilterState';
+import { hrefWithQueryKey } from '@/components/shared/filterSchema';
 import { trackUserAction, trackFilterUsed } from '@/lib/analytics';
 
 const ACTIVE_JOB_STATUSES = new Set(statusGroups.active);
@@ -111,10 +112,21 @@ const GPU_CONSUMING_JOB_STATUSES = new Set([
 // `evaluateCondition` lowercases to look up the field on each row.
 // `legacyKeys` are the spellings the old triple-array URLs carried, which the
 // dropdown chose to match a suggestion-list key rather than to read well.
-const USER_FILTER_SCHEMA = [
+//
+// GPU and Infra are multi-valued: the table's counting path already reads
+// several values on either as alternatives (see `getFilteredCounts`), so they
+// join with a comma. The rest are single-valued -- a user has one name, one id,
+// one role -- and a second value could only ever empty the table.
+export const USER_FILTER_SCHEMA = [
   { key: 'name', label: 'Name', kind: 'text' },
-  { key: 'gpu', label: 'GPU', kind: 'text', legacyKeys: ['gpu type'] },
-  { key: 'infra', label: 'Infra', kind: 'text' },
+  {
+    key: 'gpu',
+    label: 'GPU',
+    kind: 'enum',
+    multi: true,
+    legacyKeys: ['gpu type'],
+  },
+  { key: 'infra', label: 'Infra', kind: 'enum', multi: true },
   { key: 'userId', label: 'User ID', kind: 'text', legacyKeys: ['user id'] },
   { key: 'role', label: 'Role', kind: 'text' },
 ];
@@ -128,13 +140,19 @@ const PROPERTY_OPTIONS = USER_FILTER_SCHEMA.map(({ key, label }) => ({
   value: key,
 }));
 
-// Every user property is single-valued, so a second chip on one property
-// replaces the first rather than stacking: the chip bar can never show a
-// filter the URL is unable to carry.
-const addFilter = (prevFilters, property, value) => [
-  ...prevFilters.filter((f) => f.property !== property),
-  { property, operator: ':', value },
-];
+const MULTI_VALUE_LABELS = new Set(
+  USER_FILTER_SCHEMA.filter((e) => e.multi).map((e) => e.label)
+);
+
+// A multi-valued property stacks -- two GPU chips mean "either" -- and ignores
+// an exact duplicate. Everything else replaces, so the chip bar can never show
+// a filter the URL is unable to carry.
+const addFilter = (prevFilters, property, value) => {
+  const base = MULTI_VALUE_LABELS.has(property)
+    ? prevFilters.filter((f) => !(f.property === property && f.value === value))
+    : prevFilters.filter((f) => f.property !== property);
+  return [...base, { property, operator: ':', value }];
+};
 
 // Helper function to get GPU count with validation
 const getGPUCount = (accelerators, source) => {
@@ -710,11 +728,19 @@ export function Users() {
     (tab) => {
       trackUserAction('tab_change', { tab });
       setActiveMainTab(tab);
-      if (tab === 'users') {
-        router.push('/users', undefined, { shallow: true });
-      } else {
-        router.push(`/users?tab=${tab}`, undefined, { shallow: true });
-      }
+      // Keep whatever else the address bar carries: the filter params are
+      // written straight to history, so rebuilding the query from scratch here
+      // would drop them and leave the chip bar describing an unshareable URL.
+      router.push(
+        hrefWithQueryKey(
+          '/users',
+          window.location.search,
+          'tab',
+          tab === 'users' ? undefined : tab
+        ),
+        undefined,
+        { shallow: true }
+      );
     },
     [router]
   );

@@ -55,6 +55,7 @@ import {
   filterData,
 } from '@/components/shared/FilterSystem';
 import { useUrlFilterState } from '@/hooks/useUrlFilterState';
+import { hrefWithQueryKey } from '@/components/shared/filterSchema';
 import { PluginSlot } from '@/plugins/PluginSlot';
 import { usePluginComponents, useTableColumns } from '@/plugins/PluginProvider';
 import dashboardCache from '@/lib/cache';
@@ -121,15 +122,13 @@ export function Volumes() {
       // Keep whatever else the address bar carries -- the filter params are
       // written straight to history, so `router.query` may not have caught up
       // and rebuilding the query from it would drop them.
-      const params = new URLSearchParams(window.location.search);
-      if (tab === 'volumes') {
-        params.delete('tab');
-      } else {
-        params.set('tab', tab);
-      }
-      const search = params.toString();
       router.replace(
-        `${router.pathname}${search ? `?${search}` : ''}`,
+        hrefWithQueryKey(
+          router.pathname,
+          window.location.search,
+          'tab',
+          tab === 'volumes' ? undefined : tab
+        ),
         undefined,
         { shallow: true }
       );

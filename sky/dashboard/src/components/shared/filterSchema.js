@@ -168,6 +168,40 @@ export const buildQueryString = (query) => {
   return parts.length ? `?${parts.join('&')}` : '';
 };
 
+/**
+ * Parse a `location.search` string into the `{ key: value }` shape the helpers
+ * above use, collapsing a repeated key into an array.
+ */
+export const parseSearch = (search) => {
+  const params = new URLSearchParams(search);
+  const query = {};
+  for (const key of new Set(params.keys())) {
+    const all = params.getAll(key);
+    query[key] = all.length > 1 ? all : all[0];
+  }
+  return query;
+};
+
+/**
+ * Build an href for a same-page navigation that changes one query key, keeping
+ * every other key the address bar already carries.
+ *
+ * Pages whose filters live in the URL write them straight to history, so
+ * `router.query` can lag behind and rebuilding the query from it drops them.
+ * Reading `location.search` avoids that, and going back out through
+ * `buildQueryString` keeps a comma list readable rather than percent-encoding
+ * it the way `URLSearchParams.toString()` would.
+ */
+export const hrefWithQueryKey = (pathname, search, key, value) => {
+  const query = parseSearch(search);
+  if (value === undefined || value === null || value === '') {
+    delete query[key];
+  } else {
+    query[key] = value;
+  }
+  return `${pathname}${buildQueryString(query)}`;
+};
+
 /** Strip the legacy triple keys from a query object. */
 export const withoutLegacyKeys = (query) => {
   const next = { ...query };
