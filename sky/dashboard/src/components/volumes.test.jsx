@@ -1,5 +1,10 @@
 // The volumes table reaches for its data through the shared cache rather than
 // taking it as a prop, so the cache is where a fixed set of volumes goes in.
+// The table keeps its filters in the URL now, so it reads the router.
+jest.mock('next/router', () => ({
+  __esModule: true,
+  useRouter: () => ({ isReady: true, query: {}, asPath: '/volumes' }),
+}));
 jest.mock('@/lib/cache', () => ({
   __esModule: true,
   default: { get: jest.fn(), invalidate: jest.fn(), setPreloader: jest.fn() },
