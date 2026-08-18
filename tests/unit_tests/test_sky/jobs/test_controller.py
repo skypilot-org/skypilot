@@ -1659,15 +1659,16 @@ class TestDunderMainDispatchesToImportedModule:
 
 
 class TestTransientJobStatusRecoveryWindow:
-    """Tests for the transient job-status-check retry window across recovery.
+    """Tests for the transient job-status-check retry window.
 
     When the controller cannot fetch a task's job status but the cluster is
-    healthy, it retries for up to JOB_STATUS_FETCH_TOTAL_TIMEOUT_SECONDS before
-    recovering, to avoid a false alarm from a transient control-plane error.
-    That window (`transient_job_check_error_start_time`) must be reset after a
-    recovery; otherwise the first status-fetch failure after a recovery is
-    measured from before the recovery, exceeds the timeout immediately, and
-    triggers another recovery with no retries -- turning one transient error
+    healthy, it retries before recovering, to avoid a false alarm from a
+    transient control-plane error. The window is only spent once *both* its
+    budgets are exhausted (see
+    ``managed_job_utils.TransientStatusCheckWindow``), and it must be reset
+    after a recovery -- otherwise the first status-fetch failure after a
+    recovery is measured from before the recovery, is immediately past the
+    time budget, and triggers another recovery, turning one transient error
     into an unbounded recovery loop.
     """
 
@@ -1690,7 +1691,11 @@ class TestTransientJobStatusRecoveryWindow:
         ``test_status_logger_flushed_when_body_raises``).
         """
         monkeypatch.setattr(managed_job_utils,
-                            'JOB_STATUS_FETCH_TOTAL_TIMEOUT_SECONDS', 60)
+                            'JOB_STATUS_FETCH_MIN_ELAPSED_SECONDS', 60)
+        # This test is about the reset, not the retry budget: drop the retry
+        # budget so the time budget alone decides when the window is spent.
+        monkeypatch.setattr(managed_job_utils, 'JOB_STATUS_FETCH_MIN_RETRIES',
+                            0)
         monkeypatch.setattr(managed_job_utils, 'JOB_STATUS_CHECK_GAP_SECONDS',
                             0)
 
@@ -1765,6 +1770,99 @@ class TestTransientJobStatusRecoveryWindow:
         assert recover_calls == 1, (
             'expected exactly one recovery; a second recovery means the '
             'transient retry window was not reset after the first recovery')
+
+    @pytest.mark.asyncio
+    async def test_slow_check_still_gets_its_retries(self, monkeypatch):
+        """A check that outlasts the time budget is still retried.
+
+        The cluster-status refresh that runs before recovery performs its own
+        retried probes of the cluster, so one round can take far longer than
+        the time budget. With a time-only budget the whole window is spent
+        inside the round that opened it: the loop reaches its retry decision
+        already past the deadline and recovers a job it never retried once.
+        The retry budget must hold the loop in place until it has actually
+        retried ``JOB_STATUS_FETCH_MIN_RETRIES`` times.
+        """
+        monkeypatch.setattr(managed_job_utils,
+                            'JOB_STATUS_FETCH_MIN_ELAPSED_SECONDS', 60)
+        monkeypatch.setattr(managed_job_utils, 'JOB_STATUS_FETCH_MIN_RETRIES',
+                            2)
+        monkeypatch.setattr(managed_job_utils, 'JOB_STATUS_CHECK_GAP_SECONDS',
+                            0)
+
+        # The clock only advances inside the cluster-status refresh, i.e.
+        # after the window has opened and before its retry decision -- which
+        # is where the real time goes. Every round jumps well past the time
+        # budget, so the time budget alone would recover at the first check.
+        clock = {'t': 1000.0}
+        checks = 0
+        checks_before_recovery = None
+
+        async def fake_get_job_status(*args, **kwargs):
+            nonlocal checks
+            if checks >= 4:
+                raise TestTransientJobStatusRecoveryWindow._StopLoop()
+            checks += 1
+            return None, 'Job status check timed out after 30s.'
+
+        async def fake_recover(*args, **kwargs):
+            nonlocal checks_before_recovery
+            if checks_before_recovery is None:
+                checks_before_recovery = checks
+            return clock['t']
+
+        handle = MagicMock()
+        handle.launched_resources.need_cleanup_after_preemption_or_failure.\
+            return_value = False
+
+        def fake_refresh(*args, **kwargs):
+            clock['t'] += 1000.0
+            return status_lib.ClusterStatus.UP, handle
+
+        mock_self = MagicMock()
+        mock_self._job_id = 1
+        mock_self._pool = None
+
+        executor = MagicMock()
+        executor.recover = AsyncMock(side_effect=fake_recover)
+
+        state = controller_module.managed_job_state
+        with patch.object(controller_module.time, 'time',
+                          side_effect=lambda: clock['t']), \
+             patch.object(managed_job_utils, 'get_job_status',
+                          side_effect=fake_get_job_status), \
+             patch.object(controller_module.backend_utils,
+                          'refresh_cluster_status_handle',
+                          side_effect=fake_refresh), \
+             patch.object(controller_module.backend_utils,
+                          'async_check_network_connection',
+                          new=AsyncMock(return_value=None)), \
+             patch.object(controller_module.managed_job_runtime,
+                          'is_registered', return_value=False), \
+             patch.object(state, 'set_recovering_async',
+                          new=AsyncMock(return_value=None)), \
+             patch.object(state, 'set_recovered_async',
+                          new=AsyncMock(return_value=None)), \
+             patch.object(state, 'set_started_async',
+                          new=AsyncMock(return_value=None)), \
+             patch.object(controller_module.asyncio, 'sleep',
+                          new=AsyncMock(return_value=None)):
+            with pytest.raises(TestTransientJobStatusRecoveryWindow._StopLoop):
+                await controller_module.JobController._monitor_one_task_impl(
+                    mock_self,
+                    task_id=0,
+                    task=MagicMock(name='task'),
+                    cluster_name='cluster',
+                    executor=executor,
+                    status_logger=managed_job_utils.JobStatusLogger(),
+                    callback_func=MagicMock(),
+                    force_transit_to_recovering=False)
+
+        # Checks 1 and 2 must each be retried; only the third may recover. A
+        # time-only budget recovers at check 1, having never retried.
+        assert checks_before_recovery == 3, (
+            'expected recovery only after the retry budget was spent, but '
+            f'recovered after {checks_before_recovery} status check(s)')
 
     @pytest.mark.asyncio
     async def test_status_logger_flushed_when_body_raises(self, monkeypatch):
