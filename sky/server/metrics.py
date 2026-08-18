@@ -1254,11 +1254,16 @@ def start_metrics_server(host: str, port: int) -> uvicorn.Server:
     def _serve() -> None:
         try:
             asyncio.run(server.serve())
+        except SystemExit:
+            # uvicorn calls sys.exit(1) when it cannot bind, and
+            # threading.excepthook drops SystemExit on the floor, so
+            # without this a metrics server that never came up would leave
+            # nothing behind but uvicorn's own bind error -- the scrape
+            # target just looks down, with no hint of why.
+            logger.error('Metrics server failed to start on %s:%s', host, port)
         except Exception:  # pylint: disable=broad-except
-            # Without this the traceback would only reach
-            # threading.excepthook, i.e. a metrics server that died on
-            # startup (port already bound, say) would look like a silently
-            # down scrape target.
+            # Likewise: an unhandled error here would otherwise only reach
+            # threading.excepthook.
             logger.exception('Metrics server exited unexpectedly')
 
     threading.Thread(target=_serve, daemon=True, name='metrics-server').start()

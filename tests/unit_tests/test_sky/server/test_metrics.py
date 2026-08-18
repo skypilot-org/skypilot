@@ -2,6 +2,7 @@
 
 import base64
 import os
+import socket
 import threading
 import time
 from unittest.mock import AsyncMock
@@ -1353,3 +1354,27 @@ def test_stop_metrics_server_without_start_is_noop():
         metrics.stop_metrics_server()
     finally:
         metrics._metrics_server = saved
+
+
+def test_metrics_server_reports_a_bind_failure(monkeypatch):
+    """A metrics server that never came up must say so.
+
+    uvicorn answers an unbindable port with sys.exit(1), i.e. SystemExit,
+    which is not an Exception and which threading.excepthook drops
+    silently -- so the thread would just vanish and the scrape target
+    would look down for no stated reason.
+    """
+    monkeypatch.delenv('PROMETHEUS_MULTIPROC_DIR', raising=False)
+    blocker = socket.socket()
+    blocker.bind(('127.0.0.1', 0))
+    blocker.listen(1)
+    port = blocker.getsockname()[1]
+    try:
+        with patch.object(metrics, 'logger') as mock_logger:
+            server = metrics.start_metrics_server('127.0.0.1', port)
+            assert _wait_until(lambda: _live_thread_named('metrics-server') is
+                               None), ('thread outlived the failed bind')
+            assert not server.started
+            assert mock_logger.error.called, 'bind failure was not reported'
+    finally:
+        blocker.close()
