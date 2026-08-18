@@ -229,6 +229,28 @@ const JOB_VIEW_SCHEMA = [
 
 const STATUS_GROUP_NAMES = Object.keys(statusGroups);
 
+const KNOWN_STATUSES = new Set([...PRIMARY_STATUSES, ...OTHER_STATUSES]);
+
+// Everything the status UI needs, derived from the single `status` param: a
+// group name, an explicit list of pills, or neither. Values we do not
+// recognise are dropped, the same way the filter decoders drop unknown
+// properties -- a hand-edited link must not leave the pill bar highlighting
+// a group that does not exist.
+export function deriveStatusView(statusParam) {
+  const value = statusParam || '';
+  const statusGroupName = STATUS_GROUP_NAMES.includes(value) ? value : null;
+  const selectedStatuses =
+    statusGroupName || !value
+      ? []
+      : value.split(',').filter((s) => KNOWN_STATUSES.has(s));
+  return {
+    statusGroupName,
+    selectedStatuses,
+    // Neither segment is highlighted while specific pills narrow the view.
+    activeTab: statusGroupName || (selectedStatuses.length > 0 ? null : 'all'),
+  };
+}
+
 const PROPERTY_OPTIONS = JOB_FILTER_SCHEMA.map(({ key, label }) => ({
   label,
   value: key,
@@ -570,15 +592,9 @@ export function ManagedJobsTable({
   // `view.status` is the single source of truth; the pill bar and the
   // Active/All segments are both views of it. A group name means the group.
   const statusParam = view.status || '';
-  const statusGroupName = STATUS_GROUP_NAMES.includes(statusParam)
-    ? statusParam
-    : null;
-  const selectedStatuses = React.useMemo(
-    () =>
-      statusGroupName || !statusParam
-        ? []
-        : statusParam.split(',').filter(Boolean),
-    [statusParam, statusGroupName]
+  const { statusGroupName, selectedStatuses, activeTab } = React.useMemo(
+    () => deriveStatusView(statusParam),
+    [statusParam]
   );
   const setSelectedStatuses = React.useCallback(
     (next) => setView('status', (next || []).join(',')),
@@ -590,8 +606,6 @@ export function ManagedJobsTable({
   const [controllerStopped, setControllerStopped] = useState(false);
   const [controllerLaunching, setControllerLaunching] = useState(false);
   const [isRestarting, setIsRestarting] = useState(false);
-  // Neither segment is highlighted while specific pills narrow the view.
-  const activeTab = statusGroupName || (statusParam ? null : 'all');
   // Default to scoping the table to the current user's jobs. Flips to
   // 'all' when the user clicks the Everyone toggle, or implicitly when
   // they pick a different user via the FilterDropdown (explicit user
