@@ -2127,7 +2127,7 @@ def policy_db(tmp_path):
         yield _worker
 
 
-class TestRolelessPrincipalIsConfined:
+class TestRolelessPrincipalIsDenied:
     """A principal with no role this model recognizes must not be unrestricted.
 
     Blocklist semantics make the unconfigured case the permissive one: nothing
@@ -2135,8 +2135,7 @@ class TestRolelessPrincipalIsConfined:
     """
 
     @pytest.mark.parametrize('roles', [[], ['pwned'], ['Admin'], ['']])
-    def test_unrecognized_or_absent_role_gets_the_user_blocklist(
-            self, policy_db, roles):
+    def test_unrecognized_or_absent_role_is_denied(self, policy_db, roles):
         worker = policy_db()
         for role in roles:
             worker.enforcer.add_grouping_policy('subject', role)
@@ -2144,9 +2143,8 @@ class TestRolelessPrincipalIsConfined:
 
         assert worker.check_endpoint_permission('subject', '/users/export',
                                                 'GET')
-        # Confined to `user`, not denied outright: ordinary endpoints still work.
-        assert not worker.check_endpoint_permission('subject', '/status',
-                                                    'POST')
+        # Denied outright, not confined: nothing grants this principal access.
+        assert worker.check_endpoint_permission('subject', '/status', 'POST')
 
     def test_recognized_roles_are_unaffected(self, policy_db):
         worker = policy_db()
@@ -2237,32 +2235,80 @@ class TestNeedsRoleSeed:
         assert not service.probably_has_role('anyone')
         assert service.enforcer is None
 
+    def test_probably_has_role_never_touches_the_enforcer(self, policy_db):
+        """It runs on the event loop, where the enforcer's read lock can block.
 
-class TestConfinementRole:
-    """An unidentified principal is held to the deployment's own default."""
+        `load_policy()` holds the write lock for a whole reload, so consulting
+        the enforcer here would stall every request on this worker.
+        """
+        worker = policy_db()
+        worker.enforcer.add_grouping_policy('known', 'user')
+        worker.enforcer.load_policy()
+        worker.enforcer = mock.Mock(wraps=worker.enforcer)
 
-    @mock.patch('sky.users.rbac.get_default_role', return_value='viewer')
-    def test_viewer_default_confines_via_the_allowlist(self, _default,
-                                                       policy_db):
-        # `/users` is on the viewer allowlist, `/dashboard/x` is not... but the
-        # allowlist is what decides, not the blocklist.
+        assert not worker.probably_has_role('known')
+        worker.enforcer.get_roles_for_user.assert_not_called()
+
+    def test_a_seen_role_is_remembered_for_the_loop_side_guard(self, policy_db):
+        worker = policy_db()
+        worker.enforcer.add_grouping_policy('known', 'user')
+        worker.enforcer.load_policy()
+
+        assert not worker.probably_has_role('known')
+        assert not worker.needs_role_seed('known')
+        assert worker.probably_has_role('known')
+
+
+class TestDenialScope:
+    """Who the denial must not catch, and how loudly it reports.
+
+    The server's own identities get their role rows from one write, at boot,
+    under the policy lock. If that write failed, denying them would take
+    internal calls (the HA replica-to-replica authorize included) from degraded
+    to dead, so they are judged by the role that seed would have given them.
+    """
+
+    def test_system_identities_keep_their_seeded_role(self, policy_db):
         worker = policy_db()
         worker.enforcer.load_policy()
 
-        assert worker.check_endpoint_permission('ghost', '/users/export', 'GET')
-        assert not worker.check_endpoint_permission('ghost', '/users', 'GET')
-        # Outside the viewer allowlist: blocked, where the `user` blocklist
-        # would have allowed it.
-        assert worker.check_endpoint_permission('ghost', '/jobs/launch', 'POST')
+        for admin_id in (common.SERVER_ID, constants.SKYPILOT_SYSTEM_USER_ID):
+            assert not worker.check_endpoint_permission(admin_id,
+                                                        '/users/export', 'GET')
+        # And the read-only one is still held to the viewer allowlist.
+        viewer_id = constants.SKYPILOT_SYSTEM_VIEWER_USER_ID
+        assert not worker.check_endpoint_permission(viewer_id, '/users', 'GET')
+        assert worker.check_endpoint_permission(viewer_id, '/users/create',
+                                                'POST')
 
-    @mock.patch('sky.users.rbac.get_default_role', return_value='admin')
-    def test_unconfigured_default_never_confines_to_admin(
-            self, _default, policy_db):
-        """`rbac.default_role` falls back to admin; confinement must not."""
+    def test_the_denial_is_logged_once_per_principal(self, policy_db):
+        """Persistent state, so an unrated log would repeat on every request."""
         worker = policy_db()
         worker.enforcer.load_policy()
 
-        assert worker.check_endpoint_permission('ghost', '/users/export', 'GET')
+        with mock.patch.object(permission.logger, 'warning') as warn:
+            for _ in range(5):
+                worker.check_endpoint_permission('ghost', '/users/export',
+                                                 'GET')
+        assert warn.call_count == 1
+        assert 'ghost' in warn.call_args[0][0]
+
+
+class TestDefaultRoleCasing:
+    """`default_role` is validated case-insensitively but stored verbatim.
+
+    So `default_role: Viewer` is a legal config whose literal string would be
+    seeded as a role name, and an unrecognized role is now denied everywhere --
+    turning one operator's capitalization into a deployment-wide lockout.
+    """
+
+    @pytest.mark.parametrize('configured,expected', [('Viewer', 'viewer'),
+                                                     ('ADMIN', 'admin'),
+                                                     ('user', 'user')])
+    def test_get_default_role_is_normalized(self, configured, expected):
+        with mock.patch('sky.users.rbac.skypilot_config.get_nested',
+                        return_value=configured):
+            assert rbac.get_default_role() == expected
 
 
 class TestReseedRoleIfMissing:

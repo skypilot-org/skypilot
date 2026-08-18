@@ -57,10 +57,30 @@ _NO_ROLE_PROBE_TTL_SECONDS = 30
 # `_read_only_endpoint_cache`. Keys are authenticated user ids, so the space is
 # bounded by real principals rather than by traffic.
 _NO_ROLE_PROBE_CACHE_MAX = 4096
+# How often a worker repeats the denial warning for the same principal. Long
+# enough that a client retrying in a loop cannot flood the log, short enough
+# that the operator sees the condition is ongoing.
+_DENIED_LOG_TTL_SECONDS = 300
 
 # Materialized once: the role set is a static enum, and this is consulted on
 # every request.
 _SUPPORTED_ROLES = frozenset(rbac.get_supported_roles())
+
+
+def _system_user_roles() -> Dict[str, str]:
+    """The server's own identities and the role each is seeded with.
+
+    Their role rows are written once, by `_maybe_initialize_policies` at boot,
+    under the policy lock. A denial for a principal with no recognized role
+    must not apply to them: if that one seed failed, denying would take the
+    server's internal calls (including the HA replica-to-replica authorize)
+    from degraded to dead.
+    """
+    return {
+        common.SERVER_ID: rbac.RoleName.ADMIN.value,
+        constants.SKYPILOT_SYSTEM_USER_ID: rbac.RoleName.ADMIN.value,
+        constants.SKYPILOT_SYSTEM_VIEWER_USER_ID: rbac.RoleName.VIEWER.value,
+    }
 
 
 def _recognized_roles(roles: List[str]) -> List[str]:
@@ -104,6 +124,12 @@ class PermissionService:
         # user_id -> when this worker last tried to seed a missing role. See
         # `needs_role_seed`.
         self._seed_attempt_cache: Dict[str, float] = {}
+        # user_id -> when this worker last logged a denial for them. See
+        # `_log_denied_principal`.
+        self._denied_log_cache: Dict[str, float] = {}
+        # Principals this worker has already seen hold a role. Read on the
+        # event loop by `probably_has_role`, which must not touch the enforcer.
+        self._role_seen: Set[str] = set()
 
     def initialize(self):
         self._lazy_initialize(full_initialize=True)
@@ -349,13 +375,7 @@ class PermissionService:
                 user_added = self._add_user_if_not_exists_no_lock(
                     existing_user.id)
                 policy_updated = policy_updated or user_added
-        system_users = [
-            (common.SERVER_ID, rbac.RoleName.ADMIN.value),
-            (constants.SKYPILOT_SYSTEM_USER_ID, rbac.RoleName.ADMIN.value),
-            (constants.SKYPILOT_SYSTEM_VIEWER_USER_ID,
-             rbac.RoleName.VIEWER.value),
-        ]
-        for system_user_id, system_user_role in system_users:
+        for system_user_id, system_user_role in _system_user_roles().items():
             global_user_state.add_or_update_user(
                 models.User(id=system_user_id,
                             name=system_user_id,
@@ -564,31 +584,49 @@ class PermissionService:
         self._load_policy_no_lock()
         return self._ensure_enforcer().get_roles_for_user(user_id)
 
-    def _confinement_role(self) -> str:
-        """The role an unidentified principal is evaluated against.
+    def _log_denied_principal(self, user_id: str, path: str,
+                              method: str) -> None:
+        """Report a denial for a principal with no recognized role.
 
-        The deployment's own default, so one that defaults to `viewer` does not
-        hand an unidentified principal more access than it gives everyone else
-        -- but never `admin`, which is what `rbac.default_role` falls back to
-        when it was never configured.
+        Rate-limited per principal per worker: the state is persistent, so an
+        unrated log would repeat for every request such a principal makes. The
+        point of denying rather than confining is that this is loud, so it must
+        actually reach the operator without drowning the log.
         """
-        default_role = rbac.get_default_role()
-        if default_role == rbac.RoleName.ADMIN.value:
-            return rbac.RoleName.USER.value
-        return default_role
+        now = time.time()
+        if now - self._denied_log_cache.get(user_id,
+                                            0.0) < _DENIED_LOG_TTL_SECONDS:
+            return
+        if len(self._denied_log_cache) >= _NO_ROLE_PROBE_CACHE_MAX:
+            self._denied_log_cache.clear()
+        self._denied_log_cache[user_id] = now
+        logger.warning(
+            f'Denying {method} {path} for user {user_id}: the policy holds no '
+            f'role for them, so nothing grants access. Their role seed did not '
+            f'complete; assign a role to restore access.')
 
     def probably_has_role(self, user_id: str) -> bool:
-        """Cheap, non-blocking: answers from whatever is already in memory.
+        """Cheap, non-blocking: has this worker ever seen a role for them?
 
-        Never initializes the enforcer and never touches the database, so it is
-        safe to call from the event loop. A worker that has not built an
-        enforcer yet answers False, and the caller is expected to do the real
-        work off the loop.
+        A plain set lookup, deliberately not `enforcer.get_roles_for_user`:
+        that takes the enforcer's read lock, and a concurrent `load_policy()`
+        holds the write lock for the length of a full reload (hundreds of ms on
+        a large policy). This is called on the event loop, where that would
+        stall every request on the worker -- the reason the RBAC middleware
+        offloads its own check.
+
+        False therefore means "not known to have one", not "has none": the
+        caller is expected to confirm off the loop. Only the transition matters
+        for cost, since a principal who has a role is answered from memory from
+        their second request onward.
         """
-        enforcer = self.enforcer
-        if enforcer is None:
-            return False
-        return bool(enforcer.get_roles_for_user(user_id))
+        return user_id in self._role_seen
+
+    def _remember_role_seen(self, user_id: str) -> None:
+        """Record that this principal holds a role, for `probably_has_role`."""
+        if len(self._role_seen) >= _NO_ROLE_PROBE_CACHE_MAX:
+            self._role_seen.clear()
+        self._role_seen.add(user_id)
 
     def needs_role_seed(self, user_id: str) -> bool:
         """Whether this principal has no role row at all, so one is owed.
@@ -601,17 +639,22 @@ class PermissionService:
         Deliberately False for a principal holding an *unrecognized* role.
         Seeding only ever adds a role when there is none, so answering True
         there would take the distributed lock on every request and repair
-        nothing; `check_endpoint_permission` confines such a principal instead.
+        nothing; `check_endpoint_permission` denies such a principal instead.
         Replacing a role nobody recognizes is an administrative act, not
         something a login should do behind the operator's back.
+
+        Also feeds `probably_has_role`'s memo, so the loop-side guard can stay
+        a set lookup.
 
         Blocking (may reload the policy). Call from a worker thread.
         """
         enforcer = self._ensure_enforcer()
         if enforcer.get_roles_for_user(user_id):
+            self._remember_role_seen(user_id)
             return False
         if self._probe_unknown_principal(user_id):
             # Only this worker was behind; the role exists.
+            self._remember_role_seen(user_id)
             return False
         # Rate-limit the attempt itself, not just the probe: if the seed keeps
         # failing because the policy lock is contended, retrying on every
@@ -639,10 +682,11 @@ class PermissionService:
         True (block) unless the (path, method) matches an entry in
         `self._viewer_allowlist`.
 
-        A principal holding no role this model recognizes is confined to the
-        `user` blocklist. Under blocklist semantics an unknown or absent role
-        matches no policy at all, which `enforce` reads as permitted
-        everywhere -- so the unconfigured case must not be the permissive one.
+        A principal holding no role this model recognizes is denied, the way
+        every mainstream authorization system treats an unbound principal.
+        Under blocklist semantics an unknown or absent role matches no policy
+        at all, which `enforce` reads as permitted everywhere -- so the
+        unconfigured case must not be the permissive one.
         """
         # We intentionally don't load the policy here, as it is a hot path, and
         # we don't support updating the policy.
@@ -657,18 +701,20 @@ class PermissionService:
         # path.
         roles = enforcer.get_roles_for_user(user_id)
         if not _recognized_roles(roles):
-            # Reload before confining them: a role assigned moments ago on
+            # Reload before denying them: a role assigned moments ago on
             # another worker has not reached this model, and refusing a new
             # admin every admin endpoint until something else happens to
             # reload is its own outage.
             roles = self._probe_unknown_principal(user_id)
             if not _recognized_roles(roles):
-                confine_to = self._confinement_role()
-                if confine_to == rbac.RoleName.VIEWER.value:
-                    return not self._is_viewer_allowed(path, method)
-                # Casbin's `g` is reflexive, so passing the role name as the
-                # subject evaluates that role's rules directly.
-                return enforcer.enforce(confine_to, path, method)
+                system_role = _system_user_roles().get(user_id)
+                if system_role is None:
+                    self._log_denied_principal(user_id, path, method)
+                    return True
+                # Judge them by the role their boot-time seed would have
+                # given them. `admin` then falls through to `enforce`, whose
+                # blocklist for admin is empty, i.e. allowed.
+                roles = [system_role]
         # Admin wins over viewer when a user holds both — viewer's
         # default-deny semantics shouldn't restrict an admin.
         if (rbac.RoleName.VIEWER.value in roles and
