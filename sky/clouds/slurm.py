@@ -903,10 +903,15 @@ class Slurm(clouds.Cloud):
                 logger.debug(f'Slurm cluster {cluster} sinfo: {info}')
 
                 warning_msg = None
-                # The filesystem probes below only ever produce warnings, and
-                # they keep running as the submit user so that the shared
-                # filesystem warning is about the home directory that this
-                # user's jobs will actually see.
+                # The probes below run as the submit user. The environment
+                # probe doubles as an access check: if the submit user cannot
+                # run commands on the login node, the cluster is reported as
+                # unavailable with an explicit message, since the reachability
+                # check above already ruled out a connection problem by
+                # running as the SSH user. The filesystem type checks only
+                # produce warnings, and running them as the submit user keeps
+                # the shared filesystem warning about the home directory that
+                # this user's jobs will actually see.
                 submit_user = slurm_utils.get_submit_user(cluster)
                 fs_client = client
                 if submit_user is not None:
