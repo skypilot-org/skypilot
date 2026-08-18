@@ -16,12 +16,14 @@ import json
 import os
 import sys
 import traceback
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional, Set, Union
 
 import pandas as pd
 import requests
 import runpod
 from runpod.api import graphql
+
+from sky.adaptors import runpod as runpod_adaptor
 
 # The API currently returns a dynamic number of vCPUs per pod that
 # changes frequently (less than 30 mins)
@@ -593,7 +595,9 @@ def get_cpu_instance_configurations(cpu_id: str) -> List[Dict[str, Any]]:
     return instances
 
 
-def get_gpu_instance_configurations(gpu_id: str) -> List[Dict[str, Any]]:
+def get_gpu_instance_configurations(
+    gpu_id: str, available_data_centers_by_count: Dict[int, Dict[str, Set[str]]]
+) -> List[Dict[str, Any]]:
     """Retrieves available GPU instance configurations for a given GPU ID.
     Only secure cloud instances are included (community cloud instances
     are skipped).  Each configuration includes pricing (spot and base), region,
@@ -626,6 +630,10 @@ def get_gpu_instance_configurations(gpu_id: str) -> List[Dict[str, Any]]:
         max_gpu_count = DEFAULT_MAX_GPUS
 
     for gpu_count in range(1, int(max_gpu_count) + 1):
+        available_data_centers = available_data_centers_by_count.get(
+            gpu_count, {}).get(gpu_id)
+        if not available_data_centers:
+            continue
         # Get detailed GPU info for this count
         if gpu_count == 1:
             detailed_gpu = detailed_gpu_1
@@ -651,6 +659,8 @@ def get_gpu_instance_configurations(gpu_id: str) -> List[Dict[str, Any]]:
 
         for region, zones in get_launchable_region_zones().items():
             for zone in zones:
+                if zone not in available_data_centers:
+                    continue
                 instances.append({
                     'InstanceType': f'{gpu_count}x_{base_gpu_name}_SECURE',
                     'AcceleratorName': base_gpu_name,
@@ -682,14 +692,27 @@ def fetch_runpod_catalog(no_gpu: bool, no_cpu: bool) -> pd.DataFrame:
         # Get GPU list from API
         instances = []
         if not no_gpu:
-            gpus = runpod.get_gpus()
-            if not gpus:
+            maximum_gpu_count = max(
+                DEFAULT_MAX_GPUS,
+                *(int(gpu_info.get('max_count', DEFAULT_MAX_GPUS))
+                  for gpu_info in DEFAULT_GPU_INFO.values()))
+            available_data_centers_by_count = {
+                gpu_count: runpod_adaptor.get_catalog_gpu_data_center_ids(
+                    gpu_count, 'SECURE')
+                for gpu_count in range(1, maximum_gpu_count + 1)
+            }
+            gpu_ids = set().union(*(gpu_data_centers.keys()
+                                    for gpu_data_centers in
+                                    available_data_centers_by_count.values()))
+            if not gpu_ids:
                 raise ValueError('No GPU types returned from RunPod API')
 
-            # Generate instances from GPU ids
+            # Generate rows only from GPU/data-center pairs that the v2
+            # catalog reports for this exact secure pod GPU count.
             instances.extend([
-                instance for gpu in gpus
-                for instance in get_gpu_instance_configurations(gpu['id'])
+                instance for gpu_id in gpu_ids
+                for instance in get_gpu_instance_configurations(
+                    gpu_id, available_data_centers_by_count)
             ])
 
         if not no_cpu:
