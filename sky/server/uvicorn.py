@@ -23,6 +23,7 @@ from sky import sky_logging
 from sky.server import daemons
 from sky.server import metrics as metrics_lib
 from sky.server import state
+from sky.server import worker_health
 from sky.server.requests import requests as requests_lib
 from sky.server.requests import storage as request_storage
 from sky.skylet import constants
@@ -101,6 +102,32 @@ class Server(uvicorn.Server):
         super().__init__(config=config)
         self.exiting: bool = False
         self.max_db_connections = max_db_connections
+        self.health_gate: Optional[worker_health.WorkerHealthGate] = None
+
+    async def startup(self, sockets: Optional[list] = None) -> None:
+        """Start serving, then arm this worker's event-loop health gate."""
+        # Before super().startup(), which starts the app lifespan and with
+        # it the event-loop-lag monitor: a worker that reports lag but not
+        # yet its serving state reads as masked out to anything consuming
+        # both gauges.
+        worker_health.publish_initial_serving_state()
+        await super().startup(sockets=sockets)
+        if self.should_exit:
+            return
+        try:
+            self.health_gate = worker_health.maybe_start(
+                self, self.config.workers or 1, asyncio.get_running_loop())
+        except Exception:  # pylint: disable=broad-except
+            # Worker masking is an optimization; never let it stop a
+            # worker from coming up and serving traffic.
+            logger.warning('Failed to arm the worker health gate',
+                           exc_info=True)
+
+    async def shutdown(self, sockets: Optional[list] = None) -> None:
+        if self.health_gate is not None:
+            self.health_gate.stop()
+            self.health_gate = None
+        await super().shutdown(sockets=sockets)
 
     def handle_exit(self, sig: int, frame: Union[FrameType, None]) -> None:
         """Handle exit signal.
@@ -314,6 +341,9 @@ def run(config: uvicorn.Config, max_db_connections: Optional[int] = None):
     server = Server(config=config, max_db_connections=max_db_connections)
     try:
         if config.workers is not None and config.workers > 1:
+            # Markers are pid-keyed and the pod's pids restart from scratch
+            # on every container start, so clear them before forking.
+            worker_health.reset_quarantine_dir()
             sock = config.bind_socket()
             SlowStartMultiprocess(config, target=server.run,
                                   sockets=[sock]).run()

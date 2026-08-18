@@ -220,6 +220,19 @@ SKY_APISERVER_EVENT_LOOP_LAG_MAX_SECONDS = prom.Gauge(
     multiprocess_mode='liveall',
 )
 
+# Whether each uvicorn worker is currently accepting connections. Set to 0
+# while a worker has masked itself out of the shared accept path because its
+# own event loop was stalling (see sky.server.worker_health). Lets a health
+# checker tell "this replica still has healthy capacity" apart from "every
+# worker here has masked itself out", which is when the replica should leave
+# the load balancer.
+SKY_APISERVER_WORKER_SERVING = prom.Gauge(
+    'sky_apiserver_worker_serving',
+    'Whether each server worker process is accepting connections',
+    ['pid'],
+    multiprocess_mode='liveall',
+)
+
 SKY_APISERVER_WEBSOCKET_CONNECTIONS = prom.Gauge(
     'sky_apiserver_websocket_connections',
     'Number of websocket connections',
