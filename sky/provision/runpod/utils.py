@@ -1,16 +1,10 @@
 """RunPod library wrapper for SkyPilot."""
 
 import base64
-import os
 import time
 from typing import Any, Dict, List, Optional, Tuple
 
 import requests
-
-try:
-    import tomllib
-except ImportError:  # Python 3.10
-    import tomli as tomllib
 
 from sky import sky_logging
 from sky.adaptors import runpod
@@ -19,6 +13,8 @@ from sky.provision import docker_utils
 from sky.provision.runpod.api import commands as runpod_commands
 from sky.utils import common_utils
 from sky.utils import resources_utils
+
+runpod_sdk = runpod.runpod
 
 logger = sky_logging.init_logger(__name__)
 
@@ -53,156 +49,6 @@ def _rest_launchable_data_center_ids() -> Optional[set]:
     return _rest_data_center_ids
 
 
-_GPU_AVAILABILITY_TTL_SECONDS = 20
-_gpu_availability_cache: Dict[Tuple[str, int, bool], Tuple[float, set]] = {}
-
-
-def _available_data_center_ids(gpu_type_id: str, gpu_count: int,
-                               secure_cloud: bool) -> Optional[set]:
-    """Data centers currently reporting stock for the GPU, or None if unknown.
-
-    Advisory pre-check so region attempts skip data centers with no stock
-    instead of paying a create-and-fail round trip. Marketplace stock moves
-    fast, so results are cached only briefly, and any query failure falls
-    back to attempting the create anyway.
-    """
-    cache_key = (gpu_type_id, gpu_count, secure_cloud)
-    cached = _gpu_availability_cache.get(cache_key)
-    if cached is not None and (time.time() - cached[0] <
-                               _GPU_AVAILABILITY_TTL_SECONDS):
-        return cached[1]
-    secure_literal = 'true' if secure_cloud else 'false'
-    query = ('query { dataCenters { id gpuAvailability(input: '
-             f'{{gpuCount: {gpu_count}, secureCloud: {secure_literal}}}) '
-             '{ gpuTypeId available } } }')
-    try:
-        _ensure_api_key_configured()
-        result = runpod.runpod.api.graphql.run_graphql_query(query)
-        data_centers = result['data']['dataCenters']
-    except Exception as e:  # pylint: disable=broad-except
-        logger.warning('Could not query RunPod GPU availability; '
-                       f'attempting creation without the pre-check: {e}')
-        return None
-    available = {
-        data_center['id']
-        for data_center in data_centers
-        for entry in (data_center.get('gpuAvailability') or [])
-        if entry.get('gpuTypeId') == gpu_type_id and entry.get('available')
-    }
-    _gpu_availability_cache[cache_key] = (time.time(), available)
-    return available
-
-
-def available_data_center_ids_for_instance_type(
-        instance_type: str) -> Optional[set]:
-    """Return live RunPod zones for a catalog instance type.
-
-    ``None`` means that the availability API could not be queried and the
-    catalog should remain usable as a fallback.  An empty set is authoritative
-    and means that the instance type currently has no capacity anywhere.
-    """
-    if instance_type.startswith('cpu'):
-        return None
-    try:
-        count_text, gpu_name, cloud_type = instance_type.split('_')
-        gpu_count = int(
-            count_text[:-1] if count_text.endswith('x') else count_text)
-        gpu_type_id = GPU_NAME_MAP[gpu_name]
-    except (KeyError, TypeError, ValueError):
-        logger.debug('Could not derive live availability query from %s',
-                     instance_type)
-        return None
-    return _available_data_center_ids(gpu_type_id, gpu_count,
-                                      cloud_type == 'SECURE')
-
-
-def _ensure_api_key_configured() -> None:
-    """Load the default RunPod credential into the SDK when needed."""
-    sdk = runpod.runpod.load_module()
-    if getattr(sdk, 'api_key', None):
-        return
-
-    credential_file = os.path.expanduser('~/.runpod/config.toml')
-    try:
-        with open(credential_file, 'rb') as credential_stream:
-            config = tomllib.load(credential_stream)
-    except FileNotFoundError:
-        return
-    except (OSError, TypeError, ValueError) as error:
-        logger.warning('Failed to load RunPod credentials: %s', error)
-        return
-
-    api_key = config.get('default', {}).get('api_key')
-    if isinstance(api_key, str) and api_key:
-        sdk.api_key = api_key
-
-
-GPU_NAME_MAP = {
-    # AMD
-    'MI300X': 'AMD Instinct MI300X OAM',
-
-    # NVIDIA A-series
-    'A100-80GB': 'NVIDIA A100 80GB PCIe',
-    'A100-80GB-SXM': 'NVIDIA A100-SXM4-80GB',
-    'A30': 'NVIDIA A30',
-    'A40': 'NVIDIA A40',
-
-    # NVIDIA B-series
-    'B200': 'NVIDIA B200',
-
-    # GeForce
-    'RTX3070': 'NVIDIA GeForce RTX 3070',
-    'RTX3080': 'NVIDIA GeForce RTX 3080',
-    'RTX3080Ti': 'NVIDIA GeForce RTX 3080 Ti',
-    'RTX3090': 'NVIDIA GeForce RTX 3090',
-    'RTX3090Ti': 'NVIDIA GeForce RTX 3090 Ti',
-    'RTX4070Ti': 'NVIDIA GeForce RTX 4070 Ti',
-    'RTX4080': 'NVIDIA GeForce RTX 4080',
-    'RTX4080SUPER': 'NVIDIA GeForce RTX 4080 SUPER',
-    'RTX4090': 'NVIDIA GeForce RTX 4090',
-    'RTX5080': 'NVIDIA GeForce RTX 5080',
-    'RTX5090': 'NVIDIA GeForce RTX 5090',
-
-    # NVIDIA H100/H200
-    # Following instance is displayed as SXM at the console
-    # but the ID from the API appears as HBM
-    'H100-SXM': 'NVIDIA H100 80GB HBM3',
-    'H100-NVL': 'NVIDIA H100 NVL',
-    'H100': 'NVIDIA H100 PCIe',
-    'H200-SXM': 'NVIDIA H200',
-
-    # NVIDIA L-series
-    'L4': 'NVIDIA L4',
-    'L40': 'NVIDIA L40',
-    'L40S': 'NVIDIA L40S',
-
-    # Ada generation (GeForce & RTX A)
-    'RTX2000-Ada': 'NVIDIA RTX 2000 Ada Generation',
-    'RTX4000-Ada': 'NVIDIA RTX 4000 Ada Generation',
-    'RTX4000-Ada-SFF': 'NVIDIA RTX 4000 SFF Ada Generation',
-    'RTX5000-Ada': 'NVIDIA RTX 5000 Ada Generation',
-    'RTX6000-Ada': 'NVIDIA RTX 6000 Ada Generation',
-
-    # NVIDIA RTX A-series
-    'RTXA2000': 'NVIDIA RTX A2000',
-    'RTXA4000': 'NVIDIA RTX A4000',
-    'RTXA4500': 'NVIDIA RTX A4500',
-    'RTXA5000': 'NVIDIA RTX A5000',
-    'RTXA6000': 'NVIDIA RTX A6000',
-
-    # NVIDIA RTX PRO (Blackwell)
-    'RTXPRO4500': 'NVIDIA RTX PRO 4500 Blackwell',
-    'RTXPRO6000': 'NVIDIA RTX PRO 6000 Blackwell Server Edition',
-    'RTXPRO6000-WK': 'NVIDIA RTX PRO 6000 Blackwell Workstation Edition',
-
-    # Tesla V100 variants
-    'V100-16GB-FHHL': 'Tesla V100-FHHL-16GB',
-    'V100-16GB-SXM2': 'Tesla V100-SXM2-16GB',
-    'V100-32GB-SXM2': 'Tesla V100-SXM2-32GB',
-    'V100-16GB-PCIe': 'Tesla V100-PCIE-16GB',
-}
-
-
 def _construct_docker_login_template_name(cluster_name: str) -> str:
     """Constructs the registry auth template name."""
     return f'{cluster_name}-docker-login-template'
@@ -221,7 +67,7 @@ def retry(func):
         while True:
             try:
                 return func(*args, **kwargs)
-            except runpod.runpod.error.QueryError as e:
+            except runpod_sdk.error.QueryError as e:
                 error_msg = str(e).lower()
                 # Don't retry on authorization errors - these won't recover
                 auth_keywords = ['unauthorized', 'forbidden', '401', '403']
@@ -289,7 +135,7 @@ def _sky_get_pods() -> dict:
 
     Adapted from runpod.get_pods() to include containerRegistryAuthId.
     """
-    raw_return = runpod.runpod.api.graphql.run_graphql_query(_QUERY_POD)
+    raw_return = runpod_sdk.api.graphql.run_graphql_query(_QUERY_POD)
     cleaned_return = raw_return['data']['myself']['pods']
     return cleaned_return
 
@@ -308,14 +154,14 @@ query myself {
 
 def _list_pod_templates_with_container_registry() -> dict:
     """List all pod templates."""
-    raw_return = runpod.runpod.api.graphql.run_graphql_query(
+    raw_return = runpod_sdk.api.graphql.run_graphql_query(
         _QUERY_POD_TEMPLATE_WITH_REGISTRY_AUTH)
     return raw_return['data']['myself']['podTemplates']
 
 
 def list_instances() -> Dict[str, Dict[str, Any]]:
     """Lists instances associated with API key."""
-    _ensure_api_key_configured()
+    runpod.ensure_api_key_configured()
     instances = _sky_get_pods()
 
     instance_dict: Dict[str, Dict[str, Any]] = {}
@@ -352,9 +198,9 @@ def list_instances() -> Dict[str, Dict[str, Any]]:
 def delete_pod_template(template_name: str) -> None:
     """Deletes a pod template."""
     try:
-        runpod.runpod.api.graphql.run_graphql_query(
+        runpod_sdk.api.graphql.run_graphql_query(
             f'mutation {{deleteTemplate(templateName: "{template_name}")}}')
-    except runpod.runpod.error.QueryError as e:
+    except runpod_sdk.error.QueryError as e:
         logger.warning(f'Failed to delete template {template_name}: {e} '
                        'Please delete it manually.')
 
@@ -362,8 +208,8 @@ def delete_pod_template(template_name: str) -> None:
 def delete_register_auth(registry_auth_id: str) -> None:
     """Deletes a registry auth."""
     try:
-        runpod.runpod.delete_container_registry_auth(registry_auth_id)
-    except runpod.runpod.error.QueryError as e:
+        runpod_sdk.delete_container_registry_auth(registry_auth_id)
+    except runpod_sdk.error.QueryError as e:
         logger.warning(
             f'Failed to delete registry auth {registry_auth_id}: {e} '
             'Please delete it manually.')
@@ -394,13 +240,13 @@ def _create_template_for_docker_login(
     # Consider create one for each server and reuse them. Challenges including
     # calculate the reference count and delete them when no longer needed.
     formatted_image = login_config.format_image(image_name)
-    create_auth_resp = runpod.runpod.create_container_registry_auth(
+    create_auth_resp = runpod_sdk.create_container_registry_auth(
         name=container_registry_auth_name,
         username=login_config.username,
         password=login_config.password,
     )
     registry_auth_id = create_auth_resp['id']
-    create_template_resp = runpod.runpod.create_template(
+    create_template_resp = runpod_sdk.create_template(
         name=container_template_name,
         image_name=formatted_image,
         registry_auth_id=registry_auth_id,
@@ -531,10 +377,10 @@ def launch(
             'instance_id': instance_type,
         })
     else:
-        gpu_type = GPU_NAME_MAP[instance_type.split('_')[1]]
+        gpu_type = runpod.GPU_NAME_MAP[instance_type.split('_')[1]]
         gpu_quantity = int(instance_type.split('_')[0].replace('x', ''))
         cloud_type = instance_type.split('_')[2]
-        gpu_specs = runpod.runpod.get_gpu(gpu_type)
+        gpu_specs = runpod_sdk.get_gpu(gpu_type)
         params.update({
             'gpu_type_id': gpu_type,
             'cloud_type': cloud_type,
@@ -545,7 +391,7 @@ def launch(
 
     if preemptible is None or not preemptible:
         if is_cpu_instance:
-            new_instance = runpod.runpod.create_pod(**params)
+            new_instance = runpod_sdk.create_pod(**params)
         else:
             new_instance = _create_pod_via_rest(
                 _rest_pod_create_params(params, bootstrap_cmd))
@@ -553,10 +399,16 @@ def launch(
         gpu_type_id = params.get('gpu_type_id')
         gpu_count = params.get('gpu_count')
         data_center_id = params.get('data_center_id')
+        requested_cloud_type = params.get('cloud_type')
         if (not is_cpu_instance and isinstance(gpu_type_id, str) and
-                isinstance(gpu_count, int) and isinstance(data_center_id, str)):
-            available = _available_data_center_ids(
-                gpu_type_id, gpu_count, params['cloud_type'] == 'SECURE')
+                isinstance(gpu_count, int) and
+                isinstance(data_center_id, str) and
+                isinstance(requested_cloud_type, str)):
+            available = runpod.get_live_gpu_data_center_ids(
+                gpu_type_id,
+                gpu_count,
+                requested_cloud_type, [region],
+                force_refresh=True)
             if (available is not None and data_center_id not in available):
                 raise RuntimeError(
                     f'No {gpu_type_id} capacity currently reported in data '
@@ -613,8 +465,11 @@ def _rest_pod_create_params(params: Dict[str, Any],
                     'RunPod REST API does not support launching in any of '
                     f'the requested data centers ({zone}).')
             zone_ids = supported_zone_ids
-        available = _available_data_center_ids(params['gpu_type_id'], gpu_count,
-                                               params['cloud_type'] == 'SECURE')
+        available = runpod.get_live_gpu_data_center_ids(
+            params['gpu_type_id'],
+            gpu_count,
+            params['cloud_type'], [region] if region else None,
+            force_refresh=True)
         if available is not None:
             stocked_zone_ids = [z for z in zone_ids if z in available]
             if not stocked_zone_ids:
@@ -640,8 +495,8 @@ def _rest_pod_create_params(params: Dict[str, Any],
 
 def _create_pod_via_rest(create_params: Dict[str, Any]) -> Dict[str, Any]:
     """Create an on-demand pod through RunPod's REST API."""
-    _ensure_api_key_configured()
-    api_key = getattr(runpod.runpod, 'api_key', None)
+    runpod.ensure_api_key_configured()
+    api_key = getattr(runpod_sdk, 'api_key', None)
     response = requests.post(
         f'{_REST_API_BASE_URL}/pods',
         headers={'Authorization': f'Bearer {api_key}'},
@@ -668,7 +523,7 @@ def get_registry_auth_resources(
 
 def remove(instance_id: str) -> None:
     """Terminates the given instance."""
-    runpod.runpod.terminate_pod(instance_id)
+    runpod_sdk.terminate_pod(instance_id)
 
 
 def get_ssh_ports(cluster_name) -> List[int]:

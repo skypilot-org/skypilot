@@ -133,13 +133,12 @@ class RunPod(clouds.Cloud):
                                             region=region,
                                             zone=None)
 
-        # Catalog capacity is stable enough for optimizer decisions, while
-        # marketplace stock changes quickly.  Query live capacity only at the
-        # provisioning boundary, immediately before attempting pod creation.
-        # pylint: disable=import-outside-toplevel
-        from sky.provision.runpod import utils as runpod_utils
-        available = runpod_utils.available_data_center_ids_for_instance_type(
-            instance_type)
+        # Catalog availability is a short-lived snapshot, while marketplace
+        # stock changes quickly. Query the exact v2 GPU configuration only at
+        # the provisioning boundary, immediately before pod creation.
+        available = (
+            runpod_sdk_adaptor.available_data_center_ids_for_instance_type(
+                instance_type, [region]))
         if available is not None:
             for candidate_region in regions:
                 if candidate_region.zones is not None:

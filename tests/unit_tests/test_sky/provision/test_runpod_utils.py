@@ -30,18 +30,21 @@ def _launch_runpod(network_tier: resources_utils.NetworkTier,
 
 @pytest.mark.parametrize('preemptible', [False, True])
 def test_launch_best_network_tier_passes_bandwidth_requirements(preemptible):
-    with patch('sky.provision.runpod.utils.runpod') as mock_runpod, patch(
-            'sky.provision.runpod.utils.runpod_commands.create_spot_pod',
-            return_value={'id': 'pod-id'}) as create_spot_pod, patch(
-                'sky.provision.runpod.utils._rest_launchable_data_center_ids',
-                return_value={'US-CA-2'}), patch(
-                    'sky.provision.runpod.utils._available_data_center_ids',
-                    return_value={'US-CA-2'}), patch(
-                        'sky.provision.runpod.utils._create_pod_via_rest',
-                        return_value={'id': 'pod-id'}) as create_rest_pod:
-        mock_runpod.get_sdk_version_error.return_value = None
-        mock_runpod.runpod.get_gpu.return_value = {'memoryInGb': 80}
-        mock_runpod.runpod.create_pod.return_value = {'id': 'pod-id'}
+    """Pass the configured bandwidth floor to both RunPod launch APIs."""
+    with patch('sky.provision.runpod.utils.runpod_sdk', new=MagicMock(
+    )) as mock_sdk, patch(
+            'sky.provision.runpod.utils.runpod.get_sdk_version_error',
+            return_value=None
+    ), patch('sky.provision.runpod.utils.runpod_commands.create_spot_pod',
+             return_value={'id': 'pod-id'}) as create_spot_pod, patch(
+                 'sky.provision.runpod.utils._rest_launchable_data_center_ids',
+                 return_value={'US-CA-2'}), patch(
+                     'sky.adaptors.runpod.get_live_gpu_data_center_ids',
+                     return_value={'US-CA-2'}), patch(
+                         'sky.provision.runpod.utils._create_pod_via_rest',
+                         return_value={'id': 'pod-id'}) as create_rest_pod:
+        mock_sdk.get_gpu.return_value = {'memoryInGb': 80}
+        mock_sdk.create_pod.return_value = {'id': 'pod-id'}
 
         assert (_launch_runpod(resources_utils.NetworkTier.BEST,
                                preemptible=preemptible) == 'pod-id')
@@ -58,16 +61,18 @@ def test_launch_best_network_tier_passes_bandwidth_requirements(preemptible):
 
 def test_launch_standard_network_tier_omits_bandwidth_requirements():
     """Ensure standard launches omit marketplace bandwidth requirements."""
-    with patch('sky.provision.runpod.utils.runpod') as mock_runpod, patch(
-            'sky.provision.runpod.utils._rest_launchable_data_center_ids',
-            return_value={'US-CA-2'}), patch(
-                'sky.provision.runpod.utils._available_data_center_ids',
+    with patch('sky.provision.runpod.utils.runpod_sdk', new=MagicMock(
+    )) as mock_sdk, patch(
+            'sky.provision.runpod.utils.runpod.get_sdk_version_error',
+            return_value=None), patch(
+                'sky.provision.runpod.utils._rest_launchable_data_center_ids',
                 return_value={'US-CA-2'}), patch(
-                    'sky.provision.runpod.utils._create_pod_via_rest',
-                    return_value={'id': 'pod-id'}) as create_rest_pod:
-        mock_runpod.get_sdk_version_error.return_value = None
-        mock_runpod.runpod.get_gpu.return_value = {'memoryInGb': 80}
-        mock_runpod.runpod.create_pod.return_value = {'id': 'pod-id'}
+                    'sky.adaptors.runpod.get_live_gpu_data_center_ids',
+                    return_value={'US-CA-2'}), patch(
+                        'sky.provision.runpod.utils._create_pod_via_rest',
+                        return_value={'id': 'pod-id'}) as create_rest_pod:
+        mock_sdk.get_gpu.return_value = {'memoryInGb': 80}
+        mock_sdk.create_pod.return_value = {'id': 'pod-id'}
 
         _launch_runpod(resources_utils.NetworkTier.STANDARD)
 
@@ -77,16 +82,19 @@ def test_launch_standard_network_tier_omits_bandwidth_requirements():
 
 
 def test_spot_launch_rejects_data_center_without_gpu_capacity():
-    """Reject a spot pod before creation when its selected zone has no GPU capacity."""
-    with patch('sky.provision.runpod.utils.runpod') as mock_runpod, patch(
-            'sky.provision.runpod.utils._rest_launchable_data_center_ids',
-            return_value=set()
-    ), patch('sky.provision.runpod.utils._available_data_center_ids',
-             return_value={'US-NY-1'}), patch(
+    """Reject a spot pod before creation when its selected zone lacks stock."""
+    with patch('sky.provision.runpod.utils.runpod_sdk', new=MagicMock(
+    )) as mock_sdk, patch(
+            'sky.provision.runpod.utils.runpod.get_sdk_version_error',
+            return_value=None
+    ), patch('sky.provision.runpod.utils._rest_launchable_data_center_ids',
+             return_value=set()), patch(
+                 'sky.adaptors.runpod.get_live_gpu_data_center_ids',
+                 return_value={'US-NY-1'}
+             ), patch(
                  'sky.provision.runpod.utils.runpod_commands.create_spot_pod',
                  return_value={'id': 'pod-id'}) as create_spot_pod:
-        mock_runpod.get_sdk_version_error.return_value = None
-        mock_runpod.runpod.get_gpu.return_value = {'memoryInGb': 80}
+        mock_sdk.get_gpu.return_value = {'memoryInGb': 80}
 
         with pytest.raises(RuntimeError, match='No .* capacity'):
             _launch_runpod(resources_utils.NetworkTier.STANDARD,
@@ -95,10 +103,35 @@ def test_spot_launch_rejects_data_center_without_gpu_capacity():
     create_spot_pod.assert_not_called()
 
 
+def test_on_demand_launch_rejects_data_center_without_gpu_capacity():
+    """Reject an on-demand REST create before posting an unstocked zone."""
+    params = {
+        'name': 'test-pod',
+        'image_name': 'runpod/base:1.0.2-ubuntu2204',
+        'container_disk_in_gb': 50,
+        'ports': '22/tcp',
+        'support_public_ip': True,
+        'cloud_type': 'SECURE',
+        'gpu_type_id': 'NVIDIA A40',
+        'gpu_count': 1,
+        'min_vcpu_count': 4,
+        'min_memory_in_gb': 48,
+        'data_center_id': 'OC-AU-1',
+        'country_code': 'AU',
+    }
+    with patch('sky.provision.runpod.utils._rest_launchable_data_center_ids',
+               return_value={'OC-AU-1'}), patch(
+                   'sky.adaptors.runpod.get_live_gpu_data_center_ids',
+                   return_value=set()):
+        with pytest.raises(RuntimeError, match='No NVIDIA A40 capacity'):
+            runpod_utils._rest_pod_create_params(params, 'echo bootstrap')
+
+
 def test_launch_rejects_unsupported_sdk_version():
-    with patch('sky.provision.runpod.utils.runpod') as mock_runpod:
-        mock_runpod.get_sdk_version_error.return_value = (
-            'RunPod SDK 1.7.9 is too old. Install "runpod>=1.7.10".')
+    """Reject launch before provisioning when the RunPod SDK is too old."""
+    with patch('sky.provision.runpod.utils.runpod.get_sdk_version_error',
+               return_value=('RunPod SDK 1.7.9 is too old. Install '
+                             '"runpod>=1.7.10".')):
 
         with pytest.raises(RuntimeError, match='runpod>=1.7.10'):
             _launch_runpod(resources_utils.NetworkTier.BEST)
@@ -109,7 +142,7 @@ def test_rest_create_error_does_not_expose_provider_response_body():
     response = MagicMock(ok=False, status_code=400)
     response.text = 'Authorization: Bearer secret-token'
 
-    with patch('sky.provision.runpod.utils._ensure_api_key_configured'), patch(
+    with patch('sky.adaptors.runpod.ensure_api_key_configured'), patch(
             'sky.provision.runpod.utils.requests.post', return_value=response):
         with pytest.raises(RuntimeError) as exc_info:
             runpod_utils._create_pod_via_rest({'name': 'test-pod'})
@@ -122,6 +155,7 @@ def test_rest_create_error_does_not_expose_provider_response_body():
 class TestCreateTemplateForDockerLogin:
 
     def test_no_docker_login_config_returns_image_unchanged(self):
+        """Leave the image untouched when no registry credentials are given."""
         image, template_id = runpod_utils._create_template_for_docker_login(
             cluster_name='test-cluster',
             image_name='my-org/my-image:tag',
@@ -142,10 +176,11 @@ class TestCreateTemplateForDockerLogin:
         mock_auth_resp = {'id': 'auth-id-123'}
         mock_template_resp = {'id': 'template-id-456'}
 
-        with patch('sky.provision.runpod.utils.runpod') as mock_runpod:
-            mock_runpod.runpod.create_container_registry_auth.return_value = (
+        with patch('sky.provision.runpod.utils.runpod_sdk',
+                   new=MagicMock()) as mock_runpod:
+            mock_runpod.create_container_registry_auth.return_value = (
                 mock_auth_resp)
-            mock_runpod.runpod.create_template.return_value = mock_template_resp
+            mock_runpod.create_template.return_value = mock_template_resp
 
             image, template_id = (
                 runpod_utils._create_template_for_docker_login(
@@ -163,20 +198,22 @@ class TestCreateTemplateForDockerLogin:
 
         # The critical assertion: create_template must not receive None or
         # the string "None" as image_name.
-        mock_runpod.runpod.create_template.assert_called_once_with(
+        mock_runpod.create_template.assert_called_once_with(
             name=mock.ANY,
             image_name='ghcr.io/my-org/my-image:tag',
             registry_auth_id='auth-id-123',
         )
 
     def test_image_already_has_server_prefix_not_doubled(self):
+        """Preserve an image whose registry host already matches the login."""
         mock_auth_resp = {'id': 'auth-id-123'}
         mock_template_resp = {'id': 'template-id-456'}
 
-        with patch('sky.provision.runpod.utils.runpod') as mock_runpod:
-            mock_runpod.runpod.create_container_registry_auth.return_value = (
+        with patch('sky.provision.runpod.utils.runpod_sdk',
+                   new=MagicMock()) as mock_runpod:
+            mock_runpod.create_container_registry_auth.return_value = (
                 mock_auth_resp)
-            mock_runpod.runpod.create_template.return_value = mock_template_resp
+            mock_runpod.create_template.return_value = mock_template_resp
 
             image, _ = runpod_utils._create_template_for_docker_login(
                 cluster_name='test-cluster',

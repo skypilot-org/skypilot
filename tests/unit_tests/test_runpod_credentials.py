@@ -8,7 +8,6 @@ import requests
 from sky.adaptors import runpod as runpod_adaptor
 from sky.clouds import runpod as runpod_cloud
 from sky.clouds.cloud import TeardownExecutionStrategy
-from sky.provision.runpod import utils as runpod_utils
 from sky.utils import schemas
 
 
@@ -26,6 +25,16 @@ class _Response:
     def __init__(self, status_code: int, text: str = '') -> None:
         self.status_code = status_code
         self.text = text
+
+
+class _JsonResponse(_Response):
+
+    def __init__(self, payload) -> None:
+        super().__init__(200)
+        self._payload = payload
+
+    def json(self):
+        return self._payload
 
 
 def _write_runpod_config(tmp_path, monkeypatch, api_key: str) -> None:
@@ -53,9 +62,77 @@ def test_provisioning_loads_api_key_from_config(tmp_path, monkeypatch) -> None:
     sdk_module = types.SimpleNamespace(api_key=None)
     monkeypatch.setattr(runpod_adaptor, 'runpod', _FakeLazyRunPod(sdk_module))
 
-    runpod_utils._ensure_api_key_configured()
+    runpod_adaptor.ensure_api_key_configured()
 
     assert sdk_module.api_key == 'provisioning-key'
+
+
+def test_live_gpu_availability_uses_exact_v2_configuration(monkeypatch):
+    """Filter live zones from the exact v2 GPU, cloud, count, and country."""
+    monkeypatch.setattr(runpod_adaptor, '_get_api_key', lambda: 'test-key')
+    response = _JsonResponse({
+        'availability': 'LOW',
+        'dataCenters': [{
+            'id': 'OC-AU-1',
+            'availability': 'LOW',
+        }],
+    })
+    request = mock.Mock(return_value=response)
+    monkeypatch.setattr(runpod_adaptor.requests, 'get', request)
+    runpod_adaptor._gpu_availability_cache.clear()
+
+    available = runpod_adaptor.get_live_gpu_data_center_ids(
+        'NVIDIA A40', 1, 'SECURE', ['AU'])
+
+    assert available == {'OC-AU-1'}
+    request.assert_called_once_with(
+        'https://api.runpod.io/v2/catalog/gpus/NVIDIA%20A40',
+        headers={'Authorization': 'Bearer test-key'},
+        params={
+            'include': 'AVAILABILITY',
+            'product': 'POD',
+            'count': 1,
+            'cloud': 'SECURE',
+            'countryCodes': 'AU',
+        },
+        timeout=10,
+    )
+
+
+def test_catalog_gpu_availability_excludes_unavailable_data_centers(
+        monkeypatch):
+    """Keep a catalog snapshot only for v2 GPU data centers with stock."""
+    monkeypatch.setattr(runpod_adaptor, '_get_api_key', lambda: 'test-key')
+    response = _JsonResponse({
+        'gpus': [{
+            'id': 'NVIDIA A40',
+            'availability': 'LOW',
+            'dataCenters': [{
+                'id': 'OC-AU-1',
+                'availability': 'LOW',
+            }, {
+                'id': 'US-CA-1',
+                'availability': 'NONE',
+            }],
+        }],
+    })
+    request = mock.Mock(return_value=response)
+    monkeypatch.setattr(runpod_adaptor.requests, 'get', request)
+
+    data_centers = runpod_adaptor.get_catalog_gpu_data_center_ids(1, 'SECURE')
+
+    assert data_centers == {'NVIDIA A40': {'OC-AU-1'}}
+    request.assert_called_once_with(
+        'https://api.runpod.io/v2/catalog/gpus',
+        headers={'Authorization': 'Bearer test-key'},
+        params={
+            'include': 'AVAILABILITY',
+            'product': 'POD',
+            'count': 1,
+            'cloud': 'SECURE',
+        },
+        timeout=10,
+    )
 
 
 @pytest.mark.parametrize(

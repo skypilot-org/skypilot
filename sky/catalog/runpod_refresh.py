@@ -79,13 +79,13 @@ def has_credentials() -> bool:
 
 def _configure_credentials() -> None:
     """Load the configured RunPod key into the SDK, if needed."""
-    # pylint: disable=import-outside-toplevel, protected-access
+    # pylint: disable=import-outside-toplevel
     runpod_module, _, _ = _load_dependencies()
     if os.environ.get('RUNPOD_API_KEY'):
         runpod_module.api_key = os.environ['RUNPOD_API_KEY']
         return
-    from sky.provision.runpod import utils as runpod_utils
-    runpod_utils._ensure_api_key_configured()
+    from sky.adaptors import runpod as runpod_adaptor
+    runpod_adaptor.ensure_api_key_configured()
     if not getattr(runpod_module, 'api_key', None):
         raise ValueError('RunPod API key is not configured')
 

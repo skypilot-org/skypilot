@@ -19,7 +19,7 @@ def test_regions_with_offering_uses_catalog_without_live_capacity():
     with mock.patch(
             'sky.clouds.runpod.catalog.get_region_zones_for_instance_type',
             return_value=_catalog_regions()) as catalog_lookup, mock.patch(
-                'sky.provision.runpod.utils.'
+                'sky.adaptors.runpod.'
                 'available_data_center_ids_for_instance_type') as capacity:
         regions = runpod.RunPod.regions_with_offering(
             instance_type='1x_A40_SECURE',
@@ -47,7 +47,7 @@ def test_zones_provision_loop_filters_using_live_capacity():
     with mock.patch(
             'sky.clouds.runpod.catalog.get_region_zones_for_instance_type',
             return_value=[nl, ro]), mock.patch(
-                'sky.provision.runpod.utils.'
+                'sky.adaptors.runpod.'
                 'available_data_center_ids_for_instance_type',
                 return_value={'EU-NL-2'}):
         zones = list(
