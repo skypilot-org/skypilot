@@ -109,11 +109,13 @@ const GPU_CONSUMING_JOB_STATUSES = new Set([
 // The filterable properties, declared once. `key` is the URL parameter and the
 // `valueList` key for the typeahead; `label` is what lands on a chip, which
 // `evaluateCondition` lowercases to look up the field on each row.
+// `legacyKeys` are the spellings the old triple-array URLs carried, which the
+// dropdown chose to match a suggestion-list key rather than to read well.
 const USER_FILTER_SCHEMA = [
   { key: 'name', label: 'Name', kind: 'text' },
-  { key: 'gpu', label: 'GPU', kind: 'text' },
+  { key: 'gpu', label: 'GPU', kind: 'text', legacyKeys: ['gpu type'] },
   { key: 'infra', label: 'Infra', kind: 'text' },
-  { key: 'userId', label: 'User ID', kind: 'text' },
+  { key: 'userId', label: 'User ID', kind: 'text', legacyKeys: ['user id'] },
   { key: 'role', label: 'Role', kind: 'text' },
 ];
 

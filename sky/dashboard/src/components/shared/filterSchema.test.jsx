@@ -14,6 +14,13 @@ const SCHEMA = [
   { key: 'labels', label: 'Labels', kind: 'kv', multi: 'repeat' },
 ];
 
+// Properties whose URL key was renamed, so the old `property=` value is
+// neither the new key nor the lowercased label.
+const RENAMED_SCHEMA = [
+  { key: 'gpu', label: 'GPU', kind: 'text', legacyKeys: ['gpu type'] },
+  { key: 'userId', label: 'User ID', kind: 'text', legacyKeys: ['user id'] },
+];
+
 const chip = (property, value) => ({ property, operator: ':', value });
 
 describe('filtersToQuery', () => {
@@ -119,6 +126,30 @@ describe('legacy triple links', () => {
         value: 'alice',
       })
     ).toEqual({ user: 'alice' });
+  });
+
+  it('matches the lowercased label when it differs from the key', () => {
+    // Legacy links carried `filter.property` lowercased, which is the label,
+    // not the key.
+    expect(
+      legacyFiltersToQuery(RENAMED_SCHEMA, {
+        property: 'user id',
+        operator: ':',
+        value: 'hash-alice',
+      })
+    ).toEqual({ userId: 'hash-alice' });
+  });
+
+  it('matches a declared legacy spelling that is neither key nor label', () => {
+    // The users page wrote `gpu type` for a property whose label is `GPU` and
+    // whose key is now `gpu`; without `legacyKeys` such a link is dropped.
+    expect(
+      legacyFiltersToQuery(RENAMED_SCHEMA, {
+        property: 'gpu type',
+        operator: ':',
+        value: 'A100',
+      })
+    ).toEqual({ gpu: 'A100' });
   });
 
   it('translates several triples, pairing arrays by index', () => {

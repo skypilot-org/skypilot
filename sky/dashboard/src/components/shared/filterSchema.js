@@ -5,6 +5,9 @@
  *
  *   [{ key: 'status', label: 'Status', kind: 'enum', multi: true }, ...]
  *
+ * An entry may also carry `legacyKeys: ['old spelling']` for a property whose
+ * old `property=` value was neither its key nor its lowercased label.
+ *
  * and that one declaration drives the dropdown, the URL, and the chip bar, so
  * the key a page writes is by construction the key it can read back.
  *
@@ -112,12 +115,17 @@ export const legacyFiltersToQuery = (schema, query) => {
 
   const filters = [];
   properties.forEach((property, i) => {
-    // Legacy URLs carry the lowercased label, which for every page except the
-    // users GPU filter equals the schema key. Match either, so both survive.
+    // Legacy URLs carry the lowercased label, which for most pages equals the
+    // schema key. Where it does not -- the users page wrote `gpu type` for a
+    // property now keyed `gpu` -- the entry declares the old spelling in
+    // `legacyKeys`. Match all three so links already pasted somewhere survive.
     const lower = String(property ?? '').toLowerCase();
     const entry =
       entryByKey(schema, lower) ||
-      schema.find((e) => e.label.toLowerCase() === lower);
+      schema.find((e) => e.label.toLowerCase() === lower) ||
+      schema.find((e) =>
+        (e.legacyKeys || []).some((k) => k.toLowerCase() === lower)
+      );
     const value = properties.length === 1 ? values[0] : values[i];
     if (!entry || value === undefined || value === null || value === '') {
       return;
