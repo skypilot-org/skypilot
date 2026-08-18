@@ -2191,6 +2191,21 @@ class TestStalePolicyWrites:
         # grant the config no longer lists is *meant* to go.)
         assert _grouping_rows(worker_a, 'early') == ['admin']
 
+    @mock.patch('sky.global_user_state.add_or_update_user')
+    @mock.patch('sky.global_user_state.get_user', return_value=None)
+    def test_basic_auth_initialization_keeps_other_writes(
+            self, _get_user, _add_user, monkeypatch, two_workers):
+        """The basic-auth seed also ends in a whole-table rewrite."""
+        monkeypatch.setenv(constants.SKYPILOT_INITIAL_BASIC_AUTH,
+                           'admin:password123')
+        worker_a, worker_b = two_workers
+        worker_b.enforcer.load_policy()
+        worker_a.update_role('early', 'viewer')
+
+        worker_b._maybe_initialize_basic_auth_user()
+
+        assert _grouping_rows(worker_a, 'early') == ['viewer']
+
     def test_remove_workspace_policy_keeps_other_writes(self, two_workers):
         worker_a, worker_b = two_workers
         worker_a.add_workspace_policy('ws_victim', ['bob'])
@@ -2256,3 +2271,20 @@ class TestRoleReplacement:
         assert ['leaver', 'team_private', '*'] not in remaining
         # Only that user's grant goes; the workspace's other members stay.
         assert ['stayer', 'team_private', '*'] in remaining
+
+    def test_delete_user_keeps_a_blocklist_of_the_same_name(self, two_workers):
+        """A user id equal to a role name must not take the role's rules.
+
+        Nothing produces such an id today, but the failure is fail-open: a role
+        with no blocklist rows is permitted everywhere.
+        """
+        worker_a, _ = two_workers
+        worker_a.enforcer.add_policy('user', '/workspaces/update', 'POST')
+        worker_a.enforcer.add_policy('user', 'team_private', '*')
+
+        worker_a.delete_user('user')
+
+        worker_a.enforcer.load_policy()
+        remaining = worker_a.enforcer.get_policy()
+        assert ['user', '/workspaces/update', 'POST'] in remaining
+        assert ['user', 'team_private', '*'] not in remaining

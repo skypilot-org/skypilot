@@ -401,11 +401,14 @@ class PermissionService:
             removed_roles = enforcer.remove_filtered_grouping_policy(0, user_id)
             # Private-workspace membership is a `p` row (user, workspace, '*').
             # Role names also sit at field 0 of `p` rows (the blocklist rules),
-            # but a user id is an 8-char hash or an `sa-` prefixed id, so it can
-            # never collide with one.
-            removed_grants = enforcer.remove_filtered_policy(0, user_id)
+            # so match the '*' action as well instead of field 0 alone: no user
+            # id is a role name today, but taking out a role's whole blocklist
+            # would leave that role unrestricted rather than merely wrong. ''
+            # matches any value, in the model and in the sqlalchemy adapter.
+            removed_grants = enforcer.remove_filtered_policy(
+                0, user_id, '', '*')
             if not removed_roles and not removed_grants:
-                logger.debug(f'User {user_id} has no policies')
+                # Nothing to persist, and nothing to invalidate.
                 return
             enforcer.save_policy()
             self.invalidate_user_permission_cache(user_id)
@@ -416,7 +419,6 @@ class PermissionService:
             self._load_policy_no_lock()
             enforcer = self._ensure_enforcer()
             if enforcer.get_roles_for_user(user_id) == [new_role]:
-                logger.debug(f'User {user_id} already has role {new_role}')
                 return
             # Replace, don't add: a user is only ever meant to hold one role,
             # and a leftover `admin` would survive a demotion -- silently
