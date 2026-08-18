@@ -48,6 +48,31 @@ POLICY_UPDATE_LOCK_POLL_INTERVAL_SECONDS = 0.1
 # for a hard memory bound in a long-lived server process.
 _READ_ONLY_ENDPOINT_CACHE_MAX = 4096
 
+# How long a worker remembers "this principal has no role I recognize" before
+# paying for another policy load. Bounds the cost of the permanent case (a
+# genuinely role-less principal) without letting the transient one (a role
+# assigned on another worker moments ago) stay wrong for long.
+_NO_ROLE_PROBE_TTL_SECONDS = 30
+# Upper bound on that memo, cleared wholesale on overflow like
+# `_read_only_endpoint_cache`. Keys are authenticated user ids, so the space is
+# bounded by real principals rather than by traffic.
+_NO_ROLE_PROBE_CACHE_MAX = 4096
+
+# Materialized once: the role set is a static enum, and this is consulted on
+# every request.
+_SUPPORTED_ROLES = frozenset(rbac.get_supported_roles())
+
+
+def _recognized_roles(roles: List[str]) -> List[str]:
+    """The subset of `roles` the policy system actually knows about.
+
+    An unrecognized name is not a weaker role, it is no role: nothing in the
+    blocklist mentions it, so `enforce` permits it everywhere. Databases
+    predating the update-role validation can still hold one.
+    """
+    return [role for role in roles if role in _SUPPORTED_ROLES]
+
+
 _enforcer_instance: Optional['PermissionService'] = None
 
 # KV cache constants for workspace permission checks.
@@ -73,6 +98,9 @@ class PermissionService:
         # every request in the main event loop. Cleared whenever the allowlist
         # is rebuilt (`_build_viewer_allowlist_no_lock`).
         self._read_only_endpoint_cache: Dict[Tuple[str, str], bool] = {}
+        # user_id -> when this worker last reloaded on their behalf. See
+        # `_probe_unknown_principal`.
+        self._no_role_probe_cache: Dict[str, float] = {}
 
     def initialize(self):
         self._lazy_initialize(full_initialize=True)
@@ -514,6 +542,44 @@ class PermissionService:
         return (workspaces_utils.get_read_only_workspace_names() &
                 workspace_names)
 
+    def _probe_unknown_principal(self, user_id: str) -> List[str]:
+        """Reload once for a principal with no role here, and re-read it.
+
+        Either this worker's model predates whoever created them, or they have
+        no role at all. Only the database can tell the two apart, so pay for
+        one load -- but at most once per TTL per user, because the other case
+        is permanent: without the cache a role-less principal would trigger a
+        full policy load on every request it makes.
+        """
+        now = time.time()
+        if now - self._no_role_probe_cache.get(
+                user_id, 0.0) < _NO_ROLE_PROBE_TTL_SECONDS:
+            return self._ensure_enforcer().get_roles_for_user(user_id)
+        if len(self._no_role_probe_cache) >= _NO_ROLE_PROBE_CACHE_MAX:
+            self._no_role_probe_cache.clear()
+        self._no_role_probe_cache[user_id] = now
+        self._load_policy_no_lock()
+        return self._ensure_enforcer().get_roles_for_user(user_id)
+
+    def needs_role_seed(self, user_id: str) -> bool:
+        """Whether this principal looks like it never got a role.
+
+        For the login path, which already seeds new users: `seed_new_user_role`
+        is only called when the `users` row was newly inserted, so a seed that
+        failed (the policy lock has a bounded wait) is never retried and the
+        user stays role-less -- and therefore unrestricted -- until the next
+        restart re-seeds them.
+
+        Shares `_probe_unknown_principal`'s cache, so a worker whose model is
+        merely stale does not take the distributed policy lock on every one of
+        that user's requests, which is the contention that strands them in the
+        first place.
+        """
+        enforcer = self._ensure_enforcer()
+        if _recognized_roles(enforcer.get_roles_for_user(user_id)):
+            return False
+        return not _recognized_roles(self._probe_unknown_principal(user_id))
+
     def check_endpoint_permission(self, user_id: str, path: str,
                                   method: str) -> bool:
         """Check permission.
@@ -527,6 +593,11 @@ class PermissionService:
         Viewer role uses an in-memory allowlist:
         True (block) unless the (path, method) matches an entry in
         `self._viewer_allowlist`.
+
+        A principal holding no role this model recognizes is confined to the
+        `user` blocklist. Under blocklist semantics an unknown or absent role
+        matches no policy at all, which `enforce` reads as permitted
+        everywhere -- so the unconfigured case must not be the permissive one.
         """
         # We intentionally don't load the policy here, as it is a hot path, and
         # we don't support updating the policy.
@@ -540,6 +611,16 @@ class PermissionService:
         # _load_policy_no_lock and would put a query on the request hot
         # path.
         roles = enforcer.get_roles_for_user(user_id)
+        if not _recognized_roles(roles):
+            # Reload before confining them: a role assigned moments ago on
+            # another worker has not reached this model, and refusing a new
+            # admin every admin endpoint until something else happens to
+            # reload is its own outage.
+            roles = self._probe_unknown_principal(user_id)
+            if not _recognized_roles(roles):
+                # Casbin's `g` is reflexive, so passing the role name as the
+                # subject evaluates that role's rules directly.
+                return enforcer.enforce(rbac.RoleName.USER.value, path, method)
         # Admin wins over viewer when a user holds both — viewer's
         # default-deny semantics shouldn't restrict an admin.
         if (rbac.RoleName.VIEWER.value in roles and

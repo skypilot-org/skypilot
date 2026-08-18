@@ -5,7 +5,9 @@ import threading
 import time
 from unittest import mock
 
+import casbin
 import pytest
+import sqlalchemy
 import sqlalchemy_adapter
 
 from sky import models
@@ -2093,3 +2095,109 @@ class TestWorkspaceReadOnlyAccess:
         assert ('u2', 'ws', '*') in calls
         # No materialized read-only wildcard is ever written.
         assert all(c[2] == '*' for c in calls)
+
+
+@pytest.fixture
+def policy_db(tmp_path):
+    """A real sqlite-backed enforcer, so blocklist semantics are the real ones.
+
+    Yields a factory: each call returns an independent PermissionService over
+    the same database, which is what two API-server worker processes are.
+    """
+    engine = sqlalchemy.create_engine(f'sqlite:///{tmp_path}/policy.db')
+    model_path = os.path.join(os.path.dirname(permission.__file__),
+                              'model.conf')
+
+    def _worker():
+        service = permission.PermissionService()
+        adapter = sqlalchemy_adapter.Adapter(
+            engine, db_class=sqlalchemy_adapter.CasbinRule)
+        service.enforcer = casbin.SyncedEnforcer(model_path, adapter)
+        return service
+
+    seed = _worker()
+    # The `user` role's blocklist, as `_maybe_initialize_policies` would write.
+    seed.enforcer.add_policy('user', '/users/export', 'GET')
+    seed.enforcer.add_policy('user', '/users/create', 'POST')
+    with mock.patch('sky.users.permission._policy_lock'):
+        yield _worker
+
+
+class TestRolelessPrincipalIsConfined:
+    """A principal with no role this model recognizes must not be unrestricted.
+
+    Blocklist semantics make the unconfigured case the permissive one: nothing
+    mentions an unknown or absent role, so `enforce` permits it everywhere.
+    """
+
+    @pytest.mark.parametrize('roles', [[], ['pwned'], ['Admin'], ['']])
+    def test_unrecognized_or_absent_role_gets_the_user_blocklist(
+            self, policy_db, roles):
+        worker = policy_db()
+        for role in roles:
+            worker.enforcer.add_grouping_policy('subject', role)
+        worker.enforcer.load_policy()
+
+        assert worker.check_endpoint_permission('subject', '/users/export',
+                                                'GET')
+        # Confined to `user`, not denied outright: ordinary endpoints still work.
+        assert not worker.check_endpoint_permission('subject', '/status',
+                                                    'POST')
+
+    def test_recognized_roles_are_unaffected(self, policy_db):
+        worker = policy_db()
+        worker.enforcer.add_grouping_policy('an_admin', 'admin')
+        worker.enforcer.add_grouping_policy('a_user', 'user')
+        worker.enforcer.load_policy()
+
+        assert not worker.check_endpoint_permission('an_admin', '/users/export',
+                                                    'GET')
+        assert worker.check_endpoint_permission('a_user', '/users/export',
+                                                'GET')
+
+    def test_a_role_assigned_elsewhere_is_picked_up(self, policy_db):
+        """Otherwise a brand-new admin is refused until something else reloads."""
+        worker, writer = policy_db(), policy_db()
+        worker.enforcer.load_policy()  # stale from here on
+        writer.enforcer.add_grouping_policy('fresh_admin', 'admin')
+        writer.enforcer.save_policy()
+
+        assert not worker.check_endpoint_permission('fresh_admin',
+                                                    '/users/export', 'GET')
+
+    def test_reload_is_not_repeated_per_request(self, policy_db):
+        """A genuinely role-less principal must not reload on every request."""
+        worker = policy_db()
+        worker.enforcer.load_policy()
+        loads = []
+        original = worker._load_policy_no_lock
+        worker._load_policy_no_lock = lambda: (loads.append(1), original())[1]
+
+        for _ in range(5):
+            worker.check_endpoint_permission('ghost', '/users/export', 'GET')
+
+        assert len(loads) == 1, f'reloaded {len(loads)} times, expected 1'
+
+
+class TestNeedsRoleSeed:
+    """Retry a seed that never completed, without hammering the policy lock."""
+
+    def test_true_for_a_roleless_principal(self, policy_db):
+        worker = policy_db()
+        worker.enforcer.load_policy()
+        assert worker.needs_role_seed('stranded')
+
+    def test_false_for_a_principal_with_a_role(self, policy_db):
+        worker = policy_db()
+        worker.enforcer.add_grouping_policy('known', 'user')
+        worker.enforcer.load_policy()
+        assert not worker.needs_role_seed('known')
+
+    def test_false_when_only_this_worker_is_stale(self, policy_db):
+        """A stale worker must not take the policy lock for every request."""
+        worker, writer = policy_db(), policy_db()
+        worker.enforcer.load_policy()
+        writer.enforcer.add_grouping_policy('elsewhere', 'user')
+        writer.enforcer.save_policy()
+
+        assert not worker.needs_role_seed('elsewhere')
