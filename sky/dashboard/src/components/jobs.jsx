@@ -444,6 +444,7 @@ export function ManagedJobs() {
             propertyList={PROPERTY_OPTIONS}
             valueList={valueList}
             setFilters={setFilters}
+            addFilter={addFilter}
             onFilterAdd={trackNewFilter}
             placeholder="Filter jobs"
           />
