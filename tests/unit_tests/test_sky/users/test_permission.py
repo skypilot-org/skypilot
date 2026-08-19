@@ -2552,12 +2552,17 @@ class TestScheduledRoleRepair:
             'policy lock makes a repair wait')
 
     def test_queueing_is_claimed_once_per_ttl(self, policy_db):
+        """Draining between attempts, so the in-flight dedup cannot stand in.
+
+        With the queue emptied each time, only the per-principal claim stops the
+        next attempt -- which is what this pins.
+        """
         worker = policy_db()
         worker.enforcer.load_policy()
         with mock.patch.object(worker, '_run_role_repair') as run:
             for _ in range(5):
                 worker._schedule_role_repair('ghost')
-            worker._repair_queue.join()
+                worker._repair_queue.join()
         assert run.call_count == 1
 
     def test_a_burst_is_bounded(self, policy_db):
@@ -2591,6 +2596,37 @@ class TestScheduledRoleRepair:
         assert worker.claim_role_seed_attempt('ghost'), (
             'the claim was consumed by a queueing attempt that did nothing')
 
+    def test_an_unrecognized_role_is_not_queued(self, policy_db):
+        """A seed fills a gap, and a name nobody recognizes is not one.
+
+        Queueing it would spin in the worker and spend a slot the genuinely
+        role-less need.
+        """
+        worker = policy_db()
+        worker.enforcer.add_grouping_policy('weird', 'pwned')
+        worker.enforcer.load_policy()
+
+        assert worker.check_endpoint_permission('weird', '/users/export', 'GET')
+
+        assert worker._repair_in_flight == set()
+        assert worker._repair_queue.empty()
+        assert worker._repair_worker is None
+
+    def test_a_dead_worker_is_replaced(self, policy_db):
+        """Otherwise every later repair queues into a thread nobody reads."""
+        worker = policy_db()
+        worker.enforcer.load_policy()
+        with mock.patch.object(worker, '_run_role_repair'):
+            worker._schedule_role_repair('ghost1')
+            worker._repair_queue.join()
+        dead = worker._repair_worker
+        assert dead is not None
+        with mock.patch.object(dead, 'is_alive', return_value=False), \
+             mock.patch.object(worker, '_run_role_repair'):
+            worker._schedule_role_repair('ghost2')
+            worker._repair_queue.join()
+        assert worker._repair_worker is not dead
+
     def test_no_thread_until_one_is_needed(self):
         """The CLI imports this module; it must not start a thread."""
         assert permission.PermissionService()._repair_worker is None
@@ -2614,7 +2650,20 @@ class TestScheduledRoleRepair:
                                'seed_new_user_role',
                                side_effect=RuntimeError('lock timeout')):
             worker._run_role_repair('ghost')  # must not raise
-        assert 'ghost' not in worker._repair_in_flight
+
+    def test_a_drained_repair_leaves_no_claim_on_the_queue(self, policy_db):
+        """The drain loop clears in-flight, so a later attempt can queue again.
+
+        Keeping that in the repair body meant a stubbed body left the principal
+        marked as queued forever -- which silently turned the claim's rate limit
+        into dedup, and hid a missing rate limit from its own test.
+        """
+        worker = policy_db()
+        worker.enforcer.load_policy()
+        with mock.patch.object(worker, '_run_role_repair'):
+            worker._schedule_role_repair('ghost')
+            worker._repair_queue.join()
+        assert worker._repair_in_flight == set()
 
 
 class TestProbeThrottle:
@@ -2693,6 +2742,23 @@ class TestBoundedClaimCache:
         # All live and over the cap: half go, the rest keep their rate limit.
         assert 2 <= len(cache) <= 4
         assert not permission._claim_within_ttl(cache, 'new', ttl=60.0, cap=4)
+
+    def test_a_seen_role_set_drops_half_when_full(self):
+        """Same argument as the TTL caches: clearing it stampedes every one.
+
+        Every principal whose entry vanished pays another confirmation off the
+        loop, and after a clear that is all of them at once.
+        """
+        service = permission.PermissionService()
+        cap = permission._NO_ROLE_PROBE_CACHE_MAX
+        for i in range(cap):
+            service._remember_role_seen(f'u{i}')
+
+        service._remember_role_seen('one-more')
+
+        assert len(service._role_seen) > cap // 4, (
+            f'{len(service._role_seen)} left: the set was cleared, not halved')
+        assert 'one-more' in service._role_seen
 
     def test_the_claim_is_consumed(self):
         cache: dict = {}

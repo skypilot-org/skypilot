@@ -724,20 +724,27 @@ class PermissionService:
         request stays denied; the next one finds a role.
         """
         with self._repair_lock:
+            # Already queued before the cap: otherwise a principal that is
+            # waiting its turn gets logged as one that was turned away.
+            if user_id in self._repair_in_flight:
+                return
             if len(self._repair_in_flight) >= _REPAIR_MAX_IN_FLIGHT:
                 logger.warning(
                     f'Not queueing a role repair for {user_id}: '
                     f'{_REPAIR_MAX_IN_FLIGHT} already pending. Something is '
                     f'stranding principals faster than they can be repaired.')
                 return
-            if user_id in self._repair_in_flight:
-                return
             # Claimed last: a claim spent while the queue was full would make
             # this principal wait out a TTL for a repair that never ran.
             if not self.claim_role_seed_attempt(user_id):
                 return
             self._repair_in_flight.add(user_id)
-            if self._repair_worker is None:
+            # Restarted if it died: only a BaseException can end the drain loop,
+            # but leaving a dead worker attached would queue every later repair
+            # into a thread that will never read them, and the only symptom
+            # would be the cap warning above, forever.
+            if self._repair_worker is None or not self._repair_worker.is_alive(
+            ):
                 self._repair_worker = threading.Thread(
                     target=self._drain_role_repairs,
                     name='role-repair',
@@ -759,6 +766,11 @@ class PermissionService:
             try:
                 self._run_role_repair(user_id)
             finally:
+                # The queue owns the in-flight bookkeeping, not the repair
+                # itself: a caller that stubs the repair body would otherwise
+                # leave the principal marked as queued forever.
+                with self._repair_lock:
+                    self._repair_in_flight.discard(user_id)
                 self._repair_queue.task_done()
 
     def _run_role_repair(self, user_id: str) -> None:
@@ -773,9 +785,6 @@ class PermissionService:
             logger.warning(f'Queued role repair for {user_id} failed; a later '
                            f'request retries: '
                            f'{common_utils.format_exception(e)}')
-        finally:
-            with self._repair_lock:
-                self._repair_in_flight.discard(user_id)
 
     def _log_denied_principal(self, user_id: str, path: str,
                               method: str) -> None:
