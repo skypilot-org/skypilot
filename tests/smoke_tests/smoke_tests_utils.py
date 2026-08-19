@@ -14,7 +14,7 @@ import time
 import traceback
 from types import MethodType
 from typing import (Any, BinaryIO, Callable, Dict, Generator, List, NamedTuple,
-                    Optional, Sequence, Set, Tuple, Union)
+                    Optional, Sequence, Set, Tuple, Type, Union)
 from unittest.mock import patch
 import uuid
 
@@ -146,6 +146,24 @@ def _statuses_to_str(statuses: Sequence[enum.Enum]):
         return '(' + '|'.join([status.value for status in statuses]) + ')'
     else:
         return statuses[0].value
+
+
+def _failure_statuses_str(status_enum: Type[enum.Enum],
+                          target_statuses: Sequence[enum.Enum]) -> str:
+    """Terminal failure statuses to fail fast on, excluding the target(s).
+
+    Once a job reaches a terminal failure status that is not one of the
+    statuses being waited for, it can never reach the target, so the wait
+    command should stop polling instead of waiting for the full timeout.
+    Returns a pipe-joined alternation, or a sentinel that never matches a real
+    status when there is nothing to fail fast on.
+    """
+    targets = set(target_statuses)
+    failures = [
+        status.value for status in status_enum if status.is_terminal() and
+        status.value != 'SUCCEEDED' and status not in targets
+    ]
+    return '|'.join(failures) if failures else '__NO_FAILURE_STATUS__'
 
 
 _WAIT_UNTIL_CLUSTER_STATUS_CONTAINS = (
@@ -326,6 +344,18 @@ _WAIT_UNTIL_JOB_STATUS_CONTAINS_MATCHING_JOB_ID = (
     '  fi; '
     'done <<< "$current_status"; '
     'if [ "$found" -eq 1 ]; then break; fi; '  # Break outer loop if match found
+    # Fail fast: if the job has reached a terminal failure status that is not
+    # one of the target statuses, it can never reach the target, so stop
+    # polling instead of waiting for the full timeout.
+    'failed=0; '
+    'while read -r line; do '
+    '  if [[ "$line" =~ ^({job_failure_status})$ ]]; then '
+    '    echo "Job reached terminal failure status $line while waiting for \'{job_status}\'."; '
+    '    failed=1; '
+    '    break; '
+    '  fi; '
+    'done <<< "$current_status"; '
+    'if [ "$failed" -eq 1 ]; then echo "Current queue: $current_queue"; exit 1; fi; '
     'echo "Waiting for job status to contain {job_status}, current status: $current_status"; '
     'echo "Current queue: $current_queue"; '
     'sleep 10; '
@@ -348,6 +378,7 @@ def get_cmd_wait_until_job_status_contains_matching_job_id(
         cluster_name=cluster_name,
         job_id=job_id,
         job_status=_statuses_to_str(job_status),
+        job_failure_status=_failure_statuses_str(sky.JobStatus, job_status),
         timeout=timeout)
     if all_users:
         cmd = cmd.replace('sky queue ', 'sky queue -u ')
@@ -359,6 +390,7 @@ def get_cmd_wait_until_job_status_contains_without_matching_job(
     return _WAIT_UNTIL_JOB_STATUS_CONTAINS_WITHOUT_MATCHING_JOB.format(
         cluster_name=cluster_name,
         job_status=_statuses_to_str(job_status),
+        job_failure_status=_failure_statuses_str(sky.JobStatus, job_status),
         timeout=timeout)
 
 
@@ -369,6 +401,7 @@ def get_cmd_wait_until_job_status_contains_matching_job_name(
         cluster_name=cluster_name,
         job_name=job_name,
         job_status=_statuses_to_str(job_status),
+        job_failure_status=_failure_statuses_str(sky.JobStatus, job_status),
         timeout=timeout)
 
 
@@ -417,6 +450,8 @@ def get_cmd_wait_until_managed_job_status_contains_matching_job_name(
     return _WAIT_UNTIL_MANAGED_JOB_STATUS_CONTAINS_MATCHING_JOB_NAME.format(
         job_name=job_name,
         job_status=_statuses_to_str(job_status),
+        job_failure_status=_failure_statuses_str(sky.ManagedJobStatus,
+                                                 job_status),
         timeout=timeout,
         gap_seconds=gap_seconds)
 
