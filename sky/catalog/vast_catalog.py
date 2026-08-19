@@ -4,7 +4,6 @@ This module loads the service catalog file and can be used to
 query instance types and pricing information for Vast.ai.
 """
 
-import io
 import typing
 from typing import Dict, List, Optional, Tuple, Union
 
@@ -30,40 +29,42 @@ _REQUIRED_CATALOG_COLUMNS = {
     'Region',
 }
 
+_df = common.read_catalog('vast/vms.csv')
+
 
 @annotations.lru_cache(scope='request', maxsize=1)
 def _catalog_df() -> pd.DataFrame:
-    """Fetch the current stable Vast instance-type metadata.
+    """Return validated stable Vast instance-type metadata from local cache.
 
     Vast marketplace offers are selected only during provisioning. They must
     not become catalog identities because offer IDs can disappear at any time.
-    This intentionally does not use SkyPilot's local catalog cache: each
-    request must reflect the latest hosted Vast GPU inventory. All catalog
-    queries within one request share the same metadata snapshot.
+    Local catalog refreshes replace the CSV atomically; all catalog queries
+    within one request share the same stable metadata snapshot.
     """
     try:
-        catalog_df = pd.read_csv(
-            io.StringIO(common.fetch_catalog_text('vast/vms.csv')))
+        catalog_df = _df
+        missing_columns = _REQUIRED_CATALOG_COLUMNS.difference(
+            catalog_df.columns)
+        if missing_columns:
+            missing = ', '.join(sorted(missing_columns))
+            raise common.CatalogFetchError(
+                'Local Vast catalog is missing required columns: '
+                f'{missing}.')
+
+        accelerator_count = pd.to_numeric(catalog_df['AcceleratorCount'],
+                                          errors='coerce')
+        usable_gpu_rows = (catalog_df['AcceleratorName'].notna() &
+                           accelerator_count.gt(0) &
+                           catalog_df['GpuInfo'].notna())
+        if usable_gpu_rows.any():
+            return typing.cast(pd.DataFrame, catalog_df)
+        raise common.CatalogFetchError(
+            'Local Vast catalog contains no usable GPU rows.')
     except common.CatalogFetchError:
         raise
     except Exception as exc:  # pylint: disable=broad-except
         raise common.CatalogFetchError(
-            'Current Vast catalog is not valid CSV.') from exc
-
-    missing_columns = _REQUIRED_CATALOG_COLUMNS.difference(catalog_df.columns)
-    if missing_columns:
-        missing = ', '.join(sorted(missing_columns))
-        raise common.CatalogFetchError(
-            f'Current Vast catalog is missing required columns: {missing}.')
-
-    accelerator_count = pd.to_numeric(catalog_df['AcceleratorCount'],
-                                      errors='coerce')
-    usable_gpu_rows = (catalog_df['AcceleratorName'].notna() &
-                       accelerator_count.gt(0) & catalog_df['GpuInfo'].notna())
-    if not usable_gpu_rows.any():
-        raise common.CatalogFetchError(
-            'Current Vast catalog contains no usable GPU rows.')
-    return catalog_df
+            'Local Vast catalog is not valid CSV.') from exc
 
 
 def _apply_datacenter_filter(df: pd.DataFrame,
@@ -72,9 +73,12 @@ def _apply_datacenter_filter(df: pd.DataFrame,
 
     hosting_type: 0 = Consumer hosted, 1 = Datacenter hosted
     """
-    if not datacenter_only or 'HostingType' not in df.columns:
+    if not datacenter_only:
         return df
-    return df[df['HostingType'] >= 1]
+    if 'HostingType' not in df.columns:
+        return df.iloc[0:0]
+    hosting_type = pd.to_numeric(df['HostingType'], errors='coerce')
+    return df[hosting_type.ge(1)]
 
 
 def instance_type_exists(instance_type: str) -> bool:

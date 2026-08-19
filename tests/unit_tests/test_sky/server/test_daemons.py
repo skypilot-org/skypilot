@@ -206,6 +206,32 @@ class TestDaemonLogRotation:
             os.unlink(tmp_path)
 
 
+def test_vast_catalog_refresh_daemon_delegates_to_catalog_worker():
+    """The daemon delegates refresh and applies its configured pause."""
+    with mock.patch('sky.catalog.vast_refresh.refresh_catalog') as refresh, \
+         mock.patch.object(daemons.time, 'sleep') as sleep:
+        daemons.refresh_vast_catalog_event()
+
+    refresh.assert_called_once_with()
+    sleep.assert_called_once_with(
+        daemons.server_constants.VAST_CATALOG_REFRESH_DAEMON_INTERVAL_SECONDS)
+    catalog_daemon = next(daemon for daemon in daemons.INTERNAL_REQUEST_DAEMONS
+                          if daemon.id == 'vast-catalog-refresh-daemon')
+    assert catalog_daemon.name.value == 'vast-catalog-refresh'
+    assert catalog_daemon.event_fn is daemons.refresh_vast_catalog_event
+    assert catalog_daemon.should_skip is daemons.should_skip_vast_catalog_refresh
+    assert catalog_daemon.name in daemons.HIDDEN_REQUEST_NAMES
+
+
+def test_vast_catalog_refresh_daemon_requires_credential_file(monkeypatch):
+    """The daemon is skipped unless the Vast credential file is present."""
+    monkeypatch.setattr(daemons.os.path, 'isfile', lambda _path: False)
+    assert daemons.should_skip_vast_catalog_refresh()
+
+    monkeypatch.setattr(daemons.os.path, 'isfile', lambda _path: True)
+    assert not daemons.should_skip_vast_catalog_refresh()
+
+
 class TestConsolidationEventInstancePersistence:
     """The consolidation-mode refresh daemons must reuse a single
     SkyletEvent instance across iterations.
