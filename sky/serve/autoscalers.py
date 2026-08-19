@@ -1122,58 +1122,46 @@ class QueueLengthAutoscaler(_AutoscalerWithHysteresis):
                     f'queue_length_threshold={self.queue_length_threshold}')
 
     def _calculate_target_num_replicas(self) -> int:
-        """Calculate target number of replicas based on queue length."""
-        queue_length = managed_job_state.get_pending_jobs_count_by_pool(
+        """Calculate target number of replicas based on non-terminal demand.
+
+        Targets the count of non-terminal jobs directly — the desired worker
+        count, since each non-terminal job needs or already holds a pool worker
+        — clipped to [min_replicas, max_replicas], instead of ramping by +/-1
+        per decision. This tracks total worker occupancy, so a new job arriving
+        while existing workers are busy drives a scale-up (the target is
+        compared against the busy-inclusive replica count in
+        _generate_scaling_decisions, so it must include RUNNING jobs), and the
+        signal is stable across a job's PENDING -> STARTING -> RUNNING
+        transitions (it no longer drains to zero as the scheduler eagerly moves
+        a job onto a worker). The hysteresis layer
+        (_set_target_num_replicas_with_hysteresis / upscale_delay) still gates
+        how fast we ramp toward this target; this method only sets what target
+        to ramp toward.
+        """
+        nonterminal = managed_job_state.get_nonterminal_jobs_count_by_pool(
             self._service_name)
         current_num_replicas = self.target_num_replicas
 
+        # Target the desired worker count directly. clip() clamps to
+        # [min_replicas, max_replicas], so:
+        #   - nonterminal == 0           -> target == min_replicas (an idle pool
+        #                                   can scale to 0 when min_replicas == 0).
+        #   - 0 < nonterminal <= max     -> target == nonterminal (one worker per
+        #                                   non-terminal job).
+        #   - nonterminal > max_replicas -> target == max_replicas (fan out fully
+        #                                   for a burst of N > max jobs).
+        # Because clip(nonterminal) >= min_replicas and (for nonterminal >= 1)
+        # >= 1, a pool never scales to zero while any job is non-terminal.
+        target_num_replicas = self._clip_target_num_replicas(nonterminal)
+
         logger.info(f'[QueueLengthAutoscaler] Pool "{self._service_name}": '
-                    f'queue_length={queue_length}, '
-                    f'threshold={self.queue_length_threshold}, '
+                    f'nonterminal={nonterminal}, '
                     f'current_target_replicas={current_num_replicas}, '
+                    f'target_replicas={target_num_replicas}, '
                     f'min_replicas={self.min_replicas}, '
                     f'max_replicas={self.max_replicas}')
 
-        # Determine target based on queue length vs threshold
-        if queue_length == 0:
-            # There are no pending jobs, we should quickly scale down to 0.
-            target_num_replicas = 0
-            decision = 'SCALE_DOWN_TO_ZERO'
-        elif queue_length > self.queue_length_threshold:
-            # Scale up by 1
-            # TODO(lloyd): we probably want support for scaling up by more than
-            # 1 in the future. We are punting on this currently because without
-            # an understanding of the workload the right number of replicas to
-            # scale up by is not clear and the user can just tweak the upscale
-            # delay to control the rate of scaling up.
-            target_num_replicas = current_num_replicas + 1
-            decision = 'SCALE_UP'
-        elif queue_length < self.queue_length_threshold:
-            # Scale down by 1
-            target_num_replicas = current_num_replicas - 1
-            decision = 'SCALE_DOWN'
-        else:
-            # Queue length equals threshold, keep current
-            target_num_replicas = current_num_replicas
-            decision = 'NO_CHANGE'
-        logger.info(f'[QueueLengthAutoscaler] Decision: {decision} '
-                    f'{current_num_replicas} -> {target_num_replicas}')
-
-        # Special case: if target_num_replicas is 0 and queue_length is greater
-        # than 0, we should not scale down to 0. This is to prevent the service
-        # from scaling to zero when there are jobs in the queue.
-        if target_num_replicas == 0 and queue_length > 0:
-            target_num_replicas = 1
-            logger.info('Preventing scale to zero since there are jobs in the'
-                        f'queue: {queue_length}')
-
-        clipped_target = self._clip_target_num_replicas(target_num_replicas)
-        if clipped_target != target_num_replicas:
-            logger.info(f'[QueueLengthAutoscaler] Clipped target: '
-                        f'{target_num_replicas} -> {clipped_target} '
-                        f'(bounds: [{self.min_replicas}, {self.max_replicas}])')
-
-        return clipped_target
+        return target_num_replicas
 
     def update_version(self, version: int, spec: 'service_spec.SkyServiceSpec',
                        update_mode: serve_utils.UpdateMode) -> None:
