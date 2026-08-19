@@ -88,6 +88,19 @@ else:
 
 logger = sky_logging.init_logger(__name__)
 
+
+def _dump_for_log(config: config_utils.Config) -> str:
+    """Serializes a config for a log line or an error message.
+
+    Never use yaml_utils.dump_yaml_str() directly on a config for that purpose:
+    a config can carry credentials (see
+    config_utils.SENSITIVE_CONFIG_PATHS), and a debug dump is the one place
+    they escape into somewhere durable and widely readable.
+    """
+    return yaml_utils.dump_yaml_str(
+        config_utils.redact_sensitive_values(config))
+
+
 # The config is generated as described below:
 #
 # (*) (Used internally) If env var {ENV_VAR_SKYPILOT_CONFIG} exists, use its
@@ -750,7 +763,7 @@ def parse_and_validate_config_file(config_path: str) -> config_utils.Config:
             os.environ[constants.ENV_VAR_DB_CONNECTION_URI] = db_url
         if sky_logging.logging_enabled(logger, sky_logging.DEBUG):
             logger.debug(f'Config loaded from {config_path}:\n'
-                         f'{yaml_utils.dump_yaml_str(dict(config))}')
+                         f'{_dump_for_log(config)}')
     except yaml.YAMLError as e:
         logger.error(f'Error in loading config file ({config_path}):', e)
     if config:
@@ -849,7 +862,7 @@ def _reload_config_as_server() -> None:
             server_config = overlay_skypilot_config(server_config, db_config)
     if sky_logging.logging_enabled(logger, sky_logging.DEBUG):
         logger.debug(f'server config: \n'
-                     f'{yaml_utils.dump_yaml_str(dict(server_config))}')
+                     f'{_dump_for_log(server_config)}')
     _set_loaded_config(server_config)
     _set_loaded_config_path(server_config_path)
 
@@ -873,9 +886,8 @@ def _reload_config_as_client() -> None:
         overlaid_client_config = overlay_skypilot_config(
             original_config=overlaid_client_config, override_configs=override)
     if sky_logging.logging_enabled(logger, sky_logging.DEBUG):
-        logger.debug(
-            f'client config (before task and CLI overrides): \n'
-            f'{yaml_utils.dump_yaml_str(dict(overlaid_client_config))}')
+        logger.debug(f'client config (before task and CLI overrides): \n'
+                     f'{_dump_for_log(overlaid_client_config)}')
     _set_loaded_config(overlaid_client_config)
     _set_loaded_config_path([user_config_path, project_config_path])
 
@@ -985,9 +997,9 @@ def override_skypilot_config(
                 'Failed to override the SkyPilot config on API '
                 'server with your local SkyPilot config:\n'
                 '=== SkyPilot config on API server ===\n'
-                f'{yaml_utils.dump_yaml_str(dict(original_config))}\n'
+                f'{_dump_for_log(original_config)}\n'
                 '=== Your local SkyPilot config ===\n'
-                f'{yaml_utils.dump_yaml_str(dict(override_configs))}\n'
+                f'{_dump_for_log(override_configs)}\n'
                 f'Details: {e}') from e
     finally:
         _set_loaded_config(original_config)
@@ -1293,8 +1305,7 @@ def remove_queue_name_from_config() -> Iterator[None]:
         pop_if_set(('workspaces', workspace_name, 'kubernetes'))
         remove_from_context_configs(
             ('workspaces', workspace_name, 'kubernetes'))
-    logger.debug(
-        f'config without local queue: {yaml_utils.dump_yaml_str(dict(config))}')
+    logger.debug(f'config without local queue: {_dump_for_log(config)}')
     with replace_skypilot_config(config):
         yield
 
@@ -1345,7 +1356,7 @@ def apply_cli_config(cli_config: Optional[List[str]]) -> Dict[str, Any]:
     parsed_config = _compose_cli_config(cli_config)
     if sky_logging.logging_enabled(logger, sky_logging.DEBUG):
         logger.debug(f'applying following CLI overrides: \n'
-                     f'{yaml_utils.dump_yaml_str(dict(parsed_config))}')
+                     f'{_dump_for_log(parsed_config)}')
     _set_loaded_config(
         overlay_skypilot_config(original_config=_get_loaded_config(),
                                 override_configs=parsed_config))
@@ -1399,6 +1410,9 @@ def update_api_server_config_no_lock(config: config_utils.Config) -> None:
 
             def _set_config_yaml_to_db(key: str, config: config_utils.Config):
                 engine = _db_manager.get_engine()
+                # Persisting, not logging: this value is read back as the
+                # server config, so it must be the real one. Do not route it
+                # through _dump_for_log().
                 config_str = yaml_utils.dump_yaml_str(dict(config))
                 with orm.Session(engine) as session:
                     if (engine.dialect.name ==

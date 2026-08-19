@@ -103,6 +103,85 @@ class Config(Dict[str, Any]):
         return cls(**config)
 
 
+# What a redacted secret is replaced with. Matches
+# provision.common.ProvisionConfig.get_redacted_config().
+REDACTED_VALUE = '<redacted>'
+
+# Config paths whose *value* is a credential, and so must never reach a log
+# line or an error message. Only values are hidden -- the key stays, so a dump
+# still shows that the field was set.
+#
+# A path component of '*' matches every key of a mapping and every element of a
+# sequence. It is needed because `resources` accepts `any_of`/`ordered` lists,
+# each element of which can carry its own docker login.
+#
+# Deliberately excluded: fields naming a credential rather than holding one --
+# logs.{aws,gcp}.credentials_file and workspaces.*.nebius.credentials_file_path
+# are filesystem paths, and hiding them costs debuggability while revealing
+# nothing.
+SENSITIVE_CONFIG_PATHS: List[Tuple[str, ...]] = [
+    # A connection URI, so it embeds the database password.
+    (
+        'db',),
+    # A bearer token for the API server: whoever reads it holds the roles of
+    # the service account it was minted for.
+    ('api_server', 'service_account_token'),
+]
+for _controller in ('jobs', 'serve'):
+    for _resources_path in (('resources',), ('resources', 'any_of', '*'),
+                            ('resources', 'ordered', '*')):
+        SENSITIVE_CONFIG_PATHS.append((_controller, 'controller') +
+                                      _resources_path +
+                                      ('_docker_login_config', 'password'))
+del _controller, _resources_path
+
+
+def _redact_path(node: Any, path: Tuple[str, ...]) -> None:
+    """Replaces `node`'s value at `path` with REDACTED_VALUE, in place.
+
+    Missing intermediate keys are not an error: the paths describe every field
+    that *could* hold a secret, and a given config sets few of them.
+    """
+    if not path:
+        return
+    key, rest = path[0], path[1:]
+    if key == '*':
+        children: Any
+        if isinstance(node, dict):
+            children = node.values()
+        elif isinstance(node, (list, tuple)):
+            children = node
+        else:
+            return
+        for child in children:
+            _redact_path(child, rest)
+        return
+    if not isinstance(node, dict) or key not in node:
+        return
+    if not rest:
+        # Leave an unset field unset, so redaction cannot be mistaken for a
+        # value that was actually configured.
+        if node[key] is not None:
+            node[key] = REDACTED_VALUE
+        return
+    _redact_path(node[key], rest)
+
+
+def redact_sensitive_values(config: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    """Returns a copy of `config` safe to log, secret values replaced.
+
+    Use this for every dump of a SkyPilot config into a log line or an error
+    message. The input is not modified, so the live config keeps the values it
+    needs.
+    """
+    if not config:
+        return {}
+    redacted = copy.deepcopy(dict(config))
+    for path in SENSITIVE_CONFIG_PATHS:
+        _redact_path(redacted, path)
+    return redacted
+
+
 def _check_allowed_and_disallowed_override_keys(
     key: str,
     allowed_override_keys: Optional[List[Tuple[str, ...]]] = None,
