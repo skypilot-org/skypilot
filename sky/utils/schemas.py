@@ -1505,6 +1505,31 @@ _GPU_PARTITION_MAP_SCHEMA = {
     },
 }
 
+_CONTAINER_MOUNTS_SCHEMA = {
+    'type': 'object',
+    'required': [],
+    # Maps a container path to a host path string (read-only) or
+    # {host_path: ..., mode: ro|rw}.
+    'additionalProperties': {
+        'anyOf': [{
+            'type': 'string',
+        }, {
+            'type': 'object',
+            'required': ['host_path'],
+            'additionalProperties': False,
+            'properties': {
+                'host_path': {
+                    'type': 'string',
+                },
+                'mode': {
+                    'type': 'string',
+                    'enum': ['ro', 'rw'],
+                },
+            },
+        }],
+    },
+}
+
 _PRICING_SCHEMA = {
     'type': 'object',
     'required': [],
@@ -1538,6 +1563,16 @@ _CONTEXT_CONFIG_SCHEMA_MINIMAL = {
     },
     'provision_timeout': {
         'type': 'integer',
+    },
+    'max_inline_command_length': {
+        # Largest command, in bytes of request URL, that SkyPilot will inline
+        # into a `kubectl exec` instead of uploading as a file. Lower this if a
+        # proxy in front of the Kubernetes API rejects large requests; the only
+        # cost of a lower value is an extra file upload per job submission.
+        # Lives here rather than in the Kubernetes-only schema so SSH node
+        # pools, which run through the same runner, can set it too.
+        'type': 'integer',
+        'minimum': 1024,
     },
     'custom_metadata': {
         'type': 'object',
@@ -1716,6 +1751,17 @@ _CONTEXT_CONFIG_SCHEMA_KUBERNETES = {
                     },
                     'minItems': 1,
                 },
+                # Whose launches this auto-mount applies to, mirroring the
+                # personal/workspace/global scopes used by secrets:
+                # - personal: only launches by the volume's owner
+                # - workspace: only launches in the volume's workspace
+                # - global: every launch (default; original behavior)
+                # Values must match volume.AutoMountScope (not imported here
+                # to avoid a circular import).
+                'scope': {
+                    'type': 'string',
+                    'enum': ['personal', 'workspace', 'global'],
+                },
             },
         },
     },
@@ -1810,6 +1856,27 @@ def get_config_schema():
             'additionalProperties': _allow_additional_properties(),
             'properties': props,
         }
+
+    # Budgets bounding how long the managed-job controller tolerates
+    # consecutive failures of its job-status check before treating the job as
+    # unhealthy and recovering it. Recovery is only triggered once *both*
+    # budgets are exhausted; see
+    # sky.jobs.utils.TransientStatusCheckWindow.
+    jobs_status_check_schema = {
+        'type': 'object',
+        'required': [],
+        'additionalProperties': False,
+        'properties': {
+            'min_elapsed_seconds': {
+                'type': 'number',
+                'minimum': 0,
+            },
+            'min_retries': {
+                'type': 'integer',
+                'minimum': 0,
+            },
+        },
+    }
 
     cloud_configs = {
         'aws': {
@@ -2085,6 +2152,7 @@ def get_config_schema():
                 'cpu_partition': {
                     'type': 'string',
                 },
+                'container_mounts': _CONTAINER_MOUNTS_SCHEMA,
                 'cluster_configs': {
                     'type': 'object',
                     'required': [],
@@ -2109,6 +2177,7 @@ def get_config_schema():
                             'cpu_partition': {
                                 'type': 'string',
                             },
+                            'container_mounts': _CONTAINER_MOUNTS_SCHEMA,
                             'partition_configs': {
                                 'type': 'object',
                                 'required': [],
@@ -2818,8 +2887,10 @@ def get_config_schema():
             'db': {
                 'type': 'string',
             },
-            'jobs': _get_controller_schema(
-                extra_properties=_extra_jobs_properties,),
+            'jobs': _get_controller_schema(extra_properties={
+                'status_check': jobs_status_check_schema,
+                **_extra_jobs_properties,
+            },),
             'serve': _get_controller_schema(),
             'allowed_clouds': allowed_clouds,
             'admin_policy': admin_policy_schema,

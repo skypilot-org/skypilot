@@ -55,6 +55,9 @@ available_node_types:
 {% if sbatch_options is defined and sbatch_options %}
       sbatch_options: {{sbatch_options | tojson}}
 {% endif %}
+{% if slurm_volume_mounts is defined and slurm_volume_mounts %}
+      volume_mounts: {{slurm_volume_mounts | tojson}}
+{% endif %}
 
       # TODO: more configs that is required by the provisioner to create new
       # instances on the FluffyCloud:

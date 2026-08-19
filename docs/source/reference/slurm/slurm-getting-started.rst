@@ -279,7 +279,7 @@ Enable this behavior in the API server's configuration:
 
 Configure each Slurm host entry with the shared SSH user and private key. The
 SSH user must be ``root`` or have passwordless ``sudo`` permission to run
-``su``:
+``/bin/bash`` as the accounts SkyPilot submits for:
 
 .. code-block:: text
 
@@ -287,6 +287,33 @@ SSH user must be ``root`` or have passwordless ``sudo`` permission to run
         HostName login.mycluster.myorg.com
         User slurm-admin
         IdentityFile ~/.ssh/slurm_admin
+
+For a non-root SSH user, add a sudoers rule on each login node that scopes the
+grant to a group holding those accounts:
+
+.. code-block:: text
+
+    Runas_Alias SLURM_USERS = %slurm-users
+    Defaults>SLURM_USERS !requiretty
+    slurm-admin ALL=(SLURM_USERS) NOPASSWD: /bin/bash
+
+This limits impersonation to members of ``slurm-users`` and records each
+invocation according to the host's sudo logging configuration. It is not a
+per-command allowlist: SkyPilot runs job setup and run scripts, ``rsync``, and
+an interactive SSH helper as the submitting user.
+
+Treat membership in ``slurm-users`` as privileged access. Every member must be
+a workload account without ``sudo``, Slurm administrative privileges, or
+another escalation path. Any privileges available to a member are transitively
+available to the shared SSH user. Avoid ``(ALL, !root)``: it still allows
+impersonating the ``slurm`` account (Slurm's ``SlurmUser``), which is equivalent
+to controlling the scheduler.
+
+The ``Defaults>`` line disables ``requiretty`` for commands run as members of
+``SLURM_USERS`` while leaving it in force elsewhere. SkyPilot invokes sudo over
+SSH without allocating a terminal, so a global ``requiretty`` setting makes
+sudo refuse the command with ``sorry, you must have a tty to run sudo``. This
+also prevents file transfers and other job lifecycle operations from running.
 
 SkyPilot maps the authenticated username to the portion before ``@``. For
 example, ``alice@example.com`` maps to the Unix account ``alice``. The account

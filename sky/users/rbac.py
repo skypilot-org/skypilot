@@ -395,8 +395,29 @@ class RoleName(str, enum.Enum):
     VIEWER = 'viewer'
 
 
+# Roles from most to least privileged. Consulted wherever a decision has to be
+# made about a principal holding more than one role: take the least privileged,
+# never whichever came first -- `get_user_roles` does not order its result
+# deterministically, so the first entry is a coin flip.
+_ROLE_PRECEDENCE = (RoleName.ADMIN.value, RoleName.USER.value,
+                    RoleName.VIEWER.value)
+
+
 def get_supported_roles() -> List[str]:
     return [role_name.value for role_name in RoleName]
+
+
+def least_privileged_role(roles: List[str]) -> str:
+    """The least privileged of `roles`, ignoring names we do not know.
+
+    An unrecognized name must never win: it has no policy attached, which the
+    blocklist reads as allow-everything. With nothing recognizable left, falls
+    back to the most restricted role.
+    """
+    known = [role for role in roles if role in _ROLE_PRECEDENCE]
+    if not known:
+        return _ROLE_PRECEDENCE[-1]
+    return max(known, key=_ROLE_PRECEDENCE.index)
 
 
 def get_default_role() -> str:

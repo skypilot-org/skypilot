@@ -251,6 +251,59 @@ def get_cmd_wait_until_volume_is_not_found(volume_name: str,
                                                   timeout=timeout)
 
 
+_WAIT_UNTIL_VOLUME_IS_READY = (
+    # A while loop to wait until a volume is mountable, or timeout.
+    # `sky volumes apply` only *starts* provisioning: on a storage class with
+    # `volumeBindingMode: Immediate` the PersistentVolume is created
+    # asynchronously, so the claim stays Pending -- and the volume NOT_READY --
+    # after the command returns. Mounting it before then is refused with
+    # VolumeNotReadyError, so a test that creates a volume must wait for it,
+    # exactly as a user would.
+    # Deliberately not `--refresh`: that re-probes the backing resource and so
+    # would end the wait the moment the claim binds, but it refreshes the whole
+    # volume table -- a file lock and a database round-trip per volume -- and
+    # would contend with the volume operations of every other test sharing the
+    # API server. Read the row the refresh daemon maintains instead, which
+    # costs the server nothing and bounds the wait by its 60s interval.
+    'start_time=$SECONDS; '
+    'while true; do '
+    'vols=$(sky volumes ls); '
+    # Read the status out of the volume's own row -- matched on the whole first
+    # field, so a longer name containing this one is not mistaken for it -- at
+    # the character offset the header gives for the STATUS column. The table is
+    # space-padded and left-aligned, and columns before STATUS hold spaces of
+    # their own ("alice (SA)", "3 secs"), so splitting the row on whitespace
+    # would not line up. Taking the column rather than searching the row also
+    # keeps NOT_READY, or a stray word in MESSAGE, from passing for READY.
+    'status=$(echo "$vols" | awk -v n="{volume_name}" '
+    '\'$1 == "NAME" {{c = index($0, "STATUS")}} '
+    '$1 == n && c {{split(substr($0, c), f, " "); print f[1]; exit}}\'); '
+    # IN_USE is READY plus a mount; both are mountable.
+    'if [ "$status" = READY ] || [ "$status" = IN_USE ]; then '
+    '  echo "Volume {volume_name} is ready."; break; '
+    'fi; '
+    'if (( $SECONDS - $start_time > {timeout} )); then '
+    '  echo "$vols"; '
+    '  echo "Timeout after {timeout} seconds waiting for volume '
+    '{volume_name} to be ready"; exit 1; '
+    'fi; '
+    'echo "Waiting for volume {volume_name}: ${{status:-not found}}"; '
+    'sleep 5; '
+    'done')
+
+
+def get_cmd_wait_until_volume_is_ready(volume_name: str, timeout: int = 300):
+    """Blocks until a volume is mountable.
+
+    The default timeout leaves room for a cloud storage class to provision its
+    first volume plus the up-to-60s lag of the status refresh daemon this reads
+    from, and is still short enough that a genuinely broken volume fails the
+    step well inside the test timeout.
+    """
+    return _WAIT_UNTIL_VOLUME_IS_READY.format(volume_name=volume_name,
+                                              timeout=timeout)
+
+
 _WAIT_UNTIL_JOB_STATUS_CONTAINS_MATCHING_JOB_ID = (
     # A while loop to wait until the job status
     # contains certain status, with timeout.
@@ -426,6 +479,26 @@ def get_cmd_wait_until_job_status_succeeded(cluster_name: str,
 
 
 DEFAULT_CMD_TIMEOUT = 15 * 60
+
+# Per-command timeout for tests that configure `logs.store`.
+#
+# Configuring a log store adds a "Setting up logging agent" step to every
+# cluster launch, which installs fluent-bit on each node. That install runs
+# `apt-get update` and `apt-get install` against the distro package mirrors
+# before fetching fluent-bit itself. On a freshly booted VM the package index
+# refresh is the dominant cost -- it has been observed taking anywhere from 4 to
+# 19 minutes when a mirror is serving at ~100 kB/s, while the (much larger)
+# fluent-bit package downloads from its own CDN in seconds. That pushes a single
+# `sky launch` past the default budget, so give these tests enough room to ride
+# out a slow mirror instead of relying on retries.
+LOG_STORE_CMD_TIMEOUT = 30 * 60
+
+# Time for a managed job to go from submitted to RUNNING when a log store is
+# configured: the job's cluster is provisioned from scratch and pays the
+# fluent-bit install described above before the job can start. Kept below
+# LOG_STORE_CMD_TIMEOUT so that this wait, rather than the enclosing per-command
+# timeout, is what reports the failure.
+LOG_STORE_JOB_START_TIMEOUT = 25 * 60
 
 
 class Test(NamedTuple):
@@ -1582,3 +1655,190 @@ def wait_for_managed_job_status_sdk(job_name: Optional[str] = None,
         time.sleep(5)
     raise TimeoutError(f'Timeout waiting for job {job_name or job_id} to reach '
                        f'{target_statuses}')
+
+
+def unprovisionable_storage_class_name(test_name: str) -> str:
+    """Name of a per-test storage class that can never provision a volume."""
+    return f'{test_name}-noprov'
+
+
+def create_unprovisionable_storage_class_cmd(test_name: str,
+                                             binding_mode: str = 'Immediate'
+                                            ) -> str:
+    """Creates a storage class whose provisioner does not exist.
+
+    This is how a test gets a volume that is genuinely not ready without
+    waiting on -- or paying for -- real storage. The class has to exist, or
+    `sky volumes apply` rejects the volume up front when it validates the
+    storage class; with the class present the claim is accepted and then sits
+    unbound forever, because nothing is watching for it.
+
+    `binding_mode` picks which of the two situations to reproduce. Immediate
+    claims are unbound as soon as they are created, so the volume is knowably
+    unusable before any launch. WaitForFirstConsumer claims are not touched
+    until a pod needs them, so nothing about them looks wrong until a launch is
+    already under way.
+    """
+    sc_name = unprovisionable_storage_class_name(test_name)
+    return (f'kubectl apply -f - <<EOF\n'
+            f'apiVersion: storage.k8s.io/v1\n'
+            f'kind: StorageClass\n'
+            f'metadata:\n'
+            f'  name: {sc_name}\n'
+            f'provisioner: skypilot.co/does-not-exist\n'
+            f'volumeBindingMode: {binding_mode}\n'
+            f'EOF')
+
+
+def delete_unprovisionable_storage_class_cmd(test_name: str) -> str:
+    sc_name = unprovisionable_storage_class_name(test_name)
+    return f'kubectl delete sc {sc_name} --ignore-not-found'
+
+
+# A ReadWriteMany StorageClass cannot be fabricated the way the unprovisionable
+# one above can: RWX needs a real backend behind it. The Buildkite kind lane
+# installs a non-default 'nfs-rwx' class (provisioner nfs.csi.k8s.io); a cloud
+# lane has Filestore or EFS under whatever name the cluster gave it, so point
+# this at that name.
+RWX_STORAGE_CLASS_ENV_VAR = 'PYTEST_SKYPILOT_RWX_STORAGE_CLASS'
+_DEFAULT_RWX_STORAGE_CLASS = 'nfs-rwx'
+
+
+def storage_class_exists(name: str) -> bool:
+    return subprocess.run(['kubectl', 'get', 'sc', name],
+                          capture_output=True,
+                          check=False).returncode == 0
+
+
+def rwx_storage_class_name() -> Optional[str]:
+    """The ReadWriteMany StorageClass to test against, if the cluster has one.
+
+    Returns None when it does not, for the caller to fall back to a volume type
+    that needs no storage backend. Falling back rather than skipping keeps the
+    rest of the test -- everything that is not specific to RWX -- running on
+    every lane.
+
+    Raises:
+        AssertionError: if RWX_STORAGE_CLASS_ENV_VAR names a class the cluster
+            does not have. An explicit request that cannot be honoured is an
+            error, not a reason to quietly test something else.
+    """
+    explicit = os.environ.get(RWX_STORAGE_CLASS_ENV_VAR)
+    if explicit is not None:
+        assert storage_class_exists(explicit), (
+            f'{RWX_STORAGE_CLASS_ENV_VAR}={explicit!r} is not a StorageClass '
+            f'on the cluster kubectl points at.')
+        return explicit
+    if storage_class_exists(_DEFAULT_RWX_STORAGE_CLASS):
+        return _DEFAULT_RWX_STORAGE_CLASS
+    return None
+
+
+# How to make each CSI driver refuse to provision. A class whose provisioner
+# does not exist is not enough for the tests that need a *rejection*: nothing
+# answers such a claim at all, so it only ever collects Normal events, and a
+# claim that reports nothing cannot be told from one that is merely slow. What
+# these entries produce is a ProvisioningFailed carrying a terminal gRPC code,
+# which is what a launch is supposed to fail on at once.
+#
+# Both were confirmed against the driver rather than assumed: nfs.csi.k8s.io
+# answers a class with no parameters with `code = InvalidArgument desc = server
+# is a required parameter`, and the Filestore driver answers a tier its API does
+# not have with `code = InvalidArgument desc = Invalid value at 'instance.tier'`.
+# Two other candidates do not work and are recorded so they are not retried: an
+# unreachable `server` binds anyway (the driver does not check connectivity, so
+# the failure only shows up at mount time), and an absurd capacity binds anyway
+# too (an NFS volume is a directory, whatever size it claims).
+_REJECTED_BY_PROVISIONER = {
+    'nfs.csi.k8s.io': '',
+    'filestore.csi.storage.gke.io': '  tier: not-a-real-tier\n',
+}
+
+
+def _storage_class_provisioner(name: str) -> Optional[str]:
+    proc = subprocess.run(
+        ['kubectl', 'get', 'sc', name, '-o', 'jsonpath={.provisioner}'],
+        capture_output=True,
+        text=True,
+        check=False)
+    return proc.stdout.strip() or None
+
+
+def rejecting_storage_class_name(test_name: str) -> str:
+    return f'{test_name}-reject'
+
+
+def create_rejecting_storage_class_cmd(
+        test_name: str,
+        binding_mode: str = 'WaitForFirstConsumer') -> Optional[str]:
+    """Command creating a class whose driver refuses the claims made on it.
+
+    `binding_mode` picks when the refusal arrives. Under
+    WaitForFirstConsumer the driver is not called until a pod asks for the
+    claim, so the volume is correctly ready right up to the launch that breaks
+    it -- the one situation no pre-launch check can catch. Under Immediate the
+    driver is called when the claim is created, so the volume is knowably
+    unusable before any launch.
+
+    Borrows the provisioner from the cluster's RWX class, which is the one
+    driver a lane is known to have. Returns None when that driver has no known
+    way to refuse, for the caller to skip: guessing risks the opposite of the
+    intended failure, a class that provisions real storage.
+    """
+    rwx_class = rwx_storage_class_name()
+    if rwx_class is None:
+        return None
+    provisioner = _storage_class_provisioner(rwx_class)
+    parameters = _REJECTED_BY_PROVISIONER.get(provisioner)
+    if parameters is None:
+        return None
+    body = (f'apiVersion: storage.k8s.io/v1\n'
+            f'kind: StorageClass\n'
+            f'metadata:\n'
+            f'  name: {rejecting_storage_class_name(test_name)}\n'
+            f'provisioner: {provisioner}\n'
+            f'volumeBindingMode: {binding_mode}\n')
+    if parameters:
+        body += f'parameters:\n{parameters}'
+    return f'kubectl apply -f - <<EOF\n{body}EOF'
+
+
+def delete_rejecting_storage_class_cmd(test_name: str) -> str:
+    sc_name = rejecting_storage_class_name(test_name)
+    return f'kubectl delete sc {sc_name} --ignore-not-found'
+
+
+def wait_until_volume_is_rejected_cmd(volume_name: str,
+                                      timeout: int = 180) -> str:
+    """A step that blocks until the volume's record carries a rejection.
+
+    A volume on a rejecting class is not-ready from the moment it is created,
+    but for the first refresh cycle the recorded reason is that it is still
+    being provisioned -- which is what `volume_apply` can see without waiting.
+    Only once the status refresh has read the driver's answer does the record
+    say it was refused, and that is what a launch is refused over: the reason,
+    not the not-ready flag, since being provisioned is also not-ready.
+
+    Measured on the kind lane: the driver answers within seconds, the record
+    catches up in about a minute (the refresh daemon's interval).
+    """
+    return (f'start_time=$SECONDS; '
+            f'while true; do '
+            f'  vols=$(sky volumes ls); '
+            f'  row=$(echo "$vols" | grep {volume_name} || true); '
+            f'  echo "$row"; '
+            f'  if echo "$row" | grep -q ProvisioningFailed; then '
+            f'    echo "Volume {volume_name} is recorded as refused."; break; '
+            f'  fi; '
+            f'  if (( $SECONDS - $start_time > {timeout} )); then '
+            f'    echo "$vols"; '
+            f'    echo "Timeout after {timeout} seconds waiting for volume '
+            f'{volume_name} to be recorded as refused"; exit 1; '
+            f'  fi; '
+            f'  sleep 10; '
+            f'done')
+
+
+# Pins a command to the cluster the agent's kubectl points at, so a volume and
+# the storage class created for it land together.
+AGENT_K8S_INFRA = '--infra k8s/$(kubectl config current-context)'

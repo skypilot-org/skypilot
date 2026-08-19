@@ -1,4 +1,6 @@
 """Kubernetes volume provisioning (PVC and hostPath)."""
+import enum
+import re
 import time as time_module
 from typing import Any, Dict, List, Optional, Set, Tuple
 
@@ -17,6 +19,80 @@ logger = sky_logging.init_logger(__name__)
 
 PVC_FAILING_EVENT_REASONS = ('ProvisioningFailed',)
 WARNING_EVENT_TYPE = 'Warning'
+# Normal event reasons that explain why a claim is still pending. Reported to
+# the user, never treated as failures -- the PV controller and the provisioner
+# record these while working, and every reason either of them uses to report a
+# problem is a Warning, which is judged separately.
+#
+# They report progress in this order, and the newest is the one worth showing:
+# nothing has claimed the volume yet, a pod has but is not scheduled, the
+# provisioner has been handed it, the provisioner is working on it.
+PVC_PENDING_EVENT_REASONS = ('WaitForFirstConsumer', 'WaitForPodScheduled',
+                             'ExternalProvisioning', 'Provisioning')
+
+# CSI is a gRPC interface, so a provisioner's failure message carries the code
+# the storage backend returned, in grpc-go's standard rendering.
+_GRPC_CODE_PATTERN = re.compile(r'\bcode = (\w+)')
+# Codes whose documented recovery behaviour is that the caller has to change
+# something before retrying, so retrying as-is cannot succeed. Taken from the
+# CreateVolume error table in the CSI spec: INVALID_ARGUMENT ("use different
+# parameters"), ALREADY_EXISTS ("fix the arguments or use a different name"),
+# OUT_OF_RANGE ("fix the capacity range"), NOT_FOUND ("verify the source").
+# InvalidArgument is also exactly what sig-storage's provisioner library calls
+# an infeasible error, after which it retries only every retry-interval-max.
+#
+# Deliberately conservative: leaving a code out costs time (the claim falls back
+# to the slower judgement below), while wrongly including one fails a launch
+# whose volume was going to work.
+_TERMINAL_GRPC_CODES = ('InvalidArgument', 'AlreadyExists', 'OutOfRange',
+                        'NotFound')
+# Codes that mean the CreateVolume call may still be running. From
+# external-provisioner's own checkError(), which maps exactly these to
+# "provisioning in background". A network filesystem reports these while it is
+# being created -- GKE Filestore emits DeadlineExceeded ("volume not ready,
+# current state: CREATING") and Aborted ("an operation with the given volume key
+# already exists") for minutes on the way to a healthy volume -- so they must
+# never fail a launch.
+_IN_PROGRESS_GRPC_CODES = ('Canceled', 'DeadlineExceeded', 'Unavailable',
+                           'Aborted')
+
+
+class PvcFailure(enum.Enum):
+    """What a failure reported on a PVC says about waiting any longer."""
+    # The request has to change; waiting cannot help.
+    TERMINAL = 'terminal'
+    # The call may still be running, or the obstacle may clear by itself.
+    IN_PROGRESS = 'in_progress'
+    # No code to go on: another provisioner, or a failure raised before the
+    # gRPC call. Judged on how long it persists instead.
+    UNKNOWN = 'unknown'
+
+
+def classify_pvc_failure(message: Optional[str]) -> PvcFailure:
+    """Classifies a PVC failure event message by the gRPC code it carries.
+
+    A message can carry more than one code: grpc-go wraps a status in another
+    status, giving `code = Unknown desc = rpc error: code = InvalidArgument
+    desc = ...`, where the outer code is the less specific of the two. So every
+    code is read, and:
+
+    - any sign that the call may still be running wins outright, wherever it
+      appears. The cost of missing a terminal code is waiting; the cost of
+      inventing one is failing a launch whose volume was going to work.
+    - otherwise the innermost code decides, since that is the one the storage
+      backend actually returned.
+    """
+    codes = _GRPC_CODE_PATTERN.findall(message or '')
+    if not codes:
+        return PvcFailure.UNKNOWN
+    if any(code in _IN_PROGRESS_GRPC_CODES for code in codes):
+        return PvcFailure.IN_PROGRESS
+    if codes[-1] in _TERMINAL_GRPC_CODES:
+        return PvcFailure.TERMINAL
+    # Everything else -- ResourceExhausted, Internal, Unknown, PermissionDenied
+    # -- is neither provably hopeless nor provably in flight. Quota, for one,
+    # can be raised while a launch waits.
+    return PvcFailure.UNKNOWN
 
 
 def _is_rbac_permission_error(e: Exception) -> bool:
@@ -559,107 +635,175 @@ def map_all_volumes_usedby(
                                                   {}).get(pvc_name, []))
 
 
-def get_all_volumes_errors(
-    configs: List[models.VolumeConfig],) -> Dict[str, Optional[str]]:
-    """Gets error messages for all Kubernetes PVC volumes.
+def _first_pvc_failure_event(context: Optional[str], namespace: str,
+                             pvc_name: str) -> Optional[str]:
+    """Returns 'reason: message' for the newest failing PVC event, if any.
 
-    Checks if PVCs are in Pending state and if so, checks for access mode
-    mismatches between the PVC and the storage class's allowed access modes.
+    A failing event is the only positive evidence that a pending PVC will not
+    bind on its own; a pending PVC without one may still be mid-provisioning.
+
+    A warning the provisioner reports while its CreateVolume call is still
+    running is not such evidence: a network filesystem being created emits them
+    for minutes and then binds. Counting those made a volume read as unusable
+    for the middle of its own creation, which in turn refused every launch that
+    wanted it.
+    """
+    for event in kubernetes_utils.get_pvc_events(context, namespace, pvc_name):
+        if (event.type == WARNING_EVENT_TYPE or
+                event.reason in PVC_FAILING_EVENT_REASONS):
+            if classify_pvc_failure(event.message) == PvcFailure.IN_PROGRESS:
+                continue
+            if event.message:
+                return f'{event.reason}: {event.message}'
+            return str(event.reason)
+    return None
+
+
+def _get_pvc_error(context: Optional[str], namespace: str,
+                   pvc: Any) -> Optional[str]:
+    """Returns an error message for a PVC, or None if it is healthy.
+
+    Note that a pending PVC under WaitForFirstConsumer is *not* an error: the
+    provisioner is not even triggered until a pod claims it, so there is
+    nothing to detect yet.
+    """
+    pvc_name = pvc.metadata.name
+    debug_hint = (f'To debug, run: kubectl describe pvc {pvc_name} '
+                  f'-n {namespace}')
+    pvc_phase = pvc.status.phase
+
+    if pvc_phase == 'Bound':
+        return None
+
+    if pvc_phase == 'Pending':
+        error_msg = _check_pvc_access_mode_error(context, pvc)
+        if error_msg:
+            return error_msg
+        failure = _first_pvc_failure_event(context, namespace, pvc_name)
+        if failure is not None:
+            return f'PVC is pending. {failure}. {debug_hint}'
+        volume_binding_mode = _check_storage_class_volume_binding_mode(
+            context, pvc)
+        if (volume_binding_mode is None or
+                volume_binding_mode == 'WaitForFirstConsumer'):
+            # Binding is deferred until a pod consumes the PVC, so pending is
+            # the expected steady state here.
+            return None
+        # Immediate binding: provisioning has started and has not finished.
+        # Word this as in-progress -- provisioning a network volume can
+        # legitimately take minutes -- while still reporting it as not ready.
+        # The first sentence is the shared constant, which is what tells a
+        # caller deciding whether to refuse a launch that waiting is enough.
+        return (f'{volume_lib.PVC_PROVISIONING_MESSAGE} If this does not '
+                f'resolve, the storage class may be misconfigured or the '
+                f'cluster may be out of storage capacity. {debug_hint}')
+
+    if pvc_phase == 'Lost':
+        return ('PVC is in Lost state. The bound PersistentVolume '
+                f'has been deleted or is unavailable. {debug_hint}')
+
+    # Other phases (e.g., Terminating)
+    return None
+
+
+def get_all_volumes_errors(
+    configs: List[models.VolumeConfig],
+) -> Tuple[Dict[str, Optional[str]], Set[str]]:
+    """Gets error messages for all Kubernetes PVC volumes.
 
     Args:
         configs: List of VolumeConfig objects.
 
     Returns:
-        Dictionary mapping volume name to error message (None if no error).
-    """
-    context_to_namespaces: Dict[str, Set[str]] = {}
-    config_by_pvc_name: Dict[str, Dict[str, models.VolumeConfig]] = {}
+        A tuple of (errors, failed_volume_names):
+        - errors maps volume name to an error message, or to None when the
+          volume is healthy.
+        - failed_volume_names holds volumes whose status could not be
+          determined because the cluster could not be queried. Callers must
+          leave the recorded status of these volumes untouched rather than
+          reading their absence from ``errors`` as "healthy".
 
-    for config in configs:
-        # Skip hostPath volumes — they have no PVC to check
-        if config.type == volume_lib.VolumeType.HOSTPATH.value:
-            continue
-        context, namespace = _get_context_namespace(config)
-        context_to_namespaces.setdefault(context, set()).add(namespace)
-        config_by_pvc_name.setdefault(context,
-                                      {})[config.name_on_cloud] = config
+        Every input config lands in exactly one of the two, so a caller never
+        has to guess what an absent volume means.
+    """
+    # Keyed by (context, namespace): the same PVC name may exist in several
+    # namespaces, and resolving it against the wrong one would mismatch.
+    configs_by_location: Dict[Tuple[str, str], Dict[str,
+                                                    models.VolumeConfig]] = {}
 
     volume_errors: Dict[str, Optional[str]] = {}
+    failed_volume_names: Set[str] = set()
 
-    for context, namespaces in context_to_namespaces.items():
-        for namespace in namespaces:
-            try:
-                # List all PVCs in the namespace with the skypilot label
-                pvcs = kubernetes.core_api(
-                    context).list_namespaced_persistent_volume_claim(
-                        namespace=namespace,
-                        label_selector='parent=skypilot',
-                        _request_timeout=kubernetes.API_TIMEOUT)
-            except Exception as e:  # pylint: disable=broad-except
-                logger.debug(f'Failed to get PVCs in namespace {namespace} '
-                             f'in context {context}: {e}')
+    for config in configs:
+        if config.type == volume_lib.VolumeType.HOSTPATH.value:
+            # No PVC to check: the directory is created by the kubelet when
+            # a pod first mounts it, so there is nothing that can be broken
+            # ahead of time. Report it healthy rather than omitting it.
+            volume_errors[config.name] = None
+            continue
+        context, namespace = _get_context_namespace(config)
+        configs_by_location.setdefault((context, namespace),
+                                       {})[config.name_on_cloud] = config
+
+    for (context, namespace), configs_by_pvc in configs_by_location.items():
+        try:
+            # List all PVCs in the namespace with the skypilot label
+            pvcs = kubernetes.core_api(
+                context).list_namespaced_persistent_volume_claim(
+                    namespace=namespace,
+                    label_selector='parent=skypilot',
+                    _request_timeout=kubernetes.API_TIMEOUT)
+        except Exception as e:  # pylint: disable=broad-except
+            logger.debug(f'Failed to get PVCs in namespace {namespace} '
+                         f'in context {context}: {e}')
+            failed_volume_names.update(
+                config.name for config in configs_by_pvc.values())
+            continue
+
+        seen_pvc_names: Set[str] = set()
+        for pvc in pvcs.items:
+            vol_config = configs_by_pvc.get(pvc.metadata.name)
+            if vol_config is None:
                 continue
+            seen_pvc_names.add(pvc.metadata.name)
+            volume_errors[vol_config.name] = _get_pvc_error(
+                context, namespace, pvc)
 
-            for pvc in pvcs.items:
-                pvc_name = pvc.metadata.name
-                vol_config = config_by_pvc_name.get(context, {}).get(pvc_name)
-                if vol_config is None:
-                    continue
-
-                volume_name = vol_config.name
-                pvc_phase = pvc.status.phase
-
-                # If PVC is bound, no error
-                if pvc_phase == 'Bound':
-                    volume_errors[volume_name] = None
-                    continue
-
-                # If PVC is pending, check for access mode mismatch
-                if pvc_phase == 'Pending':
-                    error_msg = _check_pvc_access_mode_error(context, pvc)
-                    if error_msg:
-                        volume_errors[volume_name] = error_msg
-                    else:
-                        volume_binding_mode = (
-                            _check_storage_class_volume_binding_mode(
-                                context, pvc))
-                        if (volume_binding_mode is None or
-                                volume_binding_mode == 'WaitForFirstConsumer'):
-                            error_msg = None
-                            pvc_events = kubernetes_utils.get_pvc_events(
-                                context, namespace, pvc_name)
-                            for event in pvc_events:
-                                if (event.type == WARNING_EVENT_TYPE or
-                                        event.reason
-                                        in PVC_FAILING_EVENT_REASONS):
-                                    reason_str = event.reason
-                                    if event.message:
-                                        reason_str += f': {event.message}'
-                                    error_msg = (f'PVC is pending. '
-                                                 f'{reason_str}. To debug, run'
-                                                 f': kubectl describe pvc '
-                                                 f'{pvc_name} -n {namespace}')
-                                    break
-                            volume_errors[volume_name] = error_msg
-                        else:
-                            # Generic pending message if no specific error
-                            # detected
-                            volume_errors[volume_name] = (
-                                'PVC is pending. This may be due to '
-                                'insufficient storage resources or '
-                                'misconfiguration. To debug, run: '
-                                f'kubectl describe pvc {pvc_name} -n '
-                                f'{namespace}')
-                elif pvc_phase == 'Lost':
-                    volume_errors[volume_name] = (
-                        'PVC is in Lost state. The bound PersistentVolume '
-                        'has been deleted or is unavailable. To debug, '
-                        f'run: kubectl describe pvc {pvc_name} -n {namespace}')
+        # A registered PVC missing from the labelled listing is either a
+        # use_existing volume (adopted as-is, so it never got the skypilot
+        # label) or a PVC deleted outside SkyPilot. Only a direct read tells
+        # them apart, and leaving the latter unreported would keep a volume
+        # whose storage no longer exists looking healthy.
+        for pvc_name, vol_config in configs_by_pvc.items():
+            if pvc_name in seen_pvc_names:
+                continue
+            try:
+                pvc = kubernetes.core_api(
+                    context).read_namespaced_persistent_volume_claim(
+                        name=pvc_name,
+                        namespace=namespace,
+                        _request_timeout=kubernetes.API_TIMEOUT)
+            except kubernetes.api_exception() as e:
+                if e.status == 404:
+                    volume_errors[vol_config.name] = (
+                        f'PVC {pvc_name} no longer exists in namespace '
+                        f'{namespace}. It may have been deleted outside '
+                        f'SkyPilot. Recreate the volume, or run `sky volumes '
+                        f'delete {vol_config.name}` to deregister it.')
                 else:
-                    # Other phases (e.g., Terminating)
-                    volume_errors[volume_name] = None
+                    logger.debug(f'Failed to read PVC {pvc_name} in namespace '
+                                 f'{namespace} in context {context}: {e}')
+                    failed_volume_names.add(vol_config.name)
+                continue
+            except Exception as e:  # pylint: disable=broad-except
+                logger.debug(f'Failed to read PVC {pvc_name} in namespace '
+                             f'{namespace} in context {context}: {e}')
+                failed_volume_names.add(vol_config.name)
+                continue
+            volume_errors[vol_config.name] = _get_pvc_error(
+                context, namespace, pvc)
 
-    return volume_errors
+    return volume_errors, failed_volume_names
 
 
 def _check_storage_class_volume_binding_mode(context: Optional[str],

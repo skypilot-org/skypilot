@@ -8,6 +8,7 @@ import pytest
 
 from sky import global_user_state
 from sky import models
+from sky.adaptors import kubernetes
 from sky.provision import constants
 from sky.provision.kubernetes import config as config_lib
 from sky.provision.kubernetes import constants as k8s_constants
@@ -1756,7 +1757,7 @@ class TestGetAllVolumesErrors:
             config={'namespace': 'my-namespace'},
         )
 
-        errors = k8s_volume.get_all_volumes_errors([config])
+        errors, _ = k8s_volume.get_all_volumes_errors([config])
 
         assert errors.get('test-vol') is None
 
@@ -1799,12 +1800,18 @@ class TestGetAllVolumesErrors:
             config={'namespace': 'my-namespace'},
         )
 
-        errors = k8s_volume.get_all_volumes_errors([config])
+        errors, _ = k8s_volume.get_all_volumes_errors([config])
 
         assert 'test-vol' in errors
         assert errors['test-vol'] is not None
         assert 'pending' in errors['test-vol'].lower()
         assert 'kubectl describe pvc' in errors['test-vol']
+        # The message has to carry the shared sentence, not just say something
+        # similar: it is what tells a launch that this volume is on its way
+        # rather than broken, so a launch is not refused over it. If the wording
+        # drifts from the constant, the launch silently starts refusing again.
+        assert volume_lib.PVC_PROVISIONING_MESSAGE in errors['test-vol']
+        assert volume_lib.volume_error_may_resolve(errors['test-vol'])
 
     @patch('sky.provision.kubernetes.volume._get_context_namespace')
     @patch('sky.adaptors.kubernetes.core_api')
@@ -1845,7 +1852,7 @@ class TestGetAllVolumesErrors:
             config={'namespace': 'my-namespace'},
         )
 
-        errors = k8s_volume.get_all_volumes_errors([config])
+        errors, _ = k8s_volume.get_all_volumes_errors([config])
 
         assert 'test-vol' in errors
         assert 'access mode mismatch' in errors['test-vol'].lower()
@@ -1893,7 +1900,7 @@ class TestGetAllVolumesErrors:
             config={'namespace': 'my-namespace'},
         )
 
-        errors = k8s_volume.get_all_volumes_errors([config])
+        errors, _ = k8s_volume.get_all_volumes_errors([config])
 
         # Should be None for WaitForFirstConsumer
         assert errors.get('test-vol') is None
@@ -1937,7 +1944,7 @@ class TestGetAllVolumesErrors:
             config={'namespace': 'my-namespace'},
         )
 
-        errors = k8s_volume.get_all_volumes_errors([config])
+        errors, _ = k8s_volume.get_all_volumes_errors([config])
 
         # Should be None when storage class read fails
         assert errors.get('test-vol') is None
@@ -1976,7 +1983,7 @@ class TestGetAllVolumesErrors:
             config={'namespace': 'my-namespace'},
         )
 
-        errors = k8s_volume.get_all_volumes_errors([config])
+        errors, _ = k8s_volume.get_all_volumes_errors([config])
 
         # Should be None when storage class read fails
         assert errors.get('test-vol') is None
@@ -2007,7 +2014,7 @@ class TestGetAllVolumesErrors:
             config={'namespace': 'my-namespace'},
         )
 
-        errors = k8s_volume.get_all_volumes_errors([config])
+        errors, _ = k8s_volume.get_all_volumes_errors([config])
 
         assert 'test-vol' in errors
         assert 'Lost' in errors['test-vol']
@@ -2035,9 +2042,229 @@ class TestGetAllVolumesErrors:
             config={'namespace': 'my-namespace'},
         )
 
-        # Should not raise, just return empty dict
-        errors = k8s_volume.get_all_volumes_errors([config])
+        # Should not raise. The volume must be reported as failed rather than
+        # simply omitted -- an omitted volume reads as healthy to the caller.
+        errors, failed = k8s_volume.get_all_volumes_errors([config])
         assert errors == {}
+        assert failed == {'test-vol'}
+
+    def test_hostpath_volume_reported_clean(self):
+        """hostPath volumes have no PVC, but they still have to appear in the
+        result -- a caller cannot tell "omitted" from "unknown"."""
+        config = models.VolumeConfig(
+            _version=1,
+            name='test-vol',
+            type='k8s-hostpath',
+            cloud='kubernetes',
+            region='my-context',
+            zone=None,
+            name_on_cloud='test-vol',
+            size='10',
+            config={'host_path': '/mnt/data'},
+        )
+
+        errors, failed = k8s_volume.get_all_volumes_errors([config])
+
+        assert errors == {'test-vol': None}
+        assert failed == set()
+
+    @patch('sky.provision.kubernetes.volume._get_context_namespace')
+    @patch('sky.adaptors.kubernetes.core_api')
+    def test_pvc_deleted_outside_skypilot_reports_error(self, mock_core_api,
+                                                        mock_get_context):
+        """A registered volume whose PVC is gone must not read as healthy."""
+        mock_get_context.return_value = ('my-context', 'my-namespace')
+
+        empty_list = Mock()
+        empty_list.items = []
+        mock_core_api.return_value.list_namespaced_persistent_volume_claim.return_value = empty_list
+
+        not_found = kubernetes.api_exception()(status=404, reason='Not Found')
+        mock_core_api.return_value.read_namespaced_persistent_volume_claim.side_effect = not_found
+
+        config = models.VolumeConfig(
+            _version=1,
+            name='test-vol',
+            type='k8s-pvc',
+            cloud='kubernetes',
+            region='my-context',
+            zone=None,
+            name_on_cloud='test-pvc',
+            size='10',
+            config={'namespace': 'my-namespace'},
+        )
+
+        errors, failed = k8s_volume.get_all_volumes_errors([config])
+
+        assert 'test-vol' not in failed
+        assert errors['test-vol'] is not None
+        assert 'no longer exists' in errors['test-vol']
+
+    @patch('sky.provision.kubernetes.volume._get_context_namespace')
+    @patch('sky.adaptors.kubernetes.core_api')
+    def test_unlabelled_pvc_is_read_directly(self, mock_core_api,
+                                             mock_get_context):
+        """use_existing PVCs lack the skypilot label, so the listing misses
+        them; a direct read must still find and evaluate them."""
+        mock_get_context.return_value = ('my-context', 'my-namespace')
+
+        empty_list = Mock()
+        empty_list.items = []
+        mock_core_api.return_value.list_namespaced_persistent_volume_claim.return_value = empty_list
+
+        adopted_pvc = MockPVC('adopted-pvc', 'my-namespace')
+        adopted_pvc.status.phase = 'Bound'
+        mock_core_api.return_value.read_namespaced_persistent_volume_claim.return_value = adopted_pvc
+
+        config = models.VolumeConfig(
+            _version=1,
+            name='test-vol',
+            type='k8s-pvc',
+            cloud='kubernetes',
+            region='my-context',
+            zone=None,
+            name_on_cloud='adopted-pvc',
+            size='10',
+            config={
+                'namespace': 'my-namespace',
+                'use_existing': True
+            },
+        )
+
+        errors, failed = k8s_volume.get_all_volumes_errors([config])
+
+        assert failed == set()
+        assert errors['test-vol'] is None
+
+    @patch('sky.provision.kubernetes.volume.kubernetes_utils.get_pvc_events')
+    @patch('sky.provision.kubernetes.volume._get_context_namespace')
+    @patch('sky.adaptors.kubernetes.core_api')
+    @patch('sky.adaptors.kubernetes.storage_api')
+    def test_pvc_pending_immediate_surfaces_csi_message(self, mock_storage_api,
+                                                        mock_core_api,
+                                                        mock_get_context,
+                                                        mock_get_events):
+        """The provisioner's rejection reason is what identifies the fault,
+        so it has to reach the error message verbatim."""
+        mock_get_context.return_value = ('my-context', 'my-namespace')
+
+        mock_pvc = MockPVC('test-pvc', 'my-namespace')
+        mock_pvc.status.phase = 'Pending'
+        mock_pvc.spec.storage_class_name = 'standard'
+
+        mock_pvc_list = Mock()
+        mock_pvc_list.items = [mock_pvc]
+        mock_core_api.return_value.list_namespaced_persistent_volume_claim.return_value = mock_pvc_list
+
+        mock_pv_list = Mock()
+        mock_pv_list.items = []
+        mock_core_api.return_value.list_persistent_volume.return_value = mock_pv_list
+
+        mock_storage_class = Mock()
+        mock_storage_class.volume_binding_mode = 'Immediate'
+        mock_storage_api.return_value.read_storage_class.return_value = mock_storage_class
+
+        event = Mock()
+        event.type = 'Warning'
+        event.reason = 'ProvisioningFailed'
+        event.message = 'requested size is below the 1Ti minimum'
+        mock_get_events.return_value = [event]
+
+        config = models.VolumeConfig(
+            _version=1,
+            name='test-vol',
+            type='k8s-pvc',
+            cloud='kubernetes',
+            region='my-context',
+            zone=None,
+            name_on_cloud='test-pvc',
+            size='1000',
+            config={'namespace': 'my-namespace'},
+        )
+
+        errors, _ = k8s_volume.get_all_volumes_errors([config])
+
+        assert 'ProvisioningFailed' in errors['test-vol']
+        assert 'below the 1Ti minimum' in errors['test-vol']
+
+    @patch('sky.provision.kubernetes.volume._get_context_namespace')
+    @patch('sky.adaptors.kubernetes.core_api')
+    def test_same_pvc_name_in_two_namespaces_is_not_confused(
+            self, mock_core_api, mock_get_context):
+        """Claims are resolved per (context, namespace): the same claim name in
+        another namespace belongs to a different volume, and reading one's phase
+        as the other's would report the wrong volume broken."""
+        by_volume = {'vol-a': ('ctx', 'ns-a'), 'vol-b': ('ctx', 'ns-b')}
+        mock_get_context.side_effect = lambda cfg: by_volume[cfg.name]
+
+        bound = MockPVC('shared-name', 'ns-a')
+        bound.status.phase = 'Bound'
+        lost = MockPVC('shared-name', 'ns-b')
+        lost.status.phase = 'Lost'
+
+        def _list(namespace, **kwargs):
+            del kwargs
+            result = Mock()
+            result.items = [bound] if namespace == 'ns-a' else [lost]
+            return result
+
+        mock_core_api.return_value.list_namespaced_persistent_volume_claim.side_effect = _list
+
+        def _config(name):
+            return models.VolumeConfig(
+                _version=1,
+                name=name,
+                type='k8s-pvc',
+                cloud='kubernetes',
+                region='ctx',
+                zone=None,
+                name_on_cloud='shared-name',
+                size='10',
+                config={},
+            )
+
+        errors, failed = k8s_volume.get_all_volumes_errors(
+            [_config('vol-a'), _config('vol-b')])
+
+        assert failed == set()
+        assert errors['vol-a'] is None
+        assert errors['vol-b'] is not None
+        assert 'Lost' in errors['vol-b']
+
+    @patch('sky.provision.kubernetes.volume._get_context_namespace')
+    @patch('sky.adaptors.kubernetes.core_api')
+    def test_one_broken_volume_among_several_is_reported(
+            self, mock_core_api, mock_get_context):
+        mock_get_context.return_value = ('my-context', 'my-namespace')
+
+        good = MockPVC('good-pvc', 'my-namespace')
+        good.status.phase = 'Bound'
+        bad = MockPVC('bad-pvc', 'my-namespace')
+        bad.status.phase = 'Lost'
+
+        listing = Mock()
+        listing.items = [good, bad]
+        mock_core_api.return_value.list_namespaced_persistent_volume_claim.return_value = listing
+
+        def _config(name, pvc):
+            return models.VolumeConfig(
+                _version=1,
+                name=name,
+                type='k8s-pvc',
+                cloud='kubernetes',
+                region='my-context',
+                zone=None,
+                name_on_cloud=pvc,
+                size='10',
+                config={'namespace': 'my-namespace'},
+            )
+
+        errors, _ = k8s_volume.get_all_volumes_errors(
+            [_config('good-vol', 'good-pvc'),
+             _config('bad-vol', 'bad-pvc')])
+
+        assert errors['good-vol'] is None
+        assert errors['bad-vol'] is not None
 
 
 class TestFindPVCByNameOrLabel:
@@ -2349,3 +2576,110 @@ class TestCreatePVCWithUseExisting:
 
         assert 'Failed to search for PVC' in str(exc_info.value)
         assert 'skypilot-name=myvolume' in str(exc_info.value)
+
+
+# Verbatim messages from a GKE Filestore cluster: the first from a claim whose
+# storage class named a tier that does not exist, the next two from a claim that
+# emitted them for minutes and then bound.
+_TERMINAL_MESSAGE = (
+    'Volume provisioning failed with infeasible error. Retries will be '
+    'delayed. rpc error: code = InvalidArgument desc = Invalid value at '
+    "'instance.tier' \"not-a-real-tier\", invalid")
+_DEADLINE_MESSAGE = ('rpc error: code = DeadlineExceeded desc = Volume '
+                     'pvc-6ae55004 not ready, current state: CREATING')
+_ABORTED_MESSAGE = ('rpc error: code = Aborted desc = An operation with the '
+                    'given volume key modeInstance/us-central1/pvc-6ae55004/'
+                    'vol1 already exists.\n --- Most likely a long process is '
+                    'still running to completion. Retrying.')
+
+
+class TestClassifyPvcFailure:
+    """Whether a reported failure says anything about waiting longer.
+
+    The codes come from the CreateVolume error table in the CSI spec and from
+    external-provisioner's own checkError(); the messages are real.
+    """
+
+    def test_a_rejected_request_is_terminal(self):
+        assert k8s_volume.classify_pvc_failure(
+            _TERMINAL_MESSAGE) == k8s_volume.PvcFailure.TERMINAL
+
+    @pytest.mark.parametrize('message', [_DEADLINE_MESSAGE, _ABORTED_MESSAGE])
+    def test_a_call_that_may_still_be_running_is_not(self, message):
+        """These are what a network filesystem reports while being created."""
+        assert k8s_volume.classify_pvc_failure(
+            message) == k8s_volume.PvcFailure.IN_PROGRESS
+
+    @pytest.mark.parametrize('code',
+                             ['AlreadyExists', 'OutOfRange', 'NotFound'])
+    def test_the_other_codes_that_need_the_request_changed(self, code):
+        assert k8s_volume.classify_pvc_failure(
+            f'rpc error: code = {code} desc = nope'
+        ) == k8s_volume.PvcFailure.TERMINAL
+
+    @pytest.mark.parametrize('code', ['ResourceExhausted', 'Internal'])
+    def test_an_obstacle_that_may_clear_is_left_undecided(self, code):
+        """Quota can be raised while a launch waits, so neither hopeless nor
+        provably in flight."""
+        assert k8s_volume.classify_pvc_failure(
+            f'rpc error: code = {code} desc = nope'
+        ) == k8s_volume.PvcFailure.UNKNOWN
+
+    @pytest.mark.parametrize('message', [
+        None, '', 'failed to provision volume with StorageClass "slow"',
+        'rpc error: something else entirely'
+    ])
+    def test_a_message_with_no_code_is_left_undecided(self, message):
+        assert k8s_volume.classify_pvc_failure(
+            message) == k8s_volume.PvcFailure.UNKNOWN
+
+    def test_a_wrapped_status_is_read_by_its_inner_code(self):
+        """grpc-go wraps a status in another status, and the outer one is
+        usually the less specific of the two."""
+        assert k8s_volume.classify_pvc_failure(
+            'rpc error: code = Unknown desc = rpc error: '
+            'code = InvalidArgument desc = bad tier'
+        ) == k8s_volume.PvcFailure.TERMINAL
+
+    def test_a_call_that_may_be_running_wins_over_a_terminal_wrapper(self):
+        """The asymmetry that matters: waiting longer than needed costs time,
+        failing a launch whose volume was going to work cannot be undone."""
+        assert k8s_volume.classify_pvc_failure(
+            'rpc error: code = InvalidArgument desc = rpc error: '
+            'code = DeadlineExceeded desc = still creating'
+        ) == k8s_volume.PvcFailure.IN_PROGRESS
+
+
+class TestFirstPvcFailureEvent:
+    """What the volume-status refresh counts as evidence a claim is unusable."""
+
+    @staticmethod
+    def _events(*messages):
+        events = []
+        for message in messages:
+            event = MagicMock()
+            event.type = 'Warning'
+            event.reason = 'ProvisioningFailed'
+            event.message = message
+            events.append(event)
+        return events
+
+    def _first(self, monkeypatch, *messages):
+        monkeypatch.setattr(k8s_volume.kubernetes_utils, 'get_pvc_events',
+                            lambda *a, **kw: self._events(*messages))
+        return k8s_volume._first_pvc_failure_event('ctx', 'ns', 'pvc')
+
+    def test_a_rejected_request_is_evidence(self, monkeypatch):
+        assert 'instance.tier' in self._first(monkeypatch, _TERMINAL_MESSAGE)
+
+    def test_a_call_that_may_still_be_running_is_not(self, monkeypatch):
+        """A volume being created reported these for minutes and then bound.
+        Counting them made it read as unusable for the middle of its own
+        creation, which refused every launch that wanted it."""
+        assert self._first(monkeypatch, _DEADLINE_MESSAGE,
+                           _ABORTED_MESSAGE) is None
+
+    def test_a_real_failure_behind_an_in_progress_one_is_still_found(
+            self, monkeypatch):
+        assert 'instance.tier' in self._first(monkeypatch, _DEADLINE_MESSAGE,
+                                              _TERMINAL_MESSAGE)
