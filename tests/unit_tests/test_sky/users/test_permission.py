@@ -2627,6 +2627,23 @@ class TestScheduledRoleRepair:
             worker._repair_queue.join()
         assert worker._repair_worker is not dead
 
+    def test_a_queued_principal_is_not_logged_as_turned_away(self, policy_db):
+        """A full queue must not report the principals already in it as dropped.
+
+        Reading that warning is how an operator learns repairs are being lost,
+        so it has to mean that.
+        """
+        worker = policy_db()
+        worker.enforcer.load_policy()
+        worker._repair_in_flight = {'ghost'} | {
+            f'other{i}' for i in range(permission._REPAIR_MAX_IN_FLIGHT)
+        }
+
+        with mock.patch.object(permission.logger, 'warning') as warn:
+            worker._schedule_role_repair('ghost')
+
+        assert not [c for c in warn.call_args_list if 'Not queueing' in c[0][0]]
+
     def test_no_thread_until_one_is_needed(self):
         """The CLI imports this module; it must not start a thread."""
         assert permission.PermissionService()._repair_worker is None
