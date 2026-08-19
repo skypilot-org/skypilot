@@ -2947,11 +2947,24 @@ def get_managed_job_queue(
             if end_at is None:
                 end_at = time.time()
 
-            job_submitted_at = job['last_recovered_at'] - job['job_duration']
+            # Defensively coalesce SQL NULLs to the schema defaults
+            # (last_recovered_at=-1, job_duration=0). Such rows should not
+            # normally exist, but have been observed in the wild, and a
+            # single bad row would otherwise raise a TypeError here and
+            # break the entire job queue listing. With the defaults, the
+            # row degrades to the "never started" rendering below.
+            last_recovered_at = job['last_recovered_at']
+            if last_recovered_at is None:
+                last_recovered_at = -1
+            raw_job_duration = job['job_duration']
+            if raw_job_duration is None:
+                raw_job_duration = 0
+
+            job_submitted_at = last_recovered_at - raw_job_duration
             if job['status'] == managed_job_state.ManagedJobStatus.RECOVERING:
                 # When job is recovering, the duration is exact
                 # job['job_duration']
-                job_duration = job['job_duration']
+                job_duration = raw_job_duration
             elif job_submitted_at > 0:
                 job_duration = end_at - job_submitted_at
             else:
