@@ -24,3 +24,8 @@ jobs:
         npm --prefix sky/dashboard run lint
         npm --prefix sky/dashboard run format:check
         npm --prefix sky/dashboard run build
+    # Separate step so a failing test is reported as such rather than as a
+    # build failure. Nothing here rendered a component before, which is how a
+    # crash on every filter interaction reached master with this job green.
+    - name: Run tests
+      run: npm --prefix sky/dashboard test -- --ci

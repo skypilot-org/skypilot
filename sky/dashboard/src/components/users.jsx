@@ -8,6 +8,7 @@ import React, {
   useRef,
 } from 'react';
 import PropTypes from 'prop-types';
+import { MANAGED_JOBS_SUMMARY_ARGS } from '@/data/connectors/constants';
 import { CircularProgress } from '@mui/material';
 import Link from 'next/link';
 import { useRouter } from 'next/router';
@@ -27,10 +28,7 @@ import {
   isServiceAccountTokensPaginationAvailable,
 } from '@/data/connectors/users';
 import { getClusters } from '@/data/connectors/clusters';
-import {
-  getManagedJobs,
-  MANAGED_JOBS_SUMMARY_ARGS,
-} from '@/data/connectors/jobs';
+import { getManagedJobs } from '@/data/connectors/jobs';
 import dashboardCache from '@/lib/cache';
 import cachePreloader from '@/lib/cache-preloader';
 import { REFRESH_INTERVALS } from '@/lib/config';

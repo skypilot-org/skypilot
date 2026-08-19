@@ -4,6 +4,7 @@ import { CLOUDS_LIST, COMMON_GPUS } from '@/data/connectors/constants';
 import { apiClient } from '@/data/connectors/client';
 import { getErrorMessageFromResponse } from '@/data/utils';
 import dashboardCache from '@/lib/cache';
+import { MANAGED_JOBS_SUMMARY_ARGS } from '@/data/connectors/constants';
 import { buildContextStatsKeyFromCloud } from '@/utils/infraUtils';
 
 /**
@@ -81,9 +82,7 @@ export async function getEnabledCloudsList() {
 
 export async function getCloudInfrastructure(forceRefresh = false) {
   const { getClusters } = await import('@/data/connectors/clusters');
-  const { getManagedJobs, MANAGED_JOBS_SUMMARY_ARGS } = await import(
-    '@/data/connectors/jobs'
-  );
+  const { getManagedJobs } = await import('@/data/connectors/jobs');
   const { getWorkspaces, getEnabledCloudsBatch } = await import(
     '@/data/connectors/workspaces'
   );

@@ -71,8 +71,15 @@ export function useVersionInfo() {
   return useContext(VersionContext);
 }
 
-export function VersionTooltip({
-  children,
+/**
+ * What the version tooltip shows once it is open: the core version/commit and
+ * one line per plugin that has not opted out of the display.
+ *
+ * Exported separately from the tooltip that hosts it because the hosting
+ * tooltip only mounts its content while open, and this is the part with the
+ * behaviour worth asserting on.
+ */
+export function VersionTooltipContent({
   version,
   latestVersion,
   commit,
@@ -80,8 +87,7 @@ export function VersionTooltip({
   showUpdateInfo = true,
   showCommit = true,
 }) {
-  // Create tooltip content
-  const tooltipContent = (
+  return (
     <div className="flex flex-col gap-0.5">
       {showUpdateInfo && latestVersion && (
         <div className="mb-1">
@@ -115,10 +121,29 @@ export function VersionTooltip({
         )}
     </div>
   );
+}
 
+export function VersionTooltip({
+  children,
+  version,
+  latestVersion,
+  commit,
+  plugins,
+  showUpdateInfo = true,
+  showCommit = true,
+}) {
   return (
     <NonCapitalizedTooltip
-      content={tooltipContent}
+      content={
+        <VersionTooltipContent
+          version={version}
+          latestVersion={latestVersion}
+          commit={commit}
+          plugins={plugins}
+          showUpdateInfo={showUpdateInfo}
+          showCommit={showCommit}
+        />
+      }
       className="text-sm text-muted-foreground"
     >
       {children}
