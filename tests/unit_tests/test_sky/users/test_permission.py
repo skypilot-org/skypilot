@@ -2474,6 +2474,33 @@ class TestDenialScope:
         assert worker.check_endpoint_permission(viewer_id, '/users/create',
                                                 'POST')
 
+    def test_every_reader_agrees_about_a_system_identity(self, policy_db):
+        """The role is a property of the identity, not a row that may be gone.
+
+        `sky.users.server` refuses to delete these users or change their role,
+        so a decision that reads casbin and finds nothing must not conclude
+        they are role-less -- which is what left the endpoint gate and the
+        workspace checks disagreeing about the same principal.
+        """
+        worker = policy_db()
+        worker.enforcer.load_policy()
+
+        # The fixture seeds no rows for them, standing in for a boot-time seed
+        # that never landed.
+        assert worker.enforcer.get_roles_for_user(common.SERVER_ID) == []
+        assert worker.get_user_roles(common.SERVER_ID) == ['admin']
+        assert worker.roles_in_memory(common.SERVER_ID) == ['admin']
+        assert worker.roles_in_memory(
+            constants.SKYPILOT_SYSTEM_VIEWER_USER_ID) == ['viewer']
+
+    def test_an_ordinary_principal_is_untouched(self, policy_db):
+        worker = policy_db()
+        worker.enforcer.add_grouping_policy('someone', 'user')
+        worker.enforcer.load_policy()
+
+        assert worker.get_user_roles('someone') == ['user']
+        assert worker.get_user_roles('ghost') == []
+
     def test_the_denial_is_logged_once_per_principal(self, policy_db):
         """Persistent state, so an unrated log would repeat on every request."""
         worker = policy_db()

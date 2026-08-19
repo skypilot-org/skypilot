@@ -68,13 +68,15 @@ _SUPPORTED_ROLES = frozenset(rbac.get_supported_roles())
 
 
 def _system_user_roles() -> Dict[str, str]:
-    """The server's own identities and the role each is seeded with.
+    """The server's own identities and the role each of them has.
 
-    Their role rows are written once, by `_maybe_initialize_policies` at boot,
-    under the policy lock. A denial for a principal with no recognized role
-    must not apply to them: if that one seed failed, denying would take the
-    server's internal calls (including the HA replica-to-replica authorize)
-    from degraded to dead.
+    Not a default the policy may override: `sky.users.server` refuses to delete
+    these users or change their role, so the role is a property of the identity
+    rather than an administrative choice. `_maybe_initialize_policies` writes
+    the matching rows at boot for anything that reads casbin directly, but the
+    answer here does not depend on that write having landed -- if it failed,
+    reading the policy would leave the server unable to authorize its own
+    internal calls.
     """
     return {
         common.SERVER_ID: rbac.RoleName.ADMIN.value,
@@ -91,6 +93,20 @@ def _recognized_roles(roles: List[str]) -> List[str]:
     predating the update-role validation can still hold one.
     """
     return [role for role in roles if role in _SUPPORTED_ROLES]
+
+
+def _resolve_roles(user_id: str, roles: List[str]) -> List[str]:
+    """`roles`, with the server's own identities resolved to their own role.
+
+    Every decision that reads a principal's roles goes through this, so the
+    endpoint gate, the workspace checks and the request filters cannot disagree
+    about the same principal -- which they did while only the gate knew about
+    system identities.
+    """
+    if _recognized_roles(roles):
+        return roles
+    system_role = _system_user_roles().get(user_id)
+    return [system_role] if system_role is not None else roles
 
 
 _enforcer_instance: Optional['PermissionService'] = None
@@ -501,7 +517,18 @@ class PermissionService:
         """
         self._load_policy_no_lock()
         enforcer = self._ensure_enforcer()
-        return enforcer.get_roles_for_user(user_id)
+        return _resolve_roles(user_id, enforcer.get_roles_for_user(user_id))
+
+    def roles_in_memory(self, user_id: str) -> List[str]:
+        """This process's current view of a principal's roles, no reload.
+
+        For decisions on the request path, which cannot afford the database
+        roundtrip `get_user_roles` makes. Same resolution otherwise, so a
+        caller that reads this cannot reach a different conclusion about a
+        principal than one that reads `get_user_roles`.
+        """
+        enforcer = self._ensure_enforcer()
+        return _resolve_roles(user_id, enforcer.get_roles_for_user(user_id))
 
     def get_users_for_role(self, role: str) -> List[str]:
         """Get all users for a role."""
@@ -732,27 +759,25 @@ class PermissionService:
         # self.get_user_roles(...) here — that does a DB roundtrip via
         # _load_policy_no_lock and would put a query on the request hot
         # path.
-        roles = enforcer.get_roles_for_user(user_id)
+        roles = _resolve_roles(user_id, enforcer.get_roles_for_user(user_id))
         if not _recognized_roles(roles):
             # Reload before denying them: a role assigned moments ago on
             # another worker has not reached this model, and refusing a new
             # admin every admin endpoint until something else happens to
             # reload is its own outage.
-            roles = self._probe_unknown_principal(user_id)
+            roles = _resolve_roles(user_id,
+                                   self._probe_unknown_principal(user_id))
             if not _recognized_roles(roles):
-                system_role = _system_user_roles().get(user_id)
-                if system_role is None:
-                    self._log_denied_principal(user_id, path, method)
-                    return True
-                # Judge them by the role their boot-time seed would have
-                # given them. `admin` then falls through to `enforce`, whose
-                # blocklist for admin is empty, i.e. allowed.
-                roles = [system_role]
+                self._log_denied_principal(user_id, path, method)
+                return True
         # Admin wins over viewer when a user holds both — viewer's
         # default-deny semantics shouldn't restrict an admin.
         if (rbac.RoleName.VIEWER.value in roles and
                 rbac.RoleName.ADMIN.value not in roles):
             return not self._is_viewer_allowed(path, method)
+        # `enforce` resolves the id through casbin's `g`, so a system identity
+        # whose row never landed matches nothing -- which under blocklist
+        # semantics is "allowed", the same answer its admin role gives.
         return enforcer.enforce(user_id, path, method)
 
     def _is_viewer_allowed(self, path: str, method: str) -> bool:
