@@ -2901,13 +2901,11 @@ def api_server_logs(follow: bool = True, tail: Optional[int] = None) -> None:
 def _writable_user_config_path() -> pathlib.Path:
     """Returns the user config file that reads and writes should both use.
 
-    Reads go through `skypilot_config.get_user_config()`, which honors
-    `SKYPILOT_GLOBAL_CONFIG`, while `get_user_config_path()` always points at
-    the default path. Writing the default path while reading the overridden one
-    lands the change in a file nobody reads, and overwrites the default path
-    with a copy of the overridden config. So write wherever we read, unless
-    that file is not writable -- a config baked into a read-only image, say --
-    in which case fall back to the default path so login still works.
+    `get_user_config()` honors `SKYPILOT_GLOBAL_CONFIG` while
+    `get_user_config_path()` always points at the default path, so writing the
+    latter while reading the former lands the change in a file nobody reads.
+    Callers pair this with `_read_config_file()` so that the file they read is
+    always the file they write, including in the fallback branch below.
     """
     config_path = pathlib.Path(
         skypilot_config.resolve_user_config_path() or
@@ -2926,6 +2924,20 @@ def _writable_user_config_path() -> pathlib.Path:
     return default_path
 
 
+def _read_config_file(config_path: pathlib.Path) -> Dict[str, Any]:
+    """Reads the config at `config_path`, so writes cannot land in a copy.
+
+    The callers below rewrite a whole config file, so they must start from the
+    contents of the very file they are about to write. Seeding from
+    `get_user_config()` instead would, whenever the two paths differ, dump one
+    file's contents over the other and lose whatever it held.
+    """
+    if not config_path.exists():
+        return {}
+    return dict(skypilot_config.parse_and_validate_config_file(
+        str(config_path)))
+
+
 def _save_config_updates(endpoint: Optional[str] = None,
                          service_account_token: Optional[str] = None) -> None:
     """Save endpoint and/or service account token to config file."""
@@ -2933,10 +2945,7 @@ def _save_config_updates(endpoint: Optional[str] = None,
     with filelock.FileLock(config_path.with_suffix('.lock')):
         if not config_path.exists():
             config_path.touch()
-            config: Dict[str, Any] = {}
-        else:
-            config = skypilot_config.get_user_config()
-            config = dict(config)
+        config: Dict[str, Any] = _read_config_file(config_path)
 
         # Update endpoint if provided
         if endpoint is not None:
@@ -2963,8 +2972,7 @@ def _clear_api_server_config() -> None:
         if not config_path.exists():
             return
 
-        config = skypilot_config.get_user_config()
-        config = dict(config)
+        config = _read_config_file(config_path)
         if 'api_server' in config:
             # We might not have set the endpoint in the config file, so we
             # need to check before deleting.
@@ -2981,8 +2989,7 @@ def _clear_service_account_token() -> None:
         if not config_path.exists():
             return
 
-        config = skypilot_config.get_user_config()
-        config = dict(config)
+        config = _read_config_file(config_path)
         if 'service_account_token' not in config.get('api_server', {}):
             # Nothing to clear; leave the config file untouched.
             return
@@ -3047,10 +3054,21 @@ def _resolve_login_endpoint(endpoint: Optional[str]) -> Tuple[str, bool]:
         config file.
     """
     env_endpoint = os.environ.get(constants.SKY_API_SERVER_URL_ENV_VAR)
-    if not env_endpoint:
+    if env_endpoint is None:
         return _validate_endpoint(endpoint), False
 
-    env_endpoint = env_endpoint.rstrip('/')
+    env_endpoint = env_endpoint.strip().rstrip('/')
+    if not env_endpoint:
+        # Set but empty. `get_server_url()` returns the empty value rather than
+        # falling back to the config file, so every command would resolve to an
+        # empty server URL -- saying so beats logging in against an endpoint
+        # that nothing else will use.
+        with ux_utils.print_exception_no_traceback():
+            raise RuntimeError(
+                f'{constants.SKY_API_SERVER_URL_ENV_VAR} is set to an empty '
+                'value, which makes every command resolve to an empty server '
+                'URL. Set it to an endpoint, or run unset '
+                f'{constants.SKY_API_SERVER_URL_ENV_VAR}.')
     if endpoint is not None and endpoint.rstrip('/') != env_endpoint:
         # Two different explicit endpoints; we cannot tell which one the user
         # meant, and logging into one of them would leave the other in effect.

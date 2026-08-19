@@ -631,6 +631,63 @@ def test_api_login_writes_the_config_file_it_reads(
     )['api_server']['endpoint'] == new_endpoint
 
 
+def test_api_login_writes_do_not_clobber_the_other_config(
+        monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+    """A write must start from the file it is about to write.
+
+    When the resolved config file cannot be written, login falls back to the
+    default path. Seeding the new contents from the resolved file instead would
+    dump it over the default one and lose whatever that held.
+    """
+    default_path = tmp_path / "default.yaml"
+    override_path = tmp_path / "override.yaml"
+    default_path.write_text('docker:\n  run_options: [--mine]\n')
+    override_path.write_text('kubernetes:\n  allowed_contexts: [theirs]\n')
+    monkeypatch.setattr('sky.skypilot_config.get_user_config_path',
+                        lambda: str(default_path))
+    monkeypatch.setenv(skypilot_config.ENV_VAR_GLOBAL_CONFIG,
+                       str(override_path))
+    # Stand in for the resolved file being unwritable, without depending on
+    # file modes (a test running as root can write a read-only file).
+    monkeypatch.setattr('sky.client.sdk._writable_user_config_path',
+                        lambda: default_path)
+    skypilot_config.reload_config()
+
+    with _mock_healthy_check() as mock_check:
+        mock_check.return_value = (
+            server_common.ApiServerStatus.HEALTHY,
+            server_common.ApiServerInfo(
+                status=server_common.ApiServerStatus.HEALTHY,
+                basic_auth_enabled=False))
+        client_sdk.api_login("http://new.skypilot.co")
+
+    written = default_path.read_text()
+    assert 'endpoint: http://new.skypilot.co' in written
+    # Its own settings survive, and the other file's do not leak in.
+    assert '--mine' in written
+    assert 'theirs' not in written
+    assert 'theirs' in override_path.read_text()
+
+
+def test_api_login_rejects_empty_env_endpoint(monkeypatch: pytest.MonkeyPatch,
+                                              tmp_path: Path):
+    """An empty env var is set, not unset, and misdirects every command.
+
+    `get_server_url()` returns the empty value rather than falling back to the
+    config file, so logging in and reporting success would leave every later
+    command resolving to an empty URL.
+    """
+    config_path = tmp_path / "config.yaml"
+    monkeypatch.setattr('sky.skypilot_config.get_user_config_path',
+                        lambda: str(config_path))
+    monkeypatch.setenv(constants.SKY_API_SERVER_URL_ENV_VAR, "")
+
+    with pytest.raises(RuntimeError, match='set to an empty value'):
+        client_sdk.api_login("http://newly-set.skypilot.co")
+    # Nothing was written on the way out.
+    assert not config_path.exists()
+
+
 def test_api_logout_with_env_endpoint(monkeypatch: pytest.MonkeyPatch):
     """Logout still errors out when the endpoint is set via the env var."""
     monkeypatch.setenv(constants.SKY_API_SERVER_URL_ENV_VAR,
