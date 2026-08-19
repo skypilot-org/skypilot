@@ -3511,8 +3511,10 @@ def api_login(endpoint: Optional[str] = None,
     # The login succeeded, so the cookies it saved are the credential for this
     # endpoint from now on. Drop the residual token, which would otherwise be
     # sent in their place. Anything that failed above leaves the file untouched.
-    if residual_token is not None:
-        _clear_service_account_token()
+    # This is deliberately not gated on `residual_token`: that came from the
+    # in-memory config, which can disagree with the file, and the file is what
+    # we are about to rewrite. The call is a no-op when the file holds no token.
+    _clear_service_account_token()
     if not from_env:
         _save_config_updates(endpoint=endpoint)
 
