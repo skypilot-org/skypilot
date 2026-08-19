@@ -14,6 +14,10 @@ This example shows how to create and launch [Job Groups](https://docs.skypilot.c
 | `job_group_sdk.py` | Builds and launches a server-client Job Group in Python |
 | `job_group_primary_aux_sdk.py` | Demonstrates primary/auxiliary task lifecycle |
 | `job_group.yaml` | Equivalent YAML for reference |
+| `job_group_nccl.yaml` | Optional: disaggregated RL training (GRPO) — trainer/actor/reward as separate tasks, NCCL weight sync (needs GPUs) |
+| `trainer.py` | RL driver: owns prompts, runs GRPO updates, pushes weights to the actor over NCCL |
+| `rollout_server.py` | Actor: GPU inference server; generates completions, receives weights over NCCL |
+| `reward_server.py` | Reward: CPU verifier that scores completions |
 
 ## Usage
 
@@ -42,6 +46,68 @@ This example shows how to designate a primary task (trainer) and an auxiliary ta
 ```bash
 python examples/job-group-sdk/job_group_primary_aux_sdk.py
 ```
+
+### Disaggregated RL training with NCCL weight sync (optional)
+
+`job_group_nccl.yaml` runs a small but real reinforcement-learning loop —
+**GRPO** (Group Relative Policy Optimization, the algorithm behind DeepSeek-R1
+and modern RL-for-LLM stacks) — split into three **different** components, each
+its own Job Group task (not one program replicated across nodes). This mirrors
+how production RL stacks disaggregate generation, reward, and training so each
+scales and fails independently:
+
+| Task | Role |
+|------|------|
+| `trainer` (GPU) | Owns the prompt distribution, drives the loop, holds the trainable policy + optimizer, pushes weights to the actor |
+| `actor` (GPU) | Inference server: generates completion groups on request; receives weight updates |
+| `reward` (CPU) | Verifier: scores completions (no GPU, standard library only) |
+
+Two communication planes, each on the channel that fits it:
+
+- **Data plane** (prompts → completions → rewards): plain HTTP over Job Group
+  service discovery — the trainer calls `actor-0.${SKYPILOT_JOBGROUP_NAME}` and
+  `reward-0.${SKYPILOT_JOBGROUP_NAME}`.
+- **Weight sync** (trainer → actor): a `torch.distributed` (NCCL) broadcast over
+  a 2-rank process group (trainer = rank 0 + rendezvous host at
+  `trainer-0.${SKYPILOT_JOBGROUP_NAME}`, actor = rank 1). Pushing fresh weights
+  to inference workers over a collective — rather than via disk — is exactly how
+  stacks like SGLang/vLLM + a training engine keep rollouts on-policy. This is
+  the collective that `network_tier: best` accelerates.
+
+```bash
+sky jobs launch examples/job-group-sdk/job_group_nccl.yaml
+```
+
+Each step: the trainer samples prompts → asks the actor to generate a group of
+completions per prompt → asks the reward server to score them → standardizes
+rewards within each group (GRPO advantages) → runs a policy-gradient update on
+its local policy → **broadcasts the new weights to the actor over NCCL** so the
+next rollouts are on-policy. The trainer logs the mean reward, which climbs as
+the policy learns:
+
+```console
+(trainer, ...) [trainer] components up; model=Qwen/Qwen2.5-0.5B-Instruct group=8 prompts/step=4 steps=40
+(actor, ...)   [actor] NCCL joined as rank 1; serving generate on :8000
+(reward, ...)  [reward] serving on :8001
+(trainer, ...) [step   1/40] mean_reward=0.214 loss=-0.0031
+(trainer, ...) [step  20/40] mean_reward=0.638 loss=-0.0204
+(trainer, ...) [step  40/40] mean_reward=0.961 loss=-0.0117
+(trainer, ...) [done] training complete
+```
+
+The example is self-contained — only `torch` + `transformers` on the GPU tasks,
+and the standard library on the CPU reward task; no external inference server,
+dataset, or RL framework.
+
+`primary_tasks: [trainer]` makes the run finish when training completes; the
+long-running `actor` and `reward` servers are then terminated after a short
+grace period. The GPU tasks set `network_tier: best`, so the NCCL weight-sync
+collective uses the cluster's high-performance fabric (RDMA / InfiniBand / EFA)
+when available — auto-detected per task, a no-op (TCP fallback) otherwise. No
+group-level network setting is required.
+
+Requires a Kubernetes cluster with NVIDIA GPUs. Scale the actor or trainer with
+more GPUs, or add more actor/reward replicas as separate tasks.
 
 ## Example output
 
