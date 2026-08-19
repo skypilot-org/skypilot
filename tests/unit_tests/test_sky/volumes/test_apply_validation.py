@@ -180,6 +180,108 @@ class TestVolumeApplyValidation:
         scheduled.assert_called_once()
 
 
+class TestRealDashboardPayloads:
+    """Bodies captured from the Add Volume dialog, verbatim.
+
+    The dialog sends explicit nulls for unset optional config fields, which
+    hand-written fixtures do not, and which the config schema rejects.
+    """
+
+    @pytest.fixture
+    def client_and_executor(self, monkeypatch):
+        scheduled = mock.AsyncMock()
+        monkeypatch.setattr(executor, 'schedule_request_async', scheduled)
+        app = fastapi.FastAPI()
+        app.include_router(server.router, prefix='/volumes')
+        return TestClient(app), scheduled
+
+    @staticmethod
+    def _post(client, body):
+        with mock.patch.object(fastapi.Request, 'state') as mock_state:
+            mock_state.request_id = 'test-request-id'
+            mock_state.auth_user = None
+            return client.post('/volumes/apply', json=body)
+
+    # Create, new PVC: namespace is null whenever the user does not set one.
+    CREATE_PVC = {
+        'name': 'ok-0',
+        'volume_type': 'k8s-pvc',
+        'cloud': 'kubernetes',
+        'region': 'a-context',
+        'size': '100',
+        'config': {
+            'storage_class_name': 'standard-rwx',
+            'access_mode': 'ReadWriteMany',
+            'namespace': None,
+        },
+        'use_existing': False,
+    }
+
+    # Create, hostPath: size is null and cleanup_on_deletion is present.
+    CREATE_HOSTPATH = {
+        'name': 'ok-host',
+        'volume_type': 'k8s-hostpath',
+        'cloud': 'kubernetes',
+        'region': 'a-context',
+        'size': None,
+        'config': {
+            'host_path': '/mnt/data',
+            'cleanup_on_deletion': True
+        },
+        'use_existing': False,
+    }
+
+    # Import an existing PVC: every field is populated from the real PVC.
+    IMPORT_PVC = {
+        'name': 'imported',
+        'volume_type': 'k8s-pvc',
+        'cloud': 'kubernetes',
+        'region': 'a-context',
+        'size': None,
+        'config': {
+            'storage_class_name': 'standard-rwx',
+            'access_mode': 'ReadWriteMany',
+            'namespace': 'default',
+        },
+        'use_existing': True,
+    }
+
+    # No storage class chosen yet -- both optional fields arrive as null.
+    CREATE_PVC_ALL_NULL = {
+        'name': 'ok-1',
+        'volume_type': 'k8s-pvc',
+        'cloud': 'kubernetes',
+        'region': 'a-context',
+        'size': '100',
+        'config': {
+            'storage_class_name': None,
+            'access_mode': 'ReadWriteMany',
+            'namespace': None,
+        },
+        'use_existing': False,
+    }
+
+    @pytest.mark.parametrize('body', [
+        CREATE_PVC,
+        CREATE_HOSTPATH,
+        IMPORT_PVC,
+        CREATE_PVC_ALL_NULL,
+    ])
+    def test_dialog_payload_is_accepted(self, client_and_executor, body):
+        client, scheduled = client_and_executor
+        response = self._post(client, body)
+        assert response.status_code == 200, response.text
+        scheduled.assert_called_once()
+
+    def test_null_config_fields_are_dropped_not_forwarded(
+            self, client_and_executor):
+        client, scheduled = client_and_executor
+        assert self._post(client, self.CREATE_PVC).status_code == 200
+        forwarded = scheduled.call_args[1]['request_body'].config
+        assert 'namespace' not in forwarded
+        assert forwarded['storage_class_name'] == 'standard-rwx'
+
+
 class TestFromComponents:
     """from_components must round-trip cloud/region/zone via the infra string."""
 

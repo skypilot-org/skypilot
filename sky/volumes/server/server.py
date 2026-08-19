@@ -111,6 +111,10 @@ async def volume_apply(request: fastapi.Request,
     volume_config = volume_apply_body.config
     if volume_config is None:
         volume_config = {}
+    # Clients send explicit nulls for optional config fields (the dashboard
+    # posts `namespace: null` when it is not set). validate_schema only drops
+    # None at the top level, so drop them here or the schema rejects them.
+    volume_config = {k: v for k, v in volume_config.items() if v is not None}
     volume_config['use_existing'] = volume_apply_body.use_existing
 
     supported_volume_types = [
