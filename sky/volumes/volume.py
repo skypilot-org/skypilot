@@ -133,6 +133,15 @@ class Volume:
         })
         volume.region = region
         volume.zone = zone
+        # `infra` stays cloud-only and must not be read back off a Volume built
+        # this way -- cloud/region/zone are the truth here. Rebuilding it from
+        # the components would be worse than leaving it partial: the string
+        # cannot represent every region, so `ssh-mypool` would come back as
+        # `kubernetes/mypool` and read as authoritative. The one caller that
+        # sends `infra` (volumes.validate) builds its Volume from YAML instead.
+        #
+        # Assigning region/zone directly also means they skip the schema's infra
+        # pattern; fine here, they come from an already-validated request body.
         return volume
 
     def to_yaml_config(self) -> Dict[str, Any]:
@@ -268,8 +277,13 @@ class HostPathVolume(Volume):
             raise ValueError(
                 f'host_path must be an absolute path, got: {host_path!r}')
         # Normalize first: '/..' and '/mnt/../..' are absolute paths that
-        # resolve to the root, so a literal comparison misses them.
-        if os.path.normpath(host_path) == '/':
+        # resolve to the root, so a literal comparison misses them. Collapse
+        # the leading slashes too -- normpath keeps exactly two of them ('//'
+        # stays '//') because POSIX leaves that implementation-defined, but on
+        # Linux '//' is the root.
+        # This is a string check: a host_path pointing at a symlink to / still
+        # resolves to the root on the node, which cannot be seen from here.
+        if os.path.normpath('/' + host_path.lstrip('/')) == '/':
             raise ValueError(
                 f'host_path must not resolve to the root directory: '
                 f'{host_path!r}')

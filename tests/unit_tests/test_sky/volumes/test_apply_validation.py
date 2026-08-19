@@ -117,6 +117,11 @@ class TestVolumeApplyValidation:
             (_hostpath_body(config={'host_path': '/./..'}), 'root directory'),
             (_hostpath_body(config={'host_path': '/../../..'}),
              'root directory'),
+            # normpath keeps exactly two leading slashes, but Linux reads '//'
+            # as the root.
+            (_hostpath_body(config={'host_path': '//'}), 'root directory'),
+            (_hostpath_body(config={'host_path': '//..'}), 'root directory'),
+            (_hostpath_body(config={'host_path': '//.'}), 'root directory'),
             (_hostpath_body(config={'host_path': 'relative/path'}),
              'absolute path'),
             (_hostpath_body(config={}), 'host_path is required'),
@@ -176,20 +181,32 @@ class TestVolumeApplyValidation:
                             size='1Gi',
                             config=forwarded)
 
-    @pytest.mark.parametrize(
-        'body',
-        [
-            _pvc_body(),
-            # No dotted-name case on purpose: the rule permits dots but Kubernetes
-            # rejects a dotted spec.volumes[].name. See #10514.
-            _pvc_body(name='ok-vol-2'),
-            _hostpath_body(),
-            _runpod_body(),
-            _pvc_body(size=None, use_existing=True),
-        ])
+    @pytest.mark.parametrize('body', [
+        _pvc_body(),
+        _pvc_body(name='ok-vol-2'),
+        _hostpath_body(),
+        _runpod_body(),
+        _pvc_body(size=None, use_existing=True),
+    ])
     def test_valid_volume_is_accepted(self, client_and_executor, body):
         client, scheduled = client_and_executor
         response = post_apply(client, body)
+        assert response.status_code == 200, response.text
+        scheduled.assert_called_once()
+
+
+class TestDottedNameIsAcceptedToday:
+    """Pins current dot handling so #10514 flipping it is a deliberate edit.
+
+    A dot passes the server's rule, but Kubernetes rejects a dotted
+    spec.volumes[].name, so such a volume cannot be mounted. When #10514
+    tightens the charset this test fails -- which is the point: it is the signal
+    to update the dashboard's client-side mirror in the same change.
+    """
+
+    def test_dotted_name_still_accepted(self, client_and_executor):
+        client, scheduled = client_and_executor
+        response = post_apply(client, _pvc_body(name='dotted.name'))
         assert response.status_code == 200, response.text
         scheduled.assert_called_once()
 
@@ -343,6 +360,50 @@ class TestSdkApplyRejection:
         vol = self._volume(monkeypatch, detail)
         with pytest.raises(ValueError, match='Invalid volume name'):
             volumes_sdk.apply(vol)
+
+    def test_non_json_400_keeps_the_normal_error_path(self, monkeypatch):
+        # The guard exists for a 400 from something that is not this handler --
+        # a proxy returning an HTML error page. It must not become a
+        # JSONDecodeError, which would be worse than the HTTPError it replaced.
+        monkeypatch.setattr(server_common, 'check_server_healthy_or_start_fn',
+                            lambda *a, **kw: None)
+        response = mock.MagicMock()
+        response.status_code = 400
+        response.json.side_effect = ValueError('not JSON')
+        response.headers = {}
+        response.text = '<html>Bad Request</html>'
+        monkeypatch.setattr(server_common, 'make_authenticated_request',
+                            lambda *a, **kw: response)
+        vol = volume_lib.Volume.from_components(
+            name='ok-vol',
+            type=volume.VolumeType.PVC.value,
+            cloud='kubernetes',
+            region='my-context',
+            size='1Gi')
+        # get_request_id's own error, not a decode error from the guard.
+        with pytest.raises(Exception) as exc_info:
+            volumes_sdk.apply(vol)
+        assert 'JSONDecode' not in type(exc_info.value).__name__
+
+    def test_detail_absent_keeps_the_normal_error_path(self, monkeypatch):
+        # Valid JSON with no `detail` must fall through too.
+        monkeypatch.setattr(server_common, 'check_server_healthy_or_start_fn',
+                            lambda *a, **kw: None)
+        response = mock.MagicMock()
+        response.status_code = 400
+        response.json.return_value = {'oops': 'no detail here'}
+        response.headers = {}
+        monkeypatch.setattr(server_common, 'make_authenticated_request',
+                            lambda *a, **kw: response)
+        vol = volume_lib.Volume.from_components(
+            name='ok-vol',
+            type=volume.VolumeType.PVC.value,
+            cloud='kubernetes',
+            region='my-context',
+            size='1Gi')
+        with pytest.raises(Exception) as exc_info:
+            volumes_sdk.apply(vol)
+        assert 'no detail here' not in str(exc_info.value)
 
     def test_plain_string_detail(self, monkeypatch):
         # The pre-existing 400s on this endpoint return a bare string.

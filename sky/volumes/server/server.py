@@ -77,11 +77,16 @@ def _volume_errors_as_400() -> Iterator[None]:
     except fastapi.HTTPException:
         # Already a chosen HTTP response; do not re-wrap it as a volume error.
         raise
+    except ValueError as e:
+        # The common case: the volume really is malformed. No stack trace.
+        logger.debug(f'Rejecting invalid volume: {e}')
+        requests_lib.set_exception_stacktrace(e)
+        raise fastapi.HTTPException(
+            status_code=400, detail=exceptions.serialize_exception(e)) from e
     except Exception as e:
-        # A malformed volume is the common case, but an internal fault lands
-        # here too and would otherwise be reported as the user's mistake with
-        # nothing in the server log.
-        logger.info(f'Rejecting volume request: {e}', exc_info=True)
+        # An internal fault lands here too, and would otherwise be reported as
+        # the user's mistake with nothing in the server log.
+        logger.exception(f'Unexpected error validating a volume: {e}')
         requests_lib.set_exception_stacktrace(e)
         raise fastapi.HTTPException(
             status_code=400, detail=exceptions.serialize_exception(e)) from e

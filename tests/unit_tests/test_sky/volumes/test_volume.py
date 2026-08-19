@@ -896,8 +896,20 @@ class TestHostPathVolume:
 
     # '/..' and friends are absolute and resolve to the root, so a literal
     # '/' comparison lets them through.
-    @pytest.mark.parametrize('host_path',
-                             ['/', '/..', '/mnt/../..', '/./..', '/../../..'])
+    @pytest.mark.parametrize(
+        'host_path',
+        [
+            '/',
+            '/..',
+            '/mnt/../..',
+            '/./..',
+            '/../../..',
+            # normpath keeps exactly two leading slashes; Linux reads '//' as
+            # the root.
+            '//',
+            '//..',
+            '//.',
+        ])
     def test_hostpath_volume_root_path(self, host_path):
         """Test hostPath volume resolving to the root raises error."""
         with pytest.raises(ValueError, match='must not resolve to the root'):
