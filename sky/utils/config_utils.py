@@ -4,6 +4,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from sky import exceptions
 from sky import sky_logging
+from sky.utils import yaml_utils
 
 logger = sky_logging.init_logger(__name__)
 
@@ -193,6 +194,18 @@ def redact_sensitive_values(config: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     for path in SENSITIVE_CONFIG_PATHS:
         _redact_path(redacted, path)
     return redacted
+
+
+def dump_redacted_yaml(config: Optional[Dict[str, Any]]) -> str:
+    """Serializes a config for a log line or an error message.
+
+    Never call yaml_utils.dump_yaml_str() on a config for that purpose: a
+    config can carry credentials (see SENSITIVE_CONFIG_PATHS), and a debug dump
+    is the one place they escape into somewhere durable and widely readable.
+    Use this instead, wherever the destination is a log or a message rather
+    than storage.
+    """
+    return yaml_utils.dump_yaml_str(redact_sensitive_values(config))
 
 
 def _check_allowed_and_disallowed_override_keys(

@@ -59,6 +59,7 @@ from sky.server.requests.queues import base as queue_base
 from sky.skylet import constants
 from sky.utils import annotations
 from sky.utils import common_utils
+from sky.utils import config_utils
 from sky.utils import context
 from sky.utils import context_utils
 from sky.utils import subprocess_utils
@@ -826,7 +827,7 @@ def _request_execution_wrapper(request_id: str,
                 if sky_logging.logging_enabled(logger, sky_logging.DEBUG):
                     config = skypilot_config.to_dict()
                     logger.debug(f'request config: \n'
-                                 f'{yaml_utils.dump_yaml_str(dict(config))}')
+                                 f'{config_utils.dump_redacted_yaml(config)}')
                 (metrics_utils.SKY_APISERVER_PROCESS_EXECUTION_START_TOTAL.
                  labels(request=request_name, pid=pid).inc())
                 with metrics_utils.time_it(name=request_name,

@@ -1347,3 +1347,18 @@ def test_register_sensitive_config_paths() -> None:
         assert plugin['endpoints']['east']['url'] == 'https://east.example.com'
     finally:
         config_utils.SENSITIVE_CONFIG_PATHS[:] = original
+
+
+def test_dump_redacted_yaml() -> None:
+    """The log-facing serializer hides secrets and keeps the rest readable."""
+    dumped = config_utils.dump_redacted_yaml({
+        'api_server': {
+            'endpoint': 'https://api.example.com',
+            'service_account_token': 'sky_eyJhbGciOiJIUzI1NiJ9.canary.sig',
+        },
+    })
+
+    assert 'canary' not in dumped
+    assert 'service_account_token: <redacted>' in dumped
+    assert 'endpoint: https://api.example.com' in dumped
+    assert config_utils.dump_redacted_yaml(None) == '{}\n'
