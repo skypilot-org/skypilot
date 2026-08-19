@@ -2572,6 +2572,18 @@ def stream_logs(job_id: Optional[int],
             with open(controller_log_path, 'r', newline='',
                       encoding='utf-8') as f:
                 f.seek(end_pos)
+                # The loop below wakes up every SKY_LOG_TAILING_GAP_SECONDS
+                # (0.2s) to read new log lines, but each get_status() call
+                # is a database query. On DB-backed deployments (e.g.
+                # consolidation mode with Postgres) querying the status on
+                # every tick costs 5 queries/s - each on a fresh connection
+                # - per followed job, which can dominate database CPU with
+                # many concurrent tails. Keep the 0.2s cadence for log
+                # reads but only check the status every
+                # JOB_STATUS_CHECK_GAP_SECONDS; the only cost is that the
+                # tail of a finished job lingers up to that long before
+                # exiting.
+                last_status_check = float('-inf')
                 while True:
                     context_utils.raise_if_canceled()
                     # Print all new lines, if there are any.
@@ -2584,15 +2596,18 @@ def stream_logs(job_id: Optional[int],
                     # Flush.
                     print(end='', flush=True)
 
-                    # Check if the job if finished.
-                    # TODO(cooperc): The controller can still be
-                    # cleaning up if job is in a terminal status
-                    # (e.g. SUCCEEDED). We want to follow those logs
-                    # too. Use DONE instead?
-                    job_status = managed_job_state.get_status(job_id)
-                    assert job_status is not None, (job_id, job_name)
-                    if job_status.is_terminal():
-                        break
+                    if (time.monotonic() - last_status_check >=
+                            JOB_STATUS_CHECK_GAP_SECONDS):
+                        # Check if the job if finished.
+                        # TODO(cooperc): The controller can still be
+                        # cleaning up if job is in a terminal status
+                        # (e.g. SUCCEEDED). We want to follow those logs
+                        # too. Use DONE instead?
+                        job_status = managed_job_state.get_status(job_id)
+                        assert job_status is not None, (job_id, job_name)
+                        if job_status.is_terminal():
+                            break
+                        last_status_check = time.monotonic()
 
                     time.sleep(log_lib.SKY_LOG_TAILING_GAP_SECONDS)
 
