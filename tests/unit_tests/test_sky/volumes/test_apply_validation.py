@@ -12,6 +12,7 @@ from fastapi.testclient import TestClient
 import pytest
 
 from sky import exceptions
+from sky import models
 from sky.server import common as server_common
 from sky.server.requests import executor
 from sky.utils import infra_utils
@@ -136,6 +137,34 @@ class TestVolumeApplyValidation:
         assert response.status_code == 200, response.text
         body = scheduled.call_args[1]['request_body']
         assert body.size == applied
+
+    @pytest.mark.parametrize('sent', [None, 'omitted'])
+    def test_defaulted_config_reaches_the_worker(self, client_and_executor,
+                                                 sent):
+        # The handler defaults access_mode into a dict that is local when the
+        # client sends no config, and VolumeConfig rejects None -- so without
+        # stamping it back the request dies in the worker.
+        client, scheduled = client_and_executor
+        body = _pvc_body()
+        if sent is None:
+            body['config'] = None
+        else:
+            body.pop('config')
+        response = self._post(client, body)
+        assert response.status_code == 200, response.text
+        forwarded = scheduled.call_args[1]['request_body'].config
+        assert forwarded is not None
+        assert forwarded['access_mode'] == (
+            volume.VolumeAccessMode.READ_WRITE_ONCE.value)
+        # Proves it can actually be turned into a VolumeConfig downstream.
+        models.VolumeConfig(name='n',
+                            type=volume.VolumeType.PVC.value,
+                            cloud='kubernetes',
+                            region='r',
+                            zone=None,
+                            name_on_cloud='noc',
+                            size='1Gi',
+                            config=forwarded)
 
     @pytest.mark.parametrize('body', [
         _pvc_body(),

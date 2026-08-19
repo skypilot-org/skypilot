@@ -162,10 +162,13 @@ async def volume_apply(request: fastapi.Request,
             },
         )
         volume.validate()
-    # Apply exactly what was validated: a size carrying a unit ('100Gi')
-    # normalizes to a different number, and the PVC spec appends 'Gi' to
-    # whatever it is given.
+    # Apply exactly what was validated. A size carrying a unit ('100Gi')
+    # normalizes to a different number and the PVC spec appends 'Gi' to
+    # whatever it is given; and when the client sends no config at all, the
+    # dict holding the defaulted access mode is local to this handler, so
+    # without this the worker gets None and cannot build a VolumeConfig.
     volume_apply_body.size = volume.size
+    volume_apply_body.config = volume_config
 
     await executor.schedule_request_async(
         request_id=request.state.request_id,
