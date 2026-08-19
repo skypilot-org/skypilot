@@ -586,6 +586,7 @@ def _create_virtual_instance(
         mount_paths = [
             f'{remote_home_dir}:{remote_home_dir}',
             f'{host_ccache_dir}:{container_ccache_dir}',
+            f'{skypilot_runtime_dir}:{skypilot_runtime_dir}',
         ]
         # When workdir differs from remote_home_dir (e.g. workdir is on
         # NFS at /home/ubuntu while $HOME is /home_local/ubuntu), mount
@@ -661,6 +662,37 @@ echo "[container-init] Packages installed in $((SECONDS - INIT_START))s"
             f'echo "[container] Ready in $((SECONDS - CONTAINER_START))s"\n'
             f'touch {container_marker_file} {ready_signal}')
 
+    # sbatch batch script ── lives as long as the allocation
+    #   └─ keeper srun client (host side, never enters the container)
+    #        └─ keeper step ── outer loop restarts the step
+    #             └─ run the start spec FOREGROUND ── inner loop restarts skylet
+    #                  └─ skylet (the step cgroup owns it)
+    #
+    # attempt_skylet (any shape, possibly in-container)
+    #   └─ writes <runtime_dir>/.sky/skylet_start ──► read by the keeper loop
+    #        (runtime dir = the same host path in both shapes)
+    #
+    # A nohup'd skylet dies here: proctrack/cgroup reaps whatever a short-lived
+    # step leaves behind. The keeper stays out of the workload container because
+    # the Slurm CLIs, munge, and slurm.conf exist only on the host.
+    keeper_start_file = (
+        f'{skypilot_runtime_dir}/{skylet_constants.SKYLET_START_FILE}')
+    # attempt_skylet may run in-container where HOME is /root; the keeper
+    # sets the host-correct HOME.
+    keeper_loop = (f'while true; do '
+                   f'if [ -f {keeper_start_file} ]; then '
+                   f'HOME={sky_cluster_home_dir} bash {keeper_start_file}; '
+                   f'fi; '
+                   f'sleep 5; done')
+    skylet_keeper_block = (
+        'SKY_HEAD_NODE=$(scontrol show hostnames "$SLURM_JOB_NODELIST" '
+        '| head -n1)\n'
+        f'( while true; do '
+        f'srun --overlap --jobid=$SLURM_JOB_ID --nodes=1 --ntasks=1 '
+        f'--nodelist=$SKY_HEAD_NODE '
+        f'bash -c {shlex.quote(keeper_loop)}; '
+        f'sleep 5; done ) &')
+
     # By default stdout and stderr will be written to $HOME/slurm-%j.out
     # (because we invoke sbatch from $HOME). Redirect elsewhere to not pollute
     # the home directory.
@@ -723,6 +755,8 @@ trap 'exit 0' TERM
 mkdir -p {sky_cluster_home_dir}/sky_logs {sky_cluster_home_dir}/sky_workdir {sky_cluster_home_dir}/.sky
 # Create sky runtime directory on each node.
 srun --nodes={num_nodes} mkdir -p {skypilot_runtime_dir}
+# Slurm marker in the runtime dir: resolvable in both shapes.
+srun --nodes={num_nodes} touch {skypilot_runtime_dir}/{slurm_utils.SLURM_MARKER_FILE}
 # Marker file to indicate we're in a Slurm cluster.
 touch {slurm_marker_file}
 # Store proctrack type for task executor to read.
@@ -731,6 +765,9 @@ echo '{proctrack_type or "unknown"}' > {sky_cluster_home_dir}/{skylet_constants.
 touch {sky_cluster_home_dir}/.hushlogin
 {container_block}
 {f'touch {ready_signal}' if container_image is None else ''}
+# Skylet keeper: foreground skylet; inner loop restarts skylet, outer loop
+# restarts the step.
+{skylet_keeper_block}
 {'sleep infinity' if container_image is None else 'wait'}
 """
     # fmt: on

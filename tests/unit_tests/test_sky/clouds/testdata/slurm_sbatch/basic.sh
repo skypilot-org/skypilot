@@ -45,6 +45,8 @@ trap 'exit 0' TERM
 mkdir -p /home/testuser/.sky_clusters/test-cluster-no-container/sky_logs /home/testuser/.sky_clusters/test-cluster-no-container/sky_workdir /home/testuser/.sky_clusters/test-cluster-no-container/.sky
 # Create sky runtime directory on each node.
 srun --nodes=1 mkdir -p /tmp/test-cluster-no-container
+# Slurm marker in the runtime dir: resolvable in both shapes.
+srun --nodes=1 touch /tmp/test-cluster-no-container/.sky_slurm_cluster
 # Marker file to indicate we're in a Slurm cluster.
 touch /home/testuser/.sky_clusters/test-cluster-no-container/.sky_slurm_cluster
 # Store proctrack type for task executor to read.
@@ -53,4 +55,8 @@ echo 'cgroup' > /home/testuser/.sky_clusters/test-cluster-no-container/.sky_proc
 touch /home/testuser/.sky_clusters/test-cluster-no-container/.hushlogin
 
 touch /home/testuser/.sky_clusters/test-cluster-no-container/.sky_sbatch_ready
+# Skylet keeper: foreground skylet; inner loop restarts skylet, outer loop
+# restarts the step.
+SKY_HEAD_NODE=$(scontrol show hostnames "$SLURM_JOB_NODELIST" | head -n1)
+( while true; do srun --overlap --jobid=$SLURM_JOB_ID --nodes=1 --ntasks=1 --nodelist=$SKY_HEAD_NODE bash -c 'while true; do if [ -f /tmp/test-cluster-no-container/.sky/skylet_start ]; then HOME=/home/testuser/.sky_clusters/test-cluster-no-container bash /tmp/test-cluster-no-container/.sky/skylet_start; fi; sleep 5; done'; sleep 5; done ) &
 sleep infinity
