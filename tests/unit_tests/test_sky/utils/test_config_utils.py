@@ -1314,3 +1314,36 @@ def test_redact_sensitive_values_absent_and_empty() -> None:
                 'autoscaler': 'karpenter'
             }
         }
+
+
+def test_register_sensitive_config_paths() -> None:
+    """A plugin-registered path is redacted like a built-in one."""
+    original = list(config_utils.SENSITIVE_CONFIG_PATHS)
+    try:
+        config_utils.register_sensitive_config_paths([
+            ('my_plugin', 'api_key'),
+            ('my_plugin', 'endpoints', '*', 'token'),
+        ])
+        config = {
+            'my_plugin': {
+                'api_key': 'plugin-secret',
+                'name': 'keep-me',
+                'endpoints': {
+                    'east': {
+                        'token': 'east-secret',
+                        'url': 'https://east.example.com',
+                    },
+                },
+            },
+        }
+
+        redacted = config_utils.redact_sensitive_values(config)
+
+        plugin = redacted['my_plugin']
+        assert plugin['api_key'] == config_utils.REDACTED_VALUE
+        assert plugin['endpoints']['east'][
+            'token'] == config_utils.REDACTED_VALUE
+        assert plugin['name'] == 'keep-me'
+        assert plugin['endpoints']['east']['url'] == 'https://east.example.com'
+    finally:
+        config_utils.SENSITIVE_CONFIG_PATHS[:] = original

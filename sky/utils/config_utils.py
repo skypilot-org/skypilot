@@ -136,6 +136,19 @@ for _controller in ('jobs', 'serve'):
 del _controller, _resources_path
 
 
+def register_sensitive_config_paths(paths: List[Tuple[str, ...]]) -> None:
+    """Registers additional config paths whose values must not be logged.
+
+    For config keys added outside this schema -- see
+    schemas.register_plugin_property() and its siblings, and
+    skypilot_config.register_task_overrideable_config_key(). A path registered
+    here is redacted by redact_sensitive_values() like any built-in one, so a
+    plugin that adds a credential-bearing key can keep it out of logs without
+    editing this list. Mirrors provision.common.register_sensitive_fields().
+    """
+    SENSITIVE_CONFIG_PATHS.extend(paths)
+
+
 def _redact_path(node: Any, path: Tuple[str, ...]) -> None:
     """Replaces `node`'s value at `path` with REDACTED_VALUE, in place.
 
