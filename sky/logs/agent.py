@@ -9,17 +9,28 @@ from sky.skylet import constants
 from sky.utils import resources_utils
 from sky.utils import yaml_utils
 
-# Wall-clock caps for a single apt-get invocation, in seconds.
+# Wall-clock cap for a single `apt-get update`, in seconds. Deliberately not
+# applied to `apt-get install`: that would also cap dpkg unpack/configure, and a
+# SIGTERM landing mid-dpkg leaves the package database needing
+# `dpkg --configure -a`. The stall this guards against is in *fetching*, and the
+# fetch phase of an install is already bounded by Acquire::*::Timeout.
 _APT_UPDATE_TIMEOUT = 120
-_APT_INSTALL_TIMEOUT = 300
 
 # Acquire::Retries=0: retrying inside apt multiplies the stall by the number of
 # index files it has to fetch. The retry that actually helps is the one that
 # changes mirror, which is done below. Acquire::*::Timeout is an *inactivity*
-# timeout, so a slow-but-progressing download is not penalised.
+# timeout, not a total transfer deadline, so a slow-but-progressing download is
+# not penalised -- only one that has stopped sending data. 5s buys fast
+# detection (a fully unreachable mirror is diagnosed in ~30s rather than ~90s)
+# while still tolerating a mirror that is merely slow to first byte.
 _APT_OPTS = ('-o Acquire::Retries=0 '
-             '-o Acquire::http::Timeout=15 '
-             '-o Acquire::https::Timeout=15')
+             '-o Acquire::http::Timeout=5 '
+             '-o Acquire::https::Timeout=5')
+
+# Private, root-owned scratch dir for the fallback apt configuration. Under
+# /etc/apt rather than /tmp: /etc/apt is root-owned, so an unprivileged local
+# user cannot pre-create these paths as symlinks and redirect a root write.
+_APT_FALLBACK_DIR = '/etc/apt/sky-fallback'
 
 # Shell helpers wrapping apt-get for the logging-agent install.
 #
@@ -28,48 +39,81 @@ _APT_OPTS = ('-o Acquire::Retries=0 '
 # of index files, and Ubuntu's per-region EC2 mirrors
 # (`<region>.ec2.archive.ubuntu.com`) have repeatedly become wholly unreachable
 # -- they sit behind no CDN, and such outages have recurred without appearing on
-# any status page. Two things then go wrong at once: apt spends minutes per file
-# failing to connect, and `apt-get update` still *exits 0* when every single
-# source failed to fetch, so nothing surfaces the cause and the launch merely
-# looks like it is hanging.
+# any status page. Two things then go wrong at once: apt spends seconds to
+# minutes per file failing to connect, and `apt-get update` still *exits 0* when
+# every single source failed to fetch, so nothing surfaces the cause and the
+# launch merely looks like it is hanging.
 #
-# Hence: cap each invocation by wall clock, judge success from the output rather
-# than the exit status, and on failure retry against the canonical archive --
+# Hence: cap `apt-get update` by wall clock, judge success from the output
+# rather than the exit status, and on failure retry the canonical archive --
 # which is CDN-backed and is the same last-resort mirror cloud-init itself falls
-# back to when no mirror can be resolved. If that also fails, fail loudly
-# instead of stalling.
+# back to when no mirror can be resolved. If that also fails, fail loudly.
+#
+# The fallback deliberately builds a *self-contained* apt configuration rather
+# than trying to subtract the bad mirror from the node's own. Overriding only
+# Dir::Etc::sourcelist would miss deb822 images (Ubuntu 24.04+ describes the
+# distro archive in /etc/apt/sources.list.d/ubuntu.sources, not in
+# sources.list), so the unreachable mirror would still be consulted. Pointing
+# both sourcelist and sourceparts at our own directory, seeded with the
+# canonical archive plus a copy of SkyPilot's own repo lists, covers both
+# layouts -- and means a transient error from an unrelated third-party repo on
+# the node results in one fallback attempt rather than an aborted launch. The
+# node's real apt configuration is never modified.
 _APT_HELPERS = textwrap.dedent("""\
-    sky_apt_srcs=""
+    sky_apt_dir=""
     sky_apt_opts="%(opts)s"
+    sky_apt_own_lists="/etc/apt/sources.list.d/fluent-bit.list"
     sky_apt_os_id=$(grep -oP '(?<=^ID=).*' /etc/os-release 2>/dev/null || \
         lsb_release -is 2>/dev/null | tr '[:upper:]' '[:lower:]')
     sky_apt_codename=$(grep -oP '(?<=VERSION_CODENAME=).*' /etc/os-release \
         2>/dev/null || lsb_release -cs 2>/dev/null)
     sky_apt_use_fallback() {
       # Already switched once; there is nothing further to fall back to.
-      [ -n "$sky_apt_srcs" ] && return 1
+      [ -n "$sky_apt_dir" ] && return 1
       # Only Ubuntu pins a per-region mirror that can vanish wholesale. Debian's
       # default (deb.debian.org) is already CDN-backed, so leave it alone.
       [ "$sky_apt_os_id" = ubuntu ] || return 1
       [ -n "$sky_apt_codename" ] || return 1
+      sudo mkdir -p %(dir)s/sources.list.d || return 1
       printf 'deb http://archive.ubuntu.com/ubuntu %%s main universe\n'\
 'deb http://security.ubuntu.com/ubuntu %%s-security main universe\n' \
         "$sky_apt_codename" "$sky_apt_codename" \
-        | sudo tee /tmp/sky-apt-fallback.list >/dev/null
-      # Select the generated list for these apt calls only. The node's own
-      # /etc/apt/sources.list is deliberately left untouched, so an operator's
-      # pinned, local or offline mirror stays authoritative for everything else.
-      sky_apt_srcs="-o Dir::Etc::sourcelist=/tmp/sky-apt-fallback.list"
-      sky_apt_srcs="$sky_apt_srcs -o Dir::Etc::sourceparts=/etc/apt/sources.list.d"
+        | sudo tee %(dir)s/archive.list >/dev/null || return 1
+      sky_apt_dir=%(dir)s
       echo "SkyPilot: distro package mirror unreachable; retrying the logging" \
         "agent install via archive.ubuntu.com" >&2
       return 0
+    }
+    sky_apt_sync_own_lists() {
+      # Carry SkyPilot's own repo lists into the fallback config, re-synced on
+      # every call because they may be added after the fallback is set up. Only
+      # ours: copying all of sources.list.d would drag the unreachable distro
+      # mirror back in on deb822 images.
+      for _f in $sky_apt_own_lists; do
+        if [ -f "$_f" ]; then
+          sudo cp "$_f" "$sky_apt_dir/sources.list.d/" 2>/dev/null || true
+        fi
+      done
     }
     sky_apt_run() {
       _timeout=$1; shift
       set +e
       while :; do
-        _out=$(timeout "$_timeout" sudo apt-get $sky_apt_opts $sky_apt_srcs "$@" 2>&1)
+        _srcs=""
+        if [ -n "$sky_apt_dir" ]; then
+          sky_apt_sync_own_lists
+          _srcs="-o Dir::Etc::sourcelist=$sky_apt_dir/archive.list"
+          _srcs="$_srcs -o Dir::Etc::sourceparts=$sky_apt_dir/sources.list.d"
+        fi
+        # LC_ALL=C: the success check greps apt's messages, which are localised.
+        # Without this a fully failed update on a non-English node would look
+        # like a success, since apt-get update exits 0 either way.
+        if [ -n "$_timeout" ]; then
+          _out=$(timeout "$_timeout" sudo env LC_ALL=C apt-get \
+              $sky_apt_opts $_srcs "$@" 2>&1)
+        else
+          _out=$(sudo env LC_ALL=C apt-get $sky_apt_opts $_srcs "$@" 2>&1)
+        fi
         _rc=$?
         printf '%%s\n' "$_out"
         if [ "$_rc" -eq 0 ] && \
@@ -86,11 +130,11 @@ _APT_HELPERS = textwrap.dedent("""\
       done
     }
     sky_apt_update() { sky_apt_run %(update_timeout)s update; }
-    sky_apt_install() { sky_apt_run %(install_timeout)s install -y "$@"; }
+    sky_apt_install() { sky_apt_run "" install -y "$@"; }
     """) % {
     'opts': _APT_OPTS,
+    'dir': _APT_FALLBACK_DIR,
     'update_timeout': _APT_UPDATE_TIMEOUT,
-    'install_timeout': _APT_INSTALL_TIMEOUT,
 }
 
 

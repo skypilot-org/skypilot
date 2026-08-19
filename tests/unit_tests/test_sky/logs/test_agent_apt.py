@@ -27,13 +27,17 @@ class TestFluentbitAptHardening(unittest.TestCase):
 
     def test_every_apt_call_is_bounded(self):
         """No apt-get may run unbounded on a wedged mirror."""
-        # There is exactly one apt-get *call site* -- inside the helper, and it
-        # is wrapped in `timeout`. Any additional one would be unbounded. (The
-        # diagnostic message also names apt-get, but without `sudo`.)
-        self.assertEqual(self.cmd.count('sudo apt-get'), 1)
-        self.assertIn('timeout "$_timeout" sudo apt-get', self.cmd)
+        # Every apt-get goes through the helper, so there is no bare
+        # `sudo apt-get` anywhere -- one would bypass both the mirror fallback
+        # and the locale pinning.
+        self.assertEqual(self.cmd.count('sudo apt-get'), 0)
+        self.assertEqual(self.cmd.count('sudo env LC_ALL=C apt-get'), 2)
+        self.assertIn('timeout "$_timeout" sudo env LC_ALL=C apt-get', self.cmd)
         self.assertIn('sky_apt_run 120 update', self.cmd)
-        self.assertIn('sky_apt_run 300 install -y', self.cmd)
+        # `install` is deliberately NOT wall-clock capped: a SIGTERM landing in
+        # dpkg unpack/configure would leave the package database broken.
+        self.assertIn('sky_apt_run "" install -y', self.cmd)
+        self.assertNotIn('sky_apt_run 300 install', self.cmd)
 
     def test_exit_status_is_not_trusted(self):
         """apt-get update exits 0 even when all sources fail to fetch."""
@@ -48,11 +52,18 @@ class TestFluentbitAptHardening(unittest.TestCase):
         self.assertIn('http://archive.ubuntu.com/ubuntu', self.cmd)
         self.assertIn('http://security.ubuntu.com/ubuntu', self.cmd)
         # The fallback is selected for our apt calls only...
-        self.assertIn('-o Dir::Etc::sourcelist=/tmp/sky-apt-fallback.list',
+        self.assertIn('-o Dir::Etc::sourcelist=$sky_apt_dir/archive.list',
                       self.cmd)
-        # ...and the fluent-bit repo in sources.list.d must stay visible.
-        self.assertIn('-o Dir::Etc::sourceparts=/etc/apt/sources.list.d',
+        # ...and sourceparts must point at OUR directory, not the node's. On
+        # deb822 images (Ubuntu 24.04+) the distro archive lives in
+        # /etc/apt/sources.list.d/ubuntu.sources, so keeping the node's
+        # sources.list.d selected would still consult the dead mirror.
+        self.assertIn('-o Dir::Etc::sourceparts=$sky_apt_dir/sources.list.d',
                       self.cmd)
+        self.assertNotIn('Dir::Etc::sourceparts=/etc/apt/sources.list.d',
+                         self.cmd)
+        # SkyPilot's own repo lists are carried across into the fallback config.
+        self.assertIn('sky_apt_sync_own_lists', self.cmd)
 
     def test_node_sources_list_is_never_rewritten(self):
         """An operator's pinned or offline mirror stays authoritative."""
@@ -64,6 +75,15 @@ class TestFluentbitAptHardening(unittest.TestCase):
         pattern = (r'(?:>|tee|sed -i\b[^\n]*?)\s*'
                    r'/etc/apt/sources\.list(?!\.d)')
         self.assertIsNone(re.search(pattern, code))
+
+    def test_fallback_scratch_dir_is_root_owned(self):
+        """A predictable path in world-writable /tmp is a symlink target."""
+        self.assertIn('/etc/apt/sky-fallback', self.cmd)
+        self.assertNotIn('/tmp/sky-apt-fallback.list', self.cmd)
+
+    def test_output_check_is_locale_independent(self):
+        """apt messages are localised; the grep must not silently pass."""
+        self.assertIn('env LC_ALL=C apt-get', self.cmd)
 
     def test_fallback_is_ubuntu_only(self):
         """Debian's default deb.debian.org is already CDN-backed."""
