@@ -1837,12 +1837,20 @@ def test_managed_jobs_inline_env(generic_cloud: str):
                 job_name=name,
                 job_status=[sky.ManagedJobStatus.SUCCEEDED],
                 timeout=55),
-            f'JOB_ROW=$(sky jobs queue -v | grep {name} | head -n1) && '
+            # Unset debug logging up front, so it covers every `sky` call
+            # below: log records go to stdout, so with debug logging on the
+            # command substitutions capture log lines along with the real
+            # output.
+            'unset SKYPILOT_DEBUG && '
+            # Anchor the match to a table data row (the first column is the
+            # numeric job ID) instead of matching any line that mentions the
+            # job name.
+            f'JOB_ROW=$(sky jobs queue -v | grep -E "^[0-9]+[[:space:]].*{name}" | head -n1) && '
             f'echo "$JOB_ROW" && echo "$JOB_ROW" | grep -E "DONE|ALIVE" | grep "SUCCEEDED" && '
             f'JOB_ID=$(echo "$JOB_ROW" | awk \'{{print $1}}\') && '
             f'echo "JOB_ID=$JOB_ID" && '
             # Test that logs are still available after the job finishes.
-            'unset SKYPILOT_DEBUG; s=$(sky jobs logs $JOB_ID --refresh) && echo "$s" && echo "$s" | grep "hello world" && '
+            's=$(sky jobs logs $JOB_ID --refresh) && echo "$s" && echo "$s" | grep "hello world" && '
             # Make sure we skip the unnecessary logs.
             'echo "$s" | head -n2 | grep "Waiting for"',
         ],
