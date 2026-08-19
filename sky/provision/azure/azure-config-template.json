@@ -25,6 +25,13 @@
             "metadata": {
                 "description": "Name of the Network Security Group associated with the SkyPilot cluster."
             }
+        },
+        "sshSourceAddressPrefix": {
+            "type": "string",
+            "defaultValue": "*",
+            "metadata": {
+                "description": "Source address prefix allowed to reach SSH on the SkyPilot cluster."
+            }
         }
     },
     "variables": {
@@ -72,7 +79,7 @@
                             "protocol": "TCP",
                             "access": "Allow",
                             "direction": "Inbound",
-                            "sourceAddressPrefix": "*",
+                            "sourceAddressPrefix": "[parameters('sshSourceAddressPrefix')]",
                             "sourcePortRange": "*",
                             "destinationAddressPrefix": "*",
                             "destinationPortRange": "22"
