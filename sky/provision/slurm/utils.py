@@ -1469,9 +1469,19 @@ def srun_sshd_command(
     # because we override the home directory in SlurmCommandRunner.run.
     user_home_ssh_dir = f'~{unix_user}/.ssh'
 
-    # TODO(kevin): SSH sessions don't inherit Slurm env vars (SLURM_*, CUDA_*,
-    # etc.) because sshd/dropbear spawns a fresh shell. Fix by capturing env
-    # to a file and sourcing it.
+    # Slurm sets accelerator visibility variables on the process launched by
+    # srun. SSH servers build a fresh environment for child sessions, so these
+    # variables need to be forwarded explicitly. Keep this list limited to
+    # values whose syntax is safe in an sshd SetEnv directive.
+    accelerator_env_vars = (
+        'CUDA_VISIBLE_DEVICES',
+        'ROCR_VISIBLE_DEVICES',
+        'ZE_AFFINITY_MASK',
+        'GPU_DEVICE_ORDINAL',
+    )
+    accelerator_env_var_names = ' '.join(accelerator_env_vars)
+    dropbear_env_var_names = ' '.join(
+        (*accelerator_env_vars, 'LD_LIBRARY_PATH'))
 
     if is_container_image:
         # Dropbear + socat bridge for container mode.
@@ -1483,13 +1493,37 @@ def srun_sshd_command(
             'DROPBEAR=$(command -v dropbear); '
             'if [ -z "$DROPBEAR" ]; then '
             'echo "dropbear not found" >&2; exit 1; fi; '
+            # -e was added in Dropbear 2022.83. Existing images can provide an
+            # older binary in PATH, so preserve the old SSH behavior when the
+            # installed server does not support environment forwarding.
+            'DROPBEAR_ENV_FLAG=(); '
+            'DROPBEAR_VERSION=$("$DROPBEAR" -V 2>&1 || true); '
+            'if [[ $DROPBEAR_VERSION =~ '
+            '([0-9][0-9][0-9][0-9])\\.([0-9]+) ]]; then '
+            'DROPBEAR_VERSION_YEAR=${BASH_REMATCH[1]}; '
+            'DROPBEAR_VERSION_RELEASE=${BASH_REMATCH[2]}; '
+            'if (( DROPBEAR_VERSION_YEAR > 2022 || '
+            '(DROPBEAR_VERSION_YEAR == 2022 && '
+            'DROPBEAR_VERSION_RELEASE >= 83) )); then '
+            'DROPBEAR_ENV_FLAG=(-e); fi; '
+            'fi; '
+            # Dropbear -e forwards its entire environment. Start it with only
+            # the accelerator variables so proxy-step SLURM_* variables and
+            # unrelated submit-side values do not leak into SSH sessions. Keep
+            # LD_LIBRARY_PATH so dynamically linked custom binaries still load.
+            'DROPBEAR_ENV=(); '
+            f'for NAME in {dropbear_env_var_names}; do '
+            'if declare -p "$NAME" &>/dev/null; then '
+            'DROPBEAR_ENV+=("$NAME=${!NAME}"); fi; done; '
             # Find a free port in the ephemeral range
             'while :; do '
             'PORT=$((30000 + RANDOM % 30000)); '
             'ss -tln | awk \'{print $4}\' | grep -q ":$PORT$" || break; '
             'done; '
             # Start dropbear and wait for it to bind
-            '"$DROPBEAR" -F -s -R -p "127.0.0.1:$PORT" & '
+            'env -i "${DROPBEAR_ENV[@]}" "$DROPBEAR" '
+            '"${DROPBEAR_ENV_FLAG[@]}" -F -s -R '
+            '-p "127.0.0.1:$PORT" & '
             'DROPBEAR_PID=$!; '
             'trap "kill $DROPBEAR_PID 2>/dev/null" EXIT; '
             'for i in $(seq 1 50); do '
@@ -1520,17 +1554,12 @@ def srun_sshd_command(
             ssh_bootstrap_cmd,
         ])
 
-    # Non-container: OpenSSH sshd
-    return shlex.join([
-        'srun',
-        '--quiet',
-        '--unbuffered',
-        '--overlap',
-        '--jobid',
-        job_id,
-        '-w',
-        target_node,
-        '/usr/sbin/sshd',
+    # Non-container: OpenSSH sshd. Build one SetEnv directive because sshd uses
+    # only the first value of a keyword supplied multiple times. The allowlist
+    # covers NVIDIA, AMD, and Intel accelerator visibility variables emitted
+    # by Slurm's GRES plugins. Skip unexpected values instead of allowing them
+    # to alter sshd's configuration parser input.
+    sshd_command = '"$SSHD" ' + shlex.join([
         '-i',  # Uses stdin/stdout
         '-e',  # Writes errors to stderr
         '-f',  # Use /dev/null to avoid reading system sshd_config
@@ -1550,4 +1579,34 @@ def srun_sshd_command(
         'UsePAM=no',
         '-o',
         f'AcceptEnv={constants.SKY_CLUSTER_NAME_ENV_VAR_KEY}',
+    ])
+    ssh_bootstrap_cmd = (
+        'SSHD=/usr/sbin/sshd; SSHD_SET_ENV_SUPPORTED=0; '
+        'SSHD_VERSION=$("$SSHD" -V 2>&1 || true); '
+        'if [[ $SSHD_VERSION =~ OpenSSH_([0-9]+)\\.([0-9]+) ]]; then '
+        'SSHD_VERSION_MAJOR=${BASH_REMATCH[1]}; '
+        'SSHD_VERSION_MINOR=${BASH_REMATCH[2]}; '
+        'if (( SSHD_VERSION_MAJOR > 7 || '
+        '(SSHD_VERSION_MAJOR == 7 && SSHD_VERSION_MINOR >= 8) )); then '
+        'SSHD_SET_ENV_SUPPORTED=1; fi; fi; SSHD_SET_ENV=; '
+        f'for NAME in {accelerator_env_var_names}; do '
+        'if declare -p "$NAME" &>/dev/null; then VALUE=${!NAME}; '
+        'case "$VALUE" in *[!a-zA-Z0-9_.,:/@%+=-]*) continue;; esac; '
+        'SSHD_SET_ENV+="${SSHD_SET_ENV:+ }$NAME=$VALUE"; fi; done; '
+        f'set -- {sshd_command}; '
+        '[[ -z $SSHD_SET_ENV || $SSHD_SET_ENV_SUPPORTED != 1 ]] || '
+        'set -- "$@" -o "SetEnv=$SSHD_SET_ENV"; exec "$@"')
+
+    return shlex.join([
+        'srun',
+        '--quiet',
+        '--unbuffered',
+        '--overlap',
+        '--jobid',
+        job_id,
+        '-w',
+        target_node,
+        '/bin/bash',
+        '-c',
+        ssh_bootstrap_cmd,
     ])
