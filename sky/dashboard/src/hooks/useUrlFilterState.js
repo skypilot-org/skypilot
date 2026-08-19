@@ -72,25 +72,32 @@ export function useUrlFilterState(filterSchema, viewSchema = []) {
   const [filters, setFilters] = useState(initial.current.filters);
   const [view, setViewState] = useState(initial.current.view);
 
-  // On a hard load Next.js hydrates before the query is parsed, so re-read once
-  // the router is ready. Only adopt what the URL says if it differs, so a user
-  // who filtered during hydration does not get reset.
-  const hydrated = useRef(false);
+  // Adopt the query whenever it changes from outside this hook. Two cases:
+  // a hard load, where a statically exported page hydrates before Next parses
+  // the query; and a same-route navigation carrying filters, e.g. a link built
+  // by `buildFilterUrl` pointing back at the page it is rendered on.
+  //
+  // Writes this hook makes go through `history.replaceState`, which leaves
+  // `router.asPath` alone, so remembering what we last wrote is what tells our
+  // own writes apart from someone else's navigation.
+  const lastWritten = useRef(null);
   useEffect(() => {
-    if (!router.isReady || hydrated.current) {
+    if (!router.isReady || typeof window === 'undefined') {
       return;
     }
-    hydrated.current = true;
+    if (window.location.search === lastWritten.current) {
+      return;
+    }
     const next = readInitial();
-    if (
-      JSON.stringify(next.filters) !== JSON.stringify(initial.current.filters)
-    ) {
-      setFilters(next.filters);
-    }
-    if (JSON.stringify(next.view) !== JSON.stringify(initial.current.view)) {
-      setViewState(next.view);
-    }
-  }, [router.isReady, readInitial]);
+    setFilters((prev) =>
+      JSON.stringify(prev) === JSON.stringify(next.filters)
+        ? prev
+        : next.filters
+    );
+    setViewState((prev) =>
+      JSON.stringify(prev) === JSON.stringify(next.view) ? prev : next.view
+    );
+  }, [router.isReady, router.asPath, readInitial]);
 
   // Mirror state into the address bar. Keys not owned by this hook (a plugin's
   // own params, `tab`, ...) are preserved.
@@ -122,6 +129,10 @@ export function useUrlFilterState(filterSchema, viewSchema = []) {
     Object.assign(query, filtersToQuery(filterSchema, filters));
 
     const search = buildQueryString(query);
+    // Record it either way: when the URL already matches, our state and the
+    // address bar agree, and the adopt-external effect must not treat that as
+    // someone else's navigation.
+    lastWritten.current = search;
     const next = `${window.location.pathname}${search}${window.location.hash}`;
     if (
       next !==
