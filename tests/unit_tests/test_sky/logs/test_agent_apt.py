@@ -32,8 +32,9 @@ class TestFluentbitAptHardening(unittest.TestCase):
         # and the locale pinning.
         self.assertEqual(self.cmd.count('sudo apt-get'), 0)
         self.assertEqual(self.cmd.count('sudo env LC_ALL=C apt-get'), 2)
-        self.assertIn('timeout "$_timeout" sudo env LC_ALL=C apt-get', self.cmd)
-        self.assertIn('sky_apt_run 120 update', self.cmd)
+        self.assertNotIn('sky_apt_run 120 update', self.cmd)
+        self.assertIn('timeout "$_t" sudo env LC_ALL=C apt-get', self.cmd)
+        self.assertIn('sky_apt_run 600 update', self.cmd)
         # `install` is deliberately NOT wall-clock capped: a SIGTERM landing in
         # dpkg unpack/configure would leave the package database broken.
         self.assertIn('sky_apt_run "" install -y', self.cmd)
@@ -75,6 +76,15 @@ class TestFluentbitAptHardening(unittest.TestCase):
         pattern = (r'(?:>|tee|sed -i\b[^\n]*?)\s*'
                    r'/etc/apt/sources\.list(?!\.d)')
         self.assertIsNone(re.search(pattern, code))
+
+    def test_fallback_primes_indexes_before_retrying_an_install(self):
+        """Switched-to sources have no fetched indexes yet.
+
+        Retrying an install straight after the switch would resolve against an
+        empty package universe and fail with 'Unable to locate package'.
+        """
+        self.assertIn('if [ "$1" != update ]; then', self.cmd)
+        self.assertIn('sky_apt_exec 600 update', self.cmd)
 
     def test_fallback_scratch_dir_is_root_owned(self):
         """A predictable path in world-writable /tmp is a symlink target."""

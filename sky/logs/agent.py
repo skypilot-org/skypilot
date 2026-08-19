@@ -9,12 +9,20 @@ from sky.skylet import constants
 from sky.utils import resources_utils
 from sky.utils import yaml_utils
 
-# Wall-clock cap for a single `apt-get update`, in seconds. Deliberately not
-# applied to `apt-get install`: that would also cap dpkg unpack/configure, and a
-# SIGTERM landing mid-dpkg leaves the package database needing
-# `dpkg --configure -a`. The stall this guards against is in *fetching*, and the
-# fetch phase of an install is already bounded by Acquire::*::Timeout.
-_APT_UPDATE_TIMEOUT = 120
+# Wall-clock backstop for a single `apt-get update`, in seconds.
+#
+# This is *not* how an unreachable mirror is detected -- Acquire::*::Timeout
+# below does that, and reports it in ~30s. This cap only catches a pathological
+# hang that apt itself never returns from, so it is deliberately generous:
+# mirrors have been observed serving a full index refresh at ~100 kB/s, which
+# legitimately takes many minutes, and killing that would fail a launch that
+# would otherwise merely have been slow.
+#
+# Deliberately not applied to `apt-get install`: that would also cap dpkg
+# unpack/configure, and a SIGTERM landing mid-dpkg leaves the package database
+# needing `dpkg --configure -a`. The fetch phase of an install is already
+# bounded by Acquire::*::Timeout.
+_APT_UPDATE_TIMEOUT = 600
 
 # Acquire::Retries=0: retrying inside apt multiplies the stall by the number of
 # index files it has to fetch. The retry that actually helps is the one that
@@ -95,25 +103,29 @@ _APT_HELPERS = textwrap.dedent("""\
         fi
       done
     }
+    sky_apt_exec() {
+      # $1: wall-clock cap, empty for none. Remaining args go to apt-get.
+      _t=$1; shift
+      _srcs=""
+      if [ -n "$sky_apt_dir" ]; then
+        sky_apt_sync_own_lists
+        _srcs="-o Dir::Etc::sourcelist=$sky_apt_dir/archive.list"
+        _srcs="$_srcs -o Dir::Etc::sourceparts=$sky_apt_dir/sources.list.d"
+      fi
+      # LC_ALL=C: the success check greps apt's messages, which are localised.
+      # Without this a fully failed update on a non-English node would look
+      # like a success, since apt-get update exits 0 either way.
+      if [ -n "$_t" ]; then
+        timeout "$_t" sudo env LC_ALL=C apt-get $sky_apt_opts $_srcs "$@" 2>&1
+      else
+        sudo env LC_ALL=C apt-get $sky_apt_opts $_srcs "$@" 2>&1
+      fi
+    }
     sky_apt_run() {
       _timeout=$1; shift
       set +e
       while :; do
-        _srcs=""
-        if [ -n "$sky_apt_dir" ]; then
-          sky_apt_sync_own_lists
-          _srcs="-o Dir::Etc::sourcelist=$sky_apt_dir/archive.list"
-          _srcs="$_srcs -o Dir::Etc::sourceparts=$sky_apt_dir/sources.list.d"
-        fi
-        # LC_ALL=C: the success check greps apt's messages, which are localised.
-        # Without this a fully failed update on a non-English node would look
-        # like a success, since apt-get update exits 0 either way.
-        if [ -n "$_timeout" ]; then
-          _out=$(timeout "$_timeout" sudo env LC_ALL=C apt-get \
-              $sky_apt_opts $_srcs "$@" 2>&1)
-        else
-          _out=$(sudo env LC_ALL=C apt-get $sky_apt_opts $_srcs "$@" 2>&1)
-        fi
+        _out=$(sky_apt_exec "$_timeout" "$@")
         _rc=$?
         printf '%%s\n' "$_out"
         if [ "$_rc" -eq 0 ] && \
@@ -126,6 +138,13 @@ _APT_HELPERS = textwrap.dedent("""\
             "package mirror is left to try" >&2
           set -e
           return 1
+        fi
+        # /var/lib/apt/lists holds nothing for the sources just selected, so
+        # anything other than `update` would resolve against an empty package
+        # universe and fail with a misleading 'Unable to locate package'.
+        # `update` needs no such priming: its own retry fetches the indexes.
+        if [ "$1" != update ]; then
+          printf '%%s\n' "$(sky_apt_exec %(update_timeout)s update)"
         fi
       done
     }
