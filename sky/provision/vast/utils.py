@@ -113,21 +113,17 @@ def get_instance_logs(instance_id: str,
     return str(output)
 
 
-def _normalize_gpu_name(gpu_name: Any) -> str:
-    """Normalize Vast's equivalent space and underscore GPU spellings."""
-    return str(gpu_name or '').replace('_', ' ').strip().casefold()
-
-
 def gpu_requirements(instance_type: str) -> Tuple[str, int]:
     """Extract the exact GPU name and count encoded in an instance type."""
-    instance_parts = instance_type.split('-')
-    try:
-        gpu_name = instance_parts[1].replace('_', ' ')
-        num_gpus = int(instance_parts[0].replace('x', ''))
-    except (IndexError, ValueError) as exc:
-        raise ValueError(
-            f'Invalid Vast instance type {instance_type!r}.') from exc
-    return gpu_name, num_gpus
+    requirements = vast.get_offer_requirements(
+        instance_type,
+        region=None,
+        disk_size=1,
+        datacenter_only=False,
+        reliable_hosts=False,
+        network_tier=resources_utils.NetworkTier.STANDARD,
+    )
+    return requirements.gpu_name, requirements.num_gpus
 
 
 def matches_gpu(offer: Any, gpu_name: str, num_gpus: int) -> bool:
@@ -141,9 +137,9 @@ def matches_gpu(offer: Any, gpu_name: str, num_gpus: int) -> bool:
         normalized_num_gpus = int(offer_num_gpus)
     except (TypeError, ValueError):
         return False
-    return (_normalize_gpu_name(
-        offer.get('gpu_name')) == _normalize_gpu_name(gpu_name) and
-            normalized_num_gpus == num_gpus)
+    return (str(offer.get('gpu_name') or '').replace(
+        '_', ' ').strip().casefold() == str(gpu_name or '').replace(
+            '_', ' ').strip().casefold() and normalized_num_gpus == num_gpus)
 
 
 def _offer_price(offer: Dict[str, Any]) -> float:
@@ -155,17 +151,6 @@ def _offer_price(offer: Dict[str, Any]) -> float:
         return float(price)
     except (TypeError, ValueError):
         return math.inf
-
-
-def _offer_meets_reliability(offer: Dict[str, Any]) -> bool:
-    """Enforce the decimal reliability threshold outside SDK 1.5 parsing."""
-    reliability = offer.get('reliability')
-    if reliability is None:
-        return False
-    try:
-        return float(reliability) >= 0.99
-    except (TypeError, ValueError):
-        return False
 
 
 def _validate_created_instance(instance: Any, gpu_name: str,
@@ -293,41 +278,17 @@ def launch(name: str,
             'Private Docker registry requested but no SkyPilot registry '
             'credentials were provided.')
 
-    cpu_ram = float(instance_type.split('-')[-1]) / 1024
-    gpu_name, num_gpus = gpu_requirements(instance_type)
-
-    # Vast SDK 1.5.0 preprocesses query values with an alphanumeric parser.
-    # Decimal and quoted values silently truncate the remainder of the query.
-    # Catalog instance types use integral GiB values; round non-integral values
-    # up so the preprocessor-safe query remains a valid minimum requirement.
-    cpu_ram_query = str(math.ceil(cpu_ram))
-    gpu_name_query = gpu_name.replace(' ', '_')
-
-    query = [
-        'chunked=true',
-        'georegion=true',
-        f'disk_space>={disk_size}',
-        f'num_gpus={num_gpus}',
-        f'gpu_name={gpu_name_query}',
-        f'cpu_ram>={cpu_ram_query}',
-    ]
-    if region and region.lower() != 'any':
-        query.insert(2, f'geolocation={region[-2:].upper()}')
-    if secure_only:
-        query.append('datacenter=true')
-        query.append('hosting_type>=1')
-    if reliable_hosts:
-        query.extend([
-            'verified=true',
-            'datacenter=true',
-            'hosting_type>=1',
-            'inet_down>=1000',
-        ])
-    if network_tier is resources_utils.NetworkTier.BEST:
-        if not reliable_hosts:
-            query.append('inet_down>=1000')
-        query.append('inet_up>=1000')
-    query_str = ' '.join(query)
+    requirements = vast.get_offer_requirements(
+        instance_type,
+        region=region,
+        disk_size=disk_size,
+        datacenter_only=secure_only,
+        reliable_hosts=reliable_hosts,
+        network_tier=network_tier,
+    )
+    gpu_name = requirements.gpu_name
+    num_gpus = requirements.num_gpus
+    query_str = vast.build_offer_query(requirements)
 
     raw_instance_list = vast.vast().search_offers(query=query_str,
                                                   order='dph_total')
@@ -340,8 +301,7 @@ def launch(name: str,
         instance_list = [
             offer for offer in raw_instance_list if isinstance(offer, dict)
             if str(offer.get('machine_id')) not in excluded_machine_id_strings
-            and matches_gpu(offer, gpu_name, num_gpus) and
-            (not reliable_hosts or _offer_meets_reliability(offer))
+            and vast.offer_matches_requirements(offer, requirements)
         ]
     else:
         instance_list = []

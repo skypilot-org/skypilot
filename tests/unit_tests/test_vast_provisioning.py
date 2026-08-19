@@ -78,8 +78,17 @@ def _mock_vast_sdk(monkeypatch):
         'machine_id': 2,
         'gpu_name': 'A100',
         'num_gpus': 1,
+        'cpu_cores': 4,
+        'cpu_ram': 8192,
+        'disk_space': 30,
+        'geolocation': 'US',
         'dph_total': 0.4,
         'reliability': 0.99,
+        'verified': True,
+        'datacenter': True,
+        'hosting_type': 1,
+        'inet_down': 1000,
+        'inet_up': 1000,
     }]
     sdk.create_instance.return_value = {'new_contract': '3'}
     sdk.show_instance.return_value = {
@@ -147,6 +156,28 @@ def test_launch_standard_network_tier_preserves_reliable_host_filter(
     query = sdk.search_offers.call_args.kwargs['query']
     assert query.count('inet_down>=1000') == 1
     assert 'inet_up>=1000' not in query
+
+
+def test_launch_extracts_country_from_raw_catalog_region(monkeypatch):
+    """Provisioning queries FR from raw catalog regions, never trailing EU."""
+    sdk = _mock_vast_sdk(monkeypatch)
+    sdk.search_offers.return_value[0]['geolocation'] = 'Paris, FR, EU'
+
+    vast_utils.launch(
+        name='test-head',
+        instance_type='1x-A100-4-8192',
+        region='France, FR, EU',
+        disk_size=30,
+        image_name='vastai/base:0.0.2',
+        ports=None,
+        preemptible=False,
+        secure_only=False,
+    )
+
+    query = sdk.search_offers.call_args.kwargs['query']
+    assert 'geolocation=FR' in query
+    assert 'geolocation=EU' not in query
+    assert 'cpu_cores>=4' in query
 
 
 @pytest.mark.parametrize('registry_key', ['login', 'image_login'])
