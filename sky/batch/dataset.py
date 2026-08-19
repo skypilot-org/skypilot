@@ -158,7 +158,8 @@ class Dataset:
             output: Union[io_formats.OutputWriter,
                           List[io_formats.OutputWriter]],
             activate_env: Optional[str] = None,
-            stream: bool = True) -> int:
+            stream: bool = True,
+            resume_from: Optional[int] = None) -> int:
         """Submit batch job as a managed job. Blocks until completion.
 
         The mapper function should be decorated with @sky.batch.remote_function
@@ -182,6 +183,10 @@ class Dataset:
                     If True, the function will block until the managed job
                     is completed and print the progress. Otherwise, the
                     function will return immediately.
+            resume_from: Optional job ID of a previously cancelled batch
+                         job to resume from.  Completed batches from the
+                         previous run are skipped; failed and un-run
+                         batches are re-dispatched.
         Returns:
             The managed job ID.
 
@@ -203,6 +208,24 @@ class Dataset:
         # Gate: check pool exists and workers support sky.batch.
         _validate_pool_for_batch(pool_name)
 
+        # Gate: if resuming, verify previous job is in a resumable state.
+        # This client-side check gives immediate feedback instead of
+        # blocking in the scheduler queue (batch jobs are serialized per
+        # pool, so a new batch job cannot start while the old one is
+        # still active).
+        if resume_from is not None:
+            try:
+                prev_record = _get_managed_job_record(resume_from)
+            except RuntimeError:
+                raise ValueError(
+                    f'Cannot resume: job {resume_from} not found.') from None
+            prev_status = prev_record.status
+            if prev_status is not None and not prev_status.is_terminal():
+                raise ValueError(
+                    f'Cannot resume from job {resume_from}: it is still '
+                    f'{prev_status.value}. Cancel it first with: '
+                    f'sky jobs cancel {resume_from}')
+
         # Validate mapper function
         if not remote.is_remote_function(mapper_fn):
             raise ValueError('Mapper function must be decorated with '
@@ -220,16 +243,20 @@ class Dataset:
                 raise ValueError('output path cannot be empty')
 
         # Check if any output path already exists and confirm overwrite.
-        for fmt in outputs:
-            if utils.cloud_path_exists(fmt.path):
-                response = input(
-                    f'\nOutput file {fmt.path} already exists.\n'
-                    f'Do you want to overwrite it? [y/N]: ').strip().lower()
-                if response not in ('y', 'yes'):
-                    raise RuntimeError(
-                        f'Output file {fmt.path} already exists. '
-                        f'Operation cancelled by user.')
-                logger.info(f'Overwriting existing output file: {fmt.path}')
+        # Skip when resuming — we expect the output to exist from the
+        # previous run's completed batches.
+        if resume_from is None:
+            for fmt in outputs:
+                if utils.cloud_path_exists(fmt.path):
+                    response = input(
+                        f'\nOutput file {fmt.path} already exists.\n'
+                        f'Do you want to overwrite it? [y/N]: ').strip().lower(
+                        )
+                    if response not in ('y', 'yes'):
+                        raise RuntimeError(
+                            f'Output file {fmt.path} already exists. '
+                            f'Operation cancelled by user.')
+                    logger.info(f'Overwriting existing output file: {fmt.path}')
 
         # Short random suffix for unique task name.
         short_id = uuid.uuid4().hex[:4]
@@ -243,7 +270,7 @@ class Dataset:
         # separate cluster).  Pass all config via task metadata.
         task = sky.Task(name=task_name, run=None)
         # pylint: disable=protected-access
-        task._metadata = {
+        metadata = {
             'batch_coordinator': True,
             'batch_dataset_path': self.path,
             # First output's path for backward compat / display.
@@ -255,6 +282,16 @@ class Dataset:
             'batch_input_format': self.input_format.to_dict(),
             'batch_output_formats': output_format_dicts,
         }
+        if resume_from is not None:
+            metadata['batch_resume_from'] = resume_from
+            # Resolve root_job_id for the chain so the coordinator
+            # can reuse the same temp file directory across resumes.
+            prev_config = managed_job_state.get_batch_job_config(resume_from)
+            if prev_config and prev_config.get('batch_root_job_id'):
+                metadata['batch_root_job_id'] = prev_config['batch_root_job_id']
+            else:
+                metadata['batch_root_job_id'] = resume_from
+        task._metadata = metadata
 
         # Submit as regular managed job.  Pass pool_name so the job
         # shows up under the correct pool in ``sky jobs queue`` and
