@@ -429,8 +429,11 @@ def get_default_role() -> str:
     as a role name nothing recognizes, and a principal holding an unrecognized
     role is denied everywhere.
     """
-    return skypilot_config.get_nested(
-        ('rbac', 'default_role'), default_value=RoleName.ADMIN.value).lower()
+    configured = skypilot_config.get_nested(('rbac', 'default_role'),
+                                            default_value=None)
+    # `or` rather than get_nested's default: an explicit `default_role:` with no
+    # value parses as None, and this runs on the login path.
+    return (configured or RoleName.ADMIN.value).lower()
 
 
 def get_viewer_allowlist(

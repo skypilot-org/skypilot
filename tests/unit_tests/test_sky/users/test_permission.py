@@ -2506,12 +2506,176 @@ class TestDenialScope:
         worker = policy_db()
         worker.enforcer.load_policy()
 
-        with mock.patch.object(permission.logger, 'warning') as warn:
+        # The repair the denial queues logs too, and would seed a role midway
+        # through the loop; this test is about the denial's own line.
+        with mock.patch.object(worker, '_schedule_role_repair'), \
+             mock.patch.object(permission.logger, 'warning') as warn:
             for _ in range(5):
                 worker.check_endpoint_permission('ghost', '/users/export',
                                                  'GET')
-        assert warn.call_count == 1
-        assert 'ghost' in warn.call_args[0][0]
+        denials = [c for c in warn.call_args_list if 'Denying' in c[0][0]]
+        assert len(denials) == 1
+        assert 'ghost' in denials[0][0][0]
+
+
+class TestScheduledRoleRepair:
+    """The denial queues the repair instead of performing it.
+
+    `check_endpoint_permission` runs inside the auth executor's 5s deadline
+    while the policy lock waits up to 20s, so seeding inline would answer 503
+    under exactly the contention that strands principals -- and hold an auth
+    thread for the duration.
+    """
+
+    def test_a_denial_queues_a_repair(self, policy_db):
+        worker = policy_db()
+        worker.enforcer.load_policy()
+        queued = []
+        with mock.patch.object(worker,
+                               '_schedule_role_repair',
+                               side_effect=queued.append):
+            assert worker.check_endpoint_permission('ghost', '/users/export',
+                                                    'GET')
+        assert queued == ['ghost']
+
+    def test_the_repair_runs_off_the_request(self, policy_db):
+        """Nothing blocking happens on the caller's thread."""
+        worker = policy_db()
+        worker.enforcer.load_policy()
+        submitted = []
+        with mock.patch.object(worker, '_run_role_repair', submitted.append):
+            worker._schedule_role_repair('ghost')
+            assert worker._repair_executor is not None
+            worker._repair_executor.shutdown(wait=True)
+        assert submitted == ['ghost']
+
+    def test_queueing_is_claimed_once_per_ttl(self, policy_db):
+        worker = policy_db()
+        worker.enforcer.load_policy()
+        with mock.patch.object(worker, '_run_role_repair') as run:
+            for _ in range(5):
+                worker._schedule_role_repair('ghost')
+            assert worker._repair_executor is not None
+            worker._repair_executor.shutdown(wait=True)
+        assert run.call_count == 1
+
+    def test_a_burst_is_bounded(self, policy_db):
+        """The per-principal claim bounds the rate; this bounds the burst."""
+        worker = policy_db()
+        worker.enforcer.load_policy()
+        with mock.patch.object(worker, '_run_role_repair'):
+            for i in range(permission._REPAIR_MAX_IN_FLIGHT + 10):
+                worker._schedule_role_repair(f'ghost{i}')
+            in_flight = len(worker._repair_in_flight)
+            assert worker._repair_executor is not None
+            worker._repair_executor.shutdown(wait=True)
+        assert in_flight <= permission._REPAIR_MAX_IN_FLIGHT
+
+    def test_no_thread_until_one_is_needed(self):
+        """The CLI imports this module; it must not start a thread pool."""
+        assert permission.PermissionService()._repair_executor is None
+
+    def test_the_repair_seeds_and_the_next_check_passes(self, policy_db):
+        worker = policy_db()
+        worker.enforcer.load_policy()
+        assert worker.check_endpoint_permission('ghost', '/users/export', 'GET')
+
+        with mock.patch.object(permission, 'seed_new_user_role') as seed:
+            worker._run_role_repair('ghost')
+        seed.assert_called_once_with('ghost')
+
+    def test_a_failed_repair_is_swallowed(self, policy_db):
+        """Nothing awaits it, and the next request tries again."""
+        worker = policy_db()
+        worker.enforcer.load_policy()
+        with mock.patch.object(permission,
+                               'seed_new_user_role',
+                               side_effect=RuntimeError('lock timeout')):
+            worker._run_role_repair('ghost')  # must not raise
+        assert 'ghost' not in worker._repair_in_flight
+
+
+class TestProbeThrottle:
+    """Reload-on-miss is bounded per worker, not only per principal.
+
+    The per-principal memo is cleared wholesale on overflow and expires by TTL,
+    and the failure this feature exists for strands many principals at once --
+    so without a global bound, N of them means N reloads per TTL, each holding
+    the enforcer's write lock.
+    """
+
+    def test_a_second_principal_does_not_reload_immediately(self, policy_db):
+        worker = policy_db()
+        worker.enforcer.load_policy()
+        loads = []
+        with mock.patch.object(worker,
+                               '_load_policy_no_lock',
+                               side_effect=lambda: loads.append(1)):
+            worker._probe_unknown_principal('ghost1')
+            worker._probe_unknown_principal('ghost2')
+        assert len(loads) == 1, f'reloaded {len(loads)} times, expected 1'
+
+    def test_the_cooldown_scales_with_the_reload(self, policy_db):
+        worker = policy_db()
+        worker.enforcer.load_policy()
+
+        def slow_load():
+            time.sleep(0.05)
+
+        before = time.time()
+        with mock.patch.object(worker, '_load_policy_no_lock', slow_load):
+            worker._probe_unknown_principal('ghost1')
+        # duty cycle 0.1 => a 50ms reload buys ~450ms of cooldown.
+        assert worker._probe_cooldown_until - before > 0.3
+
+    def test_a_failed_reload_answers_role_less(self, policy_db):
+        """Raising would leave the middleware with a bare 500."""
+        worker = policy_db()
+        worker.enforcer.load_policy()
+        with mock.patch.object(worker,
+                               '_load_policy_no_lock',
+                               side_effect=RuntimeError('db down')):
+            assert worker._probe_unknown_principal('ghost') == []
+
+    def test_a_failed_reload_still_sets_the_cooldown(self, policy_db):
+        """Otherwise a broken database is retried on every request."""
+        worker = policy_db()
+        worker.enforcer.load_policy()
+        with mock.patch.object(worker,
+                               '_load_policy_no_lock',
+                               side_effect=RuntimeError('db down')):
+            worker._probe_unknown_principal('ghost')
+        assert worker._probe_cooldown_until > time.time() - 1
+
+
+class TestBoundedClaimCache:
+    """Over the cap, drop what expired -- never the whole cache.
+
+    These entries all expire, so clearing them wholesale would send every
+    principal back through the work the rate limit exists to space out, at the
+    same moment.
+    """
+
+    def test_an_expired_entry_is_dropped_before_a_live_one(self):
+        cache = {'old': time.time() - 10.0, 'fresh': time.time()}
+        assert permission._claim_within_ttl(cache, 'new', ttl=5.0, cap=2)
+        assert 'old' not in cache
+        assert 'fresh' in cache, 'a live entry was dropped'
+        assert 'new' in cache
+
+    def test_a_live_entry_survives_an_eviction(self):
+        """`fresh` keeping its stamp is what stops the herd."""
+        now = time.time()
+        cache = {f'u{i}': now for i in range(4)}
+        permission._claim_within_ttl(cache, 'new', ttl=60.0, cap=4)
+        # All live and over the cap: half go, the rest keep their rate limit.
+        assert 2 <= len(cache) <= 4
+        assert not permission._claim_within_ttl(cache, 'new', ttl=60.0, cap=4)
+
+    def test_the_claim_is_consumed(self):
+        cache: dict = {}
+        assert permission._claim_within_ttl(cache, 'u', ttl=60.0, cap=8)
+        assert not permission._claim_within_ttl(cache, 'u', ttl=60.0, cap=8)
 
 
 class TestDefaultRoleCasing:

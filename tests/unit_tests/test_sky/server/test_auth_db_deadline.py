@@ -238,6 +238,74 @@ class TestAuthProxyDeadline:
         assert not call_next_sentinel.reached
 
 
+class TestAuthProxyRoleRepair:
+    """The login path repairs a role that was never seeded.
+
+    The endpoint gate queues a repair too, but only after refusing the request.
+    Doing it here means a returning user whose seed failed is fixed before they
+    are ever denied.
+    """
+
+    def _middleware(self):
+        proxy_config = mock.Mock()
+        proxy_config.enabled = True
+        with mock.patch.object(server.server_config,
+                               'load_external_proxy_config',
+                               return_value=proxy_config):
+            return server.AuthProxyMiddleware(app=mock.Mock())
+
+    @pytest.mark.asyncio
+    async def test_repairs_a_returning_user_with_no_known_role(
+            self, mock_request, call_next_sentinel):
+        middleware = self._middleware()
+        with mock.patch.object(
+                server, '_extract_user_from_header',
+                return_value=models.User(id='u-1', name='tester')), \
+                mock.patch('sky.global_user_state.add_or_update_user',
+                           return_value=False), \
+                mock.patch('sky.users.permission.permission_service'
+                          ) as perm_service, \
+                mock.patch('sky.users.permission.reseed_role_if_missing'
+                          ) as reseed:
+            perm_service.probably_has_role.return_value = False
+            await middleware.dispatch(mock_request, call_next_sentinel)
+        reseed.assert_called_once_with('u-1')
+
+    @pytest.mark.asyncio
+    async def test_no_repair_when_a_role_is_known(self, mock_request,
+                                                  call_next_sentinel):
+        """The guard is what keeps this off the policy lock on every request."""
+        middleware = self._middleware()
+        with mock.patch.object(
+                server, '_extract_user_from_header',
+                return_value=models.User(id='u-1', name='tester')), \
+                mock.patch('sky.global_user_state.add_or_update_user',
+                           return_value=False), \
+                mock.patch('sky.users.permission.permission_service'
+                          ) as perm_service, \
+                mock.patch('sky.users.permission.reseed_role_if_missing'
+                          ) as reseed:
+            perm_service.probably_has_role.return_value = True
+            await middleware.dispatch(mock_request, call_next_sentinel)
+        reseed.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_a_new_user_is_seeded_not_repaired(self, mock_request,
+                                                     call_next_sentinel):
+        middleware = self._middleware()
+        with mock.patch.object(
+                server, '_extract_user_from_header',
+                return_value=models.User(id='u-1', name='tester')), \
+                mock.patch('sky.global_user_state.add_or_update_user',
+                           return_value=True), \
+                mock.patch('sky.users.permission.seed_new_user_role') as seed, \
+                mock.patch('sky.users.permission.reseed_role_if_missing'
+                          ) as reseed:
+            await middleware.dispatch(mock_request, call_next_sentinel)
+        seed.assert_called_once_with('u-1')
+        reseed.assert_not_called()
+
+
 @pytest.mark.asyncio
 async def test_call_with_deadline_returns_fast_results(monkeypatch):
     """The healthy path is unperturbed: fast lookups return their value."""

@@ -1,4 +1,5 @@
 """Permission service for SkyPilot API Server."""
+import concurrent.futures as futures
 import contextlib
 import hashlib
 import logging
@@ -62,21 +63,54 @@ _NO_ROLE_PROBE_CACHE_MAX = 4096
 # that the operator sees the condition is ongoing.
 _DENIED_LOG_TTL_SECONDS = 300
 
+# Share of a worker's wall time it may spend reloading the policy for
+# principals it does not recognize. The per-principal memo does not bound this
+# (it expires, and one contended provisioning strands many principals at once),
+# and each reload holds the enforcer's write lock. Expressed as a duty cycle so
+# it self-tunes to policy size: after a reload takes D, the next waits
+# D * (1/duty - 1).
+_PROBE_DUTY_CYCLE = 0.1
+
+# Cap on repairs queued but not yet run. The per-principal claim bounds the
+# rate; this bounds a burst, so one SCIM push that strands hundreds cannot grow
+# an unbounded queue behind a single worker thread.
+_REPAIR_MAX_IN_FLIGHT = 64
+
 # Materialized once: the role set is a static enum, and this is consulted on
 # every request.
 _SUPPORTED_ROLES = frozenset(rbac.get_supported_roles())
 
 
+def _claim_within_ttl(cache: Dict[str, float], key: str, ttl: float,
+                      cap: int) -> bool:
+    """Was `key` last stamped longer ago than `ttl`? If so, stamp it now.
+
+    The shape behind every per-principal rate limit here. Over the cap it drops
+    what has expired -- deliberately not the whole cache: these entries all
+    expire, so clearing them wholesale would let one eviction send every
+    principal back through the work the limit exists to space out.
+    """
+    now = time.time()
+    if now - cache.get(key, 0.0) < ttl:
+        return False
+    if len(cache) >= cap:
+        for expired in [k for k, at in cache.items() if now - at >= ttl]:
+            del cache[expired]
+        if len(cache) >= cap:
+            # Everything is live and we are still over: drop the oldest half,
+            # which costs those principals one extra pass, not all of them.
+            for old, _ in sorted(cache.items(),
+                                 key=lambda kv: kv[1])[:cap // 2]:
+                del cache[old]
+    cache[key] = now
+    return True
+
+
 def _system_user_roles() -> Dict[str, str]:
     """The server's own identities and the role each of them has.
 
-    Not a default the policy may override: `sky.users.server` refuses to delete
-    these users or change their role, so the role is a property of the identity
-    rather than an administrative choice. `_maybe_initialize_policies` writes
-    the matching rows at boot for anything that reads casbin directly, but the
-    answer here does not depend on that write having landed -- if it failed,
-    reading the policy would leave the server unable to authorize its own
-    internal calls.
+    Fixed, not a default: `sky.users.server` refuses to delete these users or
+    change their role, so the policy can only agree or be wrong about them.
     """
     return {
         common.SERVER_ID: rbac.RoleName.ADMIN.value,
@@ -95,18 +129,13 @@ def _recognized_roles(roles: List[str]) -> List[str]:
     return [role for role in roles if role in _SUPPORTED_ROLES]
 
 
-def _resolve_roles(user_id: str, roles: List[str]) -> List[str]:
-    """`roles`, with the server's own identities resolved to their own role.
+def _system_role(user_id: str) -> Optional[str]:
+    """The role this identity has by definition, or None if it is not one.
 
-    Every decision that reads a principal's roles goes through this, so the
-    endpoint gate, the workspace checks and the request filters cannot disagree
-    about the same principal -- which they did while only the gate knew about
-    system identities.
+    Checked before the policy, so the server can authorize its own calls
+    whatever the policy holds -- and without a reload.
     """
-    if _recognized_roles(roles):
-        return roles
-    system_role = _system_user_roles().get(user_id)
-    return [system_role] if system_role is not None else roles
+    return _system_user_roles().get(user_id)
 
 
 _enforcer_instance: Optional['PermissionService'] = None
@@ -146,6 +175,15 @@ class PermissionService:
         # Principals this worker has already seen hold a role. Read on the
         # event loop by `probably_has_role`, which must not touch the enforcer.
         self._role_seen: Set[str] = set()
+        # When this worker may next reload on an unrecognized principal's
+        # behalf, and the lock guarding it. See `_probe_unknown_principal`.
+        self._probe_cooldown_until: float = 0.0
+        self._probe_lock = threading.Lock()
+        # Repairs queued on `_repair_executor`, and the executor itself --
+        # created on first use so importing this module (the CLI does) never
+        # starts a thread. See `_schedule_role_repair`.
+        self._repair_in_flight: Set[str] = set()
+        self._repair_executor: Optional[futures.ThreadPoolExecutor] = None
 
     def initialize(self):
         self._lazy_initialize(full_initialize=True)
@@ -403,6 +441,10 @@ class PermissionService:
         users_with_roles = {tuple(g)[0] for g in enforcer.get_grouping_policy()}
         all_users = global_user_state.get_all_users()
         for existing_user in all_users:
+            if existing_user.id in _system_user_roles():
+                # Their explicit role is seeded below. Letting the default land
+                # first would win, because the seed only fills a gap.
+                continue
             if str(existing_user.id) not in users_with_roles:
                 logger.debug(f'Adding role for user: {existing_user.name}'
                              f'({existing_user.id})')
@@ -515,20 +557,27 @@ class PermissionService:
         Returns:
             A list of role names that the user has.
         """
+        system_role = _system_role(user_id)
+        if system_role is not None:
+            # Skips the reload as well, which the server's own identities would
+            # otherwise pay on every internal call.
+            return [system_role]
         self._load_policy_no_lock()
         enforcer = self._ensure_enforcer()
-        return _resolve_roles(user_id, enforcer.get_roles_for_user(user_id))
+        return enforcer.get_roles_for_user(user_id)
 
     def roles_in_memory(self, user_id: str) -> List[str]:
         """This process's current view of a principal's roles, no reload.
 
         For decisions on the request path, which cannot afford the database
-        roundtrip `get_user_roles` makes. Same resolution otherwise, so a
-        caller that reads this cannot reach a different conclusion about a
+        roundtrip `get_user_roles` makes. Resolves identities the same way, so
+        a caller that reads this cannot reach a different conclusion about a
         principal than one that reads `get_user_roles`.
         """
-        enforcer = self._ensure_enforcer()
-        return _resolve_roles(user_id, enforcer.get_roles_for_user(user_id))
+        system_role = _system_role(user_id)
+        if system_role is not None:
+            return [system_role]
+        return self._ensure_enforcer().get_roles_for_user(user_id)
 
     def get_users_for_role(self, role: str) -> List[str]:
         """Get all users for a role."""
@@ -628,21 +677,76 @@ class PermissionService:
     def _probe_unknown_principal(self, user_id: str) -> List[str]:
         """Reload once for a principal with no role here, and re-read it.
 
-        Either this worker's model predates whoever created them, or they have
-        no role at all. Only the database can tell the two apart, so pay for
-        one load -- but at most once per TTL per user, because the other case
-        is permanent: without the cache a role-less principal would trigger a
-        full policy load on every request it makes.
+        Only the database distinguishes "assigned elsewhere" from "never
+        seeded", so pay for one load -- bounded per principal by TTL and per
+        worker by `_PROBE_DUTY_CYCLE`. A failed reload answers "no roles" (the
+        caller denies): raising would leave the middleware with a bare 500.
         """
-        now = time.time()
-        if now - self._no_role_probe_cache.get(
-                user_id, 0.0) < _NO_ROLE_PROBE_TTL_SECONDS:
-            return self._ensure_enforcer().get_roles_for_user(user_id)
-        if len(self._no_role_probe_cache) >= _NO_ROLE_PROBE_CACHE_MAX:
-            self._no_role_probe_cache.clear()
-        self._no_role_probe_cache[user_id] = now
-        self._load_policy_no_lock()
-        return self._ensure_enforcer().get_roles_for_user(user_id)
+        roles = lambda: self._ensure_enforcer().get_roles_for_user(user_id)
+        if not _claim_within_ttl(self._no_role_probe_cache, user_id,
+                                 _NO_ROLE_PROBE_TTL_SECONDS,
+                                 _NO_ROLE_PROBE_CACHE_MAX):
+            return roles()
+        with self._probe_lock:
+            if time.time() < self._probe_cooldown_until:
+                # Another principal's probe is paying for the whole worker
+                # right now. Theirs refreshes the model this one reads.
+                return roles()
+            self._probe_cooldown_until = float('inf')
+        started = time.time()
+        try:
+            self._load_policy_no_lock()
+        except Exception as e:  # pylint: disable=broad-except
+            logger.warning(f'Policy reload for unrecognized principal '
+                           f'{user_id} failed; treating them as role-less: '
+                           f'{common_utils.format_exception(e)}')
+            return []
+        finally:
+            elapsed = time.time() - started
+            with self._probe_lock:
+                self._probe_cooldown_until = time.time() + elapsed * (
+                    1.0 / _PROBE_DUTY_CYCLE - 1.0)
+        return roles()
+
+    def _schedule_role_repair(self, user_id: str) -> None:
+        """Queue a seed for a principal the policy holds no role for.
+
+        Off the request because the caller runs inside the auth executor's 5s
+        deadline while the policy lock waits up to 20s: seeding inline would
+        answer 503 under the very contention that strands principals. This
+        request stays denied; the next one finds a role.
+        """
+        if not self.claim_role_seed_attempt(user_id):
+            return
+        with self._lock:
+            if len(self._repair_in_flight) >= _REPAIR_MAX_IN_FLIGHT:
+                logger.warning(
+                    f'Not queueing a role repair for {user_id}: '
+                    f'{_REPAIR_MAX_IN_FLIGHT} already pending. Something is '
+                    f'stranding principals faster than they can be repaired.')
+                return
+            if self._repair_executor is None:
+                self._repair_executor = futures.ThreadPoolExecutor(
+                    max_workers=1, thread_name_prefix='role-repair')
+            self._repair_in_flight.add(user_id)
+            executor = self._repair_executor
+        executor.submit(self._run_role_repair, user_id)
+
+    def _run_role_repair(self, user_id: str) -> None:
+        """Body of a queued repair. Never raises: nothing awaits it."""
+        try:
+            if not self.role_seed_missing(user_id):
+                return
+            logger.warning(f'User {user_id} has no role; seeding one now. '
+                           f'Their original seed did not complete.')
+            seed_new_user_role(user_id)
+        except Exception as e:  # pylint: disable=broad-except
+            logger.warning(f'Queued role repair for {user_id} failed; a later '
+                           f'request retries: '
+                           f'{common_utils.format_exception(e)}')
+        finally:
+            with self._lock:
+                self._repair_in_flight.discard(user_id)
 
     def _log_denied_principal(self, user_id: str, path: str,
                               method: str) -> None:
@@ -653,13 +757,10 @@ class PermissionService:
         point of denying rather than confining is that this is loud, so it must
         actually reach the operator without drowning the log.
         """
-        now = time.time()
-        if now - self._denied_log_cache.get(user_id,
-                                            0.0) < _DENIED_LOG_TTL_SECONDS:
+        if not _claim_within_ttl(self._denied_log_cache, user_id,
+                                 _DENIED_LOG_TTL_SECONDS,
+                                 _NO_ROLE_PROBE_CACHE_MAX):
             return
-        if len(self._denied_log_cache) >= _NO_ROLE_PROBE_CACHE_MAX:
-            self._denied_log_cache.clear()
-        self._denied_log_cache[user_id] = now
         logger.warning(
             f'Denying {method} {path} for user {user_id}: the policy holds no '
             f'role for them, so nothing grants access. Their role seed did not '
@@ -668,17 +769,10 @@ class PermissionService:
     def probably_has_role(self, user_id: str) -> bool:
         """Cheap, non-blocking: has this worker ever seen a role for them?
 
-        A plain set lookup, deliberately not `enforcer.get_roles_for_user`:
-        that takes the enforcer's read lock, and a concurrent `load_policy()`
-        holds the write lock for the length of a full reload (hundreds of ms on
-        a large policy). This is called on the event loop, where that would
-        stall every request on the worker -- the reason the RBAC middleware
-        offloads its own check.
-
-        False therefore means "not known to have one", not "has none": the
-        caller is expected to confirm off the loop. Only the transition matters
-        for cost, since a principal who has a role is answered from memory from
-        their second request onward.
+        A set lookup, deliberately not `enforcer.get_roles_for_user`: this runs
+        on the event loop, and that takes a lock a concurrent `load_policy()`
+        holds for the length of a full reload. False means "not known to have
+        one", not "has none" -- confirm off the loop.
         """
         return user_id in self._role_seen
 
@@ -688,26 +782,23 @@ class PermissionService:
             self._role_seen.clear()
         self._role_seen.add(user_id)
 
-    def needs_role_seed(self, user_id: str) -> bool:
-        """Whether this principal has no role row at all, so one is owed.
+    def role_seed_missing(self, user_id: str) -> bool:
+        """Whether the policy holds no role for this principal, so one is owed.
 
-        For the login paths, which seed only when the `users` row was newly
-        inserted: a seed that failed (the policy lock has a bounded wait) is
-        otherwise never retried, and the user stays role-less -- and therefore
-        unrestricted -- until a restart re-seeds them.
+        A query, not a claim -- ask `claim_role_seed_attempt` for permission to
+        act on the answer. False for a principal holding an *unrecognized*
+        role: seeding only ever fills a gap, so acting there would take the
+        distributed lock and repair nothing, and replacing a role nobody
+        recognizes is an administrative act rather than something a login does
+        behind the operator's back. `check_endpoint_permission` denies them.
 
-        Deliberately False for a principal holding an *unrecognized* role.
-        Seeding only ever adds a role when there is none, so answering True
-        there would take the distributed lock on every request and repair
-        nothing; `check_endpoint_permission` denies such a principal instead.
-        Replacing a role nobody recognizes is an administrative act, not
-        something a login should do behind the operator's back.
-
-        Also feeds `probably_has_role`'s memo, so the loop-side guard can stay
-        a set lookup.
+        Also feeds `probably_has_role`'s memo, so the loop-side guard can stay a
+        set lookup.
 
         Blocking (may reload the policy). Call from a worker thread.
         """
+        if _system_role(user_id) is not None:
+            return False
         enforcer = self._ensure_enforcer()
         if enforcer.get_roles_for_user(user_id):
             self._remember_role_seen(user_id)
@@ -716,17 +807,35 @@ class PermissionService:
             # Only this worker was behind; the role exists.
             self._remember_role_seen(user_id)
             return False
-        # Rate-limit the attempt itself, not just the probe: if the seed keeps
-        # failing because the policy lock is contended, retrying on every
-        # request would feed the contention that caused it.
-        now = time.time()
-        if now - self._seed_attempt_cache.get(user_id,
-                                              0.0) < _NO_ROLE_PROBE_TTL_SECONDS:
-            return False
-        if len(self._seed_attempt_cache) >= _NO_ROLE_PROBE_CACHE_MAX:
-            self._seed_attempt_cache.clear()
-        self._seed_attempt_cache[user_id] = now
         return True
+
+    def claim_role_seed_attempt(self, user_id: str) -> bool:
+        """Take this worker's per-principal permission to attempt a seed.
+
+        True at most once per TTL per principal, and it *consumes* that
+        permission -- so a caller that asks twice for one request gets False the
+        second time and silently skips the repair. Rate-limiting the attempt
+        rather than only the probe matters because a seed that keeps failing on
+        a contended policy lock would otherwise retry on every request and feed
+        the contention that caused it.
+
+        Cheap and non-blocking: in-memory only.
+        """
+        return _claim_within_ttl(self._seed_attempt_cache, user_id,
+                                 _NO_ROLE_PROBE_TTL_SECONDS,
+                                 _NO_ROLE_PROBE_CACHE_MAX)
+
+    def needs_role_seed(self, user_id: str) -> bool:
+        """`role_seed_missing` and a claim, for the login paths.
+
+        Kept as one call because that is what the provisioning paths want: ask
+        once, and act if the answer is yes. Claim semantics, so two calls in one
+        request do not both answer True -- see `claim_role_seed_attempt`.
+
+        Blocking (may reload the policy). Call from a worker thread.
+        """
+        return self.role_seed_missing(user_id) and self.claim_role_seed_attempt(
+            user_id)
 
     def check_endpoint_permission(self, user_id: str, path: str,
                                   method: str) -> bool:
@@ -755,19 +864,30 @@ class PermissionService:
         # as long as it is eventually consistent.
         # self._load_policy_no_lock()
         enforcer = self._ensure_enforcer()
+        system_role = _system_role(user_id)
+        if system_role is not None:
+            # Judged by the role the identity carries, so the server can
+            # authorize its own calls whatever the policy holds. Evaluated
+            # against the *role* rather than the id: casbin's `g` is reflexive,
+            # and this way an operator's blocklist for that role still applies.
+            if system_role == rbac.RoleName.VIEWER.value:
+                return not self._is_viewer_allowed(path, method)
+            return enforcer.enforce(system_role, path, method)
         # Read roles from in-memory enforcer state. Do NOT use
         # self.get_user_roles(...) here — that does a DB roundtrip via
         # _load_policy_no_lock and would put a query on the request hot
         # path.
-        roles = _resolve_roles(user_id, enforcer.get_roles_for_user(user_id))
+        roles = enforcer.get_roles_for_user(user_id)
         if not _recognized_roles(roles):
             # Reload before denying them: a role assigned moments ago on
             # another worker has not reached this model, and refusing a new
             # admin every admin endpoint until something else happens to
             # reload is its own outage.
-            roles = _resolve_roles(user_id,
-                                   self._probe_unknown_principal(user_id))
+            roles = self._probe_unknown_principal(user_id)
             if not _recognized_roles(roles):
+                # Off-request, so the write never lands inside the auth
+                # deadline: this request stays denied, the next one is not.
+                self._schedule_role_repair(user_id)
                 self._log_denied_principal(user_id, path, method)
                 return True
         # Admin wins over viewer when a user holds both — viewer's
