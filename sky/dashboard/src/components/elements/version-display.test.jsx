@@ -196,9 +196,11 @@ describe('VersionDisplay - Plugin Filtering', () => {
       expect(container.textContent).not.toContain('HiddenPlugin1');
       expect(container.textContent).not.toContain('HiddenPlugin2');
 
-      // Should still show commit info
-      expect(container.textContent).toContain('Core commit');
-      expect(container.textContent).toContain('core123');
+      // Still shows the commit, and labels it the same way as the no-plugins
+      // case: with nothing listed beside it, there is nothing for "Core" to
+      // distinguish it from.
+      expect(container.textContent).toContain('Commit: core123');
+      expect(container.textContent).not.toContain('Core commit');
     });
   });
 });

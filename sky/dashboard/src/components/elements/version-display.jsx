@@ -87,6 +87,13 @@ export function VersionTooltipContent({
   showUpdateInfo = true,
   showCommit = true,
 }) {
+  // Everything below keys off what is actually shown, not off the raw list: a
+  // plugin that opted out of the display should not make the core commit call
+  // itself "Core", and should not suppress the "not available" fallback.
+  const visiblePlugins = plugins.filter(
+    (plugin) => !plugin.hidden_from_display
+  );
+
   return (
     <div className="flex flex-col gap-0.5">
       {showUpdateInfo && latestVersion && (
@@ -98,24 +105,22 @@ export function VersionTooltipContent({
       )}
       {showCommit && commit && (
         <div>
-          {plugins.length > 0 ? 'Core commit' : 'Commit'}: {commit}
+          {visiblePlugins.length > 0 ? 'Core commit' : 'Commit'}: {commit}
         </div>
       )}
-      {plugins
-        .filter((plugin) => !plugin.hidden_from_display)
-        .map((plugin, index) => {
-          const pluginName = plugin.name || 'Unknown Plugin';
-          const parts = [];
-          if (plugin.version) parts.push(plugin.version);
-          if (showCommit && plugin.commit) parts.push(plugin.commit);
-          return parts.length > 0 ? (
-            <div key={index}>
-              {pluginName}: {parts.join(' - ')}
-            </div>
-          ) : null;
-        })}
+      {visiblePlugins.map((plugin, index) => {
+        const pluginName = plugin.name || 'Unknown Plugin';
+        const parts = [];
+        if (plugin.version) parts.push(plugin.version);
+        if (showCommit && plugin.commit) parts.push(plugin.commit);
+        return parts.length > 0 ? (
+          <div key={index}>
+            {pluginName}: {parts.join(' - ')}
+          </div>
+        ) : null;
+      })}
       {!commit &&
-        plugins.length === 0 &&
+        visiblePlugins.length === 0 &&
         (!latestVersion || !showUpdateInfo) && (
           <div>Version information not available</div>
         )}
