@@ -748,6 +748,12 @@ Following tabs describe how to configure credentials for different clouds on the
 
         When installing or upgrading the Helm chart, enable Vast credentials by setting ``vastCredentials.enabled=true``
 
+        With Vast credentials enabled, the API server periodically refreshes
+        its Vast GPU catalog (every 20 minutes by default). To override the
+        refresh interval, set
+        ``daemons.vast-catalog-refresh-daemon.interval_seconds`` in the
+        SkyPilot server configuration.
+
         .. code-block:: bash
 
             # --reuse-values keeps the Helm chart values set in the previous step

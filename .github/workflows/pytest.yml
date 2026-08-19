@@ -27,8 +27,11 @@ jobs:
           - tests/test_ssh_proxy_lag.py
         include:
           - python-version: "3.10"
-            test-path: tests/unit_tests/test_vast_catalog_stability.py
-            test-name: "Vast SDK Contract Test"
+            test-path: >-
+              tests/unit_tests/test_vast_catalog_stability.py
+              tests/unit_tests/test_vast_catalog_refresh.py
+              tests/unit_tests/test_sky/server/test_daemons.py
+            test-name: "Vast Catalog Tests"
             # pytest loads the shared AWS fixtures from tests/conftest.py.
             extras: vast,aws
             install-azure-cli: "false"
