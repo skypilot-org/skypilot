@@ -326,14 +326,17 @@ def _extract_user_from_header(
     user_hash = hashlib.md5(
         user_name.encode(),
         usedforsecurity=False).hexdigest()[:common_utils.USER_HASH_LENGTH]
+    groups = models.parse_groups(request.headers.get('X-Auth-Request-Groups'))
     if proxy_config.enabled:
         return models.User(id=user_hash,
                            name=user_name,
-                           user_type=models.UserType.LEGACY.value)
+                           user_type=models.UserType.LEGACY.value,
+                           groups=groups)
     else:
         return models.User(id=user_hash,
                            name=user_name,
-                           user_type=models.UserType.SSO.value)
+                           user_type=models.UserType.SSO.value,
+                           groups=groups)
 
 
 def _get_auth_user_header(request: fastapi.Request) -> Optional[models.User]:
