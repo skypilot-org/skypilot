@@ -40,17 +40,17 @@ import {
   getContextClusters,
   getSlurmInfrastructure,
 } from '@/data/connectors/infra';
-import { CLOUDS_LIST } from '@/data/connectors/constants';
+import {
+  CLOUDS_LIST,
+  MANAGED_JOBS_SUMMARY_ARGS,
+} from '@/data/connectors/constants';
 import {
   runSkyCheck,
   getWorkspaces,
   getEnabledCloudsBatch,
 } from '@/data/connectors/workspaces';
 import { getClusters } from '@/data/connectors/clusters';
-import {
-  getManagedJobs,
-  MANAGED_JOBS_SUMMARY_ARGS,
-} from '@/data/connectors/jobs';
+import { getManagedJobs } from '@/data/connectors/jobs';
 import { apiClient } from '@/data/connectors/client';
 import { getDashboardConfig } from '@/data/connectors/dashboard_config';
 import {
