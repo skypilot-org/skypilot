@@ -724,6 +724,17 @@ class PermissionService:
         request stays denied; the next one finds a role.
         """
         with self._repair_lock:
+            # Replaced first, because whether the worker died is orthogonal to
+            # whether this principal gets queued. Every return below leaves the
+            # queue holding repairs nobody reads, and a full in-flight set --
+            # which is what a dead worker produces -- sends every caller into
+            # one of those returns. A restart placed after them never runs, and
+            # the cap warning below stays the only symptom, forever. Only a
+            # BaseException can get the drain loop into this state.
+            if (self._repair_worker is not None and
+                    not self._repair_worker.is_alive()):
+                logger.warning('The role repair worker died; replacing it.')
+                self._start_repair_worker()
             # Already queued before the cap: otherwise a principal that is
             # waiting its turn gets logged as one that was turned away.
             if user_id in self._repair_in_flight:
@@ -739,18 +750,16 @@ class PermissionService:
             if not self.claim_role_seed_attempt(user_id):
                 return
             self._repair_in_flight.add(user_id)
-            # Restarted if it died: only a BaseException can end the drain loop,
-            # but leaving a dead worker attached would queue every later repair
-            # into a thread that will never read them, and the only symptom
-            # would be the cap warning above, forever.
-            if self._repair_worker is None or not self._repair_worker.is_alive(
-            ):
-                self._repair_worker = threading.Thread(
-                    target=self._drain_role_repairs,
-                    name='role-repair',
-                    daemon=True)
-                self._repair_worker.start()
+            if self._repair_worker is None:
+                self._start_repair_worker()
         self._repair_queue.put(user_id)
+
+    def _start_repair_worker(self) -> None:
+        """Attach a drain thread. The caller holds `_repair_lock`."""
+        self._repair_worker = threading.Thread(target=self._drain_role_repairs,
+                                               name='role-repair',
+                                               daemon=True)
+        self._repair_worker.start()
 
     def _drain_role_repairs(self) -> None:
         """Run queued repairs one at a time, forever.

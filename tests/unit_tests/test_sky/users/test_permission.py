@@ -2612,20 +2612,37 @@ class TestScheduledRoleRepair:
         assert worker._repair_queue.empty()
         assert worker._repair_worker is None
 
-    def test_a_dead_worker_is_replaced(self, policy_db):
-        """Otherwise every later repair queues into a thread nobody reads."""
+    @pytest.mark.parametrize(
+        'in_flight,asking',
+        [
+            # Waiting its turn. The stranded set is usually small and fixed, so
+            # a brand-new principal may never arrive to trigger the restart.
+            ({'ghost'}, 'ghost'),
+            # Full, which is the state a dead worker produces: every caller
+            # stops at the cap, the symptom a restart exists to end.
+            ({f'u{i}' for i in range(permission._REPAIR_MAX_IN_FLIGHT)}, 'new'),
+        ],
+        ids=['already-queued', 'cap-full'])
+    def test_a_dead_worker_is_replaced(self, policy_db, in_flight, asking):
+        """Otherwise every later repair queues into a thread nobody reads.
+
+        Both callers below decline to queue, so a restart that sits after those
+        returns never runs -- and nothing else ever reads the queue.
+        """
         worker = policy_db()
         worker.enforcer.load_policy()
         with mock.patch.object(worker, '_run_role_repair'):
-            worker._schedule_role_repair('ghost1')
+            worker._schedule_role_repair('seed')
             worker._repair_queue.join()
         dead = worker._repair_worker
         assert dead is not None
-        with mock.patch.object(dead, 'is_alive', return_value=False), \
-             mock.patch.object(worker, '_run_role_repair'):
-            worker._schedule_role_repair('ghost2')
-            worker._repair_queue.join()
+
+        worker._repair_in_flight = set(in_flight)
+        with mock.patch.object(dead, 'is_alive', return_value=False):
+            worker._schedule_role_repair(asking)
+
         assert worker._repair_worker is not dead
+        assert worker._repair_worker.is_alive()
 
     def test_a_queued_principal_is_not_logged_as_turned_away(self, policy_db):
         """A full queue must not report the principals already in it as dropped.
