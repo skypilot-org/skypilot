@@ -3,7 +3,6 @@ import json
 import typing
 from typing import List, Optional
 
-from sky import exceptions
 from sky import sky_logging
 from sky.adaptors import common as adaptors_common
 from sky.schemas.api import responses
@@ -13,7 +12,6 @@ from sky.server.requests import payloads
 from sky.usage import usage_lib
 from sky.utils import annotations
 from sky.utils import context
-from sky.utils import ux_utils
 from sky.volumes import volume as volume_lib
 
 if typing.TYPE_CHECKING:
@@ -87,12 +85,7 @@ def apply(
     )
     response = server_common.make_authenticated_request(
         'POST', '/volumes/apply', json=json.loads(body.model_dump_json()))
-    # The server rejects an invalid volume synchronously; surface its message
-    # instead of the raw HTTPError get_request_id would raise.
-    if response.status_code == 400:
-        with ux_utils.print_exception_no_traceback():
-            raise exceptions.deserialize_exception(
-                response.json().get('detail'))
+    server_common.raise_if_rejected_synchronously(response)
     return server_common.get_request_id(response)
 
 
@@ -123,10 +116,7 @@ def validate(volume: volume_lib.Volume) -> None:
     )
     response = server_common.make_authenticated_request(
         'POST', '/volumes/validate', json=json.loads(body.model_dump_json()))
-    if response.status_code == 400:
-        with ux_utils.print_exception_no_traceback():
-            raise exceptions.deserialize_exception(
-                response.json().get('detail'))
+    server_common.raise_if_rejected_synchronously(response)
 
 
 @context.contextual

@@ -64,23 +64,25 @@ def _runpod_body(**overrides):
     return body
 
 
+@pytest.fixture
+def client_and_executor(monkeypatch):
+    """A /volumes test client plus the mocked executor it would enqueue to."""
+    scheduled = mock.AsyncMock()
+    monkeypatch.setattr(executor, 'schedule_request_async', scheduled)
+    app = fastapi.FastAPI()
+    app.include_router(server.router, prefix='/volumes')
+    return TestClient(app), scheduled
+
+
+def post_apply(client, body):
+    with mock.patch.object(fastapi.Request, 'state') as mock_state:
+        mock_state.request_id = 'test-request-id'
+        mock_state.auth_user = None
+        return client.post('/volumes/apply', json=body)
+
+
 class TestVolumeApplyValidation:
     """/volumes/apply rejects what /volumes/validate rejects."""
-
-    @pytest.fixture
-    def client_and_executor(self, monkeypatch):
-        scheduled = mock.AsyncMock()
-        monkeypatch.setattr(executor, 'schedule_request_async', scheduled)
-        app = fastapi.FastAPI()
-        app.include_router(server.router, prefix='/volumes')
-        return TestClient(app), scheduled
-
-    @staticmethod
-    def _post(client, body):
-        with mock.patch.object(fastapi.Request, 'state') as mock_state:
-            mock_state.request_id = 'test-request-id'
-            mock_state.auth_user = None
-            return client.post('/volumes/apply', json=body)
 
     @staticmethod
     def _detail_message(response):
@@ -107,6 +109,14 @@ class TestVolumeApplyValidation:
             (_pvc_body(labels={'bad key': 'v'}), 'Invalid label'),
             # hostPath: absolute, and not the node root.
             (_hostpath_body(config={'host_path': '/'}), 'root directory'),
+            # Absolute paths that resolve to the root: a literal '/' check
+            # misses these.
+            (_hostpath_body(config={'host_path': '/..'}), 'root directory'),
+            (_hostpath_body(config={'host_path': '/mnt/../..'}),
+             'root directory'),
+            (_hostpath_body(config={'host_path': '/./..'}), 'root directory'),
+            (_hostpath_body(config={'host_path': '/../../..'}),
+             'root directory'),
             (_hostpath_body(config={'host_path': 'relative/path'}),
              'absolute path'),
             (_hostpath_body(config={}), 'host_path is required'),
@@ -116,7 +126,7 @@ class TestVolumeApplyValidation:
     def test_invalid_volume_is_rejected(self, client_and_executor, body,
                                         expected):
         client, scheduled = client_and_executor
-        response = self._post(client, body)
+        response = post_apply(client, body)
         assert response.status_code == 400, response.text
         assert expected in self._detail_message(response)
         # Rejected before a request row is created.
@@ -133,7 +143,7 @@ class TestVolumeApplyValidation:
         # _get_pvc_spec appends 'Gi', so forwarding a unit-carrying size
         # verbatim would build an unusable quantity like '100GiGi'.
         client, scheduled = client_and_executor
-        response = self._post(client, _pvc_body(size=sent))
+        response = post_apply(client, _pvc_body(size=sent))
         assert response.status_code == 200, response.text
         body = scheduled.call_args[1]['request_body']
         assert body.size == applied
@@ -150,7 +160,7 @@ class TestVolumeApplyValidation:
             body['config'] = None
         else:
             body.pop('config')
-        response = self._post(client, body)
+        response = post_apply(client, body)
         assert response.status_code == 200, response.text
         forwarded = scheduled.call_args[1]['request_body'].config
         assert forwarded is not None
@@ -166,16 +176,20 @@ class TestVolumeApplyValidation:
                             size='1Gi',
                             config=forwarded)
 
-    @pytest.mark.parametrize('body', [
-        _pvc_body(),
-        _pvc_body(name='dotted.name'),
-        _hostpath_body(),
-        _runpod_body(),
-        _pvc_body(size=None, use_existing=True),
-    ])
+    @pytest.mark.parametrize(
+        'body',
+        [
+            _pvc_body(),
+            # No dotted-name case on purpose: the rule permits dots but Kubernetes
+            # rejects a dotted spec.volumes[].name. See #10514.
+            _pvc_body(name='ok-vol-2'),
+            _hostpath_body(),
+            _runpod_body(),
+            _pvc_body(size=None, use_existing=True),
+        ])
     def test_valid_volume_is_accepted(self, client_and_executor, body):
         client, scheduled = client_and_executor
-        response = self._post(client, body)
+        response = post_apply(client, body)
         assert response.status_code == 200, response.text
         scheduled.assert_called_once()
 
@@ -186,21 +200,6 @@ class TestRealDashboardPayloads:
     The dialog sends explicit nulls for unset optional config fields, which
     hand-written fixtures do not, and which the config schema rejects.
     """
-
-    @pytest.fixture
-    def client_and_executor(self, monkeypatch):
-        scheduled = mock.AsyncMock()
-        monkeypatch.setattr(executor, 'schedule_request_async', scheduled)
-        app = fastapi.FastAPI()
-        app.include_router(server.router, prefix='/volumes')
-        return TestClient(app), scheduled
-
-    @staticmethod
-    def _post(client, body):
-        with mock.patch.object(fastapi.Request, 'state') as mock_state:
-            mock_state.request_id = 'test-request-id'
-            mock_state.auth_user = None
-            return client.post('/volumes/apply', json=body)
 
     # Create, new PVC: namespace is null whenever the user does not set one.
     CREATE_PVC = {
@@ -269,45 +268,41 @@ class TestRealDashboardPayloads:
     ])
     def test_dialog_payload_is_accepted(self, client_and_executor, body):
         client, scheduled = client_and_executor
-        response = self._post(client, body)
+        response = post_apply(client, body)
         assert response.status_code == 200, response.text
         scheduled.assert_called_once()
 
     def test_null_config_fields_are_dropped_not_forwarded(
             self, client_and_executor):
         client, scheduled = client_and_executor
-        assert self._post(client, self.CREATE_PVC).status_code == 200
+        assert post_apply(client, self.CREATE_PVC).status_code == 200
         forwarded = scheduled.call_args[1]['request_body'].config
         assert 'namespace' not in forwarded
         assert forwarded['storage_class_name'] == 'standard-rwx'
 
 
 class TestFromComponents:
-    """from_components must round-trip cloud/region/zone via the infra string."""
+    """from_components must preserve the resolved cloud/region/zone exactly."""
 
-    @pytest.mark.parametrize('cloud,region,zone', [
-        ('kubernetes', 'my-context', None),
-        ('kubernetes', 'arn:aws:eks:us-west-2:1:cluster/prod', None),
-        ('kubernetes', None, None),
-        ('aws', 'us-east-1', 'us-east-1a'),
-        ('aws', 'us-east-1', None),
-        ('runpod', None, 'CA-MTL-1'),
-    ])
-    def test_infra_string_round_trip(self, cloud, region, zone):
-        infra = infra_utils.InfraInfo(cloud, region, zone).to_str()
-        parsed = infra_utils.InfraInfo.from_str(infra)
-        assert (parsed.cloud, parsed.region, parsed.zone) == (cloud, region,
-                                                              zone)
-
-    @pytest.mark.parametrize('cloud,region,zone,vol_type,size', [
-        ('kubernetes', 'my-context', None, volume.VolumeType.PVC.value, '1Gi'),
-        ('kubernetes', 'arn:aws:eks:us-west-2:1:cluster/prod', None,
-         volume.VolumeType.PVC.value, '1Gi'),
-        ('runpod', None, 'CA-MTL-1',
-         volume.VolumeType.RUNPOD_NETWORK_VOLUME.value, '100'),
-    ])
-    def test_volume_keeps_resolved_components(self, cloud, region, zone,
-                                              vol_type, size):
+    @pytest.mark.parametrize(
+        'cloud,region,zone,vol_type,size',
+        [
+            ('kubernetes', 'my-context', None, volume.VolumeType.PVC.value,
+             '1Gi'),
+            ('kubernetes', 'arn:aws:eks:us-west-2:1:cluster/prod', None,
+             volume.VolumeType.PVC.value, '1Gi'),
+            # An SSH node pool is a context named ssh-<pool>. Serializing this
+            # through an infra string dropped the prefix.
+            ('kubernetes', 'ssh-mypool', None, volume.VolumeType.PVC.value,
+             '1Gi'),
+            ('kubernetes', None, None, volume.VolumeType.PVC.value, '1Gi'),
+            ('runpod', None, 'CA-MTL-1',
+             volume.VolumeType.RUNPOD_NETWORK_VOLUME.value, '100'),
+            ('runpod', 'us-east', 'CA-MTL-1',
+             volume.VolumeType.RUNPOD_NETWORK_VOLUME.value, '100'),
+        ])
+    def test_resolved_components_survive(self, cloud, region, zone, vol_type,
+                                         size):
         vol = volume_lib.Volume.from_components(name='ok-vol',
                                                 type=vol_type,
                                                 cloud=cloud,

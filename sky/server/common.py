@@ -774,6 +774,31 @@ def handle_request_error(response: 'requests.Response') -> None:
                 f'{response.text}')
 
 
+def raise_if_rejected_synchronously(response: 'requests.Response') -> None:
+    """Raises the server's own error for a synchronous 400.
+
+    An endpoint that validates before enqueuing replies 400 with a serialized
+    exception instead of a request id; without this the SDK would surface a raw
+    HTTPError. Guarded like the 403 branch of `handle_request_error`: a non-JSON
+    body (a proxy's HTML error page) leaves the caller's normal path alone.
+
+    Endpoints opt in by calling this before `get_request_id`.
+    """
+    if response.status_code != 400:
+        return
+    detail = None
+    try:
+        payload = response.json()
+        if isinstance(payload, dict):
+            detail = payload.get('detail')
+    except Exception:  # pylint: disable=broad-except
+        detail = None
+    if detail is None:
+        return
+    with ux_utils.print_exception_no_traceback():
+        raise exceptions.deserialize_exception(detail)
+
+
 def get_request_id(response: 'requests.Response') -> RequestId[T]:
     handle_request_error(response)
     request_id = response.headers.get('X-Skypilot-Request-ID')

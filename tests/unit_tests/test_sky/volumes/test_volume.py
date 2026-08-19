@@ -894,15 +894,19 @@ class TestHostPathVolume:
             )
             vol.validate()
 
-    def test_hostpath_volume_root_path(self):
-        """Test hostPath volume with root path raises error."""
-        with pytest.raises(ValueError, match='must not be the root directory'):
+    # '/..' and friends are absolute and resolve to the root, so a literal
+    # '/' comparison lets them through.
+    @pytest.mark.parametrize('host_path',
+                             ['/', '/..', '/mnt/../..', '/./..', '/../../..'])
+    def test_hostpath_volume_root_path(self, host_path):
+        """Test hostPath volume resolving to the root raises error."""
+        with pytest.raises(ValueError, match='must not resolve to the root'):
             vol = volume_lib.HostPathVolume(
                 name='my-host-vol',
                 type='k8s-hostpath',
                 infra='k8s',
                 use_existing=True,
-                config={'host_path': '/'},
+                config={'host_path': host_path},
             )
             vol.validate()
 

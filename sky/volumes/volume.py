@@ -1,4 +1,5 @@
 """Volume types and access modes."""
+import os
 from typing import Any, Dict, Optional
 
 from sky import clouds
@@ -116,16 +117,23 @@ class Volume:
         `from_yaml_config` takes an `infra` string; callers that hold the
         resolved components instead (e.g. the volume apply request body) come
         through here so both end up in the same constructor.
+
+        Only the cloud goes through `infra`. Round-tripping a region through
+        that string is lossy -- a Kubernetes context named `ssh-<pool>` comes
+        back as `<pool>` -- so region and zone are assigned directly.
         """
-        return cls.from_yaml_config({
+        volume = cls.from_yaml_config({
             'name': name,
             'type': type,
-            'infra': infra_utils.InfraInfo(cloud, region, zone).to_str(),
+            'infra': cloud,
             'size': size,
             'labels': labels,
             'use_existing': use_existing,
             'config': config,
         })
+        volume.region = region
+        volume.zone = zone
+        return volume
 
     def to_yaml_config(self) -> Dict[str, Any]:
         """Convert the Volume to a dictionary."""
@@ -259,8 +267,12 @@ class HostPathVolume(Volume):
         if not host_path.startswith('/'):
             raise ValueError(
                 f'host_path must be an absolute path, got: {host_path!r}')
-        if host_path == '/':
-            raise ValueError('host_path must not be the root directory \'/\'')
+        # Normalize first: '/..' and '/mnt/../..' are absolute paths that
+        # resolve to the root, so a literal comparison misses them.
+        if os.path.normpath(host_path) == '/':
+            raise ValueError(
+                f'host_path must not resolve to the root directory: '
+                f'{host_path!r}')
 
 
 class RunpodNetworkVolume(Volume):
