@@ -416,9 +416,11 @@ def test_api_login_env_endpoint_with_matching_flag(
         client_sdk.api_login(endpoint + '/')
 
     mock_check.assert_called_with(endpoint)
-    # Still treated as an env var login, so nothing is written to the config.
+    # An explicit --endpoint is persisted even when the variable names the same
+    # endpoint: that is what the flag documents, and the config then agrees with
+    # what is in effect.
     config = skypilot_config.get_user_config()
-    assert 'endpoint' not in config.get('api_server', {})
+    assert config['api_server']['endpoint'] == endpoint
 
 
 def _login_with_sa_token(endpoint: str, token: str = "sky_test_token") -> None:
@@ -901,9 +903,11 @@ def test_api_login_user_hash_server_healthy(monkeypatch: pytest.MonkeyPatch,
 
 def test_api_login_clears_residual_sa_token(monkeypatch: pytest.MonkeyPatch,
                                             tmp_path: Path):
-    """After login with sa token, a subsequent login without token should clear
-    the residual sa token from config before the first health check, so the
-    server can return NEEDS_AUTH and trigger the SSO flow."""
+    """After login with sa token, a subsequent login without token must not
+    authenticate with the residual sa token, so the server can return NEEDS_AUTH
+    and trigger the SSO flow. The token is hidden in memory for the duration of
+    the login and removed from the config file once the login has succeeded, so
+    that a login which fails part way through leaves the credential alone."""
     config_path = tmp_path / "config.yaml"
     user_hash_path = tmp_path / "user_hash"
     monkeypatch.setattr('sky.utils.common_utils.USER_HASH_FILE',
@@ -934,9 +938,9 @@ def test_api_login_clears_residual_sa_token(monkeypatch: pytest.MonkeyPatch,
     assert config['api_server']['service_account_token'] == 'sky_test_token'
     assert user_hash_path.read_text() == sa_user_hash
 
-    # Step 2: Login again without token. The residual sa token should be
-    # cleared before the first health check. With the sa token gone, the
-    # server returns NEEDS_AUTH, triggering the SSO flow.
+    # Step 2: Login again without token. The residual sa token must not be
+    # visible to the first health check. With the sa token gone, the server
+    # returns NEEDS_AUTH, triggering the SSO flow.
     sa_token_at_health_check = []
 
     def _capture_check_server_healthy(endpoint):
@@ -952,11 +956,24 @@ def test_api_login_clears_residual_sa_token(monkeypatch: pytest.MonkeyPatch,
         with pytest.raises(StopIteration):
             client_sdk.api_login(test_endpoint)
 
-    # The sa token must have been cleared from config BEFORE the first
-    # health check was made.
+    # The sa token must not have been visible to the first health check.
     assert sa_token_at_health_check[0] is None
+    # This login was aborted, so the credential is still on disk.
+    config = skypilot_config.get_user_config()
+    assert config['api_server']['service_account_token'] == 'sky_test_token'
+
+    # Step 3: A login that completes removes it, since the cookies it saved are
+    # the credential for this endpoint from now on.
+    with mock.patch('sky.server.common.check_server_healthy') as mock_check:
+        mock_check.return_value = (
+            server_common.ApiServerStatus.HEALTHY,
+            server_common.ApiServerInfo(
+                status=server_common.ApiServerStatus.HEALTHY,
+                basic_auth_enabled=False))
+        client_sdk.api_login(test_endpoint)
     config = skypilot_config.get_user_config()
     assert 'service_account_token' not in config.get('api_server', {})
+    assert config['api_server']['endpoint'] == test_endpoint
 
 
 def test_api_login_syncs_hash_from_final_health_check(

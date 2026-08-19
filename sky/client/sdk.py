@@ -3049,9 +3049,11 @@ def _resolve_login_endpoint(endpoint: Optional[str]) -> Tuple[str, bool]:
         endpoint: The endpoint explicitly requested by the user, if any.
 
     Returns:
-        A tuple of the endpoint to log into, and whether it came from the
-        environment variable, in which case it must not be persisted to the
-        config file.
+        A tuple of the endpoint to log into, and whether the environment
+        variable was its only source, in which case it must not be persisted to
+        the config file. An explicit `--endpoint` is always persisted, which is
+        what the flag documents; the variable overriding it afterwards is the
+        user's own doing.
     """
     env_endpoint = os.environ.get(constants.SKY_API_SERVER_URL_ENV_VAR)
     if env_endpoint is None:
@@ -3083,6 +3085,12 @@ def _resolve_login_endpoint(endpoint: Optional[str]) -> Tuple[str, bool]:
                 'the environment variable, or run unset '
                 f'{constants.SKY_API_SERVER_URL_ENV_VAR} to clear the '
                 'environment variable.')
+
+    if endpoint is not None:
+        # Same endpoint, explicitly asked for: honor `--endpoint` and persist
+        # it. `sky api info` suggests `sky api login --relogin -e <endpoint>`
+        # with the endpoint it resolved, which can be this one.
+        return _validate_endpoint(endpoint), False
 
     # The environment variable takes precedence over the config file for every
     # command, so it is already the effective endpoint; we only need to
@@ -3358,19 +3366,15 @@ def api_login(endpoint: Optional[str] = None,
     # first health check, so it uses cookie-based auth and the server can
     # correctly return NEEDS_AUTH when SSO is required.
     with contextlib.ExitStack() as stack:
-        residual_token: Optional[str] = None
-        if from_env:
-            # Leave the config file alone: the endpoint from the environment
-            # variable is already in effect, and the configured endpoint still
-            # needs its own credential. The residual token only has to be out of
-            # the way for the requests this login makes, so hide it in memory
-            # and remove it from disk once the login has actually succeeded.
-            residual_token = skypilot_config.get_nested(
-                ('api_server', 'service_account_token'), None)
-            if residual_token is not None:
-                stack.enter_context(_without_service_account_token())
-        else:
-            _save_config_updates(endpoint=endpoint)
+        # Nothing is written to the config file until the login has succeeded:
+        # a login that fails should neither repoint the config nor destroy the
+        # credential of the endpoint it is pointing at. The residual token only
+        # has to be out of the way for the requests this login makes, so hide it
+        # in memory for the duration.
+        residual_token: Optional[str] = skypilot_config.get_nested(
+            ('api_server', 'service_account_token'), None)
+        if residual_token is not None:
+            stack.enter_context(_without_service_account_token())
         server_status, api_server_info = server_common.check_server_healthy(
             endpoint)
         if server_status == server_common.ApiServerStatus.NEEDS_AUTH or relogin:
@@ -3504,11 +3508,13 @@ def api_login(endpoint: Optional[str] = None,
         _show_logged_in_message(endpoint, dashboard_url,
                                 final_api_server_info.user, server_status)
 
+    # The login succeeded, so the cookies it saved are the credential for this
+    # endpoint from now on. Drop the residual token, which would otherwise be
+    # sent in their place. Anything that failed above leaves the file untouched.
     if residual_token is not None:
-        # The login succeeded, so the cookies it saved are the credential for
-        # this endpoint from now on. Drop the token, which would otherwise be
-        # sent in their place. Anything that failed above leaves it untouched.
         _clear_service_account_token()
+    if not from_env:
+        _save_config_updates(endpoint=endpoint)
 
 
 @usage_lib.entrypoint
