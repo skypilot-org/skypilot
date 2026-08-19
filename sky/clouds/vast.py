@@ -31,9 +31,6 @@ class Vast(clouds.Cloud):
              'are non-trivial on Vast.'),
         clouds.CloudImplementationFeatures.CUSTOM_DISK_TIER:
             ('Customizing disk tier is not supported yet on Vast.'),
-        clouds.CloudImplementationFeatures.CUSTOM_NETWORK_TIER:
-            ('Custom network tier is currently not supported in '
-             f'{_REPR}.'),
         clouds.CloudImplementationFeatures.STORAGE_MOUNTING:
             ('Mounting object stores is not supported on Vast.'),
         clouds.CloudImplementationFeatures.HIGH_AVAILABILITY_CONTROLLERS:
@@ -223,6 +220,8 @@ class Vast(clouds.Cloud):
             default_value={},
             override_configs=resources.cluster_config_overrides,
         )
+        network_tier = (resources.network_tier or
+                        resources_utils.NetworkTier.STANDARD)
 
         return {
             'instance_type': resources.instance_type,
@@ -231,6 +230,7 @@ class Vast(clouds.Cloud):
             'image_id': image_id,
             'secure_only': secure_only,
             'create_instance_kwargs': create_instance_kwargs or {},
+            'network_tier': network_tier.value,
         }
 
     def _get_feasible_launchable_resources(

@@ -91,3 +91,58 @@ SkyPilot starts its Ray cluster when provisioning nodes:
      pkill -f "ray.*[=:]6379"
 
 For running Ray workloads on SkyPilot, refer to the :ref:`distributed jobs documentation <dist-jobs>`.
+
+Provisioning readiness and job states
+-------------------------------------
+
+A launch passes through two distinct state layers: the provider instance must
+first become a usable cluster, and only then does the SkyPilot job state
+machine advance. "Running" at the provider layer does not imply a running job.
+
+**Provider instance readiness**
+
+- RunPod (``sky/provision/runpod/instance.py``): an instance counts as ready
+  only when the pod reports ``desiredStatus == RUNNING`` *and* exposes a
+  public SSH port mapping. A pod can show Running in the RunPod console while
+  its container crash-loops and never maps SSH; provisioning then waits until
+  the caller's launch timeout. On-demand GPU pods are created through RunPod's
+  REST API with an explicit ``dockerEntrypoint`` override, so images do not
+  need a shell-compatible entrypoint (spot and CPU pods still go through the
+  GraphQL SDK and do). Each region attempt filters its data centers against
+  the REST API's accepted list and the live per-data-center GPU availability
+  matrix, so stale zones and empty data centers fail over in about a second
+  instead of a create-and-fail round trip.
+- Vast (``sky/provision/vast/instance.py``): provisioning selects a live
+  marketplace offer at launch time, waits until no instance is in a
+  transitional state (bounded by ``vast.provision_timeout``), and requires
+  ``actual_status == running`` plus a head instance. Vast's agent runs the
+  SkyPilot bootstrap via the offer's onstart script, independent of the image
+  entrypoint.
+
+After instance readiness, SkyPilot must reach the container over SSH with the
+injected key and start its runtime (Ray and skylet); only then is the cluster
+``UP``. Everything in this layer is what region failover and launch timeouts
+guard.
+
+**Job state machine**
+
+Job states (``sky/skylet/job_lib.py``) are provider-independent and advance
+``INIT → PENDING → SETTING_UP → RUNNING`` inside the cluster:
+
+.. list-table::
+   :header-rows: 1
+
+   * - Transition to
+     - Conditions
+   * - ``PENDING``
+     - Generated Ray driver started; waiting for in-cluster resources.
+   * - ``SETTING_UP``
+     - Ray placement granted; task ``setup`` script executing.
+   * - ``RUNNING``
+     - Cluster ``UP``, placement group granted, and ``setup`` exited 0 on
+       every node. ``set_job_started()`` in the generated driver is the only
+       writer.
+
+``RUNNING`` means the ``run`` command has started, not that the workload is
+healthy: a crashing ``run`` command transitions ``RUNNING → FAILED``, and a
+failing ``setup`` ends in ``FAILED_SETUP`` without ever reaching ``RUNNING``.

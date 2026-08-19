@@ -14,27 +14,31 @@ _sym_db = _symbol_database.Default()
 
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n&sky/schemas/generated/autostopv1.proto\x12\x0b\x61utostop.v1\"H\n\x04Hook\x12\x0b\n\x03run\x18\x01 \x01(\t\x12\"\n\x06\x65vents\x18\x02 \x03(\x0e\x32\x12.autostop.v1.Event\x12\x0f\n\x07timeout\x18\x03 \x01(\x05\"\xf8\x01\n\x12SetAutostopRequest\x12\x14\n\x0cidle_minutes\x18\x01 \x01(\x05\x12\x0f\n\x07\x62\x61\x63kend\x18\x02 \x01(\t\x12.\n\x08wait_for\x18\x03 \x01(\x0e\x32\x1c.autostop.v1.AutostopWaitFor\x12\x0c\n\x04\x64own\x18\x04 \x01(\x08\x12\x11\n\x04hook\x18\x05 \x01(\tH\x00\x88\x01\x01\x12\x19\n\x0chook_timeout\x18\x06 \x01(\x05H\x01\x88\x01\x01\x12 \n\x05hooks\x18\x07 \x03(\x0b\x32\x11.autostop.v1.Hook\x12\x13\n\x0b\x63lear_hooks\x18\x08 \x01(\x08\x42\x07\n\x05_hookB\x0f\n\r_hook_timeout\"\x15\n\x13SetAutostopResponse\"\x17\n\x15IsAutostoppingRequest\"1\n\x16IsAutostoppingResponse\x12\x17\n\x0fis_autostopping\x18\x01 \x01(\x08*\x90\x01\n\x0f\x41utostopWaitFor\x12!\n\x1d\x41UTOSTOP_WAIT_FOR_UNSPECIFIED\x10\x00\x12\"\n\x1e\x41UTOSTOP_WAIT_FOR_JOBS_AND_SSH\x10\x01\x12\x1a\n\x16\x41UTOSTOP_WAIT_FOR_JOBS\x10\x02\x12\x1a\n\x16\x41UTOSTOP_WAIT_FOR_NONE\x10\x03*T\n\x05\x45vent\x12\x15\n\x11\x45VENT_UNSPECIFIED\x10\x00\x12\x0e\n\nEVENT_STOP\x10\x01\x12\x14\n\x10\x45VENT_PREEMPTION\x10\x02\x12\x0e\n\nEVENT_DOWN\x10\x03\x32\xbe\x01\n\x0f\x41utostopService\x12P\n\x0bSetAutostop\x12\x1f.autostop.v1.SetAutostopRequest\x1a .autostop.v1.SetAutostopResponse\x12Y\n\x0eIsAutostopping\x12\".autostop.v1.IsAutostoppingRequest\x1a#.autostop.v1.IsAutostoppingResponseb\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n&sky/schemas/generated/autostopv1.proto\x12\x0b\x61utostop.v1\"H\n\x04Hook\x12\x0b\n\x03run\x18\x01 \x01(\t\x12\"\n\x06\x65vents\x18\x02 \x03(\x0e\x32\x12.autostop.v1.Event\x12\x0f\n\x07timeout\x18\x03 \x01(\x05\"\xac\x03\n\x12SetAutostopRequest\x12\x14\n\x0cidle_minutes\x18\x01 \x01(\x05\x12\x0f\n\x07\x62\x61\x63kend\x18\x02 \x01(\t\x12.\n\x08wait_for\x18\x03 \x01(\x0e\x32\x1c.autostop.v1.AutostopWaitFor\x12\x0c\n\x04\x64own\x18\x04 \x01(\x08\x12\x11\n\x04hook\x18\x05 \x01(\tH\x00\x88\x01\x01\x12\x19\n\x0chook_timeout\x18\x06 \x01(\x05H\x01\x88\x01\x01\x12 \n\x05hooks\x18\x07 \x03(\x0b\x32\x11.autostop.v1.Hook\x12\x13\n\x0b\x63lear_hooks\x18\x08 \x01(\x08\x12\x19\n\x0c\x63luster_hash\x18\t \x01(\tH\x02\x88\x01\x01\x12\x17\n\ngeneration\x18\n \x01(\x03H\x03\x88\x01\x01\x12G\n\x12\x65xecution_strategy\x18\x0b \x01(\x0e\x32&.autostop.v1.AutodownExecutionStrategyH\x04\x88\x01\x01\x42\x07\n\x05_hookB\x0f\n\r_hook_timeoutB\x0f\n\r_cluster_hashB\r\n\x0b_generationB\x15\n\x13_execution_strategy\"8\n\x13SetAutostopResponse\x12!\n\x19supports_durable_autodown\x18\x01 \x01(\x08\"\x17\n\x15IsAutostoppingRequest\"\x9a\x02\n\x16IsAutostoppingResponse\x12\x17\n\x0fis_autostopping\x18\x01 \x01(\x08\x12!\n\x19supports_durable_autodown\x18\x02 \x01(\x08\x12\x19\n\x0c\x63luster_hash\x18\x03 \x01(\tH\x00\x88\x01\x01\x12\x17\n\ngeneration\x18\x04 \x01(\x03H\x01\x88\x01\x01\x12\x42\n\x17\x64urable_execution_state\x18\x05 \x01(\x0e\x32!.autostop.v1.DurableAutodownState\x12\x1a\n\rerror_summary\x18\x06 \x01(\tH\x02\x88\x01\x01\x42\x0f\n\r_cluster_hashB\r\n\x0b_generationB\x10\n\x0e_error_summary*\x90\x01\n\x0f\x41utostopWaitFor\x12!\n\x1d\x41UTOSTOP_WAIT_FOR_UNSPECIFIED\x10\x00\x12\"\n\x1e\x41UTOSTOP_WAIT_FOR_JOBS_AND_SSH\x10\x01\x12\x1a\n\x16\x41UTOSTOP_WAIT_FOR_JOBS\x10\x02\x12\x1a\n\x16\x41UTOSTOP_WAIT_FOR_NONE\x10\x03*\xe9\x01\n\x19\x41utodownExecutionStrategy\x12+\n\'AUTODOWN_EXECUTION_STRATEGY_UNSPECIFIED\x10\x00\x12+\n\'AUTODOWN_EXECUTION_STRATEGY_SERVER_ONLY\x10\x01\x12\x39\n5AUTODOWN_EXECUTION_STRATEGY_HEAD_WITH_SERVER_FALLBACK\x10\x02\x12\x37\n3AUTODOWN_EXECUTION_STRATEGY_LEGACY_HEAD_CREDENTIALS\x10\x03*\xc7\x01\n\x14\x44urableAutodownState\x12&\n\"DURABLE_AUTODOWN_STATE_UNSPECIFIED\x10\x00\x12 \n\x1c\x44URABLE_AUTODOWN_STATE_ARMED\x10\x01\x12\x30\n,DURABLE_AUTODOWN_STATE_HEAD_TEARDOWN_STARTED\x10\x02\x12\x33\n/DURABLE_AUTODOWN_STATE_SERVER_TEARDOWN_REQUIRED\x10\x03*T\n\x05\x45vent\x12\x15\n\x11\x45VENT_UNSPECIFIED\x10\x00\x12\x0e\n\nEVENT_STOP\x10\x01\x12\x14\n\x10\x45VENT_PREEMPTION\x10\x02\x12\x0e\n\nEVENT_DOWN\x10\x03\x32\x98\x02\n\x0f\x41utostopService\x12P\n\x0bSetAutostop\x12\x1f.autostop.v1.SetAutostopRequest\x1a .autostop.v1.SetAutostopResponse\x12X\n\x13\x41pplyAutodownIntent\x12\x1f.autostop.v1.SetAutostopRequest\x1a .autostop.v1.SetAutostopResponse\x12Y\n\x0eIsAutostopping\x12\".autostop.v1.IsAutostoppingRequest\x1a#.autostop.v1.IsAutostoppingResponseb\x06proto3')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
 _builder.BuildTopDescriptorsAndMessages(DESCRIPTOR, 'sky.schemas.generated.autostopv1_pb2', _globals)
 if not _descriptor._USE_C_DESCRIPTORS:
   DESCRIPTOR._loaded_options = None
-  _globals['_AUTOSTOPWAITFOR']._serialized_start=480
-  _globals['_AUTOSTOPWAITFOR']._serialized_end=624
-  _globals['_EVENT']._serialized_start=626
-  _globals['_EVENT']._serialized_end=710
+  _globals['_AUTOSTOPWAITFOR']._serialized_start=929
+  _globals['_AUTOSTOPWAITFOR']._serialized_end=1073
+  _globals['_AUTODOWNEXECUTIONSTRATEGY']._serialized_start=1076
+  _globals['_AUTODOWNEXECUTIONSTRATEGY']._serialized_end=1309
+  _globals['_DURABLEAUTODOWNSTATE']._serialized_start=1312
+  _globals['_DURABLEAUTODOWNSTATE']._serialized_end=1511
+  _globals['_EVENT']._serialized_start=1513
+  _globals['_EVENT']._serialized_end=1597
   _globals['_HOOK']._serialized_start=55
   _globals['_HOOK']._serialized_end=127
   _globals['_SETAUTOSTOPREQUEST']._serialized_start=130
-  _globals['_SETAUTOSTOPREQUEST']._serialized_end=378
-  _globals['_SETAUTOSTOPRESPONSE']._serialized_start=380
-  _globals['_SETAUTOSTOPRESPONSE']._serialized_end=401
-  _globals['_ISAUTOSTOPPINGREQUEST']._serialized_start=403
-  _globals['_ISAUTOSTOPPINGREQUEST']._serialized_end=426
-  _globals['_ISAUTOSTOPPINGRESPONSE']._serialized_start=428
-  _globals['_ISAUTOSTOPPINGRESPONSE']._serialized_end=477
-  _globals['_AUTOSTOPSERVICE']._serialized_start=713
-  _globals['_AUTOSTOPSERVICE']._serialized_end=903
+  _globals['_SETAUTOSTOPREQUEST']._serialized_end=558
+  _globals['_SETAUTOSTOPRESPONSE']._serialized_start=560
+  _globals['_SETAUTOSTOPRESPONSE']._serialized_end=616
+  _globals['_ISAUTOSTOPPINGREQUEST']._serialized_start=618
+  _globals['_ISAUTOSTOPPINGREQUEST']._serialized_end=641
+  _globals['_ISAUTOSTOPPINGRESPONSE']._serialized_start=644
+  _globals['_ISAUTOSTOPPINGRESPONSE']._serialized_end=926
+  _globals['_AUTOSTOPSERVICE']._serialized_start=1600
+  _globals['_AUTOSTOPSERVICE']._serialized_end=1880
 # @@protoc_insertion_point(module_scope)

@@ -3,6 +3,7 @@
 import asyncio
 import atexit
 import glob
+import math
 import multiprocessing
 import os
 import re
@@ -350,6 +351,7 @@ class BurnRateCollector:
 
     def _compute_total(self) -> float:
         total = 0.0
+        unpriced_clusters = []
         clusters = global_user_state.get_clusters()
         for cluster in clusters:
             status = cluster.get('status')
@@ -363,14 +365,26 @@ class BurnRateCollector:
                 continue
 
             # instance_type_to_hourly_cost + accelerators_to_hourly_cost.
-            total += handle.launched_resources.get_cost(
-                _COST_TIME_HORIZON_SECONDS)
+            try:
+                total += handle.launched_resources.get_cost(
+                    _COST_TIME_HORIZON_SECONDS)
+            except ValueError as e:
+                # A capacity-aware catalog can stop listing a location after a
+                # cluster was launched there.  Do not turn a partial estimate
+                # into a misleading total.
+                unpriced_clusters.append(f'{cluster.get("name")}: {e}')
+        if unpriced_clusters:
+            logger.warning(
+                'Could not estimate burn rate for active cluster(s): '
+                '%s', '; '.join(unpriced_clusters))
+            return math.nan
         return total
 
     def describe(self):
         yield prom_core.GaugeMetricFamily(
             'sky_apiserver_total_burn_rate_dollars',
-            'Total estimated hourly spend across all active clusters (USD/hr)',
+            'Total estimated hourly spend across all active clusters (USD/hr; '
+            'NaN when an active cluster cannot be priced)',
             labels=['type'],
         )
 

@@ -1,3 +1,4 @@
+import copy
 import os
 import tempfile
 from unittest import mock
@@ -10,6 +11,7 @@ import pytest
 from sky import exceptions
 from sky import resources as resources_lib
 from sky import task
+from sky.provision import docker_utils
 from sky.utils import git
 from sky.utils import registry
 
@@ -755,6 +757,134 @@ def test_docker_login_config_redacted_in_display_yaml_secrets():
     exec_docker = exec_resources.get('_docker_login_config')
     assert exec_docker is not None
     assert exec_docker['password'] == 'super-secret-password'
+
+
+def test_redact_task_yaml_dict_recursively_redacts_without_mutation():
+    """Debug redaction must not mutate reusable task YAML data."""
+    task_yaml = {
+        'name': 'visible-task',
+        'envs': {
+            'SAFE_ENV': 'visible-env',
+            'API_TOKEN': 'env-token',
+        },
+        'secrets': {
+            'INLINE_SECRET': 'inline-secret',
+            'PASSWORD': 'secrets:literal-secret',
+            'secrets:workspace.REFERENCED_SECRET': None,
+            'NULL_SECRET': None,
+        },
+        'managed_secrets': [
+            'secrets:personal.LIST_REFERENCE',
+            {
+                'workspace.MOUNT_REFERENCE': {
+                    'mount_path': '/var/run/secrets/mounted'
+                }
+            },
+        ],
+        'resources': {
+            'any_of': [{
+                '_docker_login_config': {
+                    'username': 'registry-user',
+                    'password': 'registry-password',
+                },
+                'provider': {
+                    'registry': {
+                        'auth': {
+                            'passphrase': 'registry-passphrase',
+                            'token': 'provider-token',
+                            'secret': 'provider-secret',
+                            'api-key': 'provider-api-key',
+                            'access_key': 'provider-access-key',
+                            'private key': 'provider-private-key',
+                            'client-secret': 'provider-client-secret',
+                            'Authorization': 'Bearer provider-authorization',
+                            'Auth-Header': 'provider-auth-header',
+                        }
+                    }
+                },
+            }]
+        },
+    }
+    original_yaml = copy.deepcopy(task_yaml)
+
+    redacted_yaml = task.redact_task_yaml_dict(task_yaml)
+
+    assert task_yaml == original_yaml
+    assert redacted_yaml['name'] == 'visible-task'
+    assert redacted_yaml['envs'] == {
+        'SAFE_ENV': 'visible-env',
+        'API_TOKEN': '<redacted>',
+    }
+    assert redacted_yaml['secrets'] == {
+        'INLINE_SECRET': '<redacted>',
+        'PASSWORD': '<redacted>',
+        'secrets:workspace.REFERENCED_SECRET': None,
+        'NULL_SECRET': None,
+    }
+    assert redacted_yaml['managed_secrets'] == original_yaml['managed_secrets']
+    registry_auth = redacted_yaml['resources']['any_of'][0]['provider'][
+        'registry']['auth']
+    assert redacted_yaml['resources']['any_of'][0]['_docker_login_config'][
+        'username'] == 'registry-user'
+    assert registry_auth == '<redacted>'
+    assert (redacted_yaml['resources']['any_of'][0]['_docker_login_config']
+            ['password'] == '<redacted>')
+
+
+def test_redact_task_yaml_dict_redacts_nested_sensitive_values_as_a_whole():
+    task_yaml = {
+        'authorization': {
+            'value': 'Bearer raw-secret',
+        },
+        'secrets': {
+            'MY_SECRET': {
+                'value': 'raw-secret',
+            },
+            'secrets:workspace.REFERENCED_SECRET': None,
+        },
+        'managed_secrets': ['secrets:workspace.MANAGED_SECRET'],
+    }
+    original_yaml = copy.deepcopy(task_yaml)
+
+    redacted_yaml = task.redact_task_yaml_dict(task_yaml)
+
+    assert task_yaml == original_yaml
+    assert redacted_yaml['authorization'] == '<redacted>'
+    assert redacted_yaml['secrets']['MY_SECRET'] == '<redacted>'
+    assert (redacted_yaml['secrets']['secrets:workspace.REFERENCED_SECRET'] is
+            None)
+    assert redacted_yaml['managed_secrets'] == original_yaml['managed_secrets']
+
+
+def test_redact_task_yaml_dict_keeps_non_sensitive_fields():
+    task_yaml = {
+        'envs': {
+            'AUTH_MODE': 'bearer',
+            'TOKENIZER': 'bert-base',
+            'SECRET_NAME': 'registry-credential',
+        },
+        'provider': {
+            'access_key_id': 'credential-identifier',
+            'authorization_mode': 'iam',
+        },
+    }
+
+    redacted_yaml = task.redact_task_yaml_dict(task_yaml)
+
+    assert redacted_yaml == task_yaml
+
+
+def test_docker_login_config_repr_redacts_password():
+    docker_login_config = docker_utils.DockerLoginConfig(
+        username='registry-user',
+        password='registry-password',
+        server='registry.example.com',
+    )
+
+    config_repr = repr(docker_login_config)
+
+    assert 'registry-password' not in config_repr
+    assert 'registry-user' in config_repr
 
 
 def make_mock_volume_config(name='vol1',
