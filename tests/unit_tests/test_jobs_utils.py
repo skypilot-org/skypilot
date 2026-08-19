@@ -1464,3 +1464,114 @@ class TestCleanupExpiredApiAccessTokens:
     def test_no_expired_tokens_is_noop(self, mock_get_expired):
         mock_get_expired.return_value = []
         assert utils.cleanup_expired_api_access_tokens() == 0
+
+
+def _make_window(min_elapsed_seconds=60, min_retries=3):
+    return utils.TransientStatusCheckWindow(
+        min_elapsed_seconds=min_elapsed_seconds, min_retries=min_retries)
+
+
+class TestTransientStatusCheckWindow:
+    """A run of failed status checks ends only when *both* budgets are spent.
+
+    Either budget alone is unreliable. A single status-check round can outlast
+    the time budget by itself, because the cluster-status refresh that runs
+    before recovery performs its own retried probes -- so a time-only budget
+    can be spent before even one retry happens, and the job is recovered
+    having never been retried. Conversely, a burst of checks that each fail
+    immediately can exhaust a retry-only budget within seconds, long before a
+    transient condition has had a chance to clear.
+    """
+
+    def test_fresh_window_is_not_exhausted(self):
+        window = _make_window()
+        assert not window.active
+        assert not window.exhausted
+        assert window.retries == 0
+        assert window.elapsed == 0.0
+
+    def test_time_alone_does_not_exhaust_the_window(self):
+        clock = {'t': 1000.0}
+        with mock.patch.object(time, 'time', side_effect=lambda: clock['t']):
+            window = _make_window(min_elapsed_seconds=60, min_retries=3)
+            window.record_failure()
+            # One round that takes far longer than the whole time budget.
+            clock['t'] += 10_000
+            assert window.elapsed >= 60
+            assert window.retries == 0
+            assert not window.exhausted, (
+                'a slow round must not spend the window before any retry')
+
+    def test_retries_alone_do_not_exhaust_the_window(self):
+        clock = {'t': 1000.0}
+        with mock.patch.object(time, 'time', side_effect=lambda: clock['t']):
+            window = _make_window(min_elapsed_seconds=60, min_retries=3)
+            window.record_failure()
+            # Failures that each return immediately: the clock barely moves.
+            for _ in range(5):
+                window.next_backoff()
+            assert window.retries >= 3
+            assert window.elapsed < 60
+            assert not window.exhausted, (
+                'a burst of fast failures must not spend the window early')
+
+    def test_both_budgets_spent_exhausts_the_window(self):
+        clock = {'t': 1000.0}
+        with mock.patch.object(time, 'time', side_effect=lambda: clock['t']):
+            window = _make_window(min_elapsed_seconds=60, min_retries=3)
+            window.record_failure()
+            for _ in range(3):
+                window.next_backoff()
+            clock['t'] += 61
+            assert window.exhausted
+
+    def test_reset_clears_both_budgets(self):
+        clock = {'t': 1000.0}
+        with mock.patch.object(time, 'time', side_effect=lambda: clock['t']):
+            window = _make_window(min_elapsed_seconds=60, min_retries=1)
+            window.record_failure()
+            window.next_backoff()
+            clock['t'] += 61
+            assert window.exhausted
+            window.reset()
+            assert not window.active
+            assert window.retries == 0
+            assert window.elapsed == 0.0
+            assert not window.exhausted
+
+    def test_backoff_never_overshoots_the_time_budget(self):
+        clock = {'t': 1000.0}
+        with mock.patch.object(time, 'time', side_effect=lambda: clock['t']):
+            window = _make_window(min_elapsed_seconds=60, min_retries=100)
+            window.record_failure()
+            clock['t'] += 59.5
+            # Only 0.5s of the time budget is left, so the sleep is clamped to
+            # it: the window must be re-evaluated as soon as the budget
+            # expires rather than sleeping past it.
+            assert window.next_backoff() == pytest.approx(0.5)
+            clock['t'] += 10
+            # Past the time budget the retry budget is what remains, so the
+            # plain backoff applies instead of a clamp to a negative value.
+            assert window.next_backoff() > 0
+
+    def test_budgets_are_read_from_config(self):
+        overrides = {
+            ('jobs', 'status_check', 'min_elapsed_seconds'): 600,
+            ('jobs', 'status_check', 'min_retries'): 10,
+        }
+        clock = {'t': 1000.0}
+        with mock.patch.object(
+                utils.skypilot_config,
+                'get_nested',
+                side_effect=lambda keys, default_value, **kwargs: overrides.get(
+                    tuple(keys), default_value)), \
+             mock.patch.object(time, 'time', side_effect=lambda: clock['t']):
+            window = utils.TransientStatusCheckWindow()
+            window.record_failure()
+            for _ in range(9):
+                window.next_backoff()
+            clock['t'] += 601
+            assert not window.exhausted, (
+                'the configured retry budget was not honored')
+            window.next_backoff()
+            assert window.exhausted

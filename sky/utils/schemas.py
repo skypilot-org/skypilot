@@ -1857,6 +1857,27 @@ def get_config_schema():
             'properties': props,
         }
 
+    # Budgets bounding how long the managed-job controller tolerates
+    # consecutive failures of its job-status check before treating the job as
+    # unhealthy and recovering it. Recovery is only triggered once *both*
+    # budgets are exhausted; see
+    # sky.jobs.utils.TransientStatusCheckWindow.
+    jobs_status_check_schema = {
+        'type': 'object',
+        'required': [],
+        'additionalProperties': False,
+        'properties': {
+            'min_elapsed_seconds': {
+                'type': 'number',
+                'minimum': 0,
+            },
+            'min_retries': {
+                'type': 'integer',
+                'minimum': 0,
+            },
+        },
+    }
+
     cloud_configs = {
         'aws': {
             'type': 'object',
@@ -2866,8 +2887,10 @@ def get_config_schema():
             'db': {
                 'type': 'string',
             },
-            'jobs': _get_controller_schema(
-                extra_properties=_extra_jobs_properties,),
+            'jobs': _get_controller_schema(extra_properties={
+                'status_check': jobs_status_check_schema,
+                **_extra_jobs_properties,
+            },),
             'serve': _get_controller_schema(),
             'allowed_clouds': allowed_clouds,
             'admin_policy': admin_policy_schema,
