@@ -3117,9 +3117,14 @@ Valid daemon names are:
 - ``skypilot-status-refresh-daemon``
 - ``skypilot-volume-status-refresh-daemon``
 - ``managed-job-status-refresh-daemon``
+- ``vast-catalog-refresh-daemon``
 
 ``log_level``
     Log level to set for the daemon. Valid values are ``DEBUG``, ``INFO`` and ``WARNING``.
+
+``interval_seconds``
+    Refresh interval for ``vast-catalog-refresh-daemon``. Default: ``1200``
+    (20 minutes).
 
 .. code-block:: yaml
 
@@ -3130,6 +3135,8 @@ Valid daemon names are:
       log_level: INFO
     managed-job-status-refresh-daemon:
       log_level: WARNING
+    vast-catalog-refresh-daemon:
+      interval_seconds: 1200 # Refresh the Vast catalog every 20 minutes
 
 .. _config-yaml-metrics:
 
