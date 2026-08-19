@@ -1318,3 +1318,35 @@ tests:
       - matchRegex:
           path: spec.template.spec.containers[0].args[2]
           pattern: "exec sky api start .*--host=::"
+
+  # Verifies the API container keeps the current startup command and shell
+  # arguments when command and args overrides are unset.
+  - it: should use the built-in API command and args by default
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].command
+          value:
+            - tini
+            - --
+      - equal:
+          path: spec.template.spec.containers[0].args[0]
+          value: /bin/sh
+      - equal:
+          path: spec.template.spec.containers[0].args[1]
+          value: -c
+
+  # Verifies custom startup work runs after SkyPilot initialization and before
+  # the chart-owned API server process starts, without replacing tini.
+  - it: should run the pre-start hook before the official API server command
+    set:
+      apiService.preStartHook: |-
+        echo "Custom pre-start hook"
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].command
+          value:
+            - tini
+            - --
+      - matchRegex:
+          path: spec.template.spec.containers[0].args[2]
+          pattern: '(?s)initialize_configmap_sync_on_startup.*Custom pre-start hook.*exec sky api start'

@@ -36,6 +36,11 @@ apiService:
     # echo "Installing admin policy"
     # pip install git+https://github.com/michaelvll/admin-policy-examples
 
+  # Shell commands to run after SkyPilot startup initialization and before the
+  # API server starts. The hook must exit successfully; do not use exec.
+  # @schema type: [string, null]
+  preStartHook: null
+
   # Upgrade strategy for the API server, available options are:
   # - Recreate: delete the old pod first and create a new one (has downtime).
   # - RollingUpdate: [EXPERIMENTAL] create a new pod first, wait for it to be ready, then delete the old one (zero downtime).
