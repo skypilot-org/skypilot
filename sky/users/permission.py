@@ -1,9 +1,9 @@
 """Permission service for SkyPilot API Server."""
-import concurrent.futures as futures
 import contextlib
 import hashlib
 import logging
 import os
+import queue
 import threading
 import time
 from typing import Dict, Generator, List, Optional, Set, Tuple
@@ -94,14 +94,19 @@ def _claim_within_ttl(cache: Dict[str, float], key: str, ttl: float,
     if now - cache.get(key, 0.0) < ttl:
         return False
     if len(cache) >= cap:
-        for expired in [k for k, at in cache.items() if now - at >= ttl]:
-            del cache[expired]
+        # Snapshot with list() and remove with pop(): several auth-executor
+        # threads reach this at once, and iterating a dict another thread is
+        # writing raises, as does deleting a key it already removed. Losing
+        # that race should change which entries go, not fail the request.
+        for cached, at in list(cache.items()):
+            if now - at >= ttl:
+                cache.pop(cached, None)
         if len(cache) >= cap:
             # Everything is live and we are still over: drop the oldest half,
             # which costs those principals one extra pass, not all of them.
-            for old, _ in sorted(cache.items(),
-                                 key=lambda kv: kv[1])[:cap // 2]:
-                del cache[old]
+            oldest = sorted(list(cache.items()), key=lambda kv: kv[1])
+            for cached, _ in oldest[:cap // 2]:
+                cache.pop(cached, None)
     cache[key] = now
     return True
 
@@ -179,11 +184,13 @@ class PermissionService:
         # behalf, and the lock guarding it. See `_probe_unknown_principal`.
         self._probe_cooldown_until: float = 0.0
         self._probe_lock = threading.Lock()
-        # Repairs queued on `_repair_executor`, and the executor itself --
-        # created on first use so importing this module (the CLI does) never
+        # Queued repairs, the worker draining them, and the lock over both --
+        # started on first use so importing this module (the CLI does) never
         # starts a thread. See `_schedule_role_repair`.
+        self._repair_queue: 'queue.Queue[str]' = queue.Queue()
         self._repair_in_flight: Set[str] = set()
-        self._repair_executor: Optional[futures.ThreadPoolExecutor] = None
+        self._repair_worker: Optional[threading.Thread] = None
+        self._repair_lock = threading.Lock()
 
     def initialize(self):
         self._lazy_initialize(full_initialize=True)
@@ -716,21 +723,43 @@ class PermissionService:
         answer 503 under the very contention that strands principals. This
         request stays denied; the next one finds a role.
         """
-        if not self.claim_role_seed_attempt(user_id):
-            return
-        with self._lock:
+        with self._repair_lock:
             if len(self._repair_in_flight) >= _REPAIR_MAX_IN_FLIGHT:
                 logger.warning(
                     f'Not queueing a role repair for {user_id}: '
                     f'{_REPAIR_MAX_IN_FLIGHT} already pending. Something is '
                     f'stranding principals faster than they can be repaired.')
                 return
-            if self._repair_executor is None:
-                self._repair_executor = futures.ThreadPoolExecutor(
-                    max_workers=1, thread_name_prefix='role-repair')
+            if user_id in self._repair_in_flight:
+                return
+            # Claimed last: a claim spent while the queue was full would make
+            # this principal wait out a TTL for a repair that never ran.
+            if not self.claim_role_seed_attempt(user_id):
+                return
             self._repair_in_flight.add(user_id)
-            executor = self._repair_executor
-        executor.submit(self._run_role_repair, user_id)
+            if self._repair_worker is None:
+                self._repair_worker = threading.Thread(
+                    target=self._drain_role_repairs,
+                    name='role-repair',
+                    daemon=True)
+                self._repair_worker.start()
+        self._repair_queue.put(user_id)
+
+    def _drain_role_repairs(self) -> None:
+        """Run queued repairs one at a time, forever.
+
+        One worker on purpose: each repair takes the distributed policy lock,
+        and the contention that strands principals is what running them in
+        parallel would feed. A daemon thread, so a repair waiting on that lock
+        cannot delay interpreter exit -- the lock is released either way when
+        the process dies.
+        """
+        while True:
+            user_id = self._repair_queue.get()
+            try:
+                self._run_role_repair(user_id)
+            finally:
+                self._repair_queue.task_done()
 
     def _run_role_repair(self, user_id: str) -> None:
         """Body of a queued repair. Never raises: nothing awaits it."""
@@ -745,7 +774,7 @@ class PermissionService:
                            f'request retries: '
                            f'{common_utils.format_exception(e)}')
         finally:
-            with self._lock:
+            with self._repair_lock:
                 self._repair_in_flight.discard(user_id)
 
     def _log_denied_principal(self, user_id: str, path: str,
@@ -779,7 +808,11 @@ class PermissionService:
     def _remember_role_seen(self, user_id: str) -> None:
         """Record that this principal holds a role, for `probably_has_role`."""
         if len(self._role_seen) >= _NO_ROLE_PROBE_CACHE_MAX:
-            self._role_seen.clear()
+            # Half, not all: clearing sends every principal back through a
+            # confirmation off the loop at the same moment. No timestamps in a
+            # set, so which half is arbitrary.
+            for stale in list(self._role_seen)[:_NO_ROLE_PROBE_CACHE_MAX // 2]:
+                self._role_seen.discard(stale)
         self._role_seen.add(user_id)
 
     def role_seed_missing(self, user_id: str) -> bool:
@@ -885,9 +918,13 @@ class PermissionService:
             # reload is its own outage.
             roles = self._probe_unknown_principal(user_id)
             if not _recognized_roles(roles):
-                # Off-request, so the write never lands inside the auth
-                # deadline: this request stays denied, the next one is not.
-                self._schedule_role_repair(user_id)
+                if not roles:
+                    # Off-request, so the write never lands inside the auth
+                    # deadline: this request stays denied, the next one is not.
+                    # Only for an empty role: seeding fills a gap, and a name
+                    # nobody recognizes is not one -- queueing it would spin,
+                    # and spend a slot the genuinely role-less need.
+                    self._schedule_role_repair(user_id)
                 self._log_denied_principal(user_id, path, method)
                 return True
         # Admin wins over viewer when a user holds both — viewer's

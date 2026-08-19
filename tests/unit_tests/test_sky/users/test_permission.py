@@ -2545,9 +2545,11 @@ class TestScheduledRoleRepair:
         submitted = []
         with mock.patch.object(worker, '_run_role_repair', submitted.append):
             worker._schedule_role_repair('ghost')
-            assert worker._repair_executor is not None
-            worker._repair_executor.shutdown(wait=True)
+            worker._repair_queue.join()
         assert submitted == ['ghost']
+        assert worker._repair_worker.daemon, (
+            'a non-daemon worker delays interpreter exit by however long the '
+            'policy lock makes a repair wait')
 
     def test_queueing_is_claimed_once_per_ttl(self, policy_db):
         worker = policy_db()
@@ -2555,33 +2557,53 @@ class TestScheduledRoleRepair:
         with mock.patch.object(worker, '_run_role_repair') as run:
             for _ in range(5):
                 worker._schedule_role_repair('ghost')
-            assert worker._repair_executor is not None
-            worker._repair_executor.shutdown(wait=True)
+            worker._repair_queue.join()
         assert run.call_count == 1
 
     def test_a_burst_is_bounded(self, policy_db):
         """The per-principal claim bounds the rate; this bounds the burst."""
         worker = policy_db()
         worker.enforcer.load_policy()
-        with mock.patch.object(worker, '_run_role_repair'):
-            for i in range(permission._REPAIR_MAX_IN_FLIGHT + 10):
-                worker._schedule_role_repair(f'ghost{i}')
-            in_flight = len(worker._repair_in_flight)
-            assert worker._repair_executor is not None
-            worker._repair_executor.shutdown(wait=True)
+        release = threading.Event()
+        # Hold the worker on the first repair so the queue cannot drain while
+        # the burst is being measured.
+        with mock.patch.object(worker, '_run_role_repair',
+                               lambda _: release.wait(10)):
+            try:
+                for i in range(permission._REPAIR_MAX_IN_FLIGHT + 10):
+                    worker._schedule_role_repair(f'ghost{i}')
+                in_flight = len(worker._repair_in_flight)
+            finally:
+                release.set()
+                worker._repair_queue.join()
         assert in_flight <= permission._REPAIR_MAX_IN_FLIGHT
 
-    def test_no_thread_until_one_is_needed(self):
-        """The CLI imports this module; it must not start a thread pool."""
-        assert permission.PermissionService()._repair_executor is None
-
-    def test_the_repair_seeds_and_the_next_check_passes(self, policy_db):
+    def test_a_claim_is_not_spent_when_the_queue_is_full(self, policy_db):
+        """Otherwise that principal waits out a TTL for a repair never run."""
         worker = policy_db()
         worker.enforcer.load_policy()
-        assert worker.check_endpoint_permission('ghost', '/users/export', 'GET')
+        worker._repair_in_flight = {
+            f'other{i}' for i in range(permission._REPAIR_MAX_IN_FLIGHT)
+        }
+
+        worker._schedule_role_repair('ghost')
+
+        assert worker.claim_role_seed_attempt('ghost'), (
+            'the claim was consumed by a queueing attempt that did nothing')
+
+    def test_no_thread_until_one_is_needed(self):
+        """The CLI imports this module; it must not start a thread."""
+        assert permission.PermissionService()._repair_worker is None
+
+    def test_a_denial_reaches_the_seed(self, policy_db):
+        """Gate -> queue -> worker -> seed, in one process."""
+        worker = policy_db()
+        worker.enforcer.load_policy()
 
         with mock.patch.object(permission, 'seed_new_user_role') as seed:
-            worker._run_role_repair('ghost')
+            assert worker.check_endpoint_permission('ghost', '/users/export',
+                                                    'GET')
+            worker._repair_queue.join()
         seed.assert_called_once_with('ghost')
 
     def test_a_failed_repair_is_swallowed(self, policy_db):
