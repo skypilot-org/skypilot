@@ -16,6 +16,7 @@ import traceback
 from typing import (Any, Callable, Dict, Generator, List, NamedTuple, NoReturn,
                     Optional, Set, Tuple)
 import uuid
+import weakref
 
 import anyio
 import colorama
@@ -1077,9 +1078,22 @@ class RequestTaskFilter:
         filters = []
         filter_params: List[Any] = []
         if self.status is not None:
-            status_placeholders = ','.join(['?'] * len(self.status))
-            filters.append(f'status IN ({status_placeholders})')
-            filter_params.extend(status.value for status in self.status)
+            # Inline the status values as literals instead of binding them.
+            # The partial indexes on this table (e.g. ``status_name_idx``,
+            # predicated on the active statuses) can only be used when the
+            # planner can prove the query's status predicate implies the
+            # index predicate, which SQLite does at prepare time and thus
+            # never for bound parameters: with placeholders this query is a
+            # full table scan. The values are members of the RequestStatus
+            # enum (enforced here), not caller input, so interpolating them
+            # is safe.
+            assert all(
+                isinstance(status, RequestStatus) for status in self.status), (
+                    f'status filter must be RequestStatus members, got '
+                    f'{self.status}')
+            status_literals = ','.join(
+                f'\'{status.value}\'' for status in self.status)
+            filters.append(f'status IN ({status_literals})')
         if self.include_request_names is not None:
             name_placeholders = ','.join(['?'] *
                                          len(self.include_request_names))
@@ -1149,6 +1163,99 @@ async def get_api_request_ids_start_with(incomplete: str) -> List[str]:
     """Get a list of API request ids for shell completion."""
     return await request_storage.get_request_backend(
     ).get_api_request_ids_start_with(incomplete)
+
+
+class _BatchedStatusPoller:
+    """Serves point status polls of active requests from one shared snapshot.
+
+    Every loop that supervises an in-flight request — a log stream waiting
+    for its request to be scheduled, a tail checking for cancellation, the
+    coroutine executor's poll task — issues the same point lookup once per
+    tick. The lookups are identical in shape and dominated by connection
+    acquisition rather than execution, so N concurrent supervisors cost N
+    queries per tick even though one query answers all of them. With
+    hundreds of launches parked WAITING (e.g. for Kueue admission), the
+    supervision polls alone can saturate the request DB's connection layer
+    and drag P95 of every request-DB function above 1s.
+
+    Instead, keep a snapshot of (status, status_msg) for every active
+    (PENDING / WAITING / RUNNING) request, refreshed at most every
+    ``_MAX_STALENESS`` seconds by whichever poller asks first; concurrent
+    pollers await the same refresh (single-flight) and read from it. The
+    snapshot query is served by the ``status_name_idx`` partial index, so
+    it only ever touches active rows. A request absent from the snapshot
+    has finished, vanished, or was created after the snapshot was taken —
+    cases the caller must act on precisely — so it falls back to an
+    authoritative point lookup: at most one point lookup per supervisor
+    transition instead of one per supervisor per tick.
+    """
+
+    # Upper bound on how stale a served status may be. All current callers
+    # poll on a 0.5-1s cadence, so this halves at most one tick's freshness
+    # while collapsing N queries/tick into <= 1/_MAX_STALENESS queries/s.
+    _MAX_STALENESS = 0.5
+
+    def __init__(self) -> None:
+        self._snapshot: Dict[str, StatusWithMsg] = {}
+        self._snapshot_time: float = float('-inf')
+        self._refresh_lock = asyncio.Lock()
+
+    async def get(self, request_id: str) -> Optional[StatusWithMsg]:
+        snapshot = await self._fresh_snapshot()
+        status = snapshot.get(request_id)
+        if status is not None:
+            return status
+        return await get_request_status_async(request_id, include_msg=True)
+
+    async def _fresh_snapshot(self) -> Dict[str, StatusWithMsg]:
+        loop_time = asyncio.get_running_loop().time
+        if loop_time() - self._snapshot_time < self._MAX_STALENESS:
+            return self._snapshot
+        async with self._refresh_lock:
+            # The refresh may have run while this poller waited for the
+            # lock; reuse it instead of refreshing again.
+            if loop_time() - self._snapshot_time < self._MAX_STALENESS:
+                return self._snapshot
+            active = await get_request_tasks_async(
+                RequestTaskFilter(
+                    status=RequestStatus.active_statuses(),
+                    fields=['request_id', 'status', COL_STATUS_MSG]))
+            snapshot = {
+                request.request_id: StatusWithMsg(request.status,
+                                                  request.status_msg)
+                for request in active
+            }
+            # Assign both only after the query succeeded, so a failed
+            # refresh neither poisons the snapshot nor marks it fresh.
+            self._snapshot = snapshot
+            self._snapshot_time = loop_time()
+            return self._snapshot
+
+
+# One poller per event loop: uvicorn workers and the executor each run
+# their own loop (today in separate processes, where this is simply the
+# per-process singleton). Weak keys let short-lived loops (e.g. in tests)
+# drop their poller when they are garbage collected.
+_status_pollers: 'weakref.WeakKeyDictionary[Any, _BatchedStatusPoller]' = (
+    weakref.WeakKeyDictionary())
+
+
+async def get_request_status_batched(
+        request_id: str) -> Optional[StatusWithMsg]:
+    """Batched equivalent of ``get_request_status_async(include_msg=True)``.
+
+    For supervision poll loops: amortizes all concurrent pollers on this
+    event loop into one shared active-requests snapshot query per
+    ``_MAX_STALENESS`` interval. The result may be up to ``_MAX_STALENESS``
+    seconds stale for an active request; finished or missing requests are
+    always answered by an authoritative point lookup.
+    """
+    loop = asyncio.get_running_loop()
+    poller = _status_pollers.get(loop)
+    if poller is None:
+        poller = _BatchedStatusPoller()
+        _status_pollers[loop] = poller
+    return await poller.get(request_id)
 
 
 def get_active_file_mounts_blob_ids() -> set:

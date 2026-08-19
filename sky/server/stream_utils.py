@@ -126,14 +126,14 @@ async def wait_for_request_to_start(
             last_waiting_msg = waiting_msg
             # Padding forces browser rendering of the streamed chunk.
             yield waiting_msg + ' ' * 4096 + '\n'
-        # Sleep shortly to avoid storming the DB and CPU and allow other
-        # coroutines to run.
-        # TODO(aylei): we should use a better mechanism to avoid busy
-        # polling the DB, which can be a bottleneck for high-concurrency
-        # requests.
+        # Sleep shortly to avoid storming the CPU and allow other
+        # coroutines to run. The status poll itself is batched: all
+        # concurrent waiters share one active-requests snapshot query per
+        # tick, so many parked requests (e.g. launches queued for quota)
+        # no longer translate into that many DB polls per second.
         await asyncio.sleep(backoff.current_backoff())
-        status_with_msg = await requests_lib.get_request_status_async(
-            request_id, include_msg=True)
+        status_with_msg = await requests_lib.get_request_status_batched(
+            request_id)
         if status_with_msg is None:
             # Request record vanished (e.g. deleted while polling).
             break
@@ -287,8 +287,14 @@ async def _tail_log_file(
                 should_check_status = True
             if request_id is not None and should_check_status:
                 last_status_check_time = current_time
-                req_status = await requests_lib.get_request_status_async(
+                # Batched: concurrent tails share one snapshot query per
+                # tick instead of one point lookup per tail. Terminal
+                # statuses still come from an authoritative point lookup.
+                req_status = await requests_lib.get_request_status_batched(
                     request_id)
+                if req_status is None:
+                    # Request record vanished (e.g. deleted while tailing).
+                    break
                 if req_status.status > requests_lib.RequestStatus.RUNNING:
                     if (req_status.status ==
                             requests_lib.RequestStatus.CANCELLED):
