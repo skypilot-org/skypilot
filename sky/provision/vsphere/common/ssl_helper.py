@@ -2,6 +2,7 @@
 """
 import ssl
 import typing
+from typing import Optional
 
 from sky.adaptors import common as adaptors_common
 
@@ -11,19 +12,19 @@ else:
     requests = adaptors_common.LazyImport('requests')
 
 
-def get_unverified_context():
-    """    Get an unverified ssl context. Used to disable the server certificate
+def get_unverified_context() -> Optional[ssl.SSLContext]:
+    """Get an unverified ssl context. Used to disable the server certificate
     verification.
-    @return: unverified ssl context.
+    @return: unverified ssl context or None if unavailable.
     """
-    context = None
+    context: Optional[ssl.SSLContext] = None
     if hasattr(ssl, '_create_unverified_context'):
         context = ssl._create_unverified_context()  # pylint: disable=protected-access
     return context
 
 
-def get_unverified_session():
-    """    Get a requests session with cert verification disabled.
+def get_unverified_session() -> 'requests.Session':
+    """Get a requests session with cert verification disabled.
     Also disable the insecure warnings message.
     Note this is not recommended in production code.
     @return: a requests session with verification disabled.
