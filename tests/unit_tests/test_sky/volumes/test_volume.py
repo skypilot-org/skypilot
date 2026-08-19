@@ -148,11 +148,13 @@ class TestVolume:
         volume = volume_lib.Volume(name='test', type='k8s-pvc', size='100Gi')
         volume.validate_name()  # Should not raise
 
-        # Test with None name
-        volume.name = None
-        with pytest.raises(AssertionError) as exc_info:
-            volume.validate_name()
-        assert 'Volume name must be set' in str(exc_info.value)
+        # A missing name is a user-facing error, not an assertion: it has to
+        # survive serialization to the client.
+        for missing in (None, ''):
+            volume.name = missing
+            with pytest.raises(ValueError) as exc_info:
+                volume.validate_name()
+            assert 'Volume name must be set' in str(exc_info.value)
 
     def test_volume_validate_size_method(self):
         """Test Volume.validate_size method."""

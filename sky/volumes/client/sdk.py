@@ -69,6 +69,9 @@ def apply(
 
     Returns:
         The request ID of the apply request.
+
+    Raises:
+        ValueError: If the volume is invalid.
     """
     body = payloads.VolumeApplyBody(
         name=volume.name,
@@ -84,6 +87,12 @@ def apply(
     )
     response = server_common.make_authenticated_request(
         'POST', '/volumes/apply', json=json.loads(body.model_dump_json()))
+    # The server rejects an invalid volume synchronously; surface its message
+    # instead of the raw HTTPError get_request_id would raise.
+    if response.status_code == 400:
+        with ux_utils.print_exception_no_traceback():
+            raise exceptions.deserialize_exception(
+                response.json().get('detail'))
     return server_common.get_request_id(response)
 
 

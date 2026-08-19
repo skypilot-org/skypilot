@@ -1,0 +1,225 @@
+"""Unit tests for the validation /volumes/apply enforces.
+
+These use the real cloud registry rather than a mocked cloud: the point is that
+the actual rules apply on the write path, not that a mocked verdict is
+forwarded.
+"""
+
+from unittest import mock
+
+import fastapi
+from fastapi.testclient import TestClient
+import pytest
+
+from sky import exceptions
+from sky.server import common as server_common
+from sky.server.requests import executor
+from sky.utils import infra_utils
+from sky.utils import volume
+from sky.volumes import volume as volume_lib
+from sky.volumes.client import sdk as volumes_sdk
+from sky.volumes.server import server
+
+
+def _pvc_body(**overrides):
+    body = {
+        'name': 'ok-vol3',
+        'volume_type': volume.VolumeType.PVC.value,
+        'cloud': 'kubernetes',
+        'region': 'my-context',
+        'size': '100Gi',
+        'config': {
+            'access_mode': volume.VolumeAccessMode.READ_WRITE_MANY.value,
+        },
+    }
+    body.update(overrides)
+    return body
+
+
+def _hostpath_body(**overrides):
+    body = {
+        'name': 'ok-hostpath',
+        'volume_type': volume.VolumeType.HOSTPATH.value,
+        'cloud': 'kubernetes',
+        'region': 'my-context',
+        'config': {
+            'host_path': '/mnt/data'
+        },
+    }
+    body.update(overrides)
+    return body
+
+
+def _runpod_body(**overrides):
+    body = {
+        'name': 'ok-runpod',
+        'volume_type': volume.VolumeType.RUNPOD_NETWORK_VOLUME.value,
+        'cloud': 'runpod',
+        'zone': 'CA-MTL-1',
+        'size': '100',
+        'config': {},
+    }
+    body.update(overrides)
+    return body
+
+
+class TestVolumeApplyValidation:
+    """/volumes/apply rejects what /volumes/validate rejects."""
+
+    @pytest.fixture
+    def client_and_executor(self, monkeypatch):
+        scheduled = mock.AsyncMock()
+        monkeypatch.setattr(executor, 'schedule_request_async', scheduled)
+        app = fastapi.FastAPI()
+        app.include_router(server.router, prefix='/volumes')
+        return TestClient(app), scheduled
+
+    @staticmethod
+    def _post(client, body):
+        with mock.patch.object(fastapi.Request, 'state') as mock_state:
+            mock_state.request_id = 'test-request-id'
+            mock_state.auth_user = None
+            return client.post('/volumes/apply', json=body)
+
+    @staticmethod
+    def _detail_message(response):
+        # /apply returns a serialized exception for volume errors and a bare
+        # string for its own type/cloud checks.
+        detail = response.json()['detail']
+        if isinstance(detail, str):
+            return detail
+        return detail.get('message', str(detail))
+
+    @pytest.mark.parametrize(
+        'body,expected',
+        [
+            # The bug this file exists for: a name the CLI refuses. The
+            # message has to name the volume, not just recite the rule.
+            (_pvc_body(name='ok_vol3'), "'ok_vol3'"),
+            (_pvc_body(name='ok_vol3'), 'DNS-1123'),
+            (_pvc_body(name='UPPER'), 'DNS-1123'),
+            (_pvc_body(name='-leading-dash'), 'DNS-1123'),
+            (_pvc_body(name=''), 'Volume name must be set'),
+            # A new volume needs a size.
+            (_pvc_body(size=None), 'Size is required for new volumes'),
+            # Labels are checked against the cloud.
+            (_pvc_body(labels={'bad key': 'v'}), 'Invalid label'),
+            # hostPath: absolute, and not the node root.
+            (_hostpath_body(config={'host_path': '/'}), 'root directory'),
+            (_hostpath_body(config={'host_path': 'relative/path'}),
+             'absolute path'),
+            (_hostpath_body(config={}), 'host_path is required'),
+            # RunPod carries the DataCenterId in the zone.
+            (_runpod_body(zone=None), 'DataCenterId is required'),
+        ])
+    def test_invalid_volume_is_rejected(self, client_and_executor, body,
+                                        expected):
+        client, scheduled = client_and_executor
+        response = self._post(client, body)
+        assert response.status_code == 400, response.text
+        assert expected in self._detail_message(response)
+        # Rejected before a request row is created.
+        scheduled.assert_not_called()
+
+    @pytest.mark.parametrize('sent,applied', [
+        ('100', '100'),
+        ('100Gi', '100'),
+        ('1Ti', '1024'),
+        ('2048Mi', '2'),
+    ])
+    def test_size_forwarded_is_the_size_validated(self, client_and_executor,
+                                                  sent, applied):
+        # _get_pvc_spec appends 'Gi', so forwarding a unit-carrying size
+        # verbatim would build an unusable quantity like '100GiGi'.
+        client, scheduled = client_and_executor
+        response = self._post(client, _pvc_body(size=sent))
+        assert response.status_code == 200, response.text
+        body = scheduled.call_args[1]['request_body']
+        assert body.size == applied
+
+    @pytest.mark.parametrize('body', [
+        _pvc_body(),
+        _pvc_body(name='dotted.name'),
+        _hostpath_body(),
+        _runpod_body(),
+        _pvc_body(size=None, use_existing=True),
+    ])
+    def test_valid_volume_is_accepted(self, client_and_executor, body):
+        client, scheduled = client_and_executor
+        response = self._post(client, body)
+        assert response.status_code == 200, response.text
+        scheduled.assert_called_once()
+
+
+class TestFromComponents:
+    """from_components must round-trip cloud/region/zone via the infra string."""
+
+    @pytest.mark.parametrize('cloud,region,zone', [
+        ('kubernetes', 'my-context', None),
+        ('kubernetes', 'arn:aws:eks:us-west-2:1:cluster/prod', None),
+        ('kubernetes', None, None),
+        ('aws', 'us-east-1', 'us-east-1a'),
+        ('aws', 'us-east-1', None),
+        ('runpod', None, 'CA-MTL-1'),
+    ])
+    def test_infra_string_round_trip(self, cloud, region, zone):
+        infra = infra_utils.InfraInfo(cloud, region, zone).to_str()
+        parsed = infra_utils.InfraInfo.from_str(infra)
+        assert (parsed.cloud, parsed.region, parsed.zone) == (cloud, region,
+                                                              zone)
+
+    @pytest.mark.parametrize('cloud,region,zone,vol_type,size', [
+        ('kubernetes', 'my-context', None, volume.VolumeType.PVC.value, '1Gi'),
+        ('kubernetes', 'arn:aws:eks:us-west-2:1:cluster/prod', None,
+         volume.VolumeType.PVC.value, '1Gi'),
+        ('runpod', None, 'CA-MTL-1',
+         volume.VolumeType.RUNPOD_NETWORK_VOLUME.value, '100'),
+    ])
+    def test_volume_keeps_resolved_components(self, cloud, region, zone,
+                                              vol_type, size):
+        vol = volume_lib.Volume.from_components(name='ok-vol',
+                                                type=vol_type,
+                                                cloud=cloud,
+                                                region=region,
+                                                zone=zone,
+                                                size=size)
+        vol.validate()
+        assert (vol.cloud, vol.region, vol.zone) == (cloud, region, zone)
+
+
+class TestSdkApplyRejection:
+    """The SDK surfaces a synchronous rejection as the server's error."""
+
+    @staticmethod
+    def _response(detail):
+        response = mock.MagicMock()
+        response.status_code = 400
+        response.json.return_value = {'detail': detail}
+        return response
+
+    def _volume(self, monkeypatch, detail):
+        # The SDK entrypoint would otherwise try to start a real API server.
+        monkeypatch.setattr(server_common, 'check_server_healthy_or_start_fn',
+                            lambda *a, **kw: None)
+        monkeypatch.setattr(server_common, 'make_authenticated_request',
+                            lambda *a, **kw: self._response(detail))
+        vol = volume_lib.Volume.from_components(
+            name='ok-vol',
+            type=volume.VolumeType.PVC.value,
+            cloud='kubernetes',
+            region='my-context',
+            size='1Gi')
+        return vol
+
+    def test_serialized_exception_detail(self, monkeypatch):
+        detail = exceptions.serialize_exception(
+            ValueError('Invalid volume name: nope'))
+        vol = self._volume(monkeypatch, detail)
+        with pytest.raises(ValueError, match='Invalid volume name'):
+            volumes_sdk.apply(vol)
+
+    def test_plain_string_detail(self, monkeypatch):
+        # The pre-existing 400s on this endpoint return a bare string.
+        vol = self._volume(monkeypatch, 'Invalid volume type: nope')
+        with pytest.raises(RuntimeError, match='Invalid volume type'):
+            volumes_sdk.apply(vol)

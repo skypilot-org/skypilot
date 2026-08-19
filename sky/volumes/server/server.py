@@ -1,5 +1,8 @@
 """REST API for storage management."""
 
+import contextlib
+from typing import Iterator
+
 import fastapi
 
 from sky import clouds
@@ -12,6 +15,7 @@ from sky.server.requests import requests as requests_lib
 from sky.server.requests import role_filter
 from sky.utils import registry
 from sky.utils import volume as volume_utils
+from sky.volumes import volume as volume_lib
 from sky.volumes.server import core
 
 logger = sky_logging.init_logger(__name__)
@@ -61,15 +65,30 @@ async def volume_delete(request: fastapi.Request,
     )
 
 
+@contextlib.contextmanager
+def _volume_errors_as_400() -> Iterator[None]:
+    """Reports volume build/validation failures as a synchronous 400.
+
+    Shared by /validate and /apply so the two cannot disagree on which volumes
+    are legal, or on the error shape clients have to parse.
+    """
+    try:
+        yield
+    except fastapi.HTTPException:
+        # Already a chosen HTTP response; do not re-wrap it as a volume error.
+        raise
+    except Exception as e:
+        requests_lib.set_exception_stacktrace(e)
+        raise fastapi.HTTPException(
+            status_code=400, detail=exceptions.serialize_exception(e)) from e
+
+
 @router.post('/validate')
 async def volume_validate(
         _: fastapi.Request,
         volume_validate_body: payloads.VolumeValidateBody) -> None:
     """Validates a volume."""
-    # pylint: disable=import-outside-toplevel
-    from sky.volumes import volume as volume_lib
-
-    try:
+    with _volume_errors_as_400():
         volume_config = {
             'name': volume_validate_body.name,
             'type': volume_validate_body.volume_type,
@@ -81,10 +100,6 @@ async def volume_validate(
         }
         volume = volume_lib.Volume.from_yaml_config(volume_config)
         volume.validate()
-    except Exception as e:
-        requests_lib.set_exception_stacktrace(e)
-        raise fastapi.HTTPException(status_code=400,
-                                    detail=exceptions.serialize_exception(e))
 
 
 @router.post('/apply')
@@ -128,6 +143,30 @@ async def volume_apply(request: fastapi.Request,
             raise fastapi.HTTPException(
                 status_code=400,
                 detail='Runpod network volume is only supported on Runpod')
+    # Validate here rather than trusting each client to call /validate first:
+    # the dashboard posts straight to this endpoint.
+    with _volume_errors_as_400():
+        volume = volume_lib.Volume.from_components(
+            name=volume_apply_body.name,
+            type=volume_type,
+            cloud=volume_cloud,
+            region=volume_apply_body.region,
+            zone=volume_apply_body.zone,
+            size=volume_apply_body.size,
+            labels=volume_apply_body.labels,
+            use_existing=volume_apply_body.use_existing,
+            # `use_existing` was folded into the config above for core; it is
+            # not part of the volume config schema.
+            config={
+                k: v for k, v in volume_config.items() if k != 'use_existing'
+            },
+        )
+        volume.validate()
+    # Apply exactly what was validated: a size carrying a unit ('100Gi')
+    # normalizes to a different number, and the PVC spec appends 'Gi' to
+    # whatever it is given.
+    volume_apply_body.size = volume.size
+
     await executor.schedule_request_async(
         request_id=request.state.request_id,
         request_name=request_names.RequestName.VOLUME_APPLY,

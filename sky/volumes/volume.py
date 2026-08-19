@@ -99,6 +99,34 @@ class Volume:
 
         raise ValueError(f'Invalid volume type: {vol_type_val}')
 
+    @classmethod
+    def from_components(
+            cls,
+            name: Optional[str] = None,
+            type: Optional[str] = None,  # pylint: disable=redefined-builtin
+            cloud: Optional[str] = None,
+            region: Optional[str] = None,
+            zone: Optional[str] = None,
+            size: Optional[str] = None,
+            labels: Optional[Dict[str, str]] = None,
+            use_existing: Optional[bool] = None,
+            config: Optional[Dict[str, Any]] = None) -> 'Volume':
+        """Creates a Volume from already-resolved cloud, region and zone.
+
+        `from_yaml_config` takes an `infra` string; callers that hold the
+        resolved components instead (e.g. the volume apply request body) come
+        through here so both end up in the same constructor.
+        """
+        return cls.from_yaml_config({
+            'name': name,
+            'type': type,
+            'infra': infra_utils.InfraInfo(cloud, region, zone).to_str(),
+            'size': size,
+            'labels': labels,
+            'use_existing': use_existing,
+            'config': config,
+        })
+
     def to_yaml_config(self) -> Dict[str, Any]:
         """Convert the Volume to a dictionary."""
         return {
@@ -167,7 +195,8 @@ class Volume:
 
     def validate_name(self) -> None:
         """Validates if the volume name is set."""
-        assert self.name is not None, 'Volume name must be set'
+        if not self.name:
+            raise ValueError('Volume name must be set.')
 
     def validate_size(self) -> None:
         """Validates that size is specified for new volumes."""
@@ -177,13 +206,13 @@ class Volume:
                              'use the --size flag.')
 
     def validate_cloud_compatibility(self) -> None:
-        """Validates region, zone, name, labels with the cloud."""
+        """Validates the name and labels against the cloud."""
         cloud_obj = registry.CLOUD_REGISTRY.from_str(self.cloud)
         assert cloud_obj is not None
 
         valid, err_msg = cloud_obj.is_volume_name_valid(self.name)
         if not valid:
-            raise ValueError(f'Invalid volume name: {err_msg}')
+            raise ValueError(f'Invalid volume name {self.name!r}: {err_msg}')
 
         if self.labels:
             for key, value in self.labels.items():
