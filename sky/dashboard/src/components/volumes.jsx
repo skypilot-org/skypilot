@@ -54,6 +54,8 @@ import {
   Filters,
   filterData,
 } from '@/components/shared/FilterSystem';
+import { useUrlFilterState } from '@/hooks/useUrlFilterState';
+import { hrefWithQueryKey } from '@/components/shared/filterSchema';
 import { PluginSlot } from '@/plugins/PluginSlot';
 import { usePluginComponents, useTableColumns } from '@/plugins/PluginProvider';
 import dashboardCache from '@/lib/cache';
@@ -65,19 +67,36 @@ const REFRESH_INTERVAL = REFRESH_INTERVALS.REFRESH_INTERVAL;
 const VOLUMES_PAGE_SIZE_OPTIONS = [10, 30, 50, 100, 200];
 const VOLUMES_PAGE_SIZE_STORAGE_KEY = 'skypilot-volumes-page-size';
 
-// Properties offered by the filter dropdown. `value` keys into `valueList` for
-// the typeahead; `label` is what lands in `filter.property`, which
-// `evaluateCondition` lowercases to look up the field on each volume.
-const PROPERTY_OPTIONS = [
-  { label: 'Name', value: 'name' },
-  { label: 'Status', value: 'status' },
-  { label: 'Infra', value: 'infra' },
-  { label: 'Type', value: 'type' },
-  { label: 'User', value: 'user' },
+// The filterable properties, declared once. `key` is the URL parameter and the
+// `valueList` key for the typeahead; `label` is what lands in
+// `filter.property`, which `evaluateCondition` lowercases to look up the field
+// on each volume.
+const VOLUME_FILTER_SCHEMA = [
+  { key: 'name', label: 'Name', kind: 'text' },
+  { key: 'status', label: 'Status', kind: 'enum', multi: true },
+  { key: 'infra', label: 'Infra', kind: 'text' },
+  { key: 'type', label: 'Type', kind: 'enum', multi: true },
+  { key: 'user', label: 'User', kind: 'text' },
 ];
 
-// Filters are kept in local state only, so there is nothing to sync to the URL.
-const noopUpdateURLParams = () => {};
+const PROPERTY_OPTIONS = VOLUME_FILTER_SCHEMA.map(({ key, label }) => ({
+  label,
+  value: key,
+}));
+
+// Properties whose values are alternatives rather than extra conditions: two
+// Status chips mean "either", every other property replaces.
+const OR_PROPERTIES = VOLUME_FILTER_SCHEMA.filter((e) => e.multi === true).map(
+  (e) => e.label
+);
+const MULTI_VALUE_LABELS = new Set(OR_PROPERTIES);
+
+const addFilter = (prevFilters, property, value) => {
+  const base = MULTI_VALUE_LABELS.has(property)
+    ? prevFilters.filter((f) => !(f.property === property && f.value === value))
+    : prevFilters.filter((f) => f.property !== property);
+  return [...base, { property, operator: ':', value }];
+};
 
 export function Volumes() {
   const router = useRouter();
@@ -100,10 +119,19 @@ export function Volumes() {
   const handleTabChange = useCallback(
     (tab) => {
       setActiveTab(tab);
-      const query = tab === 'volumes' ? {} : { tab };
-      router.replace({ pathname: router.pathname, query }, undefined, {
-        shallow: true,
-      });
+      // Keep whatever else the address bar carries -- the filter params are
+      // written straight to history, so `router.query` may not have caught up
+      // and rebuilding the query from it would drop them.
+      router.replace(
+        hrefWithQueryKey(
+          router.pathname,
+          window.location.search,
+          'tab',
+          tab === 'volumes' ? undefined : tab
+        ),
+        undefined,
+        { shallow: true }
+      );
     },
     [router]
   );
@@ -495,7 +523,8 @@ export function VolumesTable({
   preloadingComplete,
 }) {
   const [data, setData] = useState([]);
-  const [filters, setFilters] = useState([]);
+  // Filters live in the URL, keyed by name, so a filtered view is shareable.
+  const { filters, setFilters } = useUrlFilterState(VOLUME_FILTER_SCHEMA);
   const [sortConfig, setSortConfig] = useState({
     key: null,
     direction: 'ascending',
@@ -577,7 +606,8 @@ export function VolumesTable({
     // resolve the property name to a field.
     return filterData(
       data.map((volume) => ({ ...volume, user: volume.user_name })),
-      filters
+      filters,
+      { orProperties: OR_PROPERTIES }
     );
   }, [data, filters]);
 
@@ -866,18 +896,14 @@ export function VolumesTable({
             propertyList={PROPERTY_OPTIONS}
             valueList={valueList}
             setFilters={setFilters}
-            updateURLParams={noopUpdateURLParams}
+            addFilter={addFilter}
             placeholder="Filter volumes"
           />
         </div>
       </div>
       {filters.length > 0 && (
         <div className="mb-2">
-          <Filters
-            filters={filters}
-            setFilters={setFilters}
-            updateURLParams={noopUpdateURLParams}
-          />
+          <Filters filters={filters} setFilters={setFilters} />
         </div>
       )}
 

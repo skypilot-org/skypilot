@@ -14,6 +14,7 @@ import {
   ChevronDownIcon,
 } from 'lucide-react';
 import { useMobile } from '@/hooks/useMobile';
+import { useUrlFilterState } from '@/hooks/useUrlFilterState';
 import {
   checkGrafanaAvailability,
   getGrafanaUrl,
@@ -110,6 +111,11 @@ const INFRA_PAGE_SIZE_STORAGE_KEY = 'skypilot-infra-page-size';
 // The unified infra table's Name column is wide; allow much longer names
 // before middle-ellipsis truncation kicks in (full name stays in the tooltip).
 const INFRA_NAME_TRUNCATE_LENGTH = 45;
+
+// Non-filter state that belongs in a shared link. `all` is the default and
+// stays out of the URL. The selected context is already a route segment
+// (`/infra/[...context]`), so it needs nothing here.
+const INFRA_VIEW_SCHEMA = [{ key: 'workspace', default: 'all' }];
 
 // Skeleton badge for loading cells - replaces CircularProgress size={12}
 const SkeletonBadge = () => (
@@ -2559,7 +2565,14 @@ export function GPUs() {
 
   // Workspace-aware infrastructure state
   const [workspaceInfrastructure, setWorkspaceInfrastructure] = useState({});
-  const [selectedWorkspace, setSelectedWorkspace] = useState('all');
+  // The workspace scope belongs in the link: it decides which contexts and
+  // clouds the page shows, so a URL without it points somewhere else.
+  const { view, setView } = useUrlFilterState([], INFRA_VIEW_SCHEMA);
+  const selectedWorkspace = view.workspace;
+  const setSelectedWorkspace = useCallback(
+    (next) => setView('workspace', next),
+    [setView]
+  );
   const [availableWorkspaces, setAvailableWorkspaces] = useState([]);
 
   // SSH Node Pool state
