@@ -282,7 +282,7 @@ export const FilterDropdown = ({
         ? addFilter(prevFilters, property, option)
         : [...prevFilters, { property, operator: ':', value: option }];
 
-      updateURLParams(updatedFilters);
+      updateURLParams?.(updatedFilters);
       return updatedFilters;
     });
     if (onFilterAdd) onFilterAdd(property, option);
@@ -299,7 +299,7 @@ export const FilterDropdown = ({
           ? addFilter(prevFilters, property, value)
           : [...prevFilters, { property, operator: ':', value }];
 
-        updateURLParams(updatedFilters);
+        updateURLParams?.(updatedFilters);
         return updatedFilters;
       });
       if (onFilterAdd) onFilterAdd(property, value);
@@ -407,14 +407,14 @@ export const Filters = ({ filters = [], setFilters, updateURLParams }) => {
         (_, _index) => _index !== index
       );
 
-      updateURLParams(updatedFilters);
+      updateURLParams?.(updatedFilters);
 
       return updatedFilters;
     });
   };
 
   const clearFilters = () => {
-    updateURLParams([]);
+    updateURLParams?.([]);
     setFilters([]);
   };
 
