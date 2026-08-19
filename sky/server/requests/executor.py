@@ -65,7 +65,6 @@ from sky.utils import context_utils
 from sky.utils import subprocess_utils
 from sky.utils import tempstore
 from sky.utils import timeline
-from sky.utils import yaml_utils
 from sky.utils.db import db_utils
 from sky.workspaces import constants as workspace_constants
 from sky.workspaces import core as workspaces_core
