@@ -246,6 +246,37 @@ you can use :ref:`task environment variables <env-vars>`:
             Note that the base64 encoding option is only available on Artifact Registry, not Container Registry (GCR).
 
 
+    .. tab-item:: Azure ACR
+        :sync: azure-acr-tab
+
+        We support private Azure Container Registries with an `access token or service principal <https://learn.microsoft.com/en-us/azure/container-registry/container-registry-authentication>`_:
+
+        .. code-block:: yaml
+
+          resources:
+            image_id: docker:<repo>:<tag>
+
+          envs:
+            SKYPILOT_DOCKER_USERNAME: <token-name-or-service-principal-id>
+            SKYPILOT_DOCKER_PASSWORD: <token-or-service-principal-password>
+            SKYPILOT_DOCKER_SERVER: <your-registry>.azurecr.io
+
+        .. note::
+
+            If your cluster is on Azure, SkyPilot will automatically use the VM's managed identity to authenticate with ACR, if the ``SKYPILOT_DOCKER_USERNAME`` and ``SKYPILOT_DOCKER_PASSWORD`` are set to empty strings:
+
+            .. code-block:: yaml
+
+              resources:
+                image_id: docker:<repo>:<tag>
+
+              envs:
+                SKYPILOT_DOCKER_USERNAME: ""
+                SKYPILOT_DOCKER_PASSWORD: ""
+                SKYPILOT_DOCKER_SERVER: <your-registry>.azurecr.io
+
+            **Important**: Ensure the cluster's managed identity has the ``AcrPull`` role on the registry (SkyPilot's default managed identity or a custom one via ``remote_identity``).
+
     .. tab-item:: NVIDIA NGC
         :sync: nvidia-container-registry-tab
 
