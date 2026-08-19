@@ -51,7 +51,8 @@ RUN existing_user=$(getent passwd 1000 | cut -d: -f1) && \
     if [ -n "$existing_group" ]; then groupdel "$existing_group" || true; fi && \
     groupadd -g 1000 sky && \
     useradd -m -s /bin/bash -u 1000 -g 1000 sky && \
-    echo "sky ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
+    echo "sky ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers && \
+    mkdir -p /opt/uv-python && chown sky:sky /opt/uv-python
 
 # Switch to sky user
 USER sky
@@ -66,6 +67,10 @@ SHELL ["/bin/bash", "-c"]
 
 # Install the SkyPilot runtime (uv-managed venv) and other dependencies based
 # on architecture.
+# UV_PYTHON_INSTALL_DIR keeps any interpreter uv downloads out of /home/sky: a
+# pod that mounts a volume over the home directory would otherwise shadow it and
+# break ~/skypilot-runtime. uv only downloads when the requested version is not
+# the system one -- python3.10 is system on 22.04 but not on 24.04.
 # Keep the Ray version below in sync with the one in skylet.constants
 # Keep this section in sync with the custom image optimization recommendations in our docs (kubernetes-getting-started.rst)
 RUN ARCH=${TARGETARCH:-$(case "$(uname -m)" in \
@@ -74,6 +79,7 @@ RUN ARCH=${TARGETARCH:-$(case "$(uname -m)" in \
         *) echo "$(uname -m)" ;; \
     esac)} && \
     export PIP_DISABLE_PIP_VERSION_CHECK=1 && \
+    export UV_PYTHON_INSTALL_DIR=/opt/uv-python && \
     curl -LsSf https://astral.sh/uv/install.sh | sh && \
     $HOME/.local/bin/uv venv ~/skypilot-runtime --seed --python=3.10 && \
     source ~/skypilot-runtime/bin/activate && \
