@@ -8,6 +8,7 @@ from sky import catalog
 from sky import clouds
 from sky import skypilot_config
 from sky.adaptors import common
+from sky.adaptors import vast as vast_adaptor
 from sky.utils import registry
 from sky.utils import resources_utils
 
@@ -255,28 +256,86 @@ class Vast(clouds.Cloud):
         """Returns a list of feasible resources for the given resources."""
         # pylint: disable=import-outside-toplevel
         from sky.catalog import vast_catalog
+        datacenter_only = skypilot_config.get_effective_region_config(
+            cloud='vast',
+            region=resources.region,
+            keys=('datacenter_only',),
+            default_value=False,
+            override_configs=resources.cluster_config_overrides,
+        )
+        reliable_hosts = skypilot_config.get_effective_region_config(
+            cloud='vast',
+            region=resources.region,
+            keys=('reliable_hosts',),
+            default_value=False,
+            override_configs=resources.cluster_config_overrides,
+        )
+        network_tier = (resources.network_tier or
+                        resources_utils.NetworkTier.STANDARD)
+
+        def _offer_requirements(instance_type, region):
+            return vast_adaptor.get_offer_requirements(
+                instance_type,
+                region=region,
+                disk_size=resources.disk_size,
+                datacenter_only=datacenter_only,
+                reliable_hosts=reliable_hosts,
+                network_tier=network_tier,
+            )
+
+        def _admit_live_offers(instance_list, fuzzy_candidate_list):
+            try:
+                snapshot = vast_adaptor.get_live_offer_snapshot()
+            except Exception as exc:  # pylint: disable=broad-except
+                return resources_utils.FeasibleResources(
+                    [], fuzzy_candidate_list,
+                    'Live Vast availability query failed: '
+                    f'{type(exc).__name__}: {exc} Retry the request after '
+                    'confirming Vast credentials and service availability.')
+            if snapshot.error is not None:
+                return resources_utils.FeasibleResources(
+                    [], fuzzy_candidate_list,
+                    'Live Vast availability query failed: '
+                    f'{snapshot.error} Retry the request after confirming '
+                    'Vast credentials and service availability.')
+            admitted_resources = []
+            for instance_type in instance_list:
+                if resources.region is None:
+                    static_regions = (
+                        catalog.get_region_zones_for_instance_type(
+                            instance_type, resources.use_spot, 'vast'))
+                    candidate_regions = [
+                        region.name for region in static_regions
+                    ]
+                else:
+                    candidate_regions = [resources.region]
+                for region in dict.fromkeys(candidate_regions):
+                    requirements = _offer_requirements(instance_type, region)
+                    if not any(
+                            vast_adaptor.offer_matches_requirements(
+                                offer, requirements)
+                            for offer in snapshot.offers):
+                        continue
+                    admitted_resources.append(
+                        resources.copy(
+                            cloud=Vast(),
+                            instance_type=instance_type,
+                            accelerators=None,
+                            cpus=None,
+                            region=region,
+                        ))
+            if admitted_resources:
+                return resources_utils.FeasibleResources(
+                    admitted_resources, fuzzy_candidate_list, None)
+            return resources_utils.FeasibleResources(
+                [], fuzzy_candidate_list,
+                'No live Vast offer matches the static catalog candidates. '
+                'Retry the request to refresh marketplace availability.')
+
         if resources.instance_type is not None:
             assert resources.is_launchable(), resources
             resources = resources.copy(accelerators=None)
-            return resources_utils.FeasibleResources([resources], [], None)
-
-        def _make(instance_list):
-            resource_list = []
-            for instance_type in instance_list:
-                r = resources.copy(
-                    cloud=Vast(),
-                    instance_type=instance_type,
-                    accelerators=None,
-                    cpus=None,
-                )
-                resource_list.append(r)
-            return resource_list
-
-        # Resolve datacenter_only config first (used for all instance filtering)
-        datacenter_only = skypilot_config.get_nested(
-            ('vast', 'datacenter_only'),
-            False,
-            override_configs=resources.cluster_config_overrides)
+            return _admit_live_offers([resources.instance_type], [])
 
         try:
             # Currently, handle a filter on accelerators only.
@@ -295,8 +354,7 @@ class Vast(clouds.Cloud):
                     datacenter_only=datacenter_only)
                 if default_instance_type is None:
                     return resources_utils.FeasibleResources([], [], None)
-                return resources_utils.FeasibleResources(
-                    _make([default_instance_type]), [], None)
+                return _admit_live_offers([default_instance_type], [])
 
             assert len(accelerators) == 1, resources
             acc, acc_count = list(accelerators.items())[0]
@@ -316,10 +374,13 @@ class Vast(clouds.Cloud):
                 return resources_utils.FeasibleResources([],
                                                          fuzzy_candidate_list,
                                                          None)
-            return resources_utils.FeasibleResources(_make(instance_list),
-                                                     fuzzy_candidate_list, None)
+            return _admit_live_offers(instance_list, fuzzy_candidate_list)
         except Exception as exc:  # pylint: disable=broad-except
             from sky.catalog import common as catalog_common
+            if isinstance(exc, ValueError):
+                return resources_utils.FeasibleResources(
+                    [], [], f'Vast live availability requirements are invalid: '
+                    f'{exc}')
             if not isinstance(exc, catalog_common.CatalogFetchError):
                 raise
             return resources_utils.FeasibleResources(

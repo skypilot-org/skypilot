@@ -1,13 +1,17 @@
 """Regression tests for stable Vast resource identities."""
 
 import importlib.util
+import io
 import sys
 from typing import List
 from unittest import mock
 
+import pandas as pd
 import pytest
 
+from sky import clouds
 from sky import exceptions
+from sky.adaptors import vast as vast_adaptor
 from sky.catalog import common
 from sky.catalog import vast_catalog
 from sky.clouds import vast as vast_cloud
@@ -56,6 +60,19 @@ def _make_vast_client(*methods: str) -> mock.Mock:
     client = mock.Mock(spec=[*methods, "client"])
     client.client = mock.Mock(spec=["api_key"])
     client.client.api_key = "test-api-key"
+    if 'search_offers' in methods:
+
+        def search_offers(*_args, **_kwargs):
+            """Return complete live-offer records from focused test fixtures."""
+            return [{
+                'cpu_cores': 4,
+                'cpu_ram': 8192,
+                'disk_space': 30,
+                'geolocation': 'US',
+                **offer,
+            } for offer in client.search_offers.return_value]
+
+        client.search_offers.side_effect = search_offers
     return client
 
 
@@ -68,41 +85,37 @@ def test_vast_catalog_does_not_expose_ephemeral_offer_resolution():
 
 def test_vast_catalog_uses_only_stable_instance_types(monkeypatch):
     """Catalog instance type identifiers must survive marketplace refreshes."""
-    monkeypatch.setattr(common, "fetch_catalog_text",
-                        lambda _filename: _VALID_VAST_CATALOG_CSV)
+    monkeypatch.setattr(vast_catalog, '_df',
+                        pd.read_csv(io.StringIO(_VALID_VAST_CATALOG_CSV)))
     assert all(not str(instance_type).startswith("dynamic-")
                for instance_type in vast_catalog._catalog_df()["InstanceType"])
 
 
 def test_vast_catalog_reuses_snapshot_within_request(monkeypatch):
-    """Vast catalog queries share one stable metadata snapshot per request."""
-    payloads = [
-        _VALID_VAST_CATALOG_CSV,
-        _VALID_VAST_CATALOG_CSV.replace("A100", "H100")
-    ]
+    """Vast catalog queries use local metadata without hosted request fetches."""
+    monkeypatch.setattr(vast_catalog, '_df',
+                        pd.read_csv(io.StringIO(_VALID_VAST_CATALOG_CSV)))
     calls: List[str] = []
-
-    def fetch_catalog_text(filename: str) -> str:
-        calls.append(filename)
-        return payloads.pop(0)
-
-    monkeypatch.setattr(common, "fetch_catalog_text", fetch_catalog_text)
+    monkeypatch.setattr(common, 'fetch_catalog_text',
+                        lambda filename: calls.append(filename))
 
     assert vast_catalog._catalog_df().iloc[0]["AcceleratorName"] == "A100"
     assert vast_catalog._catalog_df().iloc[0]["AcceleratorName"] == "A100"
-    assert calls == ["vast/vms.csv"]
+    assert calls == []
 
     annotations.clear_request_level_cache()
-    assert vast_catalog._catalog_df().iloc[0]["AcceleratorName"] == "H100"
-    assert calls == ["vast/vms.csv", "vast/vms.csv"]
+    assert vast_catalog._catalog_df().iloc[0]["AcceleratorName"] == "A100"
+    assert calls == []
 
 
 def test_vast_catalog_rejects_missing_required_columns(monkeypatch):
+    """Malformed local metadata cannot be used for Vast resource matching."""
     monkeypatch.setattr(
-        common,
-        'fetch_catalog_text',
-        lambda _filename: 'InstanceType,AcceleratorName\nexample,A100\n',
-    )
+        vast_catalog, '_df',
+        pd.DataFrame([{
+            'InstanceType': 'example',
+            'AcceleratorName': 'A100',
+        }]))
 
     with pytest.raises(common.CatalogFetchError,
                        match='missing required columns'):
@@ -110,14 +123,14 @@ def test_vast_catalog_rejects_missing_required_columns(monkeypatch):
 
 
 def test_vast_catalog_rejects_payload_without_gpu_rows(monkeypatch):
+    """A local catalog with no usable GPUs fails before scheduling work."""
     monkeypatch.setattr(
-        common,
-        "fetch_catalog_text",
-        lambda _filename:
-        """InstanceType,AcceleratorName,AcceleratorCount,vCPUs,MemoryGiB,GpuInfo,Price,SpotPrice,Region
+        vast_catalog, '_df',
+        pd.read_csv(
+            io.StringIO(
+                """InstanceType,AcceleratorName,AcceleratorCount,vCPUs,MemoryGiB,GpuInfo,Price,SpotPrice,Region
 small,,0,2,4,,0.1,0.1,any
-""",
-    )
+""")))
 
     with pytest.raises(common.CatalogFetchError, match="no usable GPU rows"):
         vast_catalog._catalog_df()
@@ -136,6 +149,154 @@ def test_vast_feasible_resources_reports_catalog_fetch_failure(monkeypatch):
     assert feasible_resources.resources_list == []
     assert feasible_resources.hint is not None
     assert 'catalog offline' in feasible_resources.hint
+
+
+def test_vast_country_extraction_uses_country_not_continent():
+    """Raw catalog regions must resolve FR, not their trailing EU continent."""
+    assert vast_adaptor.extract_country_code('France, FR, EU') == 'FR'
+
+    with pytest.raises(ValueError, match='country'):
+        vast_adaptor.extract_country_code('France, FRA, EU')
+
+
+def test_vast_live_snapshot_uses_one_broad_query_per_request(monkeypatch):
+    """Multiple candidate checks share one broad live API response per request."""
+    client = mock.Mock(spec=['search_offers'])
+    client.search_offers.return_value = []
+    monkeypatch.setattr(vast_adaptor, 'vast', lambda: client)
+
+    assert vast_adaptor.get_live_offer_snapshot().offers == ()
+    assert vast_adaptor.get_live_offer_snapshot().offers == ()
+
+    client.search_offers.assert_called_once_with(
+        query='chunked=true georegion=true', order='dph_total', limit=10000)
+
+
+def test_vast_live_admission_reuses_one_snapshot_for_static_candidates(
+        monkeypatch):
+    """Static candidates share one live snapshot and retain only exact offers."""
+    monkeypatch.setattr(
+        vast_catalog,
+        'get_instance_type_for_accelerator',
+        lambda *_args, **_kwargs: (['1x-A100-4-8192', '1x-A100-8-16384'], []),
+    )
+    snapshot = vast_adaptor.LiveOfferSnapshot(({
+        'gpu_name': 'A100',
+        'num_gpus': 1,
+        'cpu_cores': 4,
+        'cpu_ram': 8192,
+        'disk_space': 64,
+        'geolocation': 'Paris, FR, EU',
+    },), None)
+    get_live_offer_snapshot = mock.Mock(return_value=snapshot)
+    monkeypatch.setattr(vast_adaptor, 'get_live_offer_snapshot',
+                        get_live_offer_snapshot)
+
+    feasible_resources = vast_cloud.Vast()._get_feasible_launchable_resources(
+        Resources(
+            cloud=vast_cloud.Vast(),
+            accelerators={'A100': 1},
+            region='France, FR, EU',
+            disk_size=64,
+        ))
+
+    assert [
+        resource.instance_type for resource in feasible_resources.resources_list
+    ] == ['1x-A100-4-8192']
+    assert get_live_offer_snapshot.call_count == 1
+
+
+def test_vast_live_admission_pins_unscoped_resources_to_live_region(
+        monkeypatch):
+    """A live French offer cannot leave a feasible resource free to use Spain."""
+    monkeypatch.setattr(
+        vast_catalog,
+        'get_instance_type_for_accelerator',
+        lambda *_args, **_kwargs: (['1x-A100-4-8192'], []),
+    )
+    monkeypatch.setattr(
+        vast_catalog,
+        'get_region_zones_for_instance_type',
+        lambda *_args, **_kwargs: [
+            clouds.Region('France, FR, EU'),
+            clouds.Region('Spain, ES, EU'),
+        ],
+    )
+    monkeypatch.setattr(
+        vast_adaptor,
+        'get_live_offer_snapshot',
+        lambda: vast_adaptor.LiveOfferSnapshot(({
+            'gpu_name': 'A100',
+            'num_gpus': 1,
+            'cpu_cores': 4,
+            'cpu_ram': 8192,
+            'disk_space': 64,
+            'geolocation': 'Paris, FR, EU',
+        },), None),
+    )
+
+    feasible_resources = vast_cloud.Vast()._get_feasible_launchable_resources(
+        Resources(
+            cloud=vast_cloud.Vast(),
+            accelerators={'A100': 1},
+            disk_size=64,
+        ))
+
+    assert [resource.region for resource in feasible_resources.resources_list
+           ] == ['France, FR, EU']
+
+
+def test_vast_explicit_instance_type_fails_closed_when_live_query_fails(
+        monkeypatch):
+    """Explicit Vast types remain inadmissible when the live lookup errors."""
+    snapshot = vast_adaptor.LiveOfferSnapshot(offers=(),
+                                              error='Vast API timed out')
+    monkeypatch.setattr(vast_adaptor, 'get_live_offer_snapshot',
+                        lambda: snapshot)
+
+    feasible_resources = vast_cloud.Vast()._get_feasible_launchable_resources(
+        Resources(
+            cloud=vast_cloud.Vast(),
+            instance_type='1x-A100-4-8192',
+            region='France, FR, EU',
+            disk_size=64,
+        ))
+
+    assert feasible_resources.resources_list == []
+    assert feasible_resources.hint is not None
+    assert 'Live Vast availability query failed' in feasible_resources.hint
+    assert 'Retry the request' in feasible_resources.hint
+
+
+def test_vast_live_offer_match_enforces_host_and_network_policy():
+    """Reliable best-tier admission rejects hosts missing required safeguards."""
+    requirements = vast_adaptor.get_offer_requirements(
+        '1x-A100-4-8192',
+        region='France, FR, EU',
+        disk_size=64,
+        datacenter_only=True,
+        reliable_hosts=True,
+        network_tier='best',
+    )
+    matching_offer = {
+        'gpu_name': 'A100',
+        'num_gpus': 1,
+        'cpu_cores': 4,
+        'cpu_ram': 8192,
+        'disk_space': 64,
+        'geolocation': 'Paris, FR, EU',
+        'verified': True,
+        'datacenter': True,
+        'hosting_type': 1,
+        'reliability': 0.99,
+        'inet_down': 1000,
+        'inet_up': 1000,
+    }
+
+    assert vast_adaptor.offer_matches_requirements(matching_offer, requirements)
+    matching_offer['inet_up'] = 999
+    assert not vast_adaptor.offer_matches_requirements(matching_offer,
+                                                       requirements)
 
 
 def test_live_search_without_capacity_raises_typed_resource_error(monkeypatch):
@@ -219,7 +380,7 @@ def test_launch_reconciles_eventual_instance_visibility(monkeypatch):
     assert vast_utils.launch(
         name="test-head",
         instance_type="1x-A100-4-8192",
-        region="catalog-region",
+        region="US",
         disk_size=30,
         image_name="vastai/base:0.0.2",
         ports=None,
@@ -253,7 +414,7 @@ def test_launch_normalizes_template_startup_env_and_generated_login(
     assert vast_utils.launch(
         name="test-head",
         instance_type="1x-RTX_A6000-4-8192",
-        region="catalog-region",
+        region="US",
         disk_size=30,
         image_name="ignored-with-template",
         ports=None,
@@ -295,6 +456,14 @@ def test_launch_uses_reliable_filters_and_excludes_failed_machine(monkeypatch):
         "machine_id": 1,
         "gpu_name": "A100",
         "num_gpus": 1,
+        "cpu_cores": 4,
+        "cpu_ram": 8192,
+        "disk_space": 30,
+        "geolocation": "US",
+        "verified": True,
+        "datacenter": True,
+        "hosting_type": 1,
+        "inet_down": 1000,
         "dph_total": 0.4,
         "reliability": 0.99,
     }, {
@@ -302,6 +471,14 @@ def test_launch_uses_reliable_filters_and_excludes_failed_machine(monkeypatch):
         "machine_id": 2,
         "gpu_name": "A100",
         "num_gpus": 1,
+        "cpu_cores": 4,
+        "cpu_ram": 8192,
+        "disk_space": 30,
+        "geolocation": "US",
+        "verified": True,
+        "datacenter": True,
+        "hosting_type": 1,
+        "inet_down": 1000,
         "dph_total": 0.5,
         "reliability": 0.99,
     }]
@@ -316,7 +493,7 @@ def test_launch_uses_reliable_filters_and_excludes_failed_machine(monkeypatch):
     assert vast_utils.launch(
         name="test-head",
         instance_type="1x-A100-4-8192",
-        region="catalog-region",
+        region="US",
         disk_size=30,
         image_name="vastai/base:0.0.2",
         ports=None,
@@ -546,7 +723,7 @@ def test_launch_rejects_invalid_env_value(monkeypatch):
         vast_utils.launch(
             name="test-head",
             instance_type="1x-A100-4-8192",
-            region="catalog-region",
+            region="US",
             disk_size=30,
             image_name="vastai/base:0.0.2",
             ports=None,
@@ -575,7 +752,7 @@ def test_launch_converts_disappeared_offer_to_typed_capacity_error(monkeypatch):
         vast_utils.launch(
             name="test-head",
             instance_type="1x-A100-4-8192",
-            region="catalog-region",
+            region="US",
             disk_size=30,
             image_name="vastai/base:0.0.2",
             ports=None,
