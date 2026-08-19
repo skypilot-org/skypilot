@@ -284,6 +284,72 @@ function extractJsPath(pluginDescriptor) {
   return null;
 }
 
+// Cache the plugin manifest's JS paths in localStorage so subsequent page
+// loads can begin fetching the bundles in parallel with React hydration,
+// rather than waiting for the in-React useEffect to run `/api/plugins`
+// before queuing any <script> tag. The common cold-cache path (Cloudflare
+// RTT + manifest fetch + serial script downloads) regularly exceeds the
+// 1000ms safety timeout in `LayoutContent`, causing the fallback TopBar
+// to flash before the sidebar plugin can register `layout.navigation`.
+const PLUGIN_MANIFEST_CACHE_KEY = 'sky-plugin-manifest-cache-v1';
+
+function loadCachedManifest() {
+  if (typeof window === 'undefined') return [];
+  try {
+    const cached = localStorage.getItem(PLUGIN_MANIFEST_CACHE_KEY);
+    if (cached) {
+      const parsed = JSON.parse(cached);
+      if (Array.isArray(parsed)) return parsed;
+    }
+  } catch {
+    // Ignore parse errors
+  }
+  return [];
+}
+
+function saveManifestCache(plugins) {
+  if (typeof window === 'undefined') return;
+  try {
+    // Persist only the minimum needed to start a bundle download on the
+    // next page load. We deliberately drop everything else so a stale
+    // cache can't carry forward a stale registration.
+    const minimal = plugins
+      .filter((p) => p && p.js_extension_path)
+      .map((p) => ({
+        js_extension_path: p.js_extension_path,
+        requires_early_init: p.requires_early_init === true,
+      }));
+    localStorage.setItem(PLUGIN_MANIFEST_CACHE_KEY, JSON.stringify(minimal));
+  } catch {
+    // Ignore storage errors (e.g. quota exceeded, private browsing)
+  }
+}
+
+// At module-init time (this runs once when the bundle is parsed, before
+// React mounts), kick off plugin-bundle downloads from the cached
+// manifest. The dedup map (`pluginScriptPromises`) ensures that when the
+// in-React fetch resolves and calls `loadPluginScript` again with the
+// same URL, the existing promise is reused instead of appending a second
+// <script> tag. Plugin bundles deferred-register against
+// `window.SkyDashboardPluginAPI`, so executing before React's hydrate is
+// safe: the plugin code stays idle until the React-side init fires the
+// `plugins-ready` event.
+if (typeof window !== 'undefined') {
+  try {
+    const cached = loadCachedManifest();
+    cached.forEach((entry) => {
+      if (entry && entry.js_extension_path) {
+        loadPluginScript(
+          entry.js_extension_path,
+          entry.requires_early_init === true
+        );
+      }
+    });
+  } catch {
+    // Never block module init on cache replay
+  }
+}
+
 function normalizeNavLink(link) {
   if (!link || !link.id || !link.label || !link.href) {
     console.warn(
@@ -884,6 +950,10 @@ export function PluginProvider({ children }) {
       if (cancelled) {
         return;
       }
+      // Persist the freshly-fetched manifest so the next page load can
+      // begin downloading plugin bundles in parallel with React hydration
+      // (see the module-level cache replay above).
+      saveManifestCache(manifest);
       const loadPromises = [];
       manifest.forEach((pluginDescriptor) => {
         const jsPath = extractJsPath(pluginDescriptor);
