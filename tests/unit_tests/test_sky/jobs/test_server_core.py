@@ -16,6 +16,7 @@ def _forwarded_tail(tail):
     fake_runner.tail_managed_job_logs.return_value = 0
     with mock.patch.object(jobs_core, '_maybe_restart_controller',
                            return_value=mock.MagicMock()), \
+         mock.patch.object(jobs_core, '_reject_inaccessible_job_ids'), \
          mock.patch.object(jobs_core.backend_utils,
                            'get_backend_from_handle',
                            return_value=fake_backend), \
