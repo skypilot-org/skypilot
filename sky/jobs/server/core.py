@@ -1382,6 +1382,21 @@ def queue_v2(
 
     if handle.is_grpc_enabled_with_flag:
         try:
+            grpc_fields = fields
+            if fields is not None and 'exit_codes' in fields:
+                version_request = managed_jobsv1_pb2.GetVersionRequest()
+                version_response = backend_utils.invoke_skylet_with_retries(
+                    lambda: cloud_vm_ray_backend.SkyletClient(
+                        handle.get_grpc_channel(
+                        )).get_managed_job_controller_version(version_request))
+                controller_version = version_response.controller_version
+                supports_exit_codes = (
+                    controller_version.isdigit() and int(controller_version) >=
+                    skylet_constants.MIN_MANAGED_JOB_EXIT_CODES_SKYLET_VERSION)
+                if not supports_exit_codes:
+                    grpc_fields = [
+                        field for field in fields if field != 'exit_codes'
+                    ]
             request = managed_jobsv1_pb2.GetJobTableRequest(
                 skip_finished=skip_finished,
                 accessible_workspaces=(managed_jobsv1_pb2.Workspaces(
@@ -1402,7 +1417,7 @@ def queue_v2(
                 statuses=managed_jobsv1_pb2.Statuses(
                     statuses=statuses) if statuses is not None else None,
                 fields=managed_jobsv1_pb2.Fields(
-                    fields=fields) if fields is not None else None,
+                    fields=grpc_fields) if grpc_fields is not None else None,
                 show_jobs_without_user_hash=show_jobs_without_user_hash,
                 sort_by=sort_by,
                 sort_order=sort_order,

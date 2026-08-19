@@ -6,6 +6,7 @@ import pytest
 from sky.jobs import constants as managed_job_constants
 from sky.jobs.client import sdk as jobs_sdk
 from sky.jobs.client import sdk_async as jobs_sdk_async
+from sky.server import constants as server_constants
 
 
 def _unwrap(fn):
@@ -32,6 +33,23 @@ def _call_raw_queue_v2(**kwargs):
     return request_kwargs['json']
 
 
+def _call_raw_queue_v2_for_server_version(server_version, **kwargs):
+    """Call queue_v2 against a simulated remote API version."""
+    raw_queue_v2 = _unwrap(jobs_sdk.queue_v2)
+    with mock.patch.object(jobs_sdk.versions,
+                           'get_remote_api_version',
+                           return_value=server_version), \
+         mock.patch.object(jobs_sdk.server_common,
+                           'make_authenticated_request',
+                           return_value='response') as mock_request, \
+         mock.patch.object(jobs_sdk.server_common,
+                           'get_request_id',
+                           return_value='request-id'):
+        raw_queue_v2(**kwargs)
+    _, request_kwargs = mock_request.call_args
+    return request_kwargs['json']
+
+
 def test_queue_v2_defaults_to_lightweight_fields():
     # A high remote API version avoids the version-based field stripping so we
     # can assert the full default field set is sent.
@@ -47,6 +65,24 @@ def test_queue_v2_fields_none_requests_all_fields():
     # fields=None is the explicit "give me everything" escape hatch.
     body = _call_raw_queue_v2(refresh=False, fields=None)
     assert body['fields'] is None
+
+
+def test_queue_v2_omits_exit_codes_for_older_servers():
+    """Older servers never receive the unknown exit_codes field selector."""
+    body = _call_raw_queue_v2_for_server_version(
+        server_constants.MIN_MANAGED_JOB_EXIT_CODES_API_VERSION - 1,
+        refresh=False,
+        fields=['job_id', 'exit_codes'])
+    assert body['fields'] == ['job_id']
+
+
+def test_queue_v2_sends_exit_codes_to_supported_servers():
+    """The exit-code selector is sent once the server reaches its API gate."""
+    body = _call_raw_queue_v2_for_server_version(
+        server_constants.MIN_MANAGED_JOB_EXIT_CODES_API_VERSION,
+        refresh=False,
+        fields=['job_id', 'exit_codes'])
+    assert body['fields'] == ['job_id', 'exit_codes']
 
 
 def test_queue_version_2_dispatches_to_queue_v2():

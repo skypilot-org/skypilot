@@ -1418,6 +1418,7 @@ class JobController:
                             failure_type=managed_job_status,
                             failure_reason=failure_reason,
                             end_time=end_time,
+                            exit_codes=exit_codes,
                             callback_func=callback_func)
                         return False
 
