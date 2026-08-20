@@ -12,6 +12,7 @@ import shutil
 import socket
 import sys
 import time
+from typing import List
 
 import colorama
 import hostlist
@@ -71,6 +72,33 @@ def _get_ip_address() -> str:
     # which resolves hostnames the same way. Using `hostname -I` can return
     # Docker bridge IPs (172.17.x.x) first, causing IP mismatch errors.
     return socket.gethostbyname(socket.gethostname())
+
+
+def _get_node_idx(cluster_ips: List[str], ip_addr: str) -> int:
+    """Get the index of the current node within the cluster.
+
+    Slurm's own node index is preferred over IP matching: the IP resolved
+    inside the task can differ from the IP recorded at provisioning time,
+    e.g. for containerized jobs, nodes with several network interfaces, or
+    clusters where NodeAddr/DNS resolves differently on the login node and
+    inside the compute node runtime.
+    """
+    slurm_node_id = os.environ.get('SLURM_NODEID')
+    if slurm_node_id is not None:
+        try:
+            node_idx = int(slurm_node_id)
+        except ValueError:
+            node_idx = -1
+        if 0 <= node_idx < len(cluster_ips):
+            return node_idx
+    if len(cluster_ips) == 1:
+        # Single-node cluster: 0 is the only possible index.
+        return 0
+    try:
+        return cluster_ips.index(ip_addr)
+    except ValueError as e:
+        raise RuntimeError(f'IP address {ip_addr} not found in '
+                           f'cluster IPs: {cluster_ips}') from e
 
 
 def _get_job_node_ips() -> str:
@@ -202,14 +230,11 @@ def main():
     num_nodes = int(os.environ.get('SLURM_NNODES', 1))
     is_single_node_cluster = (args.cluster_num_nodes == 1)
 
-    # Determine node index from IP (like Ray's cluster_ips_to_node_id)
+    # Determine node index, falling back to matching the node IP (like Ray's
+    # cluster_ips_to_node_id).
     cluster_ips = args.cluster_ips.split(',')
     ip_addr = _get_ip_address()
-    try:
-        node_idx = cluster_ips.index(ip_addr)
-    except ValueError as e:
-        raise RuntimeError(f'IP address {ip_addr} not found in '
-                           f'cluster IPs: {cluster_ips}') from e
+    node_idx = _get_node_idx(cluster_ips, ip_addr)
     node_name = 'head' if node_idx == 0 else f'worker{node_idx}'
 
     # Log files are written to a shared filesystem, so each node must use a
