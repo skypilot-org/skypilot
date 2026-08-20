@@ -13,7 +13,7 @@ from sky.jobs import scheduler as managed_job_scheduler
 from sky.jobs import utils as managed_job_utils
 from sky.skylet import constants
 from sky.skylet import events
-from sky.utils import locks
+from sky.utils import leader_election
 
 if typing.TYPE_CHECKING:
     pass
@@ -23,10 +23,50 @@ logger = sky_logging.init_logger(__name__)
 _LOCK_PROBE_INTERVAL_SECONDS = 5
 _ACQUIRE_RETRY_INTERVAL_SECONDS = 5
 
-# How long to wait after acquiring the consolidation-mode lock before running
-# recovery. During a rolling update the new leader blocks on acquire() while
-# the old API server still holds the lock. The lock is released when the old
-# main process exits, but that pod's job controllers are detached subprocesses
+# Lease timing for the consolidation role, deliberately looser than the
+# `leader_election` defaults (ttl 60 / interval 10 / deadline 30). Both loose
+# knobs buy the same thing -- more waiting, fewer chances of two leaders --
+# which is the right trade for this role and the wrong one for the idempotent
+# per-tick daemons those defaults are sized for:
+#
+#   - ttl bounds how long a follower must wait before it may take a lease whose
+#     holder stopped renewing, i.e. the failover latency after a hard crash.
+#     This leader owns the job-controller process group, so a second leader does
+#     not merely repeat a tick: it restarts controllers for jobs whose
+#     controllers may still be running elsewhere, leaving two controllers
+#     driving one job. Waiting longer is strictly preferable to racing.
+#   - renew_deadline is how long a leader keeps trying before it concludes the
+#     role is gone. Here that conclusion is a suicide timer, not a step-down:
+#     losing the role means SIGTERMing this API server so its detached
+#     controllers go down with it (see `_suicide_on_role_loss`). A server
+#     restart costs far more than the leaderless gap it prevents, so the
+#     deadline is sized to ride out a database failover or restart (tens of
+#     seconds) rather than to react to one.
+#
+# The renew cadence stays at `_LOCK_PROBE_INTERVAL_SECONDS`, the interval this
+# daemon has always probed at, so the advisory backend behaves exactly as
+# before and the lease still gets ~17 attempts inside its deadline.
+#
+# The margin (ttl - deadline) is what a stepping-down leader has to get its
+# controllers dead before any other replica may adopt their jobs, on top of the
+# `_RECOVERY_WAIT_AFTER_ACQUIRE_SECONDS` the new leader waits anyway. Delivering
+# the signals is a handful of `os.kill` calls, so the margin is really there to
+# absorb a stop-the-world pause.
+#
+# Cost of the loose ttl, stated plainly: a leader that exits *without*
+# releasing -- a crash, or a pod that is simply gone -- holds the role for the
+# rest of the ttl, so that handoff is slower than the advisory lock's, which
+# came free as soon as the old main process exited. That is the same trade as
+# above, and the gap is not job-visible: the FAILED_CONTROLLER sweep only runs
+# inside a leader's own tick, and the recovery signal file is touched *before*
+# the acquire, so a contending replica starts no controllers in the meantime.
+_LEASE_TTL_SECONDS = 150.0
+_RENEW_DEADLINE_SECONDS = 90.0
+
+# How long to wait after acquiring the consolidation-mode role before running
+# recovery. During a rolling update the new leader contends while the old API
+# server still holds the role. The role is released when the old main process
+# exits, but that pod's job controllers are detached subprocesses
 # (start_new_session=True), so they are not killed until the container itself
 # is torn down a moment later. If recovery ran in that residual window, it would
 # reset jobs that the still-alive (but about-to-die) old controllers can briefly
@@ -49,66 +89,77 @@ class ManagedJobRefreshDaemonThread(threading.Thread):
         # daemon=True: when the main interpreter exits we want this thread
         # to go with it; the leader role is meant to track main's lifecycle.
         super().__init__(name='managed-job-refresh', daemon=True)
-        self._lock: Optional[locks.DistributedLock] = None
+        self._elector: Optional[leader_election.LeaderElector] = None
+        self._renewer: Optional[leader_election.LeadershipRenewer] = None
 
     def run(self) -> None:
-        self._lock = locks.get_lock(
-            managed_job_constants.CONSOLIDATION_MODE_LOCK_ID)
+        # Elect through `sky.utils.leader_election` so this role honours the
+        # same `SKYPILOT_LEADER_ELECTION_BACKEND` switch as every other
+        # fleet-wide singleton: `advisory` (the default) is the historical
+        # Postgres session-scoped advisory lock on the same lock id, so old and
+        # new pods still contend together across a rolling upgrade; `lease` is
+        # a renewable `leader_leases` row, which pins no connection for the
+        # leadership term and carries an expiry the holder must keep extending.
+        # The timing is this role's own (see `_LEASE_TTL_SECONDS`) rather than
+        # the module defaults.
+        self._elector = leader_election.get_elector(
+            managed_job_constants.CONSOLIDATION_MODE_LOCK_ID,
+            ttl_seconds=_LEASE_TTL_SECONDS,
+            renew_interval_seconds=_LOCK_PROBE_INTERVAL_SECONDS,
+            renew_deadline_seconds=_RENEW_DEADLINE_SECONDS)
 
         while True:
             try:
                 self._become_leader_and_run()
                 # _become_leader_and_run only returns normally after
-                # _suicide_on_lock_loss sent SIGTERM. Re-entering would
-                # skip the lock acquire (stale local `_acquired` flag),
-                # touch the signal file, and call ha_recovery →
-                # maybe_start_controllers — which would spawn fresh
-                # controllers under a now-released lock while the new
-                # leader on another replica is doing the same. Stop the
-                # thread instead so the SIGTERM-driven drain runs to
-                # completion without further controller churn.
+                # _suicide_on_role_loss sent SIGTERM. Re-entering would
+                # re-contend for a role we just gave up on, touch the signal
+                # file, and call ha_recovery -> maybe_start_controllers --
+                # spawning fresh controllers while the new leader on another
+                # replica is doing the same. Stop the thread instead so the
+                # SIGTERM-driven drain runs to completion without further
+                # controller churn.
                 return
             except Exception:  # pylint: disable=broad-except
                 logger.exception(
                     'managed-job refresh error; '
                     f'retrying in {_ACQUIRE_RETRY_INTERVAL_SECONDS}s')
-                # If we previously held the lock and lost the session
-                # mid-recovery, retrying would run as a stale leader
-                # (local `_acquired` flag still True, server-side lock
-                # released, another replica can grab it).  Hand off via
-                # SIGTERM, same as the steady-state probe path.
-                if self._lock.is_locked() and not self._lock_still_held():
-                    self._suicide_on_lock_loss()
+                # If we were leading and lost the role mid-recovery, retrying
+                # would run as a stale leader (our renewer has stopped, another
+                # replica can take over). Hand off via SIGTERM, same as the
+                # steady-state probe path. Still holding it, or never having
+                # held it, is an ordinary retry.
+                if self._renewer is not None and not self._renewer.holding:
+                    self._suicide_on_role_loss()
                     return
                 time.sleep(_ACQUIRE_RETRY_INTERVAL_SECONDS)
 
     def _become_leader_and_run(self) -> None:
-        assert self._lock is not None
+        assert self._elector is not None
 
-        # Touch the signal file BEFORE acquiring the lock: new controllers
+        # Touch the signal file BEFORE acquiring the role: new controllers
         # must not be started until recovery has run. During a rolling
-        # update we block on acquire() while the old API server still holds
-        # the lock; if a controller were started on this replica in that
-        # window, the old server's update_managed_jobs_statuses wouldn't see
-        # its process and could mark the job FAILED_CONTROLLER. The signal
-        # file makes update_managed_jobs_statuses and the scheduler's
-        # controller-start path early-return until recovery completes.
+        # update we contend while the old API server still holds the role;
+        # if a controller were started on this replica in that window, the
+        # old server's update_managed_jobs_statuses wouldn't see its process
+        # and could mark the job FAILED_CONTROLLER. The signal file makes
+        # update_managed_jobs_statuses and the scheduler's controller-start
+        # path early-return until recovery completes.
         # NOTE: the acquire is deliberately NOT inside the try/finally that
         # wraps recovery below. The finally unlinks the signal file, but the
-        # lock-loss step-down path (_suicide_on_lock_loss) re-touches it to
+        # role-loss step-down path (_suicide_on_role_loss) re-touches it to
         # keep controllers gated through the shutdown drain — so that path must
         # not be followed by an unlink. Scoping the finally to recovery only
         # keeps those two concerns from fighting. It also means a raise from
-        # acquire() leaves the gate file in place while run() retries, which is
-        # what we want (controller starts stay gated until we hold the lock).
+        # the acquire leaves the gate file in place while run() retries, which
+        # is what we want (controller starts stay gated until we hold the role).
         signal_file = pathlib.Path(
             constants.PERSISTENT_RUN_RESTARTING_SIGNAL_FILE).expanduser()
         signal_file.touch()
 
-        if not self._lock.is_locked():
-            logger.info(f'Acquiring the consolidation mode lock: {self._lock}')
-            self._lock.acquire()
-            logger.info('Consolidation mode lock acquired')
+        if self._renewer is None:
+            self._acquire_role()
+        assert self._renewer is not None
 
         # Wait before recovery so a prior leader (e.g. the old pod during a
         # rolling update) is fully gone first; see the comment on
@@ -117,19 +168,20 @@ class ManagedJobRefreshDaemonThread(threading.Thread):
         # sweep until recovery completes.
         logger.info(
             f'Waiting {_RECOVERY_WAIT_AFTER_ACQUIRE_SECONDS}s after acquiring '
-            'the consolidation mode lock before running recovery, to let any '
+            'the consolidation mode role before running recovery, to let any '
             'previous leader finish shutting down')
         time.sleep(_RECOVERY_WAIT_AFTER_ACQUIRE_SECONDS)
 
-        # The wait above widens the window between acquiring the lock and
-        # running recovery, during which the lock's underlying session could go
-        # silently stale (PostgresLock only). Re-verify we still hold the lock
-        # before recovery; otherwise another replica may have taken it and
-        # could be recovering concurrently, so step down rather than run a
-        # second recovery loop. _suicide_on_lock_loss re-touches the signal
-        # file and SIGTERMs the process, so leave the file in place here.
-        if not self._lock_still_held():
-            self._suicide_on_lock_loss()
+        # The wait above widens the window between acquiring the role and
+        # running recovery, during which the role could be lost underneath us —
+        # an advisory lock's session going silently stale, or a lease we stopped
+        # being able to renew. Re-verify before recovery; otherwise another
+        # replica may have taken it and could be recovering concurrently, so
+        # step down rather than run a second recovery loop.
+        # _suicide_on_role_loss re-touches the signal file and SIGTERMs the
+        # process, so leave the file in place here.
+        if not self._renewer.holding:
+            self._suicide_on_role_loss()
             return
 
         try:
@@ -138,16 +190,18 @@ class ManagedJobRefreshDaemonThread(threading.Thread):
             signal_file.unlink(missing_ok=True)
 
         # Event-loop tick at events.EVENT_CHECKING_INTERVAL_SECONDS,
-        # lock probe at _LOCK_PROBE_INTERVAL_SECONDS, sleep 1s between.
+        # role probe at _LOCK_PROBE_INTERVAL_SECONDS, sleep 1s between.
         refresh_event = events.ManagedJobEvent()
         now = time.monotonic()
-        last_probe = now
+        # Probe on the very first pass rather than one interval in: recovery
+        # above walks every managed job, so it can have outlasted the role.
+        last_probe = now - _LOCK_PROBE_INTERVAL_SECONDS
         last_event = now - events.EVENT_CHECKING_INTERVAL_SECONDS
         while True:
             now = time.monotonic()
             if now - last_probe >= _LOCK_PROBE_INTERVAL_SECONDS:
-                if not self._lock_still_held():
-                    self._suicide_on_lock_loss()
+                if not self._renewer.holding:
+                    self._suicide_on_role_loss()
                     return
                 last_probe = now
             if now - last_event >= events.EVENT_CHECKING_INTERVAL_SECONDS:
@@ -158,19 +212,65 @@ class ManagedJobRefreshDaemonThread(threading.Thread):
                 last_event = now
             time.sleep(1)
 
-    def _lock_still_held(self) -> bool:
-        """True iff we are confident this replica still owns the lock."""
-        assert self._lock is not None
-        if isinstance(self._lock, locks.PostgresLock):
-            # Check is only relevant for PG lock
-            return self._lock.is_session_alive()
-        return True
+    def _acquire_role(self) -> None:
+        """Contend until this replica wins the role, then keep it renewed.
 
-    def _suicide_on_lock_loss(self) -> None:
+        Replaces the historical blocking `lock.acquire()`. The elector's bid is
+        non-blocking, so a bid that raises (a database blip) is retried on the
+        next pass instead of killing this thread for the lifetime of the pod —
+        the old `acquire()` sat outside the retry loop's try.
+        """
+        assert self._elector is not None
+        logger.info('Contending for the consolidation mode role: '
+                    f'{self._elector.lock_id}')
+        while True:
+            try:
+                acquired = self._elector.try_acquire()
+            except Exception as e:  # pylint: disable=broad-except
+                logger.warning(
+                    f'Consolidation mode role bid failed: {e}; retrying in '
+                    f'{_ACQUIRE_RETRY_INTERVAL_SECONDS}s')
+                acquired = False
+            if acquired:
+                break
+            time.sleep(_ACQUIRE_RETRY_INTERVAL_SECONDS)
+        logger.info('Consolidation mode role acquired')
+        # Renew on its own thread, not between the steps below. The wait before
+        # recovery, recovery itself (it walks every managed job) and each
+        # ManagedJobEvent tick are all long blocking calls, and a lease is only
+        # as alive as its last renew: renewing between steps would let a slow
+        # recovery lapse the lease and hand the role to another replica *while
+        # recovery is running*, which is the worst possible moment. The thread
+        # keeps the role alive throughout and this daemon just polls `holding`.
+        # Published only once the thread is actually running: a `start()` that
+        # raises (thread exhaustion is a real failure mode) would otherwise
+        # leave a renewer that never renews, and on the advisory backend --
+        # which has no deadline to catch it -- `holding` would stay True
+        # forever, so we would run as leader with nothing probing the role.
+        # Leaving it None instead makes the retry in `run()` bid again.
+        renewer = leader_election.LeadershipRenewer(self._elector)
+        renewer.start()
+        self._renewer = renewer
+
+    def _suicide_on_role_loss(self) -> None:
         """SIGTERM the API server process so the pod can restart cleanly."""
+        assert self._elector is not None
         logger.error(
-            f'Lost consolidation mode lock {self._lock}; sending SIGTERM '
-            'to the API server to step down')
+            f'Lost the consolidation mode role {self._elector.lock_id}; '
+            'sending SIGTERM to the API server to step down')
+        # Stop renewing first, so nothing re-establishes a role this process has
+        # already decided to give up.
+        #
+        # Deliberately no `elector.release()` here. Releasing would let a
+        # follower take the role immediately, which is exactly what must not
+        # happen: the controllers killed below have to be gone before another
+        # replica adopts their jobs. Sitting out the rest of the lease's
+        # `ttl - renew_deadline` margin is the guarantee, not an oversight. (On
+        # the advisory backend there is nothing to release anyway — the role is
+        # already gone, which is why we are here.)
+        if self._renewer is not None:
+            self._renewer.stop()
+            self._renewer = None
         # Re-touch the recovery signal file so no new controllers will be
         # started
         try:
@@ -179,14 +279,14 @@ class ManagedJobRefreshDaemonThread(threading.Thread):
             signal_file.parent.mkdir(parents=True, exist_ok=True)
             signal_file.touch()
         except OSError:
-            logger.warning('Failed to touch recovery signal file on lock-loss')
-        # The lock is already released, kill job controllers to avoid split
-        # brain, e.g. new job controllers might have been launched on the new
-        # replica during rolling-update
+            logger.warning('Failed to touch recovery signal file on role loss')
+        # The role is gone, kill job controllers to avoid split brain, e.g. new
+        # job controllers might have been launched on the new replica during
+        # rolling-update
         try:
             managed_job_scheduler.kill_local_job_controllers()
         except Exception:  # pylint: disable=broad-except
-            logger.exception('Failed to kill local controllers on lock-loss')
+            logger.exception('Failed to kill local controllers on role loss')
         # SIGTERM to trigger graceful shutdown
         os.kill(os.getpid(), signal.SIGTERM)
 

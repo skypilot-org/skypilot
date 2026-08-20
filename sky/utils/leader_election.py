@@ -19,6 +19,8 @@ import abc
 import logging
 import os
 import socket
+import threading
+import time
 from typing import Optional
 import uuid
 
@@ -95,6 +97,11 @@ class LeaderElector(abc.ABC):
     def __init__(self, lock_id: str):
         self._lock_id = lock_id
 
+    @property
+    def lock_id(self) -> str:
+        """The role this elector contends for."""
+        return self._lock_id
+
     @abc.abstractmethod
     def try_acquire(self) -> bool:
         """Non-blocking bid for leadership. True iff this candidate leads."""
@@ -149,9 +156,21 @@ class AdvisoryLockElector(LeaderElector):
     process-local lock, which is exactly right for single-node deployments.
     """
 
-    def __init__(self, lock_id: str):
+    def __init__(
+            self,
+            lock_id: str,
+            renew_interval_seconds: float = DEFAULT_RENEW_INTERVAL_SECONDS):
         super().__init__(lock_id)
         self._lock: Optional[locks.DistributedLock] = None
+        # Only the probe cadence is tunable here; there is deliberately no
+        # deadline (see ``renew_deadline_seconds`` on the base class), so a
+        # caller that wants both backends to check at the same rate can ask for
+        # it without changing what a failed probe means.
+        self._renew_interval = renew_interval_seconds
+
+    @property
+    def renew_interval_seconds(self) -> float:
+        return self._renew_interval
 
     def try_acquire(self) -> bool:
         # Build a fresh lock object each bid so a prior term's closed connection
@@ -377,6 +396,132 @@ class PgLeaseElector(LeaderElector):
         return self._epoch
 
 
+# How long to wait before retrying a renew that just failed, while the renew
+# deadline has not passed yet. Short relative to any sane deadline so a brief
+# database blip is ridden out over many attempts instead of costing the role on
+# the first failure.
+_RENEW_RETRY_SECONDS = 1.0
+
+
+class LeadershipRenewer(threading.Thread):
+    """Keep a held role renewed on its own thread for a whole leadership term.
+
+    Renewal has to be decoupled from the leader's work whenever that work is a
+    long blocking call. A lease is only as alive as its last renew, so a leader
+    that renews *between* its steps lets a step longer than the TTL lapse the
+    lease and hand the role to a follower while that step is still running --
+    and the failure lands where it hurts most, because the slow steps (a
+    recovery pass, a status sweep over every job) are exactly the ones that
+    mutate shared state. Renewing on a separate thread makes the role's
+    liveness independent of what the leader happens to be doing, the same shape
+    as client-go's leader-election ``renewLoop``.
+
+    The leader polls :attr:`holding` at whatever cadence suits it and steps down
+    once it reads False. A lost role is never re-acquired here: this thread
+    stops instead, so ``holding`` only ever goes True -> False and a caller may
+    treat the first False as final.
+
+    A failed renew is retried until ``renew_deadline_seconds`` has passed since
+    the last *successful* renew, so a transient database blip costs retries
+    rather than the role -- which matters when a step-down is expensive. A
+    backend with no deadline (the advisory lock, whose ``renew`` is a
+    session-liveness probe rather than an extension) gives the role up on the
+    first failed probe, exactly as that backend has always done.
+    """
+
+    def __init__(self, elector: LeaderElector) -> None:
+        super().__init__(name=f'leader-renew-{elector.lock_id}', daemon=True)
+        self._elector = elector
+        self._interval = elector.renew_interval_seconds
+        self._deadline = elector.renew_deadline_seconds
+        self._stop_event = threading.Event()
+        self._lost = threading.Event()
+        # Anchored at construction rather than at the first renew: the caller
+        # has just acquired the role, and the acquire extended it exactly as a
+        # renew would.
+        self._last_renew = time.monotonic()
+
+    @property
+    def holding(self) -> bool:
+        """False once the role is gone -- stop acting on it immediately."""
+        if self._lost.is_set():
+            return False
+        # Safety net for a renewer that is itself wedged -- blocked in a socket
+        # read past the statement/connect timeouts, or starved of CPU -- rather
+        # than one getting failed renews: judge the role by the clock, not by
+        # whether this thread got around to noticing. Without it a stuck
+        # renewer would keep the caller acting as leader indefinitely. Only the
+        # lease backend has a clock to be judged by.
+        if (self._deadline is not None and
+                time.monotonic() - self._last_renew > self._deadline):
+            return False
+        return True
+
+    def stop(self, join_timeout: Optional[float] = None) -> None:
+        """Stop renewing; optionally wait for the thread to notice.
+
+        Does not release the role. Whether a step-down should hand over
+        immediately (``release``) or sit out the rest of the lease as a safety
+        margin depends on what the leader was doing, so that stays the caller's
+        decision.
+        """
+        self._stop_event.set()
+        if join_timeout is not None and threading.current_thread() is not self:
+            self.join(timeout=join_timeout)
+
+    def run(self) -> None:
+        failures = 0
+        try:
+            while not self._stop_event.is_set():
+                # Anchor before the round trip, not after: the server stamps
+                # the new expiry from its own clock when the statement starts,
+                # so timing the deadline from before the call understates our
+                # runway and keeps the ``ttl - deadline`` margin intact however
+                # slow the renew was.
+                before = time.monotonic()
+                try:
+                    renewed = self._elector.renew()
+                except Exception as e:  # pylint: disable=broad-except
+                    # Both shipped electors already swallow their own errors
+                    # into a False; this is here so a backend that does not
+                    # cannot take the renewer down with it -- a dead renewer is
+                    # a role nothing is watching.
+                    logger.debug('%s: renew raised: %s', self._elector.lock_id,
+                                 e)
+                    renewed = False
+                if renewed:
+                    self._last_renew = before
+                    failures = 0
+                    self._stop_event.wait(self._interval)
+                    continue
+                failures += 1
+                stale_for = time.monotonic() - self._last_renew
+                if self._deadline is None or stale_for > self._deadline:
+                    logger.error(
+                        '%s: giving up the leader role after %d failed '
+                        'renew(s) over %.1fs', self._elector.lock_id, failures,
+                        stale_for)
+                    return
+                if failures == 1:
+                    # Only the first failure of a run is a warning: retries run
+                    # at _RENEW_RETRY_SECONDS, so logging each one would emit a
+                    # line a second for the whole deadline.
+                    logger.warning(
+                        '%s: renew failed, retrying until the %.1fs deadline',
+                        self._elector.lock_id, self._deadline)
+                else:
+                    logger.debug('%s: renew failed %d times (%.1fs stale)',
+                                 self._elector.lock_id, failures, stale_for)
+                self._stop_event.wait(_RENEW_RETRY_SECONDS)
+        finally:
+            # Any exit other than a requested stop means the role is gone --
+            # including an unexpected exception, which would otherwise leave the
+            # caller believing it still leads (nothing is renewing any more, and
+            # on the advisory backend there is no clock to catch it).
+            if not self._stop_event.is_set():
+                self._lost.set()
+
+
 def get_backend() -> str:
     """Resolve the configured leader-election backend name."""
     value = os.environ.get(ENV_VAR_BACKEND, BACKEND_ADVISORY).strip().lower()
@@ -393,18 +538,36 @@ def _postgres_available() -> bool:
 
 
 def get_elector(
-        lock_id: str,
-        backend: Optional[str] = None,
-        holder: Optional[str] = None,
-        ttl_seconds: float = DEFAULT_LEASE_TTL_SECONDS) -> LeaderElector:
+    lock_id: str,
+    backend: Optional[str] = None,
+    holder: Optional[str] = None,
+    ttl_seconds: float = DEFAULT_LEASE_TTL_SECONDS,
+    renew_interval_seconds: float = DEFAULT_RENEW_INTERVAL_SECONDS,
+    renew_deadline_seconds: float = DEFAULT_RENEW_DEADLINE_SECONDS
+) -> LeaderElector:
     """Return a :class:`LeaderElector` for ``lock_id``.
 
     The lease backend is used only when it is both selected (via ``backend`` or
     ``SKYPILOT_LEADER_ELECTION_BACKEND``) and viable (Postgres configured);
     otherwise this falls back to the advisory backend, which itself degrades to
     a local file lock on single-node SQLite.
+
+    All three timing knobs are passed through so a caller whose role has a
+    different cost of failover can tune them together -- they are only
+    meaningful as a set, and the lease constructor enforces
+    ``0 < interval < deadline < ttl``. ``renew_interval_seconds`` reaches the
+    advisory backend too (there it is the liveness-probe cadence), so asking
+    for a cadence gives the same answer whichever backend is configured;
+    ``ttl_seconds`` and ``renew_deadline_seconds`` are inherently lease
+    concepts and are ignored by the advisory backend, whose leadership is not
+    time-bounded.
     """
     backend = backend or get_backend()
     if backend == BACKEND_LEASE and _postgres_available():
-        return PgLeaseElector(lock_id, holder=holder, ttl_seconds=ttl_seconds)
-    return AdvisoryLockElector(lock_id)
+        return PgLeaseElector(lock_id,
+                              holder=holder,
+                              ttl_seconds=ttl_seconds,
+                              renew_interval_seconds=renew_interval_seconds,
+                              renew_deadline_seconds=renew_deadline_seconds)
+    return AdvisoryLockElector(lock_id,
+                               renew_interval_seconds=renew_interval_seconds)
