@@ -269,7 +269,16 @@ spec:
           for file in /var/skypilot/ssh_keys/*; do
             if [ -f "$file" ]; then
               filename=$(basename "$file")
-              ln -sf "$file" "/root/.ssh/$filename"
+              if [ "$filename" = "config" ]; then
+                # /root/.ssh/config must stay writable: SkyPilot appends
+                # generated cluster entries to it during launches. Secret
+                # volumes are mounted read-only, so copy the user-provided
+                # config instead of symlinking it into the read-only mount.
+                cp "$file" /root/.ssh/config
+                chmod 600 /root/.ssh/config
+              else
+                ln -sf "$file" "/root/.ssh/$filename"
+              fi
             fi
           done
           {{- end }}
