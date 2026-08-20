@@ -196,13 +196,7 @@ class TestVolumeApplyValidation:
 
 
 class TestDottedNameIsAcceptedToday:
-    """Pins current dot handling so #10514 flipping it is a deliberate edit.
-
-    A dot passes the server's rule, but Kubernetes rejects a dotted
-    spec.volumes[].name, so such a volume cannot be mounted. When #10514
-    tightens the charset this test fails -- which is the point: it is the signal
-    to update the dashboard's client-side mirror in the same change.
-    """
+    """Pins dot handling so #10514 flipping it is a deliberate edit."""
 
     def test_dotted_name_still_accepted(self, client_and_executor):
         client, scheduled = client_and_executor
@@ -380,10 +374,9 @@ class TestSdkApplyRejection:
             cloud='kubernetes',
             region='my-context',
             size='1Gi')
-        # get_request_id's own error, not a decode error from the guard.
-        with pytest.raises(Exception) as exc_info:
+        # The fall-through's own error, not a decode error from the guard.
+        with pytest.raises(RuntimeError, match='Failed to process response'):
             volumes_sdk.apply(vol)
-        assert 'JSONDecode' not in type(exc_info.value).__name__
 
     def test_detail_absent_keeps_the_normal_error_path(self, monkeypatch):
         # Valid JSON with no `detail` must fall through too.
@@ -401,9 +394,8 @@ class TestSdkApplyRejection:
             cloud='kubernetes',
             region='my-context',
             size='1Gi')
-        with pytest.raises(Exception) as exc_info:
+        with pytest.raises(RuntimeError, match='Failed to process response'):
             volumes_sdk.apply(vol)
-        assert 'no detail here' not in str(exc_info.value)
 
     def test_plain_string_detail(self, monkeypatch):
         # The pre-existing 400s on this endpoint return a bare string.
