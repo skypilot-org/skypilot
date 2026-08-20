@@ -2240,6 +2240,13 @@ def get_config_schema():
                 'datacenter_only': {
                     'type': 'boolean',
                 },
+                'reliable_hosts': {
+                    'type': 'boolean',
+                },
+                'provision_timeout': {
+                    'type': 'number',
+                    'exclusiveMinimum': 0,
+                },
                 'create_instance_kwargs': {
                     'type': 'object',
                 },

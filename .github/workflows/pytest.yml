@@ -26,6 +26,12 @@ jobs:
           - tests/test_no_parellel.py
           - tests/test_ssh_proxy_lag.py
         include:
+          - python-version: "3.10"
+            test-path: tests/unit_tests/test_vast_catalog_stability.py
+            test-name: "Vast SDK Contract Test"
+            # pytest loads the shared AWS fixtures from tests/conftest.py.
+            extras: vast,aws
+            install-azure-cli: "false"
           # We separate out the random DAG tests because its flaky due to catalog updates.
           # TODO(zeping): Move back to the main test group once we fixed the flakiness.
           - test-path: tests/unit_tests
@@ -51,6 +57,8 @@ jobs:
           python-version: ${{ matrix.python-version }}
           test-path: ${{ matrix.test-path }}
           test-name: ${{ matrix.test-name }}
+          extras: ${{ matrix.extras || 'all' }}
+          install-azure-cli: ${{ matrix.install-azure-cli || 'true' }}
           buildkite-analytics-token: ${{ secrets.BUILDKITE_ANALYTICS_TOKEN }}
 
   limited-deps-test:

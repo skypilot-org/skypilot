@@ -184,6 +184,25 @@ class ResourcesUnavailableError(Exception):
         return self
 
 
+class VastOfferUnavailableError(ResourcesUnavailableError):
+    """Raised when a live Vast marketplace query has no matching offer."""
+
+
+class VastProvisioningError(ResourcesUnavailableError):
+    """Raised when a Vast instance cannot become ready for SkyPilot.
+
+    The error remains eligible for normal SkyPilot cloud failover.  Instance
+    IDs identify only resources created by the current provisioning attempt,
+    so the Vast provisioner can safely clean them up before retrying.
+    """
+
+    def __init__(self,
+                 message: str,
+                 instance_ids: Optional[List[str]] = None) -> None:
+        super().__init__(message)
+        self.instance_ids = list(instance_ids or [])
+
+
 class KubeAPIUnreachableError(ResourcesUnavailableError):
     """Raised when the Kubernetes API is currently unreachable.
 

@@ -374,6 +374,19 @@ def test_to_yaml_and_load(resources_kwargs, expected_yaml_config):
     assert loaded_r.labels == r.labels
 
 
+def test_to_yaml_does_not_resolve_unspecified_instance_memory():
+    """YAML serialization must not require a client-side catalog lookup."""
+    resource = Resources(cloud=clouds.AWS(), instance_type='dynamic-offer-1')
+    with mock.patch.object(
+            clouds.AWS,
+            'get_vcpus_mem_from_instance_type',
+            side_effect=AssertionError('catalog lookup must not occur')):
+        yaml_config = resource.to_yaml_config()
+
+    assert yaml_config['instance_type'] == 'dynamic-offer-1'
+    assert 'memory' not in yaml_config
+
+
 def test_resources_any_of():
     """Test Resources creation with any_of option."""
     # Test any_of with different resources options
