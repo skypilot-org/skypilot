@@ -874,7 +874,19 @@ class SlurmCodeGen(TaskCodeGen):
                 setup_done_signal_file = os.path.expanduser(setup_done_signal_file)
 
                 # Start exclusive srun in a thread to reserve allocation (similar to ray.get(pg.ready()))
-                gpu_arg = f'--gpus-per-node={num_gpus}'
+                # A step-level `--gpus-per-node` asks for *untyped* gpu GRES.
+                # When the allocation holds typed GRES (e.g. `--gres=gpu:h100:1`),
+                # Slurm 23.02 rejects such a step with "Step requested GRES
+                # (gpu:(null)) not found in the job". A step with no GRES flag
+                # inherits all job GRES, typed or untyped, so omit the flag
+                # whenever the task uses every GPU of the allocation. Keep it
+                # only when the task uses a subset of the allocation's GPUs,
+                # where step-level GPU scheduling is actually needed.
+                allocated_gpus = int(os.environ.get('SLURM_GPUS_ON_NODE', '0') or '0')
+                if {num_gpus} >= allocated_gpus:
+                    gpu_arg = ''
+                else:
+                    gpu_arg = f'--gpus-per-node={num_gpus}'
 
                 def build_task_runner_cmd(user_script, extra_flags, log_dir, env_vars_dict,
                                           task_name=None, is_setup=False,
