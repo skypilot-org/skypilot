@@ -1851,8 +1851,15 @@ def test_managed_jobs_inline_env(generic_cloud: str):
             f'echo "JOB_ID=$JOB_ID" && '
             # Test that logs are still available after the job finishes.
             's=$(sky jobs logs $JOB_ID --refresh) && echo "$s" && echo "$s" | grep "hello world" && '
-            # Make sure we skip the unnecessary logs.
-            'echo "$s" | head -n2 | grep "Waiting for"',
+            # Make sure we skip the unnecessary logs. Drop SkyPilot's own log
+            # records first: they are written to stdout, so the command
+            # substitution above captures them alongside the task log. The
+            # local `unset SKYPILOT_DEBUG` only quiets this client -- records
+            # streamed back from an API server whose own level is debug still
+            # arrive here, and would push the marker past the first lines.
+            'echo "$s" | grep -vE '
+            '"^[A-Z] [0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{3} '
+            'PID=[0-9]+ " | head -n2 | grep "Waiting for"',
         ],
         f'sky jobs cancel -y -n {name}',
         env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
