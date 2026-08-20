@@ -195,8 +195,16 @@ SKY_APISERVER_DB_CONNECTS_TOTAL = prom.Counter(
     ['db', 'pool'],
 )
 
-# How long opening one fresh connection took. This is the connection
-# admission wait, and neither the pooler nor CloudWatch measures it.
+# How long opening one fresh connection took: the connection admission
+# wait as this process experiences it.
+#
+# Read it knowing what is at the other end. Direct to the database, this
+# IS the database's admission latency. With a connection pooler in the
+# path, it is the connect to the *pooler*, which is cheap and says nothing
+# about how long the pooler then waited for a server connection upstream —
+# that half is only visible from the pooler's own metrics. The `db` label
+# separates the two cases, since the direct-role engines bypass the
+# pooler by construction.
 SKY_APISERVER_DB_CONNECT_SECONDS = prom.Histogram(
     'sky_apiserver_db_connect_seconds',
     'Duration of opening a fresh DBAPI connection',
