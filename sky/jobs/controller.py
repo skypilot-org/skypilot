@@ -36,7 +36,6 @@ from sky.jobs import job_group_networking
 from sky.jobs import log_gc
 from sky.jobs import recovery_strategy
 from sky.jobs import runtime as managed_job_runtime
-from sky.jobs import scheduler
 from sky.jobs import state as managed_job_state
 from sky.jobs import utils as managed_job_utils
 from sky.metrics import utils as metrics_lib
@@ -3366,34 +3365,20 @@ class ControllerManager:
                     failure_reason=failure_reason,
                     override_terminal=True)
 
+            callback_func = None
             if cancelling:
                 # Since it's set with cancelling
                 assert task_id is not None, job_id
-                await managed_job_state.set_cancelled_async(
-                    job_id=job_id,
-                    callback_func=managed_job_utils.event_callback_func(
-                        job_id=job_id, task_id=task_id,
-                        task=dag.tasks[task_id]))
-
-            # We should check job status after 'set_cancelled', otherwise
-            # the job status is not terminal.
-            job_status = await managed_job_state.get_status_async(job_id)
-            assert job_status is not None
-            # The job can be non-terminal if the controller exited
-            # abnormally, e.g. failed to launch cluster after reaching
-            # the MAX_RETRY.
-            if not job_status.is_terminal():
-                logger.info(f'Previous job status: {job_status.value}')
-                await managed_job_state.set_failed_async(
-                    job_id,
-                    task_id=None,
-                    failure_type=managed_job_state.ManagedJobStatus.
-                    FAILED_CONTROLLER,
-                    failure_reason=(
-                        'Unexpected error occurred. For details, '
-                        f'run: sky jobs logs --controller {job_id}'))
-
-            await scheduler.job_done_async(job_id)
+                callback_func = managed_job_utils.event_callback_func(
+                    job_id=job_id, task_id=task_id, task=dag.tasks[task_id])
+            # Write the final task status (CANCELLED if cancelling;
+            # FAILED_CONTROLLER if the controller exited abnormally with the
+            # job still non-terminal) and schedule_state=DONE in a single
+            # transaction. If they were separate writes, dying between them
+            # would strand the job terminal-but-not-DONE, and the recovery
+            # machinery would relaunch a controller for it on every pass.
+            await managed_job_state.finalize_job_done_async(
+                job_id, cancelling=cancelling, callback_func=callback_func)
 
             async with self._job_tasks_lock:
                 try:

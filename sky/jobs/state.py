@@ -1117,49 +1117,86 @@ def set_failed(
     logger.info(failure_reason)
 
 
-def set_pending_cancelled(job_id: int):
+def set_pending_cancelled(job_id: int) -> bool:
     """Set the job as cancelled, if it is PENDING and WAITING/INACTIVE.
 
     This may fail if the job is not PENDING, e.g. another process has changed
     its state in the meantime.
 
+    A job in this state has never launched anything, so there is nothing to
+    clean up and no controller needs to run for it. The status write, the
+    schedule-state write, and the audit event are a single transaction, so a
+    crash cannot leave the job half-cancelled (e.g. a terminal status with a
+    schedule_state that the scheduler would still claim and launch a
+    controller for).
+
+    For a WAITING job, the schedule_state goes straight to DONE, claiming the
+    job away from the scheduler: get_waiting_job_async locks the job_info row
+    before claiming, so the job either becomes DONE here or is claimed there,
+    never both. For an INACTIVE job (mid-submission), the schedule_state is
+    left as INACTIVE: the in-flight submission will overwrite it to WAITING
+    regardless (scheduler_set_waiting has no state guard), so writing DONE
+    here would be undone and strand a cancelled job in WAITING. Instead the
+    submission proceeds as today and the claiming controller immediately
+    finalizes the already-terminal job.
+
     Returns:
         True if the job was cancelled, False otherwise.
     """
-    add_job_event(job_id, None, ManagedJobStatus.CANCELLED,
-                  'Job has been cancelled')
     engine = _db_manager.get_engine()
-    count = 0
     with orm.Session(engine) as session:
-        # Subquery to get the spot_job_ids that match the joined condition.
-        # Build it as a select() construct (rather than Query.subquery()) so it
-        # can be passed directly to in_() without SQLAlchemy emitting a
-        # "Coercing Subquery object into a select()" warning.
-        subquery = sqlalchemy.select(spot_table.c.job_id).select_from(
-            spot_table.join(
-                job_info_table,
-                spot_table.c.spot_job_id == job_info_table.c.spot_job_id)
-        ).where(
+        # Claim the job away from the scheduler first: WAITING -> DONE.
+        done_count = session.query(job_info_table).filter(
+            job_info_table.c.spot_job_id == job_id,
+            job_info_table.c.schedule_state ==
+            ManagedJobScheduleState.WAITING.value).update(
+                {
+                    job_info_table.c.schedule_state:
+                        ManagedJobScheduleState.DONE.value
+                },
+                synchronize_session=False)
+        if done_count == 0:
+            # Not WAITING. Only proceed if the job is INACTIVE
+            # (mid-submission); see the docstring for why INACTIVE keeps its
+            # schedule_state.
+            row = session.execute(
+                sqlalchemy.select(job_info_table.c.schedule_state).where(
+                    job_info_table.c.spot_job_id == job_id)).fetchone()
+            if (row is None or
+                    row[0] != ManagedJobScheduleState.INACTIVE.value):
+                session.rollback()
+                return False
+
+        total_tasks = session.execute(
+            sqlalchemy.select(
+                sqlalchemy.func.count()  # pylint: disable=not-callable
+            ).where(spot_table.c.spot_job_id == job_id)).fetchone()[0]
+        count = session.query(spot_table).filter(
             spot_table.c.spot_job_id == job_id,
-            spot_table.c.status == ManagedJobStatus.PENDING.value,
+            spot_table.c.status == ManagedJobStatus.PENDING.value).update(
+                {
+                    spot_table.c.status: ManagedJobStatus.CANCELLED.value,
+                    spot_table.c.end_at: time.time(),
+                },
+                synchronize_session=False)
+        if count == 0 or count != total_tasks:
             # Note: it's possible that a WAITING job actually needs to be
             # cleaned up, if we are in the middle of an upgrade/recovery and
-            # the job is waiting to be reclaimed by a new controller. But,
-            # in this case the status will not be PENDING.
-            sqlalchemy.or_(
-                job_info_table.c.schedule_state ==
-                ManagedJobScheduleState.WAITING.value,
-                job_info_table.c.schedule_state ==
-                ManagedJobScheduleState.INACTIVE.value,
-            ),
-        )
-
-        count = session.query(spot_table).filter(
-            spot_table.c.job_id.in_(subquery)).update(
-                {spot_table.c.status: ManagedJobStatus.CANCELLED.value},
-                synchronize_session=False)
+            # the job is waiting to be reclaimed by a new controller. In that
+            # case some task will not be PENDING - don't short-circuit; the
+            # normal cancellation path must run so the new controller cleans
+            # up the job's resources.
+            session.rollback()
+            return False
+        session.execute(job_events_table.insert().values(
+            spot_job_id=job_id,
+            task_id=None,
+            new_status=ManagedJobStatus.CANCELLED.value,
+            reason='Job has been cancelled',
+            timestamp=datetime.datetime.now(),
+        ))
         session.commit()
-        return count > 0
+        return True
 
 
 @db_retries.retry
@@ -3671,6 +3708,130 @@ async def set_cancelled_async(job_id: int, callback_func: AsyncCallbackType):
         logger.info('Cancellation skipped, job is not CANCELLING')
 
 
+async def finalize_job_done_async(
+        job_id: int,
+        *,
+        cancelling: bool,
+        callback_func: Optional[AsyncCallbackType] = None) -> None:
+    """Write the job's final task status and schedule_state=DONE atomically.
+
+    This is the last thing the controller's job loop does for a job, after
+    cleanup has finished. In a single transaction:
+
+    - if ``cancelling``, transition the job's tasks from CANCELLING to
+      CANCELLED (the cluster has already been cleaned up at this point);
+    - if the job is still not terminal after that (the controller exited
+      abnormally, e.g. failed to launch the cluster after reaching
+      MAX_RETRY), fail it with FAILED_CONTROLLER;
+    - record the matching job events;
+    - set the job's schedule_state to DONE.
+
+    Previously these were separate transactions, and a controller crash (or
+    DB outage) between the terminal-status write and the DONE write stranded
+    the job with a terminal status but a non-DONE schedule_state — a state
+    nothing owns: the recovery machinery keeps resetting such jobs and
+    launching a controller for them on every pass, even though there is
+    nothing left to do.
+
+    Args:
+        job_id: The job to finalize.
+        cancelling: Whether the job loop exited due to user cancellation.
+        callback_func: Event callback, fired after commit and only when the
+            CANCELLING -> CANCELLED transition actually applied (it runs a
+            user-supplied command, so it must stay outside the transaction).
+    """
+    now = time.time()
+    failure_reason = ('Unexpected error occurred. For details, '
+                      f'run: sky jobs logs --controller {job_id}')
+
+    async def _op(session):
+        cancelled = False
+        if cancelling:
+            result = await session.execute(
+                sqlalchemy.update(spot_table).where(
+                    sqlalchemy.and_(
+                        spot_table.c.spot_job_id == job_id,
+                        spot_table.c.status ==
+                        ManagedJobStatus.CANCELLING.value,
+                    )).
+                values({
+                    spot_table.c.status: ManagedJobStatus.CANCELLED.value,
+                    spot_table.c.end_at: now,
+                    # Close any open recovery episode on reaching a
+                    # terminal state.
+                    spot_table.c.recovering_from_failure: None,
+                }))
+            cancelled = result.rowcount > 0
+
+        result = await session.execute(
+            sqlalchemy.select(spot_table.c.task_id, spot_table.c.status).where(
+                spot_table.c.spot_job_id == job_id).order_by(
+                    spot_table.c.task_id.asc()))
+        id_statuses = [
+            (row[0], ManagedJobStatus(row[1])) for row in result.fetchall()
+        ]
+        _, latest_status = get_latest_task_id_from_statuses(id_statuses)
+        assert latest_status is not None, job_id
+
+        failed = False
+        if not latest_status.is_terminal():
+            fields_to_set: Dict[str, Any] = {
+                spot_table.c.status: ManagedJobStatus.FAILED_CONTROLLER.value,
+                spot_table.c.failure_reason: failure_reason,
+                spot_table.c.end_at: now,
+                # Close any open recovery episode on reaching a terminal
+                # state.
+                spot_table.c.recovering_from_failure: None,
+            }
+            if latest_status == ManagedJobStatus.RECOVERING:
+                fields_to_set[spot_table.c.last_recovered_at] = now
+            result = await session.execute(
+                sqlalchemy.update(spot_table).where(
+                    sqlalchemy.and_(
+                        spot_table.c.spot_job_id == job_id,
+                        spot_table.c.end_at.is_(None),
+                    )).values(fields_to_set))
+            failed = result.rowcount > 0
+
+        if cancelled:
+            await _insert_job_event(session, job_id, None,
+                                    ManagedJobStatus.CANCELLED,
+                                    'Job has been cancelled')
+        if failed:
+            await _insert_job_event(session, job_id, None,
+                                    ManagedJobStatus.FAILED_CONTROLLER,
+                                    f'Job failed: {failure_reason}')
+
+        # NULL-safe: plain `schedule_state != DONE` would skip legacy rows
+        # whose schedule_state is NULL (SQL NULL != 'DONE' is not true).
+        await session.execute(
+            sqlalchemy.update(job_info_table).where(
+                sqlalchemy.and_(
+                    job_info_table.c.spot_job_id == job_id,
+                    sqlalchemy.or_(
+                        job_info_table.c.schedule_state.is_(None),
+                        job_info_table.c.schedule_state !=
+                        ManagedJobScheduleState.DONE.value,
+                    ))).values({
+                        job_info_table.c.schedule_state:
+                            ManagedJobScheduleState.DONE.value
+                    }))
+        await session.commit()
+        return cancelled, failed, latest_status
+
+    cancelled, failed, latest_status = await _retry_session(_op)
+    if cancelling:
+        if cancelled:
+            logger.info('Job cancelled.')
+        else:
+            logger.info('Cancellation skipped, job is not CANCELLING')
+    if failed:
+        logger.info(f'Previous job status: {latest_status.value}')
+        logger.info(failure_reason)
+    if cancelled and callback_func is not None:
+        await callback_func('CANCELLED')
+
+
 @db_retries.retry_async
 async def remove_ha_recovery_script_async(job_id: int) -> None:
     """Remove the HA recovery script for a job."""
@@ -3898,11 +4059,12 @@ def get_controller_logs_to_clean(retention_seconds: int,
                     ).
             having(
                 # A job cancelled while still PENDING (via
-                # set_pending_cancelled) reaches DONE with end_at never
-                # set. It never ran, so it has no controller log to
-                # retain -- clean it immediately. Filtering it out here
-                # instead would leave it forever uncleaned and re-scanned
-                # by the group-by on every GC cycle.
+                # set_pending_cancelled) before end_at was recorded there
+                # reaches DONE with end_at never set. It never ran, so it
+                # has no controller log to retain -- clean it immediately.
+                # Filtering it out here instead would leave it forever
+                # uncleaned and re-scanned by the group-by on every GC
+                # cycle.
                 sqlalchemy.or_(
                     sqlalchemy.func.max(spot_table.c.end_at).is_(None),
                     sqlalchemy.func.max(spot_table.c.end_at) <
@@ -3984,6 +4146,35 @@ async def _get_all_task_ids_async(job_id: int) -> List[int]:
         return [row[0] for row in result.fetchall()]
 
 
+async def _insert_job_event(
+        session: sql_async.AsyncSession,
+        job_id: int,
+        task_id: Optional[int],
+        new_status: ManagedJobStatus,
+        reason: str,
+        code: Optional[str] = None,
+        recovery_source: Optional['RecoverySource'] = None,
+        timestamp: Optional[datetime.datetime] = None) -> None:
+    """Insert a job event as part of the caller's session.
+
+    Does not commit; the event joins whatever transaction the caller has
+    open, so it is recorded atomically with the state change it describes.
+    """
+    if timestamp is None:
+        timestamp = datetime.datetime.now()
+
+    await session.execute(job_events_table.insert().values(
+        spot_job_id=job_id,
+        task_id=task_id,  # Can be None for job-level events
+        new_status=new_status.value,
+        code=code,
+        reason=reason,
+        recovery_source=(recovery_source.value
+                         if recovery_source is not None else None),
+        timestamp=timestamp,
+    ))
+
+
 @db_retries.retry_async
 async def add_job_event_async(
         job_id: int,
@@ -4007,23 +4198,10 @@ async def add_job_event_async(
             (FAILURE / EMERGENCY / HA). NULL on all other events.
         timestamp: The timestamp of the event. If None, uses current time.
     """
-    if timestamp is None:
-        timestamp = datetime.datetime.now()
-
-    status_value = new_status.value
-
     engine = await _db_manager.get_async_engine()
     async with sql_async.AsyncSession(engine) as session:
-        await session.execute(job_events_table.insert().values(
-            spot_job_id=job_id,
-            task_id=task_id,  # Can be None for job-level events
-            new_status=status_value,
-            code=code,
-            reason=reason,
-            recovery_source=(recovery_source.value
-                             if recovery_source is not None else None),
-            timestamp=timestamp,
-        ))
+        await _insert_job_event(session, job_id, task_id, new_status, reason,
+                                code, recovery_source, timestamp)
         await session.commit()
 
 
