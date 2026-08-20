@@ -19,19 +19,18 @@ PID_FILE = runtime_utils.get_runtime_dir_path(constants.SKYLET_PID_FILE)
 PORT_FILE = runtime_utils.get_runtime_dir_path(constants.SKYLET_PORT_FILE)
 START_FILE = runtime_utils.get_runtime_dir_path(constants.SKYLET_START_FILE)
 
-# Keep in sync with SLURM_MARKER_FILE in sky/provision/slurm/utils.py; that
-# module is too heavy to import here.
+# Duplicated from sky/provision/slurm/utils.py to avoid importing that module.
 _SLURM_MARKER_FILE = '.sky_slurm_cluster'
 
-# SKYPILOT_ does not start with SKY_; serialize both prefixes.
+# Serialize both prefixes because SKYPILOT_ does not start with SKY_.
 _SKY_ENV_VAR_PREFIX = 'SKY_'
 
 
 def _serialize_launch_env() -> str:
-    """Export lines reproducing this process's env for the keeper's shell.
+    """Serialize the launch environment for the host-side keeper.
 
-    No shape-dependent values (HOME is excluded); PATH is prepended to the
-    keeper's own PATH, never replaced.
+    HOME is excluded because it differs between the host and container.
+    PATH is prepended to the keeper's PATH rather than replacing it.
     """
     export_lines = []
     path_value = os.environ.get('PATH')
@@ -45,10 +44,14 @@ def _serialize_launch_env() -> str:
 
 
 def _is_inside_slurm_cluster() -> bool:
-    if os.path.exists(runtime_utils.get_runtime_dir_path(_SLURM_MARKER_FILE)):
-        return True
+    """Whether this allocation's sbatch script supports the skylet keeper.
+
+    Only the runtime marker proves that the sbatch script reads the start spec.
+    The generic Slurm check keeps the HOME fallback for older allocations.
+    """
     return os.path.exists(
-        os.path.join(os.path.expanduser('~'), _SLURM_MARKER_FILE))
+        runtime_utils.get_runtime_dir_path(
+            os.path.join('.sky', _SLURM_MARKER_FILE)))
 
 
 def _start_skylet_via_keeper(port: int) -> None:
@@ -56,32 +59,31 @@ def _start_skylet_via_keeper(port: int) -> None:
     launch_env = _serialize_launch_env()
     start_spec = (
         '#!/bin/bash\n'
-        '# Written by attempt_skylet.py; run in the foreground by the\n'
-        '# skylet keeper step.\n'
+        '# Run by the Slurm skylet keeper.\n'
         f'{launch_env}\n'
-        # $$ then exec: the PID file records the real skylet PID, matching
-        # the nohup path's `echo $!`.
+        # exec preserves $$, so the PID file records skylet itself.
         f'echo $$ > {PID_FILE}\n'
         f'exec {constants.SKY_PYTHON_CMD} -m sky.skylet.skylet '
         f'--port={port} >> {SKYLET_LOG_FILE} 2>&1\n')
-    # 0600 before the content lands; os.replace keeps the mode.
+    # The spec may contain secrets.
+    # Create it as 0600 before writing. os.replace preserves the mode.
     tmp_file = START_FILE + '.tmp'
     fd = os.open(tmp_file, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     with os.fdopen(fd, 'w', encoding='utf-8') as spec_file:
         spec_file.write(start_spec)
     os.replace(tmp_file, START_FILE)
 
-    # Poll only our PID file: the global scan can match another cluster's
-    # skylet. The host-written PID is valid here; enroot shares the PID
-    # namespace.
-    deadline = time.time() + 30
-    while time.time() < deadline:
+    # Require this cluster's PID file.
+    # A process scan can match another cluster's skylet.
+    # Enroot shares the PID namespace, so the host PID is valid in the container.
+    deadline = time.monotonic() + 30
+    while time.monotonic() < deadline:
         try:
             with open(PID_FILE, 'r', encoding='utf-8') as pid_file:
                 pid = int(pid_file.read().strip())
         except (OSError, ValueError):
             pid = -1
-        if pid > 0 and _is_running_skylet_process(pid):
+        if _is_running_skylet_process(pid):
             return
         time.sleep(0.5)
     raise RuntimeError(
@@ -170,12 +172,13 @@ def restart_skylet():
 
     on_slurm = _is_inside_slurm_cluster()
     if on_slurm:
-        # Remove the spec before killing, or the keeper could relaunch the
-        # old version/port before the new spec lands.
+        # Remove the old spec before killing skylet.
+        # This prevents the keeper from relaunching it.
+        # Any removal error except a missing file aborts before the kill.
         try:
             os.remove(START_FILE)
-        except OSError:
-            pass  # Best effort cleanup
+        except FileNotFoundError:
+            pass
 
     # Find and kill running skylet processes
     for pid in _find_running_skylet_pids():

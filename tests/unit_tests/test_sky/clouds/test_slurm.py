@@ -781,13 +781,13 @@ class TestIsInsideSlurmCluster:
                                                         monkeypatch):
         """Marker in the runtime dir is found through SKY_RUNTIME_DIR."""
         runtime_dir = tmp_path / 'rt'
-        runtime_dir.mkdir()
+        (runtime_dir / '.sky').mkdir(parents=True)
         monkeypatch.setenv(constants.SKY_RUNTIME_DIR_ENV_VAR_KEY,
                            str(runtime_dir))
         monkeypatch.setenv('HOME', str(tmp_path / 'home-without-marker'))
 
         assert not slurm_utils.is_inside_slurm_cluster()
-        (runtime_dir / slurm_utils.SLURM_MARKER_FILE).touch()
+        (runtime_dir / '.sky' / slurm_utils.SLURM_MARKER_FILE).touch()
         assert slurm_utils.is_inside_slurm_cluster()
 
     def test_home_marker_fallback(self, tmp_path, monkeypatch):
@@ -1507,7 +1507,7 @@ class TestCreateVirtualInstance:
                                                       config)
         assert ('--container-mounts="/home/testuser:/home/testuser,'
                 '/tmp/ccache_$(id -u):/var/cache/ccache,'
-                '/tmp/test-cluster-mounted:/tmp/test-cluster-mounted,'
+                '/tmp/test-cluster-mounted/.sky:/tmp/test-cluster-mounted/.sky,'
                 '/host/data:/data:ro,/nvme/$SLURM_JOB_ID:/scratch,'
                 '/host/models:/models:ro"' in mounted_script)
 
@@ -1661,7 +1661,7 @@ class TestCreateVirtualInstance:
         keeper_idx = script.index(
             '( while true; do srun --overlap --jobid=$SLURM_JOB_ID '
             '--nodes=1 --ntasks=1 --nodelist=$SKY_HEAD_NODE')
-        anchor_idx = script.rindex('\nwait\n')
+        anchor_idx = script.rindex('\nwait "$CONTAINER_PID"\n')
         assert keeper_idx < anchor_idx
         keeper_line = script[keeper_idx:script.index('\n', keeper_idx)]
         # The keeper never attaches the container: Slurm CLIs are host-only.

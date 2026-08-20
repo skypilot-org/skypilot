@@ -253,7 +253,7 @@ class TestRestartSkyletOnSlurm:
         # No real 30s waits: virtual clock, instant sleeps.
         self.clock = [0.0]
         fake_time = mock.Mock()
-        fake_time.time = lambda: self.clock[0]
+        fake_time.monotonic = lambda: self.clock[0]
 
         def fake_sleep(seconds):
             self.clock[0] += seconds
@@ -329,6 +329,23 @@ class TestRestartSkyletOnSlurm:
         assert 'stale spec' not in self.start_file.read_text()
         assert 'exec' in self.start_file.read_text()
 
+    def test_spec_removal_failure_aborts_before_killing(self, monkeypatch):
+        """If the stale spec cannot be removed, abort before killing skylet."""
+        self.start_file.write_text('stale spec')
+
+        def fail_remove(path):
+            raise PermissionError(f'cannot remove {path}')
+
+        monkeypatch.setattr(attempt_skylet.os, 'remove', fail_remove)
+        monkeypatch.setattr(
+            attempt_skylet, '_find_running_skylet_pids',
+            lambda: pytest.fail('kill scan ran after removal failed'))
+
+        with pytest.raises(PermissionError):
+            attempt_skylet.restart_skylet()
+
+        assert self.start_file.read_text() == 'stale spec'
+
     def test_handshake_timeout_raises_clear_error(self, monkeypatch):
         """No keeper response -> RuntimeError naming the keeper and files."""
         monkeypatch.setattr(attempt_skylet, '_find_running_skylet_pids',
@@ -347,7 +364,7 @@ class TestRestartSkyletOnSlurm:
         monkeypatch.setattr(attempt_skylet, '_find_running_skylet_pids',
                             lambda: [9999])
         monkeypatch.setattr(attempt_skylet, '_is_running_skylet_process',
-                            lambda pid: True)
+                            lambda pid: pid == 9999)
         monkeypatch.setattr('os.kill', lambda p, s: None)
         monkeypatch.setattr('psutil.Process',
                             lambda p: mock.Mock(wait=lambda timeout: None))
@@ -398,29 +415,28 @@ class TestRestartSkyletOnSlurm:
 
 
 class TestSlurmDetection:
-    """Test _is_inside_slurm_cluster() marker resolution in both shapes."""
+    """Test _is_inside_slurm_cluster() marker resolution."""
 
     def test_detects_slurm_via_runtime_dir_marker(self, tmp_path, monkeypatch):
         """Container shape: marker resolves through SKY_RUNTIME_DIR."""
         runtime_dir = tmp_path / 'rt'
-        runtime_dir.mkdir()
+        (runtime_dir / '.sky').mkdir(parents=True)
         monkeypatch.setenv(constants.SKY_RUNTIME_DIR_ENV_VAR_KEY,
                            str(runtime_dir))
         monkeypatch.setenv('HOME', str(tmp_path / 'empty-home'))
 
         assert not attempt_skylet._is_inside_slurm_cluster()
-        (runtime_dir / attempt_skylet._SLURM_MARKER_FILE).touch()
+        (runtime_dir / '.sky' / attempt_skylet._SLURM_MARKER_FILE).touch()
         assert attempt_skylet._is_inside_slurm_cluster()
 
-    def test_detects_slurm_via_home_marker_fallback(self, tmp_path,
-                                                    monkeypatch):
-        """Host shape / pre-existing clusters: HOME marker still works."""
+    def test_home_marker_alone_does_not_enable_keeper(self, tmp_path,
+                                                      monkeypatch):
+        """A pre-keeper allocation's HOME marker must keep the nohup path."""
         home = tmp_path / 'cluster-home'
         home.mkdir()
         monkeypatch.setenv(constants.SKY_RUNTIME_DIR_ENV_VAR_KEY,
                            str(tmp_path / 'rt-no-marker'))
         monkeypatch.setenv('HOME', str(home))
 
-        assert not attempt_skylet._is_inside_slurm_cluster()
         (home / attempt_skylet._SLURM_MARKER_FILE).touch()
-        assert attempt_skylet._is_inside_slurm_cluster()
+        assert not attempt_skylet._is_inside_slurm_cluster()

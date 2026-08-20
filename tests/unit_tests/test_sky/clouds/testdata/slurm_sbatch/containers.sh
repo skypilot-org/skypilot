@@ -14,8 +14,8 @@
 # Cleanup function to remove cluster dirs on job termination.
 cleanup() {
     saved_exit=$?
-    # The Skylet is daemonized, so it is not automatically terminated when
-    # the Slurm job is terminated, we need to kill it manually.
+    # Prevent the keeper from restarting Skylet during cleanup.
+    rm -f "/tmp/test-cluster/.sky/skylet_start"
     echo "Terminating Skylet..."
     if [ -f "/tmp/test-cluster/.sky/skylet_pid" ]; then
         kill $(cat "/tmp/test-cluster/.sky/skylet_pid") 2>/dev/null || true
@@ -25,13 +25,13 @@ cleanup() {
     # This is only needed when container_scope=global.
     # When container_scope=job, named containers are removed automatically
     # at the end of the Slurm job, see: https://github.com/NVIDIA/pyxis/wiki/Setup#slurm-epilog
-    srun --nodes=1 --ntasks-per-node=1 enroot remove -f pyxis_test-cluster 2>/dev/null || true
+    srun --overlap --nodes=1 --ntasks-per-node=1 enroot remove -f pyxis_test-cluster 2>/dev/null || true
     # Clean up sky runtime directory on each node.
     # NOTE: We can do this because --nodes for both this srun and the
     # sbatch is the same number. Otherwise, there are no guarantees
     # that this srun will run on the same subset of nodes as the srun
     # that created the sky directories.
-    srun --nodes=1 rm -rf /tmp/test-cluster
+    srun --overlap --nodes=1 rm -rf /tmp/test-cluster
     rm -rf /home/testuser/.sky_clusters/test-cluster
     exit $saved_exit
 }
@@ -44,11 +44,9 @@ trap 'exit 0' TERM
 # Create sky home directory and subdirectories for the cluster.
 mkdir -p /home/testuser/.sky_clusters/test-cluster/sky_logs /home/testuser/.sky_clusters/test-cluster/sky_workdir /home/testuser/.sky_clusters/test-cluster/.sky
 # Create sky runtime directory on each node.
-srun --nodes=1 mkdir -p /tmp/test-cluster
-# Slurm marker in the runtime dir: resolvable in both shapes.
-srun --nodes=1 touch /tmp/test-cluster/.sky_slurm_cluster
+srun --nodes=1 mkdir -p /tmp/test-cluster/.sky
 # Marker file to indicate we're in a Slurm cluster.
-touch /home/testuser/.sky_clusters/test-cluster/.sky_slurm_cluster
+srun --nodes=1 touch /tmp/test-cluster/.sky/.sky_slurm_cluster
 # Store proctrack type for task executor to read.
 echo 'cgroup' > /home/testuser/.sky_clusters/test-cluster/.sky_proctrack_type
 # Suppress login messages.
@@ -58,7 +56,7 @@ CONTAINER_START=$SECONDS
 echo "[container] Initializing test-cluster on all nodes"
 rm -rf /home/testuser/.sky_clusters/test-cluster/.sky_container_init_done
 mkdir -p /home/testuser/.sky_clusters/test-cluster/.sky_container_init_done
-srun --overlap --unbuffered --nodes=1 --ntasks-per-node=1 --container-image='nvcr.io#nvidia/pytorch:24.01-py3' --container-name=test-cluster:create --container-mounts="/home/testuser:/home/testuser,/tmp/ccache_$(id -u):/var/cache/ccache,/tmp/test-cluster:/tmp/test-cluster" --container-remap-root --no-container-mount-home --container-writable bash -c 'set -e
+srun --overlap --unbuffered --nodes=1 --ntasks-per-node=1 --container-image='nvcr.io#nvidia/pytorch:24.01-py3' --container-name=test-cluster:create --container-mounts="/home/testuser:/home/testuser,/tmp/ccache_$(id -u):/var/cache/ccache,/tmp/test-cluster/.sky:/tmp/test-cluster/.sky" --container-remap-root --no-container-mount-home --container-writable bash -c 'set -e
 echo "[container-init] Starting..."
 INIT_START=$SECONDS
 apt-get update
@@ -83,8 +81,7 @@ done
 echo "[container] Ready in $((SECONDS - CONTAINER_START))s"
 touch /home/testuser/.sky_clusters/test-cluster/.sky_slurm_container /home/testuser/.sky_clusters/test-cluster/.sky_sbatch_ready
 
-# Skylet keeper: foreground skylet; inner loop restarts skylet, outer loop
-# restarts the step.
+# Host-side keeper step that starts skylet and restarts it if it dies.
 SKY_HEAD_NODE=$(scontrol show hostnames "$SLURM_JOB_NODELIST" | head -n1)
 ( while true; do srun --overlap --jobid=$SLURM_JOB_ID --nodes=1 --ntasks=1 --nodelist=$SKY_HEAD_NODE bash -c 'while true; do if [ -f /tmp/test-cluster/.sky/skylet_start ]; then HOME=/home/testuser/.sky_clusters/test-cluster bash /tmp/test-cluster/.sky/skylet_start; fi; sleep 5; done'; sleep 5; done ) &
-wait
+wait "$CONTAINER_PID"

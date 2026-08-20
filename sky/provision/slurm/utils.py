@@ -1319,9 +1319,12 @@ def slurm_node_info(
 
 
 def is_inside_slurm_cluster() -> bool:
-    # Runtime-dir marker works in every shape; home-dir marker is the
-    # legacy fallback.
-    if os.path.exists(runtime_utils.get_runtime_dir_path(SLURM_MARKER_FILE)):
+    # New allocations write the marker under the runtime dir's .sky/.
+    # That path resolves in both the host and container shapes.
+    # Older allocations only wrote it to $HOME, so keep that as a fallback.
+    if os.path.exists(
+            runtime_utils.get_runtime_dir_path(
+                os.path.join('.sky', SLURM_MARKER_FILE))):
         return True
     marker_file = os.path.join(os.path.expanduser('~'), SLURM_MARKER_FILE)
     return os.path.exists(marker_file)
