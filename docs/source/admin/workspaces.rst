@@ -140,9 +140,14 @@ To apply the configuration, follow the following steps:
          helm upgrade --install $RELEASE_NAME skypilot/skypilot-nightly --devel \
             --namespace $NAMESPACE \
             --reuse-values \
+            --set apiService.configAuthoritative=true \
             --set-file apiService.config=/your/path/to/config.yaml
 
-      To change workspace configuration, update the config file and run the same command again. The API server will reload the new configuration automatically with no downtime. For more details, refer to :ref:`Setting the SkyPilot config in Helm Deployment <sky-api-server-config>`.
+      To change workspace configuration, update the config file and run the same command again. The ``configAuthoritative`` setting is required for Helm to replace an existing config on the persistent volume. Helm will roll the API server Deployment so the new configuration is loaded. Authoritative mode must use the default ``Recreate`` strategy, so expect a brief interruption while the new pod starts. ``RollingUpdate`` is not supported because it requires an external database, which cannot be combined with ``configAuthoritative``. For more details, refer to :ref:`Setting the SkyPilot config in Helm Deployment <sky-api-server-config>`.
+
+      .. warning::
+
+         With ``configAuthoritative`` enabled, Helm values are the source of truth. Workspace configuration updates through the dashboard are rejected; update the local config file and run Helm again instead. Do not use this mode for dashboard-managed workspaces.
 
    .. tab-item:: VM Deployment or Local API Server
 
@@ -156,6 +161,12 @@ Defining workspaces in UI
 ~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Equivalently, you can also define workspaces in the UI.
+
+.. note::
+
+   The UI can create and edit workspaces only when ``apiService.configAuthoritative``
+   is disabled. When Helm values are authoritative, API and dashboard workspace
+   updates are rejected; edit ``apiService.config`` and run Helm again instead.
 
 The SkyPilot UI (``sky dashboard``) has a **Workspaces** page that shows all configured workspaces.
 

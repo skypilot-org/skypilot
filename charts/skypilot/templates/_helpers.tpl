@@ -80,7 +80,7 @@ when umbrella charts set apiService.nodeSelector / tolerations / affinity.
 Check for apiService.config during upgrade and display warning
 */}}
 {{- define "skypilot.checkUpgradeConfig" -}}
-{{- if and .Release.IsUpgrade .Values.apiService.config -}}
+{{- if and .Release.IsUpgrade .Values.apiService.config (not .Values.apiService.configAuthoritative) -}}
 WARNING: apiService.config is set during an upgrade operation, which will be IGNORED.
 
 To update your SkyPilot config, follow the instructions in the upgrade guide:

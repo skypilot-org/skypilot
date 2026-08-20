@@ -1318,3 +1318,94 @@ tests:
       - matchRegex:
           path: spec.template.spec.containers[0].args[2]
           pattern: "exec sky api start .*--host=::"
+
+  # Test cases for apiService.configAuthoritative configuration
+  - it: should keep the PVC-to-ConfigMap sync by default
+    set:
+      apiService.config: |
+        kubernetes:
+          provision_timeout: 901
+    asserts:
+      - matchRegex:
+          path: spec.template.spec.containers[0].args[2]
+          pattern: "if \\[ -s /root/\\.sky/config\\.yaml \\]; then"
+      - matchRegex:
+          path: spec.template.spec.containers[0].args[2]
+          pattern: "initialize_configmap_sync_on_startup"
+      - notExists:
+          path: spec.template.metadata.annotations["checksum/config"]
+      - notContains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: SKYPILOT_API_SERVER_CONFIG_AUTHORITATIVE
+
+  - it: should keep the authoritative environment unset by default
+    asserts:
+      - notContains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: SKYPILOT_API_SERVER_CONFIG_AUTHORITATIVE
+
+  - it: should require config when authoritative mode is enabled
+    set:
+      apiService.configAuthoritative: true
+    asserts:
+      - failedTemplate:
+          errorMessage: "apiService.config must be set when apiService.configAuthoritative is true"
+
+  - it: should make the ConfigMap authoritative when configured
+    set:
+      apiService.configAuthoritative: true
+      apiService.config: |
+        kubernetes:
+          provision_timeout: 901
+    asserts:
+      - exists:
+          path: spec.template.metadata.annotations["checksum/config"]
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: SKYPILOT_API_SERVER_CONFIG_AUTHORITATIVE
+            value: "true"
+      - matchRegex:
+          path: spec.template.spec.containers[0].args[2]
+          pattern: "cp /var/skypilot/config/config.yaml /root/.sky/config.yaml"
+      - notMatchRegex:
+          path: spec.template.spec.containers[0].args[2]
+          pattern: "initialize_configmap_sync_on_startup"
+
+  - it: should use authoritative config with ephemeral state when storage is disabled
+    set:
+      storage.enabled: false
+      apiService.configAuthoritative: true
+      apiService.config: |
+        kubernetes:
+          provision_timeout: 901
+    asserts:
+      - contains:
+          path: spec.template.spec.volumes
+          content:
+            name: state-volume
+            emptyDir: {}
+      - matchRegex:
+          path: spec.template.spec.containers[0].args[2]
+          pattern: "cp /var/skypilot/config/config.yaml /root/.sky/config.yaml"
+
+  - it: should attach an existing claim in authoritative mode
+    set:
+      storage.enabled: false
+      storage.existingClaim: existing-state
+      apiService.configAuthoritative: true
+      apiService.config: |
+        kubernetes:
+          provision_timeout: 901
+    asserts:
+      - contains:
+          path: spec.template.spec.volumes
+          content:
+            name: state-volume
+            persistentVolumeClaim:
+              claimName: existing-state
+      - matchRegex:
+          path: spec.template.spec.containers[0].args[2]
+          pattern: "cp /var/skypilot/config/config.yaml /root/.sky/config.yaml"

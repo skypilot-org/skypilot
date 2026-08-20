@@ -109,13 +109,21 @@ apiService:
     timeoutSeconds: 1
 
   # Set ~/.sky/config.yaml content on the API server
-  # This value is IGNORED during an helm upgrade if there is an existing config
-  # due to the potential accidental loss of existing config. Use the SkyPilot dashboard to update the config.
+  # By default, this value is ignored during a helm upgrade if there is an
+  # existing config due to the potential accidental loss of existing config.
+  # Set configAuthoritative to true for GitOps-managed configuration.
+  # Otherwise, use the SkyPilot dashboard to update the config.
   # If remote database is configured (either via dbConnectionSecretName or dbConnectionString), config must be null.
   # In such case, you can add the config via the dashboard once the API server is deployed.
   # Refer to https://docs.skypilot.co/en/latest/reference/config.html for more details.
   # @schema type: [string, null]
   config: null
+  # When true, copy apiService.config to ~/.sky/config.yaml on every API server start.
+  # This makes the ConfigMap authoritative and is useful when Helm values are managed by GitOps.
+  # API server config updates are rejected; update this value through Helm instead.
+  # When false, an existing config on the persistent volume remains authoritative.
+  # @schema type: [boolean]
+  configAuthoritative: false
   # config: |
   #   admin_policy: admin_policy_examples.AddLabelsPolicy
   #
