@@ -180,6 +180,38 @@ def test_long_stall_is_sampled_more_than_once(stall_logs):
     assert lags[-1] > lags[0] * 1.5, lags
 
 
+def test_deduped_stall_emits_no_orphan_recovery(stall_logs):
+    """A stall whose dump was deduped must not log a recovery either.
+
+    The recovery line has no rate limit of its own, so without this a loop
+    stalling repeatedly in one place would emit a stream of `recovered` lines
+    with no matching `stalled` line - reading as a phantom stall.
+    """
+
+    async def main():
+        watchdog = loop_stall.LoopStallWatchdog(asyncio.get_running_loop(),
+                                                threshold=0.2,
+                                                heartbeat_interval=0.05,
+                                                poll_interval=0.02)
+        watchdog.start()
+        try:
+            await asyncio.sleep(0.4)
+            _blocking_business_code(0.5)
+            await asyncio.sleep(0.4)
+            # Same source, well inside the dedup window.
+            _blocking_business_code(0.5)
+            await asyncio.sleep(0.4)
+        finally:
+            watchdog.stop()
+
+    asyncio.run(main())
+
+    assert _messages_matching(stall_logs, 'Event loop stalled')
+    recoveries = _messages_matching(stall_logs, 'Event loop recovered')
+    assert len(recoveries) == 1, (
+        f'expected one recovery for the one reported stall, got {recoveries}')
+
+
 def _wait_for_another_thread(event: threading.Event, seconds: float) -> None:
     """Blocks the loop on a cross-thread wait, the way Future.result() does."""
     event.wait(seconds)

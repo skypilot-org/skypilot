@@ -33,6 +33,7 @@ would otherwise attribute every such stall to whichever frame happened to call
 """
 import asyncio
 import collections
+import math
 import sys
 import threading
 import time
@@ -62,9 +63,11 @@ _MAX_LOGGED_FRAMES = 12
 # At most one dump per source per this many seconds, so a source that stalls
 # repeatedly is reported without filling the log.
 _DEDUP_SECONDS = 60.0
-# Ceiling on dumps per minute across all sources, so a stall storm involving
-# many distinct sources cannot amplify into a logging storm either.
+# Ceiling on dumps across all sources within _DUMP_WINDOW_SECONDS, so a stall
+# storm involving many distinct sources cannot amplify into a logging storm
+# either.
 _MAX_DUMPS_PER_MINUTE = 10
+_DUMP_WINDOW_SECONDS = 60.0
 # The all-thread dump is much larger than a single stack, so it is rate limited
 # separately and far more aggressively.
 _ALL_THREAD_DUMP_INTERVAL = 300.0
@@ -76,7 +79,7 @@ _MAX_THREAD_GROUPS = 5
 # matter how many distinct call sites stall.
 _MAX_SOURCE_LABELS = 32
 _OVERFLOW_SOURCE = 'other'
-# Used when the loop thread held no application frames - see module docstring.
+# Used when the loop was parked in its own poll - see module docstring.
 _STARVED_SOURCE = 'starved'
 
 # Modules that only dispatch, never block on their own behalf. Frames from
@@ -269,11 +272,14 @@ class LoopStallWatchdog:
         # threading.Thread on some versions and only fails at join() time.
         self._stop_event = threading.Event()
         self._thread: Optional[threading.Thread] = None
-        # Everything below is touched by the watchdog thread only.
+        # Everything below is touched by the watchdog thread only. The rate
+        # limit timestamps start at -inf rather than 0 because time.monotonic()
+        # has an arbitrary origin - on a freshly booted host it can be smaller
+        # than the intervals below, which would suppress the very first dump.
         self._last_dump_at: Dict[str, float] = {}
         self._recent_dumps: Deque[float] = collections.deque()
         self._suppressing = False
-        self._last_all_thread_dump_at = 0.0
+        self._last_all_thread_dump_at = -math.inf
         self._known_sources: Dict[str, None] = {}
 
     # -- lifecycle ---------------------------------------------------------
@@ -338,7 +344,11 @@ class LoopStallWatchdog:
                 continue
             lag = self._current_lag()
             if lag <= self._threshold:
-                if in_stall:
+                # Only paired with a stall we actually reported: unlike the
+                # dumps this line has no rate limit of its own, and a loop
+                # oscillating around the threshold would otherwise emit
+                # recoveries for stalls that were deduped away.
+                if in_stall and logged_this_stall:
                     logger.warning(
                         f'Event loop recovered after stalling {peak_lag:.3f}s.')
                 in_stall = False
@@ -432,9 +442,11 @@ class LoopStallWatchdog:
     def _should_log(self, source: str, allow_repeat: bool = False) -> bool:
         now = time.monotonic()
         if (not allow_repeat and
-                now - self._last_dump_at.get(source, 0.0) < _DEDUP_SECONDS):
+                now - self._last_dump_at.get(source, -math.inf) <
+                _DEDUP_SECONDS):
             return False
-        while self._recent_dumps and now - self._recent_dumps[0] > 60.0:
+        while (self._recent_dumps and
+               now - self._recent_dumps[0] > _DUMP_WINDOW_SECONDS):
             self._recent_dumps.popleft()
         if len(self._recent_dumps) >= _MAX_DUMPS_PER_MINUTE:
             if not self._suppressing:
