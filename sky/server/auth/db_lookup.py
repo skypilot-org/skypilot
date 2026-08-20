@@ -32,6 +32,7 @@ from sky import exceptions
 from sky import sky_logging
 from sky.server.requests import executor
 from sky.users import permission
+from sky.utils import common_utils
 from sky.utils import context_utils
 
 logger = sky_logging.init_logger(__name__)
@@ -53,6 +54,22 @@ async def call_with_deadline(func: Callable[..., Any], *args: Any) -> Any:
     """
     return await asyncio.wait_for(context_utils.to_thread_with_executor(
         executor.get_auth_thread_executor(), func, *args),
+                                  timeout=AUTH_DB_TIMEOUT_SECONDS)
+
+
+async def _call_on_request_pool(func: Callable[..., Any], *args: Any) -> Any:
+    """Like `call_with_deadline`, on the request executor instead.
+
+    For auth-path work that is *not* a short lookup. The auth executor is 32
+    threads for exactly that, and its docstring is explicit that anything whose
+    exhaustion must not lock users out belongs on the request executor (128).
+    The deadline releases the caller, never the thread -- `wait_for` cannot
+    cancel a thread parked on a lock -- so work that can hold a thread for
+    `POLICY_UPDATE_LOCK_TIMEOUT_SECONDS` would otherwise let a burst of first
+    logins exhaust authentication for every other request on this worker.
+    """
+    return await asyncio.wait_for(context_utils.to_thread_with_executor(
+        executor.get_request_thread_executor(), func, *args),
                                   timeout=AUTH_DB_TIMEOUT_SECONDS)
 
 
@@ -81,17 +98,22 @@ async def ensure_role_for_authenticated_user(
     """
     if newly_added:
         try:
-            await call_with_deadline(permission.seed_new_user_role, user_id)
-        except asyncio.TimeoutError:
-            logger.error(f'Seeding a role for new user {user_id} timed out; '
-                         f'queueing it off the request')
-            permission.permission_service.queue_role_repair(user_id)
-            return db_timeout_response()
+            await _call_on_request_pool(permission.seed_new_user_role, user_id)
         except exceptions.ConcurrentWorkerExhaustedError as e:
             logger.error(f'Concurrent worker exhausted seeding a role for '
                          f'{user_id}: {e}')
             permission.permission_service.queue_role_repair(user_id)
             return worker_exhausted_response()
+        except Exception as e:  # pylint: disable=broad-except
+            # Everything, not just the timeout: an exception raised in a
+            # middleware surfaces as a bare 500, which clients do not retry
+            # (see this module's docstring). A first request that cannot get a
+            # role is exactly what should be retried.
+            logger.error(f'Seeding a role for new user {user_id} failed; '
+                         f'queueing it off the request: '
+                         f'{common_utils.format_exception(e)}')
+            permission.permission_service.queue_role_repair(user_id)
+            return db_timeout_response()
         return None
     if not permission.permission_service.probably_has_role(user_id):
         permission.permission_service.queue_role_repair(user_id)

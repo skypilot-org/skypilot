@@ -766,8 +766,16 @@ class PermissionService:
             if not self.claim_role_seed_attempt(user_id):
                 return
             self._repair_in_flight.add(user_id)
-            if self._repair_worker is None:
-                self._start_repair_worker()
+            try:
+                if self._repair_worker is None:
+                    self._start_repair_worker()
+            except Exception:
+                # Rolled back, or a failed thread start strands this principal
+                # for the life of the process: the entry below is what dedups
+                # later attempts, and only the drain worker removes it -- and
+                # there is no worker.
+                self._repair_in_flight.discard(user_id)
+                raise
         self._repair_queue.put(user_id)
 
     def _start_repair_worker(self) -> None:
@@ -840,11 +848,6 @@ class PermissionService:
         return user_id in self._role_seen
 
     def remember_role_seen(self, user_id: str) -> None:
-        """Record that this worker has seen a role for them. See
-        `probably_has_role`."""
-        self._remember_role_seen(user_id)
-
-    def _remember_role_seen(self, user_id: str) -> None:
         """Record that this principal holds a role, for `probably_has_role`."""
         if len(self._role_seen) >= _NO_ROLE_PROBE_CACHE_MAX:
             # Half, not all: clearing sends every principal back through a
@@ -873,11 +876,11 @@ class PermissionService:
             return False
         enforcer = self._ensure_enforcer()
         if enforcer.get_roles_for_user(user_id):
-            self._remember_role_seen(user_id)
+            self.remember_role_seen(user_id)
             return False
         if self._probe_unknown_principal(user_id):
             # Only this worker was behind; the role exists.
-            self._remember_role_seen(user_id)
+            self.remember_role_seen(user_id)
             return False
         return True
 
@@ -974,7 +977,11 @@ class PermissionService:
                     # Only for an empty role: seeding fills a gap, and a name
                     # nobody recognizes is not one -- queueing it would spin,
                     # and spend a slot the genuinely role-less need.
-                    self._schedule_role_repair(user_id)
+                    #
+                    # Through the guarded entry point: this runs inside the RBAC
+                    # middleware, where an exception is a bare 500 rather than a
+                    # denial.
+                    self.queue_role_repair(user_id)
                 self._log_denied_principal(user_id, path, method)
                 return True
         # Recognized, by either route: remember it for the loop-side guard.
@@ -983,7 +990,7 @@ class PermissionService:
         # one had run -- and the login paths that consult it queued a pointless
         # repair for each of them after every restart, which could fire the
         # in-flight cap warning on ordinary warm-up.
-        self._remember_role_seen(user_id)
+        self.remember_role_seen(user_id)
         # Admin wins over viewer when a user holds both — viewer's
         # default-deny semantics shouldn't restrict an admin.
         if (rbac.RoleName.VIEWER.value in roles and

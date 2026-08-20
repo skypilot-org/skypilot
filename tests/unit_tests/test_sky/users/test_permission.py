@@ -2833,9 +2833,9 @@ class TestBoundedClaimCache:
         service = permission.PermissionService()
         cap = permission._NO_ROLE_PROBE_CACHE_MAX
         for i in range(cap):
-            service._remember_role_seen(f'u{i}')
+            service.remember_role_seen(f'u{i}')
 
-        service._remember_role_seen('one-more')
+        service.remember_role_seen('one-more')
 
         assert len(service._role_seen) > cap // 4, (
             f'{len(service._role_seen)} left: the set was cleared, not halved')
