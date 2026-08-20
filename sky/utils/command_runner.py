@@ -1,4 +1,5 @@
 """Runner for commands to be executed on the cluster."""
+import base64
 import enum
 import fcntl
 import hashlib
@@ -2059,6 +2060,37 @@ class SlurmLoginNodeCommandRunner(SSHCommandRunner):
         super().__init__(node, ssh_user, ssh_private_key, **kwargs)
         self.slurm_user = slurm_user
         self._use_sudo = ssh_user != 'root'
+
+    def _get_command_to_run(
+        self,
+        cmd: Union[str, List[str]],
+        process_stream: bool,
+        separate_stderr: bool,
+        skip_num_lines: int,
+        source_bashrc: bool = False,
+        use_login: bool = True,
+        run_in_background: bool = False,
+    ) -> str:
+        # A Slurm login node is user-managed, and the SSH user's login shell
+        # may be csh/tcsh/fish rather than a POSIX shell. The command built by
+        # the base implementation places POSIX-only constructs (`2>&1`,
+        # `; exit ${PIPESTATUS[0]}`, trailing `&`) *outside* the
+        # `/bin/bash -c` quoting, so the remote login shell parses them:
+        # csh treats `2>&1` as a redirect to a file literally named `1` and
+        # rejects `${PIPESTATUS[0]}` with "Illegal variable name".
+        # Encode the whole command and decode it inside bash, so the login
+        # shell only ever parses a simple pipeline, which every shell
+        # (POSIX, csh family, fish) accepts.
+        command_str = super()._get_command_to_run(
+            cmd,
+            process_stream,
+            separate_stderr,
+            skip_num_lines,
+            source_bashrc=source_bashrc,
+            use_login=use_login,
+            run_in_background=run_in_background)
+        encoded = base64.b64encode(command_str.encode('utf-8')).decode('ascii')
+        return f'echo {encoded} | base64 -d | /bin/bash'
 
     def _inline_command_quote_levels(self) -> int:
         # wrap_command_as_user adds one inner login-shell `-c` command.
