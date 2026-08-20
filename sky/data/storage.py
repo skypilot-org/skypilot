@@ -424,6 +424,13 @@ def merge_mount_cached_config(
     return MountCachedConfig(**base)
 
 
+# rclone backends whose uploads are not chunked, so they define no
+# --<backend>-upload-concurrency / --<backend>-chunk-size flags. The
+# upload_concurrency/chunk_size settings have no effect there and must not be
+# emitted (an undefined backend flag is a hard error).
+_BACKENDS_WITHOUT_UPLOAD_TUNING = frozenset({'gcs'})
+
+
 @dataclasses.dataclass
 class MountCachedConfig:
     """Per-bucket configuration for MOUNT_CACHED mode (rclone flags).
@@ -459,9 +466,22 @@ class MountCachedConfig:
     # Mount as read-only.
     # rclone flag: --read-only
     read_only: Optional[bool] = None
+    # Number of chunks uploaded concurrently per transfer for multipart uploads.
+    # rclone flag: --<backend>-upload-concurrency
+    upload_concurrency: Optional[int] = None
+    # Chunk size for multipart uploads (e.g. "64M").
+    # rclone flag: --<backend>-chunk-size
+    chunk_size: Optional[str] = None
 
-    def to_rclone_flags(self) -> str:
-        """Convert non-None fields to rclone CLI flag string."""
+    def to_rclone_flags(self, backend_flag_prefix: Optional[str] = None) -> str:
+        """Convert non-None fields to rclone CLI flag string.
+
+        Args:
+            backend_flag_prefix: rclone backend name used as the prefix for
+                backend-specific flags (e.g. "s3"), or None if no backend
+                context is available. Multipart-upload tuning flags are only
+                emitted for backends that actually define them.
+        """
         flags = []
         if self.transfers is not None:
             flags.append(f'--transfers {self.transfers}')
@@ -493,6 +513,19 @@ class MountCachedConfig:
         flags.append(f'--vfs-write-back {self.vfs_write_back or "1s"}')
         if self.read_only:
             flags.append('--read-only')
+        # Backend-specific multipart-upload tuning (e.g. --s3-*, --azureblob-*).
+        if self.upload_concurrency is not None or self.chunk_size is not None:
+            if backend_flag_prefix in _BACKENDS_WITHOUT_UPLOAD_TUNING:
+                logger.warning(f'upload_concurrency/chunk_size are set but the '
+                               f'{backend_flag_prefix} backend has no rclone '
+                               'multipart-upload tuning flags; ignoring them.')
+            elif backend_flag_prefix is not None:
+                if self.upload_concurrency is not None:
+                    flags.append(f'--{backend_flag_prefix}-upload-concurrency '
+                                 f'{self.upload_concurrency}')
+                if self.chunk_size is not None:
+                    flags.append(f'--{backend_flag_prefix}-chunk-size '
+                                 f'{self.chunk_size.upper()}')
         return ' '.join(flags)
 
     def to_yaml_config(self) -> Dict[str, Any]:
@@ -2978,7 +3011,7 @@ class GcsStore(AbstractStore):
             rclone_profile_name=rclone_profile_name)
         mount_cached_cmd = mounting_utils.get_mount_cached_cmd(
             rclone_config, rclone_profile_name, self.bucket.name, mount_path,
-            config)
+            config, data_utils.Rclone.RcloneStores.GCS.backend_flag_prefix)
         return mounting_utils.get_mounting_command(mount_path, install_cmd,
                                                    mount_cached_cmd)
 
@@ -3886,7 +3919,7 @@ class AzureBlobStore(AbstractStore):
             storage_account_key=self.storage_account_key)
         mount_cached_cmd = mounting_utils.get_mount_cached_cmd(
             rclone_config, rclone_profile_name, self.container_name, mount_path,
-            config)
+            config, data_utils.Rclone.RcloneStores.AZURE.backend_flag_prefix)
         return mounting_utils.get_mounting_command(mount_path, install_cmd,
                                                    mount_cached_cmd)
 
@@ -4970,7 +5003,7 @@ class S3Store(S3CompatibleStore):
             rclone_profile_name=rclone_profile_name)
         mount_cached_cmd = mounting_utils.get_mount_cached_cmd(
             rclone_config, rclone_profile_name, self.bucket.name, mount_path,
-            config)
+            config, data_utils.Rclone.RcloneStores.S3.backend_flag_prefix)
         return mounting_utils.get_mounting_command(mount_path, install_cmd,
                                                    mount_cached_cmd)
 
@@ -5039,7 +5072,7 @@ class R2Store(S3CompatibleStore):
             rclone_profile_name=rclone_profile_name)
         mount_cached_cmd = mounting_utils.get_mount_cached_cmd(
             rclone_config, rclone_profile_name, self.bucket.name, mount_path,
-            config)
+            config, data_utils.Rclone.RcloneStores.R2.backend_flag_prefix)
         return mounting_utils.get_mounting_command(mount_path, install_cmd,
                                                    mount_cached_cmd)
 
@@ -5094,7 +5127,7 @@ class NebiusStore(S3CompatibleStore):
             rclone_profile_name=rclone_profile_name)
         mount_cached_cmd = mounting_utils.get_mount_cached_cmd(
             rclone_config, rclone_profile_name, self.bucket.name, mount_path,
-            config)
+            config, data_utils.Rclone.RcloneStores.NEBIUS.backend_flag_prefix)
         return mounting_utils.get_mounting_command(mount_path, install_cmd,
                                                    mount_cached_cmd)
 
@@ -5190,7 +5223,8 @@ class CoreWeaveStore(S3CompatibleStore):
             rclone_profile_name=rclone_profile_name)
         mount_cached_cmd = mounting_utils.get_mount_cached_cmd(
             rclone_config, rclone_profile_name, self.bucket.name, mount_path,
-            config)
+            config,
+            data_utils.Rclone.RcloneStores.COREWEAVE.backend_flag_prefix)
         return mounting_utils.get_mounting_command(mount_path, install_cmd,
                                                    mount_cached_cmd)
 
@@ -5265,7 +5299,7 @@ class VastDataStore(S3CompatibleStore):
             rclone_profile_name=rclone_profile_name)
         mount_cached_cmd = mounting_utils.get_mount_cached_cmd(
             rclone_config, rclone_profile_name, self.bucket.name, mount_path,
-            config)
+            config, data_utils.Rclone.RcloneStores.VASTDATA.backend_flag_prefix)
         return mounting_utils.get_mounting_command(mount_path, install_cmd,
                                                    mount_cached_cmd)
 
@@ -5377,7 +5411,7 @@ class OciS3CompatibleStore(S3CompatibleStore):
             rclone_profile_name=rclone_profile_name)
         mount_cached_cmd = mounting_utils.get_mount_cached_cmd(
             rclone_config, rclone_profile_name, self.bucket.name, mount_path,
-            config)
+            config, data_utils.Rclone.RcloneStores.OCI.backend_flag_prefix)
         return mounting_utils.get_mounting_command(mount_path, install_cmd,
                                                    mount_cached_cmd)
 

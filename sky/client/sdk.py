@@ -622,6 +622,7 @@ def validate(
     omit_priority_class = _omit(43)
     omit_max_hourly_cost = _omit(44)
     omit_mount_config = _omit(48)
+    omit_mount_cached_upload_tuning = _omit(58)
 
     for task in dag.tasks:
         if omit_user_specified_yaml:
@@ -651,6 +652,14 @@ def validate(
                 storage.mount_config = None
             logger.debug('`mount_config` is ignored because the server '
                          'does not support it yet.')
+        if omit_mount_cached_upload_tuning:
+            for storage in task.storage_mounts.values():
+                config = storage.mount_cached_config
+                if config is not None:
+                    config.upload_concurrency = None
+                    config.chunk_size = None
+            logger.debug('`upload_concurrency`/`chunk_size` are ignored '
+                         'because the server does not support them yet.')
         if omit_priority_class:
             for resource in task.resources:
                 if resource.priority_class:
