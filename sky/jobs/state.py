@@ -1972,7 +1972,7 @@ def get_managed_jobs_with_filters(
         sort_by: Field to sort by. Valid values: 'job_id', 'id', 'job_name',
             'name', 'submitted_at', 'status', 'job_duration', 'duration',
             'recovery_count', 'recoveries', 'resources', 'user_hash', 'user',
-            'cloud', 'infra'.
+            'cloud', 'infra', 'workspace', 'pool'.
         sort_order: Sort direction, 'asc' or 'desc'. Defaults to 'desc'.
 
     Returns:
@@ -2000,6 +2000,8 @@ def get_managed_jobs_with_filters(
         'user': job_info_table.c.user_hash,
         'cloud': job_info_table.c.cloud,
         'infra': job_info_table.c.cloud,  # Sort by cloud for infra
+        'workspace': job_info_table.c.workspace,
+        'pool': job_info_table.c.pool,
     }
 
     engine = _db_manager.get_engine()

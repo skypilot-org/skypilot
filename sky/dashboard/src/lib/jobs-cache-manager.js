@@ -1,8 +1,8 @@
 // Smart cache manager for managed jobs with pagination support
-// This manager handles both default path (fetch all, paginate client-side)
-// and plugin path (fetch exact page from server)
+// This manager fetches and caches only the requested server-side pages.
 
 import dashboardCache from './cache';
+import { REFRESH_INTERVALS } from './config';
 import { getManagedJobs } from '@/data/connectors/jobs';
 
 // Check if the jobs pagination plugin is available
@@ -22,14 +22,10 @@ class JobsCacheManager {
   constructor() {
     // Cache for paginated data, keyed by full options (including page, limit, sort)
     this.pageCache = new Map();
-    // Cache for full datasets (default path only), keyed by filter combination
-    this.fullDataCache = new Map();
     // Track ongoing requests to prevent duplicate fetches
     this.pendingRequests = new Map();
-    // Track background prefetch jobs for full datasets
-    this.backgroundPrefetching = new Map();
-    // TTL for cache entries (2 minutes)
-    this.cacheTTL = 2 * 60 * 1000;
+    // Keep normal table refreshes aligned with the configured 30-second cadence.
+    this.cacheTTL = REFRESH_INTERVALS.REFRESH_INTERVAL;
   }
 
   /**
@@ -71,7 +67,7 @@ class JobsCacheManager {
 
   /**
    * Generate a filter-only key (excludes pagination/sorting)
-   * Used for full dataset caching in default path
+   * Used to invalidate all cached pages for the same filters.
    */
   _generateFilterKey(options) {
     const {
@@ -107,25 +103,6 @@ class JobsCacheManager {
   }
 
   /**
-   * Group tasks by job_id and return unique job IDs in order
-   */
-  _groupTasksByJob(tasks) {
-    const jobMap = new Map();
-    const jobOrder = [];
-
-    for (const task of tasks) {
-      const jobId = task.id;
-      if (!jobMap.has(jobId)) {
-        jobMap.set(jobId, []);
-        jobOrder.push(jobId);
-      }
-      jobMap.get(jobId).push(task);
-    }
-
-    return { jobMap, jobOrder };
-  }
-
-  /**
    * Default path: Fetch a single page immediately for fast UI response
    * This fetches only the requested page, not the full dataset
    */
@@ -142,13 +119,19 @@ class JobsCacheManager {
     console.log('[JobsCacheManager] Default path: fetching single page', page);
 
     // Fetch the specific page using getManagedJobs with pagination params
-    const pageResponse = await dashboardCache.get(getManagedJobs, [
-      {
-        ...filterOptions,
-        page,
-        limit,
-      },
-    ]);
+    const pageResponse = await dashboardCache.get(
+      getManagedJobs,
+      [
+        {
+          ...filterOptions,
+          page,
+          limit,
+          sortBy,
+          sortOrder,
+        },
+      ],
+      { ttl: this.cacheTTL }
+    );
 
     if (pageResponse.__skipCache) {
       return pageResponse;
@@ -201,81 +184,6 @@ class JobsCacheManager {
       fromCache: false,
       cacheStatus: 'default_path_single_page',
     };
-  }
-
-  /**
-   * Default path background prefetch: Fetch ALL jobs and populate cache for all pages
-   * This is called in the background after the initial page load
-   */
-  async _loadFullDatasetAndCacheAllPages(options) {
-    const {
-      page = 1,
-      limit = 10,
-      sortBy,
-      sortOrder,
-      ...filterOptions
-    } = options;
-    const filterKey = this._generateFilterKey(filterOptions);
-
-    console.log('[JobsCacheManager] Background: fetching full dataset');
-
-    // Fetch all jobs without pagination
-    const fullDataResponse = await dashboardCache.get(getManagedJobs, [
-      filterOptions,
-    ]);
-
-    if (fullDataResponse.__skipCache || fullDataResponse.controllerStopped) {
-      return;
-    }
-
-    const allJobs = fullDataResponse.jobs || [];
-    const { jobMap, jobOrder } = this._groupTasksByJob(allJobs);
-    const totalJobs = jobOrder.length;
-
-    // Store the full dataset for future page calculations
-    this.fullDataCache.set(filterKey, {
-      jobs: allJobs,
-      jobMap,
-      jobOrder,
-      totalJobs,
-      totalNoFilter: fullDataResponse.totalNoFilter || totalJobs,
-      statusCounts: fullDataResponse.statusCounts || {},
-      timestamp: Date.now(),
-    });
-
-    // Calculate and cache all pages
-    const totalPages = Math.ceil(totalJobs / limit) || 1;
-    for (let p = 1; p <= totalPages; p++) {
-      const startIdx = (p - 1) * limit;
-      const endIdx = startIdx + limit;
-      const pageJobIds = jobOrder.slice(startIdx, endIdx);
-      const pageJobs = [];
-      for (const jobId of pageJobIds) {
-        pageJobs.push(...jobMap.get(jobId));
-      }
-
-      const pageCacheKey = this._generateCacheKey({
-        ...filterOptions,
-        page: p,
-        limit,
-        sortBy,
-        sortOrder,
-      });
-
-      this.pageCache.set(pageCacheKey, {
-        jobs: pageJobs,
-        total: totalJobs,
-        totalNoFilter: fullDataResponse.totalNoFilter || totalJobs,
-        totalPages,
-        hasNext: p < totalPages,
-        hasPrev: p > 1,
-        controllerStopped: false,
-        statusCounts: fullDataResponse.statusCounts || {},
-        timestamp: Date.now(),
-      });
-    }
-
-    console.log('[JobsCacheManager] Background: cached', totalPages, 'pages');
   }
 
   /**
@@ -394,7 +302,7 @@ class JobsCacheManager {
    * Get paginated jobs data with intelligent caching
    * - Checks cache first (keyed by all parameters including page, limit, sort)
    * - On cache miss, uses plugin path if available, otherwise default path
-   * - Default path: fetches single page immediately, then prefetches full dataset in background
+   * - Prefetches at most the immediately following server page
    *
    * @param {Object} options - Query options including pagination
    * @returns {Promise<{jobs: Array, total: number, totalNoFilter: number, totalPages: number, hasNext: boolean, hasPrev: boolean, controllerStopped: boolean, statusCounts: Object, fromCache: boolean, cacheStatus: string}>}
@@ -402,7 +310,6 @@ class JobsCacheManager {
   async getPaginatedJobs(options = {}) {
     const { page = 1, limit = 10 } = options;
     const cacheKey = this._generateCacheKey(options);
-    const filterKey = this._generateFilterKey(options);
 
     console.log('[JobsCacheManager] getPaginatedJobs called:', {
       page,
@@ -451,14 +358,6 @@ class JobsCacheManager {
       try {
         const result = await populatePromise;
 
-        // For default path, kick off background prefetch of full dataset
-        if (
-          !isPluginAvailable() &&
-          !this.backgroundPrefetching.has(filterKey)
-        ) {
-          this._kickOffBackgroundPrefetch(options, filterKey);
-        }
-
         return result;
       } finally {
         this.pendingRequests.delete(cacheKey);
@@ -467,23 +366,6 @@ class JobsCacheManager {
       console.error('[JobsCacheManager] Error in getPaginatedJobs:', error);
       throw error;
     }
-  }
-
-  /**
-   * Kick off background prefetch of full dataset (default path only)
-   */
-  _kickOffBackgroundPrefetch(options, filterKey) {
-    console.log('[JobsCacheManager] Kicking off background prefetch');
-
-    const prefetchPromise = this._loadFullDatasetAndCacheAllPages(options)
-      .catch((err) => {
-        console.warn('[JobsCacheManager] Background prefetch failed:', err);
-      })
-      .finally(() => {
-        this.backgroundPrefetching.delete(filterKey);
-      });
-
-    this.backgroundPrefetching.set(filterKey, prefetchPromise);
   }
 
   /**
@@ -507,11 +389,7 @@ class JobsCacheManager {
     console.log('[JobsCacheManager] Prefetching page', nextPage);
 
     try {
-      // For plugin path, prefetch the specific page
-      if (isPluginAvailable()) {
-        await this._populateCachePluginPath(nextOptions);
-      }
-      // For default path, all pages are already cached when we load full data
+      await this.getPaginatedJobs(nextOptions);
     } catch (error) {
       console.warn('[JobsCacheManager] Prefetch failed:', error);
     }
@@ -562,17 +440,10 @@ class JobsCacheManager {
       // Invalidate specific cache key
       const cacheKey = this._generateCacheKey(options);
       this.pageCache.delete(cacheKey);
-
-      // Also invalidate related filter key for full data cache and background prefetch
-      const filterKey = this._generateFilterKey(options);
-      this.fullDataCache.delete(filterKey);
-      this.backgroundPrefetching.delete(filterKey);
     } else {
       // Clear all cache
       this.pageCache.clear();
-      this.fullDataCache.clear();
       this.pendingRequests.clear();
-      this.backgroundPrefetching.clear();
     }
 
     // Also invalidate the underlying dashboard cache
@@ -606,9 +477,6 @@ class JobsCacheManager {
         // Skip malformed keys
       }
     }
-
-    // Also remove full data cache for this filter
-    this.fullDataCache.delete(filterKey);
   }
 
   /**
@@ -617,9 +485,7 @@ class JobsCacheManager {
   getCacheStats() {
     return {
       pageCacheSize: this.pageCache.size,
-      fullDataCacheSize: this.fullDataCache.size,
       pendingRequestsCount: this.pendingRequests.size,
-      backgroundPrefetchingCount: this.backgroundPrefetching.size,
       isPluginAvailable: isPluginAvailable(),
       cachedKeys: Array.from(this.pageCache.keys()).map((k) => {
         try {
