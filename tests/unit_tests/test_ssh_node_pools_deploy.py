@@ -1,5 +1,7 @@
 """Unit tests for sky/ssh_node_pools/deploy/deploy.py helpers."""
 
+import re
+
 from sky.ssh_node_pools.deploy import deploy
 
 
@@ -67,3 +69,44 @@ def test_prometheus_install_cmd_node_exporter_enabled_not_disabled():
     # The first 'enabled:' after the node-exporter key must be 'true'.
     enabled_line = ne_section[ne_section.index('enabled:'):].splitlines()[0]
     assert enabled_line.strip() == 'enabled: true'
+
+
+def test_tcp_forwarding_cmd_runs_sudo_under_askpass():
+    """Regression for #10303: every sudo here must be reachable without a tty.
+
+    Reading `sshd -T` and rewriting sshd_config need root. When the node has
+    no passwordless sudo, a bare `sudo` aborts with "a terminal is required to
+    read the password" and the deploy fails before k3s is ever installed.
+    """
+    askpass_block = 'echo "askpass"'
+    cmd = deploy._tcp_forwarding_cmd(askpass_block, 'head.example.com')
+
+    # The askpass block must be present verbatim, as in every sibling helper.
+    assert askpass_block in cmd
+
+    # It must come first: SUDO_ASKPASS has to be exported before any sudo runs.
+    assert cmd.index(askpass_block) < cmd.index('sudo')
+
+    # Every sudo invocation must pass -A so it consults SUDO_ASKPASS instead
+    # of trying to prompt on a tty that ssh did not allocate.
+    sudos = re.findall(r'sudo(?: -\S+)*', cmd)
+    assert sudos, cmd
+    assert all(s.startswith('sudo -A') for s in sudos), sudos
+
+    # The behaviour itself is unchanged.
+    assert 'allowtcpforwarding' in cmd
+    assert '/etc/ssh/sshd_config' in cmd
+    assert 'systemctl restart sshd' in cmd
+    assert 'head.example.com' in cmd
+
+
+def test_tcp_forwarding_cmd_without_password_has_no_askpass_block():
+    """Guard against over-fixing: passwordless hosts must be unaffected.
+
+    With no password there is no askpass block to prepend, and `sudo -A` is a
+    no-op because sudo never needs to prompt -- the same reason every other
+    privileged block here passes -A unconditionally.
+    """
+    cmd = deploy._tcp_forwarding_cmd('', 'head.example.com')
+    assert 'SUDO_ASKPASS' not in cmd
+    assert cmd.lstrip().startswith('if [')
