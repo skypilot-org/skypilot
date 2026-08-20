@@ -81,12 +81,18 @@ _REPAIR_MAX_IN_FLIGHT = 64
 _SUPPORTED_ROLES = frozenset(rbac.get_supported_roles())
 
 
-def _claim_within_ttl(cache: Dict[str, float], key: str, ttl: float,
-                      cap: int) -> bool:
-    """Was `key` last stamped longer ago than `ttl`? If so, stamp it now.
+def _take_ttl_permit(cache: Dict[str, float], key: str, ttl: float,
+                     cap: int) -> bool:
+    """Take `key`'s permit for the work behind it, if the last one has expired.
 
-    The shape behind every per-principal rate limit here. Over the cap it drops
-    what has expired -- deliberately not the whole cache: these entries all
+    One permit per key per `ttl`, consumed by taking it: a caller that asks
+    twice for one request gets False the second time. The shape behind every
+    per-principal rate limit here -- a probe's policy reload, a seed attempt, a
+    denial log line.
+
+    Over the cap it drops what has expired, and if that is not enough the oldest
+    half of what remains -- so a live permit can be revoked early under
+    sustained pressure. Deliberately not the whole cache: these entries all
     expire, so clearing them wholesale would let one eviction send every
     principal back through the work the limit exists to space out.
     """
@@ -690,9 +696,9 @@ class PermissionService:
         caller denies): raising would leave the middleware with a bare 500.
         """
         roles = lambda: self._ensure_enforcer().get_roles_for_user(user_id)
-        if not _claim_within_ttl(self._no_role_probe_cache, user_id,
-                                 _NO_ROLE_PROBE_TTL_SECONDS,
-                                 _NO_ROLE_PROBE_CACHE_MAX):
+        if not _take_ttl_permit(self._no_role_probe_cache, user_id,
+                                _NO_ROLE_PROBE_TTL_SECONDS,
+                                _NO_ROLE_PROBE_CACHE_MAX):
             return roles()
         with self._probe_lock:
             if time.time() < self._probe_cooldown_until:
@@ -804,9 +810,9 @@ class PermissionService:
         point of denying rather than confining is that this is loud, so it must
         actually reach the operator without drowning the log.
         """
-        if not _claim_within_ttl(self._denied_log_cache, user_id,
-                                 _DENIED_LOG_TTL_SECONDS,
-                                 _NO_ROLE_PROBE_CACHE_MAX):
+        if not _take_ttl_permit(self._denied_log_cache, user_id,
+                                _DENIED_LOG_TTL_SECONDS,
+                                _NO_ROLE_PROBE_CACHE_MAX):
             return
         logger.warning(
             f'Denying {method} {path} for user {user_id}: the policy holds no '
@@ -872,9 +878,9 @@ class PermissionService:
 
         Cheap and non-blocking: in-memory only.
         """
-        return _claim_within_ttl(self._seed_attempt_cache, user_id,
-                                 _NO_ROLE_PROBE_TTL_SECONDS,
-                                 _NO_ROLE_PROBE_CACHE_MAX)
+        return _take_ttl_permit(self._seed_attempt_cache, user_id,
+                                _NO_ROLE_PROBE_TTL_SECONDS,
+                                _NO_ROLE_PROBE_CACHE_MAX)
 
     def needs_role_seed(self, user_id: str) -> bool:
         """`role_seed_missing` and a claim, for the login paths.

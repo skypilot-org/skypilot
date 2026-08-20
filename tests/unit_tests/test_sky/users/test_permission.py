@@ -2763,7 +2763,7 @@ class TestBoundedClaimCache:
 
     def test_an_expired_entry_is_dropped_before_a_live_one(self):
         cache = {'old': time.time() - 10.0, 'fresh': time.time()}
-        assert permission._claim_within_ttl(cache, 'new', ttl=5.0, cap=2)
+        assert permission._take_ttl_permit(cache, 'new', ttl=5.0, cap=2)
         assert 'old' not in cache
         assert 'fresh' in cache, 'a live entry was dropped'
         assert 'new' in cache
@@ -2772,10 +2772,10 @@ class TestBoundedClaimCache:
         """`fresh` keeping its stamp is what stops the herd."""
         now = time.time()
         cache = {f'u{i}': now for i in range(4)}
-        permission._claim_within_ttl(cache, 'new', ttl=60.0, cap=4)
+        permission._take_ttl_permit(cache, 'new', ttl=60.0, cap=4)
         # All live and over the cap: half go, the rest keep their rate limit.
         assert 2 <= len(cache) <= 4
-        assert not permission._claim_within_ttl(cache, 'new', ttl=60.0, cap=4)
+        assert not permission._take_ttl_permit(cache, 'new', ttl=60.0, cap=4)
 
     def test_a_seen_role_set_drops_half_when_full(self):
         """Same argument as the TTL caches: clearing it stampedes every one.
@@ -2796,8 +2796,8 @@ class TestBoundedClaimCache:
 
     def test_the_claim_is_consumed(self):
         cache: dict = {}
-        assert permission._claim_within_ttl(cache, 'u', ttl=60.0, cap=8)
-        assert not permission._claim_within_ttl(cache, 'u', ttl=60.0, cap=8)
+        assert permission._take_ttl_permit(cache, 'u', ttl=60.0, cap=8)
+        assert not permission._take_ttl_permit(cache, 'u', ttl=60.0, cap=8)
 
 
 class TestDefaultRoleCasing:
