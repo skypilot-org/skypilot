@@ -376,6 +376,45 @@ def test_source_labels_are_capped():
     assert watchdog._label_for('mod0:fn') == 'mod0:fn'  # pylint: disable=protected-access
 
 
+def _counting_watchdog_class(captures: List[float]):
+    """A watchdog subclass that records every sample it takes.
+
+    The override's signature must match the production call in `_watch`
+    exactly. If it did not, the TypeError would be swallowed by `_watch`'s
+    except clause and `captures` would stay empty - which would make
+    test_no_dumps_when_the_loop_is_healthy pass even if a healthy loop were
+    being sampled on every poll.
+    """
+
+    class CountingWatchdog(loop_stall.LoopStallWatchdog):
+
+        def _capture(self, lag, first_of_stall, allow_repeat=False):
+            captures.append(lag)
+            return super()._capture(lag, first_of_stall, allow_repeat)
+
+    return CountingWatchdog
+
+
+def _run_counting_watchdog(captures: List[float], stall_fn,
+                           threshold: float) -> None:
+    watchdog_cls = _counting_watchdog_class(captures)
+
+    async def main():
+        watchdog = watchdog_cls(asyncio.get_running_loop(),
+                                threshold=threshold,
+                                heartbeat_interval=0.05,
+                                poll_interval=0.02)
+        watchdog.start()
+        try:
+            await asyncio.sleep(0.3)
+            stall_fn()
+            await asyncio.sleep(0.3)
+        finally:
+            watchdog.stop()
+
+    asyncio.run(main())
+
+
 def test_no_dumps_when_the_loop_is_healthy(stall_logs):
     """A healthy loop is never sampled at all.
 
@@ -383,19 +422,14 @@ def test_no_dumps_when_the_loop_is_healthy(stall_logs):
     walk, and everything else that costs more than a float comparison, happens
     only once the loop is already stalled.
     """
-    captures = []
-
-    class CountingWatchdog(loop_stall.LoopStallWatchdog):
-
-        def _capture(self, lag, first_of_stall):
-            captures.append(lag)
-            return super()._capture(lag, first_of_stall)
+    captures: List[float] = []
 
     async def main():
-        watchdog = CountingWatchdog(asyncio.get_running_loop(),
-                                    threshold=0.3,
-                                    heartbeat_interval=0.05,
-                                    poll_interval=0.02)
+        watchdog = _counting_watchdog_class(captures)(
+            asyncio.get_running_loop(),
+            threshold=0.3,
+            heartbeat_interval=0.05,
+            poll_interval=0.02)
         watchdog.start()
         try:
             # Plenty of loop iterations, none of them blocking.
@@ -407,6 +441,20 @@ def test_no_dumps_when_the_loop_is_healthy(stall_logs):
     asyncio.run(main())
     assert not captures, f'sampled a healthy loop {len(captures)} time(s)'
     assert not _messages_matching(stall_logs, 'Event loop stalled')
+
+
+def test_counting_harness_does_observe_a_real_stall(stall_logs):
+    """Positive control for the test above.
+
+    Without this, `assert not captures` would also hold if the override were
+    never reached at all, and the healthy-loop test would prove nothing.
+    """
+    del stall_logs  # Only here to keep the watchdog's output off the console.
+    captures: List[float] = []
+    _run_counting_watchdog(captures,
+                           lambda: _blocking_business_code(0.5),
+                           threshold=0.2)
+    assert captures, 'the counting override was never reached'
 
 
 # -- plumbing classification ----------------------------------------------
