@@ -178,7 +178,6 @@ class PermissionService:
         # `_probe_unknown_principal`.
         self._no_role_probe_cache: Dict[str, float] = {}
         # user_id -> when this worker last tried to seed a missing role. See
-        # `needs_role_seed`.
         self._seed_attempt_cache: Dict[str, float] = {}
         # user_id -> when this worker last logged a denial for them. See
         # `_log_denied_principal`.
@@ -197,6 +196,8 @@ class PermissionService:
         self._repair_in_flight: Set[str] = set()
         self._repair_worker: Optional[threading.Thread] = None
         self._repair_lock = threading.Lock()
+        # Rate limit for the in-flight cap warning; see `_schedule_role_repair`.
+        self._cap_log_cache: Dict[str, float] = {}
 
     def initialize(self):
         self._lazy_initialize(full_initialize=True)
@@ -746,10 +747,18 @@ class PermissionService:
             if user_id in self._repair_in_flight:
                 return
             if len(self._repair_in_flight) >= _REPAIR_MAX_IN_FLIGHT:
-                logger.warning(
-                    f'Not queueing a role repair for {user_id}: '
-                    f'{_REPAIR_MAX_IN_FLIGHT} already pending. Something is '
-                    f'stranding principals faster than they can be repaired.')
+                # Rate-limited like the denial log, and for the same reason:
+                # this is the line that tells an operator repairs are being
+                # dropped, so a burst must not be able to repeat it per
+                # request. One key, not one per principal -- the condition is
+                # about the queue, not about who arrived last.
+                if _take_ttl_permit(self._cap_log_cache, 'cap',
+                                    _DENIED_LOG_TTL_SECONDS, 2):
+                    logger.warning(
+                        f'Not queueing a role repair for {user_id}: '
+                        f'{_REPAIR_MAX_IN_FLIGHT} already pending. Something '
+                        f'is stranding principals faster than they can be '
+                        f'repaired.')
                 return
             # Claimed last: a claim spent while the queue was full would make
             # this principal wait out a TTL for a repair that never ran.
@@ -829,6 +838,11 @@ class PermissionService:
         """
         return user_id in self._role_seen
 
+    def remember_role_seen(self, user_id: str) -> None:
+        """Record that this worker has seen a role for them. See
+        `probably_has_role`."""
+        self._remember_role_seen(user_id)
+
     def _remember_role_seen(self, user_id: str) -> None:
         """Record that this principal holds a role, for `probably_has_role`."""
         if len(self._role_seen) >= _NO_ROLE_PROBE_CACHE_MAX:
@@ -882,17 +896,28 @@ class PermissionService:
                                 _NO_ROLE_PROBE_TTL_SECONDS,
                                 _NO_ROLE_PROBE_CACHE_MAX)
 
-    def needs_role_seed(self, user_id: str) -> bool:
-        """`role_seed_missing` and a claim, for the login paths.
+    def queue_role_repair(self, user_id: str) -> None:
+        """Hand a role-less principal to the off-request repair queue.
 
-        Kept as one call because that is what the provisioning paths want: ask
-        once, and act if the answer is yes. Claim semantics, so two calls in one
-        request do not both answer True -- see `claim_role_seed_attempt`.
+        Cheap and non-blocking -- an in-memory claim and a queue put -- so an
+        async caller may do this inline. That is the point: the seed takes the
+        distributed policy lock, which waits up to
+        `POLICY_UPDATE_LOCK_TIMEOUT_SECONDS`, and the contention that strands
+        principals is exactly when a login would be waiting for it. This
+        request is unaffected either way; the next one finds a role.
 
-        Blocking (may reload the policy). Call from a worker thread.
+        Never raises, so callers on the login and provisioning paths need no
+        guard of their own: queueing cannot fail for lock reasons, but starting
+        the drain thread can (`RuntimeError` when the process is out of
+        threads), and a repair nobody is waiting for must not turn a login into
+        a 500. The next caller retries.
         """
-        return self.role_seed_missing(user_id) and self.claim_role_seed_attempt(
-            user_id)
+        try:
+            self._schedule_role_repair(user_id)
+        except Exception as e:  # pylint: disable=broad-except
+            logger.warning(f'Could not queue a role repair for {user_id}; a '
+                           f'later request retries: '
+                           f'{common_utils.format_exception(e)}')
 
     def check_endpoint_permission(self, user_id: str, path: str,
                                   method: str) -> bool:
@@ -951,6 +976,13 @@ class PermissionService:
                     self._schedule_role_repair(user_id)
                 self._log_denied_principal(user_id, path, method)
                 return True
+        # Recognized, by either route: remember it for the loop-side guard.
+        # Without this the memo was only ever written by a repair, so
+        # `probably_has_role` answered False for every healthy principal until
+        # one had run -- and the login paths that consult it queued a pointless
+        # repair for each of them after every restart, which could fire the
+        # in-flight cap warning on ordinary warm-up.
+        self._remember_role_seen(user_id)
         # Admin wins over viewer when a user holds both — viewer's
         # default-deny semantics shouldn't restrict an admin.
         if (rbac.RoleName.VIEWER.value in roles and
@@ -1361,28 +1393,6 @@ def _policy_lock() -> Generator[None, None, None]:
 permission_service = PermissionService()
 
 
-def reseed_role_if_missing(user_id: str) -> None:
-    """Add a role to a principal whose original seed never completed.
-
-    Blocking (policy reload plus, at most once per user per TTL, the policy
-    lock) -- call it from a worker thread.
-
-    Failures are swallowed on purpose. The only reason this runs at all is that
-    a contended policy lock stranded the user once already; letting a second
-    timeout surface would turn their request into a 500, and the next request
-    retries anyway.
-    """
-    try:
-        if not permission_service.needs_role_seed(user_id):
-            return
-        logger.warning(f'User {user_id} has no role; seeding one now. Their '
-                       f'original seed did not complete.')
-        seed_new_user_role(user_id)
-    except Exception as e:  # pylint: disable=broad-except
-        logger.warning(f'Failed to re-seed a role for {user_id}; will retry on '
-                       f'a later request: {common_utils.format_exception(e)}')
-
-
 def seed_new_user_role(user_id: str, role: Optional[str] = None) -> None:
     """Reload config, then set up policies for a newly-created user.
 
@@ -1402,6 +1412,9 @@ def seed_new_user_role(user_id: str, role: Optional[str] = None) -> None:
     """
     skypilot_config.safe_reload_config()
     permission_service.add_user_if_not_exists(user_id, role)
+    # This worker just gave them a role; the loop-side guard should not have to
+    # learn that from a repair.
+    permission_service.remember_role_seen(user_id)
     try:
         permission_service.resync_workspace_policies_for_new_user(user_id)
     except Exception as e:  # pylint: disable=broad-except

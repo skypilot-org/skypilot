@@ -2374,19 +2374,19 @@ class TestRolelessPrincipalIsDenied:
         assert len(loads) == 1, f'reloaded {len(loads)} times, expected 1'
 
 
-class TestNeedsRoleSeed:
-    """Retry a seed that never completed, without hammering the policy lock."""
+class TestRoleSeedMissing:
+    """Is a seed owed? Asked by the drain worker before it takes the lock."""
 
     def test_true_for_a_roleless_principal(self, policy_db):
         worker = policy_db()
         worker.enforcer.load_policy()
-        assert worker.needs_role_seed('stranded')
+        assert worker.role_seed_missing('stranded')
 
     def test_false_for_a_principal_with_a_role(self, policy_db):
         worker = policy_db()
         worker.enforcer.add_grouping_policy('known', 'user')
         worker.enforcer.load_policy()
-        assert not worker.needs_role_seed('known')
+        assert not worker.role_seed_missing('known')
 
     def test_false_when_only_this_worker_is_stale(self, policy_db):
         """A stale worker must not take the policy lock for every request."""
@@ -2395,7 +2395,7 @@ class TestNeedsRoleSeed:
         writer.enforcer.add_grouping_policy('elsewhere', 'user')
         writer.enforcer.save_policy()
 
-        assert not worker.needs_role_seed('elsewhere')
+        assert not worker.role_seed_missing('elsewhere')
 
     def test_false_for_an_unrecognized_role(self, policy_db):
         """Seeding cannot repair this, so asking for it is a pure lock storm.
@@ -2409,17 +2409,20 @@ class TestNeedsRoleSeed:
         worker.enforcer.add_grouping_policy('weird', 'pwned')
         worker.enforcer.load_policy()
 
-        assert not worker.needs_role_seed('weird')
+        assert not worker.role_seed_missing('weird')
 
     def test_attempts_are_rate_limited(self, policy_db):
-        """A seed that keeps failing must not be retried on every request."""
+        """A seed that keeps failing must not be retried on every request.
+
+        The query itself is idempotent -- it answers from the policy, so it
+        keeps saying yes. The backoff is the claim beside it.
+        """
         worker = policy_db()
         worker.enforcer.load_policy()
-        # First ask says yes; the seed is assumed to have failed, so the role is
-        # still missing -- but the next asks must back off.
-        assert worker.needs_role_seed('stranded')
-        assert not worker.needs_role_seed('stranded')
-        assert not worker.needs_role_seed('stranded')
+        assert worker.role_seed_missing('stranded')
+        assert worker.claim_role_seed_attempt('stranded')
+        assert not worker.claim_role_seed_attempt('stranded')
+        assert not worker.claim_role_seed_attempt('stranded')
 
     def test_probably_has_role_never_initializes(self):
         """Safe on the event loop: no enforcer, no database, no answer but False."""
@@ -2448,7 +2451,7 @@ class TestNeedsRoleSeed:
         worker.enforcer.load_policy()
 
         assert not worker.probably_has_role('known')
-        assert not worker.needs_role_seed('known')
+        assert not worker.role_seed_missing('known')
         assert worker.probably_has_role('known')
 
 
@@ -2661,6 +2664,50 @@ class TestScheduledRoleRepair:
 
         assert not [c for c in warn.call_args_list if 'Not queueing' in c[0][0]]
 
+    def test_a_healthy_principal_warms_the_loop_side_guard(self, policy_db):
+        """Otherwise the guard is cold for everyone until a repair has run.
+
+        The login paths queue a repair when it answers False, so a memo written
+        only by repairs made every login after a restart queue a pointless one
+        -- enough of them to fire the in-flight cap warning on warm-up.
+        """
+        worker = policy_db()
+        worker.enforcer.add_grouping_policy('healthy', 'admin')
+        worker.enforcer.load_policy()
+        assert not worker.probably_has_role('healthy')
+
+        worker.check_endpoint_permission('healthy', '/users', 'GET')
+
+        assert worker.probably_has_role('healthy')
+
+    def test_the_cap_warning_is_rate_limited(self, policy_db):
+        """It is the line that says repairs are being dropped. Once per TTL.
+
+        Unrated, a burst repeats it per request and it reads as a worsening
+        incident rather than one condition.
+        """
+        worker = policy_db()
+        worker._repair_in_flight = {
+            f'u{i}' for i in range(permission._REPAIR_MAX_IN_FLIGHT)
+        }
+        with mock.patch.object(permission.logger, 'warning') as warn:
+            for i in range(5):
+                worker._schedule_role_repair(f'late{i}')
+        assert len(
+            [c for c in warn.call_args_list if 'Not queueing' in c[0][0]]) == 1
+
+    def test_queueing_never_raises(self, policy_db):
+        """A repair nobody waits for must not turn a login into a 500.
+
+        `Thread.start()` raises when the process is out of threads, and the
+        login and provisioning paths call this with no guard of their own.
+        """
+        worker = policy_db()
+        with mock.patch.object(worker,
+                               '_schedule_role_repair',
+                               side_effect=RuntimeError('out of threads')):
+            worker.queue_role_repair('ghost')
+
     def test_no_thread_until_one_is_needed(self):
         """The CLI imports this module; it must not start a thread."""
         assert permission.PermissionService()._repair_worker is None
@@ -2815,30 +2862,3 @@ class TestDefaultRoleCasing:
         with mock.patch('sky.users.rbac.skypilot_config.get_nested',
                         return_value=configured):
             assert rbac.get_default_role() == expected
-
-
-class TestReseedRoleIfMissing:
-    """The repair entry point the middlewares call from a worker thread."""
-
-    def test_swallows_a_failure_so_a_request_is_not_a_500(self, policy_db):
-        worker = policy_db()
-        worker.enforcer.load_policy()
-        with mock.patch.object(permission,
-                               'permission_service',
-                               worker), \
-             mock.patch.object(permission,
-                               'seed_new_user_role',
-                               side_effect=RuntimeError('lock timeout')):
-            # A second lock timeout must not surface: the next request retries.
-            permission.reseed_role_if_missing('stranded')
-
-    def test_seeds_when_the_role_is_missing(self, policy_db):
-        worker = policy_db()
-        worker.enforcer.load_policy()
-        seeded = []
-        with mock.patch.object(permission, 'permission_service', worker), \
-             mock.patch.object(permission,
-                               'seed_new_user_role',
-                               side_effect=lambda uid: seeded.append(uid)):
-            permission.reseed_role_if_missing('stranded')
-        assert seeded == ['stranded']

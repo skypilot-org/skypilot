@@ -680,24 +680,12 @@ class AuthProxyMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
                 logger.error(f'Concurrent worker exhausted during auth proxy '
                              f'user upsert: {e}')
                 return db_lookup.worker_exhausted_response()
-            # Offload the blocking config reload + role seed to a worker
-            # thread so this async middleware doesn't block the event loop.
-            # The reload lets a runtime `rbac.default_role` change take
-            # effect for this new user without a restart (the main
-            # API-server process does not reload config per request).
-            if newly_added:
-                await asyncio.to_thread(permission.seed_new_user_role,
-                                        auth_user.id)
-            elif not permission.permission_service.probably_has_role(
-                    auth_user.id):
-                # A seed only ever ran under `newly_added`, so a policy-lock
-                # timeout on someone's first request left them with a `users`
-                # row, no role, and nothing to retry it -- and a role-less
-                # principal matches no blocklist rule. The guard above reads
-                # only what is already in memory; confirming it and repairing
-                # it can reload the policy, so that part goes to a thread too.
-                await asyncio.to_thread(permission.reseed_role_if_missing,
-                                        auth_user.id)
+            # Same deadline as the upsert above; see the helper for why a new
+            # user's seed is awaited while a returning one's repair is queued.
+            failed = await db_lookup.ensure_role_for_authenticated_user(
+                auth_user.id, newly_added)
+            if failed is not None:
+                return failed
 
         # Store user info in request.state for access by GET endpoints
         if auth_user is not None:

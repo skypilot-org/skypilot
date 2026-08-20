@@ -10,6 +10,8 @@ import fastapi
 import pytest
 from starlette.datastructures import Headers
 
+from sky import models
+from sky.server.auth import db_lookup
 from sky.server.auth.oauth2_proxy import OAuth2ProxyMiddleware
 
 

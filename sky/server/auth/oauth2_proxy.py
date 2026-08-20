@@ -17,8 +17,8 @@ from sky import models
 from sky import sky_logging
 from sky.server import constants as server_constants
 from sky.server import middleware_utils
+from sky.server.auth import db_lookup
 from sky.server.auth import loopback
-from sky.users import permission
 from sky.utils import common_utils
 
 logger = sky_logging.init_logger(__name__)
@@ -160,23 +160,10 @@ class OAuth2ProxyMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
                                 'setup.'
                         })
                 newly_added = global_user_state.add_or_update_user(auth_user)
-                # Offload the blocking config reload + role seed to a
-                # worker thread so this async middleware doesn't block the
-                # event loop. The reload lets a runtime `rbac.default_role`
-                # change take effect for this new user without a restart.
-                if newly_added:
-                    await asyncio.to_thread(permission.seed_new_user_role,
-                                            auth_user.id)
-                elif not permission.permission_service.probably_has_role(
-                        auth_user.id):
-                    # A seed only ever ran under `newly_added`, so a
-                    # policy-lock timeout on someone's first request left them
-                    # with a `users` row and no role, and nothing to try again.
-                    # The guard reads only in-memory state; confirming and
-                    # repairing it can reload the policy, so that goes to a
-                    # thread as well.
-                    await asyncio.to_thread(permission.reseed_role_if_missing,
-                                            auth_user.id)
+                failed = await db_lookup.ensure_role_for_authenticated_user(
+                    auth_user.id, newly_added)
+                if failed is not None:
+                    return failed
                 request.state.auth_user = auth_user
                 return await call_next(request)
             elif auth_response.status == http.HTTPStatus.UNAUTHORIZED:

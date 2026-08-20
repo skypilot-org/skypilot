@@ -24,12 +24,17 @@ which clients do not retry.
 """
 import asyncio
 import os
-from typing import Any, Callable
+from typing import Any, Callable, Optional
 
 import fastapi
 
+from sky import exceptions
+from sky import sky_logging
 from sky.server.requests import executor
+from sky.users import permission
 from sky.utils import context_utils
+
+logger = sky_logging.init_logger(__name__)
 
 # Total client-side deadline on each auth DB lookup. Healthy lookups are
 # small indexed queries; this only trips when the DB layer is in real
@@ -49,6 +54,48 @@ async def call_with_deadline(func: Callable[..., Any], *args: Any) -> Any:
     return await asyncio.wait_for(context_utils.to_thread_with_executor(
         executor.get_auth_thread_executor(), func, *args),
                                   timeout=AUTH_DB_TIMEOUT_SECONDS)
+
+
+async def ensure_role_for_authenticated_user(
+        user_id: str,
+        newly_added: bool) -> Optional[fastapi.responses.JSONResponse]:
+    """Give an authenticated principal a role. A response to send, or None.
+
+    Both auth front-ends (the auth-proxy middleware and the oauth2-proxy one)
+    need the same two branches, so they live here rather than twice:
+
+    A **brand-new** user's seed is awaited: the RBAC gate denies a principal
+    with no role, so their first request has to find one. Bounded, because the
+    seed takes the distributed policy lock (up to
+    `POLICY_UPDATE_LOCK_TIMEOUT_SECONDS`) and an unbounded await hangs the login
+    for that long -- and on the bounded auth executor, so a burst of signups
+    cannot drain the default thread pool every other `to_thread` caller shares.
+    On a timeout the account is queued for repair and the caller gets a
+    retryable 503: proceeding would hand the gate a role-less principal and 403
+    their first request, and dropping the seed would leave the account broken
+    until something else noticed.
+
+    A **returning** user whose seed never completed is only queued. The repair
+    wants the same contended lock that stranded them, nothing about answering
+    this request depends on it, and the gate denies them until it lands.
+    """
+    if newly_added:
+        try:
+            await call_with_deadline(permission.seed_new_user_role, user_id)
+        except asyncio.TimeoutError:
+            logger.error(f'Seeding a role for new user {user_id} timed out; '
+                         f'queueing it off the request')
+            permission.permission_service.queue_role_repair(user_id)
+            return db_timeout_response()
+        except exceptions.ConcurrentWorkerExhaustedError as e:
+            logger.error(f'Concurrent worker exhausted seeding a role for '
+                         f'{user_id}: {e}')
+            permission.permission_service.queue_role_repair(user_id)
+            return worker_exhausted_response()
+        return None
+    if not permission.permission_service.probably_has_role(user_id):
+        permission.permission_service.queue_role_repair(user_id)
+    return None
 
 
 def db_timeout_response() -> fastapi.responses.JSONResponse:
