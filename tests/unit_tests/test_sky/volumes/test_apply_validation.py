@@ -76,6 +76,23 @@ def client_and_executor(monkeypatch):
     return TestClient(app), scheduled
 
 
+def _http_response(status, json_body=None, text=''):
+    """A response whose raise_for_status behaves like the real one."""
+    response = mock.MagicMock(spec=requests.Response)
+    response.status_code = status
+    response.url = 'http://test/volumes/apply'
+    response.text = text if json_body is None else json.dumps(json_body)
+    response.headers = {}
+    if json_body is None:
+        response.json.side_effect = ValueError('not JSON')
+    else:
+        response.json.return_value = json_body
+    if status >= 400:
+        response.raise_for_status.side_effect = requests.HTTPError(
+            f'{status} Client Error', response=response)
+    return response
+
+
 def post_apply(client, body):
     with mock.patch.object(fastapi.Request, 'state') as mock_state:
         mock_state.request_id = 'test-request-id'
@@ -338,6 +355,28 @@ class TestSdkValidateRejection:
         assert volumes_sdk.validate(vol) is None
 
 
+class TestSyncRejectionAlwaysRaises:
+    """The helper's promise must not depend on handle_request_error raising."""
+
+    def test_raises_even_if_the_fallback_returns(self, monkeypatch):
+        # handle_request_error raises for every non-200 today. If a later change
+        # gives it an early return for some status, the helper must still raise
+        # rather than silently reporting an invalid volume as valid.
+        monkeypatch.setattr(server_common, 'handle_request_error',
+                            lambda response: None)
+        response = _http_response(400, text='<html>Bad Request</html>')
+        with pytest.raises(RuntimeError, match='Unknown server error'):
+            server_common.raise_if_rejected_synchronously(response)
+
+    def test_returns_for_a_non_400(self, monkeypatch):
+        called = []
+        monkeypatch.setattr(server_common, 'handle_request_error',
+                            lambda response: called.append(1))
+        assert server_common.raise_if_rejected_synchronously(
+            _http_response(200, json_body={})) is None
+        assert not called
+
+
 class TestFromComponents:
     """from_components must preserve the resolved cloud/region/zone exactly."""
 
@@ -368,23 +407,6 @@ class TestFromComponents:
                                                 size=size)
         vol.validate()
         assert (vol.cloud, vol.region, vol.zone) == (cloud, region, zone)
-
-
-def _http_response(status, json_body=None, text=''):
-    """A response whose raise_for_status behaves like the real one."""
-    response = mock.MagicMock(spec=requests.Response)
-    response.status_code = status
-    response.url = 'http://test/volumes/apply'
-    response.text = text if json_body is None else json.dumps(json_body)
-    response.headers = {}
-    if json_body is None:
-        response.json.side_effect = ValueError('not JSON')
-    else:
-        response.json.return_value = json_body
-    if status >= 400:
-        response.raise_for_status.side_effect = requests.HTTPError(
-            f'{status} Client Error', response=response)
-    return response
 
 
 class TestSdkApplyRejection:

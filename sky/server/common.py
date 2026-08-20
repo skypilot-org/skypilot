@@ -799,8 +799,10 @@ def raise_if_rejected_synchronously(response: 'requests.Response') -> None:
         logger.debug(f'A 400 from {response.url} carried no error detail; '
                      f'falling back to the generic error. '
                      f'Body: {response.text[:200]}')
+        # No `return`: this raises today, but falling through keeps the
+        # always-raises promise from depending on that. deserialize_exception
+        # turns a None detail into a generic RuntimeError.
         handle_request_error(response)
-        return
     with ux_utils.print_exception_no_traceback():
         raise exceptions.deserialize_exception(detail)
 
