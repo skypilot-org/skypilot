@@ -473,4 +473,8 @@ class TestEnsureRoleForAuthenticatedUser:
             response = await db_lookup.ensure_role_for_authenticated_user(
                 'u-broken', True)
         assert response is not None and response.status_code == 503
+        # And it says why it gave up. `db_timeout_response`'s text blames a slow
+        # database, which is wrong for the reason this path usually fails:
+        # contention on the policy lock, a healthy database doing its job.
+        assert b'assigning roles' in response.body
         perm.queue_role_repair.assert_called_once_with('u-broken')

@@ -2696,6 +2696,46 @@ class TestScheduledRoleRepair:
         assert len(
             [c for c in warn.call_args_list if 'Not queueing' in c[0][0]]) == 1
 
+    def test_a_failed_thread_start_leaves_nothing_stranded(self, policy_db):
+        """The in-flight entry is what dedups later attempts, so it must not
+        outlive a failed queueing.
+
+        Only the drain worker removes it -- and if the worker could not start,
+        there is no worker. The principal would be unrepairable for the life of
+        the process, which is worse than the exception that got them there.
+        """
+        worker = policy_db()
+        worker.enforcer.load_policy()
+        with mock.patch.object(worker,
+                               '_start_repair_worker',
+                               side_effect=RuntimeError('out of threads')):
+            worker.queue_role_repair('ghost')
+
+        assert 'ghost' not in worker._repair_in_flight
+        # And a later attempt is not merely accepted but actually run. Asserting
+        # only the empty set, or joining the queue, proves neither: `join()`
+        # returns at once on a queue nothing was ever put on.
+        worker._seed_attempt_cache.clear()
+        with mock.patch.object(worker, '_run_role_repair') as run:
+            worker.queue_role_repair('ghost')
+            worker._repair_queue.join()
+        run.assert_called_once_with('ghost')
+
+    def test_the_gate_survives_a_queueing_failure(self, policy_db):
+        """The gate runs inside the RBAC middleware, where an exception is a
+        bare 500 rather than a denial.
+
+        Reverting it to the unguarded private method leaves the denial path
+        raising instead of answering.
+        """
+        worker = policy_db()
+        worker.enforcer.load_policy()
+        with mock.patch.object(worker,
+                               '_start_repair_worker',
+                               side_effect=RuntimeError('out of threads')):
+            assert worker.check_endpoint_permission('ghost', '/users/export',
+                                                    'GET') is True
+
     def test_queueing_never_raises(self, policy_db):
         """A repair nobody waits for must not turn a login into a 500.
 

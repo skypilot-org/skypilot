@@ -104,16 +104,29 @@ async def ensure_role_for_authenticated_user(
                          f'{user_id}: {e}')
             permission.permission_service.queue_role_repair(user_id)
             return worker_exhausted_response()
+        except asyncio.TimeoutError:
+            # Separated from the clause below for the log, not the answer: the
+            # deadline elapsed but the seed is still running in its thread and
+            # usually lands, whereas the cases below have already failed. The
+            # caller gets the same 503 either way -- from a client's side both
+            # are "not ready yet, come back".
+            logger.error(f'Seeding a role for new user {user_id} did not '
+                         f'finish within {AUTH_DB_TIMEOUT_SECONDS}s; queueing '
+                         f'it off the request')
+            permission.permission_service.queue_role_repair(user_id)
+            return role_seed_unavailable_response()
         except Exception as e:  # pylint: disable=broad-except
-            # Everything, not just the timeout: an exception raised in a
-            # middleware surfaces as a bare 500, which clients do not retry
-            # (see this module's docstring). A first request that cannot get a
-            # role is exactly what should be retried.
+            # Everything else, because an exception raised in a middleware
+            # surfaces as a bare 500, which clients do not retry (see this
+            # module's docstring). Note a contended policy lock arrives here
+            # rather than above: `_policy_lock` converts its own timeout into a
+            # RuntimeError. That is the common case for this branch, and what
+            # the response's wording is written for.
             logger.error(f'Seeding a role for new user {user_id} failed; '
                          f'queueing it off the request: '
                          f'{common_utils.format_exception(e)}')
             permission.permission_service.queue_role_repair(user_id)
-            return db_timeout_response()
+            return role_seed_unavailable_response()
         return None
     if not permission.permission_service.probably_has_role(user_id):
         permission.permission_service.queue_role_repair(user_id)
@@ -138,8 +151,29 @@ def db_timeout_response() -> fastapi.responses.JSONResponse:
         })
 
 
+def role_seed_unavailable_response() -> fastapi.responses.JSONResponse:
+    """503 for a new user whose role could not be assigned in time.
+
+    Not `db_timeout_response`: that one names a slow database, and the reason
+    this path gives up is usually contention on the policy lock, which is a
+    healthy database doing exactly what it should. Same 503 so the client
+    retries with backoff, and by then the queued repair has normally landed.
+    """
+    return fastapi.responses.JSONResponse(
+        status_code=503,
+        headers={'Retry-After': str(max(1, int(AUTH_DB_TIMEOUT_SECONDS)))},
+        content={
+            'detail': ('Could not finish setting up your account in time '
+                       '(the server is busy assigning roles). It is being '
+                       'completed in the background -- please try again.')
+        })
+
+
 def worker_exhausted_response() -> fastapi.responses.JSONResponse:
-    """503 for an auth lookup rejected by a saturated auth executor.
+    """503 for auth-path work rejected by a saturated thread executor.
+
+    Either pool: the auth executor for lookups, or the request executor for a
+    new user's role seed, which is deliberately not on the auth pool.
 
     Mirrors ``handle_concurrent_worker_exhausted_error`` in
     ``sky/server/server.py`` — that app-level handler cannot see
