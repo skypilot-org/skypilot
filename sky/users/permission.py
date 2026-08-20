@@ -196,8 +196,10 @@ class PermissionService:
         self._repair_in_flight: Set[str] = set()
         self._repair_worker: Optional[threading.Thread] = None
         self._repair_lock = threading.Lock()
-        # Rate limit for the in-flight cap warning; see `_schedule_role_repair`.
-        self._cap_log_cache: Dict[str, float] = {}
+        # When the in-flight cap warning was last emitted. A timestamp, not one
+        # of the TTL caches: the condition is global, so there is nothing to key
+        # by and no cache to bound. Read and written under `_repair_lock`.
+        self._cap_warned_at: float = 0.0
 
     def initialize(self):
         self._lazy_initialize(full_initialize=True)
@@ -749,11 +751,10 @@ class PermissionService:
             if len(self._repair_in_flight) >= _REPAIR_MAX_IN_FLIGHT:
                 # Rate-limited like the denial log, and for the same reason:
                 # this is the line that tells an operator repairs are being
-                # dropped, so a burst must not be able to repeat it per
-                # request. One key, not one per principal -- the condition is
-                # about the queue, not about who arrived last.
-                if _take_ttl_permit(self._cap_log_cache, 'cap',
-                                    _DENIED_LOG_TTL_SECONDS, 2):
+                # dropped, so a burst must not repeat it per request.
+                now = time.time()
+                if now - self._cap_warned_at >= _DENIED_LOG_TTL_SECONDS:
+                    self._cap_warned_at = now
                     logger.warning(
                         f'Not queueing a role repair for {user_id}: '
                         f'{_REPAIR_MAX_IN_FLIGHT} already pending. Something '
