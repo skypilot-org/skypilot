@@ -149,7 +149,8 @@ class TestOciS3CloudStorageCommands(unittest.TestCase):
             'oci://bucket/path', '/dest')
         self.assertIn('s3://bucket/path', cmd)
         self.assertNotIn('oci://', cmd)
-        self.assertIn('aws s3 sync', cmd)
+        # Runs the resolved AWS CLI (see #10125), not a hardcoded venv binary.
+        self.assertIn('$awscli_path s3 sync', cmd)
         self.assertIn('AWS_SHARED_CREDENTIALS_FILE=~/.oci/s3.credentials', cmd)
         self.assertIn('AWS_CONFIG_FILE=~/.oci/s3.config', cmd)
         self.assertIn('--profile=oci', cmd)
@@ -159,7 +160,8 @@ class TestOciS3CloudStorageCommands(unittest.TestCase):
             'oci://bucket/path/file', '/dest')
         self.assertIn('s3://bucket/path/file', cmd)
         self.assertNotIn('oci://', cmd)
-        self.assertIn('aws s3 cp', cmd)
+        # Runs the resolved AWS CLI (see #10125), not a hardcoded venv binary.
+        self.assertIn('$awscli_path s3 cp', cmd)
         self.assertIn('AWS_SHARED_CREDENTIALS_FILE=~/.oci/s3.credentials', cmd)
         self.assertIn('--profile=oci', cmd)
 
