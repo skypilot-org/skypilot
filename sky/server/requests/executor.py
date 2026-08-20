@@ -30,6 +30,7 @@ import time
 import typing
 from typing import Any, Callable, Dict, Generator, List, Optional, TextIO, Tuple
 
+import fastapi
 import psutil
 import setproctitle
 
@@ -1070,6 +1071,23 @@ async def prepare_request_async(
         # Fallback to legacy environment variable based identity if no
         # authentication is set.
         user_id = request_body.env_vars[constants.USER_ID_ENV_VAR]
+        # This identity comes straight from the client and is stored as the
+        # owner of any cluster the request creates, so reject a malformed one
+        # here. A well-formed id is an invariant elsewhere in the codebase
+        # (controller_utils asserts it), and a client that somehow persisted a
+        # corrupted ~/.sky/user_hash would otherwise create clusters owned by
+        # an identity that matches no user and can never be filtered back to
+        # them. See #9621. get_user_hash() regenerates a valid id on the
+        # client, so a healthy client never trips this.
+        # Skipped for system requests, whose id is replaced below anyway.
+        if (not is_skypilot_system and
+                not common_utils.is_valid_user_hash(user_id)):
+            raise fastapi.HTTPException(
+                status_code=400,
+                detail=f'Invalid user id: {user_id!r}. Remove '
+                '~/.sky/user_hash (a new one is generated automatically) or '
+                f'unset {constants.USER_ID_ENV_VAR} if it is set to an '
+                'invalid value.')
     if is_skypilot_system:
         user_id = constants.SKYPILOT_SYSTEM_USER_ID
         global_user_state.add_or_update_user(
