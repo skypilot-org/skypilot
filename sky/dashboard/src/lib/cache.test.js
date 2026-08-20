@@ -3,6 +3,7 @@
  */
 
 import { DashboardCache } from './cache';
+import { CACHE_CONFIG, REFRESH_INTERVALS } from './config';
 
 // Helper to create a mock async function that tracks calls
 function createMockFetch(returnValue, delay = 10) {
@@ -126,6 +127,19 @@ describe('DashboardCache', () => {
   });
 
   describe('Cache Behavior', () => {
+    test('should refresh default cache entries on the page refresh cadence', async () => {
+      // Default cache expiry preserves 30-second page updates without
+      // background requests on fresh cache hits.
+      const mockFetch = jest.fn(async () => ({ data: 'test' }));
+
+      await cache.get(mockFetch, ['arg1']);
+      jest.advanceTimersByTime(CACHE_CONFIG.DEFAULT_TTL + 1);
+      await cache.get(mockFetch, ['arg1']);
+
+      expect(CACHE_CONFIG.DEFAULT_TTL).toBe(REFRESH_INTERVALS.REFRESH_INTERVAL);
+      expect(mockFetch).toHaveBeenCalledTimes(2);
+    });
+
     test('should return cached data when available and fresh', async () => {
       // Fresh data is returned without extending its TTL or starting a refresh.
       jest.useRealTimers(); // Use real timers for this test

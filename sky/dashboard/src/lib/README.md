@@ -120,7 +120,7 @@ Time 200ms:  Jobs table fetches only its visible server-side page
 import dashboardCache from '@/lib/cache';
 import { getClustersAndJobsData } from '@/data/connectors/infra';
 
-// Simple usage with default TTL (5 minutes)
+// Simple usage with the default 30-second TTL
 const data = await dashboardCache.get(getClustersAndJobsData);
 
 // With custom TTL (2 minutes)
@@ -136,12 +136,16 @@ const data = await dashboardCache.get(getGPUs, [clustersAndJobsData], {
 
 ### Configuration
 
-The cache system supports configurable TTL values defined in `config.js`. Currently, all cache entries use the `DEFAULT_TTL` of 2 minutes, but the system can be extended to support different TTLs for different data types if needed.
+The cache system supports configurable TTL values defined in `config.js`. The
+default hard TTL is 30 seconds, matching the dashboard's normal periodic
+refresh cadence. It keeps visible pages current without making each fresh cache
+read start another background request. Callers can still use a longer TTL for
+data that is safe to refresh less often.
 
 ```javascript
 // Current configuration
 export const CACHE_CONFIG = {
-  DEFAULT_TTL: 2 * 60 * 1000, // 2 minutes
+  DEFAULT_TTL: REFRESH_INTERVALS.REFRESH_INTERVAL, // 30 seconds
 };
 
 // Example of how different TTLs could be configured:
