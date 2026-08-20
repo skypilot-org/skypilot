@@ -25,7 +25,7 @@ pip install -q mini-swe-agent==2.4.5 litellm pillow datasets
 # imports at load time -> dataset generation crashes. swesmith is pinned to a
 # known-good commit for the same reason (git HEAD can break the same way).
 pip install -q swebench==4.1.0
-pip install -q "swesmith @ git+https://github.com/SWE-bench/SWE-smith.git@9b74ac08118a" || pip install -q swesmith
+pip install -q "swesmith @ git+https://github.com/SWE-bench/SWE-smith.git@9b74ac08118a85c39c356802f7961893af73e07f"
 
 [ -d /root/${MODEL_DIR} ] || hf download ${MODEL_HF_REPO} --local-dir /root/${MODEL_DIR}
 if [ ! -d /root/${MODEL_DIR}_torch_dist ]; then
