@@ -2,6 +2,7 @@
 import asyncio
 import gzip
 import io
+import json
 import logging
 import threading
 import time
@@ -61,6 +62,24 @@ def _messages_matching(records: List[logging.LogRecord],
     return [m for m in messages if needle in m]
 
 
+def _details(records: List[logging.LogRecord]) -> List[dict]:
+    """Parses the trailing JSON detail out of each stall record.
+
+    Each stall is one log line: a human-readable head plus a JSON object. The
+    tests assert on the parsed object rather than on the head, so wording
+    changes do not break them and the payload is checked for real.
+    """
+    out = []
+    for record in records:
+        message = record.getMessage()
+        if 'Event loop stalled' not in message:
+            continue
+        start = message.find('{')
+        assert start != -1, f'stall record carries no JSON: {message}'
+        out.append(json.loads(message[start:]))
+    return out
+
+
 @pytest.fixture(name='stall_logs')
 def stall_logs_fixture():
     """Collects the watchdog's log records.
@@ -105,8 +124,13 @@ def test_synthetic_stall_names_the_blocking_function(stall_logs):
     assert 'in _blocking_business_code' in message
     # The innermost frame is time.sleep's caller, so the blocking frame and
     # the innermost frame coincide here.
-    assert 'blocking frame:' in message
-    assert 'in-flight task:' in message
+    detail = _details(stall_logs)[0]
+    assert detail['kind'] == 'on_loop'
+    assert detail['source'] == 'test_loop_stall:_blocking_business_code'
+    assert 'in _blocking_business_code' in detail['blocking']
+    assert detail['task']
+    # The stack is reported outermost-first, so the blocking frame is last.
+    assert 'in _blocking_business_code' in detail['frames'][-1]
 
     assert _messages_matching(
         stall_logs, 'Event loop recovered'), ('recovery was not reported')
@@ -248,8 +272,88 @@ def test_loop_blocked_on_a_thread_names_both_sides(stall_logs):
     # The innermost frame is the wait itself, which is kept verbatim.
     assert 'threading.py:' in message
     # And the other threads, since one of them is the reason for the wait.
-    assert 'waiting on another thread' in message
-    assert 'fake-holder' in message
+    detail = _details(stall_logs)[0]
+    assert detail['kind'] == 'waiting'
+    holders = [t['example_thread'] for t in detail['other_threads']]
+    assert any('fake-holder' in h for h in holders), holders
+
+
+def test_one_log_line_per_stall_with_parsable_json(stall_logs):
+    """A stall is one greppable record, not a dozen interleaved lines."""
+    _run_with_watchdog(lambda: _blocking_business_code(0.5))
+
+    stalls = [r for r in stall_logs if 'Event loop stalled' in r.getMessage()]
+    assert stalls
+    for record in stalls:
+        message = record.getMessage()
+        assert '\n' not in message, f'record spans lines: {message!r}'
+        detail = json.loads(message[message.find('{'):])
+        assert set(detail) >= {
+            'lag_s', 'threshold_s', 'kind', 'source', 'blocking', 'innermost',
+            'task', 'frames'
+        }, sorted(detail)
+        # The head stays human-readable and carries the source for grepping.
+        assert message.startswith('Event loop stalled')
+        assert detail['source'] in message[:message.find('{')]
+
+
+def test_library_internals_collapse_but_the_caller_survives():
+    """The frame budget must not be spent on library plumbing.
+
+    Regression: the cap used to keep the innermost N frames, so a deep
+    SQLAlchemy stack filled the budget with its own internals and dropped the
+    outermost frames -- which are the request handler that got there. Both ends
+    have to survive.
+    """
+    site = '/usr/local/lib/python3.10/site-packages/'
+    frames = [_frame('sqlalchemy.engine.default', 'do_execute')]
+    frames[0] = frames[0]._replace(filename=site +
+                                   'sqlalchemy/engine/default.py')
+    # Ten more SQLAlchemy layers between the leaf and our code.
+    for i in range(10):
+        frames.append(
+            loop_stall._FrameInfo(  # pylint: disable=protected-access
+                module='sqlalchemy.orm.session',
+                function=f'_layer{i}',
+                filename=site + 'sqlalchemy/orm/session.py',
+                lineno=100 + i))
+    frames.append(
+        loop_stall._FrameInfo(  # pylint: disable=protected-access
+            module='sky.global_user_state',
+            function='get_all_users',
+            filename='/sky/global_user_state.py',
+            lineno=657))
+    frames.append(
+        loop_stall._FrameInfo(  # pylint: disable=protected-access
+            module='sky.server.server',
+            function='all_contexts',
+            filename='/sky/server/server.py',
+            lineno=3701))
+
+    rendered = loop_stall._collapse_frames(frames)  # pylint: disable=protected-access
+    joined = '\n'.join(rendered)
+    # The endpoint that triggered it is the whole point and must be present.
+    assert 'all_contexts' in joined, rendered
+    assert 'get_all_users' in joined, rendered
+    # So must the frame that was actually blocking.
+    assert 'do_execute' in joined, rendered
+    # The intermediate library layers are summarised, not enumerated.
+    assert any(
+        'more sqlalchemy frame(s)' in line for line in rendered), rendered
+    assert '_layer5' not in joined
+    # Outermost first, so it reads like a traceback.
+    assert 'all_contexts' in rendered[0]
+    assert 'do_execute' in rendered[-1]
+
+
+@pytest.mark.parametrize('path,expected', [
+    ('/usr/local/lib/python3.10/site-packages/sqlalchemy/engine/default.py',
+     'sqlalchemy/engine/default.py'),
+    ('/usr/local/lib/python3.10/asyncio/runners.py', 'asyncio/runners.py'),
+    ('/skypilot/sky/server/server.py', '/skypilot/sky/server/server.py'),
+])
+def test_install_prefixes_are_trimmed(path, expected):
+    assert loop_stall._short_path(path) == expected  # pylint: disable=protected-access
 
 
 def test_bootstrap_frames_are_trimmed():
@@ -331,10 +435,14 @@ def test_starved_loop_dumps_other_threads(stall_logs):
     starved = _messages_matching(stall_logs, 'parked in its own poll')
     assert starved, ('starved stall not reported, got: '
                      f'{[r.getMessage() for r in stall_logs]}')
-    assert 'busiest other threads' in starved[0]
-    assert 'fake-worker-' in starved[0]
-    # Threads doing the same thing collapse into one line with a count.
-    assert '3 thread(s) in' in starved[0]
+    detail = _details(stall_logs)[0]
+    assert detail['kind'] == 'parked'
+    assert detail['source'] == 'starved'
+    groups = {t['source']: t for t in detail['other_threads']}
+    worker = groups['test_loop_stall:worker_thread']
+    # Threads doing the same thing collapse into one entry with a count.
+    assert worker['count'] == 3, detail['other_threads']
+    assert 'fake-worker-' in worker['example_thread']
     # The frame that called run_forever is still on the loop thread's stack.
     # Classifying on "does the stack hold any application frame" would blame
     # it for every starvation stall; classification is on the innermost frame.

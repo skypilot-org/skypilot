@@ -33,7 +33,9 @@ would otherwise attribute every such stall to whichever frame happened to call
 """
 import asyncio
 import collections
+import json
 import math
+import re
 import sys
 import threading
 import time
@@ -57,8 +59,16 @@ _POLL_INTERVAL = 0.05
 # Frames deeper than this are dropped. A stack this deep is pathological on its
 # own and we only need the innermost frames to attribute the stall.
 _MAX_STACK_DEPTH = 200
-# Application frames included in the logged stack.
-_MAX_LOGGED_FRAMES = 12
+# Application frames kept in the logged stack, after same-module runs have been
+# collapsed. If even that is exceeded, both *ends* are kept: the innermost
+# frames say what was blocking, the outermost ones say which request got there,
+# and dropping either end loses half the answer.
+_MAX_LOGGED_FRAMES = 24
+_KEEP_OUTERMOST = 8
+# A consecutive run of at least this many frames from one top-level module is
+# collapsed to its first and last frame. Library internals (a dozen SQLAlchemy
+# layers, say) would otherwise crowd out the caller that matters.
+_COLLAPSE_RUN = 4
 
 # At most one dump per source per this many seconds, so a source that stalls
 # repeatedly is reported without filling the log.
@@ -209,8 +219,80 @@ def _walk_stack(frame: Optional[types.FrameType],
     return stack
 
 
+_SITE_PACKAGES = 'site-packages/'
+_STDLIB_RE = re.compile(r'/lib/python3\.\d+/')
+
+
+def _short_path(filename: str) -> str:
+    """Trims install-location noise from a filename.
+
+    `/usr/local/lib/python3.10/site-packages/sqlalchemy/engine/default.py`
+    becomes `sqlalchemy/engine/default.py`, which is both unambiguous and short
+    enough that the interesting part of a stack is not pushed off the line.
+    """
+    index = filename.rfind(_SITE_PACKAGES)
+    if index != -1:
+        return filename[index + len(_SITE_PACKAGES):]
+    match = _STDLIB_RE.search(filename)
+    if match is not None:
+        return filename[match.end():]
+    return filename
+
+
 def _format_frame(frame: _FrameInfo) -> str:
-    return f'{frame.filename}:{frame.lineno} in {frame.function}'
+    return f'{_short_path(frame.filename)}:{frame.lineno} in {frame.function}'
+
+
+def _top_level(module: str) -> str:
+    return module.split('.', 1)[0]
+
+
+def _collapse_frames(frames: List[_FrameInfo]) -> List[str]:
+    """Renders frames outermost-first, collapsing same-module runs.
+
+    Takes frames innermost-first (as sampled) and returns display strings
+    outermost-first, so it reads like a traceback. A run of consecutive frames
+    from one top-level module is reduced to its first and last frame plus a
+    marker, because a dozen intermediate library layers say nothing that the
+    two ends do not.
+    """
+    ordered = list(reversed(frames))
+    out: List[str] = []
+    i = 0
+    while i < len(ordered):
+        module = _top_level(ordered[i].module)
+        j = i + 1
+        while j < len(ordered) and _top_level(ordered[j].module) == module:
+            j += 1
+        run = ordered[i:j]
+        if len(run) >= _COLLAPSE_RUN:
+            out.append(_format_frame(run[0]))
+            out.append(f'... {len(run) - 2} more {module} frame(s) ...')
+            out.append(_format_frame(run[-1]))
+        else:
+            out.extend(_format_frame(f) for f in run)
+        i = j
+    if len(out) > _MAX_LOGGED_FRAMES:
+        head = out[:_KEEP_OUTERMOST]
+        tail = out[_KEEP_OUTERMOST - _MAX_LOGGED_FRAMES:]
+        dropped = len(out) - len(head) - len(tail)
+        out = head + [f'... {dropped} more frame(s) ...'] + tail
+    return out
+
+
+def _as_json(detail: Dict[str, object]) -> str:
+    """Serializes the stall detail as one compact line.
+
+    A stall report used to span a dozen log lines, which meant every line
+    carried its own timestamp prefix, the record interleaved with other
+    workers' output, and no single grep could pull one report out whole.
+    Putting the detail in a trailing JSON object keeps the record greppable as
+    one line and lets `... | grep -o '{.*}' | jq` expand it on demand.
+    """
+    try:
+        return json.dumps(detail, separators=(',', ':'), default=str)
+    except (TypeError, ValueError) as e:  # pragma: no cover - defensive
+        return f'{{"json_error":"{e}"}}'
 
 
 def _source_of(frame: _FrameInfo) -> str:
@@ -464,43 +546,46 @@ class LoopStallWatchdog:
 
     def _log_stall(self, lag: float, innermost: _FrameInfo,
                    app_frames: List[_FrameInfo], source: str,
-                   other_threads: Optional[str]) -> None:
-        # Outermost first, so it reads like a traceback.
-        shown = list(reversed(app_frames[:_MAX_LOGGED_FRAMES]))
-        rendered = '\n'.join(f'    {_format_frame(f)}' for f in shown)
-        elided = len(app_frames) - len(shown)
-        if elided > 0:
-            rendered = f'    ... {elided} more application frame(s)\n{rendered}'
-        message = (
-            f'Event loop stalled {lag:.3f}s (threshold {self._threshold:.3f}s) '
-            f'in {source}\n'
-            f'  blocking frame: {_format_frame(app_frames[0])}\n'
-            f'  innermost frame: {_format_frame(innermost)}\n'
-            f'  in-flight task: {_describe_current_task(self._loop)}\n'
-            f'  application frames (outermost first):\n{rendered}')
+                   other_threads: Optional[List[Dict[str, object]]]) -> None:
+        detail: Dict[str, object] = {
+            'lag_s': round(lag, 3),
+            'threshold_s': round(self._threshold, 3),
+            'kind': 'waiting' if other_threads is not None else 'on_loop',
+            'source': source,
+            'blocking': _format_frame(app_frames[0]),
+            'innermost': _format_frame(innermost),
+            'task': _describe_current_task(self._loop),
+            'frames': _collapse_frames(app_frames),
+        }
         if other_threads is not None:
-            message = (f'{message}\n  the loop is waiting on another thread; '
-                       f'other threads in this process:\n{other_threads}')
-        logger.warning(message)
+            detail['other_threads'] = other_threads
+        logger.warning(
+            f'Event loop stalled {lag:.3f}s (threshold {self._threshold:.3f}s) '
+            f'in {source} {_as_json(detail)}')
 
     def _log_starved(self, lag: float, innermost: _FrameInfo,
                      all_frames: Mapping[int, types.FrameType],
                      loop_thread_id: int) -> None:
-        message = (
-            f'Event loop stalled {lag:.3f}s (threshold {self._threshold:.3f}s) '
-            'but the loop was parked in its own poll (innermost frame '
-            f'{_format_frame(innermost)}), so the delay came from outside the '
-            'loop - GIL contention with another thread in this process, or the '
-            'process not being scheduled.')
+        detail: Dict[str, object] = {
+            'lag_s': round(lag, 3),
+            'threshold_s': round(self._threshold, 3),
+            'kind': 'parked',
+            'source': _STARVED_SOURCE,
+            'innermost': _format_frame(innermost),
+            'note': ('loop was parked in its own poll; the delay came from '
+                     'outside the loop - GIL contention with another thread '
+                     'in this process, or the process not being scheduled'),
+        }
         other_threads = self._render_other_threads(all_frames, loop_thread_id)
-        if other_threads is None:
-            logger.warning(message)
-            return
-        logger.warning(f'{message}\n'
-                       f'  busiest other threads:\n{other_threads}')
+        if other_threads is not None:
+            detail['other_threads'] = other_threads
+        logger.warning(
+            f'Event loop stalled {lag:.3f}s (threshold {self._threshold:.3f}s) '
+            f'but the loop was parked in its own poll {_as_json(detail)}')
 
-    def _render_other_threads(self, all_frames: Mapping[int, types.FrameType],
-                              loop_thread_id: int) -> Optional[str]:
+    def _render_other_threads(
+            self, all_frames: Mapping[int, types.FrameType],
+            loop_thread_id: int) -> Optional[List[Dict[str, object]]]:
         """Renders the other threads' stacks, subject to its own rate limit.
 
         Much larger than a single stack, so it is throttled separately from the
@@ -514,9 +599,12 @@ class LoopStallWatchdog:
         if not groups:
             return None
         self._last_all_thread_dump_at = now
-        return '\n'.join(
-            f'    {count} thread(s) in {source} (e.g. {thread_name}) at '
-            f'{location}' for source, count, thread_name, location in groups)
+        return [{
+            'count': count,
+            'source': source,
+            'example_thread': thread_name,
+            'at': location,
+        } for source, count, thread_name, location in groups]
 
     def _group_other_threads(
             self, all_frames: Mapping[int, types.FrameType],
