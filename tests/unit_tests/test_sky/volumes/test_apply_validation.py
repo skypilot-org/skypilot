@@ -5,11 +5,13 @@ the actual rules apply on the write path, not that a mocked verdict is
 forwarded.
 """
 
+import json
 from unittest import mock
 
 import fastapi
 from fastapi.testclient import TestClient
 import pytest
+import requests
 
 from sky import exceptions
 from sky import models
@@ -292,6 +294,50 @@ class TestRealDashboardPayloads:
         assert forwarded['storage_class_name'] == 'standard-rwx'
 
 
+class TestSdkValidateRejection:
+    """validate() has nothing after the helper, so it must never return on 400.
+
+    apply() is covered by get_request_id raising afterwards; validate() is not,
+    so a 400 it cannot decode would read as "the volume is valid".
+    """
+
+    @staticmethod
+    def _volume(monkeypatch, response):
+        monkeypatch.setattr(server_common, 'check_server_healthy_or_start_fn',
+                            lambda *a, **kw: None)
+        monkeypatch.setattr(server_common, 'make_authenticated_request',
+                            lambda *a, **kw: response)
+        return volume_lib.Volume.from_components(
+            name='ok-vol',
+            type=volume.VolumeType.PVC.value,
+            cloud='kubernetes',
+            region='my-context',
+            size='1Gi')
+
+    def test_raises_the_servers_message(self, monkeypatch):
+        detail = exceptions.serialize_exception(ValueError('nope, invalid'))
+        vol = self._volume(monkeypatch,
+                           _http_response(400, json_body={'detail': detail}))
+        with pytest.raises(ValueError, match='nope, invalid'):
+            volumes_sdk.validate(vol)
+
+    def test_raises_on_a_non_json_400(self, monkeypatch):
+        vol = self._volume(monkeypatch,
+                           _http_response(400, text='<html>Bad Request</html>'))
+        with pytest.raises(requests.HTTPError):
+            volumes_sdk.validate(vol)
+
+    def test_raises_when_the_400_has_no_detail(self, monkeypatch):
+        vol = self._volume(monkeypatch,
+                           _http_response(400, json_body={'oops': 'no detail'}))
+        with pytest.raises(requests.HTTPError):
+            volumes_sdk.validate(vol)
+
+    def test_returns_on_a_200(self, monkeypatch):
+        vol = self._volume(monkeypatch, _http_response(200, json_body={}))
+        assert volumes_sdk.validate(vol) is None
+
+
 class TestFromComponents:
     """from_components must preserve the resolved cloud/region/zone exactly."""
 
@@ -324,15 +370,29 @@ class TestFromComponents:
         assert (vol.cloud, vol.region, vol.zone) == (cloud, region, zone)
 
 
+def _http_response(status, json_body=None, text=''):
+    """A response whose raise_for_status behaves like the real one."""
+    response = mock.MagicMock(spec=requests.Response)
+    response.status_code = status
+    response.url = 'http://test/volumes/apply'
+    response.text = text if json_body is None else json.dumps(json_body)
+    response.headers = {}
+    if json_body is None:
+        response.json.side_effect = ValueError('not JSON')
+    else:
+        response.json.return_value = json_body
+    if status >= 400:
+        response.raise_for_status.side_effect = requests.HTTPError(
+            f'{status} Client Error', response=response)
+    return response
+
+
 class TestSdkApplyRejection:
     """The SDK surfaces a synchronous rejection as the server's error."""
 
     @staticmethod
     def _response(detail):
-        response = mock.MagicMock()
-        response.status_code = 400
-        response.json.return_value = {'detail': detail}
-        return response
+        return _http_response(400, json_body={'detail': detail})
 
     def _volume(self, monkeypatch, detail):
         # The SDK entrypoint would otherwise try to start a real API server.
@@ -361,11 +421,7 @@ class TestSdkApplyRejection:
         # JSONDecodeError, which would be worse than the HTTPError it replaced.
         monkeypatch.setattr(server_common, 'check_server_healthy_or_start_fn',
                             lambda *a, **kw: None)
-        response = mock.MagicMock()
-        response.status_code = 400
-        response.json.side_effect = ValueError('not JSON')
-        response.headers = {}
-        response.text = '<html>Bad Request</html>'
+        response = _http_response(400, text='<html>Bad Request</html>')
         monkeypatch.setattr(server_common, 'make_authenticated_request',
                             lambda *a, **kw: response)
         vol = volume_lib.Volume.from_components(
@@ -375,17 +431,14 @@ class TestSdkApplyRejection:
             region='my-context',
             size='1Gi')
         # The fall-through's own error, not a decode error from the guard.
-        with pytest.raises(RuntimeError, match='Failed to process response'):
+        with pytest.raises(requests.HTTPError):
             volumes_sdk.apply(vol)
 
     def test_detail_absent_keeps_the_normal_error_path(self, monkeypatch):
         # Valid JSON with no `detail` must fall through too.
         monkeypatch.setattr(server_common, 'check_server_healthy_or_start_fn',
                             lambda *a, **kw: None)
-        response = mock.MagicMock()
-        response.status_code = 400
-        response.json.return_value = {'oops': 'no detail here'}
-        response.headers = {}
+        response = _http_response(400, json_body={'oops': 'no detail here'})
         monkeypatch.setattr(server_common, 'make_authenticated_request',
                             lambda *a, **kw: response)
         vol = volume_lib.Volume.from_components(
@@ -394,7 +447,7 @@ class TestSdkApplyRejection:
             cloud='kubernetes',
             region='my-context',
             size='1Gi')
-        with pytest.raises(RuntimeError, match='Failed to process response'):
+        with pytest.raises(requests.HTTPError):
             volumes_sdk.apply(vol)
 
     def test_plain_string_detail(self, monkeypatch):
