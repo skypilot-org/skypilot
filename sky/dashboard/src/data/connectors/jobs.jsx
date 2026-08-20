@@ -12,7 +12,7 @@ import {
 } from '@/data/connectors/constants';
 import dashboardCache from '@/lib/cache';
 import jobsCacheManager from '@/lib/jobs-cache-manager';
-import { apiClient } from './client';
+import { apiClient, getCurrentUserInfo } from './client';
 import { trackJobAction } from '@/lib/analytics';
 import { applyEnhancements } from '@/plugins/dataEnhancement';
 
@@ -882,14 +882,13 @@ export async function handleJobAction(action, jobId, cluster) {
 async function downloadLogsWithRetry(body, maxAttempts = 30) {
   // Step 1: dispatch the request and grab its server-side ID.
   const baseUrl = window.location.origin;
-  const userInfo = await (async () => {
-    // Mirror what apiClient.fetch does — the env_vars path matters.
-    const r = await fetch(`${baseUrl}/internal/dashboard/users/role`).catch(
-      () => null
-    );
-    if (r && r.ok) return r.json();
-    return { id: 'local', name: 'local' };
-  })();
+  // Reuse the shared helper instead of re-deriving the identity here. It
+  // normalizes a blank `id`/`name` to 'local', which is what the
+  // apiClient-driven /download call below sends. Deriving it separately let
+  // the two disagree: /jobs/download_logs wrote the logs under
+  // `clients//sky_logs` while /download validated against
+  // `clients/local/sky_logs` and rejected them with a 400.
+  const userInfo = await getCurrentUserInfo();
   const dispatch = await fetch(`${baseUrl}${ENDPOINT}/jobs/download_logs`, {
     method: 'POST',
     headers: {
