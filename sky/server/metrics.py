@@ -970,8 +970,11 @@ def maybe_register_managed_jobs_collector():
 metrics_app = fastapi.FastAPI()
 
 
-# Serve /metrics in dedicated thread to avoid blocking the event loop
-# of metrics server.
+# Declared sync on purpose: the collection below is CPU-bound and would
+# stall the event loop of whatever server is running it, so Starlette
+# hands it to a worker thread instead. That makes the scrape latency
+# depend on the serving loop's thread pool, which is why the metrics app
+# gets an event loop to itself -- see start_metrics_server().
 @metrics_app.get('/metrics')
 def metrics() -> fastapi.Response:
     """Expose aggregated Prometheus metrics from all worker processes."""
@@ -1213,6 +1216,64 @@ def build_metrics_server(host: str, port: int) -> uvicorn.Server:
     )
     metrics_server_instance = uvicorn.Server(metrics_config)
     return metrics_server_instance
+
+
+# The metrics server, so stop_metrics_server() can reach the instance
+# started on the private thread.
+_metrics_server: Optional[uvicorn.Server] = None
+
+
+def start_metrics_server(host: str, port: int) -> uvicorn.Server:
+    """Serve the metrics app on an event loop of its own, in its own thread.
+
+    The metrics app must not share an event loop with anything else.
+    ``/metrics`` is a sync endpoint, so Starlette runs it through
+    ``anyio.to_thread.run_sync()``, which takes a token from the *default*
+    thread limiter of the loop serving the request -- 40 tokens, one such
+    limiter per loop. Every other coroutine on that loop that fans out
+    ``anyio`` thread work draws from the same 40, and the limiter hands
+    tokens out FIFO, so a scrape that arrives while a background task has
+    thousands of ``anyio.Path`` calls queued up waits behind all of them
+    before it even starts collecting.
+
+    The API server's background loop hosts exactly that kind of task: the
+    request GC unlinks a log file per deleted request, a batch at a time.
+    While one runs, a scrape can take tens of seconds -- past any sane
+    ``scrape_timeout`` -- so the target flaps to ``up == 0`` and every
+    API server metric disappears for the duration, even though the server
+    is otherwise healthy. Isolating the loop removes the coupling: the
+    only thing contending for this loop's thread limiter is the scrape.
+
+    Returns the server, whose ``should_exit`` the caller may set directly;
+    stop_metrics_server() does that for the instance started here.
+    """
+    global _metrics_server
+    server = build_metrics_server(host, port)
+    _metrics_server = server
+
+    def _serve() -> None:
+        try:
+            asyncio.run(server.serve())
+        except SystemExit:
+            # uvicorn calls sys.exit(1) when it cannot bind, and
+            # threading.excepthook drops SystemExit on the floor, so
+            # without this a metrics server that never came up would leave
+            # nothing behind but uvicorn's own bind error -- the scrape
+            # target just looks down, with no hint of why.
+            logger.error('Metrics server failed to start on %s:%s', host, port)
+        except Exception:  # pylint: disable=broad-except
+            # Likewise: an unhandled error here would otherwise only reach
+            # threading.excepthook.
+            logger.exception('Metrics server exited unexpectedly')
+
+    threading.Thread(target=_serve, daemon=True, name='metrics-server').start()
+    return server
+
+
+def stop_metrics_server() -> None:
+    """Ask the metrics server started by start_metrics_server() to exit."""
+    if _metrics_server is not None:
+        _metrics_server.should_exit = True
 
 
 def _get_status_code_group(status_code: int) -> str:

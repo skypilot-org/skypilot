@@ -10,6 +10,8 @@ import fastapi
 import pytest
 from starlette.datastructures import Headers
 
+from sky import models
+from sky.server.auth import db_lookup
 from sky.server.auth.oauth2_proxy import OAuth2ProxyMiddleware
 
 
@@ -529,3 +531,82 @@ class TestOriginalOAuth2ProxyMiddlewareLoopback:
 
             # Should NOT bypass due to proxy headers - proceed to normal OAuth2 flow
             assert response.status_code == http.HTTPStatus.TEMPORARY_REDIRECT.value
+
+
+class _AcceptedSession:
+    """An aiohttp-shaped stub whose auth call answers 202 ACCEPTED."""
+
+    def request(self, **_kwargs):
+        response = mock.Mock()
+        response.status = http.HTTPStatus.ACCEPTED
+
+        class _Ctx:
+
+            async def __aenter__(self):
+                return response
+
+            async def __aexit__(self, *_exc):
+                return False
+
+        return _Ctx()
+
+
+def _authenticated_request():
+    request = mock.Mock()
+    request.url = mock.Mock()
+    request.url.hostname = 'localhost'
+    request.url.path = '/status'
+    request.cookies = {}
+    request.state = mock.Mock()
+    return request
+
+
+class TestOAuth2ProxyUserUpsert:
+    """The user upsert is a database write; it must not run on the event loop.
+
+    `server.py`'s auth-proxy middleware has always bounded the same call. This
+    one ran it inline, so a slow database stalled every request on the worker,
+    not only the login that triggered it. Reaches `_authenticate` through the
+    wrapper's `.middleware`, since `websocket_aware` replaces the exported
+    class.
+    """
+
+    def _middleware(self):
+        return OAuth2ProxyMiddleware(app=mock.Mock()).middleware
+
+    @pytest.mark.asyncio
+    async def test_the_upsert_is_bounded(self):
+        middleware = self._middleware()
+        call_next = mock.AsyncMock(return_value='ok')
+        user = models.User(id='u-1', name='tester')
+        with mock.patch.object(middleware, 'get_auth_user',
+                               return_value=user), \
+                mock.patch('sky.users.permission.permission_service'), \
+                mock.patch.object(db_lookup,
+                                  'call_with_deadline',
+                                  new=mock.AsyncMock(
+                                      return_value=False)) as bounded, \
+                mock.patch.object(db_lookup,
+                                  'ensure_role_for_authenticated_user',
+                                  new=mock.AsyncMock(return_value=None)):
+            await middleware._authenticate(_authenticated_request(), call_next,
+                                           _AcceptedSession())
+        bounded.assert_awaited_once()
+        assert bounded.await_args[0][0].__name__ == 'add_or_update_user'
+
+    @pytest.mark.asyncio
+    async def test_a_slow_upsert_answers_503_without_authenticating(self):
+        middleware = self._middleware()
+        call_next = mock.AsyncMock(return_value='ok')
+        user = models.User(id='u-1', name='tester')
+        with mock.patch.object(middleware, 'get_auth_user',
+                               return_value=user), \
+                mock.patch('sky.users.permission.permission_service'), \
+                mock.patch.object(db_lookup,
+                                  'call_with_deadline',
+                                  side_effect=asyncio.TimeoutError):
+            response = await middleware._authenticate(_authenticated_request(),
+                                                      call_next,
+                                                      _AcceptedSession())
+        assert response.status_code == 503
+        call_next.assert_not_called()

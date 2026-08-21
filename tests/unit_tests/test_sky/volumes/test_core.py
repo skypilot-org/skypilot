@@ -11,6 +11,7 @@ from sky import provision
 from sky.schemas.api import responses
 from sky.server import plugin_hooks
 from sky.utils import status_lib
+from sky.utils import volume as volume_utils
 from sky.volumes.server import core
 
 
@@ -839,6 +840,7 @@ class TestVolumeCore:
         # Mock cloud registry
         mock_cloud = mock.MagicMock()
         mock_cloud.max_cluster_name_length.return_value = 63
+        mock_cloud.is_volume_name_valid.return_value = (True, None)
         mock_cloud_registry = mock.MagicMock()
         mock_cloud_registry.from_str.return_value = mock_cloud
         mock_cloud.validate_region_zone.return_value = ('us-east-1',
@@ -896,6 +898,7 @@ class TestVolumeCore:
         # Mock cloud registry
         mock_cloud = mock.MagicMock()
         mock_cloud.max_cluster_name_length.return_value = 63
+        mock_cloud.is_volume_name_valid.return_value = (True, None)
         mock_cloud_registry = mock.MagicMock()
         mock_cloud_registry.from_str.return_value = mock_cloud
         mock_cloud.validate_region_zone.return_value = ('us-east-1',
@@ -937,6 +940,7 @@ class TestVolumeCore:
         # Mock cloud registry
         mock_cloud = mock.MagicMock()
         mock_cloud.max_cluster_name_length.return_value = 63
+        mock_cloud.is_volume_name_valid.return_value = (True, None)
         mock_cloud_registry = mock.MagicMock()
         mock_cloud_registry.from_str.return_value = mock_cloud
         mock_cloud.validate_region_zone.return_value = ('us-east-1',
@@ -1098,6 +1102,7 @@ class TestVolumeCore:
         # Mock cloud registry
         mock_cloud = mock.MagicMock()
         mock_cloud.max_cluster_name_length.return_value = 63
+        mock_cloud.is_volume_name_valid.return_value = (True, None)
         mock_cloud_registry = mock.MagicMock()
         mock_cloud_registry.from_str.return_value = mock_cloud
         mock_cloud.validate_region_zone.return_value = ('us-east-1',
@@ -2014,6 +2019,7 @@ class TestVolumeApplyRecordsInitialStatus:
     def _setup(monkeypatch):
         mock_cloud = mock.MagicMock()
         mock_cloud.max_cluster_name_length.return_value = 63
+        mock_cloud.is_volume_name_valid.return_value = (True, None)
         mock_cloud.validate_region_zone.return_value = ('my-context', None)
         mock_cloud_registry = mock.MagicMock()
         mock_cloud_registry.from_str.return_value = mock_cloud
@@ -2079,6 +2085,7 @@ class TestEphemeralVolumeSkipsStatusProbe:
     def test_probe_is_not_called(self, monkeypatch):
         mock_cloud = mock.MagicMock()
         mock_cloud.max_cluster_name_length.return_value = 63
+        mock_cloud.is_volume_name_valid.return_value = (True, None)
         mock_cloud.validate_region_zone.return_value = ('my-context', None)
         mock_registry = mock.MagicMock()
         mock_registry.from_str.return_value = mock_cloud
@@ -2189,3 +2196,61 @@ class TestVolumeRefreshScopedToNames:
         assert sorted(c.args[0] for c in mock_update.call_args_list) == [
             'vol-a', 'vol-b'
         ]
+
+
+class TestVolumeListReportsWhetherTheErrorMayResolve:
+    """NOT_READY covers a volume still being provisioned and one that will
+    never bind. Callers deciding whether to refuse a launch -- or whether to
+    let an admin auto-mount the volume -- need them told apart, and the reason
+    is only distinguishable by its text, so the listing decides it centrally.
+    """
+
+    def _list_one(self, monkeypatch, error_message):
+        volume = {
+            'name': 'vol',
+            'launched_at': 1,
+            'user_hash': 'u',
+            'workspace': 'default',
+            'status': status_lib.VolumeStatus.NOT_READY,
+            'error_message': error_message,
+            'usedby_pods': [],
+            'usedby_clusters': [],
+            'handle': mock.MagicMock(type='k8s-pvc',
+                                     cloud='kubernetes',
+                                     region='ctx',
+                                     zone=None,
+                                     size='1',
+                                     config={},
+                                     name_on_cloud='vol-abc',
+                                     spec=models.VolumeConfig),
+        }
+        monkeypatch.setattr(global_user_state, 'get_volumes',
+                            mock.MagicMock(return_value=[volume]))
+        monkeypatch.setattr(global_user_state, 'get_all_users',
+                            mock.MagicMock(return_value=[]))
+        return core.volume_list()[0]
+
+    def test_a_volume_still_being_provisioned_may_resolve(self, monkeypatch):
+        record = self._list_one(
+            monkeypatch, f'{volume_utils.PVC_PROVISIONING_MESSAGE} To debug, '
+            f'run: kubectl describe pvc vol-abc')
+
+        assert record['error_may_resolve'] is True
+
+    def test_a_volume_that_will_never_bind_does_not(self, monkeypatch):
+        record = self._list_one(
+            monkeypatch, 'PVC is pending. ProvisioningFailed: rpc error: '
+            'code = InvalidArgument desc = tier "not-a-real-tier" is invalid')
+
+        assert record['error_may_resolve'] is False
+
+    def test_no_error_does_not(self, monkeypatch):
+        assert self._list_one(monkeypatch, None)['error_may_resolve'] is False
+
+    def test_the_field_survives_the_response_model(self, monkeypatch):
+        """The listing returns a pydantic model, which drops keys it does not
+        declare -- so a field added to the dict alone never reaches a client."""
+        record = self._list_one(monkeypatch,
+                                volume_utils.PVC_PROVISIONING_MESSAGE)
+
+        assert 'error_may_resolve' in record.model_dump()

@@ -680,14 +680,12 @@ class AuthProxyMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
                 logger.error(f'Concurrent worker exhausted during auth proxy '
                              f'user upsert: {e}')
                 return db_lookup.worker_exhausted_response()
-            if newly_added:
-                # Offload the blocking config reload + role seed to a worker
-                # thread so this async middleware doesn't block the event loop.
-                # The reload lets a runtime `rbac.default_role` change take
-                # effect for this new user without a restart (the main
-                # API-server process does not reload config per request).
-                await asyncio.to_thread(permission.seed_new_user_role,
-                                        auth_user.id)
+            # Same deadline as the upsert above; see the helper for why a new
+            # user's seed is awaited while a returning one's repair is queued.
+            failed = await db_lookup.ensure_role_for_authenticated_user(
+                auth_user.id, newly_added)
+            if failed is not None:
+                return failed
 
         # Store user info in request.state for access by GET endpoints
         if auth_user is not None:
@@ -4064,9 +4062,11 @@ if __name__ == '__main__':
         background = uvloop.new_event_loop()
         if os.environ.get(constants.ENV_VAR_SERVER_METRICS_ENABLED):
             metrics.maybe_register_managed_jobs_collector()
-            metrics_server = metrics.build_metrics_server(
-                cmd_args.host, cmd_args.metrics_port)
-            global_tasks.append(background.create_task(metrics_server.serve()))
+            # Deliberately not on `background`: the scrape shares that
+            # loop's anyio thread limiter with every daemon below, and the
+            # ones that unlink files a batch at a time can hold the scrape
+            # off for tens of seconds. See metrics.start_metrics_server().
+            metrics.start_metrics_server(cmd_args.host, cmd_args.metrics_port)
             # Reap per-pid prometheus multiproc files left behind by
             # workers that crashed (SIGKILL, OOM, hard crash) and never
             # called mark_process_dead. Without this, MultiProcessCollector
@@ -4131,6 +4131,7 @@ if __name__ == '__main__':
 
         for gt in global_tasks:
             gt.cancel()
+        metrics.stop_metrics_server()
         for plugin in plugins.get_plugins():
             plugin.shutdown()
         subprocess_utils.run_in_parallel(lambda worker: worker.cancel(),

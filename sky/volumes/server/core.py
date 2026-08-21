@@ -18,6 +18,7 @@ from sky.utils import registry
 from sky.utils import rich_utils
 from sky.utils import status_lib
 from sky.utils import ux_utils
+from sky.utils import volume as volume_utils
 
 logger = sky_logging.init_logger(__name__)
 
@@ -231,6 +232,7 @@ def volume_list(
                 'usedby_fetch_failed': bool,
                 'is_ephemeral': bool,
                 'error_message': Optional[str],
+                'error_may_resolve': bool,
             }
         ]
     """
@@ -250,6 +252,7 @@ def volume_list(
                 continue
 
             status = volume.get('status')
+            error_message = volume.get('error_message')
             record: Dict[str, Any] = {
                 'name': volume_name,
                 'launched_at': volume.get('launched_at'),
@@ -263,7 +266,13 @@ def volume_list(
                 'usedby_clusters': volume.get('usedby_clusters', []),
                 'usedby_fetch_failed': False,
                 'is_ephemeral': volume.get('is_ephemeral', False),
-                'error_message': volume.get('error_message'),
+                'error_message': error_message,
+                # NOT_READY covers both a volume still being provisioned and
+                # one that will never bind. Only the recorded reason tells them
+                # apart, so decide it here rather than leave every caller to
+                # match on the message.
+                'error_may_resolve':
+                    volume_utils.volume_error_may_resolve(error_message),
                 'creation_yaml': volume.get('creation_yaml'),
                 'type': config.type,
                 'cloud': config.cloud,
@@ -378,6 +387,9 @@ def volume_apply(
     creation_yaml: Optional[str] = None,
 ) -> None:
     """Creates or registers a volume.
+
+    Callers validate the volume themselves; /volumes/apply does it for API
+    clients, and the in-process callers construct their own names and configs.
 
     Args:
         name: The name of the volume.

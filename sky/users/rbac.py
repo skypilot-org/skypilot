@@ -421,8 +421,19 @@ def least_privileged_role(roles: List[str]) -> str:
 
 
 def get_default_role() -> str:
-    return skypilot_config.get_nested(('rbac', 'default_role'),
-                                      default_value=RoleName.ADMIN.value)
+    """The role a newly provisioned user is seeded with.
+
+    Lowercased: the schema validates `default_role` with
+    `case_insensitive_enum`, which validates without normalizing, so
+    `default_role: Viewer` is a legal config. Returned as-is it would be seeded
+    as a role name nothing recognizes, and a principal holding an unrecognized
+    role is denied everywhere.
+    """
+    configured = skypilot_config.get_nested(('rbac', 'default_role'),
+                                            default_value=None)
+    # `or` rather than get_nested's default: an explicit `default_role:` with no
+    # value parses as None, and this runs on the login path.
+    return (configured or RoleName.ADMIN.value).lower()
 
 
 def get_viewer_allowlist(
