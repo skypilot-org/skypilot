@@ -2653,6 +2653,73 @@ def get_node_affinity(
     return node_affinity or None
 
 
+# Node label stamped on accelerator pods so they bin-pack toward each other.
+# The pod label (in the manifest metadata) and the podAffinity labelSelector
+# that targets it must agree, so both are rendered from these constants.
+GPU_BINPACK_LABEL_KEY = 'skypilot-binpack'
+GPU_BINPACK_LABEL_VALUE = 'gpu'
+
+
+def get_pod_affinity(
+    acc_label_key: Optional[str],
+    acc_label_values: Optional[List[str]],
+    efa_same_az: bool,
+    cluster_name_on_cloud: str,
+) -> Optional[Dict[str, Any]]:
+    """Builds the pod ``podAffinity`` for accelerator scheduling.
+
+    Only accelerator pods get a ``podAffinity`` (a pod that requests no
+    accelerator has nothing to bin-pack), so this returns None unless an
+    accelerator label key/values are given. When it applies:
+
+    * A preferred term bin-packs accelerator pods cluster-wide by attracting
+      them to nodes already carrying the ``skypilot-binpack: gpu`` label.
+    * When ``efa_same_az`` is set, a required term co-locates every pod of the
+      cluster into one availability zone. An AWS EFA placement group is
+      single-AZ, so every replica must schedule into one zone or the fabric
+      cannot form: the first pod fixes the AZ (Karpenter provisions an EFA node
+      wherever it has capacity) and the rest follow; the user names no zone.
+      Required (not preferred) because cross-AZ EFA is broken -- the pod must
+      pend loudly rather than silently fall back to TCP.
+
+    Args:
+        acc_label_key: Node label key identifying the accelerator type, or None.
+        acc_label_values: Accepted values for ``acc_label_key``, or None.
+        efa_same_az: Whether to pin all cluster pods into one zone for EFA.
+        cluster_name_on_cloud: Cluster name used to co-locate pods for EFA.
+
+    Returns:
+        A ``podAffinity`` dict, or None for a non-accelerator pod.
+    """
+    if acc_label_key is None or acc_label_values is None:
+        return None
+    pod_affinity: Dict[str, Any] = {
+        'preferredDuringSchedulingIgnoredDuringExecution': [{
+            'weight': 1,
+            'podAffinityTerm': {
+                'labelSelector': {
+                    'matchExpressions': [{
+                        'key': GPU_BINPACK_LABEL_KEY,
+                        'operator': 'In',
+                        'values': [GPU_BINPACK_LABEL_VALUE],
+                    }],
+                },
+                'topologyKey': 'kubernetes.io/hostname',
+            },
+        }],
+    }
+    if efa_same_az:
+        pod_affinity['requiredDuringSchedulingIgnoredDuringExecution'] = [{
+            'labelSelector': {
+                'matchLabels': {
+                    'skypilot-cluster-name': cluster_name_on_cloud,
+                },
+            },
+            'topologyKey': 'topology.kubernetes.io/zone',
+        }]
+    return pod_affinity
+
+
 def get_accelerator_label_keys(context: Optional[str],) -> List[str]:
     """Returns the label keys that should be avoided for scheduling
     CPU-only tasks.

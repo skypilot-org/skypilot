@@ -438,11 +438,13 @@ CASES: Dict[str, Dict[str, Any]] = {
 def _build_variables(case_name: str) -> Dict[str, Any]:
     """Merges a case onto the base and derives the computed template vars.
 
-    ``k8s_node_affinity`` is built by calling the same production helper
-    (``kubernetes_utils.get_node_affinity``) that
-    ``make_deploy_resources_variables`` uses, from the raw accelerator-label
-    vars the case carries. Deriving it here rather than hard-coding it is what
-    makes the goldens a semantic-identity proof for the Python lift.
+    ``k8s_node_affinity`` / ``k8s_pod_affinity`` and the binpack-label vars are
+    built by calling the same production helpers and constants
+    (``kubernetes_utils.get_node_affinity`` / ``get_pod_affinity`` /
+    ``GPU_BINPACK_LABEL_*``) that ``make_deploy_resources_variables`` uses, from
+    the raw vars the case carries. Deriving them here rather than hard-coding
+    them is what makes the goldens a semantic-identity proof for the Python
+    lift.
     """
     variables = base_variables()
     variables.update(CASES[case_name])
@@ -451,6 +453,15 @@ def _build_variables(case_name: str) -> Dict[str, Any]:
         variables['k8s_acc_label_values'],
         variables['avoid_label_keys'],
     )
+    variables['k8s_pod_affinity'] = kubernetes_utils.get_pod_affinity(
+        variables['k8s_acc_label_key'],
+        variables['k8s_acc_label_values'],
+        variables['k8s_efa_same_az'],
+        variables['cluster_name_on_cloud'],
+    )
+    variables['k8s_binpack_label_key'] = kubernetes_utils.GPU_BINPACK_LABEL_KEY
+    variables['k8s_binpack_label_value'] = (
+        kubernetes_utils.GPU_BINPACK_LABEL_VALUE)
     return variables
 
 

@@ -1050,6 +1050,11 @@ class Kubernetes(clouds.Cloud):
             'k8s_acc_label_values': k8s_acc_label_values,
             'k8s_node_affinity': kubernetes_utils.get_node_affinity(
                 k8s_acc_label_key, k8s_acc_label_values, avoid_label_keys),
+            'k8s_pod_affinity': kubernetes_utils.get_pod_affinity(
+                k8s_acc_label_key, k8s_acc_label_values, k8s_efa_same_az,
+                cluster_name.name_on_cloud),
+            'k8s_binpack_label_key': kubernetes_utils.GPU_BINPACK_LABEL_KEY,
+            'k8s_binpack_label_value': kubernetes_utils.GPU_BINPACK_LABEL_VALUE,
             'k8s_service_account_name': k8s_service_account_name,
             'k8s_automount_sa_token': 'true',
             'k8s_fuse_device_required': fuse_device_required,
