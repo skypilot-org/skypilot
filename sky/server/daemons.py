@@ -332,15 +332,22 @@ def expired_token_cleanup_event():
     # pylint: disable=import-outside-toplevel
     from sky.jobs import utils as managed_job_utils
 
-    logger.info('=== Cleaning up expired managed-job API access tokens ===')
-    removed = managed_job_utils.cleanup_expired_api_access_tokens()
+    # Gate inside the event body rather than via the should_skip hook: the
+    # hook is only consulted once at server boot (see server.lifespan), so it
+    # cannot auto-resume when the pause expires. gc_should_skip() reloads the
+    # config, so the interval read below is live either way.
+    paused = skypilot_config.gc_should_skip('expired token cleanup')
+    if not paused:
+        logger.info('=== Cleaning up expired managed-job API access tokens ===')
+        removed = managed_job_utils.cleanup_expired_api_access_tokens()
+        logger.info(f'Expired token cleanup removed {removed} token(s).')
+
     # Read the interval from config on every iteration so operators can
     # lower it (e.g., for testing) without restarting the API server.
     interval = skypilot_config.get_nested(
         ('daemons', 'expired-token-cleanup-daemon', 'interval_seconds'),
         server_constants.EXPIRED_TOKEN_CLEANUP_DAEMON_INTERVAL_SECONDS)
-    logger.info(f'Expired token cleanup removed {removed} token(s). '
-                f'Sleeping {interval} seconds for the next sweep...\n')
+    logger.info(f'Sleeping {interval} seconds for the next sweep...\n')
     time.sleep(interval)
 
 
