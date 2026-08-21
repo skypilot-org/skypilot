@@ -24,6 +24,7 @@ logger = sky_logging.init_logger(__name__)
 
 _INGRESS_TEMPLATE_NAME = 'kubernetes-ingress.yml.j2'
 _LOADBALANCER_TEMPLATE_NAME = 'kubernetes-loadbalancer.yml.j2'
+_INGRESS_CONTROLLER_SERVICE_NAME = 'ingress-nginx-controller'
 
 
 def get_port_mode(
@@ -249,8 +250,24 @@ def get_ingress_external_ip_and_ports(
     ingress_services = [
         item for item in core_api.list_namespaced_service(
             namespace, _request_timeout=kubernetes.API_TIMEOUT).items
-        if item.metadata.name == 'ingress-nginx-controller'
+        if item.metadata.name == _INGRESS_CONTROLLER_SERVICE_NAME
     ]
+    if not ingress_services:
+        # The ingress controller may be deployed in a namespace other than
+        # the default `ingress-nginx` (see #9150). Fall back to searching
+        # for the controller service across all namespaces.
+        try:
+            ingress_services = core_api.list_service_for_all_namespaces(
+                field_selector=(
+                    f'metadata.name={_INGRESS_CONTROLLER_SERVICE_NAME}'),
+                _request_timeout=kubernetes.API_TIMEOUT).items
+        except kubernetes.kubernetes.client.ApiException as e:
+            # The user may not have permission to list services across all
+            # namespaces. Keep the previous behavior of reporting no
+            # endpoints in that case.
+            logger.debug('Failed to search for the ingress controller '
+                         f'service across namespaces: {e}')
+            ingress_services = []
     if not ingress_services:
         return (None, None)
 
