@@ -1822,11 +1822,18 @@ def _parked_launch_reason(job_id: int, task_id: Optional[int]) -> Optional[str]:
     waiting line loses the one explanation it had. The parked request keeps
     carrying that explanation in its status message, so read it from there.
 
-    Best-effort by design: this runs wherever the log stream runs -- the API
-    server under consolidation, the controller host otherwise -- and any
-    failure (no requests database in this context, a schema difference, a
-    concurrent write) returns None, which leaves the caller showing exactly
-    what it showed before.
+    The request being read is co-located in both topologies, which is not
+    obvious: under consolidation the controller *is* the API server, and on a
+    dedicated controller this code runs on the controller host (the log stream
+    gets there via ``ManagedJobCodeGen.stream_logs`` + ``run_on_head``) while
+    the controller submits its launches to its own local API server -- see
+    ``recovery_strategy.ENV_VARS_TO_CLEAR``, which clears
+    ``SKY_API_SERVER_URL_ENV_VAR`` precisely so that a local server is used
+    there. So the launch request is in the store this reads, either way.
+
+    Best-effort regardless: any failure (no requests database in this context,
+    a schema difference, a concurrent write) returns None, which leaves the
+    caller showing exactly what it showed before.
     """
     try:
         task_name = managed_job_state.get_task_name(job_id, task_id or 0)
