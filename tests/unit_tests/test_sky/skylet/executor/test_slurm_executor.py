@@ -79,6 +79,64 @@ def test_unset_step_scoped_slurm_env():
         assert result[name] == value, f'{name} was wrongly unset'
 
 
+class TestGetNodeIdx:
+    """Tests for node index resolution (#10333).
+
+    The index only feeds log filenames and streaming prefixes, so
+    resolution must never raise, and must not depend on the runtime IP
+    matching the provisioning-time IP.
+    """
+
+    def test_node_name_match_wins_over_ip(self, monkeypatch):
+        # Even when the IP would resolve to a different (wrong) index, the
+        # Slurm node name is authoritative.
+        monkeypatch.setenv('SLURMD_NODENAME', 'node-2')
+        idx = slurm._get_node_idx(['node-1', 'node-2'],
+                                  ['10.0.0.1', '10.0.0.2'], '10.0.0.1')
+        assert idx == 1
+
+    def test_ip_match_when_node_name_unavailable(self, monkeypatch):
+        monkeypatch.delenv('SLURMD_NODENAME', raising=False)
+        idx = slurm._get_node_idx(['node-1', 'node-2'],
+                                  ['10.0.0.1', '10.0.0.2'], '10.0.0.2')
+        assert idx == 1
+
+    def test_ip_match_when_no_cluster_nodes_passed(self, monkeypatch):
+        # Old codegen does not pass --cluster-nodes; behavior matches the
+        # original IP lookup.
+        monkeypatch.setenv('SLURMD_NODENAME', 'node-2')
+        idx = slurm._get_node_idx([], ['10.0.0.1', '10.0.0.2'], '10.0.0.2')
+        assert idx == 1
+
+    def test_single_node_mismatched_ip_returns_zero(self, monkeypatch):
+        # The reporter's case: containerized slurmd resolves a different IP
+        # than the NodeAddr recorded at provisioning time. A single-node
+        # cluster has only one possible index.
+        monkeypatch.delenv('SLURMD_NODENAME', raising=False)
+        idx = slurm._get_node_idx([], ['10.244.10.126'], '10.102.3.53')
+        assert idx == 0
+
+    def test_falls_back_to_slurm_nodeid_and_warns(self, monkeypatch, capsys):
+        monkeypatch.setenv('SLURMD_NODENAME', 'unknown-node')
+        monkeypatch.setenv('SLURM_NODEID', '1')
+        idx = slurm._get_node_idx(['node-1', 'node-2'],
+                                  ['10.0.0.1', '10.0.0.2'], '10.0.0.9')
+        assert idx == 1
+        assert 'falling back to SLURM_NODEID' in capsys.readouterr().err
+
+    def test_never_raises_without_any_signal(self, monkeypatch):
+        monkeypatch.delenv('SLURMD_NODENAME', raising=False)
+        monkeypatch.delenv('SLURM_NODEID', raising=False)
+        idx = slurm._get_node_idx([], ['10.0.0.1', '10.0.0.2'], '10.0.0.9')
+        assert idx == 0
+
+    def test_never_raises_on_bad_slurm_nodeid(self, monkeypatch):
+        monkeypatch.delenv('SLURMD_NODENAME', raising=False)
+        monkeypatch.setenv('SLURM_NODEID', 'not-a-number')
+        idx = slurm._get_node_idx([], ['10.0.0.1', '10.0.0.2'], '10.0.0.9')
+        assert idx == 0
+
+
 def _fail_reads_under(monkeypatch, run_done_dir, exc_factory, num_failures):
     """Makes the first num_failures reads under run_done_dir raise.
 

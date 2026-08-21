@@ -447,7 +447,7 @@ def _cancel_slurm_job_steps():
             parts = line.split()
             assert len(parts) >= 2, 'Expected at least 2 parts'
             step_id, step_name = parts[0], parts[1]
-            if step_name == f'sky-2':
+            if step_name == f'sky-3':
                 subprocess.run(['scancel', step_id],
                                 check=False, capture_output=True)
     except Exception as e:
@@ -463,17 +463,18 @@ def _slurm_cleanup_handler(signum, _frame):
 signal.signal(signal.SIGTERM, _slurm_cleanup_handler)
 
 autostop_lib.set_last_active_time_to_now()
-job_lib.set_status(2, job_lib.JobStatus.PENDING)
-plural = 's' if 1 > 1 else ''
-node_str = f'1 node{plural}'
+job_lib.set_status(3, job_lib.JobStatus.PENDING)
+plural = 's' if 2 > 1 else ''
+node_str = f'2 node{plural}'
 message = ('[2m├── [0m[2m'
            'Waiting for task resources on '
            f'{node_str}.[0m')
 print(message, flush=True)
 sky_env_vars_dict = {}
-sky_env_vars_dict['SKYPILOT_INTERNAL_JOB_ID'] = 2
+sky_env_vars_dict['SKYPILOT_INTERNAL_JOB_ID'] = 3
 
-script = 'echo hello\n__skypilot_user_exit_code=$?\n# Only waits if cached mount is enabled (RCLONE_MOUNT_CACHED_LOG_DIR is not empty)\n# findmnt alone is not enough, as some clouds (e.g. AWS on ARM64) uses\n# rclone for normal mounts as well.\nif [ $(findmnt -t fuse.rclone --noheading | wc -l) -gt 0 ] &&            [ -d ~/.sky/rclone_log ] &&            [ "$(ls -A ~/.sky/rclone_log)" ]; then\n    FLUSH_START_TIME=$(date +%s)\n    flushed=0\n    # extra second on top of --vfs-cache-poll-interval to\n    # avoid race condition between rclone log line creation and this check.\n    sleep 1\n    while [ $flushed -eq 0 ]; do\n        # sleep for the same interval as --vfs-cache-poll-interval\n        sleep 10\n        flushed=1\n        for file in ~/.sky/rclone_log/*; do\n            exitcode=0\n            tac $file | grep "vfs cache: cleaned:" -m 1 | grep "in use 0, to upload 0, uploading 0" -q || exitcode=$?\n            if [ $exitcode -ne 0 ]; then\n                ELAPSED=$(($(date +%s) - FLUSH_START_TIME))\n                # Extract the last vfs cache status line to show what we\'re waiting for\n                CACHE_STATUS=$(tac $file | grep "vfs cache: cleaned:" -m 1 | sed \'s/.*vfs cache: cleaned: //\' 2>/dev/null)\n                # Extract currently uploading files from recent log lines (show up to 2 files)\n                UPLOADING_FILES=$(tac $file | head -30 | grep -E "queuing for upload" | head -2 | sed \'s/.*INFO  : //\' | sed \'s/: vfs cache:.*//\' | tr \'\\n\' \',\' | sed \'s/,$//\' | sed \'s/,/, /g\' 2>/dev/null)\n                # Build status message with available info\n                if [ -n "$CACHE_STATUS" ] && [ -n "$UPLOADING_FILES" ]; then\n                    echo "skypilot: cached mount is still uploading (elapsed: ${ELAPSED}s) [${CACHE_STATUS}] uploading: ${UPLOADING_FILES}"\n                elif [ -n "$CACHE_STATUS" ]; then\n                    echo "skypilot: cached mount is still uploading (elapsed: ${ELAPSED}s) [${CACHE_STATUS}]"\n                else\n                    # Fallback: show last non-empty line from log\n                    LAST_LINE=$(tac $file | grep -v "^$" | head -1 | sed \'s/.*INFO  : //\' | sed \'s/.*ERROR : //\' | sed \'s/.*NOTICE: //\' 2>/dev/null)\n                    if [ -n "$LAST_LINE" ]; then\n                        echo "skypilot: cached mount is still uploading (elapsed: ${ELAPSED}s) ${LAST_LINE}"\n                    else\n                        echo "skypilot: cached mount is still uploading (elapsed: ${ELAPSED}s)"\n                    fi\n                fi\n                flushed=0\n                break\n            fi\n        done\n    done\n    TOTAL_FLUSH_TIME=$(($(date +%s) - FLUSH_START_TIME))\n    echo "skypilot: cached mount upload complete (took ${TOTAL_FLUSH_TIME}s)"\nfi\nexit $__skypilot_user_exit_code'
+sky_env_vars_dict['SKYPILOT_TASK_ID'] = 'sky-2024-11-17-00-00-00-000002-cluster-3'
+script = 'echo "Running on node $SKYPILOT_NODE_RANK"\n__skypilot_user_exit_code=$?\n# Only waits if cached mount is enabled (RCLONE_MOUNT_CACHED_LOG_DIR is not empty)\n# findmnt alone is not enough, as some clouds (e.g. AWS on ARM64) uses\n# rclone for normal mounts as well.\nif [ $(findmnt -t fuse.rclone --noheading | wc -l) -gt 0 ] &&            [ -d ~/.sky/rclone_log ] &&            [ "$(ls -A ~/.sky/rclone_log)" ]; then\n    FLUSH_START_TIME=$(date +%s)\n    flushed=0\n    # extra second on top of --vfs-cache-poll-interval to\n    # avoid race condition between rclone log line creation and this check.\n    sleep 1\n    while [ $flushed -eq 0 ]; do\n        # sleep for the same interval as --vfs-cache-poll-interval\n        sleep 10\n        flushed=1\n        for file in ~/.sky/rclone_log/*; do\n            exitcode=0\n            tac $file | grep "vfs cache: cleaned:" -m 1 | grep "in use 0, to upload 0, uploading 0" -q || exitcode=$?\n            if [ $exitcode -ne 0 ]; then\n                ELAPSED=$(($(date +%s) - FLUSH_START_TIME))\n                # Extract the last vfs cache status line to show what we\'re waiting for\n                CACHE_STATUS=$(tac $file | grep "vfs cache: cleaned:" -m 1 | sed \'s/.*vfs cache: cleaned: //\' 2>/dev/null)\n                # Extract currently uploading files from recent log lines (show up to 2 files)\n                UPLOADING_FILES=$(tac $file | head -30 | grep -E "queuing for upload" | head -2 | sed \'s/.*INFO  : //\' | sed \'s/: vfs cache:.*//\' | tr \'\\n\' \',\' | sed \'s/,$//\' | sed \'s/,/, /g\' 2>/dev/null)\n                # Build status message with available info\n                if [ -n "$CACHE_STATUS" ] && [ -n "$UPLOADING_FILES" ]; then\n                    echo "skypilot: cached mount is still uploading (elapsed: ${ELAPSED}s) [${CACHE_STATUS}] uploading: ${UPLOADING_FILES}"\n                elif [ -n "$CACHE_STATUS" ]; then\n                    echo "skypilot: cached mount is still uploading (elapsed: ${ELAPSED}s) [${CACHE_STATUS}]"\n                else\n                    # Fallback: show last non-empty line from log\n                    LAST_LINE=$(tac $file | grep -v "^$" | head -1 | sed \'s/.*INFO  : //\' | sed \'s/.*ERROR : //\' | sed \'s/.*NOTICE: //\' 2>/dev/null)\n                    if [ -n "$LAST_LINE" ]; then\n                        echo "skypilot: cached mount is still uploading (elapsed: ${ELAPSED}s) ${LAST_LINE}"\n                    else\n                        echo "skypilot: cached mount is still uploading (elapsed: ${ELAPSED}s)"\n                    fi\n                fi\n                flushed=0\n                break\n            fi\n        done\n    done\n    TOTAL_FLUSH_TIME=$(($(date +%s) - FLUSH_START_TIME))\n    echo "skypilot: cached mount upload complete (took ${TOTAL_FLUSH_TIME}s)"\nfi\nexit $__skypilot_user_exit_code'
 
 if script or False:
     sky_env_vars_dict['SKYPILOT_NUM_GPUS_PER_NODE'] = 0
@@ -487,9 +488,9 @@ if script or False:
     # To support clusters with non-NFS home directories, we would
     # need to let users specify an NFS-backed "working directory"
     # or use a different coordination mechanism.
-    alloc_signal_file = f'~/.sky_alloc_12345_2'
+    alloc_signal_file = f'~/.sky_alloc_12345_3'
     alloc_signal_file = os.path.expanduser(alloc_signal_file)
-    setup_done_signal_file = f'~/.sky_setup_done_12345_2'
+    setup_done_signal_file = f'~/.sky_setup_done_12345_3'
     setup_done_signal_file = os.path.expanduser(setup_done_signal_file)
 
     # Start exclusive srun in a thread to reserve allocation (similar to ray.get(pg.ready()))
@@ -502,17 +503,17 @@ if script or False:
 
         log_dir = shlex.quote(log_dir)
         env_vars = shlex.quote(env_vars_json)
-        cluster_ips = shlex.quote(",".join(['10.0.0.1']))
+        cluster_ips = shlex.quote(",".join(['10.0.0.1', '10.0.0.2']))
 
         cluster_home = shlex.quote(os.path.expanduser('~'))
-        runner_args = f'--log-dir={log_dir} --env-vars={env_vars} --cluster-num-nodes=1 --cluster-ips={cluster_ips} --cluster-home-dir={cluster_home}'
+        runner_args = f'--log-dir={log_dir} --env-vars={env_vars} --cluster-num-nodes=2 --cluster-ips={cluster_ips} --cluster-home-dir={cluster_home}'
 
         # The executor prefers Slurm node names over IP matching
         # to determine the node index, since the IP resolved
         # inside a Slurm job can differ from the one recorded at
         # provisioning time (#10333). Executors below skylet
         # version 40 do not accept --cluster-nodes.
-        cluster_nodes = None
+        cluster_nodes = ['node-1', 'node-2']
         if cluster_nodes is not None and int(constants.SKYLET_VERSION) >= 40:
             runner_args += ' --cluster-nodes=' + shlex.quote(','.join(cluster_nodes))
 
@@ -566,7 +567,7 @@ if script or False:
         # Only unset SKY_RUNTIME_DIR for container runs. For non-container
         # runs, we want to inherit the node-local SKY_RUNTIME_DIR set by
         # SlurmCommandRunner to avoid SQLite WAL issues on shared filesystems.
-        if True:
+        if False:
             cmd_parts.append('unset SKY_RUNTIME_DIR;')
         cmd_parts.extend([
             constants.SKY_SLURM_PYTHON_CMD,
@@ -577,7 +578,7 @@ if script or False:
         srun_cmd = (
             "unset $(env | awk -F= '/^SLURM_/ && $1 !~ /^SLURM_CONF/ {print $1}') && "
             f'srun --export=ALL --quiet --unbuffered --kill-on-bad-exit --jobid=12345 '
-            f'--job-name=sky-2{job_suffix} --ntasks-per-node=1 --container-remap-root --container-name=test-cluster:exec {extra_flags} '
+            f'--job-name=sky-3{job_suffix} --ntasks-per-node=1 {extra_flags} '
             f'/bin/bash -c {bash_cmd}'
         )
 
@@ -590,10 +591,10 @@ if script or False:
     def run_thread_func():
         # This blocks until Slurm allocates resources (--exclusive)
         # --mem=0 to match RayCodeGen's behavior where we don't explicitly request memory.
-        run_flags = f'--nodes=1 --cpus-per-task=1 --mem=0 {gpu_arg} --exclusive'
+        run_flags = f'--nodes=2 --cpus-per-task=2 --mem=0 {gpu_arg} --exclusive'
         srun_cmd, cleanup = build_task_runner_cmd(
             script, run_flags, '/sky/logs/tasks', sky_env_vars_dict,
-            task_name='hello',
+            task_name='distributed_task',
             alloc_signal=alloc_signal_file,
             setup_done_signal=setup_done_signal_file
         )
@@ -624,20 +625,20 @@ if script or False:
             result = run_thread_result['result']
             returncode = int(result.get('return_code', 1))
             pid = result.get('pid', os.getpid())
-            msg = f'ERROR: [31mJob 2\'s setup failed with return code {returncode} (pid={pid}).'
+            msg = f'ERROR: [31mJob 3\'s setup failed with return code {returncode} (pid={pid}).'
             msg += f' See error logs above for more details.[0m'
             print(msg, flush=True)
             returncodes = [returncode]
             if int(constants.SKYLET_VERSION) >= 28:
-                job_lib.set_exit_codes(2, returncodes)
-            job_lib.set_status(2, job_lib.JobStatus.FAILED_SETUP)
+                job_lib.set_exit_codes(3, returncodes)
+            job_lib.set_status(3, job_lib.JobStatus.FAILED_SETUP)
             sys.exit(1)
         time.sleep(0.1)
 
     print('\x1b[2m└── \x1b[0mJob started. Streaming logs... \x1b[2m(Ctrl-C to exit log streaming; job will not be killed)\x1b[0m', flush=True)
 
     if False:
-        job_lib.set_status(2, job_lib.JobStatus.SETTING_UP)
+        job_lib.set_status(3, job_lib.JobStatus.SETTING_UP)
 
         # The schedule_step should be called after the job status is set to
         # non-PENDING, otherwise, the scheduler will think the current job
@@ -666,15 +667,15 @@ if script or False:
         setup_returncode = setup_proc.returncode
         if setup_returncode != 0:
             setup_pid = setup_proc.pid
-            msg = f'ERROR: [31mJob 2\'s setup failed with return code {setup_returncode} (pid={setup_pid}).'
+            msg = f'ERROR: [31mJob 3\'s setup failed with return code {setup_returncode} (pid={setup_pid}).'
             msg += f' See error logs above for more details.[0m'
             print(msg, flush=True)
-            job_lib.set_status(2, job_lib.JobStatus.FAILED_SETUP)
+            job_lib.set_status(3, job_lib.JobStatus.FAILED_SETUP)
             # Cancel the srun spawned by run_thread_func.
             _cancel_slurm_job_steps()
             sys.exit(1)
 
-    job_lib.set_job_started(2)
+    job_lib.set_job_started(3)
     if not False:
         # Need to call schedule_step() to make sure the scheduler
         # schedule the next pending job.
@@ -700,8 +701,8 @@ else:
 if sum(returncodes) != 0:
     # Save exit codes to job metadata for potential recovery logic
     if int(constants.SKYLET_VERSION) >= 28:
-        job_lib.set_exit_codes(2, returncodes)
-    job_lib.set_status(2, job_lib.JobStatus.FAILED)
+        job_lib.set_exit_codes(3, returncodes)
+    job_lib.set_status(3, job_lib.JobStatus.FAILED)
     # Schedule the next pending job immediately to make the job
     # scheduling more efficient.
     job_lib.scheduler.schedule_step()
@@ -715,7 +716,7 @@ if sum(returncodes) != 0:
         # Find the first non-137 return code
         non_137 = next(r for r in returncodes if r != 137)
         reason = f'(A Worker failed with return code {non_137}, SkyPilot cleaned up the processes on other nodes with return code 137)'
-    print('ERROR: [31mJob 2 failed with '
+    print('ERROR: [31mJob 3 failed with '
           'return code list:[0m',
           returncodes,
           reason,
@@ -723,7 +724,7 @@ if sum(returncodes) != 0:
     # Need this to set the job status in ray job to be FAILED.
     sys.exit(1)
 else:
-    job_lib.set_status(2, job_lib.JobStatus.SUCCEEDED)
+    job_lib.set_status(3, job_lib.JobStatus.SUCCEEDED)
     # Schedule the next pending job immediately to make the job
     # scheduling more efficient.
     job_lib.scheduler.schedule_step()

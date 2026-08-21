@@ -6955,6 +6955,35 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             return task.envs[constants.USER_ID_ENV_VAR]
         return None
 
+    @staticmethod
+    def _get_slurm_node_names(handle: CloudVmRayResourceHandle,
+                              internal_ips: List[str]) -> Optional[List[str]]:
+        """Returns Slurm node names aligned with the given internal IPs.
+
+        The executor prefers node names over IP matching to determine the
+        node index, since the IP resolved inside a Slurm job can differ
+        from the NodeAddr recorded at provisioning time (#10333).
+
+        Returns None if the cached cluster info does not cover every IP,
+        e.g. for clusters whose cached info predates node name recording.
+        """
+        cluster_info = handle.cached_cluster_info
+        if cluster_info is None:
+            return None
+        ip_to_node = {}
+        for instances in cluster_info.instances.values():
+            for instance in instances:
+                node = instance.tags.get('node')
+                if node is not None and instance.internal_ip is not None:
+                    ip_to_node[instance.internal_ip] = node
+        node_names = []
+        for ip in internal_ips:
+            node = ip_to_node.get(ip)
+            if node is None:
+                return None
+            node_names.append(node)
+        return node_names
+
     def _get_task_codegen_class(
             self, handle: CloudVmRayResourceHandle) -> task_codegen.TaskCodeGen:
         """Returns the appropriate TaskCodeGen for the given handle."""
@@ -6973,9 +7002,19 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 container_name = slurm_utils.pyxis_container_name(
                     handle.cluster_name_on_cloud)
 
+            # Map through the internal IPs rather than re-deriving the node
+            # order: internal_ips() applies its own head-first ordering, and
+            # the node names must stay aligned with --cluster-ips.
+            internal_ips = handle.internal_ips()
+            cluster_node_names = None
+            if internal_ips is not None:
+                cluster_node_names = self._get_slurm_node_names(
+                    handle, internal_ips)
+
             return task_codegen.SlurmCodeGen(
                 slurm_job_id,
                 container_name,
+                cluster_node_names=cluster_node_names,
             )
         else:
             return task_codegen.RayCodeGen()
