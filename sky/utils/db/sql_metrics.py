@@ -497,9 +497,9 @@ class _InstrumentedFetch:
             return
         try:
             _child(db_metrics.SKY_APISERVER_DB_ROWFETCH_SECONDS, self._db,
-                   self._table, self._op).observe(self._seconds)
+                   self._table).observe(self._seconds)
             _child(db_metrics.SKY_APISERVER_DB_RESULT_BYTES, self._db,
-                   self._table, self._op).observe(self._bytes)
+                   self._table).observe(self._bytes)
             if self._count_rows:
                 _child(db_metrics.SKY_APISERVER_DB_ROWS_RETURNED, self._db,
                        self._table, self._op).observe(self._rows)
@@ -536,8 +536,8 @@ def _install(engine: Any, db: str) -> None:
                 return
             duration = time.perf_counter() - started
             table, op = _labels(context)
-            _child(db_metrics.SKY_APISERVER_DB_EXECUTE_SECONDS, db, table,
-                   op).observe(duration)
+            _child(db_metrics.SKY_APISERVER_DB_EXECUTE_SECONDS, db,
+                   table).observe(duration)
             _child(db_metrics.SKY_APISERVER_DB_STATEMENTS_TOTAL, db, table, op,
                    _OUTCOME_OK).inc()
             rows = _rowcount(cursor)
@@ -548,7 +548,7 @@ def _install(engine: Any, db: str) -> None:
                 sent = _statement_bytes(statement, parameters, executemany)
                 if sent:
                     _child(db_metrics.SKY_APISERVER_DB_STATEMENT_BYTES, db,
-                           table, op).observe(sent)
+                           table).observe(sent)
             conn.info[_KEY_RESULT] = (table, op, rows is None)
         except Exception:  # pylint: disable=broad-except
             _warn_once('Failed to record a SQL statement.')

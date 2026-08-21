@@ -98,6 +98,14 @@ def test_join_is_attributed_to_its_leftmost_table():
     engine = _engine(md)
     _seed(engine, left, 2)
 
+    # Deltas, because both tables already have a CREATE TABLE attributed
+    # to them and execute latency is no longer split by op.
+    before_left = _sample('sky_apiserver_db_execute_seconds_count',
+                          db='state',
+                          table=left_name)
+    before_right = _sample('sky_apiserver_db_execute_seconds_count',
+                           db='state',
+                           table=right_name)
     with engine.connect() as conn:
         conn.execute(
             sa.select(left.c.id).join_from(left, right,
@@ -105,12 +113,10 @@ def test_join_is_attributed_to_its_leftmost_table():
 
     assert _sample('sky_apiserver_db_execute_seconds_count',
                    db='state',
-                   table=left_name,
-                   op='select') == 1
+                   table=left_name) == before_left + 1
     assert _sample('sky_apiserver_db_execute_seconds_count',
                    db='state',
-                   table=right_name,
-                   op='select') == 0
+                   table=right_name) == before_right
 
 
 def test_subquery_does_not_leak_an_anonymous_alias_as_a_label():
@@ -118,6 +124,9 @@ def test_subquery_does_not_leak_an_anonymous_alias_as_a_label():
     engine = _engine(md)
     _seed(engine, table, 3)
 
+    before = _sample('sky_apiserver_db_execute_seconds_count',
+                     db='state',
+                     table=name)
     sub = sa.select(table).subquery()
     with engine.connect() as conn:
         conn.execute(sa.select(sub.c.id)).all()
@@ -125,8 +134,10 @@ def test_subquery_does_not_leak_an_anonymous_alias_as_a_label():
     # Unwrapped to the real table, not labelled `anon_1`.
     assert _sample('sky_apiserver_db_execute_seconds_count',
                    db='state',
-                   table=name,
-                   op='select') == 1
+                   table=name) == before + 1
+    assert _sample('sky_apiserver_db_execute_seconds_count',
+                   db='state',
+                   table='anon_1') == 0
 
 
 def test_raw_text_is_not_regexed_into_a_table_label():
@@ -136,14 +147,12 @@ def test_raw_text_is_not_regexed_into_a_table_label():
 
     before = _sample('sky_apiserver_db_execute_seconds_count',
                      db='state',
-                     table=db_metrics.UNKNOWN_TABLE,
-                     op='other')
+                     table=db_metrics.UNKNOWN_TABLE)
     with engine.connect() as conn:
         conn.execute(sa.text(f'select count(*) from {table.name}')).all()
     after = _sample('sky_apiserver_db_execute_seconds_count',
                     db='state',
-                    table=db_metrics.UNKNOWN_TABLE,
-                    op='other')
+                    table=db_metrics.UNKNOWN_TABLE)
     assert after == before + 1
 
 
@@ -187,10 +196,8 @@ def test_rows_and_result_bytes_are_exact():
                    table=name,
                    op='select') == 40
     # 40 rows x (1000-char body + an 8-byte id).
-    assert _sample('sky_apiserver_db_result_bytes_sum',
-                   db='state',
-                   table=name,
-                   op='select') == 40 * 1008
+    assert _sample('sky_apiserver_db_result_bytes_sum', db='state',
+                   table=name) == 40 * 1008
 
 
 def test_result_bytes_include_a_single_outlier_row():
@@ -213,10 +220,8 @@ def test_result_bytes_include_a_single_outlier_row():
         conn.execute(sa.select(table)).all()
 
     expected = big + 199 * 100 + 200 * 8
-    assert _sample('sky_apiserver_db_result_bytes_sum',
-                   db='state',
-                   table=name,
-                   op='select') == expected
+    assert _sample('sky_apiserver_db_result_bytes_sum', db='state',
+                   table=name) == expected
 
 
 def test_result_bytes_handle_a_null_first_value():
@@ -236,10 +241,8 @@ def test_result_bytes_handle_a_null_first_value():
         conn.execute(sa.select(table)).all()
 
     # The NULL counts as a scalar (8); the real 5000-char value is not lost.
-    assert _sample('sky_apiserver_db_result_bytes_sum',
-                   db='state',
-                   table=name,
-                   op='select') == 5000 + 8 + 2 * 8
+    assert _sample('sky_apiserver_db_result_bytes_sum', db='state',
+                   table=name) == 5000 + 8 + 2 * 8
 
 
 def test_statement_bytes_capture_a_large_write():
@@ -253,8 +256,7 @@ def test_statement_bytes_capture_a_large_write():
 
     sent = _sample('sky_apiserver_db_statement_bytes_sum',
                    db='state',
-                   table=name,
-                   op='update')
+                   table=name)
     assert sent >= len(payload)
 
 
@@ -263,13 +265,15 @@ def test_statement_bytes_are_not_recorded_for_reads():
     engine = _engine(md)
     _seed(engine, table, 2)
 
+    before = _sample('sky_apiserver_db_statement_bytes_count',
+                     db='state',
+                     table=name)
     with engine.connect() as conn:
         conn.execute(sa.select(table)).all()
 
     assert _sample('sky_apiserver_db_statement_bytes_count',
                    db='state',
-                   table=name,
-                   op='select') == 0
+                   table=name) == before
 
 
 @pytest.mark.parametrize('consume', [
@@ -288,8 +292,7 @@ def test_rowfetch_covers_every_bulk_consumption_path(consume):
 
     assert _sample('sky_apiserver_db_rowfetch_seconds_count',
                    db='state',
-                   table=name,
-                   op='select') == 1
+                   table=name) == 1
 
 
 def test_rowfetch_is_not_reported_as_empty_for_row_at_a_time_reads():
@@ -307,8 +310,7 @@ def test_rowfetch_is_not_reported_as_empty_for_row_at_a_time_reads():
 
     assert _sample('sky_apiserver_db_rowfetch_seconds_count',
                    db='state',
-                   table=name,
-                   op='select') == 0
+                   table=name) == 0
 
 
 def test_orm_session_is_covered():
@@ -321,8 +323,7 @@ def test_orm_session_is_covered():
 
     assert _sample('sky_apiserver_db_rowfetch_seconds_count',
                    db='state',
-                   table=name,
-                   op='select') == 1
+                   table=name) == 1
 
 
 # --- transactions -------------------------------------------------------
@@ -481,13 +482,17 @@ def test_install_is_idempotent():
     md.create_all(engine)
     _seed(engine, table, 2)
 
+    before = _sample('sky_apiserver_db_execute_seconds_count',
+                     db='state',
+                     table=name)
     with engine.connect() as conn:
         conn.execute(sa.select(table)).all()
 
+    # Exactly one observation: a double-installed listener set would
+    # record the same statement twice.
     assert _sample('sky_apiserver_db_execute_seconds_count',
                    db='state',
-                   table=name,
-                   op='select') == 1
+                   table=name) == before + 1
 
 
 def test_disabled_attaches_nothing(monkeypatch):
@@ -502,8 +507,7 @@ def test_disabled_attaches_nothing(monkeypatch):
 
     assert _sample('sky_apiserver_db_execute_seconds_count',
                    db='state',
-                   table=name,
-                   op='select') == 0
+                   table=name) == 0
     # Not merely "skip the observe": no listener is attached at all, so
     # SQLAlchemy never takes its has-events code path.
     assert not engine._has_events  # pylint: disable=protected-access
@@ -547,12 +551,14 @@ def test_concurrent_install_attaches_once():
     md.create_all(engine)
     _seed(engine, table, 1)
 
+    before = _sample('sky_apiserver_db_execute_seconds_count',
+                     db='state',
+                     table=name)
     with engine.connect() as conn:
         conn.execute(sa.select(table)).all()
     assert _sample('sky_apiserver_db_execute_seconds_count',
                    db='state',
-                   table=name,
-                   op='select') == 1
+                   table=name) == before + 1
 
 
 # --- the external entry point used by non-SQLAlchemy callers -------------
@@ -578,8 +584,7 @@ def test_record_statement_lands_on_the_same_families():
                    outcome='ok') == before + 1
     assert _sample('sky_apiserver_db_statement_bytes_sum',
                    db='ha_asyncpg',
-                   table='requests',
-                   op='insert') >= 4096
+                   table='requests') >= 4096
 
 
 def test_observe_statement_marks_failures():

@@ -461,8 +461,8 @@
     {
       "id": 7,
       "type": "timeseries",
-      "title": "Rows returned per statement (p99)",
-      "description": "The direct instrument for a full-table read. A statement that normally returns tens of rows suddenly returning tens of thousands is the jobs-queue pathology.",
+      "title": "Rows returned per read (p99)",
+      "description": "The direct instrument for a full-table read. Filtered to op=\"select\" on purpose: rows_returned keeps its op label because for a SELECT the number is rows returned while for DML it is rows affected, and averaging those together would make \"something read the whole table\" look the same as \"something deleted the whole table\". Swap the filter to see writes.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -514,7 +514,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "histogram_quantile(0.99, sum by (le, db, table) (rate(sky_apiserver_db_rows_returned_bucket{db=~\"$db\", table=~\"$table\"}[$__rate_interval])))",
+          "expr": "histogram_quantile(0.99, sum by (le, db, table) (rate(sky_apiserver_db_rows_returned_bucket{db=~\"$db\", table=~\"$table\", op=\"select\"}[$__rate_interval])))",
           "legendFormat": "{{db}}/{{table}}",
           "range": true,
           "instant": false,
@@ -1506,7 +1506,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "histogram_quantile(0.99, sum by (le, db, table) (rate(sky_apiserver_db_rows_returned_bucket{db=~\"$db\", table=~\"$table\"}[$__range])))",
+          "expr": "histogram_quantile(0.99, sum by (le, db, table) (rate(sky_apiserver_db_rows_returned_bucket{db=~\"$db\", table=~\"$table\", op=\"select\"}[$__range])))",
           "legendFormat": "",
           "range": false,
           "instant": true,
@@ -1570,7 +1570,7 @@
               "Value #A": "execute p50",
               "Value #B": "execute p99",
               "Value #C": "rowfetch p99",
-              "Value #D": "rows p99",
+              "Value #D": "rows p99 (reads)",
               "Value #E": "result bytes p99",
               "Value #F": "statements/s"
             }

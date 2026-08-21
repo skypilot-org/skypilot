@@ -33,7 +33,13 @@ Label budget, deliberately small:
   profiles. Per-component resolution comes from ``table``.
 * ``table`` — the primary table of the statement, taken from the
   compiled SQLAlchemy construct.
-* ``op``   — select / insert / update / delete / ddl / other.
+* ``op``   — select / insert / update / delete / ddl / other. Carried
+  only by ``statements_total`` (which is where "statement rate by op"
+  lives) and by ``rows_returned`` (where returned-vs-affected rows are
+  genuinely different populations). The latency and byte families are
+  labelled by ``db`` + ``table`` alone: a per-op latency breakdown costs
+  a third of this module's total series and the questions it answers are
+  reachable from the counter.
 * ``pool`` — the pool class (``QueuePool`` / ``NullPool`` / ...), on the
   connection-side families only. A role that is expected to pool but
   reports ``NullPool`` is a defect, and nothing else surfaces it.
@@ -80,13 +86,20 @@ _KIB = 2**10
 _MIB = 2**20
 _GIB = 2**30
 
-# Statement latency ladder. Starts at 1ms: with a pooler and a remote
-# Postgres in the path, a point query costs hundreds of microseconds at
-# best, and sub-ms resolution would only buy precision for SQLite. Tops
-# out at 60s because anything slower is already an incident, and every
-# bucket multiplies the series count of every labeled histogram.
-LATENCY_BUCKETS = (0.001, 0.0025, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0,
-                   2.5, 5.0, 10.0, 30.0, 60.0, float('inf'))
+# Statement latency ladder, two buckets per decade (1x and 5x). Starts at
+# 1ms: with a pooler and a remote Postgres in the path a point query costs
+# hundreds of microseconds at best, so sub-ms resolution would only buy
+# precision for SQLite. Tops out at 60s because anything slower is already
+# an incident.
+#
+# Eleven buckets, not the sixteen this started with. Every bucket is a
+# time series per label combination, and on a real deployment the latency
+# families were 55% of everything this module exports; the five buckets
+# dropped (2.5ms, 25ms, 250ms, 2.5s, 30s) each sat next to a neighbour
+# within ~2.5x, which buys percentile smoothness rather than a different
+# answer.
+LATENCY_BUCKETS = (0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1.0, 5.0, 10.0, 60.0,
+                   float('inf'))
 
 # Rows returned per statement. Decade buckets: the question this answers
 # is "did something just read the whole table", which is an
@@ -111,7 +124,7 @@ PAYLOAD_BUCKETS = (_KIB, 16 * _KIB, 128 * _KIB, _MIB, 8 * _MIB, 32 * _MIB,
 SKY_APISERVER_DB_EXECUTE_SECONDS = prom.Histogram(
     'sky_apiserver_db_execute_seconds',
     'Duration of cursor.execute() for a statement, client-side',
-    ['db', 'table', 'op'],
+    ['db', 'table'],
     buckets=LATENCY_BUCKETS,
 )
 
@@ -122,7 +135,7 @@ SKY_APISERVER_DB_EXECUTE_SECONDS = prom.Histogram(
 SKY_APISERVER_DB_ROWFETCH_SECONDS = prom.Histogram(
     'sky_apiserver_db_rowfetch_seconds',
     'Duration of row fetch / materialization after execute, client-side',
-    ['db', 'table', 'op'],
+    ['db', 'table'],
     buckets=LATENCY_BUCKETS,
 )
 
@@ -157,6 +170,12 @@ SKY_APISERVER_DB_STATEMENTS_TOTAL = prom.Counter(
 # The direct instrument for full-table reads. Exact where the driver
 # reports it (psycopg2 sets rowcount for SELECT); otherwise counted from
 # the rows actually handed to the caller.
+#
+# This is the one payload family that keeps `op`, and it has to: for a
+# SELECT the number means rows *returned*, for DML it means rows
+# *affected*. Those are different populations, and merging them would
+# make "something read the whole table" indistinguishable from "something
+# deleted the whole table".
 SKY_APISERVER_DB_ROWS_RETURNED = prom.Histogram(
     'sky_apiserver_db_rows_returned',
     'Rows returned or affected by one statement',
@@ -173,7 +192,7 @@ SKY_APISERVER_DB_ROWS_RETURNED = prom.Histogram(
 SKY_APISERVER_DB_RESULT_BYTES = prom.Histogram(
     'sky_apiserver_db_result_bytes',
     'Bytes of result data returned by one statement, measured client-side',
-    ['db', 'table', 'op'],
+    ['db', 'table'],
     buckets=PAYLOAD_BUCKETS,
 )
 
@@ -182,7 +201,7 @@ SKY_APISERVER_DB_RESULT_BYTES = prom.Histogram(
 SKY_APISERVER_DB_STATEMENT_BYTES = prom.Histogram(
     'sky_apiserver_db_statement_bytes',
     'Bytes of statement text plus bound parameters sent for one statement',
-    ['db', 'table', 'op'],
+    ['db', 'table'],
     buckets=PAYLOAD_BUCKETS,
 )
 
@@ -310,17 +329,17 @@ def record_statement(
     if not ENABLED:
         return
     try:
-        SKY_APISERVER_DB_EXECUTE_SECONDS.labels(db, table,
-                                                op).observe(execute_seconds)
+        SKY_APISERVER_DB_EXECUTE_SECONDS.labels(db,
+                                                table).observe(execute_seconds)
         SKY_APISERVER_DB_STATEMENTS_TOTAL.labels(db, table, op, outcome).inc()
         if rows is not None and rows >= 0:
             SKY_APISERVER_DB_ROWS_RETURNED.labels(db, table, op).observe(rows)
         if result_bytes is not None:
-            SKY_APISERVER_DB_RESULT_BYTES.labels(db, table,
-                                                 op).observe(result_bytes)
+            SKY_APISERVER_DB_RESULT_BYTES.labels(db,
+                                                 table).observe(result_bytes)
         if statement_bytes is not None:
-            SKY_APISERVER_DB_STATEMENT_BYTES.labels(db, table,
-                                                    op).observe(statement_bytes)
+            SKY_APISERVER_DB_STATEMENT_BYTES.labels(
+                db, table).observe(statement_bytes)
     except Exception:  # pylint: disable=broad-except
         _warn_once('Failed to record a database statement.')
 
