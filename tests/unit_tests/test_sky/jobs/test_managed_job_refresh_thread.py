@@ -61,7 +61,7 @@ class TestElectorConfiguration:
         get_elector.assert_called_once_with(
             managed_job_constants.CONSOLIDATION_MODE_LOCK_ID,
             ttl_seconds=mjrt._LEASE_TTL_SECONDS,
-            renew_interval_seconds=mjrt._LOCK_PROBE_INTERVAL_SECONDS,
+            renew_interval_seconds=mjrt._ROLE_RENEW_INTERVAL_SECONDS,
             renew_deadline_seconds=mjrt._RENEW_DEADLINE_SECONDS)
 
     def test_timing_is_looser_than_the_module_defaults(self):
@@ -80,7 +80,7 @@ class TestElectorConfiguration:
                 leader_election.DEFAULT_RENEW_DEADLINE_SECONDS)
         # The lease constructor enforces this too, but a violation here would
         # only surface on a Postgres deployment with the lease backend on.
-        assert (0 < mjrt._LOCK_PROBE_INTERVAL_SECONDS <
+        assert (0 < mjrt._ROLE_RENEW_INTERVAL_SECONDS <
                 mjrt._RENEW_DEADLINE_SECONDS < mjrt._LEASE_TTL_SECONDS)
 
 

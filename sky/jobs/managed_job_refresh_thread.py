@@ -20,7 +20,7 @@ if typing.TYPE_CHECKING:
 
 logger = sky_logging.init_logger(__name__)
 
-_LOCK_PROBE_INTERVAL_SECONDS = 5
+_ROLE_RENEW_INTERVAL_SECONDS = 5
 _ACQUIRE_RETRY_INTERVAL_SECONDS = 5
 
 # Lease timing for the consolidation role, deliberately looser than the
@@ -43,9 +43,13 @@ _ACQUIRE_RETRY_INTERVAL_SECONDS = 5
 #     deadline is sized to ride out a database failover or restart (tens of
 #     seconds) rather than to react to one.
 #
-# The renew cadence stays at `_LOCK_PROBE_INTERVAL_SECONDS`, the interval this
-# daemon has always probed at, so the advisory backend behaves exactly as
-# before and the lease still gets ~17 attempts inside its deadline.
+# The renew cadence stays at the 5s this daemon has always probed its lock at,
+# so the lease gets ~17 attempts inside its deadline. Advisory keeps the same
+# cadence but is not quite byte-identical any more: a step-down is noticed by
+# the renewer (within one cadence) and then by the loop (within a second)
+# rather than by one inline probe, and a follower re-bids every
+# `_ACQUIRE_RETRY_INTERVAL_SECONDS` instead of the blocking acquire's 1s poll.
+# Both are dominated by `_RECOVERY_WAIT_AFTER_ACQUIRE_SECONDS`.
 #
 # The margin (ttl - deadline) is what a stepping-down leader has to get its
 # controllers dead before any other replica may adopt their jobs, on top of the
@@ -105,7 +109,7 @@ class ManagedJobRefreshDaemonThread(threading.Thread):
         self._elector = leader_election.get_elector(
             managed_job_constants.CONSOLIDATION_MODE_LOCK_ID,
             ttl_seconds=_LEASE_TTL_SECONDS,
-            renew_interval_seconds=_LOCK_PROBE_INTERVAL_SECONDS,
+            renew_interval_seconds=_ROLE_RENEW_INTERVAL_SECONDS,
             renew_deadline_seconds=_RENEW_DEADLINE_SECONDS)
 
         while True:
@@ -196,7 +200,7 @@ class ManagedJobRefreshDaemonThread(threading.Thread):
         # interval because `holding` is now an in-memory read -- the renewer
         # owns the round trip. Historically this probe *was* the round trip
         # (`is_session_alive()` per probe), which is why it was rate-limited to
-        # `_LOCK_PROBE_INTERVAL_SECONDS`; keeping that gate now would only add
+        # `_ROLE_RENEW_INTERVAL_SECONDS`; keeping that gate now would only add
         # latency to the step-down for no saving. And that latency is not free:
         # the point of stepping down is to get this replica's controllers killed
         # before anyone else can adopt their jobs, so every second of detection
