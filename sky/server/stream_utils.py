@@ -229,6 +229,9 @@ async def _tail_log_file(
 
     last_heartbeat_time = asyncio.get_event_loop().time()
     last_status_check_time = asyncio.get_event_loop().time()
+    # The last parked-state message pushed to this stream; see the WAITING
+    # branch in the status check below.
+    last_waiting_msg: Optional[str] = None
 
     # Buffer the lines in memory and flush them in chunks to improve log
     # tailing throughput.
@@ -288,7 +291,30 @@ async def _tail_log_file(
             if request_id is not None and should_check_status:
                 last_status_check_time = current_time
                 req_status = await requests_lib.get_request_status_async(
-                    request_id)
+                    request_id, include_msg=True)
+                if req_status.status == requests_lib.RequestStatus.WAITING:
+                    # The request parked mid-execution (e.g. waiting on queue
+                    # admission or a cluster lock): it stops writing to the log,
+                    # so without this the client keeps showing the last line it
+                    # streamed -- frozen for as long as the wait lasts, and
+                    # stale as soon as the reason changes. Push the parked
+                    # message as the live status instead.
+                    waiting_msg = req_status.status_msg
+                    if waiting_msg and waiting_msg != last_waiting_msg:
+                        last_waiting_msg = waiting_msg
+                        if plain_logs:
+                            # Padding forces browser rendering of the chunk.
+                            buffer.append(waiting_msg + ' ' * 4096 + '\n')
+                        else:
+                            # INIT, not UPDATE: parking ended the request's own
+                            # rich status (an EXIT reached this client), and an
+                            # exited status ignores updates.
+                            buffer.append(
+                                rich_utils.EncodedStatusMessage(
+                                    f'[dim]{waiting_msg}[/dim]').init())
+                elif req_status.status == requests_lib.RequestStatus.RUNNING:
+                    # Resumed: the request drives its own status again.
+                    last_waiting_msg = None
                 if req_status.status > requests_lib.RequestStatus.RUNNING:
                     if (req_status.status ==
                             requests_lib.RequestStatus.CANCELLED):

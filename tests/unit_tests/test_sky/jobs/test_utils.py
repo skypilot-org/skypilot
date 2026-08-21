@@ -1695,3 +1695,73 @@ class TestCancelJobsByIdWorkspaceScoping:
         msg = jobs_utils.cancel_jobs_by_id([5], current_workspace='ws-a')
         assert 'not in the active workspace' in msg
         assert 'terminal' not in msg
+
+
+class TestParkedLaunchReason:
+    """The fallback explanation for a job whose launch parked.
+
+    A parked launch ends its rich status, so the provisioning headline relayed
+    into the controller log disappears and `sky jobs launch` is left saying only
+    "Waiting for task to start". The parked request still carries the reason.
+    """
+
+    def _patch(self,
+               monkeypatch,
+               *,
+               task_name='task',
+               requests=None,
+               raises=None):
+        monkeypatch.setattr(jobs_utils.managed_job_state, 'get_task_name',
+                            lambda job_id, task_id: task_name)
+
+        def get_request_tasks(req_filter):
+            if raises is not None:
+                raise raises
+            self.filter = req_filter
+            return requests or []
+
+        monkeypatch.setattr(jobs_utils.requests_lib, 'get_request_tasks',
+                            get_request_tasks)
+
+    def test_returns_the_parked_requests_message(self, monkeypatch):
+        parked = MagicMock()
+        parked.status_msg = ('Pending (Queue: q, Position: 0, needs memory) '
+                             '(waiting to resume)')
+        self._patch(monkeypatch, requests=[parked])
+
+        assert jobs_utils._parked_launch_reason(7, 0) == parked.status_msg
+        # Scoped to a parked launch of THIS job's cluster: a WAITING request of
+        # another kind, or another job's, must not be shown as this job's
+        # reason.
+        assert self.filter.status == [
+            jobs_utils.requests_lib.RequestStatus.WAITING
+        ]
+        assert self.filter.include_request_names == ['sky.launch']
+        assert self.filter.cluster_names == [
+            jobs_utils.generate_managed_job_cluster_name('task', 7)
+        ]
+
+    def test_no_parked_request_means_no_reason(self, monkeypatch):
+        self._patch(monkeypatch, requests=[])
+        assert jobs_utils._parked_launch_reason(7, 0) is None
+
+    def test_empty_message_is_not_reported(self, monkeypatch):
+        parked = MagicMock()
+        parked.status_msg = ''
+        self._patch(monkeypatch, requests=[parked])
+        assert jobs_utils._parked_launch_reason(7, 0) is None
+
+    def test_unknown_task_means_no_reason(self, monkeypatch):
+        self._patch(monkeypatch, task_name=None)
+        assert jobs_utils._parked_launch_reason(7, 0) is None
+
+    def test_lookup_failure_is_swallowed(self, monkeypatch):
+        """Log streaming must not break where the request DB is unreadable.
+
+        This runs wherever the log stream runs -- the API server under
+        consolidation, the controller host otherwise -- so an unavailable or
+        differently-shaped request store has to degrade to today's behavior
+        (no appended line), never to an error in the middle of following a job.
+        """
+        self._patch(monkeypatch, raises=RuntimeError('no requests db here'))
+        assert jobs_utils._parked_launch_reason(7, 0) is None

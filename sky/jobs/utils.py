@@ -46,6 +46,7 @@ from sky.jobs import scheduler
 from sky.jobs import state as managed_job_state
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.schemas.api import responses
+from sky.server.requests import requests as requests_lib
 from sky.skylet import constants
 from sky.skylet import job_lib
 from sky.skylet import log_lib
@@ -1812,6 +1813,44 @@ def _provision_status_headline(provision_msg: str) -> Optional[str]:
     return None
 
 
+def _parked_launch_reason(job_id: int, task_id: Optional[int]) -> Optional[str]:
+    """The status message of a parked cluster launch for this job, if any.
+
+    A launch that parks (``exceptions.ExecutionPausedError`` -- waiting on a
+    cluster lock, on queue admission, ...) ends its rich status, so the
+    provisioning headline relayed into the controller log goes away and the
+    waiting line loses the one explanation it had. The parked request keeps
+    carrying that explanation in its status message, so read it from there.
+
+    Best-effort by design: this runs wherever the log stream runs -- the API
+    server under consolidation, the controller host otherwise -- and any
+    failure (no requests database in this context, a schema difference, a
+    concurrent write) returns None, which leaves the caller showing exactly
+    what it showed before.
+    """
+    try:
+        task_name = managed_job_state.get_task_name(job_id, task_id or 0)
+        if task_name is None:
+            return None
+        cluster_name = generate_managed_job_cluster_name(task_name, job_id)
+        parked = requests_lib.get_request_tasks(
+            requests_lib.RequestTaskFilter(
+                status=[requests_lib.RequestStatus.WAITING],
+                cluster_names=[cluster_name],
+                include_request_names=['sky.launch'],
+                fields=['status_msg', 'created_at'],
+                sort=True,
+                limit=1,
+            ))
+        if not parked:
+            return None
+        return parked[0].status_msg or None
+    except Exception as e:  # pylint: disable=broad-except
+        logger.debug(f'Could not read the parked launch reason for job '
+                     f'{job_id}: {e}')
+        return None
+
+
 def stream_logs_by_id(
         job_id: int,
         follow: bool = True,
@@ -2233,6 +2272,7 @@ def stream_logs_by_id(
                 logger.debug(
                     f'INFO: The log is not ready yet{status_str}. '
                     f'Waiting for {JOB_STATUS_CHECK_GAP_SECONDS} seconds.')
+                parked_reason = _parked_launch_reason(job_id, task_id)
                 # Poll the controller log frequently for provisioning spinner
                 # updates, but only re-check the (more expensive) managed job
                 # status every JOB_STATUS_CHECK_GAP_SECONDS.
@@ -2248,6 +2288,13 @@ def stream_logs_by_id(
                     # when there is no headline to display.
                     headline = (None if provision_msg is None else
                                 _provision_status_headline(provision_msg))
+                    if headline is None:
+                        # No live launch status: the launch may have parked
+                        # (which ends its rich status), and then its own
+                        # message is the only thing that still says what the
+                        # job is waiting for. Read on the outer cadence only --
+                        # this loop spins once a second.
+                        headline = parked_reason
                     provision_str = (''
                                      if headline is None else f'\n  {headline}')
                     msg = _JOB_WAITING_STATUS_MESSAGE.format(
