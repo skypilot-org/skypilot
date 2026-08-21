@@ -1599,6 +1599,32 @@ function JobDetailsContent({
         </div>
       )}
 
+      {/* Details section - surfaces the reason behind the current status
+          (e.g. why a job is still PENDING). A plugin may take over this slot
+          to render richer queue-specific details (e.g. Kueue); otherwise the
+          OSS fallback shows the plain details string so the reason is visible
+          here in the job details view, not just in the event table. */}
+      {jobData.details && (
+        <PluginSlot
+          name="jobs.detail.queue_details"
+          context={{
+            details: jobData.details,
+            queueName: jobData.kueue_queue_name,
+            infra: jobData.full_infra,
+            jobData: jobData,
+            title: 'Queue Details',
+          }}
+          fallback={
+            <div>
+              <div className="text-gray-600 font-medium text-base">Details</div>
+              <div className="text-base mt-1 whitespace-pre-wrap break-words">
+                {jobData.details}
+              </div>
+            </div>
+          }
+        />
+      )}
+
       {/* External Links section - full width row */}
       <div className="col-span-2">
         <div className="text-gray-600 font-medium text-base">
@@ -1627,32 +1653,6 @@ function JobDetailsContent({
           )}
         </div>
       </div>
-
-      {/* Details section - surfaces the reason behind the current status
-          (e.g. why a job is still PENDING). A plugin may take over this slot
-          to render richer queue-specific details (e.g. Kueue); otherwise the
-          OSS fallback shows the plain details string so the reason is visible
-          here in the job details view, not just in the event table. */}
-      {jobData.details && (
-        <PluginSlot
-          name="jobs.detail.queue_details"
-          context={{
-            details: jobData.details,
-            queueName: jobData.kueue_queue_name,
-            infra: jobData.full_infra,
-            jobData: jobData,
-            title: 'Queue Details',
-          }}
-          fallback={
-            <div>
-              <div className="text-gray-600 font-medium text-base">Details</div>
-              <div className="text-base mt-1 whitespace-pre-wrap break-words">
-                {jobData.details}
-              </div>
-            </div>
-          }
-        />
-      )}
 
       {/* Entrypoint section - full width row */}
       {(jobData.entrypoint || jobData.dag_yaml) && (
