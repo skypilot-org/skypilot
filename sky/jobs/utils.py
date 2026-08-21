@@ -2272,7 +2272,11 @@ def stream_logs_by_id(
                 logger.debug(
                     f'INFO: The log is not ready yet{status_str}. '
                     f'Waiting for {JOB_STATUS_CHECK_GAP_SECONDS} seconds.')
-                parked_reason = _parked_launch_reason(job_id, task_id)
+                # Looked up lazily below: a normally provisioning job has a
+                # live headline and never needs it, and this runs once per
+                # status check per streaming client.
+                parked_reason: Optional[str] = None
+                parked_reason_read = False
                 # Poll the controller log frequently for provisioning spinner
                 # updates, but only re-check the (more expensive) managed job
                 # status every JOB_STATUS_CHECK_GAP_SECONDS.
@@ -2292,8 +2296,12 @@ def stream_logs_by_id(
                         # No live launch status: the launch may have parked
                         # (which ends its rich status), and then its own
                         # message is the only thing that still says what the
-                        # job is waiting for. Read on the outer cadence only --
-                        # this loop spins once a second.
+                        # job is waiting for. Read once per status check, not
+                        # once per second like this loop.
+                        if not parked_reason_read:
+                            parked_reason_read = True
+                            parked_reason = _parked_launch_reason(
+                                job_id, task_id)
                         headline = parked_reason
                     provision_str = (''
                                      if headline is None else f'\n  {headline}')

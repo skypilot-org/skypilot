@@ -48,6 +48,23 @@ async def _yield_log_file_with_payloads_skipped(
         yield line_str
 
 
+def _waiting_status_chunks(msg: str, plain_logs: bool) -> List[str]:
+    """Chunks that show ``msg`` as the stream's current waiting status.
+
+    For a rich client all three frames matter: INIT creates a status only when
+    the client holds none, START is what actually paints it (an INIT alone
+    leaves the Live stopped, so the message is never drawn), and UPDATE applies
+    the text to a status the client may already have had. START is idempotent,
+    so the trio is safe whatever state the client is in -- the same pairing
+    ``wait_for_request_to_start`` uses below.
+    """
+    if plain_logs:
+        # Padding forces browser rendering of the streamed chunk.
+        return [msg + ' ' * 4096 + '\n']
+    status = rich_utils.EncodedStatusMessage(f'[dim]{msg}[/dim]')
+    return [status.init(), status.enter(), status.update(f'[dim]{msg}[/dim]')]
+
+
 async def wait_for_request_to_start(
     request_id: str,
     plain_logs: bool = False,
@@ -292,6 +309,10 @@ async def _tail_log_file(
                 last_status_check_time = current_time
                 req_status = await requests_lib.get_request_status_async(
                     request_id, include_msg=True)
+                if req_status is None:
+                    # The record vanished (e.g. deleted while streaming); the
+                    # loop below dereferences it more than once.
+                    break
                 if req_status.status == requests_lib.RequestStatus.WAITING:
                     # The request parked mid-execution (e.g. waiting on queue
                     # admission or a cluster lock): it stops writing to the log,
@@ -302,24 +323,12 @@ async def _tail_log_file(
                     waiting_msg = req_status.status_msg
                     if waiting_msg and waiting_msg != last_waiting_msg:
                         last_waiting_msg = waiting_msg
-                        if plain_logs:
-                            # Padding forces browser rendering of the chunk.
-                            buffer.append(waiting_msg + ' ' * 4096 + '\n')
-                        else:
-                            # INIT *and* UPDATE. Parking ended the request's own
-                            # rich status (an EXIT reached this client), so a
-                            # status has to be re-initialized -- but on a client
-                            # that still holds one, INIT reuses it without
-                            # applying the new text (see rich_utils.
-                            # client_status / _RevertibleStatus), so the UPDATE
-                            # is what actually changes what the user reads.
-                            status = rich_utils.EncodedStatusMessage(
-                                f'[dim]{waiting_msg}[/dim]')
-                            buffer.append(status.init())
-                            buffer.append(
-                                status.update(f'[dim]{waiting_msg}[/dim]'))
-                elif req_status.status == requests_lib.RequestStatus.RUNNING:
-                    # Resumed: the request drives its own status again.
+                        buffer.extend(
+                            _waiting_status_chunks(waiting_msg, plain_logs))
+                else:
+                    # Any other status (resumed, queued again, finished): the
+                    # request drives its own status again, and a later park has
+                    # to be able to report the same reason afresh.
                     last_waiting_msg = None
                 if req_status.status > requests_lib.RequestStatus.RUNNING:
                     if (req_status.status ==

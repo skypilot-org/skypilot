@@ -79,6 +79,10 @@ async def test_parked_request_status_is_pushed_to_an_attached_stream(
         msg for control, msg in controls if control is rich_utils.Control.INIT
     ]
     assert inits == expected
+    # START is what paints it: an INIT alone leaves the client's Live stopped,
+    # so the message would be pushed and never drawn.
+    assert [control for control, _ in controls
+           ].count(rich_utils.Control.START) == len(expected)
     # ...and each is applied, not merely initialized: a client that still holds
     # a status reuses it on INIT without picking up the new text, so the UPDATE
     # is what the user actually reads.
@@ -130,3 +134,30 @@ async def test_resume_lets_the_request_drive_its_own_status_again(
 
     inits = [m for c, m in controls if c is rich_utils.Control.INIT]
     assert len(inits) == 2, inits
+
+
+@pytest.mark.asyncio
+async def test_parked_message_repeats_after_any_status_change(
+        monkeypatch, tmp_path):
+    """A reason may be reported again once the request has left WAITING.
+
+    The de-dup is per parked stretch. Resetting it only on RUNNING meant a
+    resume that went WAITING -> PENDING -> WAITING between two polls kept the
+    old message suppressed, leaving the client on whatever the request emitted
+    while it ran.
+    """
+    log_path = tmp_path / 'request.log'
+    log_path.write_text('provisioning...\n')
+    waiting = requests_lib.RequestStatus.WAITING
+    msg = 'Pending (Queue: q) (waiting to resume)'
+    _status_sequence(monkeypatch, [
+        (waiting, msg),
+        (requests_lib.RequestStatus.PENDING, None),
+        (waiting, msg),
+        (requests_lib.RequestStatus.SUCCEEDED, None),
+    ])
+
+    controls = _decoded_controls(await _collect(log_path))
+
+    inits = [m for c, m in controls if c is rich_utils.Control.INIT]
+    assert inits == [f'[dim]{msg}[/dim]'] * 2, inits

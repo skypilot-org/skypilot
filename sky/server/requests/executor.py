@@ -281,6 +281,11 @@ def _wait_for_continue_condition(
     separately versioned packages, so ``update_status_msg`` is passed only to
     a ``wait()`` that accepts it rather than raising TypeError on one that
     does not.
+
+    The probe reads the signature, so a ``wait()`` wrapped by a decorator that
+    neither ``functools.wraps`` it nor declares ``**kwargs`` is treated as not
+    accepting the callback: the wait still runs, it just never reports a
+    reason.
     """
     kwargs: Dict[str, Any] = {
         'is_cancelled': is_cancelled,
