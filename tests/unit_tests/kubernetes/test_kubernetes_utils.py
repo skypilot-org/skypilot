@@ -5673,3 +5673,50 @@ class TestGetPodAffinity:
                 'topologyKey': 'topology.kubernetes.io/zone',
             }],
         }
+
+
+class TestGetNodeSelector:
+    """Tests for utils.get_node_selector."""
+
+    def test_none_when_no_entries(self):
+        assert utils.get_node_selector(None, None, None, None, False) is None
+
+    def test_none_when_key_without_value(self):
+        """A key with a None value does not produce an entry."""
+        assert utils.get_node_selector('cloud.google.com/gke-tpu-topology',
+                                       None, 'cloud.google.com/gke-spot', None,
+                                       False) is None
+
+    def test_topology_only(self):
+        assert utils.get_node_selector(
+            'cloud.google.com/gke-tpu-topology', '2x2', None, None, False) == {
+                'cloud.google.com/gke-tpu-topology': '2x2',
+            }
+
+    def test_spot_only(self):
+        assert utils.get_node_selector(None, None, 'cloud.google.com/gke-spot',
+                                       'true', False) == {
+                                           'cloud.google.com/gke-spot': 'true',
+                                       }
+
+    def test_flex_start_only(self):
+        assert utils.get_node_selector(None, None, None, None, True) == {
+            'cloud.google.com/gke-flex-start': 'true',
+        }
+
+    def test_topology_and_spot(self):
+        assert utils.get_node_selector(
+            'cloud.google.com/gke-tpu-topology', '2x4',
+            'cloud.google.com/gke-spot', 'true', False) == {
+                'cloud.google.com/gke-tpu-topology': '2x4',
+                'cloud.google.com/gke-spot': 'true',
+            }
+
+    def test_all_entries(self):
+        assert utils.get_node_selector(
+            'cloud.google.com/gke-tpu-topology', '2x2',
+            'cloud.google.com/gke-spot', 'true', True) == {
+                'cloud.google.com/gke-tpu-topology': '2x2',
+                'cloud.google.com/gke-spot': 'true',
+                'cloud.google.com/gke-flex-start': 'true',
+            }
