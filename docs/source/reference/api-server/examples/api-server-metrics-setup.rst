@@ -128,5 +128,19 @@ The Helm chart introduces **three new top-level blocks** to provide flexibility 
 All three default to ``false`` so you can mix & match:
 
 * **Fully managed Prometheus + Grafana** – set ``apiService.metrics.enabled: true``, ``prometheus.enabled: true``, and ``grafana.enabled: true``. The chart will deploy a fully managed Prometheus + Grafana stack.
-* **External Prometheus / Grafana** – set *only* ``apiService.metrics.enabled: true``. The API server will expose the metrics on the ``/metrics`` endpoint and the pod will be annotated with ``prometheus.io/scrape: true`` to enable automatic scraping by prometheus.
+* **External Prometheus / Grafana** – set *only* ``apiService.metrics.enabled: true``. The API server will expose the metrics on the ``/metrics`` endpoint and its Service will be annotated with ``prometheus.io/scrape: true`` so Prometheus-compatible service scrapers can discover it automatically.
 * **External Grafana, internal Prometheus** – enable ``prometheus`` but disable ``grafana``. Point your existing Grafana at the Prometheus service created by the chart.
+
+The chart passes the configured metrics port to the API server through
+``SKY_API_SERVER_METRICS_PORT`` and exposes the same port through the Service.
+The chart does not add a ``--metrics-port`` CLI argument, so custom API server
+images must read this environment variable to use a non-default port. Images
+that retain the historical 9090 default continue to work when ``port`` remains
+9090.
+
+The chart does not add standard ``prometheus.io/*`` annotations to the API
+server Pod by default. This avoids duplicate discovery when an external agent
+has both Service- and Pod-based scrape jobs. Set
+``prometheus.preservePodScrapeAnnotations: true`` only when a manually managed
+Pod scraper requires the legacy annotations and the duplicate-target trade-off
+is understood. Dedicated mode uses only the ``skypilot.co/*`` Pod annotations.

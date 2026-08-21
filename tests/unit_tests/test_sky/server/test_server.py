@@ -23,6 +23,36 @@ from sky.utils import common_utils
 from sky.utils import config_utils
 
 
+def test_metrics_port_defaults_to_9090(monkeypatch):
+    """Use the historical metrics port when no environment override is set."""
+    monkeypatch.delenv(constants.ENV_VAR_SERVER_METRICS_PORT, raising=False)
+
+    assert server._get_metrics_port_from_env() == 9090
+
+
+def test_metrics_port_reads_environment_override(monkeypatch):
+    """Read a valid environment override so Helm can configure older CLI images."""
+    monkeypatch.setenv(constants.ENV_VAR_SERVER_METRICS_PORT, '9190')
+
+    assert server._get_metrics_port_from_env() == 9190
+
+
+def test_metrics_port_rejects_api_port_collision():
+    """Keep the API and metrics listeners on separate ports."""
+    with pytest.raises(ValueError,
+                       match='port and metrics-port cannot be the same'):
+        server._validate_api_server_ports(46580, 46580)
+
+
+@pytest.mark.parametrize('value', ['not-a-port', '0', '65536'])
+def test_metrics_port_rejects_invalid_environment_values(monkeypatch, value):
+    """Reject malformed or out-of-range metrics ports before server startup."""
+    monkeypatch.setenv(constants.ENV_VAR_SERVER_METRICS_PORT, value)
+
+    with pytest.raises(ValueError, match=constants.ENV_VAR_SERVER_METRICS_PORT):
+        server._get_metrics_port_from_env()
+
+
 @mock.patch('uvicorn.run')
 @mock.patch('sky.server.requests.executor.start')
 @mock.patch('sky.utils.common_utils.get_cpu_count')
