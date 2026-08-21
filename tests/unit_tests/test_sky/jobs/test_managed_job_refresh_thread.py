@@ -518,6 +518,64 @@ class TestEventLoopProbe:
         suicide.assert_called_once()
         refresh_event.run.assert_not_called()
 
+    def test_checks_the_role_on_every_pass_not_on_a_slower_interval(
+            self, tmp_path, monkeypatch):
+        """`holding` is an in-memory read -- the renewer owns the round trip --
+        so rate-limiting it would only add latency to the step-down, and that
+        latency is spent out of the margin for killing this replica's
+        controllers before anyone else adopts their jobs.
+
+        Pinned by counting sleeps, not by wall clock: the loop must consult the
+        role once per 1s sleep. A version that gated the check behind an
+        interval would sleep many times per check -- and, because the tests
+        stub `time.sleep` while `time.monotonic` keeps running for real, it
+        would still eventually reach the same read count, just slower. So the
+        sleep budget is the assertion that actually discriminates.
+        """
+        signal_file = tmp_path / 'restart_signal'
+        monkeypatch.setattr(mjrt.constants,
+                            'PERSISTENT_RUN_RESTARTING_SIGNAL_FILE',
+                            str(signal_file))
+
+        class _Stop(Exception):
+            pass
+
+        counts = {'reads': 0, 'sleeps': 0}
+        renewer = _fake_renewer()
+
+        def _holding(_self):
+            counts['reads'] += 1
+            if counts['reads'] >= 3:
+                raise _Stop()
+            return True
+
+        type(renewer).holding = property(_holding)
+
+        def _sleep(_seconds):
+            counts['sleeps'] += 1
+            # Escape hatch: a gated implementation would spin here instead of
+            # reaching the third read, so bound the run rather than hang.
+            if counts['sleeps'] > 4:
+                raise _Stop()
+
+        thread = mjrt.ManagedJobRefreshDaemonThread()
+        thread._elector = _fake_elector()
+        thread._renewer = renewer
+
+        refresh_event = mock.Mock()
+        with mock.patch.object(mjrt.time, 'sleep', _sleep), \
+                mock.patch.object(mjrt.managed_job_utils,
+                                  'ha_recovery_for_consolidation_mode'), \
+                mock.patch.object(mjrt.events,
+                                  'ManagedJobEvent',
+                                  return_value=refresh_event):
+            with pytest.raises(_Stop):
+                thread._become_leader_and_run()
+
+        # Three passes, each consulting the role, cost at most one sleep each.
+        assert counts['reads'] == 3, counts
+        assert counts['sleeps'] <= 3, counts
+
 
 class TestStart:
     """`start_managed_job_refresh_daemon` honors consolidation mode."""

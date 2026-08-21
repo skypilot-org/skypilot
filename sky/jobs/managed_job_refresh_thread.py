@@ -189,21 +189,28 @@ class ManagedJobRefreshDaemonThread(threading.Thread):
         finally:
             signal_file.unlink(missing_ok=True)
 
-        # Event-loop tick at events.EVENT_CHECKING_INTERVAL_SECONDS,
-        # role probe at _LOCK_PROBE_INTERVAL_SECONDS, sleep 1s between.
+        # Event-loop tick at events.EVENT_CHECKING_INTERVAL_SECONDS, role check
+        # every pass, sleep 1s between.
+        #
+        # The role is checked on every pass rather than on its own slower
+        # interval because `holding` is now an in-memory read -- the renewer
+        # owns the round trip. Historically this probe *was* the round trip
+        # (`is_session_alive()` per probe), which is why it was rate-limited to
+        # `_LOCK_PROBE_INTERVAL_SECONDS`; keeping that gate now would only add
+        # latency to the step-down for no saving. And that latency is not free:
+        # the point of stepping down is to get this replica's controllers killed
+        # before anyone else can adopt their jobs, so every second of detection
+        # lag is spent out of the `ttl - deadline` margin.
         refresh_event = events.ManagedJobEvent()
         now = time.monotonic()
-        # Probe on the very first pass rather than one interval in: recovery
-        # above walks every managed job, so it can have outlasted the role.
-        last_probe = now - _LOCK_PROBE_INTERVAL_SECONDS
         last_event = now - events.EVENT_CHECKING_INTERVAL_SECONDS
         while True:
             now = time.monotonic()
-            if now - last_probe >= _LOCK_PROBE_INTERVAL_SECONDS:
-                if not self._renewer.holding:
-                    self._suicide_on_role_loss()
-                    return
-                last_probe = now
+            # Checked before the first tick too: recovery above walks every
+            # managed job, so it can have outlasted the role.
+            if not self._renewer.holding:
+                self._suicide_on_role_loss()
+                return
             if now - last_event >= events.EVENT_CHECKING_INTERVAL_SECONDS:
                 try:
                     refresh_event.run()
