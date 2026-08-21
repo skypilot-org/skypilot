@@ -1191,6 +1191,9 @@ def get_task_schema():
             'num_nodes': {
                 'type': 'integer',
             },
+            'max_duration': {
+                'type': 'string',
+            },
             # resources config is validated separately using RESOURCES_SCHEMA
             'resources': {
                 'type': 'object',
