@@ -8,7 +8,7 @@ fallback policy; instances are pickled onto the exception, so keep state
 picklable and define subclasses in a module importable by the scheduler.
 """
 import time
-from typing import Callable
+from typing import Callable, Optional
 
 
 class ContinueCondition:
@@ -18,14 +18,25 @@ class ContinueCondition:
     before being rescheduled.
     """
 
-    def wait(self, *, is_cancelled: Callable[[], bool],
-             fallback_wait_seconds: float) -> bool:
+    def wait(self,
+             *,
+             is_cancelled: Callable[[], bool],
+             fallback_wait_seconds: float,
+             update_status_msg: Optional[Callable[[str], None]] = None) -> bool:
         """Block until the paused request should resume.
 
         Returns True to reschedule, False to drop it (e.g. cancelled while
         paused, per ``is_cancelled``). ``fallback_wait_seconds`` is the default
         wait when there is no better signal.
+
+        ``update_status_msg`` re-writes the parked request's status message
+        (shown while the client waits) with a fresh reason. A wait that can
+        last hours should call it whenever the reason changes, so the message
+        does not go stale; the scheduler owns the formatting, so pass the bare
+        reason. It is optional because the contract is duck-typed: the
+        scheduler omits it for implementations whose ``wait()`` predates it.
         """
+        del update_status_msg  # A fixed wait has no reason to report.
         # Default: one fixed wait, then reschedule unless cancelled.
         time.sleep(max(0, fallback_wait_seconds))
         return not is_cancelled()

@@ -21,6 +21,8 @@ See the [README.md](../README.md) for detailed architecture of the executor.
 import asyncio
 import concurrent.futures
 import contextlib
+import functools
+import inspect
 import multiprocessing
 import os
 import signal
@@ -236,6 +238,67 @@ def _request_is_gone_or_cancelled(request_id: str) -> bool:
             request.status == api_requests.RequestStatus.CANCELLED)
 
 
+def _waiting_status_msg(reason: str, retry_suffix: str) -> str:
+    """Format a parked request's status message from a reason.
+
+    Single source of formatting for both the message written when the request
+    parks and the refreshes a continue condition pushes while it stays parked,
+    so the two cannot drift.
+    """
+    # status_msg is a single-line field, so strip color and collapse
+    # whitespace; the reason comes from an exception message or a live probe,
+    # so truncate to keep it readable.
+    reason = ' '.join(common_utils.remove_color(reason).split())
+    if len(reason) > _RETRY_STATUS_MSG_REASON_MAX_LEN:
+        reason = reason[:_RETRY_STATUS_MSG_REASON_MAX_LEN].rstrip() + '...'
+    return (f'{reason} ({retry_suffix})'
+            if reason else retry_suffix.capitalize())
+
+
+def _refresh_waiting_status_msg(request_id: str, retry_suffix: str,
+                                reason: str) -> None:
+    """Re-write a still-parked request's status message with a fresh reason.
+
+    Only touches a request that is still WAITING: the wait runs concurrently
+    with cancellation and with the resume that follows it, and a late refresh
+    must not resurrect a parked message on a request that has moved on.
+    """
+    with api_requests.update_request(request_id) as request_task:
+        if (request_task is None or
+                request_task.status != api_requests.RequestStatus.WAITING):
+            return
+        request_task.status_msg = _waiting_status_msg(reason, retry_suffix)
+
+
+def _wait_for_continue_condition(
+        condition: Any, *, is_cancelled: Callable[[], bool],
+        fallback_wait_seconds: float,
+        update_status_msg: Callable[[str], None]) -> bool:
+    """Run a continue condition's wait, tolerating an older ``wait()``.
+
+    The continue-condition contract is duck-typed (see
+    ``continue_condition.ContinueCondition``), and implementations live in
+    separately versioned packages, so ``update_status_msg`` is passed only to
+    a ``wait()`` that accepts it rather than raising TypeError on one that
+    does not.
+
+    The probe reads the signature, so a ``wait()`` wrapped by a decorator that
+    neither ``functools.wraps`` it nor declares ``**kwargs`` is treated as not
+    accepting the callback: the wait still runs, it just never reports a
+    reason.
+    """
+    kwargs: Dict[str, Any] = {
+        'is_cancelled': is_cancelled,
+        'fallback_wait_seconds': fallback_wait_seconds,
+    }
+    parameters = inspect.signature(condition.wait).parameters
+    if ('update_status_msg' in parameters or
+            any(parameter.kind is inspect.Parameter.VAR_KEYWORD
+                for parameter in parameters.values())):
+        kwargs['update_status_msg'] = update_status_msg
+    return condition.wait(**kwargs)
+
+
 class RequestWorker:
     """A worker that polls requests from the queue and runs them.
 
@@ -377,16 +440,10 @@ class RequestWorker:
             # a fixed backoff. Either way the wait runs in this monitor thread,
             # not an executor worker.
             condition = getattr(e, 'continue_condition', None)
-            # Surface why we are retrying, not just the wait time. status_msg
-            # is a single-line field, so strip color and collapse whitespace.
-            reason = ' '.join(common_utils.remove_color(str(e)).split())
-            if len(reason) > _RETRY_STATUS_MSG_REASON_MAX_LEN:
-                reason = reason[:_RETRY_STATUS_MSG_REASON_MAX_LEN].rstrip(
-                ) + '...'
             retry_suffix = ('waiting to resume' if condition is not None else
                             f'retrying in {retry_wait_seconds}s')
-            status_msg = (f'{reason} ({retry_suffix})'
-                          if reason else retry_suffix.capitalize())
+            # Surface why we are retrying, not just the wait time.
+            status_msg = _waiting_status_msg(str(e), retry_suffix)
             # Set request to WAITING status for visibility
             with api_requests.update_request(request_id) as request_task:
                 assert request_task is not None, request_id
@@ -394,10 +451,14 @@ class RequestWorker:
                 request_task.status_msg = status_msg
             try:
                 if condition is not None:
-                    should_reschedule = condition.wait(
+                    should_reschedule = _wait_for_continue_condition(
+                        condition,
                         is_cancelled=lambda: _request_is_gone_or_cancelled(
                             request_id),
-                        fallback_wait_seconds=retry_wait_seconds)
+                        fallback_wait_seconds=retry_wait_seconds,
+                        update_status_msg=functools.partial(
+                            _refresh_waiting_status_msg, request_id,
+                            retry_suffix))
                 else:
                     time.sleep(retry_wait_seconds)
                     should_reschedule = True
