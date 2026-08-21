@@ -1858,6 +1858,22 @@ def _parked_launch_reason(job_id: int, task_id: Optional[int]) -> Optional[str]:
         return None
 
 
+def _waiting_line_detail(provision_msg: Optional[str],
+                         parked_reason: Optional[str]) -> Optional[str]:
+    """The detail line shown under "Waiting for task to start", if any.
+
+    A live cluster-launch status wins: its headline is what the job is doing
+    right now. When there is none the launch may have parked -- which ends its
+    rich status, so nothing is relayed any more -- and then the parked request's
+    own message is the only thing that still says what the job waits for.
+    """
+    headline = (None if provision_msg is None else
+                _provision_status_headline(provision_msg))
+    if headline is not None:
+        return headline
+    return parked_reason
+
+
 def stream_logs_by_id(
         job_id: int,
         follow: bool = True,
@@ -2294,24 +2310,16 @@ def stream_logs_by_id(
                     # the live cluster-launch status, so it's clear the job is
                     # waiting on its cluster to be provisioned.
                     provision_msg = _latest_provision_status_msg()
-                    # Show only the blue headline of the cluster-launch status
-                    # as a secondary detail under the waiting line; show nothing
-                    # when there is no headline to display.
-                    headline = (None if provision_msg is None else
-                                _provision_status_headline(provision_msg))
-                    if headline is None:
-                        # No live launch status: the launch may have parked
-                        # (which ends its rich status), and then its own
-                        # message is the only thing that still says what the
-                        # job is waiting for. Read once per status check, not
-                        # once per second like this loop.
-                        if not parked_reason_read:
-                            parked_reason_read = True
-                            parked_reason = _parked_launch_reason(
-                                job_id, task_id)
-                        headline = parked_reason
-                    provision_str = (''
-                                     if headline is None else f'\n  {headline}')
+                    if (provision_msg is None or
+                            _provision_status_headline(provision_msg) is None
+                       ) and not parked_reason_read:
+                        # Nothing live to show: read the parked reason, once per
+                        # status check rather than once per second like this
+                        # loop.
+                        parked_reason_read = True
+                        parked_reason = _parked_launch_reason(job_id, task_id)
+                    detail = _waiting_line_detail(provision_msg, parked_reason)
+                    provision_str = ('' if detail is None else f'\n  {detail}')
                     msg = _JOB_WAITING_STATUS_MESSAGE.format(
                         status_str=status_str,
                         provision_str=provision_str,

@@ -1768,37 +1768,31 @@ class TestParkedLaunchReason:
 
 
 class TestWaitingLineFallback:
-    """The line `sky jobs launch` shows while the job has not started."""
-
-    def _render(self, headline, parked_reason):
-        """The waiting line as the follow loop composes it."""
-        provision_str = '' if headline is None else f'\n  {headline}'
-        if headline is None and parked_reason is not None:
-            provision_str = f'\n  {parked_reason}'
-        return jobs_utils._JOB_WAITING_STATUS_MESSAGE.format(
-            status_str=' (status: PENDING)',
-            provision_str=provision_str,
-            job_id=7)
+    """The detail line shown under "Waiting for task to start"."""
 
     def test_live_headline_wins(self):
         """A live provisioning headline is shown as before."""
-        line = self._render('Launching (Preparing SkyPilot runtime)',
-                            'Pending (Queue: q) (waiting to resume)')
-        assert 'Preparing SkyPilot runtime' in line
-        assert 'waiting to resume' not in line
+        assert jobs_utils._waiting_line_detail(
+            '[bold cyan]Preparing SkyPilot runtime[/]  hint',
+            'Pending (Queue: q) (waiting to resume)',
+        ) == 'Preparing SkyPilot runtime'
 
     def test_parked_reason_fills_the_gap(self):
-        """With no headline, the parked reason takes its place.
+        """With no live status, the parked reason takes its place.
 
-        The headline comes from rich-status payloads relayed into the
-        controller log, and parking ends that status -- so without this the
-        line degrades to "Waiting for task to start" with nothing after it.
+        The headline comes from rich-status payloads relayed into the controller
+        log, and parking ends that status -- so without this the line degrades
+        to "Waiting for task to start" with nothing after it.
         """
-        line = self._render(None, 'Pending (Queue: q, Position: 0)')
-        assert 'Pending (Queue: q, Position: 0)' in line
+        assert jobs_utils._waiting_line_detail(
+            None, 'Pending (Queue: q, Position: 0)'
+        ) == 'Pending (Queue: q, Position: 0)'
+
+    def test_a_headline_less_provision_message_still_falls_back(self):
+        """A relayed message with no [bold cyan] headline counts as none."""
+        assert jobs_utils._waiting_line_detail(
+            'no markup here', 'Pending (Queue: q)') == 'Pending (Queue: q)'
 
     def test_nothing_to_show(self):
         """Neither available renders the plain waiting line."""
-        line = self._render(None, None)
-        assert 'Waiting for task to start' in line
-        assert 'Pending (Queue' not in line
+        assert jobs_utils._waiting_line_detail(None, None) is None

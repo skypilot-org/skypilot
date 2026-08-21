@@ -141,8 +141,8 @@ async def wait_for_request_to_start(
         elif plain_logs and waiting_msg != last_waiting_msg:
             # Only log when waiting message changes.
             last_waiting_msg = waiting_msg
-            # Padding forces browser rendering of the streamed chunk.
-            yield waiting_msg + ' ' * 4096 + '\n'
+            for chunk in _waiting_status_chunks(waiting_msg, plain_logs=True):
+                yield chunk
         # Sleep shortly to avoid storming the DB and CPU and allow other
         # coroutines to run.
         # TODO(aylei): we should use a better mechanism to avoid busy
