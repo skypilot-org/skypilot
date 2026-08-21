@@ -459,6 +459,10 @@ class MountCachedConfig:
     # Mount as read-only.
     # rclone flag: --read-only
     read_only: Optional[bool] = None
+    # Environment variables exported for the `rclone mount` process. An escape
+    # hatch for rclone options not modeled above, which can all be set via
+    # RCLONE_* env vars (e.g. {"RCLONE_S3_UPLOAD_CONCURRENCY": "8"}).
+    env_vars: Optional[Dict[str, str]] = None
 
     def to_rclone_flags(self) -> str:
         """Convert non-None fields to rclone CLI flag string."""

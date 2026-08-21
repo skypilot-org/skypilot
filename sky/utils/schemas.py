@@ -813,6 +813,18 @@ def get_storage_schema():
                             'read_only': {
                                 'type': 'boolean',
                             },
+                            # Environment variables exported for the rclone
+                            # mount process (e.g. RCLONE_* options).
+                            'env_vars': {
+                                'type': 'object',
+                                'patternProperties': {
+                                    # Checks env keys are valid env var names.
+                                    '^[a-zA-Z_][a-zA-Z0-9_]*$': {
+                                        'type': 'string',
+                                    },
+                                },
+                                'additionalProperties': False,
+                            },
                         },
                     },
                     'mount': {
