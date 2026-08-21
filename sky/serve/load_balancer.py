@@ -9,7 +9,6 @@ from typing import Dict, List, Optional, Union
 import aiohttp
 import fastapi
 import httpx
-from starlette import background
 import uvicorn
 
 from sky import sky_logging
@@ -173,6 +172,16 @@ class SkyServeLoadBalancer:
         """
         logger.info(f'Proxy request to {url}')
         self._load_balancing_policy.pre_execute_hook(url, request)
+        load_released = False
+
+        def release_load() -> None:
+            nonlocal load_released
+            if load_released:
+                return
+            load_released = True
+            self._load_balancing_policy.post_execute_hook(url, request)
+
+        response_returned = False
         try:
             # We defer the get of the client here on purpose, for case when the
             # replica is ready in `_proxy_with_retries` but refreshed before
@@ -193,20 +202,37 @@ class SkyServeLoadBalancer:
                 timeout=self._stream_timeout_seconds)
             proxy_response = await client.send(proxy_request, stream=True)
 
-            async def background_func():
-                await proxy_response.aclose()
-                self._load_balancing_policy.post_execute_hook(url, request)
+            async def response_body():
+                try:
+                    async for chunk in proxy_response.aiter_raw():
+                        yield chunk
+                finally:
+                    try:
+                        await proxy_response.aclose()
+                    finally:
+                        release_load()
 
-            return fastapi.responses.StreamingResponse(
-                content=proxy_response.aiter_raw(),
+            response = fastapi.responses.StreamingResponse(
+                content=response_body(),
                 status_code=proxy_response.status_code,
-                headers=proxy_response.headers,
-                background=background.BackgroundTask(background_func))
+                headers=proxy_response.headers)
+            # TODO(jgsweets): Wrap the response ASGI call in a finally block
+            # so a client disconnect before body iteration also closes the
+            # upstream response and releases the load.
+            response_returned = True
+            return response
         except (httpx.RequestError, httpx.HTTPStatusError) as e:
             logger.error(f'Error when proxy request to {url}: '
                          f'{common_utils.format_exception(e)}'
                          f'\nTraceback: {traceback.format_exc()}')
             return e
+        finally:
+            # If proxying failed before a StreamingResponse was returned, the
+            # response body cleanup cannot run to release the load. This also
+            # covers a replica disappearing from the client pool between
+            # selection and proxying.
+            if not response_returned:
+                release_load()
 
     async def _proxy_with_retries(
             self, request: fastapi.Request) -> fastapi.responses.Response:
