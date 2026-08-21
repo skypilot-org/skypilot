@@ -349,7 +349,6 @@ class LoopStallWatchdog:
         # is the only part of this that runs on the hot path.
         self._last_beat = time.monotonic()
         self._loop_thread_id: Optional[int] = None
-        self._beating = False
         # Not named `_stop`: that shadows a private attribute of
         # threading.Thread on some versions and only fails at join() time.
         self._stop_event = threading.Event()
@@ -367,16 +366,14 @@ class LoopStallWatchdog:
     # -- lifecycle ---------------------------------------------------------
 
     def start(self) -> None:
-        """Starts the heartbeat and the watchdog thread.
+        """Starts the watchdog thread.
 
-        Must be called from the loop thread, which is how the loop's thread id
-        gets recorded without having to guess at loop internals.
+        The heartbeat it watches is driven from outside, by whichever timer the
+        loop already runs to measure its own lag; `beat` is what feeds it.
         """
         if self._thread is not None:
             return
         self._stop_event.clear()
-        self._beating = True
-        self._beat()
         self._thread = threading.Thread(target=self._watch,
                                         name='loop-stall-watchdog',
                                         daemon=True)
@@ -385,7 +382,6 @@ class LoopStallWatchdog:
                      f'{self._threshold}s')
 
     def stop(self) -> None:
-        self._beating = False
         self._stop_event.set()
         thread = self._thread
         if thread is not None:
@@ -395,12 +391,15 @@ class LoopStallWatchdog:
 
     # -- loop thread -------------------------------------------------------
 
-    def _beat(self) -> None:
+    def beat(self) -> None:
+        """Marks the loop as alive. Must be called from the loop thread.
+
+        Called from the loop's lag timer, which is also where the loop thread's
+        id gets recorded without having to guess at loop internals.
+        """
         if self._loop_thread_id is None:
             self._loop_thread_id = threading.get_ident()
         self._last_beat = time.monotonic()
-        if self._beating:
-            self._loop.call_later(self._heartbeat_interval, self._beat)
 
     # -- watchdog thread ---------------------------------------------------
 
@@ -649,15 +648,20 @@ class LoopStallWatchdog:
                              location) in ranked[:_MAX_THREAD_GROUPS]]
 
 
-def start_watchdog() -> Optional[LoopStallWatchdog]:
+def start_watchdog(
+    heartbeat_interval: float = _HEARTBEAT_INTERVAL
+) -> Optional[LoopStallWatchdog]:
     """Starts stall attribution for the running loop, if it is enabled.
 
-    Must be called from the loop thread. Returns None when disabled, so the
-    caller has nothing to stop.
+    Returns None when disabled, so the caller has nothing to stop and nothing
+    to feed. `heartbeat_interval` must match the cadence of the timer that
+    calls `beat`, since it is what separates normal scheduling slack from lag.
     """
     threshold = perf_utils.get_loop_stall_threshold()
     if threshold is None:
         return None
-    watchdog = LoopStallWatchdog(asyncio.get_running_loop(), threshold)
+    watchdog = LoopStallWatchdog(asyncio.get_running_loop(),
+                                 threshold,
+                                 heartbeat_interval=heartbeat_interval)
     watchdog.start()
     return watchdog

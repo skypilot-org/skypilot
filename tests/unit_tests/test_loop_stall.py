@@ -38,11 +38,13 @@ def _run_with_watchdog(
                                           poll_interval=0.02)
         watchdog.append(wd)
         wd.start()
+        stop_beat = _drive_heartbeat(asyncio.get_running_loop(), wd)
         try:
             await asyncio.sleep(settle)
             stall_fn()
             await asyncio.sleep(recover)
         finally:
+            stop_beat()
             wd.stop()
 
     if use_uvloop:
@@ -51,6 +53,25 @@ def _run_with_watchdog(
     else:
         asyncio.run(main())
     return watchdog[0]
+
+
+def _drive_heartbeat(loop, watchdog, interval: float = 0.05):
+    """Feeds watchdog.beat() from a loop timer.
+
+    Mirrors the server, where the loop's existing lag timer is the single tick
+    and the watchdog only reads the heartbeat it publishes. Returns a callable
+    that stops the timer.
+    """
+    running = [True]
+
+    def tick():
+        if not running[0]:
+            return
+        watchdog.beat()
+        loop.call_later(interval, tick)
+
+    tick()
+    return lambda: running.__setitem__(0, False)
 
 
 def _blocking_business_code(seconds: float) -> None:
@@ -220,6 +241,7 @@ def test_deduped_stall_emits_no_orphan_recovery(stall_logs):
                                                 heartbeat_interval=0.05,
                                                 poll_interval=0.02)
         watchdog.start()
+        stop_beat = _drive_heartbeat(asyncio.get_running_loop(), watchdog)
         try:
             await asyncio.sleep(0.4)
             _blocking_business_code(0.5)
@@ -228,6 +250,7 @@ def test_deduped_stall_emits_no_orphan_recovery(stall_logs):
             _blocking_business_code(0.5)
             await asyncio.sleep(0.4)
         finally:
+            stop_beat()
             watchdog.stop()
 
     asyncio.run(main())
@@ -428,11 +451,13 @@ def test_watchdog_can_be_restarted_after_stop(stall_logs):
         watchdog.start()
         watchdog.stop()
         watchdog.start()
+        stop_beat = _drive_heartbeat(asyncio.get_running_loop(), watchdog)
         try:
             await asyncio.sleep(0.3)
             _blocking_business_code(0.5)
             await asyncio.sleep(0.4)
         finally:
+            stop_beat()
             watchdog.stop()
 
     asyncio.run(main())
@@ -573,11 +598,13 @@ def _run_counting_watchdog(captures: List[float], stall_fn,
                                 heartbeat_interval=0.05,
                                 poll_interval=0.02)
         watchdog.start()
+        stop_beat = _drive_heartbeat(asyncio.get_running_loop(), watchdog)
         try:
             await asyncio.sleep(0.3)
             stall_fn()
             await asyncio.sleep(0.3)
         finally:
+            stop_beat()
             watchdog.stop()
 
     asyncio.run(main())
@@ -599,11 +626,13 @@ def test_no_dumps_when_the_loop_is_healthy(stall_logs):
             heartbeat_interval=0.05,
             poll_interval=0.02)
         watchdog.start()
+        stop_beat = _drive_heartbeat(asyncio.get_running_loop(), watchdog)
         try:
             # Plenty of loop iterations, none of them blocking.
             for _ in range(60):
                 await asyncio.sleep(0.01)
         finally:
+            stop_beat()
             watchdog.stop()
 
     asyncio.run(main())
