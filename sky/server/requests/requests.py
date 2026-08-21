@@ -1360,6 +1360,7 @@ async def clean_finished_requests_with_retention(retention_seconds: int,
 
 async def requests_gc_daemon():
     """Garbage collect finished requests periodically."""
+    await asyncio_utils.sleep_startup_jitter('requests GC daemon')
     while True:
         logger.info('Running requests GC daemon...')
         # Use the latest config.
@@ -1377,8 +1378,9 @@ async def requests_gc_daemon():
         except Exception as e:  # pylint: disable=broad-except
             logger.error(f'Error running requests GC daemon: {e}'
                          f'traceback: {traceback.format_exc()}')
-        # Run the daemon at most once every hour to avoid too frequent
-        # cleanup.
+        # Fixed, and deliberately independent of the retention window: the
+        # interval controls how much accumulates between passes, not how long
+        # anything is kept.
         await asyncio.sleep(_REQUESTS_GC_INTERVAL_SECONDS)
 
 
