@@ -3,6 +3,7 @@
  */
 
 import { DashboardCache } from './cache';
+import { CACHE_CONFIG, REFRESH_INTERVALS } from './config';
 
 // Helper to create a mock async function that tracks calls
 function createMockFetch(returnValue, delay = 10) {
@@ -72,6 +73,7 @@ describe('DashboardCache', () => {
     });
 
     test('should handle sequential requests using cache', async () => {
+      // A fresh cache hit must suppress backend work until the original TTL expires.
       const mockFetch = createMockFetch({ data: 'test' }, 50);
 
       // First request
@@ -83,9 +85,7 @@ describe('DashboardCache', () => {
       const promise2 = cache.get(mockFetch, ['arg1']);
       await promise2;
 
-      // Should use cache for second request, but cache also triggers
-      // a background refresh, so we expect 2 calls total
-      expect(mockFetch).toHaveBeenCalledTimes(2);
+      expect(mockFetch).toHaveBeenCalledTimes(1);
     });
 
     test('should cleanup pending requests after completion', async () => {
@@ -127,7 +127,21 @@ describe('DashboardCache', () => {
   });
 
   describe('Cache Behavior', () => {
+    test('should refresh default cache entries on the page refresh cadence', async () => {
+      // Default cache expiry preserves 30-second page updates without
+      // background requests on fresh cache hits.
+      const mockFetch = jest.fn(async () => ({ data: 'test' }));
+
+      await cache.get(mockFetch, ['arg1']);
+      jest.advanceTimersByTime(CACHE_CONFIG.DEFAULT_TTL + 1);
+      await cache.get(mockFetch, ['arg1']);
+
+      expect(CACHE_CONFIG.DEFAULT_TTL).toBe(REFRESH_INTERVALS.REFRESH_INTERVAL);
+      expect(mockFetch).toHaveBeenCalledTimes(2);
+    });
+
     test('should return cached data when available and fresh', async () => {
+      // Fresh data is returned without extending its TTL or starting a refresh.
       jest.useRealTimers(); // Use real timers for this test
       const mockFetch = createMockFetch({ data: 'test' }, 10);
 
@@ -139,8 +153,7 @@ describe('DashboardCache', () => {
 
       expect(result1).toEqual({ data: 'test' });
       expect(result2).toEqual({ data: 'test' });
-      // First call is the initial fetch, second is background refresh
-      expect(mockFetch.mock.calls.length).toBeGreaterThanOrEqual(1);
+      expect(mockFetch).toHaveBeenCalledTimes(1);
     });
 
     test('should fetch fresh data when cache is stale', async () => {

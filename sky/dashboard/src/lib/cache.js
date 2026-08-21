@@ -19,18 +19,8 @@ function simpleHash(str) {
 class DashboardCache {
   constructor() {
     this.cache = new Map();
-    this.backgroundJobs = new Map(); // Track ongoing background refresh jobs
     this.pendingRequests = new Map(); // Track in-flight requests to deduplicate concurrent calls
     this.debugMode = false; // Added for debug mode
-    this.preloader = null; // Reference to cache preloader for coordination
-  }
-
-  /**
-   * Set the cache preloader instance for coordination
-   * @param {Object} preloader - The cache preloader instance
-   */
-  setPreloader(preloader) {
-    this.preloader = preloader;
   }
 
   /**
@@ -39,47 +29,22 @@ class DashboardCache {
    * @param {Array} [args=[]] - Arguments to pass to the fetch function
    * @param {Object} [options={}] - Cache options
    * @param {number} [options.ttl] - Time to live in milliseconds
-   * @param {boolean} [options.refreshOnAccess] - Whether to refresh TTL on cache access (default: true)
    * @returns {Promise} - The cached or fresh data
    */
   async get(fetchFunction, args = [], options = {}) {
     const ttl = options.ttl || DEFAULT_CACHE_TTL;
-    const refreshOnAccess = options.refreshOnAccess !== false; // Default to true
     const key = this._generateKey(fetchFunction, args);
     const functionName = fetchFunction.name || 'anonymous';
 
     const cachedItem = this.cache.get(key);
     const now = Date.now();
 
-    // If we have cached data and it's not stale, return it and refresh in background
+    // A cache hit is read-only: its TTL is measured from the original fetch.
     if (cachedItem && now - cachedItem.lastUpdated < ttl) {
       const age = Math.round((now - cachedItem.lastUpdated) / 1000);
       this._debug(
         `Cache HIT for ${functionName} (age: ${age}s, TTL: ${Math.round(ttl / 1000)}s)`
       );
-
-      // Update the lastUpdated timestamp to extend the cache life on access
-      if (refreshOnAccess) {
-        this.cache.set(key, {
-          data: cachedItem.data,
-          lastUpdated: now,
-        });
-        this._debug(`Cache TTL refreshed for ${functionName}`);
-      }
-
-      // Launch background refresh if we're not already refreshing
-      // and if the data wasn't recently preloaded
-      if (!this.backgroundJobs.has(key)) {
-        const wasRecentlyPreloaded =
-          this.preloader?.wasRecentlyPreloaded(fetchFunction, args) || false;
-        if (!wasRecentlyPreloaded) {
-          this._refreshInBackground(fetchFunction, args, key);
-        } else {
-          this._debug(
-            `Skipping background refresh for ${functionName} - recently preloaded`
-          );
-        }
-      }
 
       return cachedItem.data;
     }
@@ -151,8 +116,6 @@ class DashboardCache {
   invalidate(fetchFunction, args = []) {
     const key = this._generateKey(fetchFunction, args);
     this.cache.delete(key);
-    // Also cancel any ongoing background job for this key
-    this.backgroundJobs.delete(key);
     // Also remove any pending requests
     this.pendingRequests.delete(key);
   }
@@ -176,7 +139,6 @@ class DashboardCache {
     // Delete all matching entries
     keysToDelete.forEach((key) => {
       this.cache.delete(key);
-      this.backgroundJobs.delete(key);
       this.pendingRequests.delete(key);
     });
   }
@@ -186,7 +148,6 @@ class DashboardCache {
    */
   clear() {
     this.cache.clear();
-    this.backgroundJobs.clear();
     this.pendingRequests.clear();
   }
 
@@ -215,7 +176,6 @@ class DashboardCache {
   getStats() {
     return {
       cacheSize: this.cache.size,
-      backgroundJobs: this.backgroundJobs.size,
       pendingRequests: this.pendingRequests.size,
       keys: Array.from(this.cache.keys()),
     };
@@ -234,14 +194,12 @@ class DashboardCache {
         key,
         age: Math.round(age / 1000), // Age in seconds
         lastUpdated: new Date(item.lastUpdated).toISOString(),
-        hasBackgroundJob: this.backgroundJobs.has(key),
         hasPendingRequest: this.pendingRequests.has(key),
       });
     }
 
     return {
       cacheSize: this.cache.size,
-      backgroundJobs: this.backgroundJobs.size,
       pendingRequests: this.pendingRequests.size,
       entries: entries.sort((a, b) => a.age - b.age),
     };
@@ -262,36 +220,6 @@ class DashboardCache {
     if (this.debugMode) {
       console.log(`[DashboardCache] ${message}`, ...args);
     }
-  }
-
-  /**
-   * Refresh data in the background without blocking the current request
-   * @private
-   */
-  _refreshInBackground(fetchFunction, args, key) {
-    // Mark that we have a background job running for this key
-    this.backgroundJobs.set(key, true);
-
-    // Execute the refresh asynchronously
-    fetchFunction(...args)
-      .then((freshData) => {
-        // Respect __skipCache signal from fetch function
-        if (freshData && freshData.__skipCache) {
-          return; // do not update cache
-        }
-        // Update cache with fresh data
-        this.cache.set(key, {
-          data: freshData,
-          lastUpdated: Date.now(),
-        });
-      })
-      .catch((error) => {
-        console.warn(`Background refresh failed for ${key}:`, error);
-      })
-      .finally(() => {
-        // Remove the background job marker
-        this.backgroundJobs.delete(key);
-      });
   }
 
   /**

@@ -10,14 +10,14 @@ This directory contains the generalized caching mechanism for the SkyPilot dashb
 
 ## Cache Preloader
 
-The cache preloader is a smart utility that automatically populates the cache for all dashboard pages when any page is visited. This dramatically improves page switching performance by ensuring data is already cached when users navigate between pages.
+The cache preloader warms only the lightweight data required by the current page. Cross-page preloading is opt-in because speculative infrastructure scans and managed-job queries can delay the visible page.
 
 ### How It Works
 
 1. **Foreground Loading**: When a page loads, it immediately fetches the data required for that specific page
-2. **Background Preloading**: After the current page data is loaded, it automatically starts loading data for all other pages in parallel
-3. **Immediate Parallel Loading**: All background pages load simultaneously without delays for maximum speed
-4. **Shared Cache**: All pages benefit from the same cache, so data loaded for one page is immediately available to others
+2. **Opt-in Background Preloading**: Callers can explicitly request speculative loading for small, likely-next data sets
+3. **Server-side Jobs Pagination**: The jobs table owns its visible-page request and never preloads the full job history
+4. **Shared Cache**: Pages reuse fresh cache entries without issuing a new backend request
 
 ### Dashboard Cache Functions
 
@@ -26,7 +26,7 @@ The preloader manages these functions across all pages:
 **Base Functions (no arguments):**
 
 - `getClusters` - Used by: clusters, jobs, infra, workspaces, users
-- `getManagedJobs` - Used by: jobs, infra, workspaces, users
+- `getManagedJobsForOtherPages` - Trimmed job summary used by: infra, workspaces, users
 - `getWorkspaces` - Used by: clusters, jobs, workspaces
 - `getUsers` - Used by: users
 - `getVolumes` - Used by: volumes
@@ -38,7 +38,7 @@ The preloader manages these functions across all pages:
 **Page Requirements:**
 
 - **Clusters**: getClusters, getWorkspaces
-- **Jobs**: getManagedJobs, getClusters, getWorkspaces
+- **Jobs**: getWorkspaces, getUsers; the table fetches its own paginated data
 - **Infra**: getClusters, getManagedJobs
 - **Workspaces**: getWorkspaces, getClusters, getManagedJobs, getEnabledClouds
 - **Users**: getUsers, getClusters, getManagedJobs
@@ -49,12 +49,12 @@ The preloader manages these functions across all pages:
 ```javascript
 import cachePreloader from '@/lib/cache-preloader';
 
-// Preload for current page and background-load others
+// Preload only the current page's lightweight supporting data
 await cachePreloader.preloadForPage('clusters');
 
 // Preload with options
 await cachePreloader.preloadForPage('jobs', {
-  backgroundPreload: true, // Enable background preloading (default: true)
+  backgroundPreload: true, // Explicitly enable speculative background preloading
   force: false, // Force refresh even if cached (default: false)
 });
 
@@ -78,7 +78,7 @@ Each dashboard page automatically triggers preloading:
 // In page useEffect
 useEffect(() => {
   const initializeData = async () => {
-    // Trigger cache preloading for current page and background preload others
+    // Trigger cache preloading for the current page
     await cachePreloader.preloadForPage('clusters');
 
     // Continue with page-specific data loading
@@ -91,9 +91,9 @@ useEffect(() => {
 
 ### Performance Benefits
 
-- **Instant Page Switching**: Subsequent page loads are nearly instantaneous
-- **Parallel Loading**: All pages load simultaneously in the background for maximum speed
-- **Smart Caching**: Only loads fresh data when needed, reuses cached data otherwise
+- **Lower Request Volume**: Page loads do not fan out to unrelated dashboard endpoints
+- **Page-sized Jobs Reads**: Managed jobs stay server-paginated in browser memory
+- **Hard TTL Caching**: A fresh hit reuses data without extending its lifetime or refreshing in the background
 - **Graceful Degradation**: If preloading fails, pages still work normally
 
 ## Timeline Example
@@ -105,15 +105,12 @@ Time 0ms:    User visits /clusters
 Time 10ms:   cachePreloader.preloadForPage('clusters') called
 Time 50ms:   getClusters() and getWorkspaces() loaded (foreground)
 Time 100ms:  Clusters page renders with data
-Time 100ms:  Background loading starts for ALL other pages simultaneously
-Time 200ms:  'jobs' page data loaded (getManagedJobs, getClusters, getWorkspaces)
-Time 250ms:  'infra' page data loaded (getClusters, getManagedJobs)
-Time 400ms:  'users' page data loaded (getUsers, getClusters, getManagedJobs)
-Time 600ms:  'workspaces' page data loaded (including getEnabledClouds for all workspaces)
-Time 600ms:  All pages now cached and ready for instant switching!
+Time 100ms:  Current page renders with its foreground data
+Time 100ms:  No unrelated requests are started by default
+Time 200ms:  Jobs table fetches only its visible server-side page
 ```
 
-**Result**: By the time you would naturally switch to another page (typically 1-2 seconds), all pages are already loaded and cached, making navigation feel instant.
+**Result**: The visible page is not delayed by unrelated dashboard work. Callers may opt in to low-cost, likely-next preloads when measurements justify it.
 
 ## How to Use
 
@@ -123,7 +120,7 @@ Time 600ms:  All pages now cached and ready for instant switching!
 import dashboardCache from '@/lib/cache';
 import { getClustersAndJobsData } from '@/data/connectors/infra';
 
-// Simple usage with default TTL (5 minutes)
+// Simple usage with the default 30-second TTL
 const data = await dashboardCache.get(getClustersAndJobsData);
 
 // With custom TTL (2 minutes)
@@ -139,12 +136,16 @@ const data = await dashboardCache.get(getGPUs, [clustersAndJobsData], {
 
 ### Configuration
 
-The cache system supports configurable TTL values defined in `config.js`. Currently, all cache entries use the `DEFAULT_TTL` of 2 minutes, but the system can be extended to support different TTLs for different data types if needed.
+The cache system supports configurable TTL values defined in `config.js`. The
+default hard TTL is 30 seconds, matching the dashboard's normal periodic
+refresh cadence. It keeps visible pages current without making each fresh cache
+read start another background request. Callers can still use a longer TTL for
+data that is safe to refresh less often.
 
 ```javascript
 // Current configuration
 export const CACHE_CONFIG = {
-  DEFAULT_TTL: 2 * 60 * 1000, // 2 minutes
+  DEFAULT_TTL: REFRESH_INTERVALS.REFRESH_INTERVAL, // 30 seconds
 };
 
 // Example of how different TTLs could be configured:
@@ -155,8 +156,8 @@ export const CACHE_CONFIG = {
 ### Cache Behavior
 
 1. **Fresh Data**: If cached data exists and is within the TTL, it's returned immediately
-2. **Background Refresh**: When data is fetched and there is a cache hit, a
-   background refresh is triggered to pull fresh data
+2. **Hard TTL**: A cache hit neither refreshes the backend nor extends the TTL;
+   data expires based on its original fetch time
 3. **Stale Data**: If fresh data fetch fails but stale data exists, stale data is returned
 4. **Cache Miss**: If no cached data exists, fresh data is fetched and cached
 
@@ -177,7 +178,6 @@ dashboardCache.clear();
 // Get cache statistics for debugging
 const stats = dashboardCache.getStats();
 console.log('Cache size:', stats.cacheSize);
-console.log('Background jobs:', stats.backgroundJobs);
 console.log('Cache keys:', stats.keys);
 
 // Get detailed cache information for debugging
@@ -188,20 +188,6 @@ console.log('Detailed cache stats:', detailedStats);
 dashboardCache.setDebugMode(true);
 // Disable debug logging
 dashboardCache.setDebugMode(false);
-```
-
-### Cache TTL Refresh on Access
-
-By default, the cache refreshes the TTL (Time To Live) when data is accessed, preventing cache expiration during frequent page switching:
-
-```javascript
-// Default behavior - TTL is refreshed on access
-const data = await dashboardCache.get(fetchFunction);
-
-// Disable TTL refresh on access (data will expire based on original fetch time)
-const data = await dashboardCache.get(fetchFunction, [], {
-  refreshOnAccess: false,
-});
 ```
 
 ### Refresh Button Implementation
@@ -246,17 +232,15 @@ Cache keys are automatically generated based on:
 - Function name
 - Function arguments (JSON stringified)
 
-### Background Refresh
+### Request Deduplication
 
-- Triggered when cached data is past 50% of its TTL
-- Prevents multiple background jobs for the same key
-- Updates cache silently without affecting current requests
+- Concurrent cache misses for the same function and arguments share one request
+- Fresh cache hits do not start a new backend request
 
 ### Error Handling
 
 - If fresh data fetch fails and stale data exists, stale data is returned
 - If no cached data exists and fetch fails, the error is re-thrown
-- Background refresh failures are logged but don't affect the main flow
 
 ## Adding Cache to New Pages
 

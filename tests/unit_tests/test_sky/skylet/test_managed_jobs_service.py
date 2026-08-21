@@ -360,6 +360,39 @@ class TestGetJobTable:
         assert 'ws1' in workspaces
         assert 'ws2' in workspaces
 
+    def test_get_job_table_forwards_sort_fields(self):
+        """Forward optional gRPC sort fields to the queue query."""
+        request = managed_jobsv1_pb2.GetJobTableRequest(sort_by='workspace',
+                                                        sort_order='asc')
+        queue_result = {
+            'jobs': [],
+            'total': 0,
+            'total_no_filter': 0,
+            'status_counts': {},
+        }
+
+        with mock.patch(
+                'sky.skylet.services.managed_job_utils.get_managed_job_queue',
+                return_value=queue_result) as get_queue:
+            self.service.GetJobTable(request, mock.Mock())
+
+        assert get_queue.call_args.kwargs['sort_by'] == 'workspace'
+        assert get_queue.call_args.kwargs['sort_order'] == 'asc'
+
+    def test_get_job_table_sorts_by_workspace(self):
+        """Sort jobs by workspace through the RPC and database query path."""
+        request = managed_jobsv1_pb2.GetJobTableRequest(
+            accessible_workspaces=managed_jobsv1_pb2.Workspaces(
+                workspaces=['ws1', 'ws2']),
+            fields=managed_jobsv1_pb2.Fields(fields=['workspace']),
+            sort_by='workspace',
+            sort_order='asc')
+
+        response = self.service.GetJobTable(request, mock.Mock())
+
+        assert [job.workspace for job in response.jobs
+               ] == sorted(job.workspace for job in response.jobs)
+
     def test_get_job_table_no_accessible_workspaces(self):
         """Test basic GetJobTable functionality without specified accessible
          workspaces - should return all jobs."""
