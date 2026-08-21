@@ -840,6 +840,7 @@ class TestVolumeCore:
         # Mock cloud registry
         mock_cloud = mock.MagicMock()
         mock_cloud.max_cluster_name_length.return_value = 63
+        mock_cloud.is_volume_name_valid.return_value = (True, None)
         mock_cloud_registry = mock.MagicMock()
         mock_cloud_registry.from_str.return_value = mock_cloud
         mock_cloud.validate_region_zone.return_value = ('us-east-1',
@@ -897,6 +898,7 @@ class TestVolumeCore:
         # Mock cloud registry
         mock_cloud = mock.MagicMock()
         mock_cloud.max_cluster_name_length.return_value = 63
+        mock_cloud.is_volume_name_valid.return_value = (True, None)
         mock_cloud_registry = mock.MagicMock()
         mock_cloud_registry.from_str.return_value = mock_cloud
         mock_cloud.validate_region_zone.return_value = ('us-east-1',
@@ -938,6 +940,7 @@ class TestVolumeCore:
         # Mock cloud registry
         mock_cloud = mock.MagicMock()
         mock_cloud.max_cluster_name_length.return_value = 63
+        mock_cloud.is_volume_name_valid.return_value = (True, None)
         mock_cloud_registry = mock.MagicMock()
         mock_cloud_registry.from_str.return_value = mock_cloud
         mock_cloud.validate_region_zone.return_value = ('us-east-1',
@@ -1099,6 +1102,7 @@ class TestVolumeCore:
         # Mock cloud registry
         mock_cloud = mock.MagicMock()
         mock_cloud.max_cluster_name_length.return_value = 63
+        mock_cloud.is_volume_name_valid.return_value = (True, None)
         mock_cloud_registry = mock.MagicMock()
         mock_cloud_registry.from_str.return_value = mock_cloud
         mock_cloud.validate_region_zone.return_value = ('us-east-1',
@@ -2015,6 +2019,7 @@ class TestVolumeApplyRecordsInitialStatus:
     def _setup(monkeypatch):
         mock_cloud = mock.MagicMock()
         mock_cloud.max_cluster_name_length.return_value = 63
+        mock_cloud.is_volume_name_valid.return_value = (True, None)
         mock_cloud.validate_region_zone.return_value = ('my-context', None)
         mock_cloud_registry = mock.MagicMock()
         mock_cloud_registry.from_str.return_value = mock_cloud
@@ -2080,6 +2085,7 @@ class TestEphemeralVolumeSkipsStatusProbe:
     def test_probe_is_not_called(self, monkeypatch):
         mock_cloud = mock.MagicMock()
         mock_cloud.max_cluster_name_length.return_value = 63
+        mock_cloud.is_volume_name_valid.return_value = (True, None)
         mock_cloud.validate_region_zone.return_value = ('my-context', None)
         mock_registry = mock.MagicMock()
         mock_registry.from_str.return_value = mock_cloud

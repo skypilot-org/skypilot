@@ -1,5 +1,8 @@
 """REST API for storage management."""
 
+import contextlib
+from typing import Iterator
+
 import fastapi
 
 from sky import clouds
@@ -12,6 +15,7 @@ from sky.server.requests import requests as requests_lib
 from sky.server.requests import role_filter
 from sky.utils import registry
 from sky.utils import volume as volume_utils
+from sky.volumes import volume as volume_lib
 from sky.volumes.server import core
 
 logger = sky_logging.init_logger(__name__)
@@ -61,15 +65,39 @@ async def volume_delete(request: fastapi.Request,
     )
 
 
+@contextlib.contextmanager
+def _volume_errors_as_400() -> Iterator[None]:
+    """Reports volume build/validation failures as a synchronous 400.
+
+    Shared by /validate and /apply so the two cannot disagree on which volumes
+    are legal, or on the error shape clients have to parse.
+    """
+    try:
+        yield
+    except fastapi.HTTPException:
+        # Already a chosen HTTP response; do not re-wrap it as a volume error.
+        raise
+    except ValueError as e:
+        # The common case: the volume really is malformed. No stack trace.
+        logger.debug(f'Rejecting invalid volume: {e}')
+        requests_lib.set_exception_stacktrace(e)
+        raise fastapi.HTTPException(
+            status_code=400, detail=exceptions.serialize_exception(e)) from e
+    except Exception as e:
+        # An internal fault lands here too, and would otherwise be reported as
+        # the user's mistake with nothing in the server log.
+        logger.exception(f'Unexpected error validating a volume: {e}')
+        requests_lib.set_exception_stacktrace(e)
+        raise fastapi.HTTPException(
+            status_code=400, detail=exceptions.serialize_exception(e)) from e
+
+
 @router.post('/validate')
 async def volume_validate(
         _: fastapi.Request,
         volume_validate_body: payloads.VolumeValidateBody) -> None:
     """Validates a volume."""
-    # pylint: disable=import-outside-toplevel
-    from sky.volumes import volume as volume_lib
-
-    try:
+    with _volume_errors_as_400():
         volume_config = {
             'name': volume_validate_body.name,
             'type': volume_validate_body.volume_type,
@@ -81,10 +109,6 @@ async def volume_validate(
         }
         volume = volume_lib.Volume.from_yaml_config(volume_config)
         volume.validate()
-    except Exception as e:
-        requests_lib.set_exception_stacktrace(e)
-        raise fastapi.HTTPException(status_code=400,
-                                    detail=exceptions.serialize_exception(e))
 
 
 @router.post('/apply')
@@ -96,6 +120,10 @@ async def volume_apply(request: fastapi.Request,
     volume_config = volume_apply_body.config
     if volume_config is None:
         volume_config = {}
+    # Clients send explicit nulls for optional config fields (the dashboard
+    # posts `namespace: null` when it is not set). validate_schema only drops
+    # None at the top level, so drop them here or the schema rejects them.
+    volume_config = {k: v for k, v in volume_config.items() if v is not None}
     volume_config['use_existing'] = volume_apply_body.use_existing
 
     supported_volume_types = [
@@ -128,6 +156,33 @@ async def volume_apply(request: fastapi.Request,
             raise fastapi.HTTPException(
                 status_code=400,
                 detail='Runpod network volume is only supported on Runpod')
+    # Validate here rather than trusting each client to call /validate first:
+    # the dashboard posts straight to this endpoint.
+    with _volume_errors_as_400():
+        volume = volume_lib.Volume.from_components(
+            name=volume_apply_body.name,
+            type=volume_type,
+            cloud=volume_cloud,
+            region=volume_apply_body.region,
+            zone=volume_apply_body.zone,
+            size=volume_apply_body.size,
+            labels=volume_apply_body.labels,
+            use_existing=volume_apply_body.use_existing,
+            # `use_existing` was folded into the config above for core; it is
+            # not part of the volume config schema.
+            config={
+                k: v for k, v in volume_config.items() if k != 'use_existing'
+            },
+        )
+        volume.validate()
+    # Apply exactly what was validated. A size carrying a unit ('100Gi')
+    # normalizes to a different number and the PVC spec appends 'Gi' to
+    # whatever it is given; and when the client sends no config at all, the
+    # dict holding the defaulted access mode is local to this handler, so
+    # without this the worker gets None and cannot build a VolumeConfig.
+    volume_apply_body.size = volume.size
+    volume_apply_body.config = volume_config
+
     await executor.schedule_request_async(
         request_id=request.state.request_id,
         request_name=request_names.RequestName.VOLUME_APPLY,
