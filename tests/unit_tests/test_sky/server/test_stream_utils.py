@@ -70,14 +70,22 @@ async def test_parked_request_status_is_pushed_to_an_attached_stream(
 
     controls = _decoded_controls(await _collect(log_path))
 
-    messages = [
-        msg for control, msg in controls if control is rich_utils.Control.INIT
-    ]
     # Both distinct reasons reached the client, and the repeat did not.
-    assert messages == [
+    expected = [
         '[dim]Pending (Queue: q, Position: 1) (waiting to resume)[/dim]',
         '[dim]Pending (Queue: q, Position: 0) (waiting to resume)[/dim]',
     ]
+    inits = [
+        msg for control, msg in controls if control is rich_utils.Control.INIT
+    ]
+    assert inits == expected
+    # ...and each is applied, not merely initialized: a client that still holds
+    # a status reuses it on INIT without picking up the new text, so the UPDATE
+    # is what the user actually reads.
+    updates = [
+        msg for control, msg in controls if control is rich_utils.Control.UPDATE
+    ]
+    assert updates == expected
 
 
 @pytest.mark.asyncio

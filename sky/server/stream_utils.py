@@ -306,12 +306,18 @@ async def _tail_log_file(
                             # Padding forces browser rendering of the chunk.
                             buffer.append(waiting_msg + ' ' * 4096 + '\n')
                         else:
-                            # INIT, not UPDATE: parking ended the request's own
-                            # rich status (an EXIT reached this client), and an
-                            # exited status ignores updates.
+                            # INIT *and* UPDATE. Parking ended the request's own
+                            # rich status (an EXIT reached this client), so a
+                            # status has to be re-initialized -- but on a client
+                            # that still holds one, INIT reuses it without
+                            # applying the new text (see rich_utils.
+                            # client_status / _RevertibleStatus), so the UPDATE
+                            # is what actually changes what the user reads.
+                            status = rich_utils.EncodedStatusMessage(
+                                f'[dim]{waiting_msg}[/dim]')
+                            buffer.append(status.init())
                             buffer.append(
-                                rich_utils.EncodedStatusMessage(
-                                    f'[dim]{waiting_msg}[/dim]').init())
+                                status.update(f'[dim]{waiting_msg}[/dim]'))
                 elif req_status.status == requests_lib.RequestStatus.RUNNING:
                     # Resumed: the request drives its own status again.
                     last_waiting_msg = None
