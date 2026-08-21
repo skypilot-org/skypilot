@@ -4,6 +4,8 @@ import gzip
 import io
 import json
 import logging
+import subprocess
+import sys
 import threading
 import time
 from typing import List, Optional
@@ -379,6 +381,64 @@ def test_bootstrap_frames_are_trimmed():
 def test_trimming_keeps_a_stack_with_no_loop_frames():
     stack = [_frame('sky.server.server', 'api_get'), _frame('gzip', 'write')]
     assert loop_stall._trim_to_current_callback(stack) == stack  # pylint: disable=protected-access
+
+
+def _piped_subprocess_on_the_loop() -> None:
+    """Blocks the loop in a way that bottoms out in the selector."""
+    subprocess.run([sys.executable, '-c', 'import time; time.sleep(0.6)'],
+                   stdout=subprocess.PIPE,
+                   stderr=subprocess.PIPE,
+                   check=False)
+
+
+@pytest.mark.parametrize('use_uvloop', [False, True])
+def test_blocking_call_that_ends_in_the_selector_is_not_called_parked(
+        stall_logs, use_uvloop):
+    """A poll frame alone does not mean the loop is idle.
+
+    `subprocess.run` with pipes waits in `selectors.select`, the same frame a
+    parked loop sits in. It is on-loop work and must be attributed to its
+    caller, not reported as the loop being starved from outside.
+    """
+    if use_uvloop:
+        pytest.importorskip('uvloop')
+    _run_with_watchdog(_piped_subprocess_on_the_loop,
+                       threshold=0.2,
+                       recover=0.6,
+                       use_uvloop=use_uvloop)
+
+    details = _details(stall_logs)
+    assert details, 'no stall was reported'
+    kinds = {d['kind'] for d in details}
+    assert 'parked' not in kinds, details
+    on_loop = [d for d in details if d['kind'] == 'on_loop']
+    assert on_loop, details
+    joined = '\n'.join('\n'.join(d['frames']) for d in on_loop)
+    assert '_piped_subprocess_on_the_loop' in joined, joined
+
+
+def test_watchdog_can_be_restarted_after_stop(stall_logs):
+    """A second start() must produce a live watchdog, not a dead thread."""
+
+    async def main():
+        watchdog = loop_stall.LoopStallWatchdog(asyncio.get_running_loop(),
+                                                threshold=0.2,
+                                                heartbeat_interval=0.05,
+                                                poll_interval=0.02)
+        watchdog.start()
+        watchdog.stop()
+        watchdog.start()
+        try:
+            await asyncio.sleep(0.3)
+            _blocking_business_code(0.5)
+            await asyncio.sleep(0.4)
+        finally:
+            watchdog.stop()
+
+    asyncio.run(main())
+    assert _messages_matching(
+        stall_logs,
+        'Event loop stalled'), ('the restarted watchdog reported nothing')
 
 
 def test_starved_loop_dumps_other_threads(stall_logs):

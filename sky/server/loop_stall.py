@@ -374,6 +374,7 @@ class LoopStallWatchdog:
         """
         if self._thread is not None:
             return
+        self._stop_event.clear()
         self._beating = True
         self._beat()
         self._thread = threading.Thread(target=self._watch,
@@ -480,11 +481,15 @@ class LoopStallWatchdog:
             if not stack:
                 return False
             innermost = stack[0]
-            parked = _is_parked(innermost)
             callback_stack = _trim_to_current_callback(stack)
             app_frames = [
                 f for f in callback_stack if not _is_plumbing(f.module)
             ]
+            # A poll frame only means the loop is idle when there is nothing of
+            # ours above it. Blocking calls bottom out in the same selector -
+            # `subprocess.run` with a pipe, for one - and those are on-loop work
+            # belonging to their caller.
+            parked = _is_parked(innermost) and not app_frames
             if parked:
                 source = _STARVED_SOURCE
             elif app_frames:
