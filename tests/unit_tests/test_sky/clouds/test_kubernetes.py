@@ -2532,7 +2532,7 @@ class TestKubernetesVolumeNameValidation(unittest.TestCase):
             self.assertTrue(ok, msg=f'{name} should be valid, got: {reason}')
 
     def test_invalid_due_to_length(self):
-        too_long = 'a' * 254  # > 253
+        too_long = 'a' * 254  # > 63, the pod-label cap
         ok, reason = kubernetes.Kubernetes.is_volume_name_valid(too_long)
         self.assertFalse(ok)
         self.assertIn('maximum length', reason or '')

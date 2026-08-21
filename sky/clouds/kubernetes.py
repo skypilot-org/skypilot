@@ -1532,8 +1532,10 @@ class Kubernetes(clouds.Cloud):
                              volume_name: str) -> Tuple[bool, Optional[str]]:
         """Validates that the volume name is valid for this cloud.
 
-        Follows Kubernetes DNS-1123 subdomain rules:
-        - must be <= 253 characters
+        Follows Kubernetes DNS-1123 subdomain rules, with a shorter length
+        cap: the name is also used as a pod spec.volumes[].name, which is an
+        RFC 1123 *label*.
+        - must be <= 63 characters (_MAX_VOLUME_NAME_LEN_LIMIT)
         - must match: '[a-z0-9]([-a-z0-9]*[a-z0-9])?(.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*' # pylint: disable=line-too-long
         """
         # Max length per DNS-1123 subdomain

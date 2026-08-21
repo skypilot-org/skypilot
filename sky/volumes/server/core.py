@@ -388,6 +388,9 @@ def volume_apply(
 ) -> None:
     """Creates or registers a volume.
 
+    Callers validate the volume themselves; /volumes/apply does it for API
+    clients, and the in-process callers construct their own names and configs.
+
     Args:
         name: The name of the volume.
         volume_type: The type of the volume.
