@@ -1837,12 +1837,20 @@ def test_managed_jobs_inline_env(generic_cloud: str):
                 job_name=name,
                 job_status=[sky.ManagedJobStatus.SUCCEEDED],
                 timeout=55),
-            f'JOB_ROW=$(sky jobs queue -v | grep {name} | head -n1) && '
-            f'echo "$JOB_ROW" && echo "$JOB_ROW" | grep -E "DONE|ALIVE" | grep "SUCCEEDED" && '
+            # Dump the queue before matching in it: when the row is
+            # missing, the grep alone leaves no evidence of what the queue
+            # actually returned.
+            'QUEUE=$(sky jobs queue -v) && echo "$QUEUE" && '
+            f'JOB_ROW=$(echo "$QUEUE" | grep {name} | head -n1) && '
+            f'echo "JOB_ROW=$JOB_ROW" && echo "$JOB_ROW" | grep -E "DONE|ALIVE" | grep "SUCCEEDED" && '
             f'JOB_ID=$(echo "$JOB_ROW" | awk \'{{print $1}}\') && '
             f'echo "JOB_ID=$JOB_ID" && '
             # Test that logs are still available after the job finishes.
-            'unset SKYPILOT_DEBUG; s=$(sky jobs logs $JOB_ID --refresh) && echo "$s" && echo "$s" | grep "hello world" && '
+            # Scope SKYPILOT_DEBUG to this command: `unset SKYPILOT_DEBUG;`
+            # sat outside the && chain, so an earlier failure skipped the
+            # unset and the head -n2 assertion below then failed on debug
+            # lines rather than reporting the real failure.
+            's=$(SKYPILOT_DEBUG=0 sky jobs logs $JOB_ID --refresh) && echo "$s" && echo "$s" | grep "hello world" && '
             # Make sure we skip the unnecessary logs.
             'echo "$s" | head -n2 | grep "Waiting for"',
         ],
