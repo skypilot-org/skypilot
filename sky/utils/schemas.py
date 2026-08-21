@@ -2414,6 +2414,10 @@ def get_config_schema():
             'requests_retention_hours': {
                 'type': 'integer',
             },
+            'requests_gc_batch_pause_seconds': {
+                'type': 'number',
+                'minimum': 0,
+            },
             'logs_retention_hours': {
                 'type': 'integer',
             },

@@ -31,6 +31,7 @@ from sky import skypilot_config
 from sky.metrics import utils as metrics_lib
 from sky.skylet import constants
 from sky.utils import annotations
+from sky.utils import asyncio_utils
 from sky.utils import common_utils
 from sky.utils import context_utils
 from sky.utils import registry
@@ -1251,6 +1252,7 @@ def cleanup_cluster_events_with_retention(retention_hours: float,
 
 async def cluster_event_retention_daemon():
     """Garbage collect cluster events periodically."""
+    await asyncio_utils.sleep_startup_jitter('cluster event retention daemon')
     while True:
         logger.info('Running cluster event retention daemon...')
         # Use the latest config.

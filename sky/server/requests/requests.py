@@ -73,6 +73,16 @@ LEGACY_REQUEST_LOG_PATH_PREFIX = '~/sky_logs/api_server/requests'
 
 DEFAULT_REQUESTS_RETENTION_HOURS = 24  # 1 day
 
+# Pause between batches in a requests GC pass. A pass can be tens of thousands
+# of rows, and rows whose `return_value` is large are stored out-of-line, so
+# deleting one cascades into deleting all of its TOAST chunks and WAL-logging
+# every one of them. Issuing those batches back to back makes a single pass
+# saturate the database's write path for as long as the pass lasts. Nothing
+# downstream needs the pass to finish promptly -- the retention window is a
+# day and the daemon runs at most once an hour -- so spreading the same work
+# over a longer window trades pass duration for a much lower write duty cycle.
+DEFAULT_REQUESTS_GC_BATCH_PAUSE_SECONDS = 2.0
+
 # TODO(zhwu): For scalability, there are several TODOs:
 # [x] Have a way to queue requests.
 # [ ] Move logs to persistent place.
@@ -1288,8 +1298,10 @@ async def _cleanup_legacy_directory_if_empty():
         logger.debug(f'Failed to cleanup legacy directory: {e}')
 
 
-async def clean_finished_requests_with_retention(retention_seconds: int,
-                                                 batch_size: int = 1000):
+async def clean_finished_requests_with_retention(
+        retention_seconds: int,
+        batch_size: int = 1000,
+        batch_pause_seconds: Optional[float] = None):
     """Clean up finished requests older than the retention period.
 
     This function removes old finished requests (SUCCEEDED, FAILED, CANCELLED)
@@ -1306,8 +1318,24 @@ async def clean_finished_requests_with_retention(retention_seconds: int,
             db query complete in a reasonable time. All stale
             requests older than the retention period will be deleted
             regardless of the batch size.
+        batch_pause_seconds: sleep this long between batches so a large pass
+            does not monopolize the database's write path. Defaults to
+            api_server.requests_gc_batch_pause_seconds, or
+            DEFAULT_REQUESTS_GC_BATCH_PAUSE_SECONDS. Set to 0 to disable.
     """
+    if batch_pause_seconds is None:
+        batch_pause_seconds = skypilot_config.get_nested(
+            ('api_server', 'requests_gc_batch_pause_seconds'),
+            DEFAULT_REQUESTS_GC_BATCH_PAUSE_SECONDS)
     debug_log_dir = pathlib.Path(sky_logging.DEBUG_LOG_DIR)
+    # Whether the pre-v0.15 log directory is still present. Checked once per
+    # pass rather than per request: on a server that has already migrated the
+    # directory is gone, and the per-request unlink below is then a wasted
+    # syscall for every row -- against a shared filesystem in deployments that
+    # put ~/sky_logs on one, where the round trip is not free.
+    # TODO Remove this along with the legacy path handling on or after v0.15.0
+    legacy_dir_exists = pathlib.Path(
+        LEGACY_REQUEST_LOG_PATH_PREFIX).expanduser().exists()
     total_deleted = 0
     while True:
         reqs = await get_request_tasks_async(
@@ -1329,10 +1357,11 @@ async def clean_finished_requests_with_retention(retention_seconds: int,
                         req.log_path.absolute()).unlink(missing_ok=True)))
             # Also delete from legacy path for backward compatibility
             # TODO Remove this on or after v0.15.0
-            legacy_log_path = _get_legacy_log_path(req.request_id)
-            futs.append(
-                asyncio.create_task(
-                    anyio.Path(legacy_log_path).unlink(missing_ok=True)))
+            if legacy_dir_exists:
+                legacy_log_path = _get_legacy_log_path(req.request_id)
+                futs.append(
+                    asyncio.create_task(
+                        anyio.Path(legacy_log_path).unlink(missing_ok=True)))
             # Delete debug log if it exists
             debug_log_path = (debug_log_dir /
                               req.request_id).with_suffix('.log')
@@ -1345,6 +1374,11 @@ async def clean_finished_requests_with_retention(retention_seconds: int,
         total_deleted += len(reqs)
         if len(reqs) < batch_size:
             break
+        # Yield the write path between batches -- see
+        # DEFAULT_REQUESTS_GC_BATCH_PAUSE_SECONDS. Skipped after the final
+        # batch so a small pass finishes without an extra delay.
+        if batch_pause_seconds > 0:
+            await asyncio.sleep(batch_pause_seconds)
 
     # Try to clean up the legacy directory if it's empty
     # TODO Remove this on or after v0.15.0
@@ -1358,6 +1392,7 @@ async def clean_finished_requests_with_retention(retention_seconds: int,
 
 async def requests_gc_daemon():
     """Garbage collect finished requests periodically."""
+    await asyncio_utils.sleep_startup_jitter('requests GC daemon')
     while True:
         logger.info('Running requests GC daemon...')
         # Use the latest config.
