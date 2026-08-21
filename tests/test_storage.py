@@ -177,6 +177,33 @@ class TestMountCachedConfig:
         config = storage_lib.MountCachedConfig(read_only=False)
         assert '--read-only' not in config.to_rclone_flags()
 
+    def test_rclone_flags_appended_and_quoted(self):
+        config = storage_lib.MountCachedConfig(
+            transfers=8, rclone_flags=['--no-modtime', '--exclude', '*.tmp'])
+        flags = config.to_rclone_flags()
+        # Appended last, after the generated flags.
+        assert flags.endswith("--no-modtime --exclude '*.tmp'")
+        # A token with shell metacharacters is quoted.
+        assert "'*.tmp'" in flags
+
+    def test_rclone_flags_none_emits_nothing_extra(self):
+        base = storage_lib.MountCachedConfig(transfers=8).to_rclone_flags()
+        with_empty = storage_lib.MountCachedConfig(
+            transfers=8, rclone_flags=[]).to_rclone_flags()
+        assert base == with_empty
+
+    def test_mount_binary_is_explicit_not_inferred(self):
+        # The binary is passed explicitly, so a mount command carrying another
+        # binary's name in an arbitrary flag (e.g. rclone_flags with "goofys")
+        # does not select the wrong binary.
+        mount_cmd = 'rclone mount foo --exclude goofys-cache/'
+        script = mounting_utils.get_mounting_script(mount_path='/mnt/x',
+                                                    mount_cmd=mount_cmd,
+                                                    install_cmd='true',
+                                                    mount_binary='rclone')
+        assert 'MOUNT_BINARY=rclone' in script
+        assert 'MOUNT_BINARY=goofys' not in script
+
     def test_round_trip_yaml(self):
         config = storage_lib.MountCachedConfig(transfers=8, read_only=True)
         yaml_dict = config.to_yaml_config()
