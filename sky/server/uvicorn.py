@@ -283,12 +283,6 @@ class Server(uvicorn.Server):
         # (e.g. event-loop-lag peaks recorded just before the worker died)
         # to every subsequent /metrics scrape and liveall-based probe.
         metrics_lib.register_multiproc_cleanup_atexit()
-        lag_threshold = perf_utils.get_loop_lag_threshold()
-        if lag_threshold is not None:
-            event_loop = asyncio.get_event_loop()
-            # Same as set PYTHONASYNCIODEBUG=1, but with custom threshold.
-            event_loop.set_debug(True)
-            event_loop.slow_callback_duration = lag_threshold
         stop_monitor = threading.Event()
         monitor = threading.Thread(
             target=metrics_lib.process_monitor,
@@ -298,10 +292,29 @@ class Server(uvicorn.Server):
         monitor.start()
         try:
             with self.capture_signals():
-                asyncio.run(self.serve(*args, **kwargs))
+                asyncio.run(self._serve_with_debug(*args, **kwargs))
         finally:
             stop_monitor.set()
             monitor.join()
+
+    async def _serve_with_debug(self, *args, **kwargs):
+        """Applies asyncio debug settings to the loop that actually serves.
+
+        These have to be applied from inside the coroutine: `asyncio.run()`
+        builds its own loop and closes it afterwards, so anything configured on
+        the loop that `asyncio.get_event_loop()` returns before the call is
+        thrown away along with that loop.
+        """
+        lag_threshold = perf_utils.get_loop_lag_threshold()
+        if lag_threshold is not None:
+            loop = asyncio.get_running_loop()
+            # Same as setting PYTHONASYNCIODEBUG=1, but with a custom
+            # threshold. Opt-in only: debug mode captures a source traceback
+            # on every handle creation. For always-on stall attribution see
+            # sky/server/loop_stall.py.
+            loop.set_debug(True)
+            loop.slow_callback_duration = lag_threshold
+        await self.serve(*args, **kwargs)
 
 
 def run(config: uvicorn.Config, max_db_connections: Optional[int] = None):
