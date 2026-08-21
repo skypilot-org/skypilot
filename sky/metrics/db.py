@@ -161,9 +161,17 @@ SKY_APISERVER_DB_COMMIT_SECONDS = prom.Histogram(
     buckets=LATENCY_BUCKETS,
 )
 
+# Counts *round trips*, not logical statements, and that is deliberate:
+# it is the unit the database and the pooler actually see, and it is the
+# same unit `execute_seconds` has to use to mean anything. The two differ
+# where SQLAlchemy's insertmanyvalues splits one `insert().returning()`
+# into several cursor executes — measured: 3000 rows becomes 3 executes at
+# the default page size of 1000. So this rate can exceed the number of
+# `execute()` calls the application made. Compare it against database-side
+# counters, not against application operations.
 SKY_APISERVER_DB_STATEMENTS_TOTAL = prom.Counter(
     'sky_apiserver_db_statements_total',
-    'Statements executed, by outcome',
+    'Round trips executed, by outcome (see the note above on batching)',
     ['db', 'table', 'op', 'outcome'],
 )
 

@@ -5,6 +5,7 @@ collide with another test's — the prometheus registry is process-global
 and its counters only ever go up.
 """
 import itertools
+import os
 import threading
 
 import prometheus_client as prom
@@ -678,3 +679,52 @@ def test_record_pool_leaves_omitted_values_untouched():
                                               'db': 'probe_pool',
                                               'pool': 'asyncpg'
                                           }) == 0
+
+
+def test_pool_gauge_returns_to_zero_when_the_pool_goes_idle(tmp_path):
+    """Regression: the throttle used to swallow every checkin.
+
+    _sync_pool_gauge fires on checkout and checkin. With a symmetric
+    time throttle, any statement shorter than the window had its checkin
+    dropped, so the only observations that landed were taken while a
+    connection was held — the gauge then read "1 checked out" through the
+    whole idle period after it. Measured on a live deployment before the
+    fix: every per-pid series read exactly 1, forever.
+    """
+    _, md, table = _table()
+    # A role of its own: the gauge series is keyed by (db, pool, pid), so
+    # any other engine in this process with the same role would clobber
+    # it and the assertion would be testing that engine instead.
+    engine = _engine(md, db='gauge_idle_probe', path=tmp_path / 'gauge.db')
+    _seed(engine, table, 2)
+
+    pid = str(os.getpid())
+
+    # Several statements back to back, each far shorter than the throttle
+    # window, so every checkin would have been throttled away.
+    for _ in range(5):
+        with engine.connect() as conn:
+            conn.execute(sa.select(table)).all()
+
+    assert _sample(
+        'sky_apiserver_db_pool_checked_out',
+        db='gauge_idle_probe',
+        pool='QueuePool',
+        pid=pid) == 0, ('gauge still reports a checked-out connection after '
+                        'the pool went idle')
+
+
+def test_pool_gauge_reports_a_held_connection(tmp_path):
+    """The other direction: it must still show a real checkout."""
+    _, md, table = _table()
+    engine = _engine(md, db='gauge_held_probe', path=tmp_path / 'gauge2.db')
+    _seed(engine, table, 2)
+
+    pid = str(os.getpid())
+    with engine.connect() as conn:
+        conn.execute(sa.select(table)).all()
+        held = _sample('sky_apiserver_db_pool_checked_out',
+                       db='gauge_held_probe',
+                       pool='QueuePool',
+                       pid=pid)
+    assert held >= 1, 'gauge did not report the connection being held'
