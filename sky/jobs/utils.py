@@ -1858,6 +1858,13 @@ def _parked_launch_reason(job_id: int, task_id: Optional[int]) -> Optional[str]:
         return None
 
 
+def _live_headline(provision_msg: Optional[str]) -> Optional[str]:
+    """The headline of a relayed cluster-launch status, if it has one."""
+    if provision_msg is None:
+        return None
+    return _provision_status_headline(provision_msg)
+
+
 def _waiting_line_detail(provision_msg: Optional[str],
                          parked_reason: Optional[str]) -> Optional[str]:
     """The detail line shown under "Waiting for task to start", if any.
@@ -1867,8 +1874,7 @@ def _waiting_line_detail(provision_msg: Optional[str],
     rich status, so nothing is relayed any more -- and then the parked request's
     own message is the only thing that still says what the job waits for.
     """
-    headline = (None if provision_msg is None else
-                _provision_status_headline(provision_msg))
+    headline = _live_headline(provision_msg)
     if headline is not None:
         return headline
     return parked_reason
@@ -2310,9 +2316,8 @@ def stream_logs_by_id(
                     # the live cluster-launch status, so it's clear the job is
                     # waiting on its cluster to be provisioned.
                     provision_msg = _latest_provision_status_msg()
-                    if (provision_msg is None or
-                            _provision_status_headline(provision_msg) is None
-                       ) and not parked_reason_read:
+                    if (_live_headline(provision_msg) is None and
+                            not parked_reason_read):
                         # Nothing live to show: read the parked reason, once per
                         # status check rather than once per second like this
                         # loop.
