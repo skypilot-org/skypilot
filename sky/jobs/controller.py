@@ -144,13 +144,14 @@ def _add_k8s_annotations(task: 'sky.Task', job_id: int) -> None:
             }
         }
     }
+    resource_type = type(task.resources)
     new_resources_list: List['sky.Resources'] = [
         original_resource.copy(_cluster_config_overrides=annotations_override)
         for original_resource in task.resources
     ]
 
     # Set the new resources back to the task
-    task.set_resources(new_resources_list)
+    task.set_resources(resource_type(new_resources_list))
 
 
 def _task_uses_kubernetes(task: 'sky.Task') -> bool:
