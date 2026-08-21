@@ -43,6 +43,7 @@ names are deliberately *not* labels.
 """
 
 import contextlib
+import logging
 import os
 import time
 from typing import Iterator, Optional
@@ -50,6 +51,8 @@ from typing import Iterator, Optional
 import prometheus_client as prom
 
 from sky.skylet import constants
+
+logger = logging.getLogger(__name__)
 
 # Whether to instrument the database layer at all. Cannot change at
 # runtime. When false, ``sky.utils.db.sql_metrics.install`` attaches no
@@ -266,6 +269,20 @@ SKY_APISERVER_DB_POOL_MAX_OVERFLOW = prom.Gauge(
     multiprocess_mode='max',
 )
 
+# One warning per process, not one per statement: a broken instrument
+# would otherwise out-log the application.
+_warned = False
+
+
+def _warn_once(message: str) -> None:
+    global _warned
+    if _warned:
+        return
+    _warned = True
+    logger.warning('%s Database metrics may be incomplete.',
+                   message,
+                   exc_info=True)
+
 
 def record_statement(
     db: str,
@@ -284,21 +301,28 @@ def record_statement(
     event hooks — a raw ``asyncpg`` pool, for instance. SQLAlchemy
     engines are fed by ``sky.utils.db.sql_metrics.install`` instead.
 
-    A no-op when metrics are disabled, so call sites need no guard.
+    A no-op when metrics are disabled, and it never raises: call sites
+    need no guard of their own. That matters more here than it looks —
+    these are called from inside `finally` blocks and from paths holding a
+    checked-out connection, so an exception escaping would strand real
+    resources over a metrics defect.
     """
     if not ENABLED:
         return
-    SKY_APISERVER_DB_EXECUTE_SECONDS.labels(db, table,
-                                            op).observe(execute_seconds)
-    SKY_APISERVER_DB_STATEMENTS_TOTAL.labels(db, table, op, outcome).inc()
-    if rows is not None and rows >= 0:
-        SKY_APISERVER_DB_ROWS_RETURNED.labels(db, table, op).observe(rows)
-    if result_bytes is not None:
-        SKY_APISERVER_DB_RESULT_BYTES.labels(db, table,
-                                             op).observe(result_bytes)
-    if statement_bytes is not None:
-        SKY_APISERVER_DB_STATEMENT_BYTES.labels(db, table,
-                                                op).observe(statement_bytes)
+    try:
+        SKY_APISERVER_DB_EXECUTE_SECONDS.labels(db, table,
+                                                op).observe(execute_seconds)
+        SKY_APISERVER_DB_STATEMENTS_TOTAL.labels(db, table, op, outcome).inc()
+        if rows is not None and rows >= 0:
+            SKY_APISERVER_DB_ROWS_RETURNED.labels(db, table, op).observe(rows)
+        if result_bytes is not None:
+            SKY_APISERVER_DB_RESULT_BYTES.labels(db, table,
+                                                 op).observe(result_bytes)
+        if statement_bytes is not None:
+            SKY_APISERVER_DB_STATEMENT_BYTES.labels(db, table,
+                                                    op).observe(statement_bytes)
+    except Exception:  # pylint: disable=broad-except
+        _warn_once('Failed to record a database statement.')
 
 
 def record_acquire(db: str, pool: str, seconds: float) -> None:
@@ -307,11 +331,15 @@ def record_acquire(db: str, pool: str, seconds: float) -> None:
     For pools SQLAlchemy does not manage, such as a raw ``asyncpg.Pool``
     used directly on an event loop. Those emit no ``PoolEvents``, so the
     engine instrumentation cannot see them, and a pool running dry is
-    exactly what this number is for.
+    exactly what this number is for. Never raises; see
+    :func:`record_statement`.
     """
     if not ENABLED:
         return
-    SKY_APISERVER_DB_ACQUIRE_SECONDS.labels(db, pool).observe(seconds)
+    try:
+        SKY_APISERVER_DB_ACQUIRE_SECONDS.labels(db, pool).observe(seconds)
+    except Exception:  # pylint: disable=broad-except
+        _warn_once('Failed to record a pool acquire.')
 
 
 def record_pool(db: str,
@@ -319,16 +347,28 @@ def record_pool(db: str,
                 checked_out: Optional[int] = None,
                 size: Optional[int] = None,
                 max_overflow: Optional[int] = None) -> None:
-    """Publish a non-SQLAlchemy pool's saturation and configured limits."""
+    """Publish a non-SQLAlchemy pool's saturation and configured limits.
+
+    Every value is optional and an omitted one is **left untouched**, not
+    reset — so a caller can publish the configured limits once at pool
+    creation and then report only ``checked_out`` on each acquire without
+    clobbering the saturation denominator.
+
+    Never raises; see :func:`record_statement`.
+    """
     if not ENABLED:
         return
-    if checked_out is not None:
-        SKY_APISERVER_DB_POOL_CHECKED_OUT.labels(db, pool, str(
-            os.getpid())).set(checked_out)
-    if size is not None:
-        SKY_APISERVER_DB_POOL_SIZE.labels(db, pool).set(size)
-    if max_overflow is not None:
-        SKY_APISERVER_DB_POOL_MAX_OVERFLOW.labels(db, pool).set(max_overflow)
+    try:
+        if checked_out is not None:
+            SKY_APISERVER_DB_POOL_CHECKED_OUT.labels(db, pool, str(
+                os.getpid())).set(checked_out)
+        if size is not None:
+            SKY_APISERVER_DB_POOL_SIZE.labels(db, pool).set(size)
+        if max_overflow is not None:
+            SKY_APISERVER_DB_POOL_MAX_OVERFLOW.labels(db,
+                                                      pool).set(max_overflow)
+    except Exception:  # pylint: disable=broad-except
+        _warn_once('Failed to record pool state.')
 
 
 class StatementObservation:
@@ -363,11 +403,20 @@ def observe_statement(db: str, table: str,
         obs.outcome = 'error'
         raise
     finally:
-        record_statement(db,
-                         table,
-                         op,
-                         time.perf_counter() - start,
-                         outcome=obs.outcome,
-                         rows=obs.rows,
-                         result_bytes=obs.result_bytes,
-                         statement_bytes=obs.statement_bytes)
+        # Guarded a second time, on top of record_statement's own guard.
+        # An exception raised from a `finally` replaces whatever the block
+        # was doing — including a successful return — so a caller that
+        # acquired a connection inside the block would lose it. Cheap
+        # insurance for the one place where the cost of raising is not
+        # just a missing sample.
+        try:
+            record_statement(db,
+                             table,
+                             op,
+                             time.perf_counter() - start,
+                             outcome=obs.outcome,
+                             rows=obs.rows,
+                             result_bytes=obs.result_bytes,
+                             statement_bytes=obs.statement_bytes)
+        except Exception:  # pylint: disable=broad-except
+            _warn_once('Failed to record an observed statement.')

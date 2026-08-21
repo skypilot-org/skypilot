@@ -614,3 +614,62 @@ def test_observe_statement_is_inert_when_disabled(monkeypatch):
                    table='clusters',
                    op='select',
                    outcome='ok') == before
+
+
+def test_record_helpers_never_raise_into_the_caller(monkeypatch):
+    """A metrics defect must not propagate to a DB caller.
+
+    These helpers are called from `finally` blocks and from paths holding a
+    checked-out connection, so an escaping exception would strand a real
+    resource over a broken instrument.
+    """
+    monkeypatch.setattr(db_metrics, '_warned', False)
+
+    class Exploding:
+
+        def labels(self, *args, **kwargs):
+            raise RuntimeError('mmap is full')
+
+    for name in ('SKY_APISERVER_DB_EXECUTE_SECONDS',
+                 'SKY_APISERVER_DB_ACQUIRE_SECONDS',
+                 'SKY_APISERVER_DB_POOL_CHECKED_OUT'):
+        monkeypatch.setattr(db_metrics, name, Exploding())
+
+    # None of these may raise.
+    db_metrics.record_statement('state', 'requests', 'select', 0.01, rows=1)
+    db_metrics.record_acquire('ha_asyncpg', 'asyncpg', 0.01)
+    db_metrics.record_pool('ha_asyncpg', 'asyncpg', checked_out=3)
+
+
+def test_observe_statement_swallows_a_broken_emit(monkeypatch):
+    """The context manager's finally must not become a caller exception."""
+    monkeypatch.setattr(db_metrics, '_warned', False)
+
+    def boom(*args, **kwargs):
+        raise RuntimeError('mmap is full')
+
+    monkeypatch.setattr(db_metrics, 'record_statement', boom)
+
+    sentinel = []
+    with db_metrics.observe_statement('ha_asyncpg', 'task_queue',
+                                      'insert') as obs:
+        obs.rows = 1
+        sentinel.append('body ran')
+    assert sentinel == ['body ran']
+
+
+def test_record_pool_leaves_omitted_values_untouched():
+    """Config published once, saturation reported per acquire."""
+    db_metrics.record_pool('probe_pool', 'asyncpg', size=5, max_overflow=0)
+    for checked_out in (1, 2, 3):
+        db_metrics.record_pool('probe_pool', 'asyncpg', checked_out=checked_out)
+
+    # The denominator survives the checked_out-only updates.
+    assert _sample('sky_apiserver_db_pool_size',
+                   db='probe_pool',
+                   pool='asyncpg') == 5
+    assert prom.REGISTRY.get_sample_value('sky_apiserver_db_pool_max_overflow',
+                                          {
+                                              'db': 'probe_pool',
+                                              'pool': 'asyncpg'
+                                          }) == 0
