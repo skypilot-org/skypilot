@@ -110,3 +110,22 @@ def test_volume_list_only_returns_accessible_workspaces(isolated_database):
     # jobs already are.
     accessible.assert_called_once_with(
         action=workspace_constants.WORKSPACE_ACTION_READ)
+
+
+def test_refresh_is_scoped_to_the_accessible_workspaces(isolated_database):
+    """A caller who reads one workspace must not drive a full-table reconcile.
+
+    volume_refresh groups its cloud calls by (context, namespace) taken from
+    the volumes it was handed, so refreshing rows the caller cannot see means
+    touching contexts reachable only from another workspace.
+    """
+    _seed_two_workspaces()
+
+    with mock.patch.object(volumes_core.workspaces_core,
+                           'get_accessible_workspace_names',
+                           return_value={'ws-a'}):
+        with mock.patch.object(volumes_core,
+                               'volume_refresh') as volume_refresh:
+            volumes_core.volume_list(refresh=True)
+
+    volume_refresh.assert_called_once_with(volume_names=['vol-a'])

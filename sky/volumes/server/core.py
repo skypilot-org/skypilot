@@ -241,13 +241,22 @@ def volume_list(
             }
         ]
     """
-    if refresh:
-        volume_refresh()
     # Visibility, not usability: read-only workspaces' volumes must be listed.
     # See the same call in jobs/server/core.py for managed jobs and in
     # backend_utils for clusters.
     accessible_workspaces = workspaces_core.get_accessible_workspace_names(
         action=workspace_constants.WORKSPACE_ACTION_READ)
+    if refresh:
+        # Keep the reconcile proportional to what this caller can see: a user
+        # who reads one workspace should not drive cloud API calls against
+        # contexts reachable only from another. volume_refresh groups its cloud
+        # calls by the (context, namespace) pairs of the volumes it is handed,
+        # so narrowing the set narrows the calls. The daemon in
+        # sky/server/daemons.py still refreshes the whole table.
+        volume_refresh(volume_names=[
+            volume['name'] for volume in global_user_state.get_volumes(
+                workspaces_filter=accessible_workspaces)
+        ])
     with rich_utils.safe_status(ux_utils.spinner_message('Listing volumes')):
         volumes = global_user_state.get_volumes(
             is_ephemeral=is_ephemeral, workspaces_filter=accessible_workspaces)
