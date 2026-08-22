@@ -187,7 +187,7 @@ Here's a side-by-side comparison of a typical Slurm script and its SkyPilot equi
 Key differences:
 
 - **No module system**: Use ``setup:`` for environment configuration (pip, conda) or Docker images
-- **Time limits are optional**: SkyPilot uses :ref:`autostop <auto-stop>` for auto-termination. Can be configured to terminate on idleness or wall-clock time.
+- **Time limits work differently**: on Kubernetes and clouds, SkyPilot uses :ref:`autostop <auto-stop>` to terminate a cluster after an idle period. On Slurm, autostop is not supported; set a wall-clock limit with ``slurm.sbatch_options.time`` instead, or rely on the partition's ``MaxTime`` (which SkyPilot submits by default).
 - **Simpler syntax**: Resource requirements are declarative YAML fields
 - **Native container support**: Easily use :ref:`containers <docker-containers>` by setting ``image_id``.
 
@@ -211,8 +211,11 @@ Resource requests
      - ``accelerators: H100:8``
      - GPU type and count
    * - ``--time=24:00:00``
-     - ``autostop: 60m``
-     - Idle-based timeout
+     - ``config.slurm.sbatch_options.time`` (Slurm);
+       ``autostop: 60m`` (Kubernetes/clouds)
+     - On Slurm, passed through as ``#SBATCH --time``; defaults to the
+       partition's ``MaxTime``. Elsewhere, ``autostop`` is an *idle* timeout,
+       not a wall-clock limit
 
 Example with resource constraints:
 
@@ -291,27 +294,27 @@ Job arrays and parameter sweeps
 
 Slurm job arrays (``sbatch --array=1-100``) allow running many similar jobs with different parameters.
 
-In SkyPilot, use :ref:`managed jobs <managed-jobs>` with environment variables:
+The direct equivalent is ``sky jobs launch --num-jobs``, which submits N
+:ref:`managed jobs <managed-jobs>` from one task YAML:
 
 .. code-block:: bash
 
-   # Launch 100 jobs with different TASK_ID values
-   for i in $(seq 1 100); do
-     sky jobs launch --env TASK_ID=$i -y -d task.yaml
-   done
+   # Launch 100 jobs
+   sky jobs launch --num-jobs 100 -y -d task.yaml
 
-Your task YAML can use ``TASK_ID`` to vary behavior:
+Each job gets ``$SKYPILOT_JOB_RANK`` (the array index, ``0`` to ``N-1``, like
+``$SLURM_ARRAY_TASK_ID``) and ``$SKYPILOT_NUM_JOBS``:
 
 .. code-block:: yaml
 
-   envs:
-     TASK_ID: null  # Required, passed via --env
-
    run: |
-     echo "Running task $TASK_ID"
-     python train.py --seed $TASK_ID
+     echo "Shard $SKYPILOT_JOB_RANK of $SKYPILOT_NUM_JOBS"
+     python train.py --shard $SKYPILOT_JOB_RANK --num-shards $SKYPILOT_NUM_JOBS
 
-For hyperparameter sweeps, you can also pass multiple environment variables:
+To reuse workers across submissions instead of provisioning per job, submit to
+a :ref:`pool <pool>`: ``sky jobs launch -p mypool --num-jobs 100 task.yaml``.
+
+For sweeps over *named* parameters, pass environment variables per job:
 
 .. code-block:: bash
 
