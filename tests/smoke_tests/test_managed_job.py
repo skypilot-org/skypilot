@@ -1841,7 +1841,12 @@ def test_managed_jobs_inline_env(generic_cloud: str):
             # missing, the grep alone leaves no evidence of what the queue
             # actually returned.
             'QUEUE=$(sky jobs queue -v) && echo "$QUEUE" && '
-            f'JOB_ROW=$(echo "$QUEUE" | grep {name} | head -n1) && '
+            # Anchor on a table row (starts with the job id). The captured
+            # output also carries the request's log, streamed from the server,
+            # and a log line that happens to mention the job name would
+            # otherwise win the `head -n1` -- which is how this assertion fails
+            # on a server whose plugins log about the job.
+            f'JOB_ROW=$(echo "$QUEUE" | grep -E "^[0-9]+[[:space:]].*{name}" | head -n1) && '
             f'echo "JOB_ROW=$JOB_ROW" && echo "$JOB_ROW" | grep -E "DONE|ALIVE" | grep "SUCCEEDED" && '
             f'JOB_ID=$(echo "$JOB_ROW" | awk \'{{print $1}}\') && '
             f'echo "JOB_ID=$JOB_ID" && '
