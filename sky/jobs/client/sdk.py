@@ -9,11 +9,13 @@ import zlib
 
 import click
 
+from sky import exceptions
 from sky import sky_logging
 from sky.backends import backend_utils
 from sky.client import common as client_common
 from sky.client import sdk
 from sky.jobs import constants as managed_job_constants
+from sky.jobs import state as managed_job_state
 from sky.schemas.api import responses
 from sky.serve.client import impl
 from sky.server import common as server_common
@@ -435,6 +437,96 @@ def cancel(
     return server_common.get_request_id(response=response)
 
 
+@rest.retry_transient_errors()
+def _resolve_managed_job_id_by_name(
+        name: str, refresh: bool,
+        controller: bool) -> Union[int, Tuple[str, int]]:
+    """Resolves a managed job name to its job ID.
+
+    The name is resolved once, before log streaming starts, so that the
+    (transparently retried) streaming requests carry a stable job ID. If the
+    server re-resolved the name on every retried request, a retry could fail
+    with NOT_FOUND after the job reached a terminal state mid-stream
+    (non-controller name resolution only considers non-terminal jobs), or
+    attach to a different job submitted with the same name in between.
+
+    Mirrors the server-side resolution semantics in
+    ``sky.jobs.utils.stream_logs``:
+    - ``controller=False`` resolves against non-terminal jobs only;
+    - ``controller=True`` resolves against all jobs, terminal included;
+    - multiple matches raise ValueError.
+
+    Returns:
+        The resolved job ID, or a ``(message, exit_code)`` tuple when no
+        matching job exists.
+    """
+    body = payloads.JobsQueueV2Body(
+        refresh=refresh,
+        skip_finished=False,
+        all_users=True,
+        name_match=name,
+        fields=['job_id', 'job_name', 'status'],
+    )
+    response = server_common.make_authenticated_request(
+        'POST',
+        '/jobs/queue/v2',
+        json=json.loads(body.model_dump_json()),
+        timeout=(5, None))
+    request_id: server_common.RequestId[
+        Tuple[List[responses.ManagedJobRecord], int, Dict[str, int],
+              int]] = server_common.get_request_id(response)
+    result = sdk.get(request_id)
+    records = result[0] if isinstance(result, tuple) else result
+
+    def _field(record: Any, key: str) -> Any:
+        if isinstance(record, dict):
+            return record.get(key)
+        return getattr(record, key, None)
+
+    # ``name_match`` is a substring match (and servers predating the field
+    # ignore it and return the full queue), so keep exact matches only. A
+    # multi-task job has one record per task; a job counts as non-terminal
+    # if any of its tasks is.
+    job_has_nonterminal_task: Dict[int, bool] = {}
+    for record in records:
+        if _field(record, 'job_name') != name:
+            continue
+        record_job_id = _field(record, 'job_id')
+        if record_job_id is None:
+            continue
+        status = _field(record, 'status')
+        if isinstance(status, str):
+            status = managed_job_state.ManagedJobStatus(status)
+        nonterminal = status is not None and not status.is_terminal()
+        job_has_nonterminal_task[record_job_id] = (job_has_nonterminal_task.get(
+            record_job_id, False) or nonterminal)
+
+    if controller:
+        candidate_ids = list(job_has_nonterminal_task.keys())
+    else:
+        candidate_ids = [
+            record_job_id
+            for record_job_id, nonterminal in job_has_nonterminal_task.items()
+            if nonterminal
+        ]
+    if not candidate_ids:
+        if controller:
+            return (f'No managed job found with name {name!r}.',
+                    int(exceptions.JobExitCode.NOT_FOUND))
+        return (f'No running managed job found with name {name!r}.',
+                int(exceptions.JobExitCode.NOT_FOUND))
+    if len(candidate_ids) > 1:
+        if controller:
+            job_ids_str = ', '.join(
+                str(record_job_id) for record_job_id in candidate_ids)
+            raise ValueError(
+                f'Multiple managed jobs found with name {name!r} '
+                f'(Job IDs: {job_ids_str}). Please specify the job_id '
+                'instead.')
+        raise ValueError(f'Multiple running jobs found with name {name!r}.')
+    return candidate_ids[0]
+
+
 @typing.overload
 def tail_logs(
     name: Optional[str] = None,
@@ -469,7 +561,6 @@ def tail_logs(name: Optional[str] = None,
 
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
-@rest.retry_transient_errors()
 def tail_logs(
     name: Optional[str] = None,
     job_id: Optional[int] = None,
@@ -530,6 +621,45 @@ def tail_logs(
     if output_stream is not None and not preload_content:
         raise ValueError(
             'output_stream cannot be specified when preload_content is False')
+
+    if job_id is None and name is not None:
+        # Resolve the name to a job ID up-front so the streaming requests
+        # below (including transparent retries, which re-issue the request)
+        # are pinned to one job. See _resolve_managed_job_id_by_name.
+        resolved = _resolve_managed_job_id_by_name(name, refresh, controller)
+        if isinstance(resolved, tuple):
+            message, returncode = resolved
+            if not preload_content:
+                return iter([message + '\n'])
+            print(message, file=output_stream, flush=True)
+            return returncode if follow else None
+        job_id = resolved
+        name = None
+    return _tail_logs(name=name,
+                      job_id=job_id,
+                      follow=follow,
+                      controller=controller,
+                      refresh=refresh,
+                      tail=tail,
+                      tail_offset=tail_offset,
+                      output_stream=output_stream,
+                      task=task,
+                      preload_content=preload_content)
+
+
+@rest.retry_transient_errors()
+def _tail_logs(
+    name: Optional[str],
+    job_id: Optional[int],
+    follow: bool,
+    controller: bool,
+    refresh: bool,
+    tail: Optional[int],
+    tail_offset: Optional[int],
+    output_stream: Optional['io.TextIOBase'],
+    task: Optional[Union[str, int]],
+    preload_content: bool,
+) -> Union[Optional[int], Iterator[Optional[str]]]:
     body = payloads.JobsLogsBody(
         name=name,
         job_id=job_id,
