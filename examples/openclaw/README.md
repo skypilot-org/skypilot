@@ -57,6 +57,30 @@ openclaw channels login --channel telegram   # requires a BotFather token
 openclaw channels login --channel discord
 ```
 
+### Add Twitter search
+
+Install [TweetClaw](https://github.com/Xquik-dev/tweetclaw) to search X posts,
+inspect public profiles, and monitor keywords from OpenClaw:
+
+```bash
+openclaw plugins install clawhub:@xquik/tweetclaw
+```
+
+The local `explore` tool works without credentials. To enable live calls, create
+an Xquik API key, then enter it without adding it to shell history:
+
+```bash
+read -rsp "Xquik API key: " XQUIK_API_KEY && printf '\n'
+openclaw config set plugins.entries.tweetclaw.config.apiKey "$XQUIK_API_KEY"
+unset XQUIK_API_KEY
+openclaw config set tools.alsoAllow '["explore", "tweetclaw"]'
+```
+
+TweetClaw asks for approval before account changes, paid requests, exports,
+monitors, and other sensitive calls. See its
+[OpenClaw setup guide](https://github.com/Xquik-dev/tweetclaw/blob/master/docs/openclaw-setup.md)
+for the current configuration and trust model.
+
 ### Lock down access
 
 The default configuration uses `pairing` mode - unknown senders receive a code and are ignored until you approve them. Review and approve pending requests:
@@ -147,7 +171,7 @@ To use a custom bucket name:
 
 ```bash
 sky launch -c openclaw openclaw.yaml \
-  --env ANTHROPIC_API_KEY \
+  --secret ANTHROPIC_API_KEY \
   --env OPENCLAW_BUCKET=my-openclaw-bucket
 ```
 
