@@ -118,7 +118,12 @@ def _fill_in_env_vars(
     def replace_var(match):
         var_name = match.group(1)
         # If the variable isn't in the dictionary, return it unchanged
-        return task_envs.get(var_name, match.group(0))
+        value = task_envs.get(var_name)
+        if value is None:
+            return match.group(0)
+        # The replacement is inserted into an existing JSON string, so escape
+        # its contents without adding another pair of quotes.
+        return json.dumps(value)[1:-1]
 
     # Pattern for valid env var names in bash.
     pattern = r'\$\{?\b([a-zA-Z_][a-zA-Z0-9_]*)\b\}?'
