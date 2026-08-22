@@ -12,7 +12,15 @@ import os
 import re
 from typing import Any, Dict, List, Optional
 
-from nebius.api.nebius.billing.v1alpha1 import OfferType
+from google.protobuf import any_pb2
+from nebius.api.nebius.billing.v1 import OfferType
+
+try:
+    # nebius >= 0.4 generates its own google.protobuf wrappers; the module
+    # does not exist on the 0.3.x SDK generation.
+    from nebius.api.google.protobuf import Any as _SdkAny
+except ImportError:
+    _SdkAny = None
 
 from sky.adaptors import nebius
 from sky.adaptors.nebius import billing
@@ -84,6 +92,131 @@ def _format_decimal(value: decimal.Decimal) -> str:
     return f'{integer_part}.{decimal_part}'
 
 
+def _pack_any(message: Any) -> Any:
+    """Packs an SDK message into a protobuf Any across SDK generations."""
+    # nebius 0.3.x message classes wrap the underlying protobuf object in
+    # __pb2_message__; pack it into a plain protobuf Any, which the 0.3.x
+    # ResourceSpec accepts directly.
+    pb2_message = getattr(message, '__pb2_message__', None)
+    if pb2_message is not None:
+        any_message = any_pb2.Any()
+        any_message.Pack(pb2_message)
+        return any_message
+    # nebius >= 0.4.3 messages own their protobuf state directly (no wrapped
+    # pb2 object) and must be packed into the SDK's own Any wrapper: the new
+    # generation's ResourceSpec rejects a plain protobuf Any.
+    if _SdkAny is None:
+        raise TypeError(
+            'Cannot pack Nebius SDK message of type '
+            f'{type(message)!r}: the installed nebius SDK exposes neither '
+            '__pb2_message__ nor the nebius.api.google.protobuf.Any wrapper.')
+    return _SdkAny(
+        type_url=f'type.googleapis.com/{type(message).__PROTO_FULL_NAME__}',
+        value=message.SerializeToString())
+
+
+def _make_create_instance_request(parent_id: str, platform_name: str,
+                                  preset_name: str, preemptible: bool) -> Any:
+    """Builds a Compute CreateInstanceRequest for billing estimates."""
+    compute_v1 = compute()
+    instance_spec_kwargs = {
+        'resources': compute_v1.ResourcesSpec(
+            platform=platform_name,
+            preset=preset_name,
+        )
+    }
+    if preemptible:
+        instance_spec_kwargs['preemptible'] = compute_v1.PreemptibleSpec(
+            on_preemption=compute_v1.PreemptibleSpec.PreemptionPolicy.STOP)
+
+    return compute_v1.CreateInstanceRequest(
+        metadata=nebius_common().ResourceMetadata(parent_id=parent_id,),
+        spec=compute_v1.InstanceSpec(**instance_spec_kwargs),
+    )
+
+
+def _make_estimate_batch_request(
+        parent_id: str,
+        platform_name: str,
+        preset_name: str,
+        preemptible: bool,
+        offer_types: Optional[List[OfferType]] = None) -> Any:
+    """Builds a billing v1 EstimateBatchRequest for one compute preset."""
+    billing_v1 = billing()
+    instance_request = _make_create_instance_request(parent_id, platform_name,
+                                                     preset_name, preemptible)
+    estimate_spec = billing_v1.ResourceSpec(spec=_pack_any(instance_request))
+    aggregation_unit_value = (
+        billing_v1.FilterAggregationUnit.FilterAggregationUnitValue)
+    return billing_v1.EstimateBatchRequest(
+        resource_specs=[estimate_spec],
+        offer_types=offer_types,
+        filter_aggregation_unit=billing_v1.FilterAggregationUnit(
+            filter_aggregation_unit_values=[
+                aggregation_unit_value.FILTER_AGGREGATION_UNIT_HOUR
+            ]),
+    )
+
+
+def _get_hourly_total_cost(response: Any) -> decimal.Decimal:
+    """Extracts hourly aggregate cost from a billing v1 estimate response."""
+    total_costs = getattr(response, 'total_costs', None)
+    if not total_costs:
+        raise ValueError('Nebius billing estimate did not return total costs.')
+
+    hourly_costs = []
+    available_units = []
+    for total_cost in total_costs:
+        aggregation_unit = getattr(total_cost, 'aggregation_unit', None)
+        unit = getattr(aggregation_unit, 'unit', None)
+        if unit is not None:
+            available_units.append(unit)
+        if unit == 'hour':
+            hourly_costs.append(total_cost)
+
+    if len(hourly_costs) != 1:
+        raise ValueError(
+            'Nebius billing estimate expected exactly one hourly total cost, '
+            f'got {len(hourly_costs)}. Available units: {available_units}.')
+
+    hourly_cost = hourly_costs[0]
+    cost_type = None
+    which_oneof = getattr(hourly_cost, 'WhichOneof', None)
+    if callable(which_oneof):
+        cost_type = which_oneof('cost_type')
+    else:
+        which_field = getattr(hourly_cost, 'which_field_in_oneof', None)
+        if callable(which_field):
+            cost_type = which_field('cost_type')
+
+    if cost_type is not None:
+        if cost_type == 'range':
+            raise ValueError(
+                'Nebius billing estimate returned a range hourly total cost; '
+                'expected a general total cost.')
+        if cost_type != 'general':
+            raise ValueError(
+                'Nebius billing estimate hourly total cost has no general '
+                'cost.')
+
+    general = getattr(hourly_cost, 'general', None)
+    if general is None:
+        if getattr(hourly_cost, 'range', None) is not None:
+            raise ValueError(
+                'Nebius billing estimate returned a range hourly total cost; '
+                'expected a general total cost.')
+        raise ValueError(
+            'Nebius billing estimate hourly total cost has no general cost.')
+
+    total = getattr(general, 'total', None)
+    cost = getattr(total, 'cost', None)
+    if cost is None or cost == '':
+        raise ValueError(
+            'Nebius billing estimate hourly total cost is missing cost.')
+
+    return decimal.Decimal(cost)
+
+
 def estimate_platforms(
         platforms: List[Any], parent_id: str, region: str,
         offer_types: Optional[List[OfferType]]) -> List[PresetInfo]:
@@ -116,35 +249,18 @@ async def _estimate_platforms_async(
     for platform in platforms:
         platform_name = platform.metadata.name
         for preset in platform.spec.presets:
-            # Form the specification for the price request
-            estimate_spec = billing().ResourceSpec(
-                compute_instance_spec=compute().CreateInstanceRequest(
-                    metadata=nebius_common().ResourceMetadata(
-                        parent_id=parent_id,),
-                    spec=compute().InstanceSpec(
-                        resources=compute().ResourcesSpec(
-                            platform=platform_name,
-                            preset=preset.name,
-                        )),
-                ))
-            price_request = billing().EstimateBatchRequest(
-                resource_specs=[estimate_spec], offer_types=offer_types)
-
-            # Form the specification for the spot price request
-            spot_estimate_spec = billing().ResourceSpec(
-                compute_instance_spec=compute().CreateInstanceRequest(
-                    metadata=nebius_common().ResourceMetadata(
-                        parent_id=parent_id,),
-                    spec=compute().InstanceSpec(
-                        resources=compute().ResourcesSpec(
-                            platform=platform_name,
-                            preset=preset.name,
-                        ),
-                        preemptible=compute().PreemptibleSpec(priority=1),
-                    ),
-                ))
-            spot_price_request = billing().EstimateBatchRequest(
-                resource_specs=[spot_estimate_spec], offer_types=offer_types)
+            price_request = _make_estimate_batch_request(
+                parent_id,
+                platform_name,
+                preset.name,
+                preemptible=False,
+                offer_types=offer_types)
+            spot_price_request = _make_estimate_batch_request(
+                parent_id,
+                platform_name,
+                preset.name,
+                preemptible=True,
+                offer_types=offer_types)
 
             # Start future for each preset
             futures.append((
@@ -185,9 +301,8 @@ async def _estimate_platforms_async(
                 if platform_name.startswith('gpu-') else '',
                 accelerator_name=platform_name.split('-')[1].upper()
                 if platform_name.startswith('gpu-') else '',
-                price_hourly=decimal.Decimal(
-                    normal.hourly_cost.general.total.cost),
-                spot_price=decimal.Decimal(spot.hourly_cost.general.total.cost),
+                price_hourly=_get_hourly_total_cost(normal),
+                spot_price=_get_hourly_total_cost(spot),
             ))
     return result
 
