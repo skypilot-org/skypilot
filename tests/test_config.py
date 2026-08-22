@@ -7,6 +7,8 @@ import textwrap
 from unittest import mock
 
 import pytest
+import sqlalchemy
+from sqlalchemy import orm
 
 import sky
 from sky import skypilot_config
@@ -996,6 +998,97 @@ def test_hierarchical_server_config(monkeypatch, tmp_path):
         ('gcp', 'labels', 'env-user-config'), None) is None
     assert skypilot_config.get_nested(
         ('gcp', 'labels', 'env-project-config'), None) is None
+
+
+def test_get_server_config_includes_db_config(monkeypatch, tmp_path):
+    """get_server_config() overlays the DB-stored config onto the file
+    config, the same way the server composes its config at startup."""
+    monkeypatch.delenv(skypilot_config.ENV_VAR_GLOBAL_CONFIG, raising=False)
+    monkeypatch.setenv(constants.ENV_VAR_IS_SKYPILOT_SERVER, 'true')
+
+    # On a DB-backed deployment, the on-disk server config file holds only
+    # the db connection, which parse_and_validate_config_file() pops out
+    # into an env var, leaving the file config empty.
+    server_config_path = tmp_path / 'server_config.yaml'
+    server_config_path.write_text(
+        textwrap.dedent("""\
+            db: sqlite:///unused-marker.db
+            """))
+    monkeypatch.setattr(skypilot_config, '_GLOBAL_CONFIG_PATH',
+                        server_config_path)
+    monkeypatch.setenv(constants.ENV_VAR_DB_CONNECTION_URI,
+                       'sqlite:///unused-marker.db')
+
+    # Set up a sqlite engine with the config_yaml_table schema, and a row
+    # holding the DB-stored server config.
+    db_path = tmp_path / 'config.db'
+    engine = sqlalchemy.create_engine(f'sqlite:///{db_path}')
+    skypilot_config.config_yaml_table.metadata.create_all(engine)
+    db_config_yaml = yaml_utils.dump_yaml_str(
+        {'aws': {
+            'labels': {
+                'from-db': 'present'
+            }
+        }})
+    with orm.Session(engine) as session:
+        session.execute(
+            sqlalchemy.insert(skypilot_config.config_yaml_table).values(
+                key=skypilot_config.API_SERVER_CONFIG_KEY,
+                value=db_config_yaml))
+        session.commit()
+
+    class _StubDBManager:
+        """Stub matching the `_db_manager.get_engine()` interface used by
+        `_compose_server_config()`."""
+
+        def get_engine(self):
+            return engine
+
+    monkeypatch.setattr(skypilot_config, '_db_manager', _StubDBManager())
+
+    config = skypilot_config.get_server_config()
+    assert config.get_nested(('aws', 'labels', 'from-db'), None) == 'present'
+
+
+def test_get_server_config_unaffected_by_request_overrides(
+        monkeypatch, tmp_path):
+    """get_server_config() re-reads the server config fresh from the file
+    (and DB, when applicable), so it must not observe a request-scoped
+    client config override installed via `override_skypilot_config`. This is
+    the reason the debug dump uses `get_server_config()` and not
+    `to_dict()`."""
+    monkeypatch.delenv(skypilot_config.ENV_VAR_GLOBAL_CONFIG, raising=False)
+    monkeypatch.delenv(skypilot_config.ENV_VAR_PROJECT_CONFIG, raising=False)
+    monkeypatch.setenv(constants.ENV_VAR_IS_SKYPILOT_SERVER, 'true')
+
+    server_config_path = tmp_path / 'server_config.yaml'
+    server_config_path.write_text(
+        textwrap.dedent("""\
+            aws:
+                labels:
+                    from-server: present
+            """))
+    monkeypatch.setattr(skypilot_config, '_GLOBAL_CONFIG_PATH',
+                        server_config_path)
+    skypilot_config.reload_config()
+    assert skypilot_config.get_server_config().get_nested(
+        ('aws', 'labels', 'from-server'), None) == 'present'
+
+    with skypilot_config.override_skypilot_config(
+        {'aws': {
+            'labels': {
+                'from-client': 'present'
+            }
+        }}):
+        server_config = skypilot_config.get_server_config()
+        assert server_config.get_nested(
+            ('aws', 'labels', 'from-client'), None) is None
+        assert server_config.get_nested(('aws', 'labels', 'from-server'),
+                                        None) == 'present'
+
+        client_config = skypilot_config.to_dict()
+        assert client_config.get_nested(('aws', 'labels', 'from-client'),
+                                        None) == 'present'
 
 
 def test_config_save_validator(monkeypatch, tmp_path):
