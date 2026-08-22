@@ -2397,3 +2397,77 @@ class TestJobGroupPhase2FailurePropagation:
                 await JobController._run_job_group(controller)
 
         controller._cleanup_job_group_clusters.assert_not_awaited()
+
+
+class TestRecordFinalJobStatus:
+    """Tests for ControllerManager._record_final_job_status.
+
+    A failed best-effort cleanup must not rewrite a job's legitimate
+    terminal state (SUCCEEDED / CANCELLED / FAILED / ...) with
+    FAILED_CONTROLLER (#10456, #9189). FAILED_CONTROLLER is reserved for
+    jobs that never reached a terminal state.
+    """
+
+    _CLEANUP_FAILURE = 'Failed to clean up, resources may have leaked: boom'
+
+    def _make_manager(self):
+        manager = MagicMock(spec=ControllerManager)
+        manager._record_final_job_status = (
+            ControllerManager._record_final_job_status.__get__(
+                manager, ControllerManager))
+        return manager
+
+    async def _run(self, status, cleanup_failure):
+        manager = self._make_manager()
+        with patch('sky.jobs.controller.managed_job_state') as state:
+            # Keep the real enum/statuses on the mocked module.
+            state.ManagedJobStatus = managed_job_state.ManagedJobStatus
+            state.get_status_async = AsyncMock(return_value=status)
+            state.set_failed_async = AsyncMock()
+            state.set_cleanup_failed_async = AsyncMock()
+            await manager._record_final_job_status(1, cleanup_failure)
+        return state
+
+    @pytest.mark.asyncio
+    async def test_terminal_job_keeps_status_on_cleanup_failure(self):
+        """CANCELLED + failed cleanup: no FAILED_CONTROLLER overwrite."""
+        state = await self._run(managed_job_state.ManagedJobStatus.CANCELLED,
+                                self._CLEANUP_FAILURE)
+        state.set_failed_async.assert_not_awaited()
+        state.set_cleanup_failed_async.assert_awaited_once_with(
+            1, self._CLEANUP_FAILURE)
+
+    @pytest.mark.asyncio
+    async def test_terminal_job_no_cleanup_failure_is_noop(self):
+        state = await self._run(managed_job_state.ManagedJobStatus.SUCCEEDED,
+                                None)
+        state.set_failed_async.assert_not_awaited()
+        state.set_cleanup_failed_async.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_non_terminal_job_fails_with_cleanup_reason(self):
+        """A job that never reached a terminal state is genuinely the
+        controller's responsibility: FAILED_CONTROLLER with the cleanup
+        failure as the reason."""
+        state = await self._run(managed_job_state.ManagedJobStatus.RUNNING,
+                                self._CLEANUP_FAILURE)
+        state.set_cleanup_failed_async.assert_not_awaited()
+        state.set_failed_async.assert_awaited_once_with(
+            1,
+            task_id=None,
+            failure_type=managed_job_state.ManagedJobStatus.FAILED_CONTROLLER,
+            failure_reason=self._CLEANUP_FAILURE,
+            override_terminal=True)
+
+    @pytest.mark.asyncio
+    async def test_non_terminal_job_fails_with_generic_reason(self):
+        state = await self._run(managed_job_state.ManagedJobStatus.RECOVERING,
+                                None)
+        state.set_cleanup_failed_async.assert_not_awaited()
+        state.set_failed_async.assert_awaited_once_with(
+            1,
+            task_id=None,
+            failure_type=managed_job_state.ManagedJobStatus.FAILED_CONTROLLER,
+            failure_reason=('Unexpected error occurred. For details, '
+                            'run: sky jobs logs --controller 1'),
+            override_terminal=False)
