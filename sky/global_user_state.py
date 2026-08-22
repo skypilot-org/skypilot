@@ -2999,14 +2999,27 @@ def _volume_record_from_row(row: Any) -> Dict[str, Any]:
 
 
 @metrics_lib.time_me
-def get_volumes(is_ephemeral: Optional[bool] = None) -> List[Dict[str, Any]]:
+def get_volumes(
+    is_ephemeral: Optional[bool] = None,
+    workspaces_filter: Optional[Set[str]] = None,
+) -> List[Dict[str, Any]]:
+    """Get volumes from the database.
+
+    Args:
+        is_ephemeral: If specified, only include volumes with this
+            ephemerality.
+        workspaces_filter: If specified, only include volumes whose workspace
+            is in this set. Use workspace names.
+    """
     engine = _db_manager.get_engine()
     with orm.Session(engine) as session:
-        if is_ephemeral is None:
-            rows = session.query(volume_table).all()
-        else:
-            rows = session.query(volume_table).filter_by(
-                is_ephemeral=int(is_ephemeral)).all()
+        query = session.query(volume_table)
+        if is_ephemeral is not None:
+            query = query.filter_by(is_ephemeral=int(is_ephemeral))
+        if workspaces_filter is not None:
+            query = query.filter(
+                volume_table.c.workspace.in_(workspaces_filter))
+        rows = query.all()
     return [_volume_record_from_row(row) for row in rows]
 
 

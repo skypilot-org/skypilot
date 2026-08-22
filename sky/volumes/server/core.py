@@ -19,6 +19,8 @@ from sky.utils import rich_utils
 from sky.utils import status_lib
 from sky.utils import ux_utils
 from sky.utils import volume as volume_utils
+from sky.workspaces import constants as workspace_constants
+from sky.workspaces import core as workspaces_core
 
 logger = sky_logging.init_logger(__name__)
 
@@ -206,6 +208,9 @@ def volume_list(
 ) -> List[responses.VolumeRecord]:
     """Gets volumes from the database.
 
+    Only volumes in workspaces the calling user can read are returned, matching
+    how clusters and managed jobs are already listed.
+
     Args:
         is_ephemeral: Whether to include ephemeral volumes.
         refresh: If True, refresh volume state from cloud APIs before returning.
@@ -236,10 +241,25 @@ def volume_list(
             }
         ]
     """
+    # Visibility, not usability: read-only workspaces' volumes must be listed.
+    # See the same call in jobs/server/core.py for managed jobs and in
+    # backend_utils for clusters.
+    accessible_workspaces = workspaces_core.get_accessible_workspace_names(
+        action=workspace_constants.WORKSPACE_ACTION_READ)
     if refresh:
-        volume_refresh()
+        # Keep the reconcile proportional to what this caller can see: a user
+        # who reads one workspace should not drive cloud API calls against
+        # contexts reachable only from another. volume_refresh groups its cloud
+        # calls by the (context, namespace) pairs of the volumes it is handed,
+        # so narrowing the set narrows the calls. The daemon in
+        # sky/server/daemons.py still refreshes the whole table.
+        volume_refresh(volume_names=[
+            volume['name'] for volume in global_user_state.get_volumes(
+                workspaces_filter=accessible_workspaces)
+        ])
     with rich_utils.safe_status(ux_utils.spinner_message('Listing volumes')):
-        volumes = global_user_state.get_volumes(is_ephemeral=is_ephemeral)
+        volumes = global_user_state.get_volumes(
+            is_ephemeral=is_ephemeral, workspaces_filter=accessible_workspaces)
         all_users = global_user_state.get_all_users()
         user_map = {user.id: user.name for user in all_users}
 
