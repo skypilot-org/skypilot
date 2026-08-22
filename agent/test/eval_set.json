@@ -78,5 +78,13 @@
   {
     "query": "I need to set up Weights & Biases experiment tracking for my training runs. Can you help me integrate wandb into my training script and configure the project dashboard?",
     "should_trigger": false
+  },
+  {
+    "query": "I have a bunch of sbatch scripts we use on our university cluster — 2 nodes, 8 gpus each, srun python train.py at the bottom. can you convert one of them into whatever format skypilot wants so I can submit the same job?",
+    "should_trigger": true
+  },
+  {
+    "query": "our slurmctld keeps dropping nodes into drain state after every reboot and scontrol update doesn't stick. how do I stop slurm from draining them on boot?",
+    "should_trigger": false
   }
 ]
