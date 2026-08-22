@@ -1596,5 +1596,55 @@ class TestDashboardConfigUrlTemplateValidation(unittest.TestCase):
             config, 'test_config')
 
 
+class TestControllerBucketSchema(unittest.TestCase):
+    """Tests for jobs.bucket / serve.bucket URL scheme validation."""
+
+    def setUp(self):
+        self.config_schema = schemas.get_config_schema()
+
+    def _validate(self, config):
+        jsonschema.validate(instance=config, schema=self.config_schema)
+
+    def test_accepts_all_writable_store_schemes(self):
+        for scheme in ('s3', 'gs', 'https', 'r2', 'cos', 'oci', 'nebius', 'cw',
+                       'vastdata'):
+            for section in ('jobs', 'serve'):
+                self._validate(
+                    {section: {
+                        'bucket': f'{scheme}://my-bucket/sub/path'
+                    }})
+
+    def test_rejects_unsupported_schemes(self):
+        # hf:// is read-only and volumes are not buckets; neither can serve
+        # as a staging bucket. ftp:// and bare paths are plain invalid.
+        for bucket in ('hf://org/repo', 'volume://vol1', 'ftp://host/bucket',
+                       'my-bucket/path', 's3:/missing-slash'):
+            for section in ('jobs', 'serve'):
+                with self.assertRaises(jsonschema.exceptions.ValidationError):
+                    self._validate({section: {'bucket': bucket}})
+
+    def test_pattern_covers_every_writable_store_prefix(self):
+        """Fails when a store is added without extending the bucket pattern.
+
+        schemas.py cannot import sky.data.storage (circular import), so the
+        scheme alternation there is a literal. This test derives the ground
+        truth from the store registry and catches drift.
+        """
+        # pylint: disable-next=import-outside-toplevel
+        from sky.data import storage
+        read_only_or_non_bucket = {
+            storage.StoreType.HF, storage.StoreType.VOLUME
+        }
+        for store_type in storage.StoreType:
+            if store_type in read_only_or_non_bucket:
+                continue
+            prefix = store_type.store_prefix()
+            for section in ('jobs', 'serve'):
+                self._validate(
+                    {section: {
+                        'bucket': f'{prefix}my-bucket/sub/path'
+                    }})
+
+
 if __name__ == "__main__":
     unittest.main()
