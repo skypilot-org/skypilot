@@ -15,6 +15,7 @@ from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import slurm
 from sky.skylet import constants
+from sky.skylet import runtime_utils
 from sky.utils import annotations
 from sky.utils import common_utils
 from sky.utils import gpu_names
@@ -1318,9 +1319,13 @@ def slurm_node_info(
 
 
 def is_inside_slurm_cluster() -> bool:
-    # Check for the marker file in the current home directory. When run by
-    # the skylet on a compute node, the HOME environment variable is set to
-    # the cluster's sky home directory by the SlurmCommandRunner.
+    # New allocations write the marker under the runtime dir's .sky/.
+    # That path resolves in both the host and container shapes.
+    # Older allocations only wrote it to $HOME, so keep that as a fallback.
+    if os.path.exists(
+            runtime_utils.get_runtime_dir_path(
+                os.path.join('.sky', SLURM_MARKER_FILE))):
+        return True
     marker_file = os.path.join(os.path.expanduser('~'), SLURM_MARKER_FILE)
     return os.path.exists(marker_file)
 
