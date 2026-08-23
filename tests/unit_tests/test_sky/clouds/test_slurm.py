@@ -774,6 +774,35 @@ class TestSlurmGPUDefaults:
         assert instance_type.memory == expected_memory
 
 
+class TestIsInsideSlurmCluster:
+    """Test the two-layer Slurm marker resolution in slurm_utils."""
+
+    def test_runtime_dir_marker_detects_container_shape(self, tmp_path,
+                                                        monkeypatch):
+        """Marker in the runtime dir is found through SKY_RUNTIME_DIR."""
+        runtime_dir = tmp_path / 'rt'
+        (runtime_dir / '.sky').mkdir(parents=True)
+        monkeypatch.setenv(constants.SKY_RUNTIME_DIR_ENV_VAR_KEY,
+                           str(runtime_dir))
+        monkeypatch.setenv('HOME', str(tmp_path / 'home-without-marker'))
+
+        assert not slurm_utils.is_inside_slurm_cluster()
+        (runtime_dir / '.sky' / slurm_utils.SLURM_MARKER_FILE).touch()
+        assert slurm_utils.is_inside_slurm_cluster()
+
+    def test_home_marker_fallback(self, tmp_path, monkeypatch):
+        """Clusters without the runtime-dir marker still detect via HOME."""
+        home = tmp_path / 'cluster-home'
+        home.mkdir()
+        monkeypatch.setenv(constants.SKY_RUNTIME_DIR_ENV_VAR_KEY,
+                           str(tmp_path / 'rt-without-marker'))
+        monkeypatch.setenv('HOME', str(home))
+
+        assert not slurm_utils.is_inside_slurm_cluster()
+        (home / slurm_utils.SLURM_MARKER_FILE).touch()
+        assert slurm_utils.is_inside_slurm_cluster()
+
+
 class TestGRESGPUParsing:
     """Test slurm_utils.get_gpu_type_and_count."""
 
@@ -1478,6 +1507,7 @@ class TestCreateVirtualInstance:
                                                       config)
         assert ('--container-mounts="/home/testuser:/home/testuser,'
                 '/tmp/ccache_$(id -u):/var/cache/ccache,'
+                '/tmp/test-cluster-mounted/.sky:/tmp/test-cluster-mounted/.sky,'
                 '/host/data:/data:ro,/nvme/$SLURM_JOB_ID:/scratch,'
                 '/host/models:/models:ro"' in mounted_script)
 
@@ -1540,6 +1570,109 @@ class TestCreateVirtualInstance:
             'test-cluster-fractional-cpus', config)
 
         assert '#SBATCH --cpus-per-task=2' in written_script
+
+    @patch('sky.provision.slurm.instance._wait_for_job_nodes')
+    @patch('sky.provision.slurm.instance.slurm_utils.get_proctrack_type')
+    @patch('sky.provision.slurm.instance.slurm_utils.get_partition_info')
+    @patch('sky.provision.slurm.instance.slurm.SlurmClient')
+    @patch('sky.provision.slurm.instance.command_runner.'
+           'SlurmLoginNodeCommandRunner')
+    def test_skylet_keeper_block_non_container(self, mock_ssh_runner,
+                                               mock_slurm_client,
+                                               mock_get_partition_info,
+                                               mock_get_proctrack_type,
+                                               mock_wait_for_job_nodes):
+        """Keeper step precedes the final anchor and runs the start spec."""
+        self._setup_mocks(mock_ssh_runner, mock_slurm_client,
+                          mock_get_partition_info, 'cpus')
+        mock_get_proctrack_type.return_value = 'cgroup'
+
+        config = self._make_non_container_config(cpus=2)
+        script = self._run_and_capture_script('test-keeper', config)
+
+        keeper_idx = script.index(
+            '( while true; do srun --overlap --jobid=$SLURM_JOB_ID '
+            '--nodes=1 --ntasks=1 --nodelist=$SKY_HEAD_NODE')
+        anchor_idx = script.rindex('sleep infinity\n')
+        # The keeper is backgrounded before the allocation-lifetime anchor.
+        assert keeper_idx < anchor_idx
+        keeper_line = script[keeper_idx:script.index('\n', keeper_idx)]
+        # Outer retry loop: the batch script restarts the step itself.
+        assert keeper_line.endswith('sleep 5; done ) &')
+        # Head node is resolved in-script from the allocation.
+        head_idx = script.index(
+            'SKY_HEAD_NODE=$(scontrol show hostnames "$SLURM_JOB_NODELIST" '
+            '| head -n1)')
+        assert head_idx < keeper_idx
+        # The loop runs the start spec from the runtime dir, foreground.
+        assert constants.SKYLET_START_FILE in keeper_line
+        assert 'while true; do' in keeper_line
+        # The keeper sets HOME; attempt_skylet may write the spec
+        # in-container where HOME is /root.
+        assert ('HOME=/home/testuser/.sky_clusters/test-keeper bash'
+                in keeper_line)
+        # Non-container keeper must not attach to a pyxis container.
+        assert '--container-name' not in keeper_line
+
+    @patch('sky.provision.slurm.instance._wait_for_job_nodes')
+    @patch('sky.provision.slurm.instance.slurm_utils.get_proctrack_type')
+    @patch('sky.provision.slurm.instance.slurm_utils.get_partition_info')
+    @patch('sky.provision.slurm.instance.slurm.SlurmClient')
+    @patch('sky.provision.slurm.instance.command_runner.'
+           'SlurmLoginNodeCommandRunner')
+    def test_skylet_keeper_block_container(self, mock_ssh_runner,
+                                           mock_slurm_client,
+                                           mock_get_partition_info,
+                                           mock_get_proctrack_type,
+                                           mock_wait_for_job_nodes):
+        """Container keeper stays host-side: no container attach args."""
+        from sky.provision import common
+
+        self._setup_mocks(mock_ssh_runner, mock_slurm_client,
+                          mock_get_partition_info, 'gpu')
+        mock_get_proctrack_type.return_value = 'cgroup'
+
+        config = common.ProvisionConfig(
+            provider_config={
+                'ssh': {
+                    'hostname': 'login.example.com',
+                    'port': '22',
+                    'user': 'testuser',
+                    'private_key': '/path/to/key',
+                },
+                'cluster': 'test-slurm',
+                'partition': 'gpu',
+                'provision_timeout': 300,
+            },
+            authentication_config={},
+            docker_config={},
+            node_config={
+                'cpus': 4,
+                'memory': 16,
+                'image_id': 'nvcr.io/nvidia/pytorch:24.01-py3',
+            },
+            count=1,
+            tags={},
+            resume_stopped_nodes=False,
+            ports_to_open_on_launch=None,
+        )
+        script = self._run_and_capture_script('test-keeper-ctr', config)
+
+        keeper_idx = script.index(
+            '( while true; do srun --overlap --jobid=$SLURM_JOB_ID '
+            '--nodes=1 --ntasks=1 --nodelist=$SKY_HEAD_NODE')
+        anchor_idx = script.rindex('\nwait "$CONTAINER_PID"\n')
+        assert keeper_idx < anchor_idx
+        keeper_line = script[keeper_idx:script.index('\n', keeper_idx)]
+        # The keeper never attaches the container: Slurm CLIs are host-only.
+        assert '--container-name' not in keeper_line
+        assert '--container-remap-root' not in keeper_line
+        assert constants.SKYLET_START_FILE in keeper_line
+        # The keeper sets the host-correct HOME when running the spec.
+        assert ('HOME=/home/testuser/.sky_clusters/test-keeper-ctr bash'
+                in keeper_line)
+        # Outer retry loop: the batch script restarts the step itself.
+        assert keeper_line.endswith('sleep 5; done ) &')
 
     @pytest.mark.parametrize('memory_gb,expected_mem_mb', [
         (0.5, 512),

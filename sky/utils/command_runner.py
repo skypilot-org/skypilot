@@ -2295,7 +2295,11 @@ exec {ssh_command} srun --unbuffered --quiet --overlap {extra_srun_args}\\
             assert self.container_args is not None, (
                 '_run_via_srun with in_container=True called but '
                 'container_args not set')
-            inner_cmd = f'{self._ENV_SETUP} && {cmd}'
+            # Export the runtime dir for keeper files.
+            # They must resolve to the same paths on the host and container.
+            inner_cmd = (f'export {constants.SKY_RUNTIME_DIR_ENV_VAR_KEY}='
+                         f'"{self.skypilot_runtime_dir}" && '
+                         f'{self._ENV_SETUP} && {cmd}')
             extra_srun_args = f'{self.container_args} '
         else:
             inner_cmd = (f'export {constants.SKY_RUNTIME_DIR_ENV_VAR_KEY}='
