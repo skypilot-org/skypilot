@@ -75,7 +75,8 @@ def _start_skylet_via_keeper(port: int) -> None:
 
     # Require this cluster's PID file.
     # A process scan can match another cluster's skylet.
-    # Enroot shares the PID namespace, so the host PID is valid in the container.
+    # Enroot shares the PID namespace, so the host PID is valid in the
+    # container.
     deadline = time.monotonic() + 30
     while time.monotonic() < deadline:
         try:
