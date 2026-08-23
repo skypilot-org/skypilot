@@ -415,11 +415,27 @@ def check_capabilities(
     if workspace is not None:
         # Check only the specified workspace
         if workspace not in available_workspaces:
+            # `available_workspaces` is this caller's access-filtered set, not
+            # the server's configured workspace set, so a miss here means
+            # either "no such workspace" or "this identity has no grant on
+            # it". Reporting it as "not found in SkyPilot configuration"
+            # points debugging at the config even when the workspace is
+            # present and correct, and when the filtered set is empty the old
+            # message rendered as `Available workspaces: `, which reads as
+            # "this server has none configured".
+            user = common_utils.get_current_user()
+            identity = repr(user.name) if user.name else f'id {user.id!r}'
+            if available_workspaces:
+                accessible = ('Accessible workspaces: '
+                              f'{", ".join(available_workspaces)}.')
+            else:
+                accessible = 'No workspaces are accessible to this identity.'
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(
-                    f'Workspace {workspace!r} not found in SkyPilot '
-                    'configuration. '
-                    f'Available workspaces: {", ".join(available_workspaces)}')
+                    f'Workspace {workspace!r} is not accessible to user '
+                    f'{identity}. {accessible} A workspace is inaccessible '
+                    'when it is absent from the SkyPilot configuration or '
+                    'when the caller has no grant on it.')
 
         # Always show details for single specified check (if verbose)
         hide_per_cloud_details_flag = False
