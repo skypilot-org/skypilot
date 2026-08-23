@@ -56,6 +56,7 @@ CONTAINER_START=$SECONDS
 echo "[container] Initializing test-cluster on all nodes"
 rm -rf /home/testuser/.sky_clusters/test-cluster/.sky_container_init_done
 mkdir -p /home/testuser/.sky_clusters/test-cluster/.sky_container_init_done
+CONTAINER_PIDS=()
 srun --overlap --unbuffered --nodes=1 --ntasks-per-node=1 --container-image='nvcr.io#nvidia/pytorch:24.01-py3' --container-name=test-cluster:create --container-mounts="/home/testuser:/home/testuser,/tmp/ccache_$(id -u):/var/cache/ccache,/tmp/test-cluster/.sky:/tmp/test-cluster/.sky" --container-remap-root --no-container-mount-home --container-writable bash -c 'set -e
 echo "[container-init] Starting..."
 INIT_START=$SECONDS
@@ -64,22 +65,48 @@ apt-get install -y ca-certificates rsync curl git wget fuse
 echo '"'"'alias sudo=""'"'"' >> ~/.bashrc
 echo "[container-init] Packages installed in $((SECONDS - INIT_START))s"
 touch /home/testuser/.sky_clusters/test-cluster/.sky_container_init_done/$SLURM_PROCID && sleep infinity' &
-CONTAINER_PID=$!
+CONTAINER_PIDS+=("$!")
 while true; do
-  num_ready=$(ls -1 /home/testuser/.sky_clusters/test-cluster/.sky_container_init_done 2>/dev/null | wc -l)
-  if [ "$num_ready" -ge "1" ]; then
-    break
-  fi
-  if ! kill -0 $CONTAINER_PID 2>/dev/null; then
-    echo "[container] ERROR: Container initialization failed."
-    echo "[container] Only $num_ready of 1 node(s) completed initialization."
-    wait $CONTAINER_PID
-    exit $?
-  fi
+  for container_pid in "${CONTAINER_PIDS[@]}"; do
+    if ! kill -0 "$container_pid" 2>/dev/null; then
+      wait "$container_pid"
+      container_rc=$?
+      if [ "$container_rc" -eq 0 ]; then container_rc=1; fi
+      echo "[container] ERROR: Container initialization failed with exit code $container_rc."
+      exit "$container_rc"
+    fi
+  done
+  shopt -s nullglob
+  ready_markers=(/home/testuser/.sky_clusters/test-cluster/.sky_container_init_done/*)
+  num_ready=${#ready_markers[@]}
+  if [ "$num_ready" -ge "1" ]; then break; fi
   sleep 1
 done
+srun --overlap --unbuffered --nodes=1 --ntasks-per-node=1 bash -c 'global_target=pyxis_test-cluster
+job_target="pyxis_${SLURM_JOB_ID}_"test-cluster
+for ((attempt = 1; attempt <= 30; attempt++)); do
+    container_pid=
+    while read -r name pid rest; do
+        if [ "$name" = "$global_target" ] || [ "$name" = "$job_target" ]; then
+            container_pid=$pid
+        fi
+    done < <(enroot list -f)
+    case "$container_pid" in
+        '"'"''"'"'|*[!0-9]*) ;;
+        *)
+            if kill -0 "$container_pid" 2>/dev/null; then
+                exit 0
+            fi
+            ;;
+    esac
+    sleep 1
+done
+echo "[container] ERROR: Container is not running as $global_target or $job_target." >&2
+exit 1
+'
 echo "[container] Ready in $((SECONDS - CONTAINER_START))s"
-touch /home/testuser/.sky_clusters/test-cluster/.sky_slurm_container /home/testuser/.sky_clusters/test-cluster/.sky_sbatch_ready
+printf '%s\n' nvcr.io/nvidia/pytorch:24.01-py3 > /home/testuser/.sky_clusters/test-cluster/.sky_slurm_container
+touch /home/testuser/.sky_clusters/test-cluster/.sky_sbatch_ready
 
 # Host-side keeper step that starts skylet and restarts it if it dies.
 SKY_HEAD_NODE=$(scontrol show hostnames "$SLURM_JOB_NODELIST" | head -n1)

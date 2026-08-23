@@ -427,6 +427,29 @@ limited to Docker Hub, AWS ECR, GCP Artifact Registry, and NVIDIA NGC.
     Container support requires the `Pyxis <https://github.com/NVIDIA/pyxis>`_
     SPANK plugin to be installed on your Slurm cluster.
 
+Stopping and restarting containers
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Container clusters on Slurm support ``sky stop`` and ``sky start``. When a
+cluster stops, SkyPilot exports each node's container filesystem to shared
+storage and releases the Slurm allocation. Starting the cluster requests a new
+allocation and restores each node from its exported filesystem.
+
+Installed packages, files under ``/root``, and other changes to the container
+root filesystem are preserved. The user's home directory remains available
+through its existing shared-filesystem mount. Running processes and memory are
+not preserved, and ``/tmp`` and ``/run`` are recreated when the cluster starts.
+
+Snapshots are stored under
+``<workdir>/.sky_snapshots/<cluster-name-on-cloud>``. If ``workdir`` is not
+configured, SkyPilot uses the remote user's home directory. A snapshot uses
+approximately as much shared storage as the container root filesystem and
+continues to consume that storage while the cluster is stopped. ``sky down``
+deletes the snapshot.
+
+Stopping is available only when the cluster uses a container image and Pyxis
+is installed. Slurm clusters that run directly on the host cannot be stopped.
+
 Private registries
 ^^^^^^^^^^^^^^^^^^
 

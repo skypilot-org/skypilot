@@ -36,8 +36,9 @@ class Slurm(clouds.Cloud):
     _CLOUD_UNSUPPORTED_FEATURES = {
         clouds.CloudImplementationFeatures.AUTOSTOP: 'Slurm does not '
                                                      'support autostop.',
-        clouds.CloudImplementationFeatures.STOP: 'Slurm does not support '
-                                                 'stopping instances.',
+        clouds.CloudImplementationFeatures.STOP:
+            'Stopping is supported only for container clusters on Slurm '
+            'clusters with Pyxis installed.',
         clouds.CloudImplementationFeatures.SPOT_INSTANCE: 'Spot instances are '
                                                           'not supported in '
                                                           'Slurm.',
@@ -67,6 +68,7 @@ class Slurm(clouds.Cloud):
     # Used for early exit in _unsupported_features_for_resources().
     _DYNAMICALLY_CHECKED_FEATURES = {
         clouds.CloudImplementationFeatures.DOCKER_IMAGE,
+        clouds.CloudImplementationFeatures.STOP,
         clouds.CloudImplementationFeatures.STORAGE_MOUNTING,
     }
     _MAX_CLUSTER_NAME_LEN_LIMIT = 120
@@ -116,12 +118,20 @@ class Slurm(clouds.Cloud):
             clusters = cls.existing_allowed_clusters()
         else:
             clusters = [cluster]
+        uses_container = resources.extract_docker_image() is not None
+        dynamically_checked_features = cls._DYNAMICALLY_CHECKED_FEATURES.copy()
+        if not uses_container:
+            dynamically_checked_features.remove(
+                clouds.CloudImplementationFeatures.STOP)
         for c in clusters:
             try:
                 # Docker image support requires the Pyxis SPANK plugin.
                 if slurm_utils.check_pyxis_enabled(c):
                     unsupported.pop(
                         clouds.CloudImplementationFeatures.DOCKER_IMAGE, None)
+                    if uses_container:
+                        unsupported.pop(clouds.CloudImplementationFeatures.STOP,
+                                        None)
                 # Storage mounting requires FUSE (/dev/fuse).
                 if slurm_utils.check_fuse_enabled(c):
                     unsupported.pop(
@@ -131,8 +141,7 @@ class Slurm(clouds.Cloud):
                 logger.debug(f'Failed to check cluster features on {c}: '
                              f'{common_utils.format_exception(e)}')
             # Stop early if all dynamically checked features are resolved.
-            if not any(f in unsupported
-                       for f in cls._DYNAMICALLY_CHECKED_FEATURES):
+            if not any(f in unsupported for f in dynamically_checked_features):
                 break
         return unsupported
 
