@@ -424,6 +424,86 @@ You can easily manage dozens, hundreds, or thousands of managed jobs at once. Th
 
 To increase the maximum number of jobs that can run at once, see :ref:`consolidation-mode-resource-planning`.
 
+.. _num-jobs:
+
+Submitting many jobs at once with ``--num-jobs``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+When every job runs the same YAML and differs only in which slice of the work it
+processes, use :code:`--num-jobs` to submit them all with one command:
+
+.. code-block:: console
+
+  $ sky jobs launch --num-jobs 10 batch-job.yaml
+
+This submits 10 independent managed jobs. Each job is launched on its own
+cluster and is recovered independently if it is preempted or fails — exactly
+as if you had run :code:`sky jobs launch` ten times.
+
+Each job is given two environment variables that let it work out which slice of
+the work is its own:
+
+- :code:`$SKYPILOT_JOB_RANK`: this job's rank, an integer from :code:`0` to :code:`num_jobs - 1`.
+- :code:`$SKYPILOT_NUM_JOBS`: the total number of jobs submitted.
+
+Both are always set, so the same YAML also works when launched as a single job
+(rank :code:`0` of :code:`1` job).
+
+For example, to evaluate 1000 prompts across 10 jobs, job rank :code:`i` can
+process prompts :code:`i * 100` through :code:`(i + 1) * 100`:
+
+.. code-block:: yaml
+
+  # batch-job.yaml
+  name: batch-workload
+
+  resources:
+    accelerators: {H100:1, H200:1}
+
+  run: |
+    echo "Job rank: $SKYPILOT_JOB_RANK out of $SKYPILOT_NUM_JOBS"
+    echo "Processing prompts from $(($SKYPILOT_JOB_RANK * 100)) to $((($SKYPILOT_JOB_RANK + 1) * 100))"
+    # Actual business logic here...
+    echo "Job $SKYPILOT_JOB_RANK finished"
+
+Submitting it produces one job per rank:
+
+.. code-block:: console
+
+  $ sky jobs launch --num-jobs 10 batch-job.yaml
+  YAML to run: batch-job.yaml
+  Submitting 10 managed jobs. Each job will be launched on its own cluster.
+  Managed job 'batch-workload' will be launched on (estimated):
+  ...
+  Launching 10 managed jobs 'batch-workload'. Proceed? [Y/n]: Y
+  Jobs submitted with IDs: 1-10.
+  📋 Useful Commands
+  ├── Show all jobs:                      https://<api-server>/dashboard/jobs
+  ├── To stream job logs:                 sky jobs logs <job-id>
+  ├── To stream controller logs:          sky jobs logs --controller <job-id>
+  └── To cancel all these jobs:           sky jobs cancel <job-ids>
+
+All 10 jobs are submitted immediately, but they do not necessarily all start at
+once: how many run concurrently is bounded by the jobs controller's capacity.
+Jobs beyond that limit stay :code:`PENDING` and start as capacity frees up. See
+:ref:`consolidation-mode-resource-planning` to raise the limit.
+
+.. tip::
+
+  :code:`--num-jobs` also works with :ref:`Pools <pool>`:
+  :code:`sky jobs launch --pool gpu-pool --num-jobs 10 batch-job.yaml` runs the
+  jobs on the pool's pre-provisioned workers instead of launching a new cluster
+  per job, which avoids paying the cold-start cost ten times. In that case
+  concurrency is bounded by the number of workers in the pool. See
+  :ref:`pool-scale-out`.
+
+.. note::
+
+  Use :code:`--num-jobs` when the jobs share one YAML and differ only by rank.
+  If each job needs different resources, hyperparameters, or environment
+  variables, launch them separately instead — see :ref:`many-jobs` for that
+  workflow.
+
 
 .. _pipeline:
 
