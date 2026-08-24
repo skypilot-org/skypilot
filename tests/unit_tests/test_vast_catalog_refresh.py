@@ -3,6 +3,7 @@
 import csv
 import importlib
 from pathlib import Path
+from unittest import mock
 
 import pandas as pd
 import pytest
@@ -127,6 +128,36 @@ def test_fetch_vast_catalog_and_save_catalog_are_reusable(
     vast_refresh.validate_catalog(catalog_path)
 
 
+def test_fetch_vast_catalog_keeps_countries_distinct(monkeypatch):
+    """Asian and European country rows never collapse into continent buckets."""
+    shared_offer = {
+        'gpu_name': 'A100',
+        'num_gpus': 1,
+        'cpu_cores': 4,
+        'cpu_ram': 8192,
+        'search': {
+            'totalHour': .8
+        },
+        'min_bid': .8,
+        'hosting_type': 1,
+        'gpu_total_ram': 81920,
+    }
+    offers = [{
+        **shared_offer, 'geolocation': region
+    } for region in ('Jiangsu, CN, AS', 'Japan, JP, AS', 'France, FR, EU')]
+    client = type('Client', (),
+                  {'search_offers': lambda _self, **_kwargs: offers})()
+    monkeypatch.setattr(fetch_vast.vast, 'vast', lambda: client)
+
+    rows = fetch_vast.fetch_vast_catalog()
+
+    assert {row['Region'] for row in rows} == {
+        'Jiangsu, CN, AS',
+        'Japan, JP, AS',
+        'France, FR, EU',
+    }
+
+
 def test_refresh_catalog_replaces_validated_staged_file(monkeypatch, tmp_path):
     """A successful Vast refresh atomically installs only validated output."""
     catalog_path = tmp_path / 'vast' / 'vms.csv'
@@ -165,3 +196,20 @@ def test_refresh_catalog_skips_without_vast_credential_file(monkeypatch):
                         lambda: pytest.fail('refresh must not fetch'))
 
     assert not vast_refresh.refresh_catalog()
+
+
+def test_refresh_catalog_force_bypasses_fresh_catalog(monkeypatch, tmp_path):
+    """A feasibility retry refreshes a valid catalog inside its age window."""
+    catalog_path = tmp_path / 'vast' / 'vms.csv'
+    catalog_path.parent.mkdir()
+    _write_catalog(catalog_path)
+    monkeypatch.setattr(vast_refresh.catalog_common, 'get_catalog_path',
+                        lambda _name: str(catalog_path))
+    monkeypatch.setattr(vast_refresh, 'has_credentials', lambda: True)
+    fetch_catalog = mock.Mock(return_value=object())
+    monkeypatch.setattr(fetch_vast, 'fetch_vast_catalog', fetch_catalog)
+    monkeypatch.setattr(fetch_vast, 'save_catalog',
+                        lambda _rows, output: _write_catalog(Path(output)))
+
+    assert vast_refresh.refresh_catalog(force=True)
+    fetch_catalog.assert_called_once_with()

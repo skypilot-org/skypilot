@@ -2827,6 +2827,11 @@ can be overridden per task via :ref:`config flag <config-client-cli-flag>`.
 SkyPilot uses stable catalog instance types for planning, then searches the
 live Vast marketplace immediately before creating an instance. Marketplace
 offer IDs are never stored as SkyPilot instance types.
+For a task without an explicit region, the live query can select any matching
+Vast country; catalog regions and prices are planning metadata, not live
+availability guarantees. An explicit Vast region remains a country constraint.
+If an unscoped targeted query has no match, SkyPilot forces one catalog refresh
+and retries before reporting the sanitized live-offer diagnostics.
 
 Default: ``false``
 

@@ -31,6 +31,7 @@ jobs:
               tests/unit_tests/test_vast_catalog_stability.py
               tests/unit_tests/test_vast_catalog_refresh.py
               tests/unit_tests/test_sky/server/test_daemons.py
+              tests/unit_tests/test_sky/utils/test_debug_utils.py::TestRequestBodyAllowlistCoverage
             test-name: "Vast Catalog Tests"
             # pytest loads the shared AWS fixtures from tests/conftest.py.
             extras: vast,aws

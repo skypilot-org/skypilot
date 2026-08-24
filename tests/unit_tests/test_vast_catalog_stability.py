@@ -14,6 +14,7 @@ from sky import exceptions
 from sky.adaptors import vast as vast_adaptor
 from sky.catalog import common
 from sky.catalog import vast_catalog
+from sky.catalog import vast_refresh
 from sky.clouds import vast as vast_cloud
 from sky.provision.vast import utils as vast_utils
 from sky.resources import Resources
@@ -152,45 +153,53 @@ def test_vast_feasible_resources_reports_catalog_fetch_failure(monkeypatch):
 
 
 def test_vast_country_extraction_uses_country_not_continent():
-    """Raw catalog regions must resolve FR, not their trailing EU continent."""
+    """Raw catalog regions resolve their country, never the trailing continent."""
+    assert vast_adaptor.extract_country_code('Jiangsu, CN, AS') == 'CN'
+    assert vast_adaptor.extract_country_code('Japan, JP, AS') == 'JP'
     assert vast_adaptor.extract_country_code('France, FR, EU') == 'FR'
 
     with pytest.raises(ValueError, match='country'):
         vast_adaptor.extract_country_code('France, FRA, EU')
 
 
-def test_vast_live_snapshot_uses_one_broad_query_per_request(monkeypatch):
-    """Multiple candidate checks share one broad live API response per request."""
+def test_vast_targeted_live_query_is_cached_per_requirements(monkeypatch):
+    """Identical requirements reuse one unbounded, server-filtered live query."""
     client = mock.Mock(spec=['search_offers'])
     client.search_offers.return_value = []
     monkeypatch.setattr(vast_adaptor, 'vast', lambda: client)
+    requirements = vast_adaptor.get_offer_requirements(
+        '1x-A100-4-8192',
+        region='France, FR, EU',
+        disk_size=64,
+        datacenter_only=False,
+        reliable_hosts=False,
+        network_tier='standard',
+    )
 
-    assert vast_adaptor.get_live_offer_snapshot().offers == ()
-    assert vast_adaptor.get_live_offer_snapshot().offers == ()
+    assert vast_adaptor.get_live_offer_matches(requirements).offers == ()
+    assert vast_adaptor.get_live_offer_matches(requirements).offers == ()
 
     client.search_offers.assert_called_once_with(
-        query='chunked=true georegion=true', order='dph_total', limit=10000)
+        query=vast_adaptor.build_offer_query(requirements), order='dph_total')
 
 
-def test_vast_live_admission_reuses_one_snapshot_for_static_candidates(
-        monkeypatch):
-    """Static candidates share one live snapshot and retain only exact offers."""
+def test_vast_live_admission_uses_targeted_country_query(monkeypatch):
+    """An explicit Vast region remains a strict live country constraint."""
     monkeypatch.setattr(
         vast_catalog,
         'get_instance_type_for_accelerator',
-        lambda *_args, **_kwargs: (['1x-A100-4-8192', '1x-A100-8-16384'], []),
+        lambda *_args, **_kwargs: (['1x-A100-4-8192'], []),
     )
-    snapshot = vast_adaptor.LiveOfferSnapshot(({
+    client = mock.Mock(spec=['search_offers'])
+    client.search_offers.return_value = [{
         'gpu_name': 'A100',
         'num_gpus': 1,
         'cpu_cores': 4,
         'cpu_ram': 8192,
         'disk_space': 64,
         'geolocation': 'Paris, FR, EU',
-    },), None)
-    get_live_offer_snapshot = mock.Mock(return_value=snapshot)
-    monkeypatch.setattr(vast_adaptor, 'get_live_offer_snapshot',
-                        get_live_offer_snapshot)
+    }]
+    monkeypatch.setattr(vast_adaptor, 'vast', lambda: client)
 
     feasible_resources = vast_cloud.Vast()._get_feasible_launchable_resources(
         Resources(
@@ -203,37 +212,34 @@ def test_vast_live_admission_reuses_one_snapshot_for_static_candidates(
     assert [
         resource.instance_type for resource in feasible_resources.resources_list
     ] == ['1x-A100-4-8192']
-    assert get_live_offer_snapshot.call_count == 1
+    assert 'geolocation=FR' in client.search_offers.call_args.kwargs['query']
 
 
-def test_vast_live_admission_pins_unscoped_resources_to_live_region(
+def test_vast_explicit_country_does_not_require_a_static_catalog_region():
+    """A valid Vast country remains selectable when no catalog row lists it."""
+    assert vast_cloud.Vast().validate_region_zone('Nowhere, ZZ, XX',
+                                                  None) == ('Nowhere, ZZ, XX',
+                                                            None)
+
+
+def test_vast_live_admission_uses_any_for_unscoped_marketplace_capacity(
         monkeypatch):
-    """A live French offer cannot leave a feasible resource free to use Spain."""
+    """Unscoped Vast capacity may use live offers outside catalog locations."""
     monkeypatch.setattr(
         vast_catalog,
         'get_instance_type_for_accelerator',
         lambda *_args, **_kwargs: (['1x-A100-4-8192'], []),
     )
-    monkeypatch.setattr(
-        vast_catalog,
-        'get_region_zones_for_instance_type',
-        lambda *_args, **_kwargs: [
-            clouds.Region('France, FR, EU'),
-            clouds.Region('Spain, ES, EU'),
-        ],
-    )
-    monkeypatch.setattr(
-        vast_adaptor,
-        'get_live_offer_snapshot',
-        lambda: vast_adaptor.LiveOfferSnapshot(({
-            'gpu_name': 'A100',
-            'num_gpus': 1,
-            'cpu_cores': 4,
-            'cpu_ram': 8192,
-            'disk_space': 64,
-            'geolocation': 'Paris, FR, EU',
-        },), None),
-    )
+    client = mock.Mock(spec=['search_offers'])
+    client.search_offers.return_value = [{
+        'gpu_name': 'A100',
+        'num_gpus': 1,
+        'cpu_cores': 4,
+        'cpu_ram': 8192,
+        'disk_space': 64,
+        'geolocation': 'Zurich, CH, EU',
+    }]
+    monkeypatch.setattr(vast_adaptor, 'vast', lambda: client)
 
     feasible_resources = vast_cloud.Vast()._get_feasible_launchable_resources(
         Resources(
@@ -243,16 +249,57 @@ def test_vast_live_admission_pins_unscoped_resources_to_live_region(
         ))
 
     assert [resource.region for resource in feasible_resources.resources_list
-           ] == ['France, FR, EU']
+           ] == ['any']
+    assert 'geolocation' not in client.search_offers.call_args.kwargs['query']
 
 
-def test_vast_explicit_instance_type_fails_closed_when_live_query_fails(
+def test_vast_live_admission_retries_once_after_forced_catalog_refresh(
         monkeypatch):
-    """Explicit Vast types remain inadmissible when the live lookup errors."""
-    snapshot = vast_adaptor.LiveOfferSnapshot(offers=(),
-                                              error='Vast API timed out')
-    monkeypatch.setattr(vast_adaptor, 'get_live_offer_snapshot',
-                        lambda: snapshot)
+    """An unscoped live miss refreshes catalog metadata and retries once."""
+    monkeypatch.setattr(
+        vast_catalog,
+        'get_instance_type_for_accelerator',
+        lambda *_args, **_kwargs: (['1x-A100-4-8192'], []),
+    )
+    client = mock.Mock(spec=['search_offers'])
+    client.search_offers.side_effect = [[],
+                                        [{
+                                            'gpu_name': 'A100',
+                                            'num_gpus': 1,
+                                            'cpu_cores': 4,
+                                            'cpu_ram': 8192,
+                                            'disk_space': 64,
+                                            'geolocation': 'Zurich, CH, EU',
+                                        }]]
+    monkeypatch.setattr(vast_adaptor, 'vast', lambda: client)
+    refresh_catalog = mock.Mock(return_value=True)
+    monkeypatch.setattr(vast_refresh, 'refresh_catalog', refresh_catalog)
+
+    feasible_resources = vast_cloud.Vast()._get_feasible_launchable_resources(
+        Resources(
+            cloud=vast_cloud.Vast(),
+            accelerators={'A100': 1},
+            disk_size=64,
+        ))
+
+    assert [resource.region for resource in feasible_resources.resources_list
+           ] == ['any']
+    refresh_catalog.assert_called_once_with(force=True)
+    assert client.search_offers.call_count == 2
+
+
+def test_vast_live_admission_reports_sanitized_rejection_counts(monkeypatch):
+    """A live no-match names failed constraints without exposing offer fields."""
+    client = mock.Mock(spec=['search_offers'])
+    client.search_offers.return_value = [{
+        'gpu_name': 'A100',
+        'num_gpus': 1,
+        'cpu_cores': 4,
+        'cpu_ram': 8192,
+        'disk_space': 63,
+        'geolocation': 'Private locality, FR, EU',
+    }]
+    monkeypatch.setattr(vast_adaptor, 'vast', lambda: client)
 
     feasible_resources = vast_cloud.Vast()._get_feasible_launchable_resources(
         Resources(
@@ -264,8 +311,25 @@ def test_vast_explicit_instance_type_fails_closed_when_live_query_fails(
 
     assert feasible_resources.resources_list == []
     assert feasible_resources.hint is not None
-    assert 'Live Vast availability query failed' in feasible_resources.hint
-    assert 'Retry the request' in feasible_resources.hint
+    assert 'offers examined=1' in feasible_resources.hint
+    assert 'disk=1' in feasible_resources.hint
+    assert 'Private locality' not in feasible_resources.hint
+
+
+def test_vast_any_region_stays_launchable_and_uses_catalog_estimate(
+        monkeypatch):
+    """The internal any region stays launchable without a catalog any row."""
+    catalog_df = pd.read_csv(io.StringIO(_VALID_VAST_CATALOG_CSV))
+    catalog_df['Region'] = 'France, FR, EU'
+    monkeypatch.setattr(vast_catalog, '_df', catalog_df)
+    vast_catalog._catalog_df.cache_clear()
+
+    regions = vast_cloud.Vast.regions_with_offering('1x-A100-4-8192', None,
+                                                    False, 'any', None)
+
+    assert regions == [clouds.Region('any')]
+    assert vast_cloud.Vast().instance_type_to_hourly_cost(
+        '1x-A100-4-8192', False, 'Nowhere, ZZ, XX') == .8
 
 
 def test_vast_live_offer_match_enforces_host_and_network_policy():
@@ -523,6 +587,15 @@ def test_live_query_survives_vast_sdk_preprocessing(monkeypatch):
         "id": 123,
         "gpu_name": "RTX A6000",
         "num_gpus": 1,
+        "cpu_cores": 4,
+        "cpu_ram": 8192,
+        "disk_space": 30,
+        "geolocation": "US",
+        "verified": True,
+        "datacenter": True,
+        "hosting_type": 1,
+        "inet_down": 1000,
+        "inet_up": 1000,
         "dph_total": 0.4,
         "reliability": 0.99,
     }]

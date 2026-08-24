@@ -219,7 +219,8 @@ def test_vast_catalog_refresh_daemon_delegates_to_catalog_worker():
                           if daemon.id == 'vast-catalog-refresh-daemon')
     assert catalog_daemon.name.value == 'vast-catalog-refresh'
     assert catalog_daemon.event_fn is daemons.refresh_vast_catalog_event
-    assert catalog_daemon.should_skip is daemons.should_skip_vast_catalog_refresh
+    assert (catalog_daemon.should_skip is
+            daemons.should_skip_vast_catalog_refresh)
     assert catalog_daemon.name in daemons.HIDDEN_REQUEST_NAMES
 
 

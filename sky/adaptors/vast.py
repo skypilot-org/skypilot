@@ -30,11 +30,13 @@ class VastOfferRequirements:
 
 
 @dataclasses.dataclass(frozen=True)
-class LiveOfferSnapshot:
-    """The request-scoped Vast marketplace response and any query failure."""
+class LiveOfferQueryResult:
+    """The matching live Vast offers and sanitized query diagnostics."""
 
     offers: Tuple[Dict[str, Any], ...]
     error: Optional[str]
+    offers_examined: int
+    rejection_counts: Tuple[Tuple[str, int], ...]
 
 
 def import_package(func):
@@ -183,71 +185,92 @@ def build_offer_query(requirements: VastOfferRequirements) -> str:
     return ' '.join(query)
 
 
-def offer_matches_requirements(offer: Any,
-                               requirements: VastOfferRequirements) -> bool:
-    """Return whether a live offer satisfies every SkyPilot Vast policy."""
+def _offer_rejection_reason(
+        offer: Any, requirements: VastOfferRequirements) -> Optional[str]:
+    """Return a sanitized first unmet requirement for a live Vast offer."""
     if not isinstance(offer, dict):
-        return False
+        return 'malformed'
     try:
         num_gpus = int(offer['num_gpus'])
     except (KeyError, TypeError, ValueError):
-        return False
+        return 'malformed'
     if (_normalize_gpu_name(offer.get('gpu_name')) != _normalize_gpu_name(
             requirements.gpu_name) or num_gpus != requirements.num_gpus):
-        return False
-    if not all((
-            _minimum_offer_value(offer, 'cpu_cores', requirements.cpu_cores),
-            _minimum_offer_value(offer, 'cpu_ram', requirements.cpu_ram_mib),
-            _minimum_offer_value(offer, 'disk_space', requirements.disk_size),
-    )):
-        return False
+        return 'gpu'
+    if not _minimum_offer_value(offer, 'cpu_cores', requirements.cpu_cores):
+        return 'cpu'
+    if not _minimum_offer_value(offer, 'cpu_ram', requirements.cpu_ram_mib):
+        return 'ram'
+    if not _minimum_offer_value(offer, 'disk_space', requirements.disk_size):
+        return 'disk'
     if requirements.country_code is not None:
         try:
             offer_country = extract_country_code(offer.get('geolocation'))
         except ValueError:
-            return False
+            return 'country'
         if offer_country != requirements.country_code:
-            return False
+            return 'country'
 
     requires_datacenter = (requirements.datacenter_only or
                            requirements.reliable_hosts)
     if (requires_datacenter and
         (not _is_true(offer, 'datacenter') or
          not _minimum_offer_value(offer, 'hosting_type', 1))):
-        return False
+        return 'host_policy'
     if requirements.reliable_hosts:
         if (not _is_true(offer, 'verified') or
                 not _minimum_offer_value(offer, 'reliability', _MIN_RELIABILITY)
                 or not _minimum_offer_value(offer, 'inet_down',
                                             _MIN_NETWORK_BANDWIDTH_MBPS)):
-            return False
+            return 'host_policy'
     if requirements.network_tier == 'best':
         if (not _minimum_offer_value(offer, 'inet_down',
                                      _MIN_NETWORK_BANDWIDTH_MBPS) or
                 not _minimum_offer_value(offer, 'inet_up',
                                          _MIN_NETWORK_BANDWIDTH_MBPS)):
-            return False
-    return True
+            return 'network'
+    return None
 
 
-@annotations.lru_cache(scope='request', maxsize=1)
-def get_live_offer_snapshot() -> LiveOfferSnapshot:
-    """Fetch one broad live Vast offer snapshot for the current request."""
+def offer_matches_requirements(offer: Any,
+                               requirements: VastOfferRequirements) -> bool:
+    """Return whether a live offer satisfies every SkyPilot Vast policy."""
+    return _offer_rejection_reason(offer, requirements) is None
+
+
+@annotations.lru_cache(scope='request')
+def get_live_offer_matches(
+        requirements: VastOfferRequirements) -> LiveOfferQueryResult:
+    """Fetch and locally validate targeted live offers for this requirement."""
     try:
-        offers = vast().search_offers(query='chunked=true georegion=true',
-                                      order='dph_total',
-                                      limit=10000)
+        offers = vast().search_offers(query=build_offer_query(requirements),
+                                      order='dph_total')
     except Exception as exc:  # pylint: disable=broad-except
-        return LiveOfferSnapshot(
+        return LiveOfferQueryResult(
             offers=(),
-            error=(f'{type(exc).__name__}: {exc}'),
+            error=f'Vast live-offer query failed ({type(exc).__name__}).',
+            offers_examined=0,
+            rejection_counts=(),
         )
     if not isinstance(offers, list):
-        return LiveOfferSnapshot(
+        return LiveOfferQueryResult(
             offers=(),
             error=('Vast returned an unexpected live-offer response.'),
+            offers_examined=0,
+            rejection_counts=(),
         )
-    return LiveOfferSnapshot(
-        offers=tuple(offer for offer in offers if isinstance(offer, dict)),
+    matching_offers = []
+    rejection_counts: Dict[str, int] = {}
+    for offer in offers:
+        rejection_reason = _offer_rejection_reason(offer, requirements)
+        if rejection_reason is None:
+            matching_offers.append(offer)
+            continue
+        rejection_counts[rejection_reason] = (
+            rejection_counts.get(rejection_reason, 0) + 1)
+    return LiveOfferQueryResult(
+        offers=tuple(matching_offers),
         error=None,
+        offers_examined=len(offers),
+        rejection_counts=tuple(sorted(rejection_counts.items())),
     )

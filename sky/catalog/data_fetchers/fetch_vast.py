@@ -12,7 +12,7 @@ import json
 import math
 import os
 import re
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Set, Tuple
 
 from sky.adaptors import vast
 
@@ -52,7 +52,7 @@ def dot_get(d: dict, key: str) -> Any:
 
 def fetch_vast_catalog() -> List[Dict[str, Any]]:
     """Fetch and normalize the current Vast offers into catalog rows."""
-    seen = set()
+    seen: Set[Tuple[str, str, str]] = set()
     # InstanceList is the buffered list to emit to
     # the CSV.
     csv_list = []
@@ -147,16 +147,20 @@ def fetch_vast_catalog() -> List[Dict[str, Any]]:
         max_bid = max([x.get('SpotPrice') for x in to_list])
         for instance in to_list:
             hosting_type = instance.get('HostingType', 0)
-            stub = (f'{instance["InstanceType"]} '
-                    f'{instance["Region"][-2:]} {hosting_type}')
-            if stub in seen:
-                printstub = f'{stub}#print'
-                if printstub not in seen:
-                    instance['SpotPrice'] = f'{max_bid:.2f}'
-                    csv_list.append(instance)
-                    seen.add(printstub)
+            raw_region = instance['Region']
+            try:
+                country_code = vast.extract_country_code(raw_region)
+            except ValueError:
+                geographic_key = f'raw:{str(raw_region).strip().casefold()}'
             else:
-                seen.add(stub)
+                geographic_key = country_code or 'any'
+            deduplication_key = (instance['InstanceType'], geographic_key,
+                                 str(hosting_type))
+            if deduplication_key in seen:
+                continue
+            instance['SpotPrice'] = f'{max_bid:.2f}'
+            csv_list.append(instance)
+            seen.add(deduplication_key)
 
     return csv_list
 

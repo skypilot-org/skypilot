@@ -364,6 +364,8 @@ def should_skip_vast_catalog_refresh():
     """Skip the Vast catalog daemon when no Vast credential file exists."""
     return not os.path.isfile(
         os.path.expanduser('~/.config/vastai/vast_api_key'))
+
+
 def server_heartbeat_event():
     """Periodically send server-side plugin metrics to Loki."""
     # pylint: disable=import-outside-toplevel

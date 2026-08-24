@@ -102,8 +102,16 @@ def get_hourly_cost(instance_type: str,
     if zone is not None:
         with ux_utils.print_exception_no_traceback():
             raise ValueError('Vast does not support zones.')
-    return common.get_hourly_cost_impl(_catalog_df(), instance_type, use_spot,
-                                       region, zone)
+    try:
+        return common.get_hourly_cost_impl(_catalog_df(), instance_type,
+                                           use_spot, region, zone)
+    except ValueError:
+        if region is None:
+            raise
+        # A live offer may exist in a country absent from the refreshed
+        # metadata. Use the global catalog price as an estimate in that case.
+        return common.get_hourly_cost_impl(_catalog_df(), instance_type,
+                                           use_spot, None, zone)
 
 
 def get_vcpus_mem_from_instance_type(
