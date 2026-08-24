@@ -4069,8 +4069,7 @@ if __name__ == '__main__':
     logger.info(f'Max db connections: {max_db_connections}')
 
     # Reserve memory for jobs and serve/pool controller in consolidation mode.
-    # setup_consolidation_mode_on_startup() above has already written the
-    # consolidation signal file, so the reservation reads the effective state.
+    # setup_consolidation_mode_on_startup() above has written the signal file.
     reserved_memory_mb = (
         controller_utils.compute_memory_reserved_for_controllers(
             # For jobs controller, we need to reserve for both jobs and

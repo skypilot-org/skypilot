@@ -1387,16 +1387,11 @@ def _controller_headroom_mb(reserve_extra_for_pool: bool) -> float:
 
 
 def _consolidation_worker_reserved_mb(reserve_extra_for_pool: bool) -> float:
-    """Memory withheld from worker sizing when controllers run in-process.
+    """Headroom plus the share set aside for the in-process controllers.
 
-    Headroom plus the share set aside for the controllers themselves. Scales
-    with system memory via _CONSOLIDATION_WORKER_MEMORY_FRACTION, so a machine
-    that can run more concurrent jobs also holds back more memory for their
-    controller processes instead of a flat constant.
-
-    In low-memory scenarios (total <= MIN_AVAIL_MB) the controller share is
-    skipped so workers get all available memory; otherwise workers are
-    guaranteed at least MIN_AVAIL_MB and capped at the fraction.
+    Scales with system memory, so a machine that can run more concurrent jobs
+    also holds back more memory for their controller processes. Below
+    MIN_AVAIL_MB the controller share is skipped so workers get everything.
     """
     headroom = _controller_headroom_mb(reserve_extra_for_pool)
     total_memory_mb = common_utils.get_mem_size_gb() * 1024 - headroom
@@ -1412,18 +1407,19 @@ def compute_memory_reserved_for_controllers(
     """Memory (MB) to withhold from API server worker sizing.
 
     In consolidation mode the jobs and serve/pool controllers run as processes
-    inside the API server, so the memory they will take has to be withheld
-    before the executor pools are sized. Returns the same quantity
+    inside the API server, so their memory has to be withheld before the
+    executor pools are sized. Returns the same quantity
     _get_total_usable_memory_mb() assumes the workers left behind, so both
-    sides of the split agree on one number.
-
-    Returns 0 outside consolidation mode, where the controllers run on their
-    own cluster and cost the API server nothing.
+    sides of the split agree on one number. Returns 0 outside consolidation
+    mode, where the controllers run on their own cluster.
     """
+    if not env_options.Options.MEMORY_AWARE_WORKER_SIZING.get():
+        # Only reserved inside a controller process.
+        if os.environ.get(constants.OVERRIDE_CONSOLIDATION_MODE) is None:
+            return 0.0
+        return _controller_headroom_mb(reserve_extra_for_pool)
     # Either kind of consolidation puts controller processes in the API
-    # server's own memory. Jobs consolidation is the signal-file-backed source
-    # of truth (and is forced True inside a controller process); serve/pool
-    # consolidation is a plain config read.
+    # server's own memory.
     if not is_jobs_consolidation_mode() and not _is_consolidation_mode(
             pool=False):
         return 0.0
@@ -1435,10 +1431,8 @@ def _get_total_usable_memory_mb(pool: bool, consolidation_mode: bool) -> float:
     total_memory_mb = common_utils.get_mem_size_gb() * 1024 - headroom
     if not consolidation_mode:
         return total_memory_mb
-    # Size the workers against the same reservation the API server itself uses,
-    # then hand the controllers whatever the workers did not take. Both sides
-    # must read from one number, otherwise each sizes itself against memory the
-    # other has already claimed.
+    # Size the workers against the same reservation the API server uses, then
+    # hand the controllers whatever the workers did not take.
     config = server_config.compute_server_config(
         deploy=True,
         quiet=True,
@@ -1451,9 +1445,10 @@ def _get_total_usable_memory_mb(pool: bool, consolidation_mode: bool) -> float:
     used += ((config.short_worker_config.garanteed_parallelism +
               config.short_worker_config.burstable_parallelism) *
              server_config.SHORT_WORKER_MEM_GB * 1024)
-    # Server workers are resident too, and the parent process along with them.
-    used += ((config.num_server_workers + 1) *
-             server_config.SERVER_WORKER_MEM_GB * 1024)
+    if env_options.Options.MEMORY_AWARE_WORKER_SIZING.get():
+        # Server workers are resident too, and the parent process with them.
+        used += ((config.num_server_workers + 1) *
+                 server_config.SERVER_WORKER_MEM_GB * 1024)
     return total_memory_mb - used
 
 
