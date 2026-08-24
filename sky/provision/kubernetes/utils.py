@@ -199,6 +199,11 @@ class KubernetesHighPerformanceNetworkType(enum.Enum):
                     'NCCL_SOCKET_IFNAME': 'eth0',
                     # GPU-to-CPU (C2C) GPUDirect over the Grace link.
                     'NCCL_NET_GDR_C2C': '1',
+                    # With NET_GDR_C2C on, NCCL's GDR cutoff is PATH_P2C, and
+                    # a GPU whose NIC sits one PCIe host bridge away falls
+                    # outside it -- GDR silently off. PHB widens the cutoff by
+                    # exactly that one level; nothing else changes.
+                    'NCCL_NET_GDR_LEVEL': 'PHB',
                     'NCCL_IB_GID_INDEX': '3',
                     'NCCL_IB_TC': '41',
                     'NCCL_IB_SL': '0',

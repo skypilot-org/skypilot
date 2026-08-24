@@ -5510,6 +5510,43 @@ class TestOCINetworkEnvVars:
         assert env['NCCL_DMABUF_ENABLE'] == '1'
         assert env['NCCL_IB_TIMEOUT'] == '22'
 
+    def test_gb300_widens_gdr_level(self):
+        """GB300 sets NCCL_NET_GDR_LEVEL=PHB, and only GB300.
+
+        With NET_GDR_C2C on, NCCL's GDR cutoff is PATH_P2C; a GPU whose NIC is
+        one PCIe host bridge away lands outside it and loses GDR silently. PHB
+        widens the cutoff by that one level. Scoped to GB300: the GB200 and
+        RoCEv2 profiles mirror OCI's published sets, which omit it.
+        """
+        assert self._NET.get_network_env_vars(
+            'GB300')['NCCL_NET_GDR_LEVEL'] == 'PHB'
+        assert 'NCCL_NET_GDR_LEVEL' not in self._NET.get_network_env_vars(
+            'GB200')
+        assert 'NCCL_NET_GDR_LEVEL' not in self._NET.get_network_env_vars(
+            'H100')
+
+    def test_gb300_still_mirrors_oci_published_values(self):
+        """The rest of the GB300 profile must stay OCI's published set.
+
+        Guards against widening the GDR level turning into a general licence
+        to deviate: these are the values OCI ships for BM.GPU.GB300.4, and the
+        two a customer was observed overriding (IB_SL=1, IB_TIMEOUT=19) are
+        deliberately *not* adopted -- 19 is a tightening, and defaults should
+        fail lenient.
+        """
+        env = self._NET.get_network_env_vars('GB300')
+        assert env['NCCL_IB_SL'] == '0'
+        assert env['NCCL_IB_TIMEOUT'] == '22'
+        assert env['NCCL_BUFFSIZE'] == '16777216'
+        assert env['NCCL_IB_SPLIT_DATA_ON_QPS'] == '0'
+        # Workload/framework knobs must never be injected:
+        # CUDA_DEVICE_MAX_CONNECTIONS=32 suits FSDP/expert-parallel overlap and
+        # is actively wrong for Megatron tensor-parallel overlap, which needs 1.
+        for absent in ('CUDA_DEVICE_MAX_CONNECTIONS',
+                       'TORCH_NCCL_HIGH_PRIORITY',
+                       'TORCH_NCCL_AVOID_RECORD_STREAMS', 'NCCL_SHM_DISABLE'):
+            assert absent not in env, absent
+
     def test_gb200_and_gb300_are_distinct(self):
         """The two GB profiles must not be identical (NET_PLUGIN differs)."""
         gb200 = self._NET.get_network_env_vars('GB200')
