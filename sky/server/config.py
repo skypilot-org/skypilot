@@ -29,6 +29,9 @@ from sky.utils import yaml_utils
 # TODO(luca): The future is now! ^^^
 LONG_WORKER_MEM_GB = 0.4
 SHORT_WORKER_MEM_GB = 0.3
+# A uvicorn server worker is a separate process holding its own copy of the
+# imported modules, so it costs about as much as a long worker.
+SERVER_WORKER_MEM_GB = 0.4
 # To control the number of long workers.
 _CPU_MULTIPLIER_FOR_LONG_WORKERS = 2
 # Limit the number of long workers of local API server, since local server is
@@ -129,6 +132,19 @@ def compute_server_config(
     if reserved_memory_mb is not None:
         mem_size_gb -= (reserved_memory_mb / 1024)
     logger.debug(f'Memory size: {mem_size_gb}GB')
+    num_server_workers = cpu_count if deploy else 1
+    # Server workers are permanent processes that live for the lifetime of the
+    # API server, so their memory is already committed by the time the executor
+    # pools are sized. Take it out of the budget before sizing the pools;
+    # otherwise the pools are sized against memory the server workers are
+    # already holding, and workers plus pools together overcommit the machine.
+    # In deployment mode the workers are children of a parent process that also
+    # stays resident (main event loop + gc daemons), so count one extra.
+    num_resident_server_procs = (num_server_workers +
+                                 1) if deploy else num_server_workers
+    mem_size_gb = max(
+        0.0, mem_size_gb - num_resident_server_procs * SERVER_WORKER_MEM_GB)
+    logger.debug(f'Memory size for executor pools: {mem_size_gb}GB')
     max_parallel_for_long = _max_long_worker_parallism(cpu_count,
                                                        mem_size_gb,
                                                        local=not deploy)
@@ -141,7 +157,6 @@ def compute_server_config(
     # to conserve the number of concurrent db connections.
     # This could lead to performance degradation.
     num_db_connections_per_worker = 0
-    num_server_workers = cpu_count
 
     # +1 for the event loop running the main process
     # and gc daemons in the '__main__' body of sky/server/server.py
@@ -151,7 +166,6 @@ def compute_server_config(
     if not deploy:
         # For local mode, use local queue backend since we only run 1 uvicorn
         # worker in local mode and no multiprocessing is needed.
-        num_server_workers = 1
         queue_backend = QueueBackend.LOCAL
         # Enable burstable workers for local API server.
         burstable_parallel_for_long = _BURSTABLE_WORKERS_FOR_LOCAL

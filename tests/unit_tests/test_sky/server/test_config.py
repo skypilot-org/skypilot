@@ -14,9 +14,9 @@ def test_compute_server_config_on_minimal_deployment(cpu_count, mem_size_gb):
     # Test deployment mode
     c = config.compute_server_config(deploy=True)
     assert c.num_server_workers == 4
-    assert c.long_worker_config.garanteed_parallelism == 8
+    assert c.long_worker_config.garanteed_parallelism == 5
     assert c.long_worker_config.burstable_parallelism == 0
-    assert c.short_worker_config.garanteed_parallelism == 9
+    assert c.short_worker_config.garanteed_parallelism == 6
     assert c.short_worker_config.burstable_parallelism == 0
     assert c.queue_backend == config.QueueBackend.MULTIPROCESSING
 
@@ -29,7 +29,7 @@ def test_compute_server_config_on_large_deployment(cpu_count, mem_size_gb):
     assert c.num_server_workers == 196
     assert c.long_worker_config.garanteed_parallelism == 392
     assert c.long_worker_config.burstable_parallelism == 0
-    assert c.short_worker_config.garanteed_parallelism == 2084
+    assert c.short_worker_config.garanteed_parallelism == 1821
     assert c.short_worker_config.burstable_parallelism == 0
     assert c.queue_backend == config.QueueBackend.MULTIPROCESSING
 
@@ -42,7 +42,7 @@ def test_compute_server_config(cpu_count, mem_size_gb):
     assert c.num_server_workers == 4
     assert c.long_worker_config.garanteed_parallelism == 8
     assert c.long_worker_config.burstable_parallelism == 0
-    assert c.short_worker_config.garanteed_parallelism == 36
+    assert c.short_worker_config.garanteed_parallelism == 29
     assert c.short_worker_config.burstable_parallelism == 0
     assert c.queue_backend == config.QueueBackend.MULTIPROCESSING
 
@@ -51,7 +51,7 @@ def test_compute_server_config(cpu_count, mem_size_gb):
     assert c.num_server_workers == 1
     assert c.long_worker_config.garanteed_parallelism == 4
     assert c.long_worker_config.burstable_parallelism == 1024
-    assert c.short_worker_config.garanteed_parallelism == 41
+    assert c.short_worker_config.garanteed_parallelism == 40
     assert c.short_worker_config.burstable_parallelism == 1024
     assert c.queue_backend == config.QueueBackend.LOCAL
 
@@ -93,12 +93,92 @@ def test_compute_server_config_pool(cpu_count, mem_size_gb, buildkite_mock):
     assert c.num_server_workers == 12
     assert c.long_worker_config.garanteed_parallelism == 24
     assert c.long_worker_config.burstable_parallelism == 0
-    assert c.short_worker_config.garanteed_parallelism == 114
+    assert c.short_worker_config.garanteed_parallelism == 97
     assert c.short_worker_config.burstable_parallelism == 0
     assert c.queue_backend == config.QueueBackend.MULTIPROCESSING
 
     assert controller_utils._get_number_of_services(pool=True) == 5
     assert controller_utils._get_request_parallelism(pool=True) == 40
+
+
+@mock.patch('sky.utils.common_utils.get_mem_size_gb', return_value=48)
+@mock.patch('sky.utils.common_utils.get_cpu_count', return_value=12)
+def test_compute_server_config_consolidation_mode(cpu_count, mem_size_gb):
+    """In consolidation mode the controllers' memory is withheld up front.
+
+    The jobs and serve/pool controllers run as processes inside the API server,
+    so the executor pools have to be sized against what is left after their
+    share rather than against the whole machine.
+    """
+    from sky.utils import controller_utils
+
+    with mock.patch.object(controller_utils, 'is_jobs_consolidation_mode',
+                           return_value=True), \
+         mock.patch.object(controller_utils, '_is_consolidation_mode',
+                           return_value=True), \
+         mock.patch('sky.jobs.utils.is_consolidation_mode', return_value=True):
+        reserved_memory_mb = (
+            controller_utils.compute_memory_reserved_for_controllers(
+                reserve_extra_for_pool=True))
+        c = config.compute_server_config(deploy=True,
+                                         quiet=True,
+                                         reserved_memory_mb=reserved_memory_mb)
+
+    # 2GB of headroom, doubled for the pool controller, plus 30% of what is
+    # left for the controller processes themselves.
+    assert reserved_memory_mb == pytest.approx(4096 + 0.3 * (48 * 1024 - 4096))
+    assert c.num_server_workers == 12
+    assert c.long_worker_config.garanteed_parallelism == 24
+    # 12.0GB left for short workers at 0.3GB each; int() truncation of the
+    # binary representation of 40.0 lands on 39.
+    assert c.short_worker_config.garanteed_parallelism == 39
+    assert c.queue_backend == config.QueueBackend.MULTIPROCESSING
+
+    # Everything the server permanently holds -- server workers, both executor
+    # pools and the controller reservation -- has to fit in its memory.
+    committed_gb = (_permanent_worker_memory_gb(c) + reserved_memory_mb / 1024)
+    assert committed_gb <= 48
+
+
+@mock.patch('sky.utils.common_utils.get_mem_size_gb', return_value=48)
+@mock.patch('sky.utils.common_utils.get_cpu_count', return_value=12)
+def test_no_controller_reservation_outside_consolidation(
+        cpu_count, mem_size_gb):
+    """Outside consolidation mode the controllers cost the API server nothing."""
+    from sky.utils import controller_utils
+
+    with mock.patch.object(controller_utils, 'is_jobs_consolidation_mode',
+                           return_value=False), \
+         mock.patch.object(controller_utils, '_is_consolidation_mode',
+                           return_value=False):
+        assert controller_utils.compute_memory_reserved_for_controllers(
+            reserve_extra_for_pool=True) == 0.0
+
+
+def _permanent_worker_memory_gb(c: 'config.ServerConfig') -> float:
+    """Memory the permanent processes of a ServerConfig are budgeted to use."""
+    # +1 server process for the parent running the main event loop.
+    return (
+        (c.num_server_workers + 1) * config.SERVER_WORKER_MEM_GB +
+        c.long_worker_config.garanteed_parallelism * config.LONG_WORKER_MEM_GB +
+        c.short_worker_config.garanteed_parallelism *
+        config.SHORT_WORKER_MEM_GB)
+
+
+# Shapes big enough that the _MIN_LONG_WORKERS / _get_min_short_workers
+# responsiveness floors do not override the memory budget.
+@pytest.mark.parametrize('cpu_count,mem_size_gb', [(4, 8), (4, 16), (8, 32),
+                                                   (12, 48), (24, 96),
+                                                   (64, 128), (196, 784)])
+def test_permanent_processes_fit_in_memory(cpu_count, mem_size_gb):
+    """Server workers plus both executor pools must fit in the server memory."""
+    with mock.patch('sky.utils.common_utils.get_cpu_count',
+                    return_value=cpu_count), \
+         mock.patch('sky.utils.common_utils.get_mem_size_gb',
+                    return_value=mem_size_gb), \
+         mock.patch('sky.jobs.utils.is_consolidation_mode', return_value=False):
+        c = config.compute_server_config(deploy=True, quiet=True)
+    assert _permanent_worker_memory_gb(c) <= mem_size_gb
 
 
 def test_parallel_size_long():
