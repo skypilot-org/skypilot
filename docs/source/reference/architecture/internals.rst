@@ -121,7 +121,11 @@ machine advance. "Running" at the provider layer does not imply a running job.
   unscoped tasks use the internal ``any`` placement sentinel, while an explicit
   region remains a country constraint. Stable catalog regions and prices are
   advisory metadata only; an unscoped no-match forces one catalog refresh and
-  retries once before the capacity diagnostic is returned.
+  retries once before the capacity diagnostic is returned. Vast catalog
+  instance types encode GPU model, count, per-device VRAM, CPU, and host RAM,
+  so a live query can never exchange a lower-memory GPU variant for a cheaper
+  one. Legacy instance types without a VRAM identity are rejected when the
+  current catalog cannot resolve a single unambiguous VRAM value.
 
 After instance readiness, SkyPilot must reach the container over SSH with the
 injected key and start its runtime (Ray and skylet); only then is the cluster

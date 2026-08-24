@@ -338,7 +338,7 @@ class Vast(clouds.Cloud):
             if admitted_resources:
                 return (resources_utils.FeasibleResources(
                     admitted_resources, fuzzy_candidate_list, None), False)
-            diagnostic_keys = ('cpu', 'ram', 'disk', 'gpu', 'country',
+            diagnostic_keys = ('cpu', 'ram', 'vram', 'disk', 'gpu', 'country',
                                'host_policy', 'network', 'malformed')
             diagnostics = [
                 f'offers examined={offers_examined}',

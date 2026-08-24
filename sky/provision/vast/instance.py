@@ -58,22 +58,25 @@ def _get_head_instance_id(instances: Dict[str, Any]) -> Optional[str]:
 def _validate_existing_gpus(instances: Dict[str, Any],
                             instance_type: str) -> None:
     """Reject adopted nodes whose reported GPU does not match the request."""
-    gpu_name, num_gpus = utils.gpu_requirements(instance_type)
+    gpu_requirements = utils.gpu_requirements(instance_type)
     mismatched_instances = {
         instance_id: instance
         for instance_id, instance in instances.items()
-        if not utils.matches_gpu(instance, gpu_name, num_gpus)
+        if not utils.matches_gpu(instance, gpu_requirements)
     }
     if not mismatched_instances:
         return
 
     details = '; '.join(
         f'id={instance_id}, gpu_name={instance.get("gpu_name")!r}, '
-        f'num_gpus={instance.get("num_gpus")!r}'
+        f'num_gpus={instance.get("num_gpus")!r}, '
+        f'gpu_ram={instance.get("gpu_ram")!r}'
         for instance_id, instance in mismatched_instances.items())
     raise exceptions.VastProvisioningError(
         f'Vast cluster has existing instances that do not match the '
-        f'requested GPU gpu_name={gpu_name!r}, num_gpus={num_gpus}: {details}.',
+        f'requested GPU gpu_name={gpu_requirements.gpu_name!r}, '
+        f'num_gpus={gpu_requirements.num_gpus}, '
+        f'gpu_ram>={gpu_requirements.gpu_ram_mib}: {details}.',
         instance_ids=list(mismatched_instances),
     )
 

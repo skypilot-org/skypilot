@@ -1,5 +1,6 @@
 """Tests for the locally refreshed Vast catalog."""
 
+import ast
 import csv
 import importlib
 from pathlib import Path
@@ -156,6 +157,54 @@ def test_fetch_vast_catalog_keeps_countries_distinct(monkeypatch):
         'Japan, JP, AS',
         'France, FR, EU',
     }
+
+
+def test_fetch_vast_catalog_preserves_per_gpu_memory_identity(monkeypatch):
+    """A100 40GB and 80GB offers must be distinct durable catalog resources."""
+    shared_offer = {
+        'gpu_name': 'A100 SXM4',
+        'cpu_cores': 32,
+        'cpu_ram': 65536,
+        'search': {
+            'totalHour': .8
+        },
+        'min_bid': .8,
+        'hosting_type': 1,
+    }
+    offers = [{
+        **shared_offer,
+        'num_gpus': 1,
+        'gpu_total_ram': 40960,
+        'geolocation': 'Georgia, US, NA',
+    }, {
+        **shared_offer,
+        'num_gpus': 1,
+        'gpu_total_ram': 81920,
+        'geolocation': 'Prague, CZ, EU',
+    }, {
+        **shared_offer,
+        'num_gpus': 2,
+        'gpu_total_ram': 163840,
+        'geolocation': 'Prague, CZ, EU',
+    }]
+    client = type('Client', (),
+                  {'search_offers': lambda _self, **_kwargs: offers})()
+    monkeypatch.setattr(fetch_vast.vast, 'vast', lambda: client)
+
+    rows = fetch_vast.fetch_vast_catalog()
+
+    rows_by_instance_type = {row['InstanceType']: row for row in rows}
+    assert set(rows_by_instance_type) == {
+        'vastv2-1x-A100_SXM4-40960-32-65536',
+        'vastv2-1x-A100_SXM4-81920-32-65536',
+        'vastv2-2x-A100_SXM4-81920-32-65536',
+    }
+    assert rows_by_instance_type['vastv2-1x-A100_SXM4-81920-32-65536'][
+        'AcceleratorName'] == ('A100-80GB')
+    gpu_info = ast.literal_eval(
+        rows_by_instance_type['vastv2-2x-A100_SXM4-81920-32-65536']['GpuInfo'])
+    assert gpu_info['Gpus'][0]['MemoryInfo']['SizeInMiB'] == 81920
+    assert gpu_info['TotalGpuMemoryInMiB'] == 163840
 
 
 def test_refresh_catalog_replaces_validated_staged_file(monkeypatch, tmp_path):

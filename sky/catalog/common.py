@@ -866,7 +866,7 @@ def list_accelerators_impl(
         sort_key = ['Price', 'SpotPrice']
         subset = [
             'InstanceType', 'AcceleratorName', 'AcceleratorCount', 'vCPUs',
-            'MemoryGiB'
+            'DeviceMemoryGiB', 'MemoryGiB'
         ]
         if all_regions:
             sort_key.append('Region')

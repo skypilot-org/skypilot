@@ -4,6 +4,8 @@ This module loads the service catalog file and can be used to
 query instance types and pricing information for Vast.ai.
 """
 
+import ast
+import math
 import typing
 from typing import Dict, List, Optional, Tuple, Union
 
@@ -143,6 +145,36 @@ def get_accelerators_from_instance_type(
         instance_type: str) -> Optional[Dict[str, Union[int, float]]]:
     return common.get_accelerators_from_instance_type_impl(
         _catalog_df(), instance_type)
+
+
+def get_legacy_per_gpu_vram_mib(instance_type: str, num_gpus: int) -> int:
+    """Resolve a legacy type only when all catalog rows prove one VRAM value."""
+    vram_values = set()
+    catalog_df = _catalog_df()
+    rows = catalog_df[catalog_df['InstanceType'] == instance_type]
+    for gpu_info in rows['GpuInfo']:
+        try:
+            parsed_gpu_info = (ast.literal_eval(gpu_info) if isinstance(
+                gpu_info, str) else gpu_info)
+        except (TypeError, ValueError, SyntaxError):
+            continue
+        try:
+            total_vram_mib = float(parsed_gpu_info['TotalGpuMemoryInMiB'])
+        except (KeyError, TypeError, ValueError):
+            if num_gpus != 1:
+                continue
+            try:
+                total_vram_mib = float(
+                    parsed_gpu_info['Gpus'][0]['MemoryInfo']['SizeInMiB'])
+            except (KeyError, TypeError, ValueError):
+                continue
+        if math.isfinite(total_vram_mib) and total_vram_mib > 0:
+            vram_values.add(round(total_vram_mib / num_gpus))
+    if len(vram_values) != 1:
+        raise ValueError(
+            'Legacy Vast instance type is ambiguous across GPU VRAM values; '
+            'refresh or reselect the resource.')
+    return vram_values.pop()
 
 
 def get_instance_type_for_accelerator(

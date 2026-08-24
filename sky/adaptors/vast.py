@@ -20,6 +20,7 @@ class VastOfferRequirements:
 
     gpu_name: str
     num_gpus: int
+    gpu_ram_mib: int
     cpu_cores: int
     cpu_ram_mib: int
     disk_size: int
@@ -119,19 +120,34 @@ def get_offer_requirements(instance_type: str, region: Optional[str],
                            network_tier: Any) -> VastOfferRequirements:
     """Parse a stable Vast instance type into its live-offer requirements."""
     parts = instance_type.split('-')
+    is_legacy_instance_type = parts[0] != 'vastv2'
     try:
-        if not parts[0].endswith('x'):
-            raise ValueError
-        num_gpus = int(parts[0][:-1])
-        cpu_cores = int(parts[-2])
-        cpu_ram_mib = int(parts[-1])
+        if not is_legacy_instance_type:
+            if not parts[1].endswith('x'):
+                raise ValueError
+            num_gpus = int(parts[1][:-1])
+            gpu_ram_mib = int(parts[-3])
+            cpu_cores = int(parts[-2])
+            cpu_ram_mib = int(parts[-1])
+            gpu_name = '-'.join(parts[2:-3]).replace('_', ' ')
+        else:
+            if not parts[0].endswith('x'):
+                raise ValueError
+            num_gpus = int(parts[0][:-1])
+            cpu_cores = int(parts[-2])
+            cpu_ram_mib = int(parts[-1])
+            gpu_name = '-'.join(parts[1:-2]).replace('_', ' ')
         normalized_disk_size = int(disk_size)
     except (IndexError, ValueError) as exc:
         raise ValueError(
             f'Invalid Vast instance type {instance_type!r}.') from exc
-    gpu_name = '-'.join(parts[1:-2]).replace('_', ' ')
-    if (not gpu_name or
-            min(num_gpus, cpu_cores, cpu_ram_mib, normalized_disk_size) <= 0):
+    if is_legacy_instance_type:
+        # Import lazily: the catalog generator imports this adapter.
+        from sky.catalog import vast_catalog  # pylint: disable=import-outside-toplevel
+        gpu_ram_mib = vast_catalog.get_legacy_per_gpu_vram_mib(
+            instance_type, num_gpus)
+    if (not gpu_name or min(num_gpus, gpu_ram_mib, cpu_cores, cpu_ram_mib,
+                            normalized_disk_size) <= 0):
         raise ValueError(f'Invalid Vast instance type {instance_type!r}.')
 
     normalized_network_tier = str(getattr(network_tier, 'value',
@@ -143,6 +159,7 @@ def get_offer_requirements(instance_type: str, region: Optional[str],
     return VastOfferRequirements(
         gpu_name=gpu_name,
         num_gpus=num_gpus,
+        gpu_ram_mib=gpu_ram_mib,
         cpu_cores=cpu_cores,
         cpu_ram_mib=cpu_ram_mib,
         disk_size=normalized_disk_size,
@@ -164,6 +181,7 @@ def build_offer_query(requirements: VastOfferRequirements) -> str:
         f'disk_space>={requirements.disk_size}',
         f'num_gpus={requirements.num_gpus}',
         f'gpu_name={requirements.gpu_name.replace(" ", "_")}',
+        f'gpu_ram>={math.ceil(requirements.gpu_ram_mib / 1024)}',
         f'cpu_cores>={requirements.cpu_cores}',
         f'cpu_ram>={math.ceil(requirements.cpu_ram_mib / 1024)}',
     ]
@@ -197,6 +215,8 @@ def _offer_rejection_reason(
     if (_normalize_gpu_name(offer.get('gpu_name')) != _normalize_gpu_name(
             requirements.gpu_name) or num_gpus != requirements.num_gpus):
         return 'gpu'
+    if not _minimum_offer_value(offer, 'gpu_ram', requirements.gpu_ram_mib):
+        return 'vram'
     if not _minimum_offer_value(offer, 'cpu_cores', requirements.cpu_cores):
         return 'cpu'
     if not _minimum_offer_value(offer, 'cpu_ram', requirements.cpu_ram_mib):

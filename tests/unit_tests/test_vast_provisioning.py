@@ -16,6 +16,8 @@ from sky.utils import resources_utils
 from sky.utils import status_lib
 from sky.utils import yaml_utils
 
+_A100_INSTANCE_TYPE = 'vastv2-1x-A100-81920-4-8192'
+
 
 def _instance(instance_id: str,
               status: str,
@@ -24,7 +26,8 @@ def _instance(instance_id: str,
               status_msg=None,
               name='test-head',
               gpu_name='A100',
-              num_gpus=1):
+              num_gpus=1,
+              gpu_ram=81920):
     return {
         'id': instance_id,
         'name': name,
@@ -34,6 +37,7 @@ def _instance(instance_id: str,
         'status_msg': status_msg,
         'gpu_name': gpu_name,
         'num_gpus': num_gpus,
+        'gpu_ram': gpu_ram,
     }
 
 
@@ -44,7 +48,7 @@ def _provision_config() -> common.ProvisionConfig:
         docker_config={},
         node_config={
             'ImageId': 'vastai/base:0.0.2',
-            'InstanceType': '1x-A100-4-8192',
+            'InstanceType': _A100_INSTANCE_TYPE,
             'DiskSize': 30,
             'Preemptible': False,
         },
@@ -59,7 +63,7 @@ def _launch_vast(network_tier: resources_utils.NetworkTier,
                  reliable_hosts: bool = False) -> str:
     return vast_utils.launch(
         name='test-head',
-        instance_type='1x-A100-4-8192',
+        instance_type=_A100_INSTANCE_TYPE,
         region='US',
         disk_size=30,
         image_name='vastai/base:0.0.2',
@@ -78,6 +82,7 @@ def _mock_vast_sdk(monkeypatch):
         'machine_id': 2,
         'gpu_name': 'A100',
         'num_gpus': 1,
+        'gpu_ram': 81920,
         'cpu_cores': 4,
         'cpu_ram': 8192,
         'disk_space': 30,
@@ -95,6 +100,7 @@ def _mock_vast_sdk(monkeypatch):
         'id': '3',
         'gpu_name': 'A100',
         'num_gpus': 1,
+        'gpu_ram': 81920,
     }
     monkeypatch.setattr(vast_utils.vast, 'vast', lambda: sdk)
     return sdk
@@ -115,7 +121,7 @@ def test_vast_template_persists_network_tier(tmp_path):
             'docker_login_config': None,
             'create_instance_kwargs': {},
             'ssh_private_key': '/tmp/sky-key',
-            'instance_type': '1x-A100-4-8192',
+            'instance_type': _A100_INSTANCE_TYPE,
             'disk_size': 30,
             'image_id': 'vastai/base:0.0.2',
             'use_spot': False,
@@ -165,7 +171,7 @@ def test_launch_extracts_country_from_raw_catalog_region(monkeypatch):
 
     vast_utils.launch(
         name='test-head',
-        instance_type='1x-A100-4-8192',
+        instance_type=_A100_INSTANCE_TYPE,
         region='France, FR, EU',
         disk_size=30,
         image_name='vastai/base:0.0.2',
@@ -188,7 +194,7 @@ def test_launch_rejects_direct_registry_login_override_before_offer_query(
     with pytest.raises(ValueError, match='SKYPILOT_DOCKER'):
         vast_utils.launch(
             name='test-head',
-            instance_type='1x-A100-4-8192',
+            instance_type=_A100_INSTANCE_TYPE,
             region='US',
             disk_size=30,
             image_name='registry.example.com/team/image:latest',

@@ -21,13 +21,21 @@ from sky.resources import Resources
 from sky.utils import annotations
 from sky.utils import resources_utils
 
+_A100_INSTANCE_TYPE = 'vastv2-1x-A100-81920-4-8192'
+_RTX_A6000_INSTANCE_TYPE = 'vastv2-1x-RTX_A6000-49152-4-8192'
+
 _VALID_VAST_CATALOG_CSV = """InstanceType,AcceleratorName,AcceleratorCount,vCPUs,MemoryGiB,GpuInfo,Price,SpotPrice,Region
 1x-A100-4-8192,A100,1,4,8,\"{'Gpus': [{'MemoryInfo': {'SizeInMiB': 81920}}]}\",0.8,0.8,any
+1x-RTX_A6000-4-8192,RTXA6000,1,4,8,\"{'Gpus': [{'MemoryInfo': {'SizeInMiB': 49152}}]}\",0.8,0.8,any
+vastv2-1x-A100-81920-4-8192,A100-80GB,1,4,8,\"{'Gpus': [{'MemoryInfo': {'SizeInMiB': 81920}}]}\",0.8,0.8,any
+vastv2-1x-RTX_A6000-49152-4-8192,RTXA6000,1,4,8,\"{'Gpus': [{'MemoryInfo': {'SizeInMiB': 49152}}]}\",0.8,0.8,any
 """
 
 
 @pytest.fixture(autouse=True)
-def clear_request_catalog_cache():
+def clear_request_catalog_cache(monkeypatch):
+    monkeypatch.setattr(vast_catalog, '_df',
+                        pd.read_csv(io.StringIO(_VALID_VAST_CATALOG_CSV)))
     annotations.clear_request_level_cache()
     yield
     annotations.clear_request_level_cache()
@@ -68,6 +76,7 @@ def _make_vast_client(*methods: str) -> mock.Mock:
             return [{
                 'cpu_cores': 4,
                 'cpu_ram': 8192,
+                'gpu_ram': 81920,
                 'disk_space': 30,
                 'geolocation': 'US',
                 **offer,
@@ -107,6 +116,36 @@ def test_vast_catalog_reuses_snapshot_within_request(monkeypatch):
     annotations.clear_request_level_cache()
     assert vast_catalog._catalog_df().iloc[0]["AcceleratorName"] == "A100"
     assert calls == []
+
+
+def test_list_accelerators_keeps_distinct_gpu_memory_variants():
+    """Listing must retain 40GB and 80GB variants with an otherwise equal shape."""
+    catalog_df = pd.DataFrame([{
+        'InstanceType': 'same-shape',
+        'AcceleratorName': 'A100',
+        'AcceleratorCount': 1,
+        'vCPUs': 32,
+        'MemoryGiB': 64,
+        'GpuInfo': "{'Gpus': [{'MemoryInfo': {'SizeInMiB': 40960}}]}",
+        'Price': .5,
+        'SpotPrice': .5,
+        'Region': 'Georgia, US, NA',
+    }, {
+        'InstanceType': 'same-shape',
+        'AcceleratorName': 'A100',
+        'AcceleratorCount': 1,
+        'vCPUs': 32,
+        'MemoryGiB': 64,
+        'GpuInfo': "{'Gpus': [{'MemoryInfo': {'SizeInMiB': 81920}}]}",
+        'Price': .9,
+        'SpotPrice': .9,
+        'Region': 'Prague, CZ, EU',
+    }])
+
+    accelerators = common.list_accelerators_impl('vast', catalog_df, True, None,
+                                                 None, None)
+
+    assert [info.device_memory for info in accelerators['A100']] == [40., 80.]
 
 
 def test_vast_catalog_rejects_missing_required_columns(monkeypatch):
@@ -183,17 +222,95 @@ def test_vast_targeted_live_query_is_cached_per_requirements(monkeypatch):
         query=vast_adaptor.build_offer_query(requirements), order='dph_total')
 
 
+def test_vast_v2_identity_rejects_lower_memory_live_offer(monkeypatch):
+    """An 80GB Vast resource must not admit a cheaper 40GB A100 offer."""
+    requirements = vast_adaptor.get_offer_requirements(
+        'vastv2-1x-A100_SXM4-81920-32-65536',
+        region=None,
+        disk_size=64,
+        datacenter_only=False,
+        reliable_hosts=False,
+        network_tier='standard',
+    )
+    client = mock.Mock(spec=['search_offers'])
+    client.search_offers.return_value = [{
+        'id': 40,
+        'gpu_name': 'A100 SXM4',
+        'num_gpus': 1,
+        'gpu_ram': 40960,
+        'cpu_cores': 32,
+        'cpu_ram': 65536,
+        'disk_space': 64,
+        'geolocation': 'Georgia, US, NA',
+    }, {
+        'id': 80,
+        'gpu_name': 'A100 SXM4',
+        'num_gpus': 1,
+        'gpu_ram': 81920,
+        'cpu_cores': 32,
+        'cpu_ram': 65536,
+        'disk_space': 64,
+        'geolocation': 'Prague, CZ, EU',
+    }]
+    monkeypatch.setattr(vast_adaptor, 'vast', lambda: client)
+
+    result = vast_adaptor.get_live_offer_matches(requirements)
+
+    assert requirements.gpu_ram_mib == 81920
+    assert [offer['id'] for offer in result.offers] == [80]
+    assert result.rejection_counts == (('vram', 1),)
+    assert 'gpu_ram>=80' in client.search_offers.call_args.kwargs['query']
+
+
+def test_vast_legacy_identity_fails_closed_when_memory_is_ambiguous(
+        monkeypatch):
+    """Legacy types may not choose a 40GB or 80GB variant arbitrarily."""
+    catalog_df = pd.DataFrame([{
+        'InstanceType': '1x-A100_SXM4-32-65536',
+        'AcceleratorName': 'A100',
+        'AcceleratorCount': 1,
+        'vCPUs': 32,
+        'MemoryGiB': 64,
+        'GpuInfo': "{'Gpus': [{'MemoryInfo': {'SizeInMiB': 40960}}]}",
+        'Price': .5,
+        'SpotPrice': .5,
+        'Region': 'Georgia, US, NA',
+    }, {
+        'InstanceType': '1x-A100_SXM4-32-65536',
+        'AcceleratorName': 'A100-80GB',
+        'AcceleratorCount': 1,
+        'vCPUs': 32,
+        'MemoryGiB': 64,
+        'GpuInfo': "{'Gpus': [{'MemoryInfo': {'SizeInMiB': 81920}}]}",
+        'Price': .9,
+        'SpotPrice': .9,
+        'Region': 'Prague, CZ, EU',
+    }])
+    monkeypatch.setattr(vast_catalog, '_df', catalog_df)
+
+    with pytest.raises(ValueError, match='ambiguous.*VRAM'):
+        vast_adaptor.get_offer_requirements(
+            '1x-A100_SXM4-32-65536',
+            region=None,
+            disk_size=64,
+            datacenter_only=False,
+            reliable_hosts=False,
+            network_tier='standard',
+        )
+
+
 def test_vast_live_admission_uses_targeted_country_query(monkeypatch):
     """An explicit Vast region remains a strict live country constraint."""
     monkeypatch.setattr(
         vast_catalog,
         'get_instance_type_for_accelerator',
-        lambda *_args, **_kwargs: (['1x-A100-4-8192'], []),
+        lambda *_args, **_kwargs: ([_A100_INSTANCE_TYPE], []),
     )
     client = mock.Mock(spec=['search_offers'])
     client.search_offers.return_value = [{
         'gpu_name': 'A100',
         'num_gpus': 1,
+        'gpu_ram': 81920,
         'cpu_cores': 4,
         'cpu_ram': 8192,
         'disk_space': 64,
@@ -211,7 +328,7 @@ def test_vast_live_admission_uses_targeted_country_query(monkeypatch):
 
     assert [
         resource.instance_type for resource in feasible_resources.resources_list
-    ] == ['1x-A100-4-8192']
+    ] == [_A100_INSTANCE_TYPE]
     assert 'geolocation=FR' in client.search_offers.call_args.kwargs['query']
 
 
@@ -228,12 +345,13 @@ def test_vast_live_admission_uses_any_for_unscoped_marketplace_capacity(
     monkeypatch.setattr(
         vast_catalog,
         'get_instance_type_for_accelerator',
-        lambda *_args, **_kwargs: (['1x-A100-4-8192'], []),
+        lambda *_args, **_kwargs: ([_A100_INSTANCE_TYPE], []),
     )
     client = mock.Mock(spec=['search_offers'])
     client.search_offers.return_value = [{
         'gpu_name': 'A100',
         'num_gpus': 1,
+        'gpu_ram': 81920,
         'cpu_cores': 4,
         'cpu_ram': 8192,
         'disk_space': 64,
@@ -259,13 +377,14 @@ def test_vast_live_admission_retries_once_after_forced_catalog_refresh(
     monkeypatch.setattr(
         vast_catalog,
         'get_instance_type_for_accelerator',
-        lambda *_args, **_kwargs: (['1x-A100-4-8192'], []),
+        lambda *_args, **_kwargs: ([_A100_INSTANCE_TYPE], []),
     )
     client = mock.Mock(spec=['search_offers'])
     client.search_offers.side_effect = [[],
                                         [{
                                             'gpu_name': 'A100',
                                             'num_gpus': 1,
+                                            'gpu_ram': 81920,
                                             'cpu_cores': 4,
                                             'cpu_ram': 8192,
                                             'disk_space': 64,
@@ -294,6 +413,7 @@ def test_vast_live_admission_reports_sanitized_rejection_counts(monkeypatch):
     client.search_offers.return_value = [{
         'gpu_name': 'A100',
         'num_gpus': 1,
+        'gpu_ram': 81920,
         'cpu_cores': 4,
         'cpu_ram': 8192,
         'disk_space': 63,
@@ -304,7 +424,7 @@ def test_vast_live_admission_reports_sanitized_rejection_counts(monkeypatch):
     feasible_resources = vast_cloud.Vast()._get_feasible_launchable_resources(
         Resources(
             cloud=vast_cloud.Vast(),
-            instance_type='1x-A100-4-8192',
+            instance_type=_A100_INSTANCE_TYPE,
             region='France, FR, EU',
             disk_size=64,
         ))
@@ -324,18 +444,18 @@ def test_vast_any_region_stays_launchable_and_uses_catalog_estimate(
     monkeypatch.setattr(vast_catalog, '_df', catalog_df)
     vast_catalog._catalog_df.cache_clear()
 
-    regions = vast_cloud.Vast.regions_with_offering('1x-A100-4-8192', None,
+    regions = vast_cloud.Vast.regions_with_offering(_A100_INSTANCE_TYPE, None,
                                                     False, 'any', None)
 
     assert regions == [clouds.Region('any')]
     assert vast_cloud.Vast().instance_type_to_hourly_cost(
-        '1x-A100-4-8192', False, 'Nowhere, ZZ, XX') == .8
+        _A100_INSTANCE_TYPE, False, 'Nowhere, ZZ, XX') == .8
 
 
 def test_vast_live_offer_match_enforces_host_and_network_policy():
     """Reliable best-tier admission rejects hosts missing required safeguards."""
     requirements = vast_adaptor.get_offer_requirements(
-        '1x-A100-4-8192',
+        _A100_INSTANCE_TYPE,
         region='France, FR, EU',
         disk_size=64,
         datacenter_only=True,
@@ -345,6 +465,7 @@ def test_vast_live_offer_match_enforces_host_and_network_policy():
     matching_offer = {
         'gpu_name': 'A100',
         'num_gpus': 1,
+        'gpu_ram': 81920,
         'cpu_cores': 4,
         'cpu_ram': 8192,
         'disk_space': 64,
@@ -436,6 +557,7 @@ def test_launch_reconciles_eventual_instance_visibility(monkeypatch):
             "id": 456,
             "gpu_name": "A100",
             "num_gpus": 1,
+            "gpu_ram": 81920,
         }
     ]
     monkeypatch.setattr(vast_utils.vast, "vast", lambda: client)
@@ -472,6 +594,7 @@ def test_launch_normalizes_template_startup_env_and_generated_login(
         "id": 456,
         "gpu_name": "RTX A6000",
         "num_gpus": 1,
+        "gpu_ram": 49152,
     }
     monkeypatch.setattr(vast_utils.vast, "vast", lambda: client)
 
@@ -551,6 +674,7 @@ def test_launch_uses_reliable_filters_and_excludes_failed_machine(monkeypatch):
         "id": 789,
         "gpu_name": "A100",
         "num_gpus": 1,
+        "gpu_ram": 81920,
     }
     monkeypatch.setattr(vast_utils.vast, "vast", lambda: client)
 
@@ -604,6 +728,7 @@ def test_live_query_survives_vast_sdk_preprocessing(monkeypatch):
         "id": 456,
         "gpu_name": "RTX A6000",
         "num_gpus": 1,
+        "gpu_ram": 49152,
     }
     monkeypatch.setattr(vast_utils.vast, "vast", lambda: client)
 
@@ -663,6 +788,7 @@ def test_launch_discards_mismatched_offers_before_selection(monkeypatch):
         "id": 789,
         "gpu_name": "A100",
         "num_gpus": 1,
+        "gpu_ram": 81920,
     }
     monkeypatch.setattr(vast_utils.vast, "vast", lambda: client)
 
@@ -678,6 +804,46 @@ def test_launch_discards_mismatched_offers_before_selection(monkeypatch):
     ) == 789
 
     assert client.create_instance.call_args.kwargs["id"] == 456
+
+
+def test_launch_never_downgrades_per_gpu_vram(monkeypatch):
+    """An 80 GiB resource selects its compatible offer over a cheaper 40 GiB GPU."""
+    client = _make_vast_client("search_offers", "create_instance",
+                               "show_instance")
+    client.search_offers.return_value = [{
+        "id": 40,
+        "gpu_name": "A100 SXM4",
+        "num_gpus": 1,
+        "gpu_ram": 40960,
+        "dph_total": 0.1,
+    }, {
+        "id": 80,
+        "gpu_name": "A100 SXM4",
+        "num_gpus": 1,
+        "gpu_ram": 81920,
+        "dph_total": 0.9,
+    }]
+    client.create_instance.return_value = {"new_contract": 456}
+    client.show_instance.return_value = {
+        "id": 456,
+        "gpu_name": "A100 SXM4",
+        "num_gpus": 1,
+        "gpu_ram": 81920,
+    }
+    monkeypatch.setattr(vast_utils.vast, "vast", lambda: client)
+
+    assert vast_utils.launch(
+        name="test-head",
+        instance_type='vastv2-1x-A100_SXM4-81920-4-8192',
+        region="any",
+        disk_size=30,
+        image_name="vastai/base:0.0.2",
+        ports=None,
+        preemptible=False,
+        secure_only=False,
+    ) == 456
+
+    assert client.create_instance.call_args.kwargs["id"] == 80
 
 
 def test_launch_rejects_empty_exact_gpu_match(monkeypatch):
@@ -726,6 +892,7 @@ def test_launch_orders_matching_offers_and_logs_selected_price(monkeypatch):
         "id": 789,
         "gpu_name": "A100",
         "num_gpus": 1,
+        "gpu_ram": 81920,
     }
     monkeypatch.setattr(vast_utils.vast, "vast", lambda: client)
 
@@ -761,6 +928,7 @@ def test_launch_destroys_contract_when_created_gpu_mismatches(monkeypatch):
         "id": 456,
         "gpu_name": "H100",
         "num_gpus": 1,
+        "gpu_ram": 81920,
     }
     monkeypatch.setattr(vast_utils.vast, "vast", lambda: client)
 
@@ -859,6 +1027,7 @@ def test_launch_retries_next_offer_when_selected_offer_disappears(monkeypatch):
         "id": 789,
         "gpu_name": "A100",
         "num_gpus": 1,
+        "gpu_ram": 81920,
     }
     monkeypatch.setattr(vast_utils.vast, "vast", lambda: client)
 
@@ -894,6 +1063,7 @@ def test_launch_retries_delayed_contract_visibility(monkeypatch):
             "id": 789,
             "gpu_name": "A100",
             "num_gpus": 1,
+            "gpu_ram": 81920,
         }
     ]
     monkeypatch.setattr(vast_utils.vast, "vast", lambda: client)
