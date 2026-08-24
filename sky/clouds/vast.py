@@ -9,14 +9,17 @@ from sky import clouds
 from sky import skypilot_config
 from sky.adaptors import common
 from sky.adaptors import vast as vast_adaptor
+from sky.utils import annotations
 from sky.utils import registry
 from sky.utils import resources_utils
+from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
     from sky import resources as resources_lib
     from sky.utils import volume as volume_lib
 
 _CREDENTIAL_PATH = '~/.config/vastai/vast_api_key'
+_ANY_REGION = 'any'
 
 
 @registry.CLOUD_REGISTRY.register
@@ -88,11 +91,12 @@ class Vast(clouds.Cloud):
     ) -> List[clouds.Region]:
         assert zone is None, 'Vast does not support zones.'
         del accelerators, zone  # unused
+        if region is not None:
+            # Feasibility has already verified this explicit country against
+            # the live marketplace. The static catalog must not reject it.
+            return [clouds.Region(region)]
         regions = catalog.get_region_zones_for_instance_type(
             instance_type, use_spot, 'vast')
-
-        if region is not None:
-            regions = [r for r in regions if r.name == region]
         return regions
 
     @classmethod
@@ -128,9 +132,10 @@ class Vast(clouds.Cloud):
                                      use_spot: bool,
                                      region: Optional[str] = None,
                                      zone: Optional[str] = None) -> float:
+        catalog_region = None if region == _ANY_REGION else region
         return catalog.get_hourly_cost(instance_type,
                                        use_spot=use_spot,
-                                       region=region,
+                                       region=catalog_region,
                                        zone=zone,
                                        clouds='vast')
 
@@ -283,61 +288,75 @@ class Vast(clouds.Cloud):
                 network_tier=network_tier,
             )
 
+        def _candidate_regions():
+            if resources.region is not None:
+                return [resources.region]
+            if (resources.image_id is not None and
+                    None not in resources.image_id):
+                return list(resources.image_id)
+            return [None]
+
+        def _is_unscoped_request():
+            return all(
+                vast_adaptor.extract_country_code(region) is None
+                for region in _candidate_regions())
+
         def _admit_live_offers(instance_list, fuzzy_candidate_list):
-            try:
-                snapshot = vast_adaptor.get_live_offer_snapshot()
-            except Exception as exc:  # pylint: disable=broad-except
-                return resources_utils.FeasibleResources(
-                    [], fuzzy_candidate_list,
-                    'Live Vast availability query failed: '
-                    f'{type(exc).__name__}: {exc} Retry the request after '
-                    'confirming Vast credentials and service availability.')
-            if snapshot.error is not None:
-                return resources_utils.FeasibleResources(
-                    [], fuzzy_candidate_list,
-                    'Live Vast availability query failed: '
-                    f'{snapshot.error} Retry the request after confirming '
-                    'Vast credentials and service availability.')
             admitted_resources = []
-            for instance_type in instance_list:
-                if resources.region is None:
-                    static_regions = (
-                        catalog.get_region_zones_for_instance_type(
-                            instance_type, resources.use_spot, 'vast'))
-                    candidate_regions = [
-                        region.name for region in static_regions
-                    ]
-                else:
-                    candidate_regions = [resources.region]
-                for region in dict.fromkeys(candidate_regions):
+            offers_examined = 0
+            eligible_offers = 0
+            rejection_counts: Dict[str, int] = {}
+            for instance_type in dict.fromkeys(instance_list):
+                for region in dict.fromkeys(_candidate_regions()):
                     requirements = _offer_requirements(instance_type, region)
-                    if not any(
-                            vast_adaptor.offer_matches_requirements(
-                                offer, requirements)
-                            for offer in snapshot.offers):
+                    live_result = vast_adaptor.get_live_offer_matches(
+                        requirements)
+                    if live_result.error is not None:
+                        return (resources_utils.FeasibleResources(
+                            [], fuzzy_candidate_list,
+                            'Live Vast availability query failed: '
+                            f'{live_result.error} Retry the request after '
+                            'confirming Vast credentials and service '
+                            'availability.'), True)
+                    offers_examined += live_result.offers_examined
+                    eligible_offers += len(live_result.offers)
+                    for rejection_reason, count in live_result.rejection_counts:
+                        rejection_counts[rejection_reason] = (
+                            rejection_counts.get(rejection_reason, 0) + count)
+                    if not live_result.offers:
                         continue
+                    admitted_region = (_ANY_REGION if region is None or
+                                       region == _ANY_REGION else region)
                     admitted_resources.append(
                         resources.copy(
                             cloud=Vast(),
                             instance_type=instance_type,
                             accelerators=None,
                             cpus=None,
-                            region=region,
+                            region=admitted_region,
                         ))
             if admitted_resources:
-                return resources_utils.FeasibleResources(
-                    admitted_resources, fuzzy_candidate_list, None)
-            return resources_utils.FeasibleResources(
+                return (resources_utils.FeasibleResources(
+                    admitted_resources, fuzzy_candidate_list, None), False)
+            diagnostic_keys = ('cpu', 'ram', 'vram', 'disk', 'gpu', 'country',
+                               'host_policy', 'network', 'malformed')
+            diagnostics = [
+                f'offers examined={offers_examined}',
+                f'eligible={eligible_offers}'
+            ]
+            diagnostics.extend(
+                f'{key}={rejection_counts[key]}' for key in diagnostic_keys
+                if key in rejection_counts)
+            return (resources_utils.FeasibleResources(
                 [], fuzzy_candidate_list,
-                'No live Vast offer matches the static catalog candidates. '
-                'Retry the request to refresh marketplace availability.')
+                'No live Vast offer matches the targeted requirements; ' +
+                ', '.join(diagnostics) + '.'), False)
 
-        if resources.instance_type is not None:
-            assert resources.is_launchable(), resources
-            resources = resources.copy(accelerators=None)
-            return _admit_live_offers([resources.instance_type], [])
+        def _get_catalog_candidates():
+            if resources.instance_type is not None:
+                assert resources.is_launchable(), resources
+                return [resources.instance_type], []
 
-        try:
             # Currently, handle a filter on accelerators only.
             accelerators = resources.accelerators
             if accelerators is None:
@@ -353,13 +372,12 @@ class Vast(clouds.Cloud):
                     max_hourly_cost=resources.max_hourly_cost,
                     datacenter_only=datacenter_only)
                 if default_instance_type is None:
-                    return resources_utils.FeasibleResources([], [], None)
-                return _admit_live_offers([default_instance_type], [])
+                    return None, []
+                return [default_instance_type], []
 
             assert len(accelerators) == 1, resources
             acc, acc_count = list(accelerators.items())[0]
-            (instance_list, fuzzy_candidate_list
-            ) = vast_catalog.get_instance_type_for_accelerator(
+            return vast_catalog.get_instance_type_for_accelerator(
                 acc,
                 acc_count,
                 use_spot=resources.use_spot,
@@ -370,11 +388,38 @@ class Vast(clouds.Cloud):
                 memory=resources.memory,
                 max_hourly_cost=resources.max_hourly_cost,
                 datacenter_only=datacenter_only)
+
+        try:
+            instance_list, fuzzy_candidate_list = _get_catalog_candidates()
             if instance_list is None:
                 return resources_utils.FeasibleResources([],
                                                          fuzzy_candidate_list,
                                                          None)
-            return _admit_live_offers(instance_list, fuzzy_candidate_list)
+            feasible_resources, live_query_failed = _admit_live_offers(
+                instance_list, fuzzy_candidate_list)
+            if (feasible_resources.resources_list or live_query_failed or
+                    not _is_unscoped_request()):
+                return feasible_resources
+
+            # Marketplace offers can change after a catalog sweep. Retry once
+            # after a forced refresh, then let the targeted live diagnostics
+            # describe any remaining capacity mismatch.
+            from sky.catalog import vast_refresh
+            try:
+                refreshed = vast_refresh.refresh_catalog(force=True)
+            except Exception:  # pylint: disable=broad-except
+                return feasible_resources
+            if not refreshed:
+                return feasible_resources
+            annotations.clear_request_level_cache()
+            instance_list, fuzzy_candidate_list = _get_catalog_candidates()
+            if instance_list is None:
+                return resources_utils.FeasibleResources([],
+                                                         fuzzy_candidate_list,
+                                                         None)
+            feasible_resources, _ = _admit_live_offers(instance_list,
+                                                       fuzzy_candidate_list)
+            return feasible_resources
         except Exception as exc:  # pylint: disable=broad-except
             from sky.catalog import common as catalog_common
             if isinstance(exc, ValueError):
@@ -420,8 +465,18 @@ class Vast(clouds.Cloud):
     def instance_type_exists(self, instance_type: str) -> bool:
         return catalog.instance_type_exists(instance_type, 'vast')
 
-    def validate_region_zone(self, region: Optional[str], zone: Optional[str]):
-        return catalog.validate_region_zone(region, zone, clouds='vast')
+    def validate_region_zone(
+            self, region: Optional[str],
+            zone: Optional[str]) -> Tuple[Optional[str], Optional[str]]:
+        """Validate Vast's region syntax without treating catalog rows as stock.
+        """
+        if zone is not None:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError('Vast does not support zones.')
+        if region is None or region == _ANY_REGION:
+            return region, None
+        vast_adaptor.extract_country_code(region)
+        return region, None
 
     @classmethod
     def get_image_size(cls, image_id: str, region: Optional[str]) -> float:

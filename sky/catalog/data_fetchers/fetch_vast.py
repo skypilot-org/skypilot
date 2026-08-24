@@ -12,7 +12,7 @@ import json
 import math
 import os
 import re
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Set, Tuple
 
 from sky.adaptors import vast
 
@@ -37,11 +37,41 @@ _MAPPED_KEYS = (
     ('hosting_type', 'HostingType'),
 )
 
+_VAST_INSTANCE_TYPE_PREFIX = 'vastv2'
+_ACCELERATOR_MEMORY_VARIANTS = {
+    ('A100', 80 * 1024): 'A100-80GB',
+    ('V100', 32 * 1024): 'V100-32GB',
+}
 
-def create_instance_type(obj: Dict[str, Any]) -> str:
+
+def create_instance_type(obj: Dict[str, Any], per_gpu_vram_mib: int) -> str:
+    """Return a stable Vast type that preserves per-device VRAM."""
     stubify = lambda x: re.sub(r'\s', '_', x)
-    return '{}x-{}-{}-{}'.format(obj['num_gpus'], stubify(obj['gpu_name']),
-                                 obj['cpu_cores'], obj['cpu_ram'])
+    return (f'{_VAST_INSTANCE_TYPE_PREFIX}-{obj["num_gpus"]}x-'
+            f'{stubify(obj["gpu_name"])}-{per_gpu_vram_mib}-'
+            f'{obj["cpu_cores"]}-{obj["cpu_ram"]}')
+
+
+def get_per_gpu_vram_mib(offer: Dict[str, Any]) -> int:
+    """Return validated per-device VRAM from Vast's total-memory field."""
+    try:
+        gpu_count = int(offer['num_gpus'])
+        total_vram_mib = float(offer['gpu_total_ram'])
+    except (KeyError, TypeError, ValueError) as exc:
+        raise ValueError('Vast offer is missing GPU memory metadata.') from exc
+    if (gpu_count <= 0 or not math.isfinite(total_vram_mib) or
+            total_vram_mib <= 0):
+        raise ValueError('Vast offer has invalid GPU memory metadata.')
+    return round(total_vram_mib / gpu_count)
+
+
+def _accelerator_name(gpu_name: str, per_gpu_vram_mib: int) -> str:
+    """Normalize a Vast GPU name while retaining canonical memory variants."""
+    gpu = re.sub('Ada', '-Ada', re.sub(r'\s', '', gpu_name))
+    gpu = re.sub(r'(Ti|PCIE|SXM4|SXM|NVL)$', '', gpu)
+    gpu = re.sub(r'(RTX\d0\d0)(S|D)$', r'\1', gpu)
+    gpu = _map.get(gpu, gpu)
+    return _ACCELERATOR_MEMORY_VARIANTS.get((gpu, per_gpu_vram_mib), gpu)
 
 
 def dot_get(d: dict, key: str) -> Any:
@@ -52,7 +82,7 @@ def dot_get(d: dict, key: str) -> Any:
 
 def fetch_vast_catalog() -> List[Dict[str, Any]]:
     """Fetch and normalize the current Vast offers into catalog rows."""
-    seen = set()
+    seen: Set[Tuple[str, str, str]] = set()
     # InstanceList is the buffered list to emit to
     # the CSV.
     csv_list = []
@@ -99,7 +129,8 @@ def fetch_vast_catalog() -> List[Dict[str, Any]]:
             field = dot_get(offer, ours)
             entry[theirs] = field
 
-        instance_type = create_instance_type(offer)
+        per_gpu_vram_mib = get_per_gpu_vram_mib(offer)
+        instance_type = create_instance_type(offer, per_gpu_vram_mib)
         entry['InstanceType'] = instance_type
 
         # the documentation says
@@ -113,12 +144,7 @@ def fetch_vast_catalog() -> List[Dict[str, Any]]:
         # we can do that.
         entry['MemoryGiB'] /= 1024
 
-        gpu = re.sub('Ada', '-Ada', re.sub(r'\s', '', offer['gpu_name']))
-        gpu = re.sub(r'(Ti|PCIE|SXM4|SXM|NVL)$', '', gpu)
-        gpu = re.sub(r'(RTX\d0\d0)(S|D)$', r'\1', gpu)
-
-        if gpu in _map:
-            gpu = _map[gpu]
+        gpu = _accelerator_name(offer['gpu_name'], per_gpu_vram_mib)
 
         entry['AcceleratorName'] = gpu
         entry['GpuInfo'] = json.dumps({
@@ -126,7 +152,7 @@ def fetch_vast_catalog() -> List[Dict[str, Any]]:
                 'Name': gpu,
                 'Count': offer['num_gpus'],
                 'MemoryInfo': {
-                    'SizeInMiB': offer['gpu_total_ram']
+                    'SizeInMiB': per_gpu_vram_mib
                 }
             }],
             'TotalGpuMemoryInMiB': offer['gpu_total_ram']
@@ -147,16 +173,20 @@ def fetch_vast_catalog() -> List[Dict[str, Any]]:
         max_bid = max([x.get('SpotPrice') for x in to_list])
         for instance in to_list:
             hosting_type = instance.get('HostingType', 0)
-            stub = (f'{instance["InstanceType"]} '
-                    f'{instance["Region"][-2:]} {hosting_type}')
-            if stub in seen:
-                printstub = f'{stub}#print'
-                if printstub not in seen:
-                    instance['SpotPrice'] = f'{max_bid:.2f}'
-                    csv_list.append(instance)
-                    seen.add(printstub)
+            raw_region = instance['Region']
+            try:
+                country_code = vast.extract_country_code(raw_region)
+            except ValueError:
+                geographic_key = f'raw:{str(raw_region).strip().casefold()}'
             else:
-                seen.add(stub)
+                geographic_key = country_code or 'any'
+            deduplication_key = (instance['InstanceType'], geographic_key,
+                                 str(hosting_type))
+            if deduplication_key in seen:
+                continue
+            instance['SpotPrice'] = f'{max_bid:.2f}'
+            csv_list.append(instance)
+            seen.add(deduplication_key)
 
     return csv_list
 

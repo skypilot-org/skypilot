@@ -10,7 +10,7 @@ from pathlib import Path
 import re
 import shlex
 import time
-from typing import Any, Dict, Iterable, List, Optional, Tuple
+from typing import Any, Dict, Iterable, List, Optional
 
 from sky import exceptions
 from sky import sky_logging
@@ -113,9 +113,9 @@ def get_instance_logs(instance_id: str,
     return str(output)
 
 
-def gpu_requirements(instance_type: str) -> Tuple[str, int]:
-    """Extract the exact GPU name and count encoded in an instance type."""
-    requirements = vast.get_offer_requirements(
+def gpu_requirements(instance_type: str) -> vast.VastOfferRequirements:
+    """Extract the GPU identity, including minimum VRAM, from a type."""
+    return vast.get_offer_requirements(
         instance_type,
         region=None,
         disk_size=1,
@@ -123,11 +123,10 @@ def gpu_requirements(instance_type: str) -> Tuple[str, int]:
         reliable_hosts=False,
         network_tier=resources_utils.NetworkTier.STANDARD,
     )
-    return requirements.gpu_name, requirements.num_gpus
 
 
-def matches_gpu(offer: Any, gpu_name: str, num_gpus: int) -> bool:
-    """Return whether a search result exactly matches the requested GPU."""
+def matches_gpu(offer: Any, requirements: vast.VastOfferRequirements) -> bool:
+    """Return whether an instance keeps the requested GPU identity intact."""
     if not isinstance(offer, dict):
         return False
     offer_num_gpus = offer.get('num_gpus')
@@ -137,9 +136,15 @@ def matches_gpu(offer: Any, gpu_name: str, num_gpus: int) -> bool:
         normalized_num_gpus = int(offer_num_gpus)
     except (TypeError, ValueError):
         return False
+    try:
+        offer_gpu_ram_mib = float(offer['gpu_ram'])
+    except (KeyError, TypeError, ValueError):
+        return False
     return (str(offer.get('gpu_name') or '').replace(
-        '_', ' ').strip().casefold() == str(gpu_name or '').replace(
-            '_', ' ').strip().casefold() and normalized_num_gpus == num_gpus)
+        '_', ' ').strip().casefold() == str(
+            requirements.gpu_name or '').replace('_', ' ').strip().casefold()
+            and normalized_num_gpus == requirements.num_gpus and
+            offer_gpu_ram_mib >= requirements.gpu_ram_mib)
 
 
 def _offer_price(offer: Dict[str, Any]) -> float:
@@ -153,18 +158,22 @@ def _offer_price(offer: Dict[str, Any]) -> float:
         return math.inf
 
 
-def _validate_created_instance(instance: Any, gpu_name: str,
-                               num_gpus: int) -> None:
+def _validate_created_instance(
+        instance: Any, requirements: vast.VastOfferRequirements) -> None:
     """Raise when a created contract does not identify the requested GPU."""
-    if not matches_gpu(instance, gpu_name, num_gpus):
+    if not matches_gpu(instance, requirements):
         actual_gpu_name = (instance.get('gpu_name') if isinstance(
             instance, dict) else None)
         actual_num_gpus = (instance.get('num_gpus') if isinstance(
             instance, dict) else None)
+        actual_gpu_ram = (instance.get('gpu_ram')
+                          if isinstance(instance, dict) else None)
         raise ValueError(
             f'Vast reported gpu_name={actual_gpu_name!r}, '
-            f'num_gpus={actual_num_gpus!r}; expected gpu_name={gpu_name!r}, '
-            f'num_gpus={num_gpus}.')
+            f'num_gpus={actual_num_gpus!r}, gpu_ram={actual_gpu_ram!r}; '
+            f'expected gpu_name={requirements.gpu_name!r}, '
+            f'num_gpus={requirements.num_gpus}, '
+            f'gpu_ram>={requirements.gpu_ram_mib}.')
 
 
 def list_instances() -> Dict[str, Dict[str, Any]]:
@@ -409,7 +418,7 @@ def launch(name: str,
                 raise RuntimeError(
                     f'Vast contract {contract_id} was not visible after '
                     f'{_SHOW_INSTANCE_MAX_ATTEMPTS} attempts.')
-            _validate_created_instance(new_instance, gpu_name, num_gpus)
+            _validate_created_instance(new_instance, requirements)
         except Exception as exc:  # pylint: disable=broad-except
             try:
                 vast.vast().destroy_instance(id=contract_id)

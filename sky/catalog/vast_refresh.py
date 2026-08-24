@@ -71,12 +71,16 @@ def catalog_is_fresh(target: Path) -> bool:
     return True
 
 
-def refresh_catalog() -> bool:
+def refresh_catalog(force: bool = False) -> bool:
     """Fetch, validate, and atomically install the current Vast catalog.
 
     A refresh is intentionally disabled unless the Vast credential file is
     available. If a provider call fails, a previously validated CSV remains in
     place and continues to serve catalog queries.
+
+    Args:
+        force: Refresh even when the current catalog is still within its
+            configured maximum age.
     """
     if not has_credentials():
         return False
@@ -84,7 +88,7 @@ def refresh_catalog() -> bool:
     target = Path(catalog_common.get_catalog_path(CATALOG_FILENAME))
     target.parent.mkdir(parents=True, exist_ok=True)
     with filelock.FileLock(str(target) + '.refresh.lock'):
-        if catalog_is_fresh(target):
+        if not force and catalog_is_fresh(target):
             return True
 
         file_descriptor, staged_name = tempfile.mkstemp(prefix='.vast-vms-',
