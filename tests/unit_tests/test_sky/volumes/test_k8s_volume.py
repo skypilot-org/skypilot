@@ -1728,8 +1728,8 @@ class TestRefreshVolumeConfig:
         assert config.region == 'existing-context'
 
 
-class TestGetAllVolumesErrors:
-    """Tests for get_all_volumes_errors function."""
+class TestGetAllVolumesState:
+    """Tests for get_all_volumes_state function."""
 
     @patch('sky.provision.kubernetes.volume._get_context_namespace')
     @patch('sky.adaptors.kubernetes.core_api')
@@ -1757,7 +1757,7 @@ class TestGetAllVolumesErrors:
             config={'namespace': 'my-namespace'},
         )
 
-        errors, _ = k8s_volume.get_all_volumes_errors([config])
+        errors, _, _ = k8s_volume.get_all_volumes_state([config])
 
         assert errors.get('test-vol') is None
 
@@ -1800,7 +1800,7 @@ class TestGetAllVolumesErrors:
             config={'namespace': 'my-namespace'},
         )
 
-        errors, _ = k8s_volume.get_all_volumes_errors([config])
+        errors, _, _ = k8s_volume.get_all_volumes_state([config])
 
         assert 'test-vol' in errors
         assert errors['test-vol'] is not None
@@ -1852,7 +1852,7 @@ class TestGetAllVolumesErrors:
             config={'namespace': 'my-namespace'},
         )
 
-        errors, _ = k8s_volume.get_all_volumes_errors([config])
+        errors, _, _ = k8s_volume.get_all_volumes_state([config])
 
         assert 'test-vol' in errors
         assert 'access mode mismatch' in errors['test-vol'].lower()
@@ -1900,7 +1900,7 @@ class TestGetAllVolumesErrors:
             config={'namespace': 'my-namespace'},
         )
 
-        errors, _ = k8s_volume.get_all_volumes_errors([config])
+        errors, _, _ = k8s_volume.get_all_volumes_state([config])
 
         # Should be None for WaitForFirstConsumer
         assert errors.get('test-vol') is None
@@ -1944,7 +1944,7 @@ class TestGetAllVolumesErrors:
             config={'namespace': 'my-namespace'},
         )
 
-        errors, _ = k8s_volume.get_all_volumes_errors([config])
+        errors, _, _ = k8s_volume.get_all_volumes_state([config])
 
         # Should be None when storage class read fails
         assert errors.get('test-vol') is None
@@ -1983,7 +1983,7 @@ class TestGetAllVolumesErrors:
             config={'namespace': 'my-namespace'},
         )
 
-        errors, _ = k8s_volume.get_all_volumes_errors([config])
+        errors, _, _ = k8s_volume.get_all_volumes_state([config])
 
         # Should be None when storage class read fails
         assert errors.get('test-vol') is None
@@ -2014,7 +2014,7 @@ class TestGetAllVolumesErrors:
             config={'namespace': 'my-namespace'},
         )
 
-        errors, _ = k8s_volume.get_all_volumes_errors([config])
+        errors, _, _ = k8s_volume.get_all_volumes_state([config])
 
         assert 'test-vol' in errors
         assert 'Lost' in errors['test-vol']
@@ -2044,7 +2044,7 @@ class TestGetAllVolumesErrors:
 
         # Should not raise. The volume must be reported as failed rather than
         # simply omitted -- an omitted volume reads as healthy to the caller.
-        errors, failed = k8s_volume.get_all_volumes_errors([config])
+        errors, _, failed = k8s_volume.get_all_volumes_state([config])
         assert errors == {}
         assert failed == {'test-vol'}
 
@@ -2063,7 +2063,7 @@ class TestGetAllVolumesErrors:
             config={'host_path': '/mnt/data'},
         )
 
-        errors, failed = k8s_volume.get_all_volumes_errors([config])
+        errors, _, failed = k8s_volume.get_all_volumes_state([config])
 
         assert errors == {'test-vol': None}
         assert failed == set()
@@ -2094,7 +2094,7 @@ class TestGetAllVolumesErrors:
             config={'namespace': 'my-namespace'},
         )
 
-        errors, failed = k8s_volume.get_all_volumes_errors([config])
+        errors, _, failed = k8s_volume.get_all_volumes_state([config])
 
         assert 'test-vol' not in failed
         assert errors['test-vol'] is not None
@@ -2131,7 +2131,7 @@ class TestGetAllVolumesErrors:
             },
         )
 
-        errors, failed = k8s_volume.get_all_volumes_errors([config])
+        errors, _, failed = k8s_volume.get_all_volumes_state([config])
 
         assert failed == set()
         assert errors['test-vol'] is None
@@ -2182,7 +2182,7 @@ class TestGetAllVolumesErrors:
             config={'namespace': 'my-namespace'},
         )
 
-        errors, _ = k8s_volume.get_all_volumes_errors([config])
+        errors, _, _ = k8s_volume.get_all_volumes_state([config])
 
         assert 'ProvisioningFailed' in errors['test-vol']
         assert 'below the 1Ti minimum' in errors['test-vol']
@@ -2223,7 +2223,7 @@ class TestGetAllVolumesErrors:
                 config={},
             )
 
-        errors, failed = k8s_volume.get_all_volumes_errors(
+        errors, _, failed = k8s_volume.get_all_volumes_state(
             [_config('vol-a'), _config('vol-b')])
 
         assert failed == set()
@@ -2259,7 +2259,7 @@ class TestGetAllVolumesErrors:
                 config={'namespace': 'my-namespace'},
             )
 
-        errors, _ = k8s_volume.get_all_volumes_errors(
+        errors, _, _ = k8s_volume.get_all_volumes_state(
             [_config('good-vol', 'good-pvc'),
              _config('bad-vol', 'bad-pvc')])
 
@@ -2683,3 +2683,190 @@ class TestFirstPvcFailureEvent:
             self, monkeypatch):
         assert 'instance.tier' in self._first(monkeypatch, _DEADLINE_MESSAGE,
                                               _TERMINAL_MESSAGE)
+
+
+class TestObservedVolumeState:
+    """What `get_all_volumes_state` reports about the cluster-owned fields.
+
+    A volume's size is recorded when it is created, but the cluster can change
+    it afterwards -- storage gets expanded, and a provisioner can round a
+    request up -- so the refresh has to read it back from the PVC.
+    """
+
+    def _config(self, name_on_cloud='test-pvc', size='10', config=None):
+        return models.VolumeConfig(
+            _version=1,
+            name='test-vol',
+            type='k8s-pvc',
+            cloud='kubernetes',
+            region='my-context',
+            zone=None,
+            name_on_cloud=name_on_cloud,
+            size=size,
+            config=config
+            if config is not None else {'namespace': 'my-namespace'},
+        )
+
+    def _observe(self, mock_core_api, pvc, config=None):
+        pvc_list = Mock()
+        pvc_list.items = [pvc] if pvc is not None else []
+        (mock_core_api.return_value.list_namespaced_persistent_volume_claim.
+         return_value) = pvc_list
+        _, observed, _ = k8s_volume.get_all_volumes_state(
+            [config if config is not None else self._config()])
+        return observed
+
+    @patch('sky.provision.kubernetes.volume._get_context_namespace')
+    @patch('sky.adaptors.kubernetes.core_api')
+    def test_expanded_volume_reports_its_new_capacity(self, mock_core_api,
+                                                      mock_get_context):
+        mock_get_context.return_value = ('my-context', 'my-namespace')
+        pvc = MockPVC('test-pvc', 'my-namespace', size='10Ti')
+        pvc.status.phase = 'Bound'
+        # An expansion moves the request first; status.capacity follows once
+        # the volume has actually grown, and that is the size that exists.
+        pvc.spec.resources.requests = {'storage': '25Ti'}
+        pvc.status.capacity = {'storage': '25Ti'}
+
+        observed = self._observe(mock_core_api, pvc)
+
+        assert observed['test-vol'].size == '25600'
+
+    @patch('sky.provision.kubernetes.volume._get_context_namespace')
+    @patch('sky.adaptors.kubernetes.core_api')
+    def test_a_request_that_is_not_yet_fulfilled_is_not_a_capacity(
+            self, mock_core_api, mock_get_context):
+        """A pending expansion must not be reported as the size on disk."""
+        mock_get_context.return_value = ('my-context', 'my-namespace')
+        pvc = MockPVC('test-pvc', 'my-namespace', size='10Gi')
+        pvc.status.phase = 'Bound'
+        pvc.spec.resources.requests = {'storage': '20Gi'}
+        pvc.status.capacity = {'storage': '10Gi'}
+
+        observed = self._observe(mock_core_api, pvc)
+
+        assert observed['test-vol'].size == '10'
+
+    @patch('sky.provision.kubernetes.volume._get_context_namespace')
+    @patch('sky.adaptors.kubernetes.core_api')
+    def test_an_unbound_claim_reports_no_capacity(self, mock_core_api,
+                                                  mock_get_context):
+        mock_get_context.return_value = ('my-context', 'my-namespace')
+        pvc = MockPVC('test-pvc', 'my-namespace')
+        pvc.status.phase = 'Pending'
+        pvc.status.capacity = None
+
+        observed = self._observe(mock_core_api, pvc)
+
+        assert observed['test-vol'].size is None
+
+    @patch('sky.provision.kubernetes.volume._get_context_namespace')
+    @patch('sky.adaptors.kubernetes.core_api')
+    def test_an_unreadable_capacity_reports_none(self, mock_core_api,
+                                                 mock_get_context):
+        mock_get_context.return_value = ('my-context', 'my-namespace')
+        pvc = MockPVC('test-pvc', 'my-namespace')
+        pvc.status.phase = 'Bound'
+        pvc.status.capacity = {'storage': 'not-a-quantity'}
+
+        observed = self._observe(mock_core_api, pvc)
+
+        assert observed['test-vol'].size is None
+
+    @patch('sky.provision.kubernetes.volume._get_context_namespace')
+    @patch('sky.adaptors.kubernetes.core_api')
+    def test_a_sub_gi_capacity_reports_none(self, mock_core_api,
+                                            mock_get_context):
+        """Rounding to '0' is not a size a volume could be created with."""
+        mock_get_context.return_value = ('my-context', 'my-namespace')
+        pvc = MockPVC('test-pvc', 'my-namespace')
+        pvc.status.phase = 'Bound'
+        pvc.status.capacity = {'storage': '100Mi'}
+
+        observed = self._observe(mock_core_api, pvc)
+
+        assert observed['test-vol'].size is None
+
+    @patch('sky.provision.kubernetes.volume._get_context_namespace')
+    @patch('sky.adaptors.kubernetes.core_api')
+    def test_storage_class_is_reported(self, mock_core_api, mock_get_context):
+        mock_get_context.return_value = ('my-context', 'my-namespace')
+        pvc = MockPVC('test-pvc', 'my-namespace', storage_class='premium-rwo')
+        pvc.status.phase = 'Bound'
+
+        observed = self._observe(mock_core_api, pvc)
+
+        assert observed['test-vol'].storage_class_name == 'premium-rwo'
+
+    @patch('sky.provision.kubernetes.volume._get_context_namespace')
+    @patch('sky.adaptors.kubernetes.core_api')
+    def test_no_storage_class_is_not_a_class_name(self, mock_core_api,
+                                                  mock_get_context):
+        """'' opts out of dynamic provisioning; it is not a class to record."""
+        mock_get_context.return_value = ('my-context', 'my-namespace')
+        pvc = MockPVC('test-pvc', 'my-namespace', storage_class='')
+        pvc.status.phase = 'Bound'
+
+        observed = self._observe(mock_core_api, pvc)
+
+        assert observed['test-vol'].storage_class_name is None
+
+    @patch('sky.provision.kubernetes.volume._get_context_namespace')
+    @patch('sky.adaptors.kubernetes.core_api')
+    def test_a_use_existing_pvc_is_observed_too(self, mock_core_api,
+                                                mock_get_context):
+        """An adopted PVC carries no skypilot label, so it is read by name in
+        the other branch -- which has to observe it all the same."""
+        mock_get_context.return_value = ('my-context', 'my-namespace')
+        pvc = MockPVC('adopted-pvc', 'my-namespace', size='25Ti')
+        pvc.status.phase = 'Bound'
+        pvc.metadata.labels = {}
+
+        empty = Mock()
+        empty.items = []
+        (mock_core_api.return_value.list_namespaced_persistent_volume_claim.
+         return_value) = empty
+        (mock_core_api.return_value.read_namespaced_persistent_volume_claim.
+         return_value) = pvc
+
+        _, observed, _ = k8s_volume.get_all_volumes_state([
+            self._config(name_on_cloud='adopted-pvc',
+                         config={
+                             'namespace': 'my-namespace',
+                             'use_existing': True
+                         })
+        ])
+
+        assert observed['test-vol'].size == '25600'
+
+    @patch('sky.provision.kubernetes.volume._get_context_namespace')
+    @patch('sky.adaptors.kubernetes.core_api')
+    def test_an_unreadable_namespace_observes_nothing(self, mock_core_api,
+                                                      mock_get_context):
+        mock_get_context.return_value = ('my-context', 'my-namespace')
+        (mock_core_api.return_value.list_namespaced_persistent_volume_claim.
+         side_effect) = Exception('apiserver down')
+
+        _, observed, failed = k8s_volume.get_all_volumes_state([self._config()])
+
+        assert observed == {}
+        assert failed == {'test-vol'}
+
+    def test_a_hostpath_volume_has_nothing_to_observe(self):
+        config = models.VolumeConfig(
+            _version=1,
+            name='host-vol',
+            type='k8s-hostpath',
+            cloud='kubernetes',
+            region='my-context',
+            zone=None,
+            name_on_cloud='host-vol',
+            size=None,
+            config={'host_path': '/mnt/data'},
+        )
+
+        errors, observed, failed = k8s_volume.get_all_volumes_state([config])
+
+        assert errors == {'host-vol': None}
+        assert observed == {}
+        assert not failed
