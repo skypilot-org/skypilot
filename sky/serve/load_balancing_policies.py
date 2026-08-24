@@ -6,6 +6,7 @@ import typing
 from typing import Any, Dict, List, Optional
 
 from sky import sky_logging
+from sky.serve import serve_utils
 
 if typing.TYPE_CHECKING:
     import fastapi
@@ -18,11 +19,15 @@ DEFAULT_LB_POLICY = None
 
 
 def _request_repr(request: 'fastapi.Request') -> str:
-    return ('<Request '
-            f'method="{request.method}" '
-            f'url="{request.url}" '
-            f'headers={dict(request.headers)} '
-            f'query_params={dict(request.query_params)}>')
+    return (
+        '<Request '
+        f'method="{request.method}" '
+        # Do not include the query string in the URL: it may contain a
+        # secret even when the parameter name is not available here.
+        f'url="{request.url.path}" '
+        f'headers={serve_utils.redact_request_fields(request.headers)} '
+        f'query_params='
+        f'{serve_utils.redact_request_fields(request.query_params)}>')
 
 
 class LoadBalancingPolicy:
