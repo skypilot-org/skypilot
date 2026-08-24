@@ -728,3 +728,49 @@ def test_pool_gauge_reports_a_held_connection(tmp_path):
                        pool='QueuePool',
                        pid=pid)
     assert held >= 1, 'gauge did not report the connection being held'
+
+
+def test_checkin_fires_before_the_connection_is_returned(tmp_path):
+    """Pins the one undocumented ordering assumption in this module.
+
+    `_sync_pool_gauge` subtracts 1 at checkin because the event fires
+    while the connection is still counted as checked out. SQLAlchemy does
+    not document that ordering. A flip would survive single-connection
+    use — the clamp to 0 hides it — but would silently under-report by
+    one under concurrency, and the two gauge tests above are
+    single-connection, so neither would catch it.
+
+    So assert the ordering itself: a SQLAlchemy upgrade that moves the
+    dispatch turns into a red test here rather than a quietly wrong
+    saturation gauge in production.
+    """
+    _, md, table = _table()
+    engine = _engine(md, db='checkin_order_probe', path=tmp_path / 'order.db')
+    _seed(engine, table, 1)
+
+    seen = {}
+
+    @sa.event.listens_for(engine, 'checkout')
+    def _at_checkout(dbapi_connection, conn_rec, conn_proxy):
+        del dbapi_connection, conn_rec, conn_proxy
+        seen['checkout'] = engine.pool.checkedout()
+
+    @sa.event.listens_for(engine, 'checkin')
+    def _at_checkin(dbapi_connection, conn_rec):
+        del dbapi_connection, conn_rec
+        seen['checkin'] = engine.pool.checkedout()
+
+    with engine.connect() as conn:
+        conn.execute(sa.select(table)).all()
+    settled = engine.pool.checkedout()
+
+    assert seen['checkout'] == 1, (
+        'checkout no longer sees the connection as checked out; the gauge '
+        'would now under-report while a connection is held')
+    assert seen['checkin'] == 1, (
+        'checkin no longer counts the connection it is returning, so the '
+        '-1 adjustment in _sync_pool_gauge is wrong and the saturation '
+        'gauge under-reports by one per concurrent connection')
+    assert settled == 0, (
+        'the pool did not settle back to zero once the connection was '
+        'returned')
