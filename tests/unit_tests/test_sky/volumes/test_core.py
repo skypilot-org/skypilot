@@ -1205,8 +1205,9 @@ class TestVolumeCore:
         monkeypatch.setattr(provision, 'get_all_volumes_usedby',
                             mock_get_all_usedby)
 
-        # Mock get_all_volumes_state
-        mock_get_errors = mock.MagicMock(return_value={})
+        # Reports the volume healthy, so that it reaches the usedby check this
+        # test is about instead of being skipped by the error-fetch guard.
+        mock_get_errors = mock.MagicMock(return_value=({}, {}, set()))
         monkeypatch.setattr(provision, 'get_all_volumes_state', mock_get_errors)
 
         # Mock filelock
