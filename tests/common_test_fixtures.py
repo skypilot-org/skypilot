@@ -20,6 +20,7 @@ import sky
 from sky import global_user_state
 from sky import sky_logging
 from sky import skypilot_config
+from sky.adaptors import vast as vast_adaptor
 from sky.backends.cloud_vm_ray_backend import CloudVmRayBackend
 from sky.catalog import vsphere_catalog
 from sky.provision import common as provision_common
@@ -191,6 +192,14 @@ def check_quota_available_mock(*_, **__):
     return True
 
 
+def get_live_vast_offers_mock(*_, **__) -> vast_adaptor.LiveOfferQueryResult:
+    """Make generic cloud-selection tests independent of Vast capacity."""
+    return vast_adaptor.LiveOfferQueryResult(offers=({},),
+                                             error=None,
+                                             offers_examined=1,
+                                             rejection_counts=())
+
+
 @pytest.fixture
 def enable_all_clouds(monkeypatch, request, mock_client_requests):
     """Create mock context managers for cloud configurations."""
@@ -209,6 +218,8 @@ def enable_all_clouds(monkeypatch, request, mock_client_requests):
     monkeypatch.setattr('sky.check.get_cached_enabled_clouds_or_refresh',
                         get_clouds_factory)
     monkeypatch.setattr('sky.check.check_capability', dummy_function)
+    monkeypatch.setattr('sky.adaptors.vast.get_live_offer_matches',
+                        get_live_vast_offers_mock)
     monkeypatch.setattr('sky.catalog.aws_catalog._get_az_mappings',
                         get_az_mappings)
     monkeypatch.setattr('sky.backends.backend_utils.check_owner_identity',
