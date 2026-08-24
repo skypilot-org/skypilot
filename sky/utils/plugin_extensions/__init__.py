@@ -10,6 +10,8 @@ from sky.utils.plugin_extensions.external_failure_source import (
 from sky.utils.plugin_extensions.log_delivery_source import LogDeliverySource
 from sky.utils.plugin_extensions.node_info_source import NodeInfoSource
 from sky.utils.plugin_extensions.pod_info_source import PodInfoSource
+from sky.utils.plugin_extensions.pod_start_policy import PodStartPolicy
+from sky.utils.plugin_extensions.pod_start_policy import PodStartVerdict
 from sky.utils.plugin_extensions.recipe_validator import RecipeValidator
 
 __all__ = [
@@ -18,5 +20,7 @@ __all__ = [
     'LogDeliverySource',
     'NodeInfoSource',
     'PodInfoSource',
+    'PodStartPolicy',
+    'PodStartVerdict',
     'RecipeValidator',
 ]
