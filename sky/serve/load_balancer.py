@@ -203,9 +203,11 @@ class SkyServeLoadBalancer:
                 headers=proxy_response.headers,
                 background=background.BackgroundTask(background_func))
         except (httpx.RequestError, httpx.HTTPStatusError) as e:
-            logger.error(f'Error when proxy request to {url}: '
-                         f'{common_utils.format_exception(e)}'
-                         f'\nTraceback: {traceback.format_exc()}')
+            error = serve_utils.redact_urls(common_utils.format_exception(e))
+            formatted_traceback = serve_utils.redact_urls(
+                traceback.format_exc())
+            logger.error(f'Error when proxy request to {url}: {error}'
+                         f'\nTraceback: {formatted_traceback}')
             return e
 
     async def _proxy_with_retries(
