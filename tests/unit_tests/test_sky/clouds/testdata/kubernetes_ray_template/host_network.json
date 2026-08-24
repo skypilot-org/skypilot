@@ -132,6 +132,7 @@
             }
           ],
           "dnsPolicy": "ClusterFirstWithHostNet",
+          "hostNetwork": true,
           "restartPolicy": "Never",
           "serviceAccountName": "skypilot-service-account",
           "volumes": [
