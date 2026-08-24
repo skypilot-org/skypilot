@@ -3292,7 +3292,12 @@ def _get_pod_termination_reason(pod: Any, cluster_name: str) -> str:
                 if reason is None:
                     # just in-case reason is None, have default for debugging
                     reason = f'exit({exit_code})'
-                container_reasons.append(reason)
+                # An OOM kill on a container with no memory limit is a
+                # node-level OOM, not the container overrunning its own cap.
+                # Tag it so the hint lookup can recommend the right fix.
+                container_reasons.append(
+                    kubernetes_utils.annotate_oom_reason(
+                        reason, pod, container_status.name))
                 if terminated.finished_at is not None:
                     latest_timestamp = max(latest_timestamp,
                                            terminated.finished_at)
