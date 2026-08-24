@@ -101,6 +101,44 @@ def test_compute_server_config_pool(cpu_count, mem_size_gb, buildkite_mock):
     assert controller_utils._get_request_parallelism(pool=True) == 40
 
 
+_MAX_TASKS_ENV = config.server_constants.WORKER_MAX_TASKS_PER_CHILD_ENV_VAR
+
+
+def test_worker_max_tasks_per_child_unset(monkeypatch):
+    monkeypatch.delenv(_MAX_TASKS_ENV, raising=False)
+    assert config._get_worker_max_tasks_per_child() is None
+
+
+def test_worker_max_tasks_per_child_valid(monkeypatch):
+    monkeypatch.setenv(_MAX_TASKS_ENV, '100')
+    monkeypatch.setattr(config.sys, 'version_info', (3, 11, 0))
+    assert config._get_worker_max_tasks_per_child() == 100
+
+
+@pytest.mark.parametrize('value', ['0', '-3', 'abc', ''])
+def test_worker_max_tasks_per_child_invalid(monkeypatch, value):
+    monkeypatch.setenv(_MAX_TASKS_ENV, value)
+    monkeypatch.setattr(config.sys, 'version_info', (3, 11, 0))
+    assert config._get_worker_max_tasks_per_child() is None
+
+
+def test_worker_max_tasks_per_child_ignored_pre_311(monkeypatch):
+    monkeypatch.setenv(_MAX_TASKS_ENV, '100')
+    monkeypatch.setattr(config.sys, 'version_info', (3, 10, 0))
+    assert config._get_worker_max_tasks_per_child() is None
+
+
+@mock.patch('sky.utils.common_utils.get_mem_size_gb', return_value=8)
+@mock.patch('sky.utils.common_utils.get_cpu_count', return_value=4)
+def test_compute_server_config_propagates_max_tasks(cpu_count, mem_size_gb,
+                                                    monkeypatch):
+    monkeypatch.setenv(_MAX_TASKS_ENV, '50')
+    monkeypatch.setattr(config.sys, 'version_info', (3, 11, 0))
+    c = config.compute_server_config(deploy=True)
+    assert c.long_worker_config.max_tasks_per_child == 50
+    assert c.short_worker_config.max_tasks_per_child == 50
+
+
 def test_parallel_size_long():
     # Test with insufficient memory
     cpu_count = 4

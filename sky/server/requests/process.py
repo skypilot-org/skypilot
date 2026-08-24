@@ -2,6 +2,7 @@
 import concurrent.futures
 import logging
 import multiprocessing
+import sys
 import threading
 import time
 from typing import Callable, Dict, Optional, Tuple
@@ -24,7 +25,16 @@ class PoolExecutor(concurrent.futures.ProcessPoolExecutor):
        shutting down instead of indefinitely waiting.
     """
 
-    def __init__(self, max_workers: int, **kwargs):
+    def __init__(self,
+                 max_workers: int,
+                 max_tasks_per_child: Optional[int] = None,
+                 **kwargs):
+        if max_tasks_per_child is not None and sys.version_info >= (3, 11):
+            # Recycle a worker process after it has handled this many tasks so
+            # its high-water-mark RSS is reclaimed. `max_tasks_per_child` was
+            # added to ProcessPoolExecutor in Python 3.11; on older versions it
+            # is silently ignored (the caller logs a warning instead).
+            kwargs['max_tasks_per_child'] = max_tasks_per_child
         super().__init__(max_workers=max_workers, **kwargs)
         self.max_workers: int = max_workers
         # The number of workers that are handling tasks, atomicity across
@@ -203,13 +213,21 @@ class BurstableExecutor:
     def __init__(self,
                  garanteed_workers: int,
                  burst_workers: int = 0,
+                 max_tasks_per_child: Optional[int] = None,
                  **kwargs):
         if garanteed_workers > 0:
             self._guaranteed_workers = garanteed_workers
-            self._guaranteed_pool_kwargs = kwargs
+            # Worker recycling applies to the guaranteed pool only; burst
+            # workers are already disposed after each task. Keep
+            # max_tasks_per_child in the stored kwargs so the pool is rebuilt
+            # with the same setting after a BrokenProcessPool.
+            self._guaranteed_pool_kwargs = {
+                **kwargs,
+                'max_tasks_per_child': max_tasks_per_child,
+            }
             self._guaranteed_pool_lock = threading.Lock()
             self._executor = PoolExecutor(max_workers=garanteed_workers,
-                                          **kwargs)
+                                          **self._guaranteed_pool_kwargs)
         if burst_workers > 0:
             self._burst_executor = DisposableExecutor(max_workers=burst_workers,
                                                       **kwargs)

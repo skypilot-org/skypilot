@@ -1,6 +1,8 @@
 """Unit tests for sky/server/requests/process.py."""
 from concurrent.futures import Future
 import concurrent.futures.process
+import os
+import sys
 import time
 import unittest.mock
 
@@ -15,6 +17,11 @@ def dummy_task(sleep_time=0.1):
     """A dummy task that sleeps for a given time."""
     time.sleep(sleep_time)
     return True
+
+
+def pid_task():
+    """Return the worker process PID, to observe worker recycling."""
+    return os.getpid()
 
 
 def failing_task():
@@ -83,6 +90,53 @@ def test_pool_executor():
     finally:
         # Wait a bit to ensure all tasks are truly done
         time.sleep(0.1)
+        executor.shutdown()
+
+
+@pytest.mark.skipif(sys.version_info < (3, 11),
+                    reason='max_tasks_per_child requires Python 3.11+')
+def test_pool_executor_recycles_after_max_tasks():
+    """A guaranteed worker is replaced after max_tasks_per_child tasks."""
+    executor = PoolExecutor(max_workers=1, max_tasks_per_child=2)
+    try:
+        # Submit one at a time so all tasks land on the single worker in
+        # order, making recycling deterministic.
+        pids = []
+        for _ in range(4):
+            pids.append(executor.submit(pid_task).result(timeout=20))
+        # With max_tasks_per_child=2 the worker is recycled after every 2
+        # tasks: [A, A, B, B] with A != B.
+        assert pids[0] == pids[1], pids
+        assert pids[2] == pids[3], pids
+        assert pids[0] != pids[2], pids
+    finally:
+        executor.shutdown()
+
+
+def test_pool_executor_no_recycle_by_default():
+    """Without max_tasks_per_child the worker is reused for every task."""
+    executor = PoolExecutor(max_workers=1)
+    try:
+        pids = [executor.submit(pid_task).result(timeout=20) for _ in range(4)]
+        assert len(set(pids)) == 1, pids
+    finally:
+        executor.shutdown()
+
+
+def test_burstable_executor_max_tasks_per_child_routing():
+    """max_tasks_per_child is applied to the guaranteed pool only.
+
+    Burst workers (DisposableExecutor) already dispose after each task, so the
+    setting must not be forwarded to them.
+    """
+    executor = BurstableExecutor(garanteed_workers=1,
+                                 burst_workers=1,
+                                 max_tasks_per_child=5)
+    try:
+        assert (executor._guaranteed_pool_kwargs['max_tasks_per_child'] == 5)
+        # DisposableExecutor does not accept/track the setting.
+        assert not hasattr(executor._burst_executor, 'max_tasks_per_child')
+    finally:
         executor.shutdown()
 
 
