@@ -28,7 +28,7 @@ def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
     if config.count > 1:
         raise RuntimeError('Lium supports single-node clusters only.')
 
-    pods = lium_utils.cluster_pods(cluster_name_on_cloud)
+    pods = lium_utils.get_cluster_pods(cluster_name_on_cloud)
     head_pod_id = _head_pod_id(pods)
     if head_pod_id is not None:
         logger.info(f'Cluster {cluster_name_on_cloud} already has a head pod.')
@@ -42,7 +42,7 @@ def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
 
     node_config = config.node_config
     instance_type = node_config['InstanceType']
-    node = lium_utils.find_node(instance_type, region)
+    node = lium_utils.find_cheapest_free_node(instance_type, region)
     if node is None:
         raise RuntimeError(f'No free Lium node offers {instance_type} in '
                            f'region {region}.')
@@ -88,7 +88,7 @@ def terminate_instances(cluster_name_on_cloud: str,
         # A Lium cluster is one head pod, so there is no worker to delete.
         return
 
-    pods = lium_utils.cluster_pods(cluster_name_on_cloud)
+    pods = lium_utils.get_cluster_pods(cluster_name_on_cloud)
     for pod_id, pod in pods.items():
         logger.info(f'Deleting pod {pod_id} ({pod.name}).')
         lium_utils.terminate_pod(pod_id)
@@ -102,7 +102,7 @@ def get_cluster_info(
     del region  # unused
     # A pod without an SSH endpoint is not reachable yet, so it is left out.
     pods = {
-        pod_id: pod for pod_id, pod in lium_utils.cluster_pods(
+        pod_id: pod for pod_id, pod in lium_utils.get_cluster_pods(
             cluster_name_on_cloud).items() if pod.host is not None
     }
     instances: Dict[str, List[common.InstanceInfo]] = {
@@ -133,7 +133,8 @@ def query_instances(
     del cluster_name, provider_config  # unused
     statuses: Dict[str, Tuple[Optional[status_lib.ClusterStatus],
                               Optional[str]]] = {}
-    for pod_id, pod in lium_utils.cluster_pods(cluster_name_on_cloud).items():
+    for pod_id, pod in lium_utils.get_cluster_pods(
+            cluster_name_on_cloud).items():
         pod_status = pod.status.upper()
         cluster_status = lium_utils.POD_STATUS_MAP.get(
             pod_status, status_lib.ClusterStatus.INIT)

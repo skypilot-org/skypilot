@@ -60,8 +60,6 @@ class Lium(clouds.Cloud):
     }
     # yapf: enable
 
-    _regions: List[clouds.Region] = []
-
     PROVISIONER_VERSION = clouds.ProvisionerVersion.SKYPILOT
     STATUS_VERSION = clouds.StatusVersion.SKYPILOT
     OPEN_PORTS_VERSION = clouds.OpenPortsVersion.LAUNCH_ONLY
@@ -160,14 +158,6 @@ class Lium(clouds.Cloud):
 
     @classmethod
     def get_zone_shell_cmd(cls) -> Optional[str]:
-        return None
-
-    @classmethod
-    def get_user_identities(cls) -> Optional[List[List[str]]]:
-        return None
-
-    @classmethod
-    def get_current_user_identity_str(cls) -> Optional[str]:
         return None
 
     def instance_type_exists(self, instance_type: str) -> bool:

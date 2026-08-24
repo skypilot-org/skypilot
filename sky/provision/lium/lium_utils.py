@@ -20,6 +20,9 @@ else:
 logger = sky_logging.init_logger(__name__)
 
 DEFAULT_BASE_URL = 'https://lium.io/api'
+# The tier of a node that keeps running until the renter stops it. The other
+# tier, 'spot', is taken back when its provider wants the node.
+SECURE_TIER = 'secure'
 CREDENTIAL_PATH = '~/.lium/config.ini'
 API_KEY_ENV_VAR = 'LIUM_API_KEY'
 
@@ -91,6 +94,8 @@ class LiumNode:
     driver_version: str
     price_per_hour: float
     country_code: str
+    tier: str
+    is_whole_host_free: bool
 
 
 @dataclasses.dataclass
@@ -176,10 +181,13 @@ def _parse_node(payload: Dict[str, Any]) -> Optional[LiumNode]:
         gpu_count=gpu_count,
         driver_version=gpu.get('driver', ''),
         price_per_hour=(payload.get('price_per_gpu') or 0) * gpu_count,
-        country_code=(payload.get('location') or {}).get('country_code', ''))
+        country_code=(payload.get('location') or {}).get('country_code', ''),
+        tier=payload.get('tier', ''),
+        is_whole_host_free=bool(payload.get('is_whole_host_free')))
 
 
-def find_node(instance_type: str, region: str) -> Optional[LiumNode]:
+def find_cheapest_free_node(instance_type: str,
+                            region: str) -> Optional[LiumNode]:
     """Returns the cheapest free node that matches the instance type.
 
     Lium rents a node whole, so the node must offer exactly the number of GPUs
@@ -201,6 +209,11 @@ def find_node(instance_type: str, region: str) -> Optional[LiumNode]:
         if accelerator_name(node.gpu_model) != acc_name:
             continue
         if node.country_code != region:
+            continue
+        # A spot node can be taken back at any time, and SkyPilot rents from
+        # Lium as on-demand. A node that already runs a pod cannot be rented
+        # whole, which is the shape the catalog quotes.
+        if node.tier != SECURE_TIER or not node.is_whole_host_free:
             continue
         candidates.append(node)
     if not candidates:
@@ -261,7 +274,7 @@ def _parse_pod(payload: Dict[str, Any]) -> LiumPod:
                    ssh_port=int(port_match.group(1)) if port_match else 22)
 
 
-def cluster_pods(cluster_name_on_cloud: str) -> Dict[str, LiumPod]:
+def get_cluster_pods(cluster_name_on_cloud: str) -> Dict[str, LiumPod]:
     """Returns the pods of a cluster, keyed by pod id."""
     prefix = f'{cluster_name_on_cloud}-'
     pods = [_parse_pod(payload) for payload in _request('GET', '/pods')]
@@ -273,16 +286,24 @@ def terminate_pod(pod_id: str) -> None:
     _request('DELETE', f'/pods/{pod_id}')
 
 
+def _is_failed_status(status: str) -> bool:
+    """Tells whether a pod status is one the pod cannot leave."""
+    return status in POD_STATUS_MAP and POD_STATUS_MAP[status] is None
+
+
 def wait_pod_ready(pod_id: str, timeout: int) -> Optional[LiumPod]:
-    """Waits until a pod runs and reports its SSH endpoint."""
+    """Waits until a pod runs and reports its SSH endpoint.
+
+    Returns None when the timeout expires. Raises when the pod fails or is
+    gone, so a rent that broke does not hold the launch for the full timeout.
+    """
     deadline = time.time() + timeout
     while time.time() < deadline:
-        for payload in _request('GET', '/pods'):
-            if payload['id'] != pod_id:
-                continue
-            pod = _parse_pod(payload)
-            if pod.status.upper() == 'RUNNING' and pod.host is not None:
-                return pod
-            break
+        pod = _parse_pod(_request('GET', f'/pods/{pod_id}'))
+        status = pod.status.upper()
+        if _is_failed_status(status):
+            raise LiumError(f'Pod {pod_id} failed to start: {status}.')
+        if status == 'RUNNING' and pod.host is not None:
+            return pod
         time.sleep(_POD_POLL_INTERVAL)
     return None

@@ -9,6 +9,7 @@ Usage:
 import argparse
 import collections
 import csv
+import dataclasses
 import json
 import os
 from typing import Any, Dict, List, Optional, Tuple
@@ -20,7 +21,20 @@ from sky.provision.lium import lium_utils
 ENDPOINT = 'https://lium.io/api/public/v1/nodes'
 
 
-def _gpu_info(acc_name: str, acc_count: int, memory_gib: int) -> str:
+@dataclasses.dataclass(frozen=True)
+class _Offer:
+    """One catalog row: the cheapest whole node of one shape in one region."""
+    instance_type: str
+    accelerator_name: str
+    accelerator_count: int
+    price_per_hour: float
+    vcpus: int
+    memory_gib: int
+    gpu_memory_gib: int
+    region: str
+
+
+def _gpu_info_column(acc_name: str, acc_count: int, memory_gib: int) -> str:
     """Builds the GpuInfo column, in the format the catalog reader expects."""
     memory_mib = memory_gib * 1024
     info: Dict[str, Any] = {
@@ -43,16 +57,17 @@ def _fetch_nodes(endpoint: str) -> List[Dict[str, Any]]:
     return response.json()['nodes']
 
 
-def _cheapest_offer_per_region(
-        nodes: List[Dict[str, Any]]) -> Dict[Tuple[str, str], Dict[str, Any]]:
+def _cheapest_offer_per_type_and_region(
+        nodes: List[Dict[str, Any]]) -> List[_Offer]:
     """Keeps the cheapest node per instance type and region.
 
     A Lium node is rented whole, so one node is one offer, and a node that is
-    already in use in part is left out. Many nodes share an instance type
-    inside a region; the catalog holds one row per pair, and the cheapest node
-    is the one SkyPilot quotes.
+    already in use in part is left out. A spot node is left out too: it can be
+    taken back at any time, and SkyPilot rents from Lium as on-demand. Many
+    nodes share an instance type inside a region; the catalog holds one row per
+    pair, and the cheapest node is the one SkyPilot quotes.
     """
-    cheapest: Dict[Tuple[str, str], Dict[str, Any]] = {}
+    cheapest: Dict[Tuple[str, str], _Offer] = {}
     for node in nodes:
         acc_name = lium_utils.accelerator_name(node['gpu_model'])
         if acc_name is None:
@@ -60,26 +75,28 @@ def _cheapest_offer_per_region(
         acc_count = node['gpu_count']
         if node['available_gpu_count'] < acc_count:
             continue
-        region = node['country_code']
-        key = (lium_utils.make_instance_type(acc_name, acc_count), region)
-        price = node['price_per_node_hour']
+        if node['tier'] != lium_utils.SECURE_TIER:
+            continue
+        offer = _Offer(instance_type=lium_utils.make_instance_type(
+            acc_name, acc_count),
+                       accelerator_name=acc_name,
+                       accelerator_count=acc_count,
+                       price_per_hour=node['price_per_node_hour'],
+                       vcpus=node['cpu_count'],
+                       memory_gib=node['ram_gb'],
+                       gpu_memory_gib=node['gpu_memory_gb'],
+                       region=node['country_code'])
+        key = (offer.instance_type, offer.region)
         current = cheapest.get(key)
-        if current is None or price < current['price']:
-            cheapest[key] = {
-                'acc_name': acc_name,
-                'acc_count': acc_count,
-                'price': price,
-                'vcpus': node['cpu_count'],
-                'memory_gib': node['ram_gb'],
-                'gpu_memory_gib': node['gpu_memory_gb'],
-                'region': region,
-            }
-    return cheapest
+        if current is None or offer.price_per_hour < current.price_per_hour:
+            cheapest[key] = offer
+    return sorted(cheapest.values(),
+                  key=lambda offer: (offer.instance_type, offer.region))
 
 
 def create_catalog(endpoint: str, output_path: str) -> None:
     """Writes the Lium catalog from the public node feed."""
-    offers = _cheapest_offer_per_region(_fetch_nodes(endpoint))
+    offers = _cheapest_offer_per_type_and_region(_fetch_nodes(endpoint))
 
     with open(output_path, mode='w', encoding='utf-8') as f:
         writer = csv.writer(f, delimiter=',', quotechar='"')
@@ -87,22 +104,22 @@ def create_catalog(endpoint: str, output_path: str) -> None:
             'InstanceType', 'AcceleratorName', 'AcceleratorCount', 'vCPUs',
             'MemoryGiB', 'Price', 'Region', 'GpuInfo', 'SpotPrice'
         ])
-        for (instance_type, region), offer in sorted(offers.items()):
+        for offer in offers:
             writer.writerow([
-                instance_type,
-                offer['acc_name'],
-                float(offer['acc_count']),
-                float(offer['vcpus']),
-                float(offer['memory_gib']),
-                round(offer['price'], 4),
-                region,
-                _gpu_info(offer['acc_name'], offer['acc_count'],
-                          offer['gpu_memory_gib']),
+                offer.instance_type,
+                offer.accelerator_name,
+                float(offer.accelerator_count),
+                float(offer.vcpus),
+                float(offer.memory_gib),
+                round(offer.price_per_hour, 4),
+                offer.region,
+                _gpu_info_column(offer.accelerator_name,
+                                 offer.accelerator_count, offer.gpu_memory_gib),
                 '',  # Lium has no spot instances.
             ])
 
     counts: 'collections.Counter[str]' = collections.Counter(
-        offer['acc_name'] for offer in offers.values())
+        offer.accelerator_name for offer in offers)
     print(f'Wrote {len(offers)} offers to {output_path}: '
           f'{dict(sorted(counts.items()))}')
 
