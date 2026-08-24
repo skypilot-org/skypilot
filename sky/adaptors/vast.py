@@ -143,7 +143,8 @@ def get_offer_requirements(instance_type: str, region: Optional[str],
             f'Invalid Vast instance type {instance_type!r}.') from exc
     if is_legacy_instance_type:
         # Import lazily: the catalog generator imports this adapter.
-        from sky.catalog import vast_catalog  # pylint: disable=import-outside-toplevel
+        # pylint: disable=import-outside-toplevel
+        from sky.catalog import vast_catalog
         gpu_ram_mib = vast_catalog.get_legacy_per_gpu_vram_mib(
             instance_type, num_gpus)
     if (not gpu_name or min(num_gpus, gpu_ram_mib, cpu_cores, cpu_ram_mib,
