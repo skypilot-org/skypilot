@@ -1413,11 +1413,13 @@ def compute_memory_reserved_for_controllers(
     sides of the split agree on one number. Returns 0 outside consolidation
     mode, where the controllers run on their own cluster.
     """
-    if not env_options.Options.MEMORY_AWARE_WORKER_SIZING.get():
-        # Only reserved inside a controller process.
-        if os.environ.get(constants.OVERRIDE_CONSOLIDATION_MODE) is None:
-            return 0.0
+    if os.environ.get(constants.OVERRIDE_CONSOLIDATION_MODE) is not None:
+        # A local API server started from a controller process, which inherits
+        # its env. _get_parallelism() sizes that machine assuming only the flat
+        # headroom was withheld, so withhold exactly that.
         return _controller_headroom_mb(reserve_extra_for_pool)
+    if not env_options.Options.MEMORY_AWARE_WORKER_SIZING.get():
+        return 0.0
     # Either kind of consolidation puts controller processes in the API
     # server's own memory.
     if not is_jobs_consolidation_mode() and not _is_consolidation_mode(

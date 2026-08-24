@@ -125,10 +125,11 @@ def test_memory_aware_sizing_reserves_server_workers(cpu_count, mem_size_gb):
     """Server worker memory comes out of the budget before the pools."""
     with _memory_aware_sizing():
         c = config.compute_server_config(deploy=True, quiet=True)
-    # 13 resident server processes at 0.4GB, so 42.8GB is left for the pools.
+    # 13 resident server processes at 0.4GB = 5.2GB, of which the 2GB min-avail
+    # reserve already covered part, so 3.2GB comes off the top.
     assert c.num_server_workers == 12
     assert c.long_worker_config.garanteed_parallelism == 24
-    assert c.short_worker_config.garanteed_parallelism == 103
+    assert c.short_worker_config.garanteed_parallelism == 110
     assert _permanent_worker_memory_gb(c) <= 48
 
 
@@ -155,8 +156,7 @@ def test_memory_aware_sizing_consolidation_mode(cpu_count, mem_size_gb):
     assert reserved_memory_mb == pytest.approx(4096 + 0.3 * (48 * 1024 - 4096))
     assert c.num_server_workers == 12
     assert c.long_worker_config.garanteed_parallelism == 24
-    # 12.0GB left at 0.3GB each; int() of the binary 40.0 truncates to 39.
-    assert c.short_worker_config.garanteed_parallelism == 39
+    assert c.short_worker_config.garanteed_parallelism == 53
     committed_gb = _permanent_worker_memory_gb(c) + reserved_memory_mb / 1024
     assert committed_gb <= 48
 
@@ -173,6 +173,31 @@ def test_memory_aware_sizing_off_by_default(cpu_count, mem_size_gb):
                            return_value=True):
         assert controller_utils.compute_memory_reserved_for_controllers(
             reserve_extra_for_pool=True) == 0.0
+
+
+@pytest.mark.parametrize('gate_on', [False, True])
+@mock.patch('sky.utils.common_utils.get_mem_size_gb', return_value=48)
+@mock.patch('sky.utils.common_utils.get_cpu_count', return_value=12)
+def test_controller_process_reserves_flat_headroom(cpu_count, mem_size_gb,
+                                                   gate_on):
+    """A local API server under a controller process keeps the flat headroom.
+
+    _get_parallelism() sizes that machine assuming only the headroom was
+    withheld, so the gate must not switch it to the scaling reservation.
+    """
+    from sky.skylet import constants as skylet_constants
+    from sky.utils import controller_utils
+
+    env = {skylet_constants.OVERRIDE_CONSOLIDATION_MODE: 'true'}
+    if gate_on:
+        from sky.utils import env_options
+        env[env_options.Options.MEMORY_AWARE_WORKER_SIZING.env_key] = 'true'
+    with mock.patch.dict(os.environ, env):
+        reserved = controller_utils.compute_memory_reserved_for_controllers(
+            reserve_extra_for_pool=True)
+    assert reserved == float(
+        controller_utils.MAXIMUM_CONTROLLER_RESERVED_MEMORY_MB) * (
+            1 + controller_utils.POOL_JOBS_RESOURCES_RATIO)
 
 
 @mock.patch('sky.utils.common_utils.get_mem_size_gb', return_value=48)
