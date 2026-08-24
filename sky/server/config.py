@@ -30,8 +30,6 @@ from sky.utils import yaml_utils
 # TODO(luca): The future is now! ^^^
 LONG_WORKER_MEM_GB = 0.4
 SHORT_WORKER_MEM_GB = 0.3
-# A server worker is a separate process with its own copy of the imported
-# modules, so it costs about as much as a long worker.
 SERVER_WORKER_MEM_GB = 0.4
 # To control the number of long workers.
 _CPU_MULTIPLIER_FOR_LONG_WORKERS = 2
