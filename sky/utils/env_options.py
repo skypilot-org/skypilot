@@ -50,7 +50,9 @@ class Options(enum.Enum):
     # consolidation-mode controllers, before sizing the executor pools. Without
     # it the pools are sized against total memory and the permanent processes
     # can add up to more memory than the server has.
-    MEMORY_AWARE_WORKER_SIZING = ('SKYPILOT_MEMORY_AWARE_WORKER_SIZING', False)
+    # TEMPORARY: defaulted on so test runs exercise the new sizing without
+    # setting the env var. Flip back to False before merging.
+    MEMORY_AWARE_WORKER_SIZING = ('SKYPILOT_MEMORY_AWARE_WORKER_SIZING', True)
 
     def __init__(self, env_var: str, default: bool) -> None:
         super().__init__()
