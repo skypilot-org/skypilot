@@ -241,6 +241,13 @@ With the above setup, you can now scale out to run many jobs in parallel.
 
 To run many jobs at once, we will launch the jobs as :ref:`SkyPilot managed jobs <managed-jobs>`. We can control the hyperparameter environment variables independently for each managed job.
 
+.. tip::
+
+  This section covers jobs that differ from each other, e.g., a hyperparameter
+  sweep. If every job instead runs the same command on a different shard of the
+  data, use :code:`sky jobs launch --num-jobs N` to submit them all in one
+  command — see :ref:`identical jobs <many-jobs-num-jobs>` below.
+
 You can use normal loops in bash or Python to iterate over possible hyperparameters:
 
 .. tab-set::
@@ -369,6 +376,42 @@ Then, submit all jobs by iterating over the config files and calling ``sky jobs 
       --env-file $config_file \
       --env WANDB_API_KEY
   done
+
+
+.. _many-jobs-num-jobs:
+
+Identical jobs
+~~~~~~~~~~~~~~
+
+The loops above give each job its own hyperparameters. When every job instead
+runs the same command and differs only in which shard of the work it handles —
+batch inference, evals, data processing — no loop is needed. Pass
+:code:`--num-jobs` and SkyPilot submits them all from a single YAML:
+
+.. code-block:: console
+
+  $ sky jobs launch --num-jobs 10 batch-job.yaml
+
+Each job is given ``$SKYPILOT_JOB_RANK`` (0 to N-1) and ``$SKYPILOT_NUM_JOBS``,
+which the task uses to select its shard:
+
+.. code-block:: yaml
+
+  # batch-job.yaml
+  name: batch-inference
+
+  resources:
+    accelerators: L4:1
+
+  run: |
+    python infer.py \
+      --shard-index $SKYPILOT_JOB_RANK \
+      --num-shards $SKYPILOT_NUM_JOBS
+
+These are ordinary managed jobs — one cluster each, each recovered on its own if
+preempted — exactly as if you had run ``sky jobs launch`` ten times. See
+:ref:`num-jobs` for details, including how to run them on a :ref:`pool <pool>`
+to avoid paying the cold-start cost once per job.
 
 
 Best practices for scaling

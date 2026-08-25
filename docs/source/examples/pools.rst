@@ -180,8 +180,6 @@ The job will be launched on one of the available workers in the pool.
 
   Currently, each worker is **exclusively occupied** by a single job at a time, so the :code:`resources` specified in the job YAML should match those used in the pool YAML. Support for running multiple jobs concurrently on the same worker will be added in the future.
 
-.. _pool-scale-out:
-
 Scale out with multiple jobs
 ----------------------------
 
@@ -230,11 +228,6 @@ Use the following command to submit them to the pool:
 
 Note that the maximum concurrency is limited by the number of workers in the pool.
 To enable more jobs to run simultaneously, increase the number of workers when creating the pool.
-
-.. tip::
-
-  :code:`--num-jobs` is not specific to pools: :code:`sky jobs launch --num-jobs 10 batch-job.yaml`
-  submits the same 10 jobs without a pool, each on its own cluster. See :ref:`num-jobs`.
 
 There are several things to note when submitting jobs to a pool:
 
