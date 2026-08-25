@@ -205,10 +205,11 @@ class Vast(clouds.Cloud):
         custom_resources = resources_utils.make_ray_custom_resources_str(
             acc_dict)
 
-        if resources.image_id is None:
-            image_id: Optional[str] = 'vastai/base:0.0.2'
-        elif resources.extract_docker_image() is not None:
-            image_id = resources.extract_docker_image()
+        docker_image = resources.extract_docker_image()
+        if docker_image is not None:
+            image_id: Optional[str] = docker_image
+        elif resources.image_id is None:
+            image_id = 'vastai/base:0.0.2'
         else:
             image_id = resources.image_id[resources.region]
 
@@ -338,8 +339,9 @@ class Vast(clouds.Cloud):
             if admitted_resources:
                 return (resources_utils.FeasibleResources(
                     admitted_resources, fuzzy_candidate_list, None), False)
-            diagnostic_keys = ('cpu', 'ram', 'vram', 'disk', 'gpu', 'country',
-                               'host_policy', 'network', 'malformed')
+            diagnostic_keys = ('availability', 'cpu', 'ram', 'vram', 'disk',
+                               'gpu', 'country', 'host_policy', 'network',
+                               'malformed')
             diagnostics = [
                 f'offers examined={offers_examined}',
                 f'eligible={eligible_offers}'

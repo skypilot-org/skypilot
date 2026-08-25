@@ -816,6 +816,32 @@ def test_image_id_dual_copy_preserves_both():
     assert copied.get_cloud_image_id() == {'us-east-1': 'ami-0abcdef'}
 
 
+def test_resources_reuse_requires_matching_reserved_docker_images():
+    """Cluster reuse requires the same effective reserved Docker image."""
+    requested = Resources(cloud=clouds.AWS(),
+                          image_id={'docker': 'registry.example.com/app:v2'})
+    matching_cluster = Resources(
+        cloud=clouds.AWS(), image_id={'docker': 'registry.example.com/app:v2'})
+    different_cluster = Resources(
+        cloud=clouds.AWS(), image_id={'docker': 'registry.example.com/app:v1'})
+
+    assert requested.less_demanding_than(matching_cluster)
+    assert not requested.less_demanding_than(different_cluster)
+
+
+def test_legacy_region_keyed_docker_images_remain_region_restricted():
+    """Legacy Docker maps remain valid only in their declared regions."""
+    resources = Resources(cloud=clouds.RunPod(),
+                          image_id={
+                              'US': 'docker:registry.example.com/us:v1',
+                              'CA': 'docker:registry.example.com/ca:v1',
+                          })
+
+    assert resources.valid_on_region_zones('US', [])
+    assert resources.valid_on_region_zones('CA', [])
+    assert not resources.valid_on_region_zones('EU', [])
+
+
 def test_image_id_dual_pickle_round_trip():
     """Pickling preserves both images, and old pickles migrate cleanly."""
     r = Resources(cloud='aws',

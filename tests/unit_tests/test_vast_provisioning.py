@@ -94,6 +94,8 @@ def _mock_vast_sdk(monkeypatch):
         'hosting_type': 1,
         'inet_down': 1000,
         'inet_up': 1000,
+        'rentable': True,
+        'rented': False,
     }]
     sdk.create_instance.return_value = {'new_contract': '3'}
     sdk.show_instance.return_value = {

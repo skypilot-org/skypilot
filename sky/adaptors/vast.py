@@ -114,6 +114,12 @@ def _is_true(offer: Dict[str, Any], key: str) -> bool:
     return value is True or value == 1 or value == 'true'
 
 
+def _is_false(offer: Dict[str, Any], key: str) -> bool:
+    """Interpret explicit false Vast boolean fields without coercion."""
+    value = offer.get(key)
+    return value is False or value == 0 or value == 'false'
+
+
 def get_offer_requirements(instance_type: str, region: Optional[str],
                            disk_size: int, datacenter_only: bool,
                            reliable_hosts: bool,
@@ -172,13 +178,15 @@ def get_offer_requirements(instance_type: str, region: Optional[str],
 
 
 def build_offer_query(requirements: VastOfferRequirements) -> str:
-    """Build an SDK-safe final query equivalent to live-offer matching."""
+    """Build an SDK-safe exact query equivalent to live-offer matching."""
     # Vast SDK 1.5.0 preprocesses query values with an alphanumeric parser.
     # Use integral GiB for its cpu_ram filter, then validate exact MiB values
     # from returned offers in offer_matches_requirements().
+    # Catalog-only chunking and geographic bucketing would weaken final
+    # admission, so this query deliberately does not include those flags.
     query = [
-        'chunked=true',
-        'georegion=true',
+        'rentable=true',
+        'rented=false',
         f'disk_space>={requirements.disk_size}',
         f'num_gpus={requirements.num_gpus}',
         f'gpu_name={requirements.gpu_name.replace(" ", "_")}',
@@ -209,6 +217,8 @@ def _offer_rejection_reason(
     """Return a sanitized first unmet requirement for a live Vast offer."""
     if not isinstance(offer, dict):
         return 'malformed'
+    if not _is_true(offer, 'rentable') or not _is_false(offer, 'rented'):
+        return 'availability'
     try:
         num_gpus = int(offer['num_gpus'])
     except (KeyError, TypeError, ValueError):

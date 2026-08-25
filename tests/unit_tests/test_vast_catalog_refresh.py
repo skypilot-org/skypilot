@@ -105,7 +105,7 @@ def test_datacenter_filter_fails_closed_without_hosting_type():
 
 def test_fetch_vast_catalog_and_save_catalog_are_reusable(
         monkeypatch, tmp_path):
-    """The Vast generator exposes fetch and save callables for refresh jobs."""
+    """Catalog refresh retains its broad bucketing query and save contract."""
     offer = {
         'gpu_name': 'A100',
         'num_gpus': 1,
@@ -119,14 +119,17 @@ def test_fetch_vast_catalog_and_save_catalog_are_reusable(
         'hosting_type': 1,
         'gpu_total_ram': 81920,
     }
-    client = type('Client', (),
-                  {'search_offers': lambda _self, **_kwargs: [offer, offer]})()
+    client = mock.Mock(spec=['search_offers'])
+    client.search_offers.return_value = [offer, offer]
     monkeypatch.setattr(fetch_vast.vast, 'vast', lambda: client)
 
     catalog_path = tmp_path / 'vms.csv'
     fetch_vast.save_catalog(fetch_vast.fetch_vast_catalog(), str(catalog_path))
 
     vast_refresh.validate_catalog(catalog_path)
+    assert client.search_offers.call_args.kwargs['query'] == (
+        'georegion = true chunked = true '
+        'inet_down >= 100 disk_space >= 80')
 
 
 def test_fetch_vast_catalog_keeps_countries_distinct(monkeypatch):

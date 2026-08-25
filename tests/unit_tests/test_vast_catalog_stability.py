@@ -79,6 +79,8 @@ def _make_vast_client(*methods: str) -> mock.Mock:
                 'gpu_ram': 81920,
                 'disk_space': 30,
                 'geolocation': 'US',
+                'rentable': True,
+                'rented': False,
                 **offer,
             } for offer in client.search_offers.return_value]
 
@@ -201,6 +203,75 @@ def test_vast_country_extraction_uses_country_not_continent():
         vast_adaptor.extract_country_code('France, FRA, EU')
 
 
+def test_vast_live_query_requires_available_offers_without_catalog_bucketing(
+        monkeypatch):
+    """Exact live admission rejects unavailable or incomplete offers."""
+    requirements = vast_adaptor.get_offer_requirements(
+        _A100_INSTANCE_TYPE,
+        region=None,
+        disk_size=64,
+        datacenter_only=False,
+        reliable_hosts=False,
+        network_tier='standard',
+    )
+    client = mock.Mock(spec=['search_offers'])
+    client.search_offers.return_value = [{
+        'id': 1,
+        'gpu_name': 'A100',
+        'num_gpus': 1,
+        'gpu_ram': 81920,
+        'cpu_cores': 4,
+        'cpu_ram': 8192,
+        'disk_space': 64,
+        'geolocation': 'Zurich, CH, EU',
+        'rentable': False,
+        'rented': False,
+    }, {
+        'id': 2,
+        'gpu_name': 'A100',
+        'num_gpus': 1,
+        'gpu_ram': 81920,
+        'cpu_cores': 4,
+        'cpu_ram': 8192,
+        'disk_space': 64,
+        'geolocation': 'Zurich, CH, EU',
+        'rentable': True,
+        'rented': True,
+    }, {
+        'id': 3,
+        'gpu_name': 'A100',
+        'num_gpus': 1,
+        'gpu_ram': 81920,
+        'cpu_cores': 4,
+        'cpu_ram': 8192,
+        'disk_space': 64,
+        'geolocation': 'Zurich, CH, EU',
+        'rentable': True,
+    }, {
+        'id': 4,
+        'gpu_name': 'A100',
+        'num_gpus': 1,
+        'gpu_ram': 81920,
+        'cpu_cores': 4,
+        'cpu_ram': 8192,
+        'disk_space': 64,
+        'geolocation': 'Zurich, CH, EU',
+        'rentable': True,
+        'rented': False,
+    }]
+    monkeypatch.setattr(vast_adaptor, 'vast', lambda: client)
+
+    result = vast_adaptor.get_live_offer_matches(requirements)
+
+    query = client.search_offers.call_args.kwargs['query']
+    assert [offer['id'] for offer in result.offers] == [4]
+    assert result.rejection_counts == (('availability', 3),)
+    assert 'rentable=true' in query
+    assert 'rented=false' in query
+    assert 'chunked=true' not in query
+    assert 'georegion=true' not in query
+
+
 def test_vast_targeted_live_query_is_cached_per_requirements(monkeypatch):
     """Identical requirements reuse one unbounded, server-filtered live query."""
     client = mock.Mock(spec=['search_offers'])
@@ -220,6 +291,57 @@ def test_vast_targeted_live_query_is_cached_per_requirements(monkeypatch):
 
     client.search_offers.assert_called_once_with(
         query=vast_adaptor.build_offer_query(requirements), order='dph_total')
+
+
+def test_vast_precheck_and_provisioning_share_exact_available_query(
+        monkeypatch):
+    """Provisioning cannot weaken the exact query used by feasibility checks."""
+    client = _make_vast_client('search_offers', 'create_instance',
+                               'show_instance')
+    client.search_offers.return_value = [{
+        'id': 123,
+        'gpu_name': 'A100',
+        'num_gpus': 1,
+        'dph_total': .4,
+    }]
+    client.create_instance.return_value = {'new_contract': 456}
+    client.show_instance.return_value = {
+        'id': 456,
+        'gpu_name': 'A100',
+        'num_gpus': 1,
+        'gpu_ram': 81920,
+    }
+    monkeypatch.setattr(vast_adaptor, 'vast', lambda: client)
+    monkeypatch.setattr(vast_utils.vast, 'vast', lambda: client)
+    requirements = vast_adaptor.get_offer_requirements(
+        '1x-A100-4-8192',
+        region='US',
+        disk_size=30,
+        datacenter_only=False,
+        reliable_hosts=False,
+        network_tier='standard',
+    )
+
+    assert vast_adaptor.get_live_offer_matches(requirements).offers
+    assert vast_utils.launch(
+        name='test-head',
+        instance_type='1x-A100-4-8192',
+        region='US',
+        disk_size=30,
+        image_name='vastai/base:0.0.2',
+        ports=None,
+        preemptible=False,
+        secure_only=False,
+    ) == 456
+
+    query_calls = [
+        call.kwargs['query'] for call in client.search_offers.call_args_list
+    ]
+    assert query_calls == [vast_adaptor.build_offer_query(requirements)] * 2
+    assert 'rentable=true' in query_calls[0]
+    assert 'rented=false' in query_calls[0]
+    assert 'chunked=true' not in query_calls[0]
+    assert 'georegion=true' not in query_calls[0]
 
 
 def test_vast_v2_identity_rejects_lower_memory_live_offer(monkeypatch):
@@ -242,6 +364,8 @@ def test_vast_v2_identity_rejects_lower_memory_live_offer(monkeypatch):
         'cpu_ram': 65536,
         'disk_space': 64,
         'geolocation': 'Georgia, US, NA',
+        'rentable': True,
+        'rented': False,
     }, {
         'id': 80,
         'gpu_name': 'A100 SXM4',
@@ -251,6 +375,8 @@ def test_vast_v2_identity_rejects_lower_memory_live_offer(monkeypatch):
         'cpu_ram': 65536,
         'disk_space': 64,
         'geolocation': 'Prague, CZ, EU',
+        'rentable': True,
+        'rented': False,
     }]
     monkeypatch.setattr(vast_adaptor, 'vast', lambda: client)
 
@@ -315,6 +441,8 @@ def test_vast_live_admission_uses_targeted_country_query(monkeypatch):
         'cpu_ram': 8192,
         'disk_space': 64,
         'geolocation': 'Paris, FR, EU',
+        'rentable': True,
+        'rented': False,
     }]
     monkeypatch.setattr(vast_adaptor, 'vast', lambda: client)
 
@@ -356,6 +484,8 @@ def test_vast_live_admission_uses_any_for_unscoped_marketplace_capacity(
         'cpu_ram': 8192,
         'disk_space': 64,
         'geolocation': 'Zurich, CH, EU',
+        'rentable': True,
+        'rented': False,
     }]
     monkeypatch.setattr(vast_adaptor, 'vast', lambda: client)
 
@@ -369,6 +499,55 @@ def test_vast_live_admission_uses_any_for_unscoped_marketplace_capacity(
     assert [resource.region for resource in feasible_resources.resources_list
            ] == ['any']
     assert 'geolocation' not in client.search_offers.call_args.kwargs['query']
+
+
+def test_vast_unscoped_docker_image_survives_admission_and_deployment(
+        monkeypatch):
+    """Unscoped Vast deployment preserves its Docker image without geolocation."""
+    requested_image = 'registry.example.com/ximilar/llm:test'
+    client = mock.Mock(spec=['search_offers'])
+    client.search_offers.return_value = [{
+        'gpu_name': 'A100',
+        'num_gpus': 1,
+        'gpu_ram': 81920,
+        'cpu_cores': 4,
+        'cpu_ram': 8192,
+        'disk_space': 64,
+        'geolocation': 'Zurich, CH, EU',
+        'rentable': True,
+        'rented': False,
+    }]
+    monkeypatch.setattr(vast_adaptor, 'vast', lambda: client)
+    cloud = vast_cloud.Vast()
+
+    feasible_resources = cloud._get_feasible_launchable_resources(
+        Resources(
+            cloud=cloud,
+            instance_type=_A100_INSTANCE_TYPE,
+            disk_size=64,
+            image_id={'docker': requested_image},
+        ))
+
+    assert len(feasible_resources.resources_list) == 1
+    admitted_resources = feasible_resources.resources_list[0]
+    assert admitted_resources.region == 'any'
+    assert admitted_resources.extract_docker_image() == requested_image
+    assert 'geolocation' not in client.search_offers.call_args.kwargs['query']
+
+    with mock.patch.object(
+            cloud, 'get_accelerators_from_instance_type',
+            return_value={'A100': 1}), mock.patch(
+                'sky.clouds.vast.skypilot_config.get_effective_region_config',
+                side_effect=lambda **kwargs: kwargs['default_value']):
+        deploy_variables = cloud.make_deploy_resources_variables(
+            resources=admitted_resources,
+            cluster_name=resources_utils.ClusterName('test', 'test'),
+            region=clouds.Region('any'),
+            zones=None,
+            num_nodes=1,
+        )
+
+    assert deploy_variables['image_id'] == requested_image
 
 
 def test_vast_live_admission_retries_once_after_forced_catalog_refresh(
@@ -389,6 +568,8 @@ def test_vast_live_admission_retries_once_after_forced_catalog_refresh(
                                             'cpu_ram': 8192,
                                             'disk_space': 64,
                                             'geolocation': 'Zurich, CH, EU',
+                                            'rentable': True,
+                                            'rented': False,
                                         }]]
     monkeypatch.setattr(vast_adaptor, 'vast', lambda: client)
     refresh_catalog = mock.Mock(return_value=True)
@@ -418,6 +599,8 @@ def test_vast_live_admission_reports_sanitized_rejection_counts(monkeypatch):
         'cpu_ram': 8192,
         'disk_space': 63,
         'geolocation': 'Private locality, FR, EU',
+        'rentable': True,
+        'rented': False,
     }]
     monkeypatch.setattr(vast_adaptor, 'vast', lambda: client)
 
@@ -470,6 +653,8 @@ def test_vast_live_offer_match_enforces_host_and_network_policy():
         'cpu_ram': 8192,
         'disk_space': 64,
         'geolocation': 'Paris, FR, EU',
+        'rentable': True,
+        'rented': False,
         'verified': True,
         'datacenter': True,
         'hosting_type': 1,
@@ -762,6 +947,8 @@ def test_live_query_survives_vast_sdk_preprocessing(monkeypatch):
     assert parsed_query["gpu_name"]["eq"] == "RTX A6000"
     assert parsed_query["num_gpus"]["eq"] == "1"
     assert parsed_query["cpu_ram"]["gte"] == 8000
+    assert parsed_query['rentable']['eq'] is True
+    assert parsed_query['rented']['eq'] is False
     assert "reliability" not in parsed_query
     assert parsed_query["verified"]["eq"] is True
     assert parsed_query["datacenter"]["eq"] is True

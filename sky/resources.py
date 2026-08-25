@@ -2027,6 +2027,9 @@ class Resources:
                 return False
             # self.zone <= other.zone
 
+        if self.extract_docker_image() != other.extract_docker_image():
+            return False
+
         if self.image_id is not None:
             if other.image_id is None:
                 return False
