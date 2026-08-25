@@ -110,6 +110,10 @@ Below is the configuration syntax and some example values. See detailed explanat
     :ref:`apt_mirrors <config-yaml-kubernetes-apt-mirrors>`:
       - mirror.math.princeton.edu
       - mirrors.kernel.org
+    :ref:`rdma <config-yaml-kubernetes-rdma>`:
+      mode: sriov
+      resource: nvidia.com/rdma-vf
+      networks: default/rdma-vf
     :ref:`context_configs <config-yaml-kubernetes-context-configs>`:
       context1:
         pod_config:
@@ -2176,6 +2180,60 @@ Example:
       - mirrors.kernel.org
 
 Can also be set per-context via ``context_configs``.
+
+.. _config-yaml-kubernetes-rdma:
+
+``kubernetes.rdma``
+~~~~~~~~~~~~~~~~~~~
+
+How RDMA NICs are delivered to pods on an RDMA-capable cluster (optional).
+
+.. note::
+
+    This setting currently applies **only to Oracle OKE RoCE clusters** — those
+    that SkyPilot detects as OCI RoCE when a task requests
+    :ref:`network_tier: best <yaml-spec-resources-network-tier>`.
+
+Oracle documents two ways for a pod to reach the RDMA fabric on OKE, and a
+cluster is set up for one of them:
+
+- **Host networking** (default). The pod shares the node's network namespace
+  and reaches the RDMA devices through a ``/dev/infiniband`` hostPath, which
+  requires a privileged container. This is what SkyPilot has always done on an
+  OKE RoCE cluster, so leave ``rdma`` unset for it.
+- **SR-IOV**. The pod keeps its own network namespace; the RDMA NICs arrive as
+  SR-IOV virtual functions, requested as an extended resource and attached by
+  Multus. Select it with ``mode: sriov``.
+
+Fields:
+
+- ``mode``: ``sriov`` to use the SR-IOV model. Unset means host networking.
+- ``resource``: the extended resource advertised by the RDMA device plugin,
+  e.g. ``nvidia.com/rdma-vf``. Required when ``mode: sriov``.
+- ``networks``: the ``NetworkAttachmentDefinition`` to attach, named the way
+  Multus expects — either ``<name>`` (looked up in the pod's namespace) or
+  ``<namespace>/<name>``, e.g. ``default/rdma-vf``. Required when
+  ``mode: sriov``.
+
+``resource`` and ``networks`` both name objects that whoever installed the
+device plugin chose, so SkyPilot cannot infer them and fails with an actionable
+error if ``mode: sriov`` is set without them.
+
+Example:
+
+.. code-block:: yaml
+
+  kubernetes:
+    context_configs:
+      my-oke-cluster:
+        rdma:
+          mode: sriov
+          resource: nvidia.com/rdma-vf
+          networks: default/rdma-vf
+
+With ``mode: sriov``, SkyPilot does not enable host networking and does not
+mount ``/dev/infiniband`` or run the container privileged — an SR-IOV device
+plugin configured with ``isRdma`` injects the RDMA character devices itself.
 
 .. _config-yaml-kubernetes-context-configs:
 
