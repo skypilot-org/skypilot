@@ -67,6 +67,13 @@ const REFRESH_INTERVAL = REFRESH_INTERVALS.REFRESH_INTERVAL;
 const VOLUMES_PAGE_SIZE_OPTIONS = [10, 30, 50, 100, 200];
 const VOLUMES_PAGE_SIZE_STORAGE_KEY = 'skypilot-volumes-page-size';
 
+// Sizes come from the API as a number of GiB.
+export const formatSize = (size) => {
+  if (size == null) return '-';
+  if (size >= 1024) return `${+(size / 1024).toFixed(1)}Ti`;
+  return `${size}Gi`;
+};
+
 // The filterable properties, declared once. `key` is the URL parameter and the
 // `valueList` key for the typeahead; `label` is what lands in
 // `filter.property`, which `evaluateCondition` lowercases to look up the field
@@ -691,10 +698,35 @@ export function VolumesTable({
     setCurrentPage(1); // Reset to first page when changing page size
   };
 
-  const formatSize = (size) => {
-    if (size == null) return '-';
-    if (size >= 1024) return `${+(size / 1024).toFixed(1)}Ti`;
-    return `${size}Gi`;
+  // A volume reports the capacity it actually has, so a resize that has not
+  // landed yet is invisible in the size alone. Show where it is heading, and
+  // say what the volume is waiting for -- `needs_restart` in particular never
+  // clears on its own.
+  const resizeHint = (status, target) => {
+    switch (status) {
+      case 'needs_restart':
+        return `Resizing to ${target}: the space is allocated, but the filesystem only grows when the volume is next mounted. Restart the cluster or pod using it.`;
+      case 'in_progress':
+        return `Resizing to ${target}.`;
+      case 'failed':
+        return `Resize to ${target} failed. Check the volume's events on the cluster.`;
+      default:
+        return `Resizing to ${target}.`;
+    }
+  };
+
+  const renderSize = (volume) => {
+    const size = formatSize(volume.size);
+    if (!volume.resize_status || volume.resize_target_size == null) {
+      return size;
+    }
+    const target = formatSize(volume.resize_target_size);
+    return (
+      <span title={resizeHint(volume.resize_status, target)}>
+        {size}
+        <span className="text-gray-500"> &rarr; {target}</span>
+      </span>
+    );
   };
 
   const formatTimestamp = (timestamp) => {
@@ -766,7 +798,7 @@ export function VolumesTable({
       id: 'size',
       order: 30,
       renderHeader: () => sortableHeader('Size', 'size'),
-      renderCell: (volume) => <TableCell>{formatSize(volume.size)}</TableCell>,
+      renderCell: (volume) => <TableCell>{renderSize(volume)}</TableCell>,
     },
     {
       id: 'user_name',

@@ -4,6 +4,7 @@ import { useRouter } from 'next/router';
 import Link from 'next/link';
 import { StatusBadge } from '@/components/elements/StatusBadge';
 import { getVolumes } from '@/data/connectors/volumes';
+import { formatSize } from '@/components/volumes';
 import dashboardCache from '@/lib/cache';
 import {
   RotateCwIcon,
@@ -285,7 +286,32 @@ function VolumeDetailCard({ volumeData }) {
               </div>
               <div>
                 <div className="text-gray-600 font-medium text-base">Size</div>
-                <div className="text-base mt-1">{volumeData.size || 'N/A'}</div>
+                <div className="text-base mt-1">
+                  {volumeData.size != null
+                    ? formatSize(volumeData.size)
+                    : 'N/A'}
+                  {volumeData.resize_status &&
+                    volumeData.resize_target_size != null && (
+                      <span className="text-gray-500">
+                        {' '}
+                        &rarr; {formatSize(volumeData.resize_target_size)}
+                      </span>
+                    )}
+                </div>
+                {/* The size above is the capacity the volume has now; a
+                    resize only shows up there once it has landed. */}
+                {volumeData.resize_status === 'needs_restart' && (
+                  <div className="text-sm mt-1 text-gray-500">
+                    Waiting to grow the filesystem: restart the cluster or pod
+                    using this volume.
+                  </div>
+                )}
+                {volumeData.resize_status === 'failed' && (
+                  <div className="text-sm mt-1 text-gray-500">
+                    The resize did not complete. Check the volume&apos;s events
+                    on the cluster.
+                  </div>
+                )}
               </div>
               <div>
                 <div className="text-gray-600 font-medium text-base">User</div>

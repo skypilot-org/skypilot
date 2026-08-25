@@ -45,6 +45,11 @@ export async function getVolumes() {
           // from "cannot tell".
           error_may_resolve: volume.error_may_resolve,
           creation_yaml: volume.creation_yaml || null,
+          // Only set while the volume is being resized: `size` above is the
+          // capacity it has now, which is not what was asked for until the
+          // resize lands. Servers older than these fields report nothing.
+          resize_status: volume.resize_status || null,
+          resize_target_size: volume.resize_target_size ?? null,
         };
       }) || [];
 

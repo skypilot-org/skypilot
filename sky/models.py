@@ -140,6 +140,25 @@ class KubernetesNodesInfo:
         )
 
 
+class VolumeResizeStatus(enum.Enum):
+    """How far along a resize is, in terms of what the user can do about it.
+
+    Deliberately not the cloud's own vocabulary: Kubernetes reports one set of
+    values on clusters new enough for `allocatedResourceStatuses` and another
+    (its resize conditions) on older ones, and another cloud would report
+    something else again. Callers care about the three cases that differ in
+    what happens next.
+    """
+    # The storage backend is working on it; waiting is all that is needed.
+    IN_PROGRESS = 'in_progress'
+    # The new capacity is allocated, but the filesystem is grown by the node
+    # when it next mounts the volume -- so it stays at the old size until the
+    # workload using it restarts. Can sit here indefinitely.
+    NEEDS_RESTART = 'needs_restart'
+    # The resize stopped short. The recorded size is still the real one.
+    FAILED = 'failed'
+
+
 @dataclasses.dataclass
 class ObservedVolumeState:
     """The fields of a volume that the cloud owns, as the cloud reports them.
@@ -157,6 +176,12 @@ class ObservedVolumeState:
     # ``VolumeConfig.size``.
     size: Optional[str] = None
     storage_class_name: Optional[str] = None
+    # Set while the volume is being resized to a size it does not have yet.
+    # `size` stays the capacity that exists, so without these two a volume
+    # whose expansion is in flight -- or stuck waiting on something the user
+    # has to do -- looks indistinguishable from one that was never resized.
+    resize_status: Optional[VolumeResizeStatus] = None
+    resize_target_size: Optional[str] = None
 
 
 class VolumeConfig(pydantic.BaseModel):

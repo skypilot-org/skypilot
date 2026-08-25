@@ -176,3 +176,57 @@ describe('VolumesTable details column', () => {
     expect(cellsInColumn).toContain('-');
   });
 });
+
+describe('VolumesTable size column while a resize is pending', () => {
+  // The recorded size is the capacity the volume has now, so a resize that
+  // has not landed is invisible in it. `needs_restart` in particular never
+  // clears on its own -- the user has to restart what is using the volume.
+  const resizing = (status) => ({
+    ...volume('vol-resizing'),
+    size: 1,
+    resize_status: status,
+    resize_target_size: 2,
+  });
+
+  it('shows only the current size when nothing is resizing', async () => {
+    const { container } = await renderTable([volume('vol-steady')]);
+
+    const row = container.querySelector('table tbody tr');
+    expect(row.textContent).toContain('1Gi');
+    expect(row.textContent).not.toContain('→');
+  });
+
+  it('shows where the size is heading while a resize is pending', async () => {
+    const { container } = await renderTable([resizing('needs_restart')]);
+
+    const row = container.querySelector('table tbody tr');
+    expect(row.textContent).toContain('1Gi');
+    expect(row.textContent).toContain('2Gi');
+  });
+
+  it('says a pending resize is waiting on a restart', async () => {
+    const { container } = await renderTable([resizing('needs_restart')]);
+
+    const hint = container.querySelector('[title*="Resizing to 2Gi"]');
+    expect(hint).toBeTruthy();
+    expect(hint.getAttribute('title')).toContain('Restart');
+  });
+
+  it('says a failed resize failed', async () => {
+    const { container } = await renderTable([resizing('failed')]);
+
+    const hint = container.querySelector('[title*="2Gi"]');
+    expect(hint.getAttribute('title')).toContain('failed');
+  });
+
+  it('ignores a status from a server that reports no target size', async () => {
+    // An older server sends neither field; a half-populated row must not
+    // render a dangling arrow.
+    const { container } = await renderTable([
+      { ...volume('vol-half'), resize_status: 'in_progress' },
+    ]);
+
+    const row = container.querySelector('table tbody tr');
+    expect(row.textContent).not.toContain('→');
+  });
+});

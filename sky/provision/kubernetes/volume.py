@@ -60,6 +60,25 @@ _TERMINAL_GRPC_CODES = ('InvalidArgument', 'AlreadyExists', 'OutOfRange',
 _IN_PROGRESS_GRPC_CODES = ('Canceled', 'DeadlineExceeded', 'Unavailable',
                            'Aborted')
 
+# Every state `status.allocatedResourceStatuses` can report for a claim being
+# resized, mapped to what the user can do about it. NodeResizePending is the
+# one that does not clear on its own: the filesystem is grown by the node the
+# next time it mounts the volume, so the workload has to restart.
+_RESIZE_STATUSES = {
+    'ControllerResizeInProgress': models.VolumeResizeStatus.IN_PROGRESS,
+    'NodeResizeInProgress': models.VolumeResizeStatus.IN_PROGRESS,
+    'NodeResizePending': models.VolumeResizeStatus.NEEDS_RESTART,
+    'ControllerResizeFailed': models.VolumeResizeStatus.FAILED,
+    'NodeResizeFailed': models.VolumeResizeStatus.FAILED,
+}
+# What a cluster too old for allocatedResourceStatuses reports instead: the
+# same two live states, as claim conditions. There is no failed condition --
+# a failure only shows up as the resize never finishing.
+_RESIZE_CONDITIONS = {
+    'Resizing': models.VolumeResizeStatus.IN_PROGRESS,
+    'FileSystemResizePending': models.VolumeResizeStatus.NEEDS_RESTART,
+}
+
 
 class PvcFailure(enum.Enum):
     """What a failure reported on a PVC says about waiting any longer."""
@@ -962,6 +981,52 @@ def _parse_pvc_size(size_quantity: Optional[str],
     return str(size)
 
 
+def _pvc_resize_state(
+        pvc_obj: Any, pvc_name: str
+) -> Tuple[Optional[models.VolumeResizeStatus], Optional[str]]:
+    """Returns how far a resize of this claim has got, and its target size.
+
+    Both are None when no resize is in flight, which is the normal case.
+
+    A claim's capacity only moves once the new space exists, so an expansion
+    that is still running -- or that is waiting for the workload to restart
+    before the filesystem can grow -- looks like nothing happened at all.
+    """
+    status = getattr(pvc_obj, 'status', None)
+    resize_status = None
+    statuses = getattr(status, 'allocated_resource_statuses', None)
+    if isinstance(statuses, dict):
+        storage_status = statuses.get('storage')
+        if storage_status is not None:
+            resize_status = _RESIZE_STATUSES.get(storage_status)
+    if resize_status is None:
+        # Clusters older than allocatedResourceStatuses report a resize only
+        # through the claim's conditions.
+        conditions = getattr(status, 'conditions', None)
+        for condition in conditions if isinstance(conditions, list) else []:
+            if getattr(condition, 'status', None) != 'True':
+                continue
+            condition_type = getattr(condition, 'type', None)
+            mapped = (_RESIZE_CONDITIONS.get(condition_type)
+                      if condition_type is not None else None)
+            if mapped is not None:
+                resize_status = mapped
+                break
+    if resize_status is None:
+        return None, None
+
+    # What the resize is heading for: the capacity being allocated, or, before
+    # the backend has acknowledged anything, the request itself.
+    allocated = getattr(status, 'allocated_resources', None)
+    target = allocated.get('storage') if isinstance(allocated, dict) else None
+    if target is None:
+        requests = getattr(getattr(pvc_obj.spec, 'resources', None), 'requests',
+                           None)
+        if isinstance(requests, dict):
+            target = requests.get('storage')
+    return resize_status, _parse_pvc_size(target, pvc_name)
+
+
 def _observed_volume_state(pvc_obj: Any) -> models.ObservedVolumeState:
     """Reads the fields of a PVC that the cluster, not our config, owns.
 
@@ -969,12 +1034,15 @@ def _observed_volume_state(pvc_obj: Any) -> models.ObservedVolumeState:
     a recorded config never clears a value it cannot see.
     """
     pvc_name = pvc_obj.metadata.name
+    resize_status, resize_target_size = _pvc_resize_state(pvc_obj, pvc_name)
     return models.ObservedVolumeState(
         size=_parse_pvc_size(_pvc_capacity(pvc_obj), pvc_name),
         # An empty storageClassName is the Kubernetes way of opting out of
         # dynamic provisioning, not a class name to record.
         storage_class_name=(getattr(pvc_obj.spec, 'storage_class_name', None) or
                             None),
+        resize_status=resize_status,
+        resize_target_size=resize_target_size,
     )
 
 

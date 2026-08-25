@@ -38,6 +38,12 @@ class MockPVC:
 
         self.status = Mock()
         self.status.capacity = {'storage': size}
+        # A claim that is not being resized reports neither, and the real
+        # client gives None rather than a Mock -- which a bare Mock() would
+        # make truthy and iterable-looking.
+        self.status.allocated_resource_statuses = None
+        self.status.allocated_resources = None
+        self.status.conditions = None
 
 
 class MockPod:
@@ -2916,3 +2922,135 @@ class TestPvcSizeQuantities:
         assert k8s_volume._parse_pvc_size('2Gi', 'test-pvc') == '2'
         assert k8s_volume._parse_pvc_size('2000G', 'test-pvc') == '1863'
         assert k8s_volume._parse_pvc_size('2000Gi', 'test-pvc') == '2000'
+
+
+class TestObservedResizeState:
+    """What `get_all_volumes_state` reports about a resize in flight.
+
+    A claim's capacity only moves once the new space exists, so an expansion
+    that is still running -- or parked waiting for the workload to restart --
+    is indistinguishable from no expansion at all unless it is reported
+    separately.
+    """
+
+    def _config(self):
+        return models.VolumeConfig(
+            _version=1,
+            name='test-vol',
+            type='k8s-pvc',
+            cloud='kubernetes',
+            region='my-context',
+            zone=None,
+            name_on_cloud='test-pvc',
+            size='1',
+            config={'namespace': 'my-namespace'},
+        )
+
+    def _observe(self, mock_core_api, pvc):
+        pvc_list = Mock()
+        pvc_list.items = [pvc]
+        (mock_core_api.return_value.list_namespaced_persistent_volume_claim.
+         return_value) = pvc_list
+        _, observed, _ = k8s_volume.get_all_volumes_state([self._config()])
+        return observed['test-vol']
+
+    def _resizing_pvc(self, status: str, allocated: str = '2Gi'):
+        pvc = MockPVC('test-pvc', 'my-namespace', size='1Gi')
+        pvc.status.phase = 'Bound'
+        pvc.status.capacity = {'storage': '1Gi'}
+        pvc.spec.resources.requests = {'storage': allocated}
+        pvc.status.allocated_resources = {'storage': allocated}
+        pvc.status.allocated_resource_statuses = {'storage': status}
+        return pvc
+
+    @patch('sky.provision.kubernetes.volume._get_context_namespace')
+    @patch('sky.adaptors.kubernetes.core_api')
+    def test_a_resize_waiting_on_the_node_needs_a_restart(
+            self, mock_core_api, mock_get_context):
+        """The one state that never clears on its own."""
+        mock_get_context.return_value = ('my-context', 'my-namespace')
+
+        observed = self._observe(mock_core_api,
+                                 self._resizing_pvc('NodeResizePending'))
+
+        assert observed.resize_status == models.VolumeResizeStatus.NEEDS_RESTART
+        assert observed.resize_target_size == '2'
+        # The size is still what the volume actually has.
+        assert observed.size == '1'
+
+    @patch('sky.provision.kubernetes.volume._get_context_namespace')
+    @patch('sky.adaptors.kubernetes.core_api')
+    @pytest.mark.parametrize(
+        'status', ['ControllerResizeInProgress', 'NodeResizeInProgress'])
+    def test_a_running_resize_is_in_progress(self, mock_core_api,
+                                             mock_get_context, status):
+        mock_get_context.return_value = ('my-context', 'my-namespace')
+
+        observed = self._observe(mock_core_api, self._resizing_pvc(status))
+
+        assert observed.resize_status == models.VolumeResizeStatus.IN_PROGRESS
+
+    @patch('sky.provision.kubernetes.volume._get_context_namespace')
+    @patch('sky.adaptors.kubernetes.core_api')
+    @pytest.mark.parametrize('status',
+                             ['ControllerResizeFailed', 'NodeResizeFailed'])
+    def test_a_stopped_resize_is_failed(self, mock_core_api, mock_get_context,
+                                        status):
+        mock_get_context.return_value = ('my-context', 'my-namespace')
+
+        observed = self._observe(mock_core_api, self._resizing_pvc(status))
+
+        assert observed.resize_status == models.VolumeResizeStatus.FAILED
+
+    @patch('sky.provision.kubernetes.volume._get_context_namespace')
+    @patch('sky.adaptors.kubernetes.core_api')
+    def test_a_volume_that_is_not_being_resized_reports_nothing(
+            self, mock_core_api, mock_get_context):
+        mock_get_context.return_value = ('my-context', 'my-namespace')
+        pvc = MockPVC('test-pvc', 'my-namespace', size='1Gi')
+        pvc.status.phase = 'Bound'
+
+        observed = self._observe(mock_core_api, pvc)
+
+        assert observed.resize_status is None
+        assert observed.resize_target_size is None
+
+    @patch('sky.provision.kubernetes.volume._get_context_namespace')
+    @patch('sky.adaptors.kubernetes.core_api')
+    def test_an_older_cluster_reports_the_resize_as_a_condition(
+            self, mock_core_api, mock_get_context):
+        """Clusters without allocatedResourceStatuses only set conditions."""
+        mock_get_context.return_value = ('my-context', 'my-namespace')
+        pvc = MockPVC('test-pvc', 'my-namespace', size='1Gi')
+        pvc.status.phase = 'Bound'
+        pvc.status.capacity = {'storage': '1Gi'}
+        pvc.status.allocated_resource_statuses = None
+        pvc.status.allocated_resources = None
+        pvc.spec.resources.requests = {'storage': '2Gi'}
+        condition = Mock()
+        condition.type = 'FileSystemResizePending'
+        condition.status = 'True'
+        pvc.status.conditions = [condition]
+
+        observed = self._observe(mock_core_api, pvc)
+
+        assert observed.resize_status == models.VolumeResizeStatus.NEEDS_RESTART
+        # No allocatedResources on such a cluster: fall back to the request.
+        assert observed.resize_target_size == '2'
+
+    @patch('sky.provision.kubernetes.volume._get_context_namespace')
+    @patch('sky.adaptors.kubernetes.core_api')
+    def test_a_condition_that_is_not_true_is_not_a_resize(
+            self, mock_core_api, mock_get_context):
+        mock_get_context.return_value = ('my-context', 'my-namespace')
+        pvc = MockPVC('test-pvc', 'my-namespace', size='1Gi')
+        pvc.status.phase = 'Bound'
+        pvc.status.allocated_resource_statuses = None
+        condition = Mock()
+        condition.type = 'Resizing'
+        condition.status = 'False'
+        pvc.status.conditions = [condition]
+
+        observed = self._observe(mock_core_api, pvc)
+
+        assert observed.resize_status is None
