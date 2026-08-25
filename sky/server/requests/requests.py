@@ -1339,6 +1339,11 @@ async def clean_finished_requests_with_retention(retention_seconds: int,
             futs.append(
                 asyncio.create_task(
                     anyio.Path(debug_log_path).unlink(missing_ok=True)))
+            # Delete the request's lock file; nothing else ever removes it.
+            futs.append(
+                asyncio.create_task(
+                    anyio.Path(request_lock_path(
+                        req.request_id)).unlink(missing_ok=True)))
         await asyncio.gather(*futs)
 
         await _delete_requests([req.request_id for req in reqs])

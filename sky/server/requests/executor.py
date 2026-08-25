@@ -1104,8 +1104,11 @@ async def _execute_request_coroutine(request: api_requests.Request):
         raise
     finally:
         # Always cancel the context to kill potentially running background
-        # routine.
+        # routine, and close its log file handle. Without this, a request
+        # that finishes via the success path or any cancellation path never
+        # closes its log fd, so a worker leaks it once GC unlinks the log.
         ctx.cancel()
+        ctx.cleanup()
 
 
 async def prepare_request_async(

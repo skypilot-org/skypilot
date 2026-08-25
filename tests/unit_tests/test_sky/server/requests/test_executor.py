@@ -23,6 +23,7 @@ from sky.server.requests import payloads
 from sky.server.requests import process
 from sky.server.requests import requests as requests_lib
 from sky.skylet import constants
+from sky.utils import context
 from sky.utils import context_utils
 
 
@@ -138,6 +139,51 @@ async def test_execute_request_coroutine_ctx_cancelled_on_cancellation(
         await task.task
         # Verify the context is actually cancelled
         mock_ctx.cancel.assert_called()
+
+
+def _quick_success_entrypoint(*args, **kwargs):
+    """A picklable entrypoint that returns immediately."""
+    return 'ok'
+
+
+@pytest.mark.asyncio
+async def test_execute_request_coroutine_closes_log_handle_on_success(
+        isolated_database):
+    """A successfully finished request must close its log file handle.
+
+    Otherwise, once request-retention GC unlinks the (now-orphaned) log
+    file, the worker process keeps the deleted file's disk blocks alive
+    for as long as it keeps running.
+    """
+    request = requests_lib.Request(
+        request_id='test-request-success',
+        name='test-request-name',
+        status=requests_lib.RequestStatus.PENDING,
+        created_at=time.time(),
+        user_id='test-user-id',
+        entrypoint=_quick_success_entrypoint,
+        request_body=payloads.RequestBody(),
+    )
+    await requests_lib.create_if_not_exists_async(request)
+
+    # Use the real Context (not a mock) so redirect_log()/cleanup() actually
+    # run, and capture it via initialize() since the task's contextvar
+    # doesn't propagate back to this coroutine.
+    captured_ctx: List[context.SkyPilotContext] = []
+    real_initialize = context.initialize
+
+    def capturing_initialize(*args, **kwargs):
+        ctx = real_initialize(*args, **kwargs)
+        captured_ctx.append(ctx)
+        return ctx
+
+    with mock.patch('sky.utils.context.initialize',
+                    side_effect=capturing_initialize):
+        task = executor.execute_request_in_coroutine(request)
+        await task.task
+
+    assert len(captured_ctx) == 1
+    assert captured_ctx[0]._log_file_handle is None
 
 
 CALLED_FLAG = [False]

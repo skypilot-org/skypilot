@@ -189,9 +189,10 @@ async def test_clean_finished_requests_with_retention(isolated_database):
     # Verify old running request was NOT deleted
     assert requests.get_request('old-running-1') is not None
 
-    # Verify log file unlink was called for current, legacy, and debug paths
-    # (3 calls per deleted request: current path + legacy path + debug log)
-    assert mock_unlink.call_count == 3
+    # Verify log file unlink was called for current, legacy, debug, and lock
+    # paths (4 calls per deleted request: current path + legacy path +
+    # debug log + lock file)
+    assert mock_unlink.call_count == 4
 
     # Verify logging
     mock_logger.info.assert_called_once()
@@ -284,7 +285,7 @@ async def test_clean_finished_requests_with_retention_batch_size_functionality(
 
     # Verify log file unlink was called for each deleted request
     # (3 calls per request: current path + legacy path + debug log)
-    assert mock_unlink.call_count == 75
+    assert mock_unlink.call_count == 100
 
     # Verify logging shows correct total
     mock_logger.info.assert_called_once()
@@ -671,7 +672,7 @@ async def test_clean_finished_requests_cleans_both_paths(
                     retention_seconds)
 
     # Verify that unlink was called for current, legacy, and debug log paths
-    assert len(unlinked_paths) == 3
+    assert len(unlinked_paths) == 4
 
     # All paths should contain the request ID
     current_path_count = sum(
