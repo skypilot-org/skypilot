@@ -1233,7 +1233,10 @@ export function ManagedJobsTable({
   const groupedJobs = React.useMemo(() => {
     const groups = new Map();
     paginatedData.forEach((job) => {
-      const jobId = job.id;
+      // External rows never form job groups; key them by their globally
+      // unique task_job_id so equal Slurm ids across clusters (or a
+      // Slurm id matching a managed id) can't collapse into one group.
+      const jobId = job.is_external ? job.task_job_id : job.id;
       if (!groups.has(jobId)) {
         groups.set(jobId, []);
       }
