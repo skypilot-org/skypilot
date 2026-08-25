@@ -483,9 +483,3 @@ exhausted, so the number of jobs controls how much of the sweep runs in
 parallel, independently of how many configurations the sweep contains.
 
 
-Best practices for scaling
---------------------------
-
-The number of managed jobs that can run in parallel depends on the available memory. With the default API server size (8 GiB), up to ~400 jobs can run in parallel. Increasing memory increases capacity proportionally, up to 2000 jobs. See :ref:`resource planning for managed jobs <consolidation-mode-resource-planning>` for a full capacity table.
-
-If you are using a :ref:`remote jobs controller <jobs-controller-remote>`, see :ref:`jobs-controller-sizing` for scaling guidance.
