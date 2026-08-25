@@ -23,8 +23,8 @@ import threading
 import time
 import traceback
 import typing
-from typing import (Any, Dict, Iterable, List, Literal, Optional, Set, Tuple,
-                    Union)
+from typing import (Any, Dict, Iterable, Iterator, List, Literal, Optional, Set,
+                    TextIO, Tuple, Union)
 
 import colorama
 import filelock
@@ -144,6 +144,22 @@ _FINAL_JOB_STATUS_WAIT_TIMEOUT_SECONDS = 120
 
 # Content written to the jobs cancel signal file.
 _JOBS_GRACEFUL_CANCEL_SIGNAL = 'graceful'
+
+# How many jobs the consolidation-mode recovery sweep settles before pausing.
+# Small enough that one batch's DB work is a short burst rather than a long
+# hold on a pooled connection, large enough that the fixed per-batch queries
+# (a few) stay negligible next to the per-job work they replace.
+_RECOVERY_SWEEP_BATCH_SIZE = 100
+
+# Multiple of a batch's own duration to pause for before the next batch. 1.0
+# caps the sweep at half the DB throughput it could take; see
+# _throttle_recovery_sweep.
+_RECOVERY_SWEEP_PAUSE_RATIO = 1.0
+
+# Ceiling on one inter-batch pause. Without it, a single pathologically slow
+# batch (e.g. one that sat in a connection queue) would stall the rest of the
+# sweep for just as long, and recovery gates controller startup.
+_RECOVERY_SWEEP_MAX_PAUSE_SECONDS = 5.0
 
 # The response fields for managed jobs that require cluster handle
 _CLUSTER_HANDLE_FIELDS = [
@@ -393,60 +409,148 @@ def ha_recovery_for_consolidation_mode() -> None:
               encoding='utf-8') as f:
         start = time.time()
         f.write(f'Starting HA recovery at {datetime.now()}\n')
-        jobs, _ = managed_job_state.get_managed_jobs_with_filters(fields=[
-            'job_id', 'controller_pid', 'controller_pid_started_at',
-            'schedule_state', 'status'
-        ])
-        for job in jobs:
-            job_id = job['job_id']
-            controller_pid = job['controller_pid']
-            controller_pid_started_at = job.get('controller_pid_started_at')
 
-            # In consolidation mode, it is possible that only the API server
-            # process is restarted, and the controller process is not. In such
-            # case, we don't need to do anything and the controller process will
-            # just keep running. However, in most cases, the controller process
-            # will also be stopped - either by a pod restart in k8s API server,
-            # or by `sky api stop`, which will stop controllers.
-            # TODO(cooperc): Make sure we cannot have a controller process
-            # running across API server restarts for consistency.
-            if controller_pid is not None:
-                try:
-                    # Note: We provide the legacy job id to the
-                    # controller_process_alive just in case, but we shouldn't
-                    # have a running legacy job controller process at this point
-                    if controller_process_alive(
-                            managed_job_state.ControllerPidRecord(
-                                pid=controller_pid,
-                                started_at=controller_pid_started_at), job_id):
-                        message = (f'Controller pid {controller_pid} for '
-                                   f'job {job_id} is still running. '
-                                   'Skipping recovery.\n')
-                        logger.debug(message)
-                        f.write(message)
-                        continue
-                except Exception:  # pylint: disable=broad-except
-                    # _controller_process_alive may raise if psutil fails; we
-                    # should not crash the recovery logic because of this.
-                    message = ('Error checking controller pid '
-                               f'{controller_pid} for job {job_id}\n')
-                    logger.warning(message, exc_info=True)
-                    f.write(message)
+        # Only jobs whose schedule_state says a controller should be running
+        # can need recovery, so ask the DB for exactly those instead of
+        # reading the whole jobs history and filtering in Python.
+        candidates = managed_job_state.get_jobs_needing_recovery_check()
+        orphaned = [
+            job['job_id']
+            for job in candidates
+            if not _controller_still_running(job, f)
+        ]
+        f.write(f'{len(candidates)} job(s) to check, '
+                f'{len(orphaned)} without a live controller\n')
 
-            # Controller process is not set or not alive.
-            if job['schedule_state'] not in [
-                    managed_job_state.ManagedJobScheduleState.DONE,
-                    managed_job_state.ManagedJobScheduleState.WAITING,
-                    # INACTIVE job may be mid-submission, don't set to WAITING.
-                    managed_job_state.ManagedJobScheduleState.INACTIVE,
-            ]:
-                managed_job_state.reset_job_for_recovery(job_id)
-                message = (f'Job {job_id} completed recovery at '
-                           f'{datetime.now()}\n')
-                logger.info(message)
-                f.write(message)
+        finished = 0
+        recovered = 0
+        batch_seconds = 0.0
+        batches = _batched(orphaned, _RECOVERY_SWEEP_BATCH_SIZE)
+        for batch_index, batch in enumerate(batches):
+            if batch_index > 0:
+                # Pause between batches, not after the last one: recovery
+                # gates controller startup, so the final pause would be pure
+                # added latency with no batch left to protect.
+                _throttle_recovery_sweep(batch_seconds, f)
+            batch_start = time.time()
+            # Jobs that are already finished need no controller at all;
+            # sending them through the normal path would have a controller
+            # read the job's DAG just to observe that there is nothing left
+            # to run. Settle them directly.
+            done = _jobs_needing_no_controller(batch)
+            done_ids = sorted(done)
+            reset_ids = [job_id for job_id in batch if job_id not in done]
+            finished += managed_job_state.set_jobs_done_batch(done_ids)
+            recovered += managed_job_state.reset_jobs_for_recovery_batch(
+                reset_ids)
+            if done_ids:
+                f.write(f'Settled already-finished job(s) {done_ids}\n')
+            if reset_ids:
+                f.write(f'Reset job(s) {reset_ids} for recovery\n')
+            # Flush per batch: this file is how an operator watches a sweep
+            # that is still in progress, and a sweep that pauses between
+            # batches can be in progress for a while.
+            f.flush()
+            batch_seconds = time.time() - batch_start
+
+        message = (f'Recovered {recovered} job(s), settled {finished} '
+                   f'already-finished job(s)')
+        logger.info(message)
+        f.write(f'{message}\n')
         f.write(f'HA recovery completed at {datetime.now()}\n')
         f.write(f'Total recovery time: {time.time() - start} seconds\n')
+
+
+def _controller_still_running(job: Dict[str, Any], log_file: TextIO) -> bool:
+    """Whether the job's recorded controller process is still alive here.
+
+    In consolidation mode it is possible that only the API server process was
+    restarted and the controller process was not; then there is nothing to do
+    and the controller keeps running. In most cases the controller process is
+    also stopped -- either by a pod restart in the k8s API server, or by
+    `sky api stop`, which stops controllers.
+
+    TODO(cooperc): Make sure we cannot have a controller process running
+    across API server restarts for consistency.
+    """
+    job_id = job['job_id']
+    controller_pid = job['controller_pid']
+    if controller_pid is None:
+        return False
+    try:
+        # Note: We provide the legacy job id to the controller_process_alive
+        # just in case, but we shouldn't have a running legacy job controller
+        # process at this point.
+        if controller_process_alive(
+                managed_job_state.ControllerPidRecord(
+                    pid=controller_pid,
+                    started_at=job.get('controller_pid_started_at')), job_id):
+            message = (f'Controller pid {controller_pid} for job {job_id} is '
+                       'still running. Skipping recovery.\n')
+            logger.debug(message)
+            log_file.write(message)
+            return True
+    except Exception:  # pylint: disable=broad-except
+        # controller_process_alive may raise if psutil fails; we should not
+        # crash the recovery logic because of this.
+        message = (f'Error checking controller pid {controller_pid} for job '
+                   f'{job_id}\n')
+        logger.warning(message, exc_info=True)
+        log_file.write(message)
+    return False
+
+
+def _jobs_needing_no_controller(job_ids: List[int]) -> Set[int]:
+    """Subset of ``job_ids`` that recovery can settle without a controller.
+
+    A job qualifies when all its tasks are CANCELLED -- which, per
+    ``get_job_ids_with_all_tasks_cancelled``, means its cleanup already
+    completed -- and none of its clusters is still in the cluster table, so
+    there is provably nothing left for controller cleanup to tear down. The
+    cluster check is belt and braces for a job that reached CANCELLED by some
+    path that skipped teardown; such a job goes through the normal
+    reset-to-WAITING route and a controller cleans up after it.
+    """
+    cancelled = managed_job_state.get_job_ids_with_all_tasks_cancelled(job_ids)
+    if not cancelled:
+        return set()
+    cluster_name_to_job: Dict[str, int] = {}
+    for job_id, task_name in managed_job_state.get_non_pool_task_names(
+            sorted(cancelled)):
+        cluster_name_to_job.setdefault(
+            generate_managed_job_cluster_name(task_name, job_id), job_id)
+    still_around = global_user_state.filter_existing_cluster_names(
+        set(cluster_name_to_job))
+    return cancelled - {cluster_name_to_job[name] for name in still_around}
+
+
+def _throttle_recovery_sweep(batch_seconds: float, log_file: TextIO) -> None:
+    """Pause between recovery batches, in proportion to the last batch's cost.
+
+    The sweep shares its DB with the heartbeats and lease renewals that decide
+    whether this replica keeps the leader role. Pushing a large sweep through
+    at full speed can starve those, cost the lease, and hand the sweep to
+    another replica that starts it over -- so the sweep must leave headroom.
+
+    How much headroom is needed depends on how loaded the DB already is, and
+    the time a batch just took is the cheapest available measure of that: it
+    is the end-to-end cost of this sweep's own statements, connection wait
+    included, so it rises exactly when the DB is the contended resource. Wait
+    that long again (capped) before the next batch, which holds the sweep to
+    at most half of the throughput it could take and makes it back off further
+    the slower the DB gets, without a separate probe to interpret.
+    """
+    pause = min(batch_seconds * _RECOVERY_SWEEP_PAUSE_RATIO,
+                _RECOVERY_SWEEP_MAX_PAUSE_SECONDS)
+    if pause <= 0:
+        return
+    log_file.write(f'Batch took {batch_seconds:.2f}s; pausing {pause:.2f}s\n')
+    time.sleep(pause)
+
+
+def _batched(items: List[int], size: int) -> Iterator[List[int]]:
+    for i in range(0, len(items), size):
+        yield items[i:i + size]
 
 
 class JobStatusLogger:

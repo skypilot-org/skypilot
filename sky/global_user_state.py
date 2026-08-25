@@ -1575,6 +1575,29 @@ def get_cluster_workspace(cluster_name: str) -> Optional[str]:
 
 
 @metrics_lib.time_me
+def filter_existing_cluster_names(cluster_names: Set[str]) -> Set[str]:
+    """Of ``cluster_names``, the ones that have a row in the cluster table.
+
+    Existence-only check: unlike ``get_handles_from_cluster_names`` this does
+    not read or unpickle the handle, so it stays cheap for callers that only
+    need to know whether a cluster is still around (e.g. deciding whether
+    there is anything left to tear down).
+    """
+    result: Set[str] = set()
+    if not cluster_names:
+        return result
+    engine = _db_manager.get_engine()
+    names_list = list(cluster_names)
+    with orm.Session(engine) as session:
+        for offset in range(0, len(names_list), _CLUSTER_IN_QUERY_CHUNK_SIZE):
+            batch = names_list[offset:offset + _CLUSTER_IN_QUERY_CHUNK_SIZE]
+            rows = session.query(cluster_table.c.name).filter(
+                cluster_table.c.name.in_(batch)).all()
+            result.update(row.name for row in rows)
+    return result
+
+
+@metrics_lib.time_me
 def get_handles_from_cluster_names(
         cluster_names: Set[str]
 ) -> Dict[str, Optional['backends.ResourceHandle']]:
