@@ -3054,3 +3054,136 @@ class TestObservedResizeState:
         observed = self._observe(mock_core_api, pvc)
 
         assert observed.resize_status is None
+
+
+class TestResizeConditionsAndMessage:
+    """Which condition decides the state, and whose words describe it.
+
+    A resizing claim holds several conditions at once -- one parked waiting for
+    a restart is still `Resizing` too -- so the order they are read in is the
+    difference between telling the user to wait and telling them to restart
+    something.
+    """
+
+    def _config(self):
+        return models.VolumeConfig(
+            _version=1,
+            name='test-vol',
+            type='k8s-pvc',
+            cloud='kubernetes',
+            region='my-context',
+            zone=None,
+            name_on_cloud='test-pvc',
+            size='1',
+            config={'namespace': 'my-namespace'},
+        )
+
+    def _observe(self, mock_core_api, pvc):
+        pvc_list = Mock()
+        pvc_list.items = [pvc]
+        (mock_core_api.return_value.list_namespaced_persistent_volume_claim.
+         return_value) = pvc_list
+        _, observed, _ = k8s_volume.get_all_volumes_state([self._config()])
+        return observed['test-vol']
+
+    def _condition(self, condition_type, message=None, status='True'):
+        condition = Mock()
+        condition.type = condition_type
+        condition.status = status
+        condition.message = message
+        return condition
+
+    def _pvc(self, conditions, allocated_status=None):
+        pvc = MockPVC('test-pvc', 'my-namespace', size='1Gi')
+        pvc.status.phase = 'Bound'
+        pvc.status.capacity = {'storage': '1Gi'}
+        pvc.status.allocated_resources = {'storage': '2Gi'}
+        pvc.status.allocated_resource_statuses = ({
+            'storage': allocated_status
+        } if allocated_status else None)
+        pvc.status.conditions = conditions
+        return pvc
+
+    @patch('sky.provision.kubernetes.volume._get_context_namespace')
+    @patch('sky.adaptors.kubernetes.core_api')
+    def test_a_restart_outranks_a_resize_in_progress(self, mock_core_api,
+                                                     mock_get_context):
+        """Both hold at once, and `Resizing` is listed first."""
+        mock_get_context.return_value = ('my-context', 'my-namespace')
+        pvc = self._pvc([
+            self._condition('Resizing'),
+            self._condition('FileSystemResizePending', message='k8s says so'),
+        ])
+
+        observed = self._observe(mock_core_api, pvc)
+
+        assert observed.resize_status == models.VolumeResizeStatus.NEEDS_RESTART
+        assert observed.resize_message == 'k8s says so'
+
+    @patch('sky.provision.kubernetes.volume._get_context_namespace')
+    @patch('sky.adaptors.kubernetes.core_api')
+    def test_a_failure_outranks_everything(self, mock_core_api,
+                                           mock_get_context):
+        mock_get_context.return_value = ('my-context', 'my-namespace')
+        pvc = self._pvc([
+            self._condition('Resizing'),
+            self._condition('FileSystemResizePending'),
+            self._condition('NodeResizeError', message='quota exceeded'),
+        ])
+
+        observed = self._observe(mock_core_api, pvc)
+
+        assert observed.resize_status == models.VolumeResizeStatus.FAILED
+        assert observed.resize_message == 'quota exceeded'
+
+    @patch('sky.provision.kubernetes.volume._get_context_namespace')
+    @patch('sky.adaptors.kubernetes.core_api')
+    def test_the_message_describes_the_state_that_was_settled_on(
+            self, mock_core_api, mock_get_context):
+        """The state comes from allocatedResourceStatuses; the words have to
+        come from the condition that matches it, not from whichever holds."""
+        mock_get_context.return_value = ('my-context', 'my-namespace')
+        pvc = self._pvc(
+            [
+                self._condition('Resizing', message='about the wrong state'),
+                self._condition('FileSystemResizePending',
+                                message='waiting for a restart'),
+            ],
+            allocated_status='NodeResizePending',
+        )
+
+        observed = self._observe(mock_core_api, pvc)
+
+        assert observed.resize_status == models.VolumeResizeStatus.NEEDS_RESTART
+        assert observed.resize_message == 'waiting for a restart'
+
+    @patch('sky.provision.kubernetes.volume._get_context_namespace')
+    @patch('sky.adaptors.kubernetes.core_api')
+    def test_a_condition_without_words_reports_none(self, mock_core_api,
+                                                    mock_get_context):
+        """Nothing is invented here; the caller supplies the fallback."""
+        mock_get_context.return_value = ('my-context', 'my-namespace')
+        pvc = self._pvc([self._condition('FileSystemResizePending')],
+                        allocated_status='NodeResizePending')
+
+        observed = self._observe(mock_core_api, pvc)
+
+        assert observed.resize_status == models.VolumeResizeStatus.NEEDS_RESTART
+        assert observed.resize_message is None
+
+    @patch('sky.provision.kubernetes.volume._get_context_namespace')
+    @patch('sky.adaptors.kubernetes.core_api')
+    def test_a_condition_that_no_longer_holds_is_not_read(
+            self, mock_core_api, mock_get_context):
+        mock_get_context.return_value = ('my-context', 'my-namespace')
+        pvc = self._pvc([
+            self._condition('FileSystemResizePending',
+                            message='stale',
+                            status='False'),
+            self._condition('Resizing', message='current'),
+        ])
+
+        observed = self._observe(mock_core_api, pvc)
+
+        assert observed.resize_status == models.VolumeResizeStatus.IN_PROGRESS
+        assert observed.resize_message == 'current'

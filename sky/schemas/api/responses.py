@@ -303,3 +303,6 @@ class VolumeRecord(ResponseBaseModel):
     # models.VolumeResizeStatus's values.
     resize_status: Optional[str] = None
     resize_target_size: Optional[str] = None
+    # What to show about the resize: the cloud's own account of it where there
+    # is one, plus what the user has to do next.
+    resize_message: Optional[str] = None

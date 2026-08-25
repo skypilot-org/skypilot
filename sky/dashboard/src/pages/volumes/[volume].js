@@ -300,16 +300,9 @@ function VolumeDetailCard({ volumeData }) {
                 </div>
                 {/* The size above is the capacity the volume has now; a
                     resize only shows up there once it has landed. */}
-                {volumeData.resize_status === 'needs_restart' && (
+                {volumeData.resize_message && (
                   <div className="text-sm mt-1 text-gray-500">
-                    Waiting to grow the filesystem: restart the cluster or pod
-                    using this volume.
-                  </div>
-                )}
-                {volumeData.resize_status === 'failed' && (
-                  <div className="text-sm mt-1 text-gray-500">
-                    The resize did not complete. Check the volume&apos;s events
-                    on the cluster.
+                    {volumeData.resize_message}
                   </div>
                 )}
               </div>

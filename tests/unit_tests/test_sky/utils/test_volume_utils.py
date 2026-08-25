@@ -837,3 +837,55 @@ class TestAutoMountScope:
         assert volume.AutoMountScope.supported_scopes() == [
             'personal', 'workspace', 'global'
         ]
+
+
+class TestResizeDisplayMessage:
+    """The one sentence shown about a resize, built in one place.
+
+    Kubernetes explains the state better than a message reconstructed from the
+    state name, but it explains it in its own terms -- a pod on a node, not a
+    SkyPilot cluster -- and it does not always say anything at all.
+    """
+
+    def test_no_resize_says_nothing(self):
+        assert volume.resize_display_message(None, None) is None
+
+    def test_the_clouds_own_words_are_kept(self):
+        message = volume.resize_display_message(
+            'needs_restart',
+            'Waiting for user to (re-)start a pod to finish file system '
+            'resize of volume on node.')
+
+        assert message.startswith('Waiting for user to (re-)start a pod')
+
+    def test_and_what_to_do_about_it_is_added(self):
+        message = volume.resize_display_message('needs_restart', 'k8s says so')
+
+        # The cloud says why; this says what to do in SkyPilot's terms.
+        assert 'k8s says so' in message
+        assert 'Restart the cluster' in message
+
+    def test_a_cloud_with_nothing_to_say_still_gets_a_sentence(self):
+        message = volume.resize_display_message('needs_restart', None)
+
+        assert 'filesystem' in message
+        assert 'Restart the cluster' in message
+
+    def test_a_resize_in_progress_asks_for_nothing(self):
+        message = volume.resize_display_message('in_progress', None)
+
+        assert 'resizing' in message.lower()
+        assert 'Restart' not in message
+
+    def test_a_failed_resize_says_the_size_did_not_change(self):
+        message = volume.resize_display_message('failed', 'disk full')
+
+        assert 'disk full' in message
+        assert 'previous size' in message
+
+    def test_a_status_this_reader_does_not_know_is_still_reported(self):
+        """A half-upgraded deployment can have a newer writer than reader."""
+        assert volume.resize_display_message(
+            'from_the_future', 'the cloud said this') == 'the cloud said this'
+        assert 'from_the_future' in volume.resize_display_message(
+            'from_the_future', None)

@@ -119,14 +119,16 @@ class TestVolumeCore:
                       usedby_pods=[],
                       usedby_clusters=[],
                       resize_status=None,
-                      resize_target_size=None),
+                      resize_target_size=None,
+                      resize_message=None),
             mock.call('test-volume-2',
                       status=status_lib.VolumeStatus.READY,
                       error_message=None,
                       usedby_pods=[],
                       usedby_clusters=[],
                       resize_status=None,
-                      resize_target_size=None)
+                      resize_target_size=None,
+                      resize_message=None)
         ]
         mock_update_status.assert_has_calls(expected_calls, any_order=True)
 
@@ -225,14 +227,16 @@ class TestVolumeCore:
                       usedby_pods=['pod1', 'pod2'],
                       usedby_clusters=['cluster1', 'cluster2'],
                       resize_status=None,
-                      resize_target_size=None),
+                      resize_target_size=None,
+                      resize_message=None),
             mock.call('test-volume-2',
                       status=status_lib.VolumeStatus.IN_USE,
                       error_message=None,
                       usedby_pods=['pod1', 'pod2'],
                       usedby_clusters=['cluster1', 'cluster2'],
                       resize_status=None,
-                      resize_target_size=None)
+                      resize_target_size=None,
+                      resize_message=None)
         ]
         mock_update_status.assert_has_calls(expected_calls, any_order=True)
 

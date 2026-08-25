@@ -117,6 +117,52 @@ def is_read_write_many_pvc(volume_config: models.VolumeConfig) -> bool:
 PVC_PROVISIONING_MESSAGE = ('PVC is pending: the PersistentVolume is still '
                             'being provisioned.')
 
+# What each resize state means, for a cloud that reports the state but not a
+# word about it. Kubernetes puts it better on the claim's conditions, so these
+# are only the fallback.
+_RESIZE_STATE_MESSAGES = {
+    models.VolumeResizeStatus.IN_PROGRESS: ('The storage backend is resizing '
+                                            'this volume.'),
+    models.VolumeResizeStatus.NEEDS_RESTART:
+        ('The new space is allocated, but the filesystem only grows when the '
+         'volume is next mounted.'),
+    models.VolumeResizeStatus.FAILED: 'The resize did not complete.',
+}
+
+# What to do about it, in SkyPilot's terms. Kubernetes explains the pending
+# case as "(re-)start a pod ... on node", which is accurate and is not how a
+# SkyPilot user reaches the volume -- so its own account of why is kept, and
+# this says what to do next.
+_RESIZE_STATE_ACTIONS = {
+    models.VolumeResizeStatus.NEEDS_RESTART:
+        ('Restart the cluster or job using this volume to finish the '
+         'resize.'),
+    models.VolumeResizeStatus.FAILED: 'The volume still has its previous size.',
+}
+
+
+def resize_display_message(resize_status: Optional[str],
+                           cloud_message: Optional[str]) -> Optional[str]:
+    """The one sentence to show about a resize, or None if none is in flight.
+
+    Built here rather than stored so that every surface -- the volumes table,
+    the volume's own page, any client -- says the same thing, and so that the
+    wording can change without rewriting what is in the database.
+
+    An unrecognized status comes from a newer writer than this reader, which
+    happens while a deployment is half upgraded: report what it said rather
+    than nothing.
+    """
+    if not resize_status:
+        return None
+    try:
+        status = models.VolumeResizeStatus(resize_status)
+    except ValueError:
+        return cloud_message or f'Resize state: {resize_status}.'
+    parts = [cloud_message or _RESIZE_STATE_MESSAGES.get(status)]
+    parts.append(_RESIZE_STATE_ACTIONS.get(status))
+    return ' '.join(part for part in parts if part) or None
+
 
 def volume_error_may_resolve(error_message: Optional[str]) -> bool:
     """Whether a not-ready volume may still become usable without a change.

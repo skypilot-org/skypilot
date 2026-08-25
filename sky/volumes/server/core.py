@@ -193,11 +193,14 @@ def volume_refresh(volume_names: Optional[List[str]] = None) -> None:
             current_usedby_clusters = latest_volume.get('usedby_clusters', [])
             current_resize_status = latest_volume.get('resize_status')
             current_resize_target = latest_volume.get('resize_target_size')
+            current_resize_message = latest_volume.get('resize_message')
             observed = cloud_to_observed.get(cloud, {}).get(volume_name)
             new_resize_status = (observed.resize_status
                                  if observed is not None else None)
             new_resize_target = (observed.resize_target_size
                                  if observed is not None else None)
+            new_resize_message = (observed.resize_message
+                                  if observed is not None else None)
 
             # Determine new status and error_message
             if volume_error:
@@ -219,7 +222,8 @@ def volume_refresh(volume_names: Optional[List[str]] = None) -> None:
             resize_changed = (
                 current_resize_status !=
                 (new_resize_status.value if new_resize_status else None) or
-                current_resize_target != new_resize_target)
+                current_resize_target != new_resize_target or
+                current_resize_message != new_resize_message)
 
             if (status_changed or error_changed or usedby_changed or
                     resize_changed):
@@ -233,7 +237,8 @@ def volume_refresh(volume_names: Optional[List[str]] = None) -> None:
                     usedby_pods=usedby_pods,
                     usedby_clusters=usedby_clusters,
                     resize_status=new_resize_status,
-                    resize_target_size=new_resize_target)
+                    resize_target_size=new_resize_target,
+                    resize_message=new_resize_message)
             volume_config = latest_volume.get('handle')
             if volume_config is None:
                 continue
@@ -353,6 +358,9 @@ def volume_list(
                 # until the resize lands.
                 'resize_status': volume.get('resize_status'),
                 'resize_target_size': volume.get('resize_target_size'),
+                # Built here, not stored, so every surface says the same thing.
+                'resize_message': volume_utils.resize_display_message(
+                    volume.get('resize_status'), volume.get('resize_message')),
                 'type': config.type,
                 'cloud': config.cloud,
                 'region': config.region,

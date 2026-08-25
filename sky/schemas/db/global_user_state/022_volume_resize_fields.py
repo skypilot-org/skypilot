@@ -21,7 +21,7 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade():
-    """Add resize_status and resize_target_size columns to volumes table.
+    """Add the resize_status, resize_target_size and resize_message columns.
 
     A volume's recorded size is the capacity it actually has, so an expansion
     that has not finished -- or that is waiting on the workload to restart
@@ -34,6 +34,10 @@ def upgrade():
                                              server_default=None)
         db_utils.add_column_to_table_alembic('volumes',
                                              'resize_target_size',
+                                             sa.Text(),
+                                             server_default=None)
+        db_utils.add_column_to_table_alembic('volumes',
+                                             'resize_message',
                                              sa.Text(),
                                              server_default=None)
 

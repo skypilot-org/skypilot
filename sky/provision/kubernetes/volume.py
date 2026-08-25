@@ -71,13 +71,20 @@ _RESIZE_STATUSES = {
     'ControllerResizeFailed': models.VolumeResizeStatus.FAILED,
     'NodeResizeFailed': models.VolumeResizeStatus.FAILED,
 }
-# What a cluster too old for allocatedResourceStatuses reports instead: the
-# same two live states, as claim conditions. There is no failed condition --
-# a failure only shows up as the resize never finishing.
-_RESIZE_CONDITIONS = {
-    'Resizing': models.VolumeResizeStatus.IN_PROGRESS,
-    'FileSystemResizePending': models.VolumeResizeStatus.NEEDS_RESTART,
-}
+# The same states as claim conditions, which is all a cluster too old for
+# allocatedResourceStatuses reports -- and, on any cluster, the only place the
+# claim explains itself in words.
+#
+# Ordered, because a claim carries several at once: one parked waiting for a
+# restart is still `Resizing` too. Reading them in list order would report the
+# wrong one, so they are read in the order of what the user has to do about
+# them: fix a failure, restart something, or just wait.
+_RESIZE_CONDITIONS = (
+    ('ControllerResizeError', models.VolumeResizeStatus.FAILED),
+    ('NodeResizeError', models.VolumeResizeStatus.FAILED),
+    ('FileSystemResizePending', models.VolumeResizeStatus.NEEDS_RESTART),
+    ('Resizing', models.VolumeResizeStatus.IN_PROGRESS),
+)
 
 
 class PvcFailure(enum.Enum):
@@ -981,18 +988,33 @@ def _parse_pvc_size(size_quantity: Optional[str],
     return str(size)
 
 
-def _pvc_resize_state(
-        pvc_obj: Any, pvc_name: str
-) -> Tuple[Optional[models.VolumeResizeStatus], Optional[str]]:
-    """Returns how far a resize of this claim has got, and its target size.
+def _true_resize_conditions(status: Any) -> Dict[str, Optional[str]]:
+    """The claim's resize conditions that currently hold, and what they say."""
+    conditions = getattr(status, 'conditions', None)
+    held: Dict[str, Optional[str]] = {}
+    for condition in conditions if isinstance(conditions, list) else []:
+        if getattr(condition, 'status', None) != 'True':
+            continue
+        condition_type = getattr(condition, 'type', None)
+        if condition_type is not None:
+            held[condition_type] = getattr(condition, 'message', None)
+    return held
 
-    Both are None when no resize is in flight, which is the normal case.
+
+def _pvc_resize_state(
+    pvc_obj: Any, pvc_name: str
+) -> Tuple[Optional[models.VolumeResizeStatus], Optional[str], Optional[str]]:
+    """Returns how far a resize of this claim has got, what it is heading for,
+    and how the claim explains itself.
+
+    All three are None when no resize is in flight, which is the normal case.
 
     A claim's capacity only moves once the new space exists, so an expansion
     that is still running -- or that is waiting for the workload to restart
     before the filesystem can grow -- looks like nothing happened at all.
     """
     status = getattr(pvc_obj, 'status', None)
+    conditions = _true_resize_conditions(status)
     resize_status = None
     statuses = getattr(status, 'allocated_resource_statuses', None)
     if isinstance(statuses, dict):
@@ -1000,20 +1022,22 @@ def _pvc_resize_state(
         if storage_status is not None:
             resize_status = _RESIZE_STATUSES.get(storage_status)
     if resize_status is None:
-        # Clusters older than allocatedResourceStatuses report a resize only
-        # through the claim's conditions.
-        conditions = getattr(status, 'conditions', None)
-        for condition in conditions if isinstance(conditions, list) else []:
-            if getattr(condition, 'status', None) != 'True':
-                continue
-            condition_type = getattr(condition, 'type', None)
-            mapped = (_RESIZE_CONDITIONS.get(condition_type)
-                      if condition_type is not None else None)
-            if mapped is not None:
+        # All a cluster older than allocatedResourceStatuses reports.
+        for condition_type, mapped in _RESIZE_CONDITIONS:
+            if condition_type in conditions:
                 resize_status = mapped
                 break
     if resize_status is None:
-        return None, None
+        return None, None, None
+
+    # The claim's own account of the state settled on above -- Kubernetes says
+    # it better than a message reconstructed from the state name, and only the
+    # conditions carry one at all.
+    message = None
+    for condition_type, mapped in _RESIZE_CONDITIONS:
+        if mapped == resize_status and conditions.get(condition_type):
+            message = conditions[condition_type]
+            break
 
     # What the resize is heading for: the capacity being allocated, or, before
     # the backend has acknowledged anything, the request itself.
@@ -1024,7 +1048,7 @@ def _pvc_resize_state(
                            None)
         if isinstance(requests, dict):
             target = requests.get('storage')
-    return resize_status, _parse_pvc_size(target, pvc_name)
+    return resize_status, _parse_pvc_size(target, pvc_name), message
 
 
 def _observed_volume_state(pvc_obj: Any) -> models.ObservedVolumeState:
@@ -1034,7 +1058,8 @@ def _observed_volume_state(pvc_obj: Any) -> models.ObservedVolumeState:
     a recorded config never clears a value it cannot see.
     """
     pvc_name = pvc_obj.metadata.name
-    resize_status, resize_target_size = _pvc_resize_state(pvc_obj, pvc_name)
+    resize_status, resize_target_size, resize_message = _pvc_resize_state(
+        pvc_obj, pvc_name)
     return models.ObservedVolumeState(
         size=_parse_pvc_size(_pvc_capacity(pvc_obj), pvc_name),
         # An empty storageClassName is the Kubernetes way of opting out of
@@ -1043,6 +1068,7 @@ def _observed_volume_state(pvc_obj: Any) -> models.ObservedVolumeState:
                             None),
         resize_status=resize_status,
         resize_target_size=resize_target_size,
+        resize_message=resize_message,
     )
 
 

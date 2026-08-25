@@ -177,6 +177,9 @@ volume_table = sqlalchemy.Table(
     sqlalchemy.Column('resize_target_size',
                       sqlalchemy.Text,
                       server_default=None),
+    # What the cloud said about the resize, in its own words. What is shown to
+    # the user is built from this in volume_list, not stored.
+    sqlalchemy.Column('resize_message', sqlalchemy.Text, server_default=None),
 )
 
 # Table for Cluster History
@@ -3004,6 +3007,7 @@ def _volume_record_from_row(row: Any) -> Dict[str, Any]:
         'creation_yaml': row.creation_yaml,
         'resize_status': row.resize_status,
         'resize_target_size': row.resize_target_size,
+        'resize_message': row.resize_message,
     }
 
 
@@ -3152,7 +3156,8 @@ def update_volume_status(name: str,
                          usedby_clusters: Optional[List[str]] = None,
                          resize_status: Optional[
                              models.VolumeResizeStatus] = None,
-                         resize_target_size: Optional[str] = None) -> None:
+                         resize_target_size: Optional[str] = None,
+                         resize_message: Optional[str] = None) -> None:
     """Update volume status and related fields.
 
     Args:
@@ -3165,6 +3170,7 @@ def update_volume_status(name: str,
             which is what a finished resize looks like).
         resize_target_size: The size that resize is heading for (None clears
             it).
+        resize_message: What the cloud said about the resize (None clears it).
     """
     engine = _db_manager.get_engine()
     with orm.Session(engine) as session:
@@ -3178,6 +3184,7 @@ def update_volume_status(name: str,
         update_dict[volume_table.c.resize_status] = (
             resize_status.value if resize_status is not None else None)
         update_dict[volume_table.c.resize_target_size] = resize_target_size
+        update_dict[volume_table.c.resize_message] = resize_message
         # Update usedby fields if provided (encode as JSON)
         if usedby_pods is not None:
             update_dict[volume_table.c.usedby_pods] = json.dumps(usedby_pods)

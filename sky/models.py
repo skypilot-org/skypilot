@@ -182,6 +182,9 @@ class ObservedVolumeState:
     # has to do -- looks indistinguishable from one that was never resized.
     resize_status: Optional[VolumeResizeStatus] = None
     resize_target_size: Optional[str] = None
+    # How the cloud explains the state, in its own words. None when it offers
+    # none, which is the usual case for everything but Kubernetes conditions.
+    resize_message: Optional[str] = None
 
 
 class VolumeConfig(pydantic.BaseModel):

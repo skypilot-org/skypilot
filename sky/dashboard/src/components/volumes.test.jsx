@@ -181,11 +181,16 @@ describe('VolumesTable size column while a resize is pending', () => {
   // The recorded size is the capacity the volume has now, so a resize that
   // has not landed is invisible in it. `needs_restart` in particular never
   // clears on its own -- the user has to restart what is using the volume.
-  const resizing = (status) => ({
+  // The message is composed by the server, so the table just renders it.
+  const resizing = (
+    status,
+    message = 'Resizing to 2Gi. Restart the cluster.'
+  ) => ({
     ...volume('vol-resizing'),
     size: 1,
     resize_status: status,
     resize_target_size: 2,
+    resize_message: message,
   });
 
   it('shows only the current size when nothing is resizing', async () => {
@@ -204,24 +209,32 @@ describe('VolumesTable size column while a resize is pending', () => {
     expect(row.textContent).toContain('2Gi');
   });
 
-  it('says a pending resize is waiting on a restart', async () => {
+  it("shows the server's explanation without hovering, in details", async () => {
     const { container } = await renderTable([resizing('needs_restart')]);
 
-    const hint = container.querySelector('[title*="Resizing to 2Gi"]');
-    expect(hint).toBeTruthy();
-    expect(hint.getAttribute('title')).toContain('Restart');
+    expect(container.textContent).toContain('Restart the cluster');
   });
 
-  it('says a failed resize failed', async () => {
-    const { container } = await renderTable([resizing('failed')]);
+  it('leaves the details column to an error when there is one', async () => {
+    // An error means the volume is unusable, which outranks a resize that has
+    // not landed; the resize keeps its tooltip on the size cell.
+    const withBoth = {
+      ...resizing('needs_restart'),
+      status: 'NOT_READY',
+      error_message: 'PVC is pending. ProvisioningFailed: no capacity',
+    };
+    const { container } = await renderTable([withBoth]);
 
-    const hint = container.querySelector('[title*="2Gi"]');
-    expect(hint.getAttribute('title')).toContain('failed');
+    const details =
+      container.querySelector('table tbody tr').lastElementChild
+        .previousElementSibling;
+    expect(details.textContent).toContain('ProvisioningFailed');
+    expect(details.textContent).not.toContain('Restart the cluster');
   });
 
   it('ignores a status from a server that reports no target size', async () => {
-    // An older server sends neither field; a half-populated row must not
-    // render a dangling arrow.
+    // An older server sends none of these fields; a half-populated row must
+    // not render a dangling arrow.
     const { container } = await renderTable([
       { ...volume('vol-half'), resize_status: 'in_progress' },
     ]);

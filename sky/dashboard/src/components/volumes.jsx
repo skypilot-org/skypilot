@@ -42,7 +42,11 @@ import {
 import { ErrorDisplay } from '@/components/elements/ErrorDisplay';
 import Link from 'next/link';
 import { useRouter } from 'next/router';
-import { TimestampWithTooltip, LastUpdatedTimestamp } from '@/components/utils';
+import {
+  TimestampWithTooltip,
+  LastUpdatedTimestamp,
+  NonCapitalizedTooltip as Tooltip,
+} from '@/components/utils';
 import { StatusBadge } from '@/components/elements/StatusBadge';
 import {
   TruncatedDetails,
@@ -699,22 +703,9 @@ export function VolumesTable({
   };
 
   // A volume reports the capacity it actually has, so a resize that has not
-  // landed yet is invisible in the size alone. Show where it is heading, and
-  // say what the volume is waiting for -- `needs_restart` in particular never
-  // clears on its own.
-  const resizeHint = (status, target) => {
-    switch (status) {
-      case 'needs_restart':
-        return `Resizing to ${target}: the space is allocated, but the filesystem only grows when the volume is next mounted. Restart the cluster or pod using it.`;
-      case 'in_progress':
-        return `Resizing to ${target}.`;
-      case 'failed':
-        return `Resize to ${target} failed. Check the volume's events on the cluster.`;
-      default:
-        return `Resizing to ${target}.`;
-    }
-  };
-
+  // landed yet is invisible in the size alone. Show where it is heading, with
+  // the server's explanation of what it is waiting for -- the same text the
+  // details column shows, when that one is free.
   const renderSize = (volume) => {
     const size = formatSize(volume.size);
     if (!volume.resize_status || volume.resize_target_size == null) {
@@ -722,10 +713,14 @@ export function VolumesTable({
     }
     const target = formatSize(volume.resize_target_size);
     return (
-      <span title={resizeHint(volume.resize_status, target)}>
-        {size}
-        <span className="text-gray-500"> &rarr; {target}</span>
-      </span>
+      <Tooltip content={volume.resize_message}>
+        {/* nowrap: the column is narrow, and a size broken across three lines
+            reads worse than a wider column. */}
+        <span className="whitespace-nowrap">
+          {size}
+          <span className="text-gray-500"> &rarr; {target}</span>
+        </span>
+      </Tooltip>
     );
   };
 
@@ -744,8 +739,11 @@ export function VolumesTable({
   // Volumes are usable most of the time, so a column of dashes would be noise.
   // Judge over the whole dataset, not the current page or filter, so the column
   // does not come and go while paging.
+  const volumeDetails = (volume) =>
+    volume.error_message || volume.resize_message || null;
+
   const anyVolumeHasDetails = useMemo(
-    () => data.some((volume) => volume.error_message),
+    () => data.some((volume) => volumeDetails(volume)),
     [data]
   );
 
@@ -847,9 +845,9 @@ export function VolumesTable({
             renderHeader: () => <TableHead>Details</TableHead>,
             renderCell: (volume) => (
               <TableCell>
-                {volume.error_message ? (
+                {volumeDetails(volume) ? (
                   <TruncatedDetails
-                    text={volume.error_message}
+                    text={volumeDetails(volume)}
                     rowId={volume.name}
                     expandedRowId={expandedRowId}
                     setExpandedRowId={setExpandedRowId}

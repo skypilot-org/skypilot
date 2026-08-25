@@ -50,6 +50,7 @@ export async function getVolumes() {
           // resize lands. Servers older than these fields report nothing.
           resize_status: volume.resize_status || null,
           resize_target_size: volume.resize_target_size ?? null,
+          resize_message: volume.resize_message || null,
         };
       }) || [];
 
