@@ -23,8 +23,8 @@ def mock_no_volume_errors(monkeypatch):
     the cloud, so a test that asserts on the refresh outcome has to say what
     the check found.
     """
-    monkeypatch.setattr(provision, 'get_all_volumes_errors',
-                        mock.MagicMock(return_value=({}, set())))
+    monkeypatch.setattr(provision, 'get_all_volumes_state',
+                        mock.MagicMock(return_value=({}, {}, set())))
 
 
 class TestVolumeCore:
@@ -1205,10 +1205,10 @@ class TestVolumeCore:
         monkeypatch.setattr(provision, 'get_all_volumes_usedby',
                             mock_get_all_usedby)
 
-        # Mock get_all_volumes_errors
-        mock_get_errors = mock.MagicMock(return_value={})
-        monkeypatch.setattr(provision, 'get_all_volumes_errors',
-                            mock_get_errors)
+        # Reports the volume healthy, so that it reaches the usedby check this
+        # test is about instead of being skipped by the error-fetch guard.
+        mock_get_errors = mock.MagicMock(return_value=({}, {}, set()))
+        monkeypatch.setattr(provision, 'get_all_volumes_state', mock_get_errors)
 
         # Mock filelock
         mock_filelock = mock.MagicMock()
@@ -1496,13 +1496,12 @@ class TestVolumeCore:
         mock_get_volumes = mock.MagicMock(return_value=mock_volumes)
         monkeypatch.setattr(global_user_state, 'get_volumes', mock_get_volumes)
 
-        # Mock get_all_volumes_errors to return an error
+        # Mock get_all_volumes_state to return an error
         error_msg = 'PVC access mode mismatch: PVC requests ReadWriteOnce'
         mock_get_errors = mock.MagicMock(return_value=({
             'test-volume': error_msg
-        }, set()))
-        monkeypatch.setattr(provision, 'get_all_volumes_errors',
-                            mock_get_errors)
+        }, {}, set()))
+        monkeypatch.setattr(provision, 'get_all_volumes_state', mock_get_errors)
 
         mock_get_all_usedby = mock.MagicMock(return_value=({}, {}, set()))
         monkeypatch.setattr(provision, 'get_all_volumes_usedby',
@@ -1872,10 +1871,10 @@ class TestInitialVolumeStatus:
 
     def test_bound_volume_is_ready(self, monkeypatch):
         config = _make_volume_config()
-        monkeypatch.setattr(provision, 'get_all_volumes_errors',
-                            lambda cloud, configs: ({
-                                'test-vol': None
-                            }, set()))
+        monkeypatch.setattr(
+            provision, 'get_all_volumes_state', lambda cloud, configs: ({
+                'test-vol': None
+            }, {}, set()))
 
         status, error = core._initial_volume_status('Kubernetes', config)
 
@@ -1887,9 +1886,9 @@ class TestInitialVolumeStatus:
         just-created volume must not be advertised as usable."""
         config = _make_volume_config()
         monkeypatch.setattr(
-            provision, 'get_all_volumes_errors', lambda cloud, configs: ({
+            provision, 'get_all_volumes_state', lambda cloud, configs: ({
                 'test-vol': 'PVC is pending.'
-            }, set()))
+            }, {}, set()))
 
         status, error = core._initial_volume_status('Kubernetes', config)
 
@@ -1898,8 +1897,8 @@ class TestInitialVolumeStatus:
 
     def test_unqueryable_volume_is_ready(self, monkeypatch):
         config = _make_volume_config()
-        monkeypatch.setattr(provision, 'get_all_volumes_errors',
-                            lambda cloud, configs: ({}, {'test-vol'}))
+        monkeypatch.setattr(provision, 'get_all_volumes_state',
+                            lambda cloud, configs: ({}, {}, {'test-vol'}))
 
         status, error = core._initial_volume_status('Kubernetes', config)
 
@@ -1913,7 +1912,7 @@ class TestInitialVolumeStatus:
             raise RuntimeError('kube API unreachable')
 
         config = _make_volume_config()
-        monkeypatch.setattr(provision, 'get_all_volumes_errors', _raise)
+        monkeypatch.setattr(provision, 'get_all_volumes_state', _raise)
 
         status, error = core._initial_volume_status('Kubernetes', config)
 
@@ -1974,7 +1973,7 @@ class TestVolumeRefreshErrorFetchFailure:
         def _raise(cloud, configs):
             raise RuntimeError('kube API unreachable')
 
-        monkeypatch.setattr(provision, 'get_all_volumes_errors', _raise)
+        monkeypatch.setattr(provision, 'get_all_volumes_state', _raise)
 
         core.volume_refresh()
 
@@ -1985,8 +1984,8 @@ class TestVolumeRefreshErrorFetchFailure:
         volumes must not get frozen by the failed-fetch guard."""
         mock_update_status = self._setup(monkeypatch,
                                          status_lib.VolumeStatus.READY, None)
-        monkeypatch.setattr(provision, 'get_all_volumes_errors',
-                            lambda cloud, configs: ({}, set()))
+        monkeypatch.setattr(provision, 'get_all_volumes_state',
+                            lambda cloud, configs: ({}, {}, set()))
         monkeypatch.setattr(provision, 'map_all_volumes_usedby',
                             mock.MagicMock(return_value=(['pod-a'], [])))
 
@@ -2001,9 +2000,9 @@ class TestVolumeRefreshErrorFetchFailure:
         mock_update_status = self._setup(monkeypatch,
                                          status_lib.VolumeStatus.READY, None)
         monkeypatch.setattr(
-            provision, 'get_all_volumes_errors', lambda cloud, configs: ({
+            provision, 'get_all_volumes_state', lambda cloud, configs: ({
                 'test-volume': 'PVC is pending.'
-            }, set()))
+            }, {}, set()))
 
         core.volume_refresh()
 
@@ -2041,9 +2040,9 @@ class TestVolumeApplyRecordsInitialStatus:
     def test_unbound_volume_is_recorded_not_ready(self, monkeypatch):
         mock_add_volume = self._setup(monkeypatch)
         monkeypatch.setattr(
-            provision, 'get_all_volumes_errors', lambda cloud, configs: ({
+            provision, 'get_all_volumes_state', lambda cloud, configs: ({
                 'test-vol': 'PVC is pending.'
-            }, set()))
+            }, {}, set()))
 
         core.volume_apply(name='test-vol',
                           volume_type='k8s-pvc',
@@ -2061,10 +2060,10 @@ class TestVolumeApplyRecordsInitialStatus:
 
     def test_bound_volume_is_recorded_ready(self, monkeypatch):
         mock_add_volume = self._setup(monkeypatch)
-        monkeypatch.setattr(provision, 'get_all_volumes_errors',
-                            lambda cloud, configs: ({
-                                'test-vol': None
-                            }, set()))
+        monkeypatch.setattr(
+            provision, 'get_all_volumes_state', lambda cloud, configs: ({
+                'test-vol': None
+            }, {}, set()))
 
         core.volume_apply(name='test-vol',
                           volume_type='k8s-pvc',
@@ -2100,9 +2099,8 @@ class TestEphemeralVolumeSkipsStatusProbe:
         monkeypatch.setattr('sky.volumes.server.core.filelock.FileLock',
                             mock.MagicMock())
         monkeypatch.setattr(global_user_state, 'add_volume', mock.MagicMock())
-        mock_get_errors = mock.MagicMock(return_value=({}, set()))
-        monkeypatch.setattr(provision, 'get_all_volumes_errors',
-                            mock_get_errors)
+        mock_get_errors = mock.MagicMock(return_value=({}, {}, set()))
+        monkeypatch.setattr(provision, 'get_all_volumes_state', mock_get_errors)
 
         core.volume_apply(name='eph-vol',
                           volume_type='k8s-pvc',
@@ -2146,8 +2144,8 @@ class TestVolumeRefreshScopedToNames:
         }
 
     def _patch_common(self, monkeypatch, wanted):
-        monkeypatch.setattr(provision, 'get_all_volumes_errors',
-                            mock.MagicMock(return_value=({}, set())))
+        monkeypatch.setattr(provision, 'get_all_volumes_state',
+                            mock.MagicMock(return_value=({}, {}, set())))
         monkeypatch.setattr(provision, 'get_all_volumes_usedby',
                             mock.MagicMock(return_value=({}, {}, set())))
         monkeypatch.setattr(provision, 'map_all_volumes_usedby',
@@ -2254,3 +2252,146 @@ class TestVolumeListReportsWhetherTheErrorMayResolve:
                                 volume_utils.PVC_PROVISIONING_MESSAGE)
 
         assert 'error_may_resolve' in record.model_dump()
+
+
+class TestVolumeRefreshObservedState:
+    """The refresh has to bring cloud-owned fields back in line.
+
+    A volume's size is recorded when it is created, so a volume whose storage
+    was expanded afterwards keeps advertising the size it started with -- on
+    the dashboard, in `sky volumes ls`, and to anyone planning capacity.
+    """
+
+    def _config(self, size='10240', config=None):
+        return models.VolumeConfig(
+            _version=1,
+            name='checkpoints',
+            type='k8s-pvc',
+            cloud='kubernetes',
+            region='my-context',
+            zone=None,
+            name_on_cloud='checkpoints-abc123',
+            size=size,
+            config=config
+            if config is not None else {'namespace': 'my-namespace'},
+        )
+
+    def _volume(self, handle):
+        return {
+            'name': 'checkpoints',
+            'launched_at': 1234567890,
+            'user_hash': 'user123',
+            'workspace': 'default',
+            'last_attached_at': None,
+            'last_use': None,
+            'handle': handle,
+            'status': status_lib.VolumeStatus.READY,
+            'is_ephemeral': False,
+            'usedby_pods': [],
+            'usedby_clusters': [],
+            'error_message': None,
+        }
+
+    def _refresh(self, monkeypatch, handle, observed, errors=None, failed=None):
+        """Runs volume_refresh over one volume and returns the config writes."""
+        volume = self._volume(handle)
+        monkeypatch.setattr(global_user_state, 'get_volumes',
+                            mock.MagicMock(return_value=[volume]))
+        monkeypatch.setattr(global_user_state, 'get_volume_by_name',
+                            mock.MagicMock(return_value=volume))
+        monkeypatch.setattr(global_user_state, 'update_volume_status',
+                            mock.MagicMock())
+        monkeypatch.setattr(
+            provision, 'get_all_volumes_state',
+            mock.MagicMock(return_value=(errors if errors is not None else {
+                'checkpoints': None
+            }, observed, failed if failed is not None else set())))
+        monkeypatch.setattr(provision, 'get_all_volumes_usedby',
+                            mock.MagicMock(return_value=({}, {}, set())))
+        monkeypatch.setattr(provision, 'map_all_volumes_usedby',
+                            mock.MagicMock(return_value=([], [])))
+        monkeypatch.setattr(
+            provision, 'refresh_volume_config',
+            mock.MagicMock(side_effect=lambda cloud, c: (False, c)))
+        monkeypatch.setattr('sky.volumes.server.core.filelock.FileLock',
+                            mock.MagicMock())
+        update_config = mock.MagicMock()
+        monkeypatch.setattr(global_user_state, 'update_volume_config',
+                            update_config)
+
+        core.volume_refresh()
+        return update_config
+
+    def test_an_expanded_volume_is_recorded_at_its_new_size(self, monkeypatch):
+        handle = self._config(size='10240')
+
+        update_config = self._refresh(
+            monkeypatch, handle,
+            {'checkpoints': models.ObservedVolumeState(size='25600')})
+
+        update_config.assert_called_once()
+        assert update_config.call_args[0][1].size == '25600'
+
+    def test_a_volume_that_still_matches_is_not_rewritten(self, monkeypatch):
+        """The daemon runs every minute; an unchanged volume must not cost a
+        pickle and a database write each time."""
+        handle = self._config(size='25600')
+
+        update_config = self._refresh(
+            monkeypatch, handle,
+            {'checkpoints': models.ObservedVolumeState(size='25600')})
+
+        update_config.assert_not_called()
+
+    def test_a_cloud_with_no_answer_leaves_the_size_alone(self, monkeypatch):
+        handle = self._config(size='10240')
+
+        update_config = self._refresh(
+            monkeypatch, handle,
+            {'checkpoints': models.ObservedVolumeState(size=None)})
+
+        update_config.assert_not_called()
+        assert handle.size == '10240'
+
+    def test_an_unreadable_cloud_leaves_the_size_alone(self, monkeypatch):
+        """A volume whose PVC could not be read must keep what it has, rather
+        than be described from an answer nobody got."""
+        handle = self._config(size='10240')
+
+        update_config = self._refresh(monkeypatch,
+                                      handle, {},
+                                      errors={},
+                                      failed={'checkpoints'})
+
+        update_config.assert_not_called()
+        assert handle.size == '10240'
+
+    def test_a_missing_storage_class_is_filled_in(self, monkeypatch):
+        """Volumes created before SkyPilot read the class back have none
+        recorded, even though their PVC has one."""
+        handle = self._config(config={'namespace': 'my-namespace'})
+
+        update_config = self._refresh(
+            monkeypatch, handle, {
+                'checkpoints':
+                    models.ObservedVolumeState(storage_class_name='premium-rwo')
+            })
+
+        update_config.assert_called_once()
+        assert update_config.call_args[0][1].config[
+            'storage_class_name'] == 'premium-rwo'
+
+    def test_a_recorded_storage_class_is_not_overwritten(self, monkeypatch):
+        handle = self._config(config={
+            'namespace': 'my-namespace',
+            'storage_class_name': 'standard-rwo',
+        })
+
+        update_config = self._refresh(
+            monkeypatch, handle, {
+                'checkpoints':
+                    models.ObservedVolumeState(storage_class_name='premium-rwo')
+            })
+
+        update_config.assert_not_called()
+        assert handle.config['storage_class_name'] == 'standard-rwo'

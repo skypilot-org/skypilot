@@ -29,6 +29,37 @@ VOLUME_LOCK_PATH = os.path.expanduser('~/.sky/.{volume_name}.lock')
 VOLUME_LOCK_TIMEOUT_SECONDS = 20
 
 
+def _apply_observed_state(
+        config: models.VolumeConfig,
+        observed: Optional[models.ObservedVolumeState]) -> bool:
+    """Brings a volume config in line with what the cloud reports.
+
+    Returns whether anything changed, so a config that already matches is not
+    re-pickled and re-written on every refresh.
+
+    Only fields the cloud owns are touched, and only when it reported one: a
+    missing value means the cloud had no answer, never that the recorded value
+    should be dropped.
+    """
+    if observed is None:
+        return False
+    changed = False
+    if observed.size is not None and observed.size != config.size:
+        logger.info(f'Volume {config.name} size changed from '
+                    f'{config.size} to {observed.size}.')
+        config.size = observed.size
+        changed = True
+    # Back-fill only. A storage class is fixed once the backing resource has
+    # one, so a recorded value is not something the cloud can contradict --
+    # but volumes created before SkyPilot read it back, or before the cluster
+    # had a default class to assign, have nothing recorded at all.
+    if (observed.storage_class_name is not None and
+            config.config.get('storage_class_name') is None):
+        config.config['storage_class_name'] = observed.storage_class_name
+        changed = True
+    return changed
+
+
 def volume_refresh(volume_names: Optional[List[str]] = None) -> None:
     """Refreshes volume status by querying cloud APIs.
 
@@ -72,22 +103,26 @@ def volume_refresh(volume_names: Optional[List[str]] = None) -> None:
         cloud_to_volume_names.setdefault(cloud, set()).add(volume.get('name'))
         volume_name_to_config[volume.get('name')] = config
 
-    # Check for volume errors (e.g., misconfiguration)
+    # Check for volume errors (e.g., misconfiguration), and read back the
+    # fields the cloud owns rather than the config.
     cloud_to_volume_errors: Dict[str, Dict[str, Optional[str]]] = {}
+    cloud_to_observed: Dict[str, Dict[str, models.ObservedVolumeState]] = {}
     cloud_to_error_failed_names: Dict[str, Set[str]] = {}
     for cloud, configs in cloud_to_configs.items():
         try:
-            # A cloud with no error check of its own returns both empty, which
+            # A cloud with no error check of its own returns all empty, which
             # leaves its volumes eligible for a status update driven by their
             # usedby info alone.
-            volume_errors, error_failed_names = (
-                provision.get_all_volumes_errors(cloud, configs))
+            volume_errors, observed, error_failed_names = (
+                provision.get_all_volumes_state(cloud, configs))
             cloud_to_volume_errors[cloud] = volume_errors
+            cloud_to_observed[cloud] = observed
             cloud_to_error_failed_names[cloud] = error_failed_names
         except Exception as e:  # pylint: disable=broad-except
             logger.warning(
                 f'Failed to get volume errors for volumes on {cloud}: {e}')
             cloud_to_volume_errors[cloud] = {}
+            cloud_to_observed[cloud] = {}
             # Do not let an unreadable cloud silently clear every volume's
             # error and mark them all healthy -- keep their current status.
             cloud_to_error_failed_names[cloud] = cloud_to_volume_names.get(
@@ -197,6 +232,13 @@ def volume_refresh(volume_names: Optional[List[str]] = None) -> None:
             # the region to the in-cluster context name for these volumes.
             need_refresh, volume_config = provision.refresh_volume_config(
                 volume_config.cloud, volume_config)
+            # The observed state was read before the lock, so it is merged into
+            # the handle just re-read under it, not into the copy it was fetched
+            # with.
+            if _apply_observed_state(
+                    volume_config,
+                    cloud_to_observed.get(cloud, {}).get(volume_name)):
+                need_refresh = True
             if need_refresh:
                 global_user_state.update_volume_config(volume_name,
                                                        volume_config)
@@ -379,8 +421,8 @@ def _initial_volume_status(
     optimistic behavior everywhere else on this path.
     """
     try:
-        volume_errors, failed_volume_names = provision.get_all_volumes_errors(
-            cloud, [config])
+        volume_errors, _, failed_volume_names = (
+            provision.get_all_volumes_state(cloud, [config]))
     except Exception as e:  # pylint: disable=broad-except
         logger.debug(f'Failed to check the initial status of volume '
                      f'{config.name}: {e}')

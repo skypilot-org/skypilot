@@ -1,4 +1,5 @@
 """Kubernetes volume provisioning (PVC and hostPath)."""
+import decimal
 import enum
 import re
 import time as time_module
@@ -12,10 +13,13 @@ from sky.provision import constants
 from sky.provision.kubernetes import config as config_lib
 from sky.provision.kubernetes import constants as k8s_constants
 from sky.provision.kubernetes import utils as kubernetes_utils
-from sky.utils import resources_utils
 from sky.utils import volume as volume_lib
 
 logger = sky_logging.init_logger(__name__)
+
+# A volume's size is recorded in gibibytes, which is also the unit the PVC
+# spec is written in.
+_BYTES_PER_GIB = 1024**3
 
 PVC_FAILING_EVENT_REASONS = ('ProvisioningFailed',)
 WARNING_EVENT_TYPE = 'Warning'
@@ -706,25 +710,34 @@ def _get_pvc_error(context: Optional[str], namespace: str,
     return None
 
 
-def get_all_volumes_errors(
+def get_all_volumes_state(
     configs: List[models.VolumeConfig],
-) -> Tuple[Dict[str, Optional[str]], Set[str]]:
-    """Gets error messages for all Kubernetes PVC volumes.
+) -> Tuple[Dict[str, Optional[str]], Dict[str, models.ObservedVolumeState],
+           Set[str]]:
+    """Gets the cluster's view of all Kubernetes PVC volumes.
+
+    Both the error check and the cloud-owned fields come out of the same PVC
+    objects, so they are read in one pass: no volume can be judged against one
+    version of a PVC and described from another, and the listing is not paid
+    for twice.
 
     Args:
         configs: List of VolumeConfig objects.
 
     Returns:
-        A tuple of (errors, failed_volume_names):
+        A tuple of (errors, observed, failed_volume_names):
         - errors maps volume name to an error message, or to None when the
           volume is healthy.
+        - observed maps volume name to what the PVC reports about the fields
+          the cluster owns. Absent for a volume whose PVC could not be read.
         - failed_volume_names holds volumes whose status could not be
           determined because the cluster could not be queried. Callers must
           leave the recorded status of these volumes untouched rather than
           reading their absence from ``errors`` as "healthy".
 
-        Every input config lands in exactly one of the two, so a caller never
-        has to guess what an absent volume means.
+        Every input config lands in exactly one of errors and
+        failed_volume_names, so a caller never has to guess what an absent
+        volume means.
     """
     # Keyed by (context, namespace): the same PVC name may exist in several
     # namespaces, and resolving it against the wrong one would mismatch.
@@ -732,6 +745,7 @@ def get_all_volumes_errors(
                                                     models.VolumeConfig]] = {}
 
     volume_errors: Dict[str, Optional[str]] = {}
+    observed: Dict[str, models.ObservedVolumeState] = {}
     failed_volume_names: Set[str] = set()
 
     for config in configs:
@@ -768,6 +782,7 @@ def get_all_volumes_errors(
             seen_pvc_names.add(pvc.metadata.name)
             volume_errors[vol_config.name] = _get_pvc_error(
                 context, namespace, pvc)
+            observed[vol_config.name] = _observed_volume_state(pvc)
 
         # A registered PVC missing from the labelled listing is either a
         # use_existing volume (adopted as-is, so it never got the skypilot
@@ -802,8 +817,9 @@ def get_all_volumes_errors(
                 continue
             volume_errors[vol_config.name] = _get_pvc_error(
                 context, namespace, pvc)
+            observed[vol_config.name] = _observed_volume_state(pvc)
 
-    return volume_errors, failed_volume_names
+    return volume_errors, observed, failed_volume_names
 
 
 def _check_storage_class_volume_binding_mode(context: Optional[str],
@@ -891,6 +907,77 @@ def _check_pvc_access_mode_error(context: Optional[str],
             f'kubectl describe pvc {pvc_name} -n {namespace}')
 
 
+def _pvc_capacity(pvc_obj: Any) -> Optional[str]:
+    """Returns the capacity the PVC's bound volume actually has, if any.
+
+    ``status.capacity`` is the real size of the underlying volume, while
+    ``spec.resources.requests`` is only what was asked for: a request can be
+    rounded up by the provisioner, expanded later, or not yet fulfilled. A
+    claim that is not bound reports nothing here.
+    """
+    capacity = getattr(getattr(pvc_obj, 'status', None), 'capacity', None)
+    if isinstance(capacity, dict):
+        return capacity.get('storage')
+    return None
+
+
+def _parse_pvc_size(size_quantity: Optional[str],
+                    pvc_name: str) -> Optional[str]:
+    """Normalizes a Kubernetes storage quantity to a volume size in GiB.
+
+    Shared by the create and refresh paths so the two cannot record the same
+    PVC differently.
+
+    Parsed by the Kubernetes client rather than `resources_utils`, which reads
+    a quantity by SkyPilot's rules rather than Kubernetes': a bare number is
+    bytes to Kubernetes and gigabytes to SkyPilot, and the decimal suffixes a
+    claim can perfectly well be written with (`2G`, `500M`) are not units it
+    knows at all. A claim SkyPilot did not create -- which is every
+    `use_existing` volume -- is written however its author wrote it.
+
+    Rounds to the nearest GiB, since that is the only unit a volume's size is
+    recorded in: a claim written `2G` is 1.86GiB, and reporting 1Gi for it
+    would look like half the volume went missing.
+    """
+    if not size_quantity:
+        return None
+    try:
+        size_bytes = kubernetes.parse_quantity(size_quantity)
+        size = int(
+            decimal.Decimal(size_bytes / _BYTES_PER_GIB).quantize(
+                decimal.Decimal('1'), rounding=decimal.ROUND_HALF_UP))
+    except Exception as e:  # pylint: disable=broad-except
+        # Just log the error since it is not critical: a volume whose size
+        # cannot be read keeps the one already recorded.
+        logger.warning(f'Failed to parse PVC size {size_quantity!r} '
+                       f'for PVC {pvc_name}: {e}')
+        return None
+    if size <= 0:
+        # Under half a gibibyte. Volume creation rejects '0' as a size, so
+        # recording it here would put a value in the database that the same
+        # volume could not have been created with.
+        logger.warning(f'Ignoring PVC size {size_quantity!r} for PVC '
+                       f'{pvc_name}: rounds to less than 1Gi.')
+        return None
+    return str(size)
+
+
+def _observed_volume_state(pvc_obj: Any) -> models.ObservedVolumeState:
+    """Reads the fields of a PVC that the cluster, not our config, owns.
+
+    Only reports what the PVC actually says, so that a caller merging this into
+    a recorded config never clears a value it cannot see.
+    """
+    pvc_name = pvc_obj.metadata.name
+    return models.ObservedVolumeState(
+        size=_parse_pvc_size(_pvc_capacity(pvc_obj), pvc_name),
+        # An empty storageClassName is the Kubernetes way of opting out of
+        # dynamic provisioning, not a class name to record.
+        storage_class_name=(getattr(pvc_obj.spec, 'storage_class_name', None) or
+                            None),
+    )
+
+
 def _populate_config_from_pvc(config: models.VolumeConfig,
                               pvc_obj: Any) -> None:
     """Populate missing fields in config from a PVC object.
@@ -923,28 +1010,14 @@ def _populate_config_from_pvc(config: models.VolumeConfig,
             config.config['access_mode'] = pvc_access_mode
 
     # Populate size if not set (prefer bound capacity, fallback to requested)
-    pvc_size = None
-    size_quantity = None
-    # Try status.capacity (dict) - actual bound size
-    capacity = getattr(getattr(pvc_obj, 'status', None), 'capacity', None)
-    if isinstance(capacity, dict) and 'storage' in capacity:
-        size_quantity = capacity['storage']
+    size_quantity = _pvc_capacity(pvc_obj)
     # Fallback to spec.resources.requests (dict) - requested size
     if size_quantity is None:
         requests = getattr(getattr(pvc_obj.spec, 'resources', None), 'requests',
                            None)
         if isinstance(requests, dict):
             size_quantity = requests.get('storage')
-    # Parse and normalize the size if found
-    if size_quantity:
-        try:
-            # Normalize to GB string (e.g., '20')
-            pvc_size = resources_utils.parse_memory_resource(
-                size_quantity, 'size', allow_rounding=True)
-        except ValueError as e:
-            # Just log the error since it is not critical.
-            logger.warning(f'Failed to parse PVC size {size_quantity!r} '
-                           f'for PVC {pvc_name}: {e}')
+    pvc_size = _parse_pvc_size(size_quantity, pvc_name)
     if pvc_size is not None:
         if config.size is not None and config.size != pvc_size:
             logger.warning(f'PVC {pvc_name} has size {pvc_size} but config '

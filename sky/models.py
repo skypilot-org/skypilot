@@ -140,6 +140,25 @@ class KubernetesNodesInfo:
         )
 
 
+@dataclasses.dataclass
+class ObservedVolumeState:
+    """The fields of a volume that the cloud owns, as the cloud reports them.
+
+    ``VolumeConfig`` doubles as the request SkyPilot made and the state the
+    cloud is in, and only the request is known when the volume is created --
+    storage can be expanded, and a provisioner can round a request up. This
+    carries what a later look at the cloud found, so the recorded config can be
+    brought back in line with it.
+
+    A field left None means the cloud reported nothing for it, which must never
+    be read as "the recorded value is gone".
+    """
+    # The capacity the volume actually has, in the same units as
+    # ``VolumeConfig.size``.
+    size: Optional[str] = None
+    storage_class_name: Optional[str] = None
+
+
 class VolumeConfig(pydantic.BaseModel):
     """Configuration for creating a volume."""
     # If any fields changed, increment the version. For backward compatibility,

@@ -24,7 +24,7 @@ import pathlib
 import shlex
 import tempfile
 import textwrap
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 import jinja2
 import pytest
@@ -2607,6 +2607,105 @@ def test_volume_mix_on_kubernetes():
             timeout=25 * 60,
         )
         smoke_tests_utils.run_one_test(test)
+
+
+# ---------- A volume's recorded size follows its actual capacity ----------
+@pytest.mark.kubernetes
+# Creates and recreates the PVC with the agent's own kubectl, which a remote
+# server's agent does not have.
+@pytest.mark.no_remote_server
+def test_volume_size_resync_on_kubernetes():
+    """The recorded size has to follow the storage, not the original request.
+
+    A volume's size is written once, when it is created or registered, so a
+    volume whose backing storage changed afterwards kept advertising its
+    original size forever -- in `sky volumes ls` and on the dashboard, which
+    reads the same record.
+
+    Expansion is how that happens in the wild, but it needs a StorageClass whose
+    provisioner runs a resizer sidecar, which the CI clusters do not have: the
+    request is accepted and then never carried out. Recreating the claim at a
+    different size under the same name moves the same field (the PVC's
+    status.capacity) and is read back by the same code, and it is a real
+    scenario for a `use_existing` volume, whose PVC lifecycle SkyPilot does not
+    own.
+    """
+    storage_class = smoke_tests_utils.rwx_storage_class_name()
+    if storage_class is None:
+        pytest.skip(
+            'Needs a StorageClass that binds without a consumer. The default '
+            'local-path class is WaitForFirstConsumer, so its claims stay '
+            'Pending -- and a Pending claim reports no capacity to read back.')
+    name = smoke_tests_utils.get_cluster_name()
+    # `--use-existing` finds the PVC by the volume's own name.
+    pvc = name
+
+    def create_pvc(size: str) -> str:
+        return (f'kubectl delete pvc {pvc} --ignore-not-found --wait=true && '
+                f'kubectl create -f - <<EOF\n'
+                f'apiVersion: v1\n'
+                f'kind: PersistentVolumeClaim\n'
+                f'metadata:\n'
+                f'  name: {pvc}\n'
+                f'spec:\n'
+                f'  accessModes:\n'
+                f'    - ReadWriteMany\n'
+                f'  storageClassName: {storage_class}\n'
+                f'  resources:\n'
+                f'    requests:\n'
+                f'      storage: {size}\n'
+                f'EOF')
+
+    def wait_for_capacity(size: str) -> str:
+        # The size is only readable once the claim is bound; until then the
+        # capacity field does not exist.
+        return (f'start=$SECONDS; '
+                f'while true; do '
+                f'  cap=$(kubectl get pvc {pvc} '
+                f'-o jsonpath="{{.status.capacity.storage}}" || true); '
+                f'  echo "PVC capacity: $cap"; '
+                f'  [ "$cap" = "{size}" ] && break; '
+                f'  if (( $SECONDS - $start > 120 )); then '
+                f'    echo "Timeout waiting for PVC {pvc} to report {size}"; '
+                f'    kubectl describe pvc {pvc}; exit 1; '
+                f'  fi; '
+                f'  sleep 5; '
+                f'done')
+
+    def size_is(size: str, was: Optional[str] = None) -> str:
+        # -w so the size cannot be matched by another column of the same row.
+        cmd = (f'vols=$(sky volumes ls) && echo "$vols" && '
+               f'echo "$vols" | grep {name} | grep -w "{size}"')
+        if was is not None:
+            # The old size has to be gone, not merely accompanied.
+            cmd += f' && ! echo "$vols" | grep {name} | grep -qw "{was}"'
+        return cmd
+
+    test = smoke_tests_utils.Test(
+        'volume_size_resync_on_kubernetes',
+        [
+            f'echo "StorageClass under test: {storage_class}"',
+            create_pvc('2Gi'),
+            wait_for_capacity('2Gi'),
+            # No --size: the recorded size has to come from the claim, so that
+            # the check below cannot pass on what the command line said.
+            f'sky volumes apply -y -n {name} --type k8s-pvc '
+            f'{smoke_tests_utils.AGENT_K8S_INFRA} --use-existing',
+            size_is('2Gi'),
+            # The storage changes behind SkyPilot's back.
+            create_pvc('5Gi'),
+            wait_for_capacity('5Gi'),
+            # `ls --refresh` runs the same refresh the background daemon runs,
+            # without waiting out its interval.
+            f'sky volumes ls --refresh > /dev/null',
+            size_is('5Gi', was='2Gi'),
+        ],
+        smoke_tests_utils.chain_teardown(
+            f'sky volumes delete {name} -y || true',
+            f'kubectl delete pvc {pvc} --ignore-not-found'),
+        timeout=10 * 60,
+    )
+    smoke_tests_utils.run_one_test(test)
 
 
 # ---------- Container logs from task on Kubernetes ----------
