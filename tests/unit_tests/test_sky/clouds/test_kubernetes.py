@@ -4694,6 +4694,256 @@ class TestKubernetesOciRoceHostNetworkOptOut(unittest.TestCase):
         self.assertIn('dnsPolicy: ClusterFirstWithHostNet', default_on)
 
 
+class TestKubernetesRdmaMode(unittest.TestCase):
+    """`kubernetes.rdma.mode` selects how RDMA NICs reach the pod.
+
+    The two models are mutually exclusive and each drives several pod-spec
+    decisions, so one declaration drives them all. Unset must preserve the
+    historical behavior exactly.
+    """
+
+    def _deploy_vars(self,
+                     rdma=None,
+                     pod_config=None,
+                     node_alloc=None,
+                     network_type=None):
+        gpu_resources = mock.MagicMock()
+        gpu_resources.instance_type = '8CPU--32GB--GB300:4'
+        gpu_resources.accelerators = {'GB300': 4}
+        gpu_resources.use_spot = False
+        gpu_resources.region = 'oci-context'
+        gpu_resources.zone = None
+        gpu_resources.cluster_config_overrides = {}
+        gpu_resources.image_id = None
+        setattr(gpu_resources, 'assert_launchable', lambda: gpu_resources)
+        gpu_resources.network_tier = resources_utils.NetworkTier.BEST
+
+        region_config = {
+            ('kubernetes', 'remote_identity'): 'SERVICE_ACCOUNT',
+            ('kubernetes', 'provision_timeout'): 10,
+            ('kubernetes', 'high_availability', 'storage_class_name'): None,
+            ('kubernetes', 'pod_config'): pod_config or {},
+        }
+        for key, value in (rdma or {}).items():
+            region_config[('kubernetes', 'rdma', key)] = value
+
+        alloc = dict(node_alloc if node_alloc is not None else {
+            'nvidia.com/gpu': '4',
+            'nvidia.com/mlnxnics': '4',
+        })
+        alloc.setdefault('cpu', '8')
+        alloc.setdefault('memory', '32Gi')
+        node = mock.MagicMock()
+        node.metadata.labels = {'accelerator': 'GB300'}
+        node.status.allocatable = alloc
+        # adjust_resources_to_allocatable() reads capacity as well.
+        node.status.capacity = dict(alloc)
+
+        from sky.provision.kubernetes.utils import (
+            KubernetesHighPerformanceNetworkType as N)
+        with patch('sky.provision.kubernetes.utils.get_kubernetes_nodes',
+                   return_value=[node]), \
+             patch('sky.provision.kubernetes.utils.'
+                   'get_current_kube_config_context_name',
+                   return_value='oci-context'), \
+             patch('sky.provision.kubernetes.utils.'
+                   'get_kube_config_context_namespace',
+                   return_value='default'), \
+             patch('sky.provision.kubernetes.utils.get_accelerator_label_keys',
+                   return_value=[]), \
+             patch('sky.provision.kubernetes.utils.'
+                   'get_accelerator_label_key_values',
+                   return_value=('accelerator', ['GB300'], None, None)), \
+             patch('sky.provision.kubernetes.utils.get_gpu_resource_key',
+                   return_value='nvidia.com/gpu'), \
+             patch('sky.provision.kubernetes.utils.is_kubeconfig_exec_auth',
+                   return_value=(False, None)), \
+             patch('sky.skypilot_config.get_workspace_cloud') as mock_ws, \
+             patch('sky.skypilot_config.get_effective_region_config',
+                   side_effect=lambda cloud, keys, region, default_value=None,
+                   override_configs=None: region_config.get(
+                       (cloud,) + keys, default_value)), \
+             patch('sky.provision.kubernetes.network_utils.get_port_mode'
+                  ) as mock_pm, \
+             patch('sky.catalog.get_image_id_from_tag',
+                   return_value='img:latest'), \
+             patch('sky.clouds.kubernetes.Kubernetes._detect_network_type',
+                   return_value=(network_type or N.OCI_ROCE, None)):
+            mock_ws.return_value.get.return_value = None
+            mock_pm.return_value.value = 'portforward'
+            k8s_cloud = kubernetes.Kubernetes()
+            return k8s_cloud.make_deploy_resources_variables(
+                resources=gpu_resources,
+                cluster_name=resources_utils.ClusterName(display_name='c',
+                                                         name_on_cloud='c'),
+                region=mock.MagicMock(name='oci-context'),
+                zones=None,
+                num_nodes=2,
+                dryrun=False)
+
+    def test_unset_preserves_historical_behavior(self):
+        deploy_vars = self._deploy_vars()
+        self.assertTrue(deploy_vars['k8s_host_network'])
+        self.assertIsNone(deploy_vars['k8s_rdma_nic_resource'])
+        self.assertIsNone(deploy_vars['k8s_rdma_networks'])
+
+    def test_sriov_mode_drops_host_network_and_injects_nics(self):
+        deploy_vars = self._deploy_vars(
+            rdma={
+                'mode': 'sriov',
+                'resource': 'nvidia.com/mlnxnics',
+                'networks': 'network-operator/sriov-net',
+            })
+        # One declaration flips host networking off ...
+        self.assertFalse(deploy_vars['k8s_host_network'])
+        self.assertNotIn('SKYPILOT_HOST_NETWORK', deploy_vars['k8s_env_vars'])
+        # ... and wires the VF resource in, proportional to the GPUs asked
+        # for: 4 of 4 GPUs on a node advertising 4 NICs -> 4.
+        self.assertEqual(deploy_vars['k8s_rdma_nic_resource'],
+                         'nvidia.com/mlnxnics')
+        self.assertEqual(deploy_vars['k8s_rdma_nic_count'], 4)
+        # One Multus attachment per VF.
+        self.assertEqual(deploy_vars['k8s_rdma_networks'],
+                         ','.join(['network-operator/sriov-net'] * 4))
+        # The cluster is still an OCI RoCE cluster ...
+        self.assertTrue(deploy_vars['k8s_enable_oci_roce'])
+        # ... but the bare-metal device access is dropped: an SR-IOV device
+        # plugin with isRdma injects the character devices itself, so a
+        # /dev/infiniband hostPath would shadow them and expose every device
+        # on the node rather than this pod's VFs.
+        self.assertFalse(deploy_vars['k8s_rdma_host_device_access'])
+        # IPC_LOCK is kept: RDMA memory registration may need the memlock
+        # allowance, and granting an unused capability is the cheap direction.
+        self.assertTrue(deploy_vars['k8s_ipc_lock_capability'])
+
+    def test_pod_config_alone_does_not_drop_device_access(self):
+        """Opting out of host networking is not opting out of device access.
+
+        Preserves the behavior shipped in the hostNetwork fix: only declaring
+        an rdma mode changes which devices the pod gets.
+        """
+        deploy_vars = self._deploy_vars(
+            pod_config={'spec': {
+                'hostNetwork': False
+            }})
+        self.assertFalse(deploy_vars['k8s_host_network'])
+        self.assertTrue(deploy_vars['k8s_rdma_host_device_access'])
+
+    def test_pod_config_outranks_the_context_mode(self):
+        # A task's pod_config is more specific than an admin's per-context
+        # default, so it wins -- here putting the pod back on the host network
+        # even though the context selected SR-IOV.
+        deploy_vars = self._deploy_vars(
+            rdma={
+                'mode': 'sriov',
+                'resource': 'nvidia.com/mlnxnics',
+                'networks': 'network-operator/sriov-net',
+            },
+            pod_config={'spec': {
+                'hostNetwork': True
+            }})
+        self.assertTrue(deploy_vars['k8s_host_network'])
+
+    def test_ignored_on_a_network_type_that_delivers_its_own_nics(self):
+        """A tenant-wide rdma block must not leak onto other cloud types.
+
+        CoreWeave/Together/EFA each inject their own NIC resource, so applying
+        this one there would double up. Scoping silently -- rather than
+        raising -- is what lets a tenant-wide `kubernetes.rdma` coexist with a
+        mixed fleet, and matches how every other per-cloud NIC injection is
+        gated.
+        """
+        from sky.provision.kubernetes.utils import (
+            KubernetesHighPerformanceNetworkType as N)
+        deploy_vars = self._deploy_vars(rdma={
+            'mode': 'sriov',
+            'resource': 'nvidia.com/mlnxnics',
+            'networks': 'network-operator/sriov-net',
+        },
+                                        network_type=N.COREWEAVE)
+        self.assertIsNone(deploy_vars['k8s_rdma_nic_resource'])
+        self.assertIsNone(deploy_vars['k8s_rdma_networks'])
+        self.assertFalse(deploy_vars['k8s_rdma_host_device_access'])
+
+    def test_nic_count_scales_with_partial_gpu_request(self):
+        # A dual-port shape: 8 VFs across 8 GPUs, asking for 4 -> 4.
+        deploy_vars = self._deploy_vars(rdma={
+            'mode': 'sriov',
+            'resource': 'nvidia.com/rdma-vf',
+            'networks': 'default/rdma-vf',
+        },
+                                        node_alloc={
+                                            'nvidia.com/gpu': '8',
+                                            'nvidia.com/rdma-vf': '16',
+                                        })
+        # 4/8 of a node advertising 16 VFs -> 8, matching Oracle's 2-per-GPU
+        # ratio on dual-port shapes rather than a naive 1:1.
+        self.assertEqual(deploy_vars['k8s_rdma_nic_count'], 8)
+
+    def _render_block(self, marker, **variables):
+        """Render one `{% if %}` block from the live template file."""
+        import jinja2
+
+        import sky
+        template_path = os.path.join(os.path.dirname(sky.__file__), 'templates',
+                                     'kubernetes-ray.yml.j2')
+        with open(template_path, 'r', encoding='utf-8') as fin:
+            full = fin.read()
+        begin = full.index(marker)
+        stop = full.index('{% endif %}', begin) + len('{% endif %}')
+        return jinja2.Template(full[begin:stop]).render(**variables)
+
+    _ANNOTATION_MARKER = ('{% if k8s_rdma_networks is defined and '
+                          'k8s_rdma_networks is not none %}')
+    _RESOURCE_MARKER = ('{% if k8s_rdma_nic_resource is defined and '
+                        'k8s_rdma_nic_resource is not none %}')
+
+    def test_sriov_renders_annotation_and_resource(self):
+        networks = ','.join(['network-operator/sriov-net'] * 4)
+        annotation = self._render_block(self._ANNOTATION_MARKER,
+                                        k8s_rdma_networks=networks)
+        self.assertIn(f'k8s.v1.cni.cncf.io/networks: {networks}', annotation)
+
+        resource = self._render_block(
+            self._RESOURCE_MARKER,
+            k8s_rdma_nic_resource='nvidia.com/mlnxnics',
+            k8s_rdma_nic_count=4)
+        self.assertIn('nvidia.com/mlnxnics: 4', resource)
+
+    def test_unset_renders_nothing(self):
+        """Guards the undefined-vs-none Jinja trap.
+
+        An *undefined* variable satisfies `is not none`, so the first version
+        of this template emitted a bare `: ` and produced an unparseable
+        manifest for every caller that does not pass these variables -- which
+        includes the snapshot fixtures. Rendering with them absent is what
+        catches that; no deploy-var assertion would.
+        """
+        self.assertEqual(
+            self._render_block(self._ANNOTATION_MARKER).strip(), '')
+        self.assertEqual(self._render_block(self._RESOURCE_MARKER).strip(), '')
+
+    def test_sriov_without_names_fails_loudly(self):
+        # Nothing on the cluster lets us infer either name, and a pod with a
+        # resource but no attachment would run without RDMA rather than fail.
+        with self.assertRaises(ValueError) as ctx:
+            self._deploy_vars(rdma={'mode': 'sriov'})
+        self.assertIn('rdma.resource', str(ctx.exception))
+        self.assertIn('rdma.networks', str(ctx.exception))
+
+    def test_sriov_fails_when_no_node_advertises_the_resource(self):
+        # Guessing a count risks under-requesting, which loses bandwidth
+        # silently; failing is the loud direction.
+        with self.assertRaises(ValueError) as ctx:
+            self._deploy_vars(
+                rdma={
+                    'mode': 'sriov',
+                    'resource': 'nvidia.com/absent',
+                    'networks': 'default/rdma-vf',
+                })
+        self.assertIn('nvidia.com/absent', str(ctx.exception))
+
+
 class TestKubernetesSpotLabelContext(unittest.TestCase):
     """Regression test for TICKET-034.
 

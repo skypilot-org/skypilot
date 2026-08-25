@@ -1619,6 +1619,33 @@ _CONTEXT_CONFIG_SCHEMA_KUBERNETES = {
             },
         },
     },
+    'rdma': {
+        # How RDMA NICs reach pods on this context. Unset preserves the
+        # historical behavior (RDMA-capable clusters imply host networking).
+        'type': 'object',
+        'required': [],
+        'additionalProperties': False,
+        'properties': {
+            'mode': {
+                'type': 'string',
+                'case_insensitive_enum': [
+                    mode.value for mode in kubernetes_enums.KubernetesRdmaMode
+                ],
+            },
+            # Extended resource advertised by the RDMA device plugin, e.g.
+            # nvidia.com/rdma-vf. Site-specific: the device plugin's config
+            # composes it from an operator-chosen prefix and name.
+            'resource': {
+                'type': 'string',
+            },
+            # Value for the Multus k8s.v1.cni.cncf.io/networks annotation --
+            # the NetworkAttachmentDefinition to attach, repeated once per
+            # requested VF.
+            'networks': {
+                'type': 'string',
+            },
+        },
+    },
     # TODO(kevin): Remove 'networking' in v0.13.0.
     'networking': {
         'type': 'string',

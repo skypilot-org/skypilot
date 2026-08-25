@@ -1026,10 +1026,100 @@ class Kubernetes(clouds.Cloud):
             network_type == KubernetesHighPerformanceNetworkType.OCI_ROCE)
         merged_pod_config = kubernetes_utils.resolve_effective_pod_config(
             resources.cluster_config_overrides, self, context)
+
+        # How RDMA NICs reach pods on this context. Unset keeps the historical
+        # behavior, so this is additive: only a context that sets a mode sees
+        # any change.
+        #
+        # Scoped to the one network type whose NIC delivery this describes,
+        # matching how every other per-cloud NIC injection is gated (AWS EFA
+        # below, CoreWeave and Together in the template). A tenant-wide
+        # `kubernetes.rdma` therefore applies only where it is meaningful
+        # instead of failing launches on the rest of a mixed fleet. The
+        # mechanism itself -- an SR-IOV device plugin plus Multus -- is not
+        # OCI-specific, so widening this is moving one condition.
+        rdma_mode = None
+        if oci_roce_enabled:
+            rdma_mode = skypilot_config.get_effective_region_config(
+                cloud=cloud_config_str,
+                region=context,
+                keys=('rdma', 'mode'),
+                default_value=None)
+            if rdma_mode is not None:
+                rdma_mode = kubernetes_enums.KubernetesRdmaMode(
+                    rdma_mode.lower())
+
+        # Precedence: a task's pod_config is more specific than an admin's
+        # per-context mode, which in turn is more specific than what the
+        # detected network type implies.
         pod_config_host_network = merged_pod_config.get('spec',
                                                         {}).get('hostNetwork')
-        k8s_host_network = (oci_roce_enabled if pod_config_host_network is None
-                            else bool(pod_config_host_network))
+        if pod_config_host_network is not None:
+            k8s_host_network = bool(pod_config_host_network)
+        elif rdma_mode == kubernetes_enums.KubernetesRdmaMode.SRIOV:
+            k8s_host_network = False
+        else:
+            k8s_host_network = oci_roce_enabled
+
+        # Reaching the RDMA devices through a /dev/infiniband hostPath needs a
+        # privileged container, and is only how the bare-metal model works. An
+        # SR-IOV device plugin configured with isRdma injects the character
+        # devices itself, so mounting the host directory there would both
+        # shadow what the kubelet injected and hand the pod every device on the
+        # node instead of its own VFs. Not keyed on k8s_host_network: an
+        # explicit pod_config `hostNetwork: false` alone keeps today's device
+        # access, so only declaring a mode changes it.
+        if rdma_mode == kubernetes_enums.KubernetesRdmaMode.SRIOV:
+            k8s_rdma_host_device_access = False
+        else:
+            k8s_rdma_host_device_access = oci_roce_enabled
+        # SR-IOV mode also needs the VF extended resource on the container and
+        # a Multus attachment per VF. Both names are chosen by whoever
+        # configured the device plugin on this cluster, so they are declared
+        # rather than guessed; the count is derived, since it follows from the
+        # node and the GPUs requested.
+        k8s_rdma_nic_resource = None
+        k8s_rdma_nic_count = None
+        k8s_rdma_networks = None
+        if rdma_mode == kubernetes_enums.KubernetesRdmaMode.SRIOV:
+            k8s_rdma_nic_resource = skypilot_config.get_effective_region_config(
+                cloud=cloud_config_str,
+                region=context,
+                keys=('rdma', 'resource'),
+                default_value=None)
+            k8s_rdma_networks = skypilot_config.get_effective_region_config(
+                cloud=cloud_config_str,
+                region=context,
+                keys=('rdma', 'networks'),
+                default_value=None)
+            if not k8s_rdma_nic_resource or not k8s_rdma_networks:
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(
+                        f'kubernetes.rdma.mode is '
+                        f'{kubernetes_enums.KubernetesRdmaMode.SRIOV.value!r} '
+                        f'for context {context!r}, but rdma.resource and/or '
+                        'rdma.networks are not set. Both name cluster-specific '
+                        'objects that SkyPilot cannot infer: the extended '
+                        'resource advertised by the RDMA device plugin (e.g. '
+                        '"nvidia.com/rdma-vf") and the '
+                        'NetworkAttachmentDefinition to attach (e.g. '
+                        '"default/rdma-vf").')
+            k8s_rdma_nic_count = self._derive_rdma_nic_count(
+                context, k8s_rdma_nic_resource, k8s_acc_label_key,
+                k8s_resource_key, acc_count)
+            if k8s_rdma_nic_count is None:
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(
+                        f'Could not determine how many '
+                        f'{k8s_rdma_nic_resource!r} to request on context '
+                        f'{context!r}: no node advertises it while also being '
+                        'able to host this request. Check that the RDMA device '
+                        'plugin is running and that rdma.resource names the '
+                        'resource it advertises.')
+            # One attachment per VF, matching the resource count.
+            k8s_rdma_networks = ','.join([k8s_rdma_networks] *
+                                         k8s_rdma_nic_count)
+
         if k8s_host_network:
             cluster_name_on_cloud = cluster_name.name_on_cloud
             k8s_env_vars['SKYPILOT_HOST_NETWORK'] = '1'
@@ -1104,6 +1194,10 @@ class Kubernetes(clouds.Cloud):
             'k8s_context': context,
             'k8s_namespace': namespace,
             'k8s_host_network': k8s_host_network,
+            'k8s_rdma_host_device_access': k8s_rdma_host_device_access,
+            'k8s_rdma_nic_resource': k8s_rdma_nic_resource,
+            'k8s_rdma_nic_count': k8s_rdma_nic_count,
+            'k8s_rdma_networks': k8s_rdma_networks,
         }
 
         # Pod-level terminationGracePeriodSeconds rendered from any
@@ -1593,6 +1687,50 @@ class Kubernetes(clouds.Cloud):
             f'{cls.canonical_name()}/{c}'
             for c in cls.existing_allowed_contexts(silent=True)
         ]
+
+    @staticmethod
+    def _derive_rdma_nic_count(context: str, resource: str,
+                               k8s_acc_label_key: Optional[str],
+                               k8s_resource_key: Optional[str],
+                               acc_count: Optional[int]) -> Optional[int]:
+        """How many RDMA NICs to request, proportional to the GPUs requested.
+
+        Read off a node that both advertises ``resource`` and could host the
+        request, rather than whichever node happened to match the network-type
+        label first -- a drained node advertises neither. Returns None when no
+        such node exists, leaving the caller to fail with an actionable error
+        instead of guessing a count: over-requesting merely leaves the pod
+        unschedulable, but under-requesting yields a pod that runs with fewer
+        NICs than intended and silently loses bandwidth.
+
+        Proportional rather than 1:1 because the ratio is a property of the
+        shape: dual-port shapes advertise two VFs per GPU.
+        """
+        if not acc_count or not k8s_acc_label_key or not k8s_resource_key:
+            return None
+        # Deliberately not swallowing a failure to list nodes: the caller
+        # reports None as "no node advertises this resource", which would be a
+        # misleading diagnosis for an API or permission error.
+        nodes = kubernetes_utils.get_kubernetes_nodes(context=context)
+        for node in nodes:
+            allocatable = node.status.allocatable or {}
+            labels = node.metadata.labels or {}
+            if (k8s_acc_label_key not in labels or
+                    k8s_resource_key not in allocatable or
+                    resource not in allocatable):
+                continue
+            try:
+                node_gpu_count = int(allocatable[k8s_resource_key])
+                node_nic_count = int(allocatable[resource])
+            except (TypeError, ValueError):
+                continue
+            if node_gpu_count < acc_count or node_nic_count <= 0:
+                continue
+            return max(
+                1,
+                min(math.floor(acc_count / node_gpu_count * node_nic_count),
+                    node_nic_count))
+        return None
 
     @staticmethod
     def _derive_efa_count_from_catalog(acc_type: str,
