@@ -555,7 +555,7 @@ function JobNameLink({ href, name }) {
     <NonCapitalizedTooltip content={name}>
       <Link
         href={href}
-        className="text-blue-600 block min-w-[200px] max-w-[240px] truncate"
+        className="text-blue-600 block w-[240px] truncate"
       >
         {name}
       </Link>
