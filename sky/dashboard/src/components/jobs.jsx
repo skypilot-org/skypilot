@@ -531,6 +531,25 @@ function BatchProgressBar({ completed, total }) {
   );
 }
 
+// External (non-managed) rows merged in by the server carry
+// is_external + external_cluster/external_job_id; their detail pages
+// live under /slurm-jobs instead of /jobs.
+function externalJobHref(item) {
+  return `/slurm-jobs/${encodeURIComponent(item.external_cluster)}/${encodeURIComponent(item.external_job_id)}`;
+}
+
+function ExternalPill() {
+  return (
+    <span
+      className="inline-flex items-center flex-shrink-0 ml-2 px-2 rounded-full border border-gray-200 bg-gray-100 text-gray-600 text-xs font-medium"
+      style={{ paddingTop: 1, paddingBottom: 1, lineHeight: 1.4 }}
+      title="This workload is launched and managed outside of SkyPilot"
+    >
+      External
+    </span>
+  );
+}
+
 function JobNameLink({ href, name }) {
   return (
     <NonCapitalizedTooltip content={name}>
@@ -1496,10 +1515,12 @@ export function ManagedJobsTable({
             );
           }
 
-          // Single task. A row may carry its own detail link (e.g. rows
-          // sourced from outside the managed-jobs table); otherwise link to
-          // the managed-job detail page.
-          const detailHref = item.detail_href || `/jobs/${item.id}`;
+          // Single task. A row may carry its own detail link; external
+          // rows without one derive it from their identity fields, and
+          // everything else links to the managed-job detail page.
+          const detailHref =
+            item.detail_href ||
+            (item.is_external ? externalJobHref(item) : `/jobs/${item.id}`);
           return (
             <TableCell>
               {hasAnyJobGroups ? (
@@ -1576,13 +1597,16 @@ export function ManagedJobsTable({
             );
           }
 
-          // Single task. Honor a row-provided detail link (see the ID
-          // column) so externally-sourced rows point at their own page.
-          const detailHref = item.detail_href || `/jobs/${item.id}`;
+          // Single task. Same link resolution as the ID column: a
+          // row-provided detail link wins, external rows derive theirs.
+          const detailHref =
+            item.detail_href ||
+            (item.is_external ? externalJobHref(item) : `/jobs/${item.id}`);
           return (
             <TableCell className="whitespace-nowrap">
               <div className="flex items-center">
                 <JobNameLink href={detailHref} name={item.name} />
+                {item.is_external && <ExternalPill />}
                 {isBatch && <BatchBadge className="ml-2" />}
               </div>
             </TableCell>
@@ -1626,12 +1650,16 @@ export function ManagedJobsTable({
         renderCell: (item) =>
           shouldShowWorkspace ? (
             <TableCell>
-              <Link
-                href="/workspaces"
-                className="text-gray-700 hover:text-blue-600 hover:underline"
-              >
-                {item.workspace || 'default'}
-              </Link>
+              {item.is_external ? (
+                <span className="text-gray-400">—</span>
+              ) : (
+                <Link
+                  href="/workspaces"
+                  className="text-gray-700 hover:text-blue-600 hover:underline"
+                >
+                  {item.workspace || 'default'}
+                </Link>
+              )}
             </TableCell>
           ) : null,
       },
@@ -1935,6 +1963,23 @@ export function ManagedJobsTable({
         renderHeader: () => <TableHead>Logs</TableHead>,
         renderCell: (item, ctx) => {
           const { renderMode, jobId } = ctx || {};
+
+          if (item.is_external) {
+            // External Slurm rows: logs live on their detail page.
+            return (
+              <TableCell>
+                <div className="flex items-center space-x-2">
+                  <Link
+                    href={externalJobHref(item)}
+                    title="View logs"
+                    className="text-sky-blue hover:text-sky-blue-bright font-medium inline-flex items-center h-8"
+                  >
+                    <FileSearchIcon className="w-4 h-4" />
+                  </Link>
+                </div>
+              </TableCell>
+            );
+          }
 
           // For group parent, use jobId; otherwise use item.id
           const logJobId = renderMode === 'groupParent' ? jobId : item.id;
