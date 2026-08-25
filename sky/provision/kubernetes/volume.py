@@ -1,4 +1,5 @@
 """Kubernetes volume provisioning (PVC and hostPath)."""
+import decimal
 import enum
 import re
 import time as time_module
@@ -12,10 +13,13 @@ from sky.provision import constants
 from sky.provision.kubernetes import config as config_lib
 from sky.provision.kubernetes import constants as k8s_constants
 from sky.provision.kubernetes import utils as kubernetes_utils
-from sky.utils import resources_utils
 from sky.utils import volume as volume_lib
 
 logger = sky_logging.init_logger(__name__)
+
+# A volume's size is recorded in gibibytes, which is also the unit the PVC
+# spec is written in.
+_BYTES_PER_GIB = 1024**3
 
 PVC_FAILING_EVENT_REASONS = ('ProvisioningFailed',)
 WARNING_EVENT_TYPE = 'Warning'
@@ -919,31 +923,43 @@ def _pvc_capacity(pvc_obj: Any) -> Optional[str]:
 
 def _parse_pvc_size(size_quantity: Optional[str],
                     pvc_name: str) -> Optional[str]:
-    """Normalizes a Kubernetes storage quantity to a volume size, or None.
+    """Normalizes a Kubernetes storage quantity to a volume size in GiB.
 
     Shared by the create and refresh paths so the two cannot record the same
     PVC differently.
+
+    Parsed by the Kubernetes client rather than `resources_utils`, which reads
+    a quantity by SkyPilot's rules rather than Kubernetes': a bare number is
+    bytes to Kubernetes and gigabytes to SkyPilot, and the decimal suffixes a
+    claim can perfectly well be written with (`2G`, `500M`) are not units it
+    knows at all. A claim SkyPilot did not create -- which is every
+    `use_existing` volume -- is written however its author wrote it.
+
+    Rounds to the nearest GiB, since that is the only unit a volume's size is
+    recorded in: a claim written `2G` is 1.86GiB, and reporting 1Gi for it
+    would look like half the volume went missing.
     """
     if not size_quantity:
         return None
     try:
-        # Normalize to GB string (e.g., '20')
-        size = resources_utils.parse_memory_resource(size_quantity,
-                                                     'size',
-                                                     allow_rounding=True)
-    except ValueError as e:
-        # Just log the error since it is not critical.
+        size_bytes = kubernetes.parse_quantity(size_quantity)
+        size = int(
+            decimal.Decimal(size_bytes / _BYTES_PER_GIB).quantize(
+                decimal.Decimal('1'), rounding=decimal.ROUND_HALF_UP))
+    except Exception as e:  # pylint: disable=broad-except
+        # Just log the error since it is not critical: a volume whose size
+        # cannot be read keeps the one already recorded.
         logger.warning(f'Failed to parse PVC size {size_quantity!r} '
                        f'for PVC {pvc_name}: {e}')
         return None
-    if size == '0':
-        # Rounded down from a sub-Gi quantity. Volume creation rejects '0' as a
-        # size, so recording it here would put a value in the database that the
-        # same volume could not have been created with.
+    if size <= 0:
+        # Under half a gibibyte. Volume creation rejects '0' as a size, so
+        # recording it here would put a value in the database that the same
+        # volume could not have been created with.
         logger.warning(f'Ignoring PVC size {size_quantity!r} for PVC '
                        f'{pvc_name}: rounds to less than 1Gi.')
         return None
-    return size
+    return str(size)
 
 
 def _observed_volume_state(pvc_obj: Any) -> models.ObservedVolumeState:

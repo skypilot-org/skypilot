@@ -2499,6 +2499,9 @@ class TestCreatePVCWithUseExisting:
     @patch('sky.provision.kubernetes.volume.kubernetes')
     def test_use_existing_populates_config(self, mock_k8s, mock_find_pvc):
         """Test use_existing populates config from found PVC."""
+        # Sizes are read with Kubernetes' quantity grammar, so the mocked
+        # adaptor has to keep that one real for the size to be read at all.
+        mock_k8s.parse_quantity = kubernetes.parse_quantity
         mock_pvc = MockPVC('myvolume-abc123',
                            'my-namespace',
                            storage_class='fast-ssd',
@@ -2870,3 +2873,46 @@ class TestObservedVolumeState:
         assert errors == {'host-vol': None}
         assert observed == {}
         assert not failed
+
+
+class TestPvcSizeQuantities:
+    """Sizes are read with Kubernetes' quantity grammar, not SkyPilot's.
+
+    A claim SkyPilot did not create -- which is every `use_existing` volume --
+    is written however its author wrote it, and the two grammars disagree on
+    the two things most likely to appear: a bare number is bytes to Kubernetes
+    and gibibytes to SkyPilot, and `2G` is a legal claim size that SkyPilot's
+    parser does not recognise at all.
+    """
+
+    @pytest.mark.parametrize('quantity,expected', [
+        ('10Gi', '10'),
+        ('1Ti', '1024'),
+        ('25Ti', '25600'),
+        ('100Mi', None),
+        ('2G', '2'),
+        ('1G', '1'),
+        ('500M', None),
+        ('2T', '1863'),
+        ('1e9', '1'),
+        ('1000', None),
+        ('512', None),
+        ('1.5Gi', '2'),
+        (None, None),
+        ('', None),
+        ('garbage', None),
+    ])
+    def test_a_quantity_reads_as_kubernetes_means_it(self, quantity, expected):
+        assert k8s_volume._parse_pvc_size(quantity, 'test-pvc') == expected
+
+    def test_a_bare_number_is_bytes_not_gibibytes(self):
+        """The reading that would overstate a volume a billionfold."""
+        assert k8s_volume._parse_pvc_size('10240', 'test-pvc') is None
+
+    def test_a_decimal_suffix_is_read_rather_than_dropped(self):
+        """`2G` is 2e9 bytes, which is 1.86GiB -- recorded as the nearest GiB
+        rather than discarded, and not confused with 2Gi."""
+        assert k8s_volume._parse_pvc_size('2G', 'test-pvc') == '2'
+        assert k8s_volume._parse_pvc_size('2Gi', 'test-pvc') == '2'
+        assert k8s_volume._parse_pvc_size('2000G', 'test-pvc') == '1863'
+        assert k8s_volume._parse_pvc_size('2000Gi', 'test-pvc') == '2000'
