@@ -141,20 +141,24 @@ class KubernetesNodesInfo:
 
 
 class VolumeResizeStatus(enum.Enum):
-    """How far along a resize is, in terms of what the user can do about it.
+    """Where a resize has got to, in terms of what stands between it and done.
 
-    Deliberately not the cloud's own vocabulary: Kubernetes reports one set of
-    values on clusters new enough for `allocatedResourceStatuses` and another
-    (its resize conditions) on older ones, and another cloud would report
-    something else again. Callers care about the three cases that differ in
-    what happens next.
+    Deliberately not the cloud's own vocabulary, which is both wordier and
+    version-specific: Kubernetes alone names these differently on its
+    conditions and on `allocatedResourceStatuses`, and another cloud would name
+    them differently again.
+
+    What the user should *do* is not part of the state: for the middle one it
+    depends on whether anything is using the volume, which the state itself
+    cannot say. See `volume.resize_display_message`.
     """
     # The storage backend is working on it; waiting is all that is needed.
     IN_PROGRESS = 'in_progress'
     # The new capacity is allocated, but the filesystem is grown by the node
-    # when it next mounts the volume -- so it stays at the old size until the
-    # workload using it restarts. Can sit here indefinitely.
-    NEEDS_RESTART = 'needs_restart'
+    # that mounts the volume, so the volume keeps its old size until that
+    # happens. For a volume in use it happens on its own, without restarting
+    # anything; for one nothing is using, it waits indefinitely.
+    PENDING_ON_NODE = 'pending_on_node'
     # The resize stopped short. The recorded size is still the real one.
     FAILED = 'failed'
 

@@ -123,31 +123,48 @@ PVC_PROVISIONING_MESSAGE = ('PVC is pending: the PersistentVolume is still '
 _RESIZE_STATE_MESSAGES = {
     models.VolumeResizeStatus.IN_PROGRESS: ('The storage backend is resizing '
                                             'this volume.'),
-    models.VolumeResizeStatus.NEEDS_RESTART:
+    models.VolumeResizeStatus.PENDING_ON_NODE:
         ('The new space is allocated, but the filesystem only grows when the '
-         'volume is next mounted.'),
+         'volume is mounted.'),
     models.VolumeResizeStatus.FAILED: 'The resize did not complete.',
 }
 
-# What to do about it, in SkyPilot's terms. Kubernetes explains the pending
-# case as "(re-)start a pod ... on node", which is accurate and is not how a
-# SkyPilot user reaches the volume -- so its own account of why is kept, and
-# this says what to do next.
-_RESIZE_STATE_ACTIONS = {
-    models.VolumeResizeStatus.NEEDS_RESTART:
-        ('Restart the cluster or job using this volume to finish the '
-         'resize.'),
-    models.VolumeResizeStatus.FAILED: 'The volume still has its previous size.',
-}
+# What to do about it, in SkyPilot's terms rather than Kubernetes'.
+#
+# A volume waiting on the node is the case that needs telling apart, and the
+# state alone cannot: Kubernetes grows the filesystem of a volume that is in
+# use without anything being restarted, and leaves one that nothing is using
+# waiting indefinitely. Its own words for both are "(re-)start a pod", which
+# would send someone to restart a job that is about to finish on its own.
+#
+# The two are worded around what SkyPilot can actually know. A volume it sees
+# a cluster on is certainly mounted; one it sees nothing on may still be
+# mounted by something else -- `get_all_volumes_usedby` only counts pods
+# SkyPilot created -- so that side says what will finish the resize rather
+# than asserting nothing is using it.
+_RESIZE_PENDING_IN_USE = ('A cluster or job is using it, so the node grows the '
+                          'filesystem without anything being restarted.')
+_RESIZE_PENDING_UNUSED = ('The node grows the filesystem the next time '
+                          'something mounts the volume; start or restart a '
+                          'cluster or job that uses it.')
+_RESIZE_FAILED_ACTION = 'The volume still has its previous size.'
 
 
 def resize_display_message(resize_status: Optional[str],
-                           cloud_message: Optional[str]) -> Optional[str]:
+                           cloud_message: Optional[str],
+                           known_in_use: bool = False) -> Optional[str]:
     """The one sentence to show about a resize, or None if none is in flight.
 
     Built here rather than stored so that every surface -- the volumes table,
     the volume's own page, any client -- says the same thing, and so that the
     wording can change without rewriting what is in the database.
+
+    Args:
+        resize_status: a `models.VolumeResizeStatus` value.
+        cloud_message: the cloud's own account of the state, if it gave one.
+        known_in_use: whether SkyPilot can see a cluster or job holding the
+            volume. Positive only: nothing to see does not mean nothing has it
+            mounted, since only pods SkyPilot created are counted.
 
     An unrecognized status comes from a newer writer than this reader, which
     happens while a deployment is half upgraded: report what it said rather
@@ -159,8 +176,21 @@ def resize_display_message(resize_status: Optional[str],
         status = models.VolumeResizeStatus(resize_status)
     except ValueError:
         return cloud_message or f'Resize state: {resize_status}.'
-    parts = [cloud_message or _RESIZE_STATE_MESSAGES.get(status)]
-    parts.append(_RESIZE_STATE_ACTIONS.get(status))
+    action = None
+    why = cloud_message
+    if status == models.VolumeResizeStatus.PENDING_ON_NODE:
+        if known_in_use:
+            action = _RESIZE_PENDING_IN_USE
+            # The one place the cloud's own words are dropped. Kubernetes sets
+            # the same "(re-)start a pod" message whether or not the volume is
+            # mounted, so on a volume that is, it contradicts the sentence
+            # after it -- and it is the half that is wrong.
+            why = None
+        else:
+            action = _RESIZE_PENDING_UNUSED
+    elif status == models.VolumeResizeStatus.FAILED:
+        action = _RESIZE_FAILED_ACTION
+    parts = [why or _RESIZE_STATE_MESSAGES.get(status), action]
     return ' '.join(part for part in parts if part) or None
 
 

@@ -360,7 +360,14 @@ def volume_list(
                 'resize_target_size': volume.get('resize_target_size'),
                 # Built here, not stored, so every surface says the same thing.
                 'resize_message': volume_utils.resize_display_message(
-                    volume.get('resize_status'), volume.get('resize_message')),
+                    volume.get('resize_status'),
+                    volume.get('resize_message'),
+                    # Seeing a cluster on the volume means it is certainly
+                    # mounted, which is what decides the advice for a resize
+                    # waiting on the node.
+                    known_in_use=bool(
+                        volume.get('usedby_pods') or
+                        volume.get('usedby_clusters'))),
                 'type': config.type,
                 'cloud': config.cloud,
                 'region': config.region,

@@ -60,29 +60,18 @@ _TERMINAL_GRPC_CODES = ('InvalidArgument', 'AlreadyExists', 'OutOfRange',
 _IN_PROGRESS_GRPC_CODES = ('Canceled', 'DeadlineExceeded', 'Unavailable',
                            'Aborted')
 
-# Every state `status.allocatedResourceStatuses` can report for a claim being
-# resized, mapped to what the user can do about it. NodeResizePending is the
-# one that does not clear on its own: the filesystem is grown by the node the
-# next time it mounts the volume, so the workload has to restart.
-_RESIZE_STATUSES = {
-    'ControllerResizeInProgress': models.VolumeResizeStatus.IN_PROGRESS,
-    'NodeResizeInProgress': models.VolumeResizeStatus.IN_PROGRESS,
-    'NodeResizePending': models.VolumeResizeStatus.NEEDS_RESTART,
-    'ControllerResizeFailed': models.VolumeResizeStatus.FAILED,
-    'NodeResizeFailed': models.VolumeResizeStatus.FAILED,
-}
-# The same states as claim conditions, which is all a cluster too old for
-# allocatedResourceStatuses reports -- and, on any cluster, the only place the
-# claim explains itself in words.
+# Every resize state a claim reports on its conditions, and what each means
+# for the volume. This is the only place the claim explains itself in words,
+# so it is also where the state is read from -- see `_pvc_resize_state`.
 #
-# Ordered, because a claim carries several at once: one parked waiting for a
-# restart is still `Resizing` too. Reading them in list order would report the
-# wrong one, so they are read in the order of what the user has to do about
-# them: fix a failure, restart something, or just wait.
+# Ordered, because a claim holds several at once: one waiting to be mounted is
+# still `Resizing` too. Reading them in list order would report the wrong one,
+# so they are read worst-first: a failure to look at, then work that cannot
+# proceed, then work that is proceeding.
 _RESIZE_CONDITIONS = (
     ('ControllerResizeError', models.VolumeResizeStatus.FAILED),
     ('NodeResizeError', models.VolumeResizeStatus.FAILED),
-    ('FileSystemResizePending', models.VolumeResizeStatus.NEEDS_RESTART),
+    ('FileSystemResizePending', models.VolumeResizeStatus.PENDING_ON_NODE),
     ('Resizing', models.VolumeResizeStatus.IN_PROGRESS),
 )
 
@@ -1010,34 +999,27 @@ def _pvc_resize_state(
     All three are None when no resize is in flight, which is the normal case.
 
     A claim's capacity only moves once the new space exists, so an expansion
-    that is still running -- or that is waiting for the workload to restart
-    before the filesystem can grow -- looks like nothing happened at all.
+    that is still running -- or that is waiting to be mounted before the
+    filesystem can grow -- looks like nothing happened at all.
+
+    Read from the conditions rather than `status.allocatedResourceStatuses`,
+    even though the latter is the purpose-built field: the state and the words
+    describing it then come from the same place and cannot disagree, and every
+    cluster has conditions while only recent ones have that field. What it
+    would add -- telling a controller-stage resize from a node-stage one -- is
+    collapsed by VolumeResizeStatus anyway.
     """
     status = getattr(pvc_obj, 'status', None)
     conditions = _true_resize_conditions(status)
     resize_status = None
-    statuses = getattr(status, 'allocated_resource_statuses', None)
-    if isinstance(statuses, dict):
-        storage_status = statuses.get('storage')
-        if storage_status is not None:
-            resize_status = _RESIZE_STATUSES.get(storage_status)
-    if resize_status is None:
-        # All a cluster older than allocatedResourceStatuses reports.
-        for condition_type, mapped in _RESIZE_CONDITIONS:
-            if condition_type in conditions:
-                resize_status = mapped
-                break
-    if resize_status is None:
-        return None, None, None
-
-    # The claim's own account of the state settled on above -- Kubernetes says
-    # it better than a message reconstructed from the state name, and only the
-    # conditions carry one at all.
     message = None
     for condition_type, mapped in _RESIZE_CONDITIONS:
-        if mapped == resize_status and conditions.get(condition_type):
+        if condition_type in conditions:
+            resize_status = mapped
             message = conditions[condition_type]
             break
+    if resize_status is None:
+        return None, None, None
 
     # What the resize is heading for: the capacity being allocated, or, before
     # the backend has acknowledged anything, the request itself.

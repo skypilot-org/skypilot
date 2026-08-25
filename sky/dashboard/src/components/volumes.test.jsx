@@ -179,9 +179,9 @@ describe('VolumesTable details column', () => {
 
 describe('VolumesTable size column while a resize is pending', () => {
   // The recorded size is the capacity the volume has now, so a resize that
-  // has not landed is invisible in it. `needs_restart` in particular never
-  // clears on its own -- the user has to restart what is using the volume.
-  // The message is composed by the server, so the table just renders it.
+  // has not landed is invisible in it, and one waiting on the node can stay
+  // that way indefinitely. What it is waiting for is composed by the server,
+  // so the table just renders it.
   const resizing = (
     status,
     message = 'Resizing to 2Gi. Restart the cluster.'
@@ -202,7 +202,7 @@ describe('VolumesTable size column while a resize is pending', () => {
   });
 
   it('shows where the size is heading while a resize is pending', async () => {
-    const { container } = await renderTable([resizing('needs_restart')]);
+    const { container } = await renderTable([resizing('pending_on_node')]);
 
     const row = container.querySelector('table tbody tr');
     expect(row.textContent).toContain('1Gi');
@@ -210,7 +210,7 @@ describe('VolumesTable size column while a resize is pending', () => {
   });
 
   it("shows the server's explanation without hovering, in details", async () => {
-    const { container } = await renderTable([resizing('needs_restart')]);
+    const { container } = await renderTable([resizing('pending_on_node')]);
 
     expect(container.textContent).toContain('Restart the cluster');
   });
@@ -219,7 +219,7 @@ describe('VolumesTable size column while a resize is pending', () => {
     // An error means the volume is unusable, which outranks a resize that has
     // not landed; the resize keeps its tooltip on the size cell.
     const withBoth = {
-      ...resizing('needs_restart'),
+      ...resizing('pending_on_node'),
       status: 'NOT_READY',
       error_message: 'PVC is pending. ProvisioningFailed: no capacity',
     };
@@ -236,7 +236,9 @@ describe('VolumesTable size column while a resize is pending', () => {
     // The expanded row used to be gated on the error message, so "show more"
     // flipped to "show less" with nothing revealed.
     const long = `Waiting for user to (re-)start a pod to finish file system resize of volume on node. Restart the cluster or job using this volume to finish the resize.`;
-    const { container } = await renderTable([resizing('needs_restart', long)]);
+    const { container } = await renderTable([
+      resizing('pending_on_node', long),
+    ]);
 
     fireEvent.click(screen.getByText('... show more'));
 

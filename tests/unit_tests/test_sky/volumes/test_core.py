@@ -2483,20 +2483,20 @@ class TestVolumeRefreshResizeState:
             monkeypatch, volume, {
                 'checkpoints': models.ObservedVolumeState(
                     size='1',
-                    resize_status=models.VolumeResizeStatus.NEEDS_RESTART,
+                    resize_status=models.VolumeResizeStatus.PENDING_ON_NODE,
                     resize_target_size='2')
             })
 
         update_status.assert_called_once()
         kwargs = update_status.call_args.kwargs
         assert kwargs['resize_status'] == (
-            models.VolumeResizeStatus.NEEDS_RESTART)
+            models.VolumeResizeStatus.PENDING_ON_NODE)
         assert kwargs['resize_target_size'] == '2'
 
     def test_a_finished_resize_clears_what_was_recorded(self, monkeypatch):
         """The cloud stops reporting a resize once it lands; so must we."""
         volume = self._volume(self._config(size='2'),
-                              resize_status='needs_restart',
+                              resize_status='pending_on_node',
                               resize_target_size='2')
 
         update_status = self._refresh(
@@ -2512,23 +2512,40 @@ class TestVolumeRefreshResizeState:
         """A resize can sit pending for hours; that must not cost a write a
         minute."""
         volume = self._volume(self._config(size='1'),
-                              resize_status='needs_restart',
+                              resize_status='pending_on_node',
                               resize_target_size='2')
 
         update_status = self._refresh(
             monkeypatch, volume, {
                 'checkpoints': models.ObservedVolumeState(
                     size='1',
-                    resize_status=models.VolumeResizeStatus.NEEDS_RESTART,
+                    resize_status=models.VolumeResizeStatus.PENDING_ON_NODE,
                     resize_target_size='2')
             })
 
         update_status.assert_not_called()
 
+    def test_a_volume_in_use_gets_the_advice_for_one(self, monkeypatch):
+        """Whether anything holds the volume decides what the user is told,
+        and volume_list is where the two meet."""
+        volume = self._volume(self._config(size='1'),
+                              resize_status='pending_on_node',
+                              resize_target_size='2')
+        volume['usedby_clusters'] = ['some-cluster']
+        monkeypatch.setattr(global_user_state, 'get_volumes',
+                            mock.MagicMock(return_value=[volume]))
+        monkeypatch.setattr(global_user_state, 'get_all_users',
+                            mock.MagicMock(return_value=[]))
+
+        records = core.volume_list()
+
+        assert ('without anything being restarted'
+                in records[0]['resize_message'])
+
     def test_the_fields_survive_the_response_model(self, monkeypatch):
         """volume_list has to carry them through to the client."""
         volume = self._volume(self._config(size='1'),
-                              resize_status='needs_restart',
+                              resize_status='pending_on_node',
                               resize_target_size='2')
         monkeypatch.setattr(global_user_state, 'get_volumes',
                             mock.MagicMock(return_value=[volume]))
@@ -2537,5 +2554,5 @@ class TestVolumeRefreshResizeState:
 
         records = core.volume_list()
 
-        assert records[0]['resize_status'] == 'needs_restart'
+        assert records[0]['resize_status'] == 'pending_on_node'
         assert records[0]['resize_target_size'] == '2'

@@ -852,24 +852,51 @@ class TestResizeDisplayMessage:
 
     def test_the_clouds_own_words_are_kept(self):
         message = volume.resize_display_message(
-            'needs_restart',
+            'pending_on_node',
             'Waiting for user to (re-)start a pod to finish file system '
             'resize of volume on node.')
 
         assert message.startswith('Waiting for user to (re-)start a pod')
 
     def test_and_what_to_do_about_it_is_added(self):
-        message = volume.resize_display_message('needs_restart', 'k8s says so')
+        message = volume.resize_display_message('pending_on_node',
+                                                'k8s says so')
 
         # The cloud says why; this says what to do in SkyPilot's terms.
         assert 'k8s says so' in message
-        assert 'Restart the cluster' in message
+        assert 'mounts the volume' in message
 
     def test_a_cloud_with_nothing_to_say_still_gets_a_sentence(self):
-        message = volume.resize_display_message('needs_restart', None)
+        message = volume.resize_display_message('pending_on_node', None)
 
         assert 'filesystem' in message
-        assert 'Restart the cluster' in message
+
+    def test_a_volume_in_use_is_not_told_to_restart_anything(self):
+        """Kubernetes grows the filesystem of a mounted volume by itself.
+
+        Its own words say "(re-)start a pod" either way, which would send
+        someone to restart a job that is about to finish on its own.
+        """
+        message = volume.resize_display_message(
+            'pending_on_node',
+            'Waiting for user to (re-)start a pod to finish file system '
+            'resize of volume on node.',
+            known_in_use=True)
+
+        assert 'without anything being restarted' in message
+        # Kubernetes sets that message whether or not the volume is mounted,
+        # so keeping it here would contradict the sentence after it.
+        assert '(re-)start a pod' not in message
+        # Not an instruction to restart anything.
+        assert 'Restart' not in message
+        assert 'start or restart' not in message
+
+    def test_a_volume_nothing_is_using_is_told_what_will_finish_it(self):
+        message = volume.resize_display_message('pending_on_node',
+                                                None,
+                                                known_in_use=False)
+
+        assert 'next time something mounts the volume' in message
 
     def test_a_resize_in_progress_asks_for_nothing(self):
         message = volume.resize_display_message('in_progress', None)
