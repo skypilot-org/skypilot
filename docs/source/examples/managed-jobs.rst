@@ -490,10 +490,11 @@ Jobs beyond that limit stay :code:`PENDING` and start as capacity frees up. See
 
 .. note::
 
-  Use :code:`--num-jobs` when the jobs share one YAML and differ only by rank.
-  If each job needs different resources, hyperparameters, or environment
-  variables, launch them separately instead — see :ref:`many-jobs` for that
-  workflow.
+  Use :code:`--num-jobs` when the jobs share one YAML — either because they
+  differ only by rank, or because each job works out its own assignment (e.g.,
+  a sweep agent that pulls its next configuration from a controller). If each
+  job needs different resources or a different launch command, launch them
+  separately instead — see :ref:`many-jobs` for that workflow.
 
 
 .. _pipeline:
