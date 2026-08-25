@@ -410,8 +410,7 @@ which the task uses to select its shard:
 
 These are ordinary managed jobs — one cluster each, each recovered on its own if
 preempted — exactly as if you had run ``sky jobs launch`` ten times. See
-:ref:`num-jobs` for details, including how to run them on a :ref:`pool <pool>`
-to avoid paying the cold-start cost once per job.
+:ref:`num-jobs` for details.
 
 
 Best practices for scaling

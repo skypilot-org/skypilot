@@ -488,14 +488,6 @@ once: how many run concurrently is bounded by the jobs controller's capacity.
 Jobs beyond that limit stay :code:`PENDING` and start as capacity frees up. See
 :ref:`consolidation-mode-resource-planning` to raise the limit.
 
-.. tip::
-
-  :code:`--num-jobs` also works with :ref:`Pools <pool>`:
-  :code:`sky jobs launch --pool gpu-pool --num-jobs 10 batch-job.yaml` runs the
-  jobs on the pool's pre-provisioned workers instead of launching a new cluster
-  per job, which avoids paying the cold-start cost ten times. In that case
-  concurrency is bounded by the number of workers in the pool.
-
 .. note::
 
   Use :code:`--num-jobs` when the jobs share one YAML and differ only by rank.
