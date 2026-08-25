@@ -972,9 +972,9 @@ export function VolumesTable({
                     </TableRow>
                     {/* A volume can become ready while its reason is
                         expanded, taking the column with it. */}
-                    {expandedRowId === volume.name && volume.error_message && (
+                    {expandedRowId === volume.name && volumeDetails(volume) && (
                       <ExpandedDetailsRow
-                        text={volume.error_message}
+                        text={volumeDetails(volume)}
                         colSpan={totalColSpan}
                         innerRef={expandedRowRef}
                       />

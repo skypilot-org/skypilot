@@ -232,6 +232,19 @@ describe('VolumesTable size column while a resize is pending', () => {
     expect(details.textContent).not.toContain('Restart the cluster');
   });
 
+  it('expands a resize explanation, not only an error', async () => {
+    // The expanded row used to be gated on the error message, so "show more"
+    // flipped to "show less" with nothing revealed.
+    const long = `Waiting for user to (re-)start a pod to finish file system resize of volume on node. Restart the cluster or job using this volume to finish the resize.`;
+    const { container } = await renderTable([resizing('needs_restart', long)]);
+
+    fireEvent.click(screen.getByText('... show more'));
+
+    const expanded = container.querySelector('tr.expanded-details');
+    expect(expanded).toBeTruthy();
+    expect(expanded.textContent).toContain('finish the resize.');
+  });
+
   it('ignores a status from a server that reports no target size', async () => {
     // An older server sends none of these fields; a half-populated row must
     // not render a dangling arrow.
