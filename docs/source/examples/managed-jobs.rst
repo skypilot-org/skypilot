@@ -917,7 +917,7 @@ For absolute maximum parallelism, the following per-cloud configurations are rec
 .. note::
   Remember to tear down your controller to apply these changes, as described above.
 
-With this configuration, you can launch up to 512 jobs at once. Once the jobs are launched, up to 2000 jobs can be running in parallel.
+With this configuration, you can launch up to 512 jobs at once.
 
 .. _migrating-from-remote-controller:
 
