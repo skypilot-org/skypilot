@@ -1359,7 +1359,14 @@ def services_account_token_configured_in_env_file() -> bool:
     if file_path is not None:
         with open(file_path, 'r') as f:
             content = f.read()
-            print(content, file=sys.stderr, flush=True)
+            # Which env-file config a run picked up is worth seeing in the
+            # log, but the file is a client config: it carries
+            # api_server.service_account_token in plaintext. Print it through
+            # the same redaction the config dumps use, never raw.
+            print(config_utils.dump_redacted_yaml(
+                yaml_utils.safe_load(content)),
+                  file=sys.stderr,
+                  flush=True)
             return 'service_account_token' in content
     return False
 

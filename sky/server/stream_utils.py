@@ -48,6 +48,23 @@ async def _yield_log_file_with_payloads_skipped(
         yield line_str
 
 
+def _waiting_status_chunks(msg: str, plain_logs: bool) -> List[str]:
+    """Chunks that show ``msg`` as the stream's current waiting status.
+
+    For a rich client all three frames matter: INIT creates a status only when
+    the client holds none, START is what actually paints it (an INIT alone
+    leaves the Live stopped, so the message is never drawn), and UPDATE applies
+    the text to a status the client may already have had. START is idempotent,
+    so the trio is safe whatever state the client is in -- the same pairing
+    ``wait_for_request_to_start`` uses below.
+    """
+    if plain_logs:
+        # Padding forces browser rendering of the streamed chunk.
+        return [msg + ' ' * 4096 + '\n']
+    status = rich_utils.EncodedStatusMessage(f'[dim]{msg}[/dim]')
+    return [status.init(), status.enter(), status.update(f'[dim]{msg}[/dim]')]
+
+
 async def wait_for_request_to_start(
     request_id: str,
     plain_logs: bool = False,
@@ -124,8 +141,8 @@ async def wait_for_request_to_start(
         elif plain_logs and waiting_msg != last_waiting_msg:
             # Only log when waiting message changes.
             last_waiting_msg = waiting_msg
-            # Padding forces browser rendering of the streamed chunk.
-            yield waiting_msg + ' ' * 4096 + '\n'
+            for chunk in _waiting_status_chunks(waiting_msg, plain_logs=True):
+                yield chunk
         # Sleep shortly to avoid storming the DB and CPU and allow other
         # coroutines to run.
         # TODO(aylei): we should use a better mechanism to avoid busy
@@ -229,6 +246,9 @@ async def _tail_log_file(
 
     last_heartbeat_time = asyncio.get_event_loop().time()
     last_status_check_time = asyncio.get_event_loop().time()
+    # The last parked-state message pushed to this stream; see the WAITING
+    # branch in the status check below.
+    last_waiting_msg: Optional[str] = None
 
     # Buffer the lines in memory and flush them in chunks to improve log
     # tailing throughput.
@@ -288,7 +308,28 @@ async def _tail_log_file(
             if request_id is not None and should_check_status:
                 last_status_check_time = current_time
                 req_status = await requests_lib.get_request_status_async(
-                    request_id)
+                    request_id, include_msg=True)
+                if req_status is None:
+                    # The record vanished (e.g. deleted while streaming); the
+                    # loop below dereferences it more than once.
+                    break
+                if req_status.status == requests_lib.RequestStatus.WAITING:
+                    # The request parked mid-execution (e.g. waiting on queue
+                    # admission or a cluster lock): it stops writing to the log,
+                    # so without this the client keeps showing the last line it
+                    # streamed -- frozen for as long as the wait lasts, and
+                    # stale as soon as the reason changes. Push the parked
+                    # message as the live status instead.
+                    waiting_msg = req_status.status_msg
+                    if waiting_msg and waiting_msg != last_waiting_msg:
+                        last_waiting_msg = waiting_msg
+                        buffer.extend(
+                            _waiting_status_chunks(waiting_msg, plain_logs))
+                else:
+                    # Any other status (resumed, queued again, finished): the
+                    # request drives its own status again, and a later park has
+                    # to be able to report the same reason afresh.
+                    last_waiting_msg = None
                 if req_status.status > requests_lib.RequestStatus.RUNNING:
                     if (req_status.status ==
                             requests_lib.RequestStatus.CANCELLED):

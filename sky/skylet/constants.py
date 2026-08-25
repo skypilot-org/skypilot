@@ -181,6 +181,8 @@ SKYLET_VERSION_FILE = '.sky/skylet_version'
 SKYLET_LOG_FILE = '.sky/skylet.log'
 SKYLET_PID_FILE = '.sky/skylet_pid'
 SKYLET_PORT_FILE = '.sky/skylet_port'
+# The Slurm skylet keeper consumes this start spec.
+SKYLET_START_FILE = '.sky/skylet_start'
 SKYLET_GRPC_PORT = 46590
 SKYLET_GRPC_TIMEOUT_SECONDS = 10
 # TODO(zpoint): legacy autostop-hook log path, kept so the new
@@ -825,6 +827,14 @@ COST_REPORT_DEFAULT_DAYS = 30
 
 ENV_VAR_LOOP_LAG_THRESHOLD_MS = (SKYPILOT_ENV_VAR_PREFIX +
                                  'DEBUG_LOOP_LAG_THRESHOLD_MS')
+
+# Lag above which the event loop stall watchdog dumps the loop thread's stack
+# to attribute the stall. Unlike the debug variable above this is on by
+# default, because its cost falls on the stall path only; set it to 0 to turn
+# the watchdog off.
+ENV_VAR_LOOP_STALL_THRESHOLD_MS = (SKYPILOT_ENV_VAR_PREFIX +
+                                   'LOOP_STALL_THRESHOLD_MS')
+DEFAULT_LOOP_STALL_THRESHOLD_MS = 1000.0
 
 ARM64_ARCH = 'arm64'
 X86_64_ARCH = 'x86_64'
