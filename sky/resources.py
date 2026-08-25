@@ -432,6 +432,7 @@ class Resources:
             network_tier = resources_utils.NetworkTier(network_tier_str)
         self._network_tier = network_tier
 
+        normalized_ports: Optional[List[str]] = None
         if ports is not None:
             if isinstance(ports, tuple):
                 ports = list(ports)
@@ -445,12 +446,12 @@ class Resources:
                     token = token.strip()
                     if token:
                         flattened_ports.append(token)
-            ports = resources_utils.simplify_ports(flattened_ports)
-            if not ports:
+            normalized_ports = resources_utils.simplify_ports(flattened_ports)
+            if not normalized_ports:
                 # Set to None if empty. This is mainly for resources from
                 # cli, which will comes in as an empty tuple.
-                ports = None
-        self._ports = ports
+                normalized_ports = None
+        self._ports = normalized_ports
 
         self._labels = labels
 
