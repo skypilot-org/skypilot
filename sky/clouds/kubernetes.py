@@ -1106,7 +1106,7 @@ class Kubernetes(clouds.Cloud):
                         '"default/rdma-vf").')
             k8s_rdma_nic_count = self._derive_rdma_nic_count(
                 context, k8s_rdma_nic_resource, k8s_acc_label_key,
-                k8s_resource_key, acc_count)
+                k8s_acc_label_values, k8s_resource_key, acc_count)
             if k8s_rdma_nic_count is None:
                 with ux_utils.print_exception_no_traceback():
                     raise ValueError(
@@ -1691,13 +1691,20 @@ class Kubernetes(clouds.Cloud):
     @staticmethod
     def _derive_rdma_nic_count(context: str, resource: str,
                                k8s_acc_label_key: Optional[str],
+                               k8s_acc_label_values: Optional[List[str]],
                                k8s_resource_key: Optional[str],
                                acc_count: Optional[int]) -> Optional[int]:
         """How many RDMA NICs to request, proportional to the GPUs requested.
 
         Read off a node that both advertises ``resource`` and could host the
         request, rather than whichever node happened to match the network-type
-        label first -- a drained node advertises neither. Returns None when no
+        label first -- a drained node advertises neither. Matching the
+        accelerator label *value*, not just its key, matters on a cluster where
+        several GPU shapes share a key: the VF-per-GPU ratio differs per shape,
+        so reading it off a shape the pod's node affinity excludes would
+        under-request VFs and silently lose bandwidth. The values are raw node
+        label strings, not canonical accelerator names, which is what makes
+        comparing them against a node's own label correct. Returns None when no
         such node exists, leaving the caller to fail with an actionable error
         instead of guessing a count: over-requesting merely leaves the pod
         unschedulable, but under-requesting yields a pod that runs with fewer
@@ -1718,6 +1725,10 @@ class Kubernetes(clouds.Cloud):
             if (k8s_acc_label_key not in labels or
                     k8s_resource_key not in allocatable or
                     resource not in allocatable):
+                continue
+            # Same node set the pod's affinity pins to.
+            if (k8s_acc_label_values is not None and
+                    labels[k8s_acc_label_key] not in k8s_acc_label_values):
                 continue
             try:
                 node_gpu_count = int(allocatable[k8s_resource_key])

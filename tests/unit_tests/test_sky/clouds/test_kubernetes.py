@@ -4706,7 +4706,8 @@ class TestKubernetesRdmaMode(unittest.TestCase):
                      rdma=None,
                      pod_config=None,
                      node_alloc=None,
-                     network_type=None):
+                     network_type=None,
+                     nodes=None):
         gpu_resources = mock.MagicMock()
         gpu_resources.instance_type = '8CPU--32GB--GB300:4'
         gpu_resources.accelerators = {'GB300': 4}
@@ -4727,22 +4728,28 @@ class TestKubernetesRdmaMode(unittest.TestCase):
         for key, value in (rdma or {}).items():
             region_config[('kubernetes', 'rdma', key)] = value
 
-        alloc = dict(node_alloc if node_alloc is not None else {
-            'nvidia.com/gpu': '4',
-            'nvidia.com/mlnxnics': '4',
-        })
-        alloc.setdefault('cpu', '8')
-        alloc.setdefault('memory', '32Gi')
-        node = mock.MagicMock()
-        node.metadata.labels = {'accelerator': 'GB300'}
-        node.status.allocatable = alloc
-        # adjust_resources_to_allocatable() reads capacity as well.
-        node.status.capacity = dict(alloc)
+        specs = nodes if nodes is not None else [
+            ('GB300', node_alloc if node_alloc is not None else {
+                'nvidia.com/gpu': '4',
+                'nvidia.com/mlnxnics': '4',
+            })
+        ]
+        node_mocks = []
+        for label_value, node_resources in specs:
+            alloc = dict(node_resources)
+            alloc.setdefault('cpu', '8')
+            alloc.setdefault('memory', '32Gi')
+            node = mock.MagicMock()
+            node.metadata.labels = {'accelerator': label_value}
+            node.status.allocatable = alloc
+            # adjust_resources_to_allocatable() reads capacity as well.
+            node.status.capacity = dict(alloc)
+            node_mocks.append(node)
 
         from sky.provision.kubernetes.utils import (
             KubernetesHighPerformanceNetworkType as N)
         with patch('sky.provision.kubernetes.utils.get_kubernetes_nodes',
-                   return_value=[node]), \
+                   return_value=node_mocks), \
              patch('sky.provision.kubernetes.utils.'
                    'get_current_kube_config_context_name',
                    return_value='oci-context'), \
@@ -4843,6 +4850,37 @@ class TestKubernetesRdmaMode(unittest.TestCase):
                 'hostNetwork': True
             }})
         self.assertTrue(deploy_vars['k8s_host_network'])
+
+    def test_nic_count_ignores_other_shapes_sharing_the_label_key(self):
+        """The ratio must come from a node the pod can actually land on.
+
+        Several GPU shapes can share one accelerator label key while
+        advertising different VF-per-GPU ratios. Matching on the key alone
+        would read the ratio off a shape the pod's node affinity excludes --
+        here a 1:1 node listed first, when the requested shape is 2:1 --
+        under-requesting VFs and silently losing bandwidth rather than failing.
+        """
+        deploy_vars = self._deploy_vars(
+            rdma={
+                'mode': 'sriov',
+                'resource': 'nvidia.com/mlnxnics',
+                'networks': 'network-operator/sriov-net',
+            },
+            nodes=[
+                # Wrong shape, listed first, enough GPUs to look eligible.
+                ('H100', {
+                    'nvidia.com/gpu': '8',
+                    'nvidia.com/mlnxnics': '8',
+                }),
+                # The requested shape: twice the VFs per GPU.
+                ('GB300', {
+                    'nvidia.com/gpu': '4',
+                    'nvidia.com/mlnxnics': '8',
+                }),
+            ])
+        # 4/4 GPUs on the GB300 node advertising 8 VFs -> 8, not the 4 the
+        # H100 node's 1:1 ratio would have produced.
+        self.assertEqual(deploy_vars['k8s_rdma_nic_count'], 8)
 
     def test_ignored_on_a_network_type_that_delivers_its_own_nics(self):
         """A tenant-wide rdma block must not leak onto other cloud types.
