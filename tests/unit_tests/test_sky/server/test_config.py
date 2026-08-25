@@ -8,19 +8,6 @@ import pytest
 from sky.server import config
 
 
-@pytest.fixture(autouse=True)
-def _gate_off_unless_asked():
-    """TEMPORARY: pin the sizing gate off, it is defaulted on for test runs.
-
-    Tests that want it on patch the same key to 'true' on top of this.
-    """
-    from sky.utils import env_options
-    with mock.patch.dict(
-            os.environ,
-        {env_options.Options.MEMORY_AWARE_WORKER_SIZING.env_key: 'false'}):
-        yield
-
-
 @mock.patch('sky.utils.common_utils.get_mem_size_gb', return_value=8)
 @mock.patch('sky.utils.common_utils.get_cpu_count', return_value=4)
 def test_compute_server_config_on_minimal_deployment(cpu_count, mem_size_gb):
