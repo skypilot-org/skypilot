@@ -5,6 +5,7 @@ that is necessary for PostgreSQL compatibility. See issue #8178 and PR #8179.
 """
 
 import pickle
+import sqlite3
 from unittest import mock
 
 import pytest
@@ -331,6 +332,8 @@ class TestVolumeResizeColumnsRoundTrip:
         # it.
         assert record['handle'].size == '10'
 
+    @pytest.mark.skipif(sqlite3.sqlite_version_info < (3, 35),
+                        reason='ALTER TABLE ... DROP COLUMN needs SQLite 3.35+')
     def test_a_database_that_predates_the_columns_is_upgraded_into_them(
             self, fresh_db):
         """The pinned target revision has to reach the migration that adds them.

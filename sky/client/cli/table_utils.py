@@ -247,7 +247,7 @@ class PVCVolumeTable(VolumeTable):
         #  If show_all is False, show the table with the columns:
         #   NAME, TYPE, INFRA, SIZE, USER, WORKSPACE,
         #   AGE, STATUS, LAST_USE, USED_BY, IS_EPHEMERAL
-        #   (+ MESSAGE if any volume is not ready)
+        #   (+ MESSAGE if any volume has something to say)
         #  If show_all is True, show the table with the columns:
         #   NAME, TYPE, INFRA, SIZE, USER, WORKSPACE,
         #   AGE, STATUS, LAST_USE, USED_BY, IS_EPHEMERAL, NAME_ON_CLOUD
@@ -264,7 +264,7 @@ class PVCVolumeTable(VolumeTable):
                 'MESSAGE',
             ]
         elif self._has_messages:
-            # Show MESSAGE column even without show_all if there are issues
+            # Show MESSAGE column even without show_all if there is one
             columns = columns + ['MESSAGE']
 
         table = log_utils.create_table(columns)
