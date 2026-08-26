@@ -248,6 +248,16 @@ class ClusterEventType(enum.Enum):
     LAUNCH_PROGRESS = 'LAUNCH_PROGRESS'
 
 
+# Prefix of the STATUS_CHANGE event reason recorded when a cluster is flipped
+# to INIT because a status refresh found it in an abnormal state -- e.g. a node
+# terminated/preempted, the ray cluster is unhealthy, or a pod is OOMKilled
+# (see backend_utils._refresh_cluster_status). INIT is overloaded: a cluster is
+# INIT both while it is actively launching and while it is stuck/broken. The
+# dashboard uses this prefix to tell the two apart (actively 'launching' vs
+# 'unhealthy') so it can show the underlying problem instead of a misleading
+# "LAUNCHING". Keep in sync with the event reason written in backend_utils.
+ABNORMAL_STATUS_REASON_PREFIX = 'Cluster is abnormal because'
+
 # Table for cluster status change events.
 # starting_status: Status of the cluster at the start of the event.
 # ending_status: Status of the cluster at the end of the event.
@@ -305,6 +315,20 @@ system_config_table = sqlalchemy.Table(
     sqlalchemy.Column('config_value', sqlalchemy.Text),
     sqlalchemy.Column('created_at', sqlalchemy.Integer),
     sqlalchemy.Column('updated_at', sqlalchemy.Integer),
+)
+
+# Renewable leases for fleet-wide leader election. Each row is one singleton
+# role: ``holder`` is the current leader's identity, ``epoch`` is a monotonic
+# fencing token bumped on every change of holder, and ``expires_at`` is the
+# server-side deadline by which the holder must renew or be taken over. See
+# ``sky.utils.leader_election.PgLeaseElector``.
+leader_leases_table = sqlalchemy.Table(
+    'leader_leases',
+    Base.metadata,
+    sqlalchemy.Column('lock_id', sqlalchemy.Text, primary_key=True),
+    sqlalchemy.Column('holder', sqlalchemy.Text),
+    sqlalchemy.Column('epoch', sqlalchemy.BigInteger),
+    sqlalchemy.Column('expires_at', sqlalchemy.DateTime(timezone=True)),
 )
 
 
@@ -1126,15 +1150,21 @@ def _get_last_or_terminal_cluster_event_multiple(
 
 
 def get_last_cluster_event_of_type_multiple(
-        cluster_hashes: Set[str],
-        event_type: ClusterEventType) -> Dict[str, str]:
-    """Returns the latest event of `event_type` per cluster_hash.
+    cluster_hashes: Set[str],
+    event_type: Union[ClusterEventType, List[ClusterEventType]],
+) -> Dict[str, str]:
+    """Returns the newest event of the given type(s) per cluster_hash.
 
-    Mirrors _get_last_or_terminal_cluster_event_multiple but filters to a
-    single event type (no TERMINAL-priority ordering).
+    ``event_type`` may be a single ClusterEventType or a list; when a list is
+    given, the single most-recent event across all listed types is returned per
+    cluster (ordered by transitioned_at). Mirrors
+    _get_last_or_terminal_cluster_event_multiple but without its TERMINAL-first
+    priority ordering. Clusters with no matching event are omitted.
     """
     if not cluster_hashes:
         return {}
+    event_types = ([event_type]
+                   if isinstance(event_type, ClusterEventType) else event_type)
     engine = _db_manager.get_engine()
     with orm.Session(engine) as session:
         row_number = sqlalchemy.func.row_number().over(
@@ -1147,7 +1177,7 @@ def get_last_cluster_event_of_type_multiple(
             row_number,
         ).filter(
             cluster_event_table.c.cluster_hash.in_(cluster_hashes),
-            cluster_event_table.c.type == event_type.value,
+            cluster_event_table.c.type.in_([t.value for t in event_types]),
         ).subquery()
 
         rows = session.query(
@@ -1524,6 +1554,26 @@ def get_handle_from_cluster_name(
     return pickle.loads(row.handle)
 
 
+@db_retries.retry
+@metrics_lib.time_me
+def get_cluster_workspace(cluster_name: str) -> Optional[str]:
+    """Returns the workspace a cluster belongs to, or None if no such cluster.
+
+    Selects only the ``workspace`` column so callers doing a permission check
+    don't pay the cost of unpickling the handle. A stored NULL (clusters that
+    predate the column) is normalized to the default workspace, so a non-None
+    return always means "the cluster exists and lives in this workspace".
+    """
+    engine = _db_manager.get_engine()
+    assert cluster_name is not None, 'cluster_name cannot be None'
+    with orm.Session(engine) as session:
+        row = (session.query(
+            cluster_table.c.workspace).filter_by(name=cluster_name).first())
+    if row is None:
+        return None
+    return row.workspace or constants.SKYPILOT_DEFAULT_WORKSPACE
+
+
 @metrics_lib.time_me
 def get_handles_from_cluster_names(
         cluster_names: Set[str]
@@ -1686,6 +1736,15 @@ def get_cluster_provision_log_path(cluster_name: str) -> Optional[str]:
     if row is None:
         return None
     return getattr(row, 'provision_log_path', None)
+
+
+@metrics_lib.time_me
+def get_all_cluster_provision_log_paths() -> List[str]:
+    """Returns the recorded provision_log_path of every existing cluster."""
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
+        rows = session.query(cluster_table.c.provision_log_path).all()
+    return [row.provision_log_path for row in rows if row.provision_log_path]
 
 
 @metrics_lib.time_me
@@ -2260,8 +2319,12 @@ def get_clusters(
         for row in rows
         if status_lib.ClusterStatus[row.status] is status_lib.ClusterStatus.INIT
     }
-    launch_progress_dict = get_last_cluster_event_of_type_multiple(
-        init_cluster_hashes, ClusterEventType.LAUNCH_PROGRESS)
+    # Newest launch/status-change event per INIT cluster. Its reason both tells
+    # an actively-launching cluster apart from one stuck in an abnormal state
+    # (see ABNORMAL_STATUS_REASON_PREFIX) and provides the message to display.
+    latest_init_event_dict = get_last_cluster_event_of_type_multiple(
+        init_cluster_hashes,
+        [ClusterEventType.STATUS_CHANGE, ClusterEventType.LAUNCH_PROGRESS])
 
     # get last cluster event for each row
     if not summary_response:
@@ -2296,14 +2359,22 @@ def get_clusters(
                           if exclude_managed_clusters else bool(row.is_managed),
             'node_names': common_utils.get_display_node_names(row.node_names),
         }
-        # launch_status_reason is populated outside the summary_response
-        # gate so both the list page (summary_response=True) and detail
-        # page (summary_response=False) get the badge tooltip data.
+        # init_kind / init_status_reason are populated outside the
+        # summary_response gate so both the list page (summary_response=True)
+        # and detail page (summary_response=False) get the badge/banner data.
+        # init_kind disambiguates the overloaded INIT state: 'launching'
+        # (actively provisioning) vs 'unhealthy' (flipped to INIT by an
+        # abnormal-state refresh). See ABNORMAL_STATUS_REASON_PREFIX.
         if record['status'] is status_lib.ClusterStatus.INIT:
-            record['launch_status_reason'] = launch_progress_dict.get(
-                row.cluster_hash)
+            latest_reason = latest_init_event_dict.get(row.cluster_hash)
+            record['init_kind'] = (
+                status_lib.INIT_KIND_UNHEALTHY if latest_reason is not None and
+                latest_reason.startswith(ABNORMAL_STATUS_REASON_PREFIX) else
+                status_lib.INIT_KIND_LAUNCHING)
+            record['init_status_reason'] = latest_reason
         else:
-            record['launch_status_reason'] = None
+            record['init_kind'] = None
+            record['init_status_reason'] = None
         if not summary_response:
             record['last_creation_yaml'] = row.last_creation_yaml
             record['last_creation_command'] = row.last_creation_command
@@ -2579,22 +2650,43 @@ def set_enabled_clouds(enabled_clouds: List[str],
         session.commit()
 
 
+def _slurm_submit_as_user_enabled() -> bool:
+    slurm_config = skypilot_config.get_nested(('slurm',), default_value={})
+    if slurm_config.get('submit_as_user', False):
+        return True
+    cluster_configs = slurm_config.get('cluster_configs', {})
+    return any(
+        config.get('submit_as_user', False)
+        for config in cluster_configs.values())
+
+
+def _scope_config_key_to_user(key: str) -> str:
+    if not _slurm_submit_as_user_enabled():
+        return key
+    user_id = common_utils.get_current_user().id
+    return f'{key}_{user_id}'
+
+
 def _get_enabled_clouds_key(cloud_capability: 'cloud.CloudCapability',
                             workspace: str) -> str:
-    return _ENABLED_CLOUDS_KEY_PREFIX + workspace + '_' + cloud_capability.value
+    key = (_ENABLED_CLOUDS_KEY_PREFIX + workspace + '_' +
+           cloud_capability.value)
+    return _scope_config_key_to_user(key)
 
 
 _CHECK_RESULTS_KEY_PREFIX = 'check_results_'
 
 
 def _get_check_results_key(workspace: str) -> str:
-    return f'{_CHECK_RESULTS_KEY_PREFIX}{workspace}'
+    return _scope_config_key_to_user(f'{_CHECK_RESULTS_KEY_PREFIX}{workspace}')
 
 
 @metrics_lib.time_me
 def get_cached_check_results(
         workspace: str) -> Dict[str, Dict[str, Dict[str, Any]]]:
-    """Return the persisted check_results dict for a workspace, or {}.
+    """Return persisted check results for a workspace, or {}.
+
+    With Slurm submit-as-user enabled, results are scoped to the current user.
 
     Shape:
         {cloud_repr: {context_or_empty_str: {"enabled": bool, "reason": str}}}.
@@ -2623,6 +2715,8 @@ def set_check_results(
 ) -> None:
     """Persist `results` for `workspace`.
 
+    With Slurm submit-as-user enabled, results are scoped to the current user.
+
     `is_full_workspace_run=True` replaces the entire row (drops clouds /
     contexts not present in `results`).  `False` merges at *context*
     granularity within a cloud: read the existing row, update only the
@@ -2650,7 +2744,7 @@ def set_check_results(
         else:
             # Read-modify-write under the default session isolation. This
             # is NOT race-safe against concurrent scoped writes for
-            # different clouds in the same workspace: SQLAlchemy
+            # different clouds for the same cache scope: SQLAlchemy
             # `orm.Session` does not acquire row locks, and under the
             # default isolation (READ COMMITTED on Postgres, deferred on
             # SQLite) two interleaved RMW cycles can clobber each
@@ -2658,7 +2752,7 @@ def set_check_results(
             # (one scoped run's leaves get overwritten until the next
             # write rewrites the row) and the source-of-truth
             # enabled_clouds_* rows are unaffected, so we accept the
-            # race here rather than serialize through a per-workspace
+            # race here rather than serialize through a per-key
             # advisory lock. If this row ever becomes load-bearing for
             # correctness, switch to `with_for_update()` (postgres) and
             # an explicit BEGIN IMMEDIATE (sqlite).
@@ -2879,36 +2973,86 @@ def get_volume_names_start_with(starts_with: str) -> List[str]:
     return [row.name for row in rows]
 
 
+def _volume_record_from_row(row: Any) -> Dict[str, Any]:
+    """Builds a volume record from a volume table row.
+
+    Shared so every accessor returns the same shape: a caller that switches
+    between them must not have to check which keys it now has.
+    """
+    return {
+        'name': row.name,
+        'launched_at': row.launched_at,
+        'handle': pickle.loads(row.handle),
+        'user_hash': row.user_hash,
+        'workspace': row.workspace,
+        'last_attached_at': row.last_attached_at,
+        'last_use': row.last_use,
+        'status': status_lib.VolumeStatus[row.status],
+        'is_ephemeral': bool(row.is_ephemeral),
+        'error_message': row.error_message,
+        # Decode JSON-encoded usedby fields
+        'usedby_pods': json.loads(row.usedby_pods) if row.usedby_pods else [],
+        'usedby_clusters':
+            (json.loads(row.usedby_clusters) if row.usedby_clusters else []),
+        'creation_yaml': row.creation_yaml,
+    }
+
+
 @metrics_lib.time_me
-def get_volumes(is_ephemeral: Optional[bool] = None) -> List[Dict[str, Any]]:
+def get_volumes(
+    is_ephemeral: Optional[bool] = None,
+    workspaces_filter: Optional[Set[str]] = None,
+) -> List[Dict[str, Any]]:
+    """Get volumes from the database.
+
+    Args:
+        is_ephemeral: If specified, only include volumes with this
+            ephemerality.
+        workspaces_filter: If specified, only include volumes whose workspace
+            is in this set. Use workspace names.
+    """
     engine = _db_manager.get_engine()
     with orm.Session(engine) as session:
-        if is_ephemeral is None:
-            rows = session.query(volume_table).all()
-        else:
-            rows = session.query(volume_table).filter_by(
-                is_ephemeral=int(is_ephemeral)).all()
-    records = []
-    for row in rows:
-        # Decode JSON-encoded usedby fields
-        usedby_pods = json.loads(row.usedby_pods) if row.usedby_pods else []
-        usedby_clusters = (json.loads(row.usedby_clusters)
-                           if row.usedby_clusters else [])
-        records.append({
-            'name': row.name,
-            'launched_at': row.launched_at,
-            'handle': pickle.loads(row.handle),
-            'user_hash': row.user_hash,
-            'workspace': row.workspace,
-            'last_attached_at': row.last_attached_at,
-            'last_use': row.last_use,
-            'status': status_lib.VolumeStatus[row.status],
-            'is_ephemeral': bool(row.is_ephemeral),
-            'error_message': row.error_message,
-            'usedby_pods': usedby_pods,
-            'usedby_clusters': usedby_clusters,
-            'creation_yaml': row.creation_yaml,
-        })
+        query = session.query(volume_table)
+        if is_ephemeral is not None:
+            query = query.filter_by(is_ephemeral=int(is_ephemeral))
+        if workspaces_filter is not None:
+            query = query.filter(
+                volume_table.c.workspace.in_(workspaces_filter))
+        rows = query.all()
+    return [_volume_record_from_row(row) for row in rows]
+
+
+@metrics_lib.time_me
+def get_volumes_from_names(
+        volume_names: List[str],
+        is_ephemeral: Optional[bool] = None) -> List[Dict[str, Any]]:
+    """Batched ``get_volume_by_name`` for many volume names at once.
+
+    Returns records in the same shape as ``get_volumes``. Names with no row
+    are simply absent from the result, so the caller sees the same thing it
+    would from a filtered ``get_volumes``.
+
+    Args:
+        volume_names: Volume names to look up.
+        is_ephemeral: If given, keep only volumes with this ephemerality,
+            matching ``get_volumes``.
+    """
+    if not volume_names:
+        return []
+    engine = _db_manager.get_engine()
+    # Chunk the IN list for the same reason as _CLUSTER_IN_QUERY_CHUNK_SIZE:
+    # SQLite caps bound parameters and PostgreSQL plans huge IN clauses badly.
+    records: List[Dict[str, Any]] = []
+    with orm.Session(engine) as session:
+        for offset in range(0, len(volume_names), _CLUSTER_IN_QUERY_CHUNK_SIZE):
+            batch = volume_names[offset:offset + _CLUSTER_IN_QUERY_CHUNK_SIZE]
+            query = session.query(volume_table).filter(
+                volume_table.c.name.in_(batch))
+            if is_ephemeral is not None:
+                query = query.filter(
+                    volume_table.c.is_ephemeral == int(is_ephemeral))
+            records.extend(_volume_record_from_row(row) for row in query.all())
     return records
 
 
@@ -2918,24 +3062,7 @@ def get_volume_by_name(name: str) -> Optional[Dict[str, Any]]:
     with orm.Session(engine) as session:
         row = session.query(volume_table).filter_by(name=name).first()
     if row:
-        # Decode JSON-encoded usedby fields
-        usedby_pods = json.loads(row.usedby_pods) if row.usedby_pods else []
-        usedby_clusters = (json.loads(row.usedby_clusters)
-                           if row.usedby_clusters else [])
-        return {
-            'name': row.name,
-            'launched_at': row.launched_at,
-            'handle': pickle.loads(row.handle),
-            'user_hash': row.user_hash,
-            'workspace': row.workspace,
-            'last_attached_at': row.last_attached_at,
-            'last_use': row.last_use,
-            'status': status_lib.VolumeStatus[row.status],
-            'error_message': row.error_message,
-            'usedby_pods': usedby_pods,
-            'usedby_clusters': usedby_clusters,
-            'creation_yaml': row.creation_yaml,
-        }
+        return _volume_record_from_row(row)
     return None
 
 
@@ -2946,6 +3073,7 @@ def add_volume(
     status: status_lib.VolumeStatus,
     is_ephemeral: bool = False,
     creation_yaml: Optional[str] = None,
+    error_message: Optional[str] = None,
 ) -> None:
     engine = _db_manager.get_engine()
     volume_launched_at = int(time.time())
@@ -2978,6 +3106,7 @@ def add_volume(
             status=status.value,
             is_ephemeral=int(is_ephemeral),
             creation_yaml=creation_yaml,
+            error_message=error_message,
         )
         do_update_stmt = insert_stmnt.on_conflict_do_nothing()
         session.execute(do_update_stmt)
@@ -3183,15 +3312,37 @@ def get_user_service_account_tokens(user_hash: str) -> List[Dict[str, Any]]:
 
 
 @metrics_lib.time_me
-def update_service_account_token_last_used(token_id: str) -> None:
-    """Update the last_used_at timestamp for a service account token."""
+def update_service_account_token_last_used(token_id: str,
+                                           min_interval_seconds: int = 0
+                                          ) -> None:
+    """Update the last_used_at timestamp for a service account token.
+
+    With ``min_interval_seconds > 0`` the UPDATE is conditional: it only
+    lands when the stored ``last_used_at`` is NULL or older than the
+    interval. The staleness check lives in the WHERE clause (not in the
+    caller) so concurrent callers that all read a stale timestamp cannot
+    herd on the row at an interval boundary: the first transaction to
+    commit refreshes the row, and every other caller's UPDATE re-evaluates
+    against the committed row, matches zero rows, and writes nothing (no
+    redundant WAL/dead-tuple churn).
+    """
     engine = _db_manager.get_engine()
     last_used_at = int(time.time())
 
     with orm.Session(engine) as session:
-        session.query(service_account_token_table).filter_by(
-            token_id=token_id).update(
-                {service_account_token_table.c.last_used_at: last_used_at})
+        query = session.query(service_account_token_table).filter_by(
+            token_id=token_id)
+        if min_interval_seconds > 0:
+            query = query.filter(
+                sqlalchemy.or_(
+                    service_account_token_table.c.last_used_at.is_(None),
+                    service_account_token_table.c.last_used_at <
+                    last_used_at - min_interval_seconds))
+        # synchronize_session=False: the session is scoped to this single
+        # statement, and the conditional criteria above are not evaluatable
+        # in-memory by the default strategy.
+        query.update({service_account_token_table.c.last_used_at: last_used_at},
+                     synchronize_session=False)
         session.commit()
 
 

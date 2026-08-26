@@ -1,11 +1,13 @@
 """Slurm instance provisioning."""
 
+import math
 import os
+import re
 import shlex
 import tempfile
 import threading
 import time
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 
 import colorama
 
@@ -38,6 +40,23 @@ def _sbatch_log_path(base_dir: str, job_id: str) -> str:
 POLL_INTERVAL_SECONDS = 2
 # Default KillWait is 30 seconds, so we add some buffer time here.
 _JOB_TERMINATION_TIMEOUT_SECONDS = 60
+# How long to give the batch script's TERM trap to run cleanup and exit
+# before escalating to a plain scancel. Matches Slurm's default KillWait,
+# the grace Slurm itself gives between SIGTERM and SIGKILL.
+_TERMINATION_GRACE_PERIOD_SECONDS = 30
+
+# Terminal states where scancel is not needed or will fail.
+_TERMINAL_JOB_STATES = {
+    'COMPLETED', 'CANCELLED', 'FAILED', 'TIMEOUT', 'NODE_FAIL', 'PREEMPTED',
+    'SPECIAL_EXIT'
+}
+# States where the job holds an allocation that a graceful termination is
+# not guaranteed to release, so teardown must verify the job exits and
+# escalate if it does not.
+_ESCALATION_JOB_STATES = {'RUNNING', 'SUSPENDED'}
+# States that mean the job is on its way out: terminal, or COMPLETING
+# (Slurm is already tearing it down).
+_EXITING_JOB_STATES = _TERMINAL_JOB_STATES | {'COMPLETING'}
 
 # sbatch options that SkyPilot controls and must not be overridden by users.
 # These are either set dynamically based on the resource spec, or are required
@@ -54,6 +73,19 @@ _SBATCH_PROTECTED_OPTIONS = frozenset({
     'gres',
     'partition',
 })
+
+_PYXIS_MOUNT_PATH_PATTERN = re.compile(
+    r'/(?:[A-Za-z0-9._~+@%=/\-]|\$[A-Za-z_][A-Za-z0-9_]*)*')
+
+
+def _validate_pyxis_mount_path(path: str, field: str) -> None:
+    """Validate a path before interpolating it into --container-mounts."""
+    if not (isinstance(path, str) and
+            _PYXIS_MOUNT_PATH_PATTERN.fullmatch(path)):
+        raise ValueError(
+            f'Invalid Pyxis container mount {field} path {path!r}. Paths must '
+            'be absolute and contain only safe POSIX path characters or '
+            'simple $VARNAME expansions.')
 
 
 def _build_custom_sbatch_directives(sbatch_options: Dict[str, Any]) -> str:
@@ -325,6 +357,7 @@ def _create_virtual_instance(
     identities_only = ssh_config_dict.get('identities_only', False)
     partition = slurm_utils.get_partition_from_config(provider_config)
 
+    slurm_user = provider_config.get('slurm_user')
     client = slurm.SlurmClient(
         ssh_host,
         ssh_port,
@@ -333,6 +366,7 @@ def _create_virtual_instance(
         ssh_proxy_command=ssh_proxy_command,
         ssh_proxy_jump=ssh_proxy_jump,
         identities_only=identities_only,
+        slurm_user=slurm_user,
     )
 
     slurm_cluster = slurm_utils.get_slurm_cluster_from_config(provider_config)
@@ -460,7 +494,7 @@ def _create_virtual_instance(
 
     # To bootstrap things, we need to do it with SSHCommandRunner first.
     # SlurmCommandRunner is for after the virtual instances are created.
-    login_node_runner = command_runner.SSHCommandRunner(
+    login_node_runner = command_runner.SlurmLoginNodeCommandRunner(
         (ssh_host, ssh_port),
         ssh_user,
         ssh_key,
@@ -468,6 +502,7 @@ def _create_virtual_instance(
         ssh_proxy_jump=ssh_proxy_jump,
         enable_interactive_auth=True,
         disable_identities_only=not identities_only,
+        slurm_user=slurm_user,
     )
     remote_home_dir = login_node_runner.get_remote_home_dir()
 
@@ -495,8 +530,6 @@ def _create_virtual_instance(
     sky_cluster_home_dir = _sky_cluster_home_dir(sky_base_dir,
                                                  cluster_name_on_cloud)
     ready_signal = f'{sky_cluster_home_dir}/.sky_sbatch_ready'
-    slurm_marker_file = (
-        f'{sky_cluster_home_dir}/{slurm_utils.SLURM_MARKER_FILE}')
 
     # For non-Docker Hub registries, pyxis/enroot requires '#' separator
     # between registry and path. See:
@@ -551,12 +584,28 @@ def _create_virtual_instance(
         mount_paths = [
             f'{remote_home_dir}:{remote_home_dir}',
             f'{host_ccache_dir}:{container_ccache_dir}',
+            # Share only skylet state between the host and container.
+            # Mounting the full runtime dir exposes the host venv.
+            # The container then skips its own venv.
+            # The host python symlink is invalid inside the container.
+            f'{skypilot_runtime_dir}/.sky:{skypilot_runtime_dir}/.sky',
         ]
         # When workdir differs from remote_home_dir (e.g. workdir is on
         # NFS at /home/ubuntu while $HOME is /home_local/ubuntu), mount
         # it so the container can access sky_cluster_home_dir.
         if workdir is not None and workdir != remote_home_dir:
             mount_paths.append(f'{workdir}:{workdir}')
+        for volume_mount in resources.get('volume_mounts', []) or []:
+            dst_path = volume_mount['path']
+            volume_config = volume_mount['volume_config']
+            host_path = volume_config['config']['host_path']
+            _validate_pyxis_mount_path(host_path, 'source')
+            _validate_pyxis_mount_path(dst_path, 'destination')
+            mount = f'{host_path}:{dst_path}'
+            # Fail closed: anything but an explicit 'rw' mounts read-only.
+            if volume_config['config'].get('mode') != 'rw':
+                mount += ':ro'
+            mount_paths.append(mount)
         container_mounts = ','.join(mount_paths)
         # Add sudo alias to bashrc since we're already root in the container.
         # This allows scripts with 'sudo' commands to work without modification.
@@ -615,6 +664,37 @@ echo "[container-init] Packages installed in $((SECONDS - INIT_START))s"
             f'echo "[container] Ready in $((SECONDS - CONTAINER_START))s"\n'
             f'touch {container_marker_file} {ready_signal}')
 
+    # sbatch batch script ── lives as long as the allocation
+    #   └─ keeper srun client (host side, never enters the container)
+    #        └─ keeper step ── outer loop restarts the step
+    #             └─ run the start spec FOREGROUND ── inner loop restarts skylet
+    #                  └─ skylet (the step cgroup owns it)
+    #
+    # attempt_skylet (any shape, possibly in-container)
+    #   └─ writes <runtime_dir>/.sky/skylet_start ──► read by the keeper loop
+    #        (runtime dir = the same host path in both shapes)
+    #
+    # A nohup'd skylet dies here: proctrack/cgroup reaps whatever a short-lived
+    # step leaves behind. The keeper stays out of the workload container because
+    # the Slurm CLIs, munge, and slurm.conf exist only on the host.
+    keeper_start_file = (
+        f'{skypilot_runtime_dir}/{skylet_constants.SKYLET_START_FILE}')
+    # A spec written in the container inherits HOME=/root.
+    # The keeper restores the host HOME before running it.
+    keeper_loop = (f'while true; do '
+                   f'if [ -f {keeper_start_file} ]; then '
+                   f'HOME={sky_cluster_home_dir} bash {keeper_start_file}; '
+                   f'fi; '
+                   f'sleep 5; done')
+    skylet_keeper_block = (
+        'SKY_HEAD_NODE=$(scontrol show hostnames "$SLURM_JOB_NODELIST" '
+        '| head -n1)\n'
+        f'( while true; do '
+        f'srun --overlap --jobid=$SLURM_JOB_ID --nodes=1 --ntasks=1 '
+        f'--nodelist=$SKY_HEAD_NODE '
+        f'bash -c {shlex.quote(keeper_loop)}; '
+        f'sleep 5; done ) &')
+
     # By default stdout and stderr will be written to $HOME/slurm-%j.out
     # (because we invoke sbatch from $HOME). Redirect elsewhere to not pollute
     # the home directory.
@@ -637,14 +717,14 @@ echo "[container-init] Packages installed in $((SECONDS - INIT_START))s"
 #SBATCH --wait-all-nodes=1
 # Let the job be terminated rather than requeued implicitly.
 #SBATCH --no-requeue
-#SBATCH --cpus-per-task={int(resources["cpus"])}
+#SBATCH --cpus-per-task={math.ceil(float(resources["cpus"]))}
 {mem_directive}{gpu_directive}{extra_sbatch_directives}
 
 # Cleanup function to remove cluster dirs on job termination.
 cleanup() {{
     saved_exit=$?
-    # The Skylet is daemonized, so it is not automatically terminated when
-    # the Slurm job is terminated, we need to kill it manually.
+    # Prevent the keeper from restarting Skylet during cleanup.
+    rm -f "{skypilot_runtime_dir}/{skylet_constants.SKYLET_START_FILE}"
     echo "Terminating Skylet..."
     if [ -f "{skypilot_runtime_dir}/.sky/skylet_pid" ]; then
         kill $(cat "{skypilot_runtime_dir}/.sky/skylet_pid") 2>/dev/null || true
@@ -654,13 +734,13 @@ cleanup() {{
     # This is only needed when container_scope=global.
     # When container_scope=job, named containers are removed automatically
     # at the end of the Slurm job, see: https://github.com/NVIDIA/pyxis/wiki/Setup#slurm-epilog
-    srun --nodes={num_nodes} --ntasks-per-node=1 enroot remove -f {shlex.quote(_enroot_container_name_global_scope(cluster_name_on_cloud))} 2>/dev/null || true
+    srun --overlap --nodes={num_nodes} --ntasks-per-node=1 enroot remove -f {shlex.quote(_enroot_container_name_global_scope(cluster_name_on_cloud))} 2>/dev/null || true
     # Clean up sky runtime directory on each node.
     # NOTE: We can do this because --nodes for both this srun and the
     # sbatch is the same number. Otherwise, there are no guarantees
     # that this srun will run on the same subset of nodes as the srun
     # that created the sky directories.
-    srun --nodes={num_nodes} rm -rf {skypilot_runtime_dir}
+    srun --overlap --nodes={num_nodes} rm -rf {skypilot_runtime_dir}
     rm -rf {sky_cluster_home_dir}
     exit $saved_exit
 }}
@@ -673,16 +753,18 @@ trap 'exit 0' TERM
 # Create sky home directory and subdirectories for the cluster.
 mkdir -p {sky_cluster_home_dir}/sky_logs {sky_cluster_home_dir}/sky_workdir {sky_cluster_home_dir}/.sky
 # Create sky runtime directory on each node.
-srun --nodes={num_nodes} mkdir -p {skypilot_runtime_dir}
+srun --nodes={num_nodes} mkdir -p {skypilot_runtime_dir}/.sky
 # Marker file to indicate we're in a Slurm cluster.
-touch {slurm_marker_file}
+srun --nodes={num_nodes} touch {skypilot_runtime_dir}/.sky/{slurm_utils.SLURM_MARKER_FILE}
 # Store proctrack type for task executor to read.
 echo '{proctrack_type or "unknown"}' > {sky_cluster_home_dir}/{skylet_constants.SLURM_PROCTRACK_TYPE_FILE}
 # Suppress login messages.
 touch {sky_cluster_home_dir}/.hushlogin
 {container_block}
 {f'touch {ready_signal}' if container_image is None else ''}
-{'sleep infinity' if container_image is None else 'wait'}
+# Host-side keeper step that starts skylet and restarts it if it dies.
+{skylet_keeper_block}
+{'sleep infinity' if container_image is None else 'wait "$CONTAINER_PID"'}
 """
     # fmt: on
     # pylint: enable=line-too-long
@@ -797,6 +879,7 @@ def query_instances(
         ssh_proxy_command=ssh_proxy_command,
         ssh_proxy_jump=ssh_proxy_jump,
         identities_only=identities_only,
+        slurm_user=provider_config.get('slurm_user'),
     )
 
     # Map Slurm job states to SkyPilot ClusterStatus
@@ -895,6 +978,7 @@ def get_cluster_info(
         ssh_proxy_command=ssh_proxy_command,
         ssh_proxy_jump=ssh_proxy_jump,
         identities_only=identities_only,
+        slurm_user=provider_config.get('slurm_user'),
     )
 
     # Find running job for this cluster
@@ -953,6 +1037,32 @@ def stop_instances(
     raise NotImplementedError()
 
 
+def _wait_for_job_states(client: 'slurm.SlurmClient', job_name: str,
+                         states: Set[str], timeout: float) -> bool:
+    """Wait until every job with this name is in `states` or gone.
+
+    Returns False if the timeout expires first. Transient query failures
+    are tolerated until the deadline: this is only called after the
+    termination signals were already delivered, so one failed poll must
+    not fail the whole teardown.
+    """
+    deadline = time.time() + timeout
+    while True:
+        try:
+            jobs_state: Optional[List[str]] = client.get_jobs_state_by_name(
+                job_name)
+        except exceptions.CommandError as e:
+            logger.debug(f'Failed to query the state of job {job_name}, '
+                         f'retrying: {e}')
+            jobs_state = None
+        if jobs_state is not None and all(
+                state.strip() in states for state in jobs_state):
+            return True
+        if time.time() >= deadline:
+            return False
+        time.sleep(POLL_INTERVAL_SECONDS)
+
+
 def terminate_instances(
     cluster_name_on_cloud: str,
     provider_config: Optional[Dict[str, Any]] = None,
@@ -971,7 +1081,8 @@ def terminate_instances(
     # cluster). In this case, use local execution instead of SSH.
     # This assumes that the compute node is able to run scancel.
     # TODO(kevin): Validate this assumption.
-    if slurm_utils.is_inside_slurm_cluster():
+    inside_slurm_cluster = slurm_utils.is_inside_slurm_cluster()
+    if inside_slurm_cluster:
         logger.debug('Running inside a Slurm cluster, using local execution')
         client = slurm.SlurmClient(is_inside_slurm_cluster=True)
     else:
@@ -992,6 +1103,7 @@ def terminate_instances(
             ssh_proxy_command=ssh_proxy_command,
             ssh_proxy_jump=ssh_proxy_jump,
             identities_only=identities_only,
+            slurm_user=provider_config.get('slurm_user'),
         )
     jobs_state = client.get_jobs_state_by_name(cluster_name_on_cloud)
     if not jobs_state:
@@ -1003,12 +1115,7 @@ def terminate_instances(
     )
 
     job_state = jobs_state[0].strip()
-    # Terminal states where scancel is not needed or will fail.
-    terminal_states = {
-        'COMPLETED', 'CANCELLED', 'FAILED', 'TIMEOUT', 'NODE_FAIL', 'PREEMPTED',
-        'SPECIAL_EXIT'
-    }
-    if job_state in terminal_states:
+    if job_state in _TERMINAL_JOB_STATES:
         logger.debug(
             f'Job for cluster {cluster_name_on_cloud} is already in a terminal '
             f'state {job_state}. No action needed.')
@@ -1022,11 +1129,61 @@ def terminate_instances(
         logger.debug(
             f'Job for cluster {cluster_name_on_cloud} is already completing. '
             'No action needed.')
-    else:
-        # For other states (e.g., RUNNING, SUSPENDED), send a TERM signal.
+    elif job_state not in _ESCALATION_JOB_STATES or inside_slurm_cluster:
+        # Transient states (e.g. STAGING_OUT, SIGNALING): the job is not
+        # holding a steady allocation; a graceful signal is sufficient.
+        # Autodown (running inside the cluster): the Skylet performing this
+        # teardown lives inside a job step's cgroup, so the step-level TERM
+        # below would kill the terminating process itself; and autodown only
+        # fires on idle clusters, which have no task steps that could block
+        # the batch script's cleanup.
         client.cancel_jobs_by_name(cluster_name_on_cloud,
                                    signal='TERM',
                                    full=True)
+    else:
+        # For RUNNING/SUSPENDED jobs, attempt a graceful termination first:
+        # TERM all job steps (the running task processes) and the batch
+        # script, whose TERM trap cleans up the cluster's runtime
+        # directories before exiting.
+        # Both scancel invocations are needed: without --full, scancel
+        # signals all job steps but not the batch script; with --full, it
+        # signals the batch script and its child processes, which does not
+        # reach steps launched from outside the batch script's process tree
+        # (e.g. task steps launched by the Skylet).
+        client.cancel_jobs_by_name(cluster_name_on_cloud, signal='TERM')
+        client.cancel_jobs_by_name(cluster_name_on_cloud,
+                                   signal='TERM',
+                                   full=True)
+        # Graceful termination is not guaranteed to bring the job down: if
+        # any step survives the TERM, it keeps the allocation busy, which
+        # blocks the batch script's cleanup srun from starting a step and
+        # leaves the job RUNNING indefinitely. Verify the job exits within
+        # a grace period, and escalate to a plain scancel (Slurm's own
+        # TERM -> KillWait -> KILL sequence) if it does not.
+        if _wait_for_job_states(client, cluster_name_on_cloud,
+                                _EXITING_JOB_STATES,
+                                _TERMINATION_GRACE_PERIOD_SECONDS):
+            return
+        logger.warning(
+            f'Job for cluster {cluster_name_on_cloud} did not exit within '
+            f'{_TERMINATION_GRACE_PERIOD_SECONDS}s of the termination '
+            'signal. Escalating to a full cancellation; the cleanup in the '
+            'batch script may be cut short, which can leave SkyPilot runtime '
+            'directories behind on the nodes.')
+        client.cancel_jobs_by_name(cluster_name_on_cloud)
+        # The plain scancel moves the job to COMPLETING while Slurm runs
+        # its TERM -> KillWait -> KILL sequence, so here require the job to
+        # actually leave the queue: a job wedged in COMPLETING (typically
+        # non-killable processes) still holds the allocation and must be
+        # reported, not treated as success.
+        if not _wait_for_job_states(client, cluster_name_on_cloud,
+                                    _TERMINAL_JOB_STATES,
+                                    _JOB_TERMINATION_TIMEOUT_SECONDS):
+            raise RuntimeError(
+                f'Slurm job for cluster {cluster_name_on_cloud} is still '
+                f'running {_JOB_TERMINATION_TIMEOUT_SECONDS}s after scancel. '
+                'The allocation may be leaked; check squeue and cancel the '
+                'job manually if needed.')
 
 
 def open_ports(
@@ -1109,6 +1266,7 @@ def get_command_runners(
     # collisions between different Slurm clusters.
     ssh_control_name = command_runner.DEFAULT_SSH_CONTROL_NAME
 
+    slurm_user = provider_config.get('slurm_user')
     client = slurm.SlurmClient(
         login_node_ssh_hostname,
         login_node_ssh_port,
@@ -1117,6 +1275,7 @@ def get_command_runners(
         ssh_proxy_command=login_node_ssh_proxy_command,
         ssh_proxy_jump=login_node_ssh_proxy_jump,
         identities_only=login_node_identities_only,
+        slurm_user=slurm_user,
     )
     remote_home_dir = client.get_remote_home_dir()
 
@@ -1165,6 +1324,7 @@ def get_command_runners(
             ssh_proxy_command=login_node_ssh_proxy_command,
             ssh_control_name=ssh_control_name,
             container_args=container_args,
+            slurm_user=slurm_user,
             enable_interactive_auth=True,
             # Allow ssh-agent and default key fallback for Slurm.
             disable_identities_only=True) for instance_info in instances

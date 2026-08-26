@@ -8,6 +8,7 @@ from sky import logs
 from sky import resources
 from sky import skypilot_config
 from sky.backends import backend_utils
+from sky.catalog import gcp_catalog
 from sky.clouds import Region
 from sky.clouds import Zone
 from sky.clouds.gcp import GCP
@@ -15,8 +16,44 @@ from sky.clouds.utils import gcp_utils
 from sky.provision import common
 from sky.provision.gcp import config as gcp_config
 from sky.provision.gcp import constants as gcp_constants
+from sky.provision.gcp import volume_utils as gcp_volume_utils
 from sky.utils import common_utils
 from sky.utils import config_utils
+from sky.utils import resources_utils
+
+
+def test_gcp_rtxpro6000_instance_type_mapping():
+    # RTXPRO6000 (GCP G4) maps to g4-standard-{48,96,192,384} for 1/2/4/8 GPUs.
+    assert gcp_catalog._ACC_INSTANCE_TYPE_DICTS['RTXPRO6000'] == {
+        1: ['g4-standard-48'],
+        2: ['g4-standard-96'],
+        4: ['g4-standard-192'],
+        8: ['g4-standard-384'],
+    }
+    expected = {
+        'g4-standard-48': 1,
+        'g4-standard-96': 2,
+        'g4-standard-192': 4,
+        'g4-standard-384': 8,
+    }
+    for instance_type, count in expected.items():
+        assert gcp_catalog._INSTANCE_TYPE_TO_ACC[instance_type] == {
+            'RTXPRO6000': count,
+        }
+
+
+@pytest.mark.parametrize(
+    'instance_type',
+    ['g4-standard-48', 'g4-standard-96', 'g4-standard-192', 'g4-standard-384'])
+def test_gcp_g4_uses_hyperdisk_balanced(instance_type):
+    # G4 only supports hyperdisk-balanced (no pd-* support), like n4/a4.
+    tier2name = gcp_volume_utils.get_data_disk_tier_mapping(instance_type)
+    for tier in resources_utils.DiskTier:
+        if tier == resources_utils.DiskTier.BEST:
+            continue
+        assert tier2name[tier] == 'hyperdisk-balanced', (
+            f'{instance_type} tier {tier.value} should be hyperdisk-balanced, '
+            f'got {tier2name[tier]}')
 
 
 @pytest.mark.parametrize((

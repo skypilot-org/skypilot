@@ -5,6 +5,7 @@ import functools
 import os
 import pathlib
 import queue as queue_lib
+import threading
 import time
 from typing import List
 from unittest import mock
@@ -796,7 +797,12 @@ class _RecordingCondition(continue_condition_lib.ContinueCondition):
         self._verdict = verdict
         self.calls = []
 
-    def wait(self, *, is_cancelled, fallback_wait_seconds) -> bool:
+    def wait(self,
+             *,
+             is_cancelled,
+             fallback_wait_seconds,
+             update_status_msg=None) -> bool:
+        del update_status_msg  # This condition reports no reason.
         self.calls.append({
             'is_cancelled': is_cancelled(),
             'fallback_wait_seconds': fallback_wait_seconds,
@@ -869,6 +875,144 @@ def test_pause_base_condition_dropped_if_cancelled_during_wait(
     assert pause_harness.queue_items == []
 
 
+class _ReportingCondition(continue_condition_lib.ContinueCondition):
+    """A condition that pushes fresh reasons while parked."""
+
+    def __init__(self, reasons, before_report=None):
+        self._reasons = reasons
+        self._before_report = before_report
+        self.got_updater = None
+
+    def wait(self,
+             *,
+             is_cancelled,
+             fallback_wait_seconds,
+             update_status_msg=None) -> bool:
+        del is_cancelled, fallback_wait_seconds
+        self.got_updater = update_status_msg
+        if self._before_report is not None:
+            self._before_report()
+        for reason in self._reasons:
+            assert update_status_msg is not None
+            update_status_msg(reason)
+        return True
+
+
+def test_pause_status_msg_refreshed_while_parked(pause_harness):
+    """A parked request's status message follows the condition's latest reason.
+
+    A pause can last hours (e.g. waiting on queue admission), so the message
+    the client is shown must not be frozen at the one written when the request
+    parked. The scheduler owns the formatting, so the refreshed message carries
+    the same suffix as the initial one.
+    """
+    condition = _ReportingCondition(
+        reasons=['Pending (Queue: q, Position: 4)', 'Pending (Queue: q)'])
+
+    pause_harness.run(condition, retry_wait_seconds=30)
+
+    assert condition.got_updater is not None
+    updated = requests_lib.get_request(pause_harness.request_id,
+                                       fields=['status_msg'])
+    # The last reason wins, formatted exactly like the initial message.
+    assert updated.status_msg == 'Pending (Queue: q) (waiting to resume)'
+
+
+def test_pause_status_msg_refresh_skipped_once_not_waiting(pause_harness):
+    """A late refresh must not resurrect a parked message.
+
+    The wait runs concurrently with cancellation (and with the resume that
+    follows it), so a reason arriving after the request left WAITING must be
+    dropped rather than overwrite the newer state's message.
+    """
+
+    def cancel():
+        with requests_lib.update_request(pause_harness.request_id) as request:
+            request.status = requests_lib.RequestStatus.CANCELLED
+            request.status_msg = 'cancelled by user'
+
+    condition = _ReportingCondition(reasons=['Pending (Queue: q, Position: 4)'],
+                                    before_report=cancel)
+
+    pause_harness.run(condition, retry_wait_seconds=30)
+
+    updated = requests_lib.get_request(pause_harness.request_id,
+                                       fields=['status_msg'])
+    assert updated.status_msg == 'cancelled by user'
+
+
+def test_pause_status_msg_reason_truncated(pause_harness):
+    """A long reason is truncated but keeps the suffix readable."""
+    condition = _ReportingCondition(reasons=['x' * 500])
+
+    pause_harness.run(condition, retry_wait_seconds=30)
+
+    updated = requests_lib.get_request(pause_harness.request_id,
+                                       fields=['status_msg'])
+    assert updated.status_msg.endswith('... (waiting to resume)')
+    assert len(updated.status_msg) < 250
+
+
+class _LegacyWaitCondition:
+    """A duck-typed condition whose wait() predates update_status_msg."""
+
+    def __init__(self):
+        self.calls = []
+
+    def wait(self, *, is_cancelled, fallback_wait_seconds) -> bool:
+        self.calls.append(fallback_wait_seconds)
+        del is_cancelled
+        return True
+
+
+class _KwargsWaitCondition:
+    """A duck-typed condition that absorbs unknown kwargs."""
+
+    def __init__(self):
+        self.kwargs = []
+
+    def wait(self, *, is_cancelled, fallback_wait_seconds, **kwargs) -> bool:
+        del is_cancelled, fallback_wait_seconds
+        self.kwargs.append(sorted(kwargs))
+        return True
+
+
+def test_pause_tolerates_condition_wait_without_the_new_kwarg(pause_harness):
+    """A condition from a separately versioned package still waits normally.
+
+    The continue-condition contract is duck-typed, so an implementation whose
+    wait() predates update_status_msg must keep parking the request rather than
+    failing the call and degrading to a fixed-backoff retry loop.
+    """
+    condition = _LegacyWaitCondition()
+
+    request_element = pause_harness.run(condition, retry_wait_seconds=30)
+
+    assert condition.calls == [30]
+    assert pause_harness.queue_items == [request_element]
+
+
+def test_pause_passes_the_new_kwarg_to_a_kwargs_absorbing_wait(pause_harness):
+    """A wait() with **kwargs is given the updater rather than skipped."""
+    condition = _KwargsWaitCondition()
+
+    pause_harness.run(condition, retry_wait_seconds=30)
+
+    assert condition.kwargs == [['update_status_msg']]
+
+
+@pytest.mark.parametrize(('reason', 'suffix', 'expected'), [
+    ('Pending (Queue: q)', 'waiting to resume',
+     'Pending (Queue: q) (waiting to resume)'),
+    ('multi\nline   reason', 'retrying in 5s',
+     'multi line reason (retrying in 5s)'),
+    ('', 'waiting to resume', 'Waiting to resume'),
+])
+def test_waiting_status_msg_formatting(reason, suffix, expected):
+    """Whitespace is collapsed, and an empty reason leaves just the suffix."""
+    assert executor._waiting_status_msg(reason, suffix) == expected
+
+
 def test_pause_marks_executor_free_before_wait(pause_harness, monkeypatch):
     """The freed worker process is accounted for before the pause wait runs.
 
@@ -890,8 +1034,12 @@ def test_pause_marks_executor_free_before_wait(pause_harness, monkeypatch):
 
     class _GaugeWatchingCondition(continue_condition_lib.ContinueCondition):
 
-        def wait(self, *, is_cancelled, fallback_wait_seconds) -> bool:
-            del is_cancelled, fallback_wait_seconds
+        def wait(self,
+                 *,
+                 is_cancelled,
+                 fallback_wait_seconds,
+                 update_status_msg=None) -> bool:
+            del is_cancelled, fallback_wait_seconds, update_status_msg
             inc_count_at_wait.append(gauge.inc.call_count)
             return True
 
@@ -904,6 +1052,64 @@ def test_pause_marks_executor_free_before_wait(pause_harness, monkeypatch):
     assert gauge.inc.call_count == 1
     # Sanity: the request still rescheduled as before.
     assert pause_harness.queue_items == [request_element]
+
+
+def test_monitor_thread_start_failure_returns_the_slot(pause_harness,
+                                                       monkeypatch):
+    """A monitor thread that never starts must not leak a free-executor slot.
+
+    handle_task_result, which runs in that thread, owns the increment matching
+    process_request()'s decrement. If the thread never starts the slot is gone
+    for the lifetime of the process, and enough of these drive the gauge
+    negative - indistinguishable from a genuine request backlog.
+    """
+    gauge = mock.Mock()
+    monkeypatch.setattr(executor.metrics_utils, 'METRICS_ENABLED', True)
+    monkeypatch.setattr(executor.metrics_utils, 'SKY_APISERVER_LONG_EXECUTORS',
+                        gauge)
+
+    class _UnstartableThread:
+
+        def start(self):
+            raise RuntimeError("can't start new thread")
+
+    real_thread = executor.threading.Thread
+
+    def _thread_factory(*args, **kwargs):
+        # Only the monitor thread is made unstartable; anything else the
+        # request path spawns must keep working.
+        if kwargs.get('target') == pause_harness.worker.handle_task_result:
+            return _UnstartableThread()
+        return real_thread(*args, **kwargs)
+
+    monkeypatch.setattr(executor.threading, 'Thread', _thread_factory)
+
+    class _MockExecutor:
+
+        def submit_until_success(self, fn, *args, **kwargs):
+            del fn, args, kwargs
+            fut = concurrent.futures.Future()
+            fut.set_result(None)
+            return fut
+
+    class _OneShotQueue:
+
+        def __init__(self, item):
+            self._item = item
+
+        def get(self):
+            item, self._item = self._item, None
+            return item
+
+    request_queue = _OneShotQueue((pause_harness.request_id, False, True))
+
+    # The thread failure is still swallowed by process_request's handler, so
+    # the dispatcher loop survives it - only the accounting must be repaired.
+    pause_harness.worker.process_request(_MockExecutor(), request_queue)
+
+    # Assert the invariant, not where the decrement sits: a failed monitor
+    # thread must leave the gauge net-zero either way.
+    assert gauge.dec.call_count == gauge.inc.call_count
 
 
 def test_resolve_blob_valid(tmp_path, monkeypatch):
@@ -1327,3 +1533,68 @@ def test_resolution_log_silent_for_bare_launch_without_prefix(
     assert not [m for m in info_calls if 'Using workspace' in m], (
         f'bare `launch` (without prefix) must not match the whitelist; '
         f'got: {info_calls}')
+
+
+def _reset_thread_executors():
+    """Drop both cached per-process executors so each test starts clean."""
+    # pylint: disable=protected-access
+    executor._REQUEST_THREAD_EXECUTOR = None
+    executor._AUTH_THREAD_EXECUTOR = None
+
+
+def test_auth_and_request_executors_are_distinct():
+    _reset_thread_executors()
+    try:
+        request_executor = executor.get_request_thread_executor()
+        auth_executor = executor.get_auth_thread_executor()
+        assert request_executor is not auth_executor
+        assert request_executor.name != auth_executor.name
+        # Each getter still memoizes per process.
+        assert executor.get_request_thread_executor() is request_executor
+        assert executor.get_auth_thread_executor() is auth_executor
+    finally:
+        _reset_thread_executors()
+
+
+def test_saturating_request_executor_does_not_block_auth():
+    """The point of the split: streaming work filling the request executor
+    must not make authentication fail.
+
+    Before the split both shared one pool, so enough long-lived streams
+    starved the auth lookups that run on every request and the server
+    answered 503 to traffic that had nothing to do with streaming.
+    """
+    _reset_thread_executors()
+    release = threading.Event()
+    futures = []
+    try:
+        # Shrink the request pool for the duration: what matters is that it
+        # reaches *its* limit, not how big that limit is. Filling the real 128
+        # would spawn 128 threads inside a test worker, which under `pytest
+        # -n` starves the whole run -- enough to push neighbouring tests past
+        # their own timeouts.
+        with mock.patch.object(executor, '_REQUEST_THREADS_LIMIT', 4):
+            request_executor = executor.get_request_thread_executor()
+        auth_executor = executor.get_auth_thread_executor()
+        assert request_executor.max_workers == 4
+
+        # Fill the request executor to its limit with tasks that do not finish,
+        # standing in for in-flight log streams.
+        for _ in range(request_executor.max_workers):
+            futures.append(request_executor.submit(release.wait, 10))
+
+        # It is now full: one more task is rejected.
+        with pytest.raises(exceptions.ConcurrentWorkerExhaustedError):
+            request_executor.submit(release.wait, 10)
+
+        # Auth is unaffected and still serves requests.
+        assert auth_executor.submit(lambda: 'ok').result(timeout=5) == 'ok'
+        assert auth_executor.check_available() >= 0
+    finally:
+        release.set()
+        for fut in futures:
+            try:
+                fut.result(timeout=5)
+            except Exception:  # pylint: disable=broad-except
+                pass
+        _reset_thread_executors()

@@ -1,5 +1,6 @@
 """Unit tests for sky.server.requests.requests module."""
 import asyncio
+import json
 import logging
 import pathlib
 import time
@@ -15,6 +16,7 @@ from sky.server.requests import payloads
 from sky.server.requests import requests
 from sky.server.requests.requests import RequestStatus
 from sky.server.requests.requests import ScheduleType
+from sky.server.requests.serializers import decoders
 from sky.server.requests.serializers import encoders
 
 
@@ -1274,20 +1276,20 @@ def test_requests_filter():
         status=[RequestStatus.PENDING, RequestStatus.RUNNING], sort=True)
     sql, params = filter_status.build_query()
     expected_sql = (f'SELECT {expected_columns} FROM {requests.REQUEST_TABLE} '
-                    'WHERE status IN (\'PENDING\',\'RUNNING\') '
+                    'WHERE status IN (?,?) '
                     'ORDER BY created_at DESC')
     assert sql == expected_sql
-    assert params == []
+    assert params == ['PENDING', 'RUNNING']
 
     # Test cluster_names filter
     filter_clusters = requests.RequestTaskFilter(
         cluster_names=['cluster1', 'cluster2'], sort=True)
     sql, params = filter_clusters.build_query()
     expected_sql = (f'SELECT {expected_columns} FROM {requests.REQUEST_TABLE} '
-                    'WHERE cluster_name IN (\'cluster1\',\'cluster2\') '
+                    'WHERE cluster_name IN (?,?) '
                     'ORDER BY created_at DESC')
     assert sql == expected_sql
-    assert params == []
+    assert params == ['cluster1', 'cluster2']
 
     # Test user_id filter (uses parameterized query)
     filter_user = requests.RequestTaskFilter(user_id='test-user-123', sort=True)
@@ -1302,20 +1304,20 @@ def test_requests_filter():
         exclude_request_names=['request1', 'request2'], sort=True)
     sql, params = filter_exclude.build_query()
     expected_sql = (f'SELECT {expected_columns} FROM {requests.REQUEST_TABLE} '
-                    'WHERE name NOT IN (\'request1\',\'request2\') '
+                    'WHERE name NOT IN (?,?) '
                     'ORDER BY created_at DESC')
     assert sql == expected_sql
-    assert params == []
+    assert params == ['request1', 'request2']
 
     # Test include_request_names filter
     filter_include = requests.RequestTaskFilter(
         include_request_names=['request3', 'request4'], sort=True)
     sql, params = filter_include.build_query()
     expected_sql = (f'SELECT {expected_columns} FROM {requests.REQUEST_TABLE} '
-                    'WHERE name IN (\'request3\',\'request4\') '
+                    'WHERE name IN (?,?) '
                     'ORDER BY created_at DESC')
     assert sql == expected_sql
-    assert params == []
+    assert params == ['request3', 'request4']
 
     # Test finished_before filter (uses parameterized query)
     timestamp = 1234567890.0
@@ -1337,13 +1339,17 @@ def test_requests_filter():
         sort=True)
     sql, params = filter_combined.build_query()
     expected_sql = (f'SELECT {expected_columns} FROM {requests.REQUEST_TABLE} '
-                    'WHERE status IN (\'SUCCEEDED\',\'FAILED\') AND '
-                    'name NOT IN (\'internal-task\') AND '
-                    'cluster_name IN (\'prod-cluster\') AND '
+                    'WHERE status IN (?,?) AND '
+                    'name NOT IN (?) AND '
+                    'cluster_name IN (?) AND '
                     'user_id = ? AND finished_at < ? '
                     'ORDER BY created_at DESC')
     assert sql == expected_sql
-    assert params == ['admin-user', 9876543210.0]
+    # Parameter order must match placeholder order in the SQL above.
+    assert params == [
+        'SUCCEEDED', 'FAILED', 'internal-task', 'prod-cluster', 'admin-user',
+        9876543210.0
+    ]
 
     # Test mutually exclusive filters raise ValueError
     with pytest.raises(ValueError, match='Only one of exclude_request_names'):
@@ -1351,17 +1357,55 @@ def test_requests_filter():
                                    include_request_names=['req2'],
                                    sort=True)
 
-    # Test special characters in names are properly escaped with repr()
+    # Names with quotes are bound as parameters, never interpolated. repr()
+    # was previously used here, which emitted a double-quoted value -- a
+    # SQL *identifier*, not a string literal.
     filter_special_chars = requests.RequestTaskFilter(
         cluster_names=['cluster\'with\'quotes', 'cluster\"with\"double'],
         sort=True)
     sql, params = filter_special_chars.build_query()
-    # repr() should properly escape the quotes
     expected_sql = (f'SELECT {expected_columns} FROM {requests.REQUEST_TABLE} '
-                    'WHERE cluster_name IN (\"cluster\'with\'quotes\",'
-                    '\'cluster\"with\"double\') ORDER BY created_at DESC')
+                    'WHERE cluster_name IN (?,?) ORDER BY created_at DESC')
     assert sql == expected_sql
-    assert params == []
+    assert params == ['cluster\'with\'quotes', 'cluster\"with\"double']
+    # The values themselves must not appear in the SQL text at all.
+    assert 'with\'quotes' not in sql
+    assert 'with\"double' not in sql
+
+
+def test_validate_fields_rejects_injection():
+    """`fields` reaches the SELECT list by interpolation -- allowlist it."""
+    # Every known column is accepted.
+    requests.validate_fields(requests.REQUEST_COLUMNS)
+    requests.validate_fields(['request_id', 'status'])
+    # None/empty mean "all columns".
+    requests.validate_fields(None)
+    requests.validate_fields([])
+
+    injections = [
+        'request_id) FROM requests--',
+        '(SELECT 1)',
+        'request_id, (SELECT user_id FROM requests LIMIT 1)',
+        '*',
+        'request_id;DROP TABLE requests',
+        'rowid',
+    ]
+    for payload in injections:
+        with pytest.raises(ValueError, match='Unknown request field'):
+            requests.validate_fields([payload])
+        # Also rejected when smuggled alongside a valid column.
+        with pytest.raises(ValueError, match='Unknown request field'):
+            requests.validate_fields(['request_id', payload])
+
+
+def test_requests_filter_rejects_bad_fields():
+    """RequestTaskFilter validates `fields` for every caller, at construction."""
+    filter_ok = requests.RequestTaskFilter(fields=['request_id', 'status'])
+    sql, _ = filter_ok.build_query()
+    assert sql.startswith('SELECT request_id, status FROM')
+
+    with pytest.raises(ValueError, match='Unknown request field'):
+        requests.RequestTaskFilter(fields=['request_id) FROM requests--'])
 
 
 def test_encode_requests_empty_list():
@@ -2015,3 +2059,301 @@ def test_decode_tolerates_unresolvable_entrypoint(monkeypatch):
     assert decoded.request_id == 'down-req'
     assert decoded.name == 'down'
     assert decoded.status == RequestStatus.SUCCEEDED
+
+
+def test_request_id_where_matches_like():
+    """The clause matches exactly the ids `LIKE prefix || '%'` would.
+
+    Also asserts a full-length id uses an exact `=` and a shorter string uses
+    the indexed range.
+    """
+    import sqlite3
+    import uuid
+    conn = sqlite3.connect(':memory:')
+    conn.execute('CREATE TABLE requests (request_id TEXT PRIMARY KEY)')
+    rows = [str(uuid.uuid4()) for _ in range(500)]
+    # Craft ids that stress the prefix upper-bound (chars near '9'/'f'/'-').
+    rows += ['ab9', 'ab9a', 'abaa', 'de-', 'de-x', 'deadbeef']
+    for r in rows:
+        conn.execute('INSERT OR IGNORE INTO requests VALUES (?)', (r,))
+    # '\U0010ffff' exercises the max-code-point upper-bound fallback.
+    for prefix in [
+            'a', 'ab9', 'de-', '9', 'f', rows[0], rows[0][:8], '\U0010ffff',
+            'a\U0010ffff'
+    ]:
+        like = {
+            x[0] for x in conn.execute(
+                'SELECT request_id FROM requests WHERE request_id LIKE ?', (
+                    prefix + '%',))
+        }
+        where, params = requests._request_id_where(prefix)
+        rng = {
+            x[0] for x in conn.execute(
+                f'SELECT request_id FROM requests WHERE {where}', params)
+        }
+        assert like == rng, prefix
+
+    # A full-length (>=36 char) id uses an exact `=`; a shorter string uses the
+    # indexed prefix range.
+    assert requests._request_id_where(rows[0]) == ('request_id = ?', (rows[0],))
+    where, _ = requests._request_id_where(rows[0][:8])
+    assert where == 'request_id >= ? AND request_id < ?'
+    # An empty id is never a valid lookup key.
+    with pytest.raises(ValueError):
+        requests._request_id_where('')
+
+
+@pytest.mark.asyncio
+async def test_request_id_lookup_uses_index(isolated_database):
+    """Request-id lookups must use the PK index, not a full table scan.
+
+    Regression test for the requests-DB full-table-scan: `get_request` /
+    `get_request_status_async` ran `WHERE request_id LIKE ?`, which SQLite
+    could not satisfy with the primary-key index (default case-insensitive
+    LIKE on a BINARY-collated key) and so scanned the whole table.
+    """
+    ids = [
+        '11111111-1111-1111-1111-111111111111',
+        '11111111-2222-2222-2222-222222222222',
+        'ffffffff-ffff-ffff-ffff-ffffffffffff',
+    ]
+    for rid in ids:
+        await requests.create_if_not_exists_async(
+            requests.Request(request_id=rid,
+                             name='n',
+                             entrypoint=dummy,
+                             request_body=payloads.RequestBody(),
+                             status=RequestStatus.RUNNING,
+                             created_at=0.0,
+                             finished_at=0.0,
+                             user_id='u'))
+
+    # Full id -> exactly one; shared prefix -> both; miss -> None.
+    got = await requests.get_request_async(ids[0])
+    assert got is not None and got.request_id == ids[0]
+    status = await requests.get_request_status_async(ids[0])
+    assert status is not None and status.status == RequestStatus.RUNNING
+    both = await requests.get_requests_async_with_prefix('11111111-')
+    assert {r.request_id for r in both} == {ids[0], ids[1]}
+    assert await requests.get_request_async('no-such-id') is None
+    # Empty-input shell completion lists recent ids (must not raise on '').
+    all_ids = await requests.get_api_request_ids_start_with('')
+    assert set(ids).issubset(set(all_ids))
+
+    # The generated query must use the index (SEARCH), not a full SCAN.
+    where, params = requests._request_id_where(ids[0])
+    plan = requests._DB.conn.execute(
+        f'EXPLAIN QUERY PLAN SELECT status FROM {requests.REQUEST_TABLE} '
+        f'WHERE {where}', params).fetchall()
+    plan_text = ' '.join(str(row) for row in plan)
+    assert 'SEARCH' in plan_text and 'SCAN' not in plan_text, plan_text
+
+
+@pytest.mark.asyncio
+async def test_interrupt_request_for_retry_records_terminal_error(
+        isolated_database):
+    """Interrupting a request records a terminal error.
+
+    Interrupted requests are never re-executed after a server restart, so
+    the stored error lets /api/get fail definitively (telling the client to
+    re-submit the original request) instead of serving a retryable 503
+    forever.
+    """
+    from sky import exceptions
+    from sky.server import uvicorn as sky_uvicorn
+
+    request = requests.Request(request_id='interrupt-me',
+                               name='test-request',
+                               entrypoint=dummy,
+                               request_body=payloads.RequestBody(),
+                               status=RequestStatus.RUNNING,
+                               created_at=time.time(),
+                               user_id='test-user')
+    assert await requests.create_if_not_exists_async(request)
+
+    # The method does not use self beyond being an instance method.
+    sky_uvicorn.Server.interrupt_request_for_retry(mock.MagicMock(),
+                                                   'interrupt-me')
+
+    interrupted = requests.get_request('interrupt-me')
+    assert interrupted is not None
+    assert interrupted.status == RequestStatus.CANCELLED
+    assert interrupted.should_retry is True
+    # finished_at must be stamped, otherwise retention cleanup
+    # (finished_at < cutoff) never garbage-collects the row.
+    assert interrupted.finished_at is not None
+    error = interrupted.get_error()
+    assert error is not None
+    assert isinstance(error['object'], exceptions.RequestInterruptedError)
+
+
+@pytest.mark.asyncio
+async def test_interrupt_request_without_retry_records_plain_cancellation(
+        isolated_database):
+    """should_retry=False marks the interrupt as a plain terminal
+    cancellation: no re-submit signal on /api/stream (Control.RETRY), just
+    the stored error. Used for requests whose client-side retry unit can
+    only re-attach the same dead request id (e.g. sky.launch at the
+    shutdown drain timeout)."""
+    from sky import exceptions
+    from sky.server import uvicorn as sky_uvicorn
+
+    request = requests.Request(request_id='interrupt-no-retry',
+                               name='sky.launch',
+                               entrypoint=dummy,
+                               request_body=payloads.RequestBody(),
+                               status=RequestStatus.RUNNING,
+                               created_at=time.time(),
+                               user_id='test-user')
+    assert await requests.create_if_not_exists_async(request)
+
+    sky_uvicorn.Server.interrupt_request_for_retry(mock.MagicMock(),
+                                                   'interrupt-no-retry',
+                                                   should_retry=False)
+
+    interrupted = requests.get_request('interrupt-no-retry')
+    assert interrupted is not None
+    assert interrupted.status == RequestStatus.CANCELLED
+    assert interrupted.should_retry is False
+    assert interrupted.finished_at is not None
+    error = interrupted.get_error()
+    assert error is not None
+    assert isinstance(error['object'], exceptions.RequestInterruptedError)
+
+
+# --- Display serializers: request body scoped to the caller -----------------
+
+_SECRET_TASK_YAML = """name: t
+resources:
+  cloud: aws
+envs:
+  HF_TOKEN: env-marker-secret
+secrets:
+  WANDB_API_KEY: secret-marker-value
+run: echo hi
+"""
+
+
+def _launch_body_with_secrets():
+    return payloads.LaunchBody(
+        task=_SECRET_TASK_YAML,
+        cluster_name='c',
+        env_vars={'MY_TOKEN': 'env-var-marker'},
+        override_skypilot_config={'aws': {
+            'token': 'CONFIG-MARKER'
+        }})
+
+
+def _make_request(request_id: str, body) -> requests.Request:
+    return requests.Request(request_id=request_id,
+                            name='sky.launch',
+                            entrypoint=dummy,
+                            request_body=body,
+                            status=RequestStatus.SUCCEEDED,
+                            created_at=0.0,
+                            user_id='alice')
+
+
+def _assert_full(request_body: str):
+    for marker in ('env-marker-secret', 'secret-marker-value', 'CONFIG-MARKER',
+                   'env-var-marker'):
+        assert marker in request_body, f'{marker!r} missing from owner body'
+
+
+def test_encode_owner_path_keeps_real_values():
+    """Request.encode() (the /api/get owner path) is never scoped/dropped."""
+    request = _make_request('display-owner-1', _launch_body_with_secrets())
+    encoded = request.encode()
+    decoded_body = decoders.decode_and_unpickle(encoded.request_body)
+    assert 'env-marker-secret' in decoded_body.task
+    assert 'secret-marker-value' in decoded_body.task
+    assert decoded_body.override_skypilot_config == {
+        'aws': {
+            'token': 'CONFIG-MARKER'
+        }
+    }
+
+
+@pytest.mark.asyncio
+async def test_readable_encode_scopes_to_caller(isolated_database):
+    request = _make_request('display-readable-1', _launch_body_with_secrets())
+    await requests.create_if_not_exists_async(request)
+    row = requests.get_request('display-readable-1')
+    # Owner (caller == owner) and no-auth (caller None) get the full body.
+    _assert_full(row.readable_encode(caller_user_id='alice').request_body)
+    _assert_full(row.readable_encode(caller_user_id=None).request_body)
+    # Any other caller (e.g. an admin listing everyone) gets no body at all.
+    other = row.readable_encode(caller_user_id='some-admin')
+    assert other.request_body == json.dumps(None)
+
+
+def test_encode_requests_scopes_to_caller():
+    """The other listing serializer (GET /api/status without request_ids)."""
+    request = _make_request('display-listing-1', _launch_body_with_secrets())
+    with mock.patch('sky.global_user_state.get_all_users', return_value=[]):
+        _assert_full(
+            requests.encode_requests([request],
+                                     caller_user_id='alice')[0].request_body)
+        other = requests.encode_requests([request],
+                                         caller_user_id='some-admin')[0]
+        assert other.request_body == json.dumps(None)
+
+
+def test_encode_requests_omits_body_when_owner_unknown():
+    """Fail-safe: an unknown (blanked) owner is not the caller, so no body."""
+    request = _make_request('display-listing-2', _launch_body_with_secrets())
+    request.user_id = ''  # user_id excluded from the fetched fields
+    with mock.patch('sky.global_user_state.get_all_users', return_value=[]):
+        payload = requests.encode_requests([request], caller_user_id='bob')[0]
+    assert payload.request_body == json.dumps(None)
+
+
+@pytest.mark.asyncio
+async def test_kill_requests_scoped_by_user(isolated_database):
+    """kill_requests with an explicit request_ids list must still honor the
+    user_id scope, so a caller cannot cancel another user's request."""
+    alice = requests.Request(request_id='kill-alice-1',
+                             name='sky.launch',
+                             entrypoint=dummy,
+                             request_body=payloads.RequestBody(),
+                             status=RequestStatus.RUNNING,
+                             created_at=0.0,
+                             pid=None,
+                             user_id='alice')
+    bob = requests.Request(request_id='kill-bob-1',
+                           name='sky.launch',
+                           entrypoint=dummy,
+                           request_body=payloads.RequestBody(),
+                           status=RequestStatus.RUNNING,
+                           created_at=0.0,
+                           pid=None,
+                           user_id='bob')
+    await requests.create_if_not_exists_async(alice)
+    await requests.create_if_not_exists_async(bob)
+
+    # Alice tries to cancel both by explicit id; only her own is cancelled.
+    cancelled = requests.kill_requests(
+        request_ids=['kill-alice-1', 'kill-bob-1'], user_id='alice')
+    assert cancelled == ['kill-alice-1']
+    assert requests.get_request(
+        'kill-alice-1').status == RequestStatus.CANCELLED
+    # Bob's request is untouched.
+    assert requests.get_request('kill-bob-1').status == RequestStatus.RUNNING
+
+
+@pytest.mark.asyncio
+async def test_kill_requests_unscoped_cancels_all(isolated_database):
+    """user_id=None stays privileged (internal shutdown path): cancels all."""
+    for rid, uid in [('shutdown-a', 'alice'), ('shutdown-b', 'bob')]:
+        await requests.create_if_not_exists_async(
+            requests.Request(request_id=rid,
+                             name='sky.launch',
+                             entrypoint=dummy,
+                             request_body=payloads.RequestBody(),
+                             status=RequestStatus.RUNNING,
+                             created_at=0.0,
+                             pid=None,
+                             user_id=uid))
+    cancelled = requests.kill_requests(request_ids=['shutdown-a', 'shutdown-b'],
+                                       user_id=None)
+    assert set(cancelled) == {'shutdown-a', 'shutdown-b'}

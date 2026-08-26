@@ -1,14 +1,38 @@
 """Unit tests for the jobs server queue."""
 import time
 from typing import Any, Dict, List, Optional
+from unittest import mock
 
 import pytest
 
+from sky.jobs import constants as managed_job_constants
 from sky.jobs import state as managed_job_state
 from sky.jobs import utils as jobs_utils
 # Target under test
 from sky.jobs.server import core as jobs_core
 from sky.skylet import constants as skylet_constants
+from sky.workspaces import constants as workspace_constants
+
+
+def _unwrap(fn):
+    while hasattr(fn, '__wrapped__'):
+        fn = fn.__wrapped__
+    return fn
+
+
+def test_v1_queue_handler_defaults_to_lightweight_fields():
+    """The deprecated v1 queue path (core.queue) must narrow fields so old
+    clients hitting /jobs/queue don't trigger a full-payload pull."""
+    raw_queue = _unwrap(jobs_core.queue)
+    with mock.patch.object(jobs_core, 'queue_v2',
+                           return_value=([], 0, {}, 0)) as mock_queue_v2:
+        raw_queue(refresh=False,
+                  skip_finished=False,
+                  all_users=False,
+                  job_ids=None)
+    _, kwargs = mock_queue_v2.call_args
+    assert kwargs['fields'] == list(
+        managed_job_constants.DEFAULT_MANAGED_JOB_FIELDS)
 
 
 def _make_job(job_id: int,
@@ -221,8 +245,11 @@ class TestQueue:
             }
             return {w: {} for w in workspaces}
 
-        def fake_get_accessible_workspace_names():
-            # Match fake_get_workspaces so queue_v2 sees the same workspace set
+        def fake_get_accessible_workspace_names(action):
+            # Match fake_get_workspaces so queue_v2 sees the same workspace set.
+            # The job listing must ask for the READ set, so that a non-member of
+            # a read-only-visible workspace still sees its jobs.
+            assert action == workspace_constants.WORKSPACE_ACTION_READ, action
             return set(fake_get_workspaces().keys())
 
         def fake_get_job_table(skip_finished,
@@ -531,7 +558,8 @@ class TestQueue:
         monkeypatch.setattr(jobs_core.workspaces_core, 'get_workspaces',
                             fake_get_workspaces_only_w1)
         monkeypatch.setattr(jobs_core.workspaces_core,
-                            'get_accessible_workspace_names', lambda: {'w1'})
+                            'get_accessible_workspace_names',
+                            lambda action: {'w1'})
         filtered, total, status_counts, total_no_filter = jobs_core.queue_v2(
             refresh=False,
             skip_finished=False,

@@ -1,5 +1,6 @@
 """SDK functions for cluster/job management."""
 import concurrent.futures
+import json
 import shlex
 import typing
 from typing import Any, Dict, List, Literal, Optional, Tuple, Union
@@ -38,12 +39,14 @@ from sky.utils import common
 from sky.utils import common_utils
 from sky.utils import controller_utils
 from sky.utils import debug_utils
+from sky.utils import log_links
 from sky.utils import resources_utils
 from sky.utils import rich_utils
 from sky.utils import status_lib
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
 from sky.utils.kubernetes import kubernetes_deploy_utils
+from sky.workspaces import constants as workspace_constants
 from sky.workspaces import core as workspaces_core
 
 if typing.TYPE_CHECKING:
@@ -1201,6 +1204,21 @@ def autostop(
 # ==================
 
 
+def _annotate_job_links(jobs: List[Dict[str, Any]]) -> None:
+    """Compute each job's external links from its harvested-URL metadata.
+
+    Matching against the configured dashboard.external_links patterns happens
+    here, server-side, in one place. URLs are harvested into job metadata by the
+    cluster's skylet, so a link is surfaced even if no one streamed the logs.
+    """
+    patterns = log_links.get_patterns()
+    for job in jobs:
+        meta = job.get('metadata') or {}
+        urls = meta.get(log_links.EXTRACTED_URLS_METADATA_KEY)
+        job['links'] = (log_links.match_links(urls, patterns)
+                        if patterns and isinstance(urls, list) else {})
+
+
 def _get_job_queue(handle: backends.CloudVmRayResourceHandle,
                    backend: backends.CloudVmRayBackend,
                    user_hash: Optional[str],
@@ -1228,11 +1246,14 @@ def _get_job_queue(handle: backends.CloudVmRayResourceHandle,
                     'resources': job_info.resources,
                     'log_path': job_info.log_path,
                     'user_hash': job_info.username,
+                    'metadata': (json.loads(job_info.metadata)
+                                 if job_info.metadata else {}),
                 }
                 # Copied from job_lib.load_job_queue.
                 user = global_user_state.get_user(job_dict['user_hash'])
                 job_dict['username'] = user.name if user is not None else None
                 jobs.append(job_dict)
+            _annotate_job_links(jobs)
             return jobs
         except exceptions.SKYLET_GRPC_FALLBACK_ERRORS as e:
             logger.debug(f'gRPC failed, falling back to SSH: {e}')
@@ -1249,7 +1270,9 @@ def _get_job_queue(handle: backends.CloudVmRayResourceHandle,
         f'{handle.cluster_name}.',
         stderr=f'{jobs_payload + stderr}',
         stream_logs=True)
-    return job_lib.load_job_queue(jobs_payload)
+    jobs = job_lib.load_job_queue(jobs_payload)
+    _annotate_job_links(jobs)
+    return jobs
 
 
 @usage_lib.entrypoint
@@ -1430,10 +1453,24 @@ def tail_logs(cluster_name: str,
 
     """
     # Check the status of the cluster.
-    handle = backend_utils.check_cluster_available(
-        cluster_name,
-        operation='tailing logs',
-    )
+    try:
+        handle = backend_utils.check_cluster_available(
+            cluster_name,
+            operation='tailing logs',
+        )
+    except (exceptions.ClusterNotUpError, exceptions.ClusterDoesNotExist):
+        # The cluster is gone; if a log reader is registered, stream the logs
+        # back from the external store instead.
+        from sky import logs  # pylint: disable=import-outside-toplevel
+        reader = logs.get_log_reader()
+        if reader is not None:
+            returncode = reader.read_cluster_job_logs(cluster_name,
+                                                      job_id,
+                                                      follow=follow,
+                                                      tail=tail)
+            if returncode is not None:
+                return returncode
+        raise
     backend = backend_utils.get_backend_from_handle(handle)
 
     usage_lib.record_cluster_name_for_current_operation(cluster_name)
@@ -1633,8 +1670,16 @@ def enabled_clouds(workspace: Optional[str] = None,
     if workspace is None:
         workspace = skypilot_config.get_active_workspace()
     else:
+        # A read: this only reports which clouds/contexts the workspace has
+        # enabled, so read access is the right level. Requiring write would
+        # deny a workspace the caller can legitimately see (read-only
+        # visibility for non-members), which in turn fails the whole
+        # `enabled_clouds_batch` fan-out below and empties the dashboard's
+        # "Enabled infra" column and Infra page.
         workspaces_core.check_workspace_permission(
-            common_utils.get_current_user(), workspace)
+            common_utils.get_current_user(),
+            workspace,
+            action=workspace_constants.WORKSPACE_ACTION_READ)
     cached_clouds = global_user_state.get_cached_enabled_clouds(
         sky_cloud.CloudCapability.COMPUTE, workspace=workspace)
     with skypilot_config.local_active_workspace_ctx(workspace):
@@ -1906,9 +1951,11 @@ def realtime_slurm_gpu_availability(
 @usage_lib.entrypoint
 def local_up(gpus: bool,
              name: Optional[str] = None,
-             port_start: Optional[int] = None) -> None:
+             port_start: Optional[int] = None,
+             num_nodes: int = 1) -> None:
     """Creates a local cluster."""
-    kubernetes_deploy_utils.deploy_local_cluster(name, port_start, gpus)
+    kubernetes_deploy_utils.deploy_local_cluster(name, port_start, gpus,
+                                                 num_nodes)
 
 
 def local_down(name: Optional[str] = None) -> None:
@@ -1934,7 +1981,8 @@ def create_debug_dump(request_ids: Optional[List[str]] = None,
                       cluster_names: Optional[List[str]] = None,
                       managed_job_ids: Optional[List[int]] = None,
                       recent_minutes: Optional[float] = None,
-                      client_info: Optional[Dict[str, Any]] = None) -> str:
+                      client_info: Optional[Dict[str, Any]] = None,
+                      overall_deadline: Optional[float] = None) -> str:
     """Create a debug dump for troubleshooting.
 
     Args:
@@ -1944,6 +1992,12 @@ def create_debug_dump(request_ids: Optional[List[str]] = None,
         recent_minutes: If specified, include all resources active within
             this many minutes.
         client_info: Optional client-side info to include in the dump.
+        overall_deadline: Optional absolute wall-clock (time.time()) instant to
+            stop the whole collection by; when reached, collection stops early
+            and a partial dump is returned. Passing an absolute deadline lets an
+            out-of-process caller charge already-elapsed time (e.g. executor
+            queue wait) against the budget rather than ignoring it. None means
+            no deadline.
 
     Returns:
         Path to the created zip file on the server.
@@ -1961,7 +2015,8 @@ def create_debug_dump(request_ids: Optional[List[str]] = None,
         cluster_names=cluster_names,
         managed_job_ids=managed_job_ids,
         recent_minutes=recent_minutes,
-        client_info=client_info)
+        client_info=client_info,
+        overall_deadline=overall_deadline)
     logger.info('Debug dump created')
     logger.debug(f'Debug dump path on API server: {debug_dump_path}')
     return str(debug_dump_path)

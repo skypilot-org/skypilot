@@ -803,10 +803,10 @@ class TestGetManagedJobsWithFilters:
 
 
 class TestGetLatestRecoveryReasons:
-    """Tests for get_latest_recovery_reasons."""
+    """Recovery-reason coverage via get_latest_recovery_and_pending_reasons."""
 
     def test_empty_job_ids(self, _mock_managed_jobs_db_conn):
-        assert state.get_latest_recovery_reasons([]) == {}
+        assert state.get_latest_recovery_and_pending_reasons([], [])[0] == {}
 
     def test_latest_reason_wins_and_filters(self, _mock_managed_jobs_db_conn):
         early = datetime.datetime(2026, 1, 1, 0, 0, 0)
@@ -839,7 +839,7 @@ class TestGetLatestRecoveryReasons:
                             state.ManagedJobStatus.RECOVERING,
                             'unrelated',
                             timestamp=late)
-        result = state.get_latest_recovery_reasons([1, 2])
+        result = state.get_latest_recovery_and_pending_reasons([1, 2], [])[0]
         assert result == {
             1: 'OOMKilled (exit code 137)',
             2: 'preempted',
@@ -860,12 +860,141 @@ class TestGetLatestRecoveryReasons:
                             state.ManagedJobStatus.RECOVERING,
                             '',
                             timestamp=late)
-        assert state.get_latest_recovery_reasons([1]) == {1: 'real reason'}
+        assert state.get_latest_recovery_and_pending_reasons([1], [])[0] == {
+            1: 'real reason'
+        }
 
     def test_no_recovering_events_returns_empty(self,
                                                 _mock_managed_jobs_db_conn):
         state.add_job_event(1, 0, state.ManagedJobStatus.RUNNING, 'running')
-        assert state.get_latest_recovery_reasons([1]) == {}
+        assert state.get_latest_recovery_and_pending_reasons([1], [])[0] == {}
+
+
+class TestSetRecoveringEventReason:
+    """Reason/code selection for the RECOVERING event in set_recovering_async.
+
+    Priority: external failures (plugin-reported), then a user-job failure
+    reason (non-zero exit on a healthy cluster, SKY-6411), then the last
+    cluster event, then the generic preemption fallback.
+    """
+
+    async def _run(self, **kwargs):
+        with mock.patch.object(state, 'add_job_event_async',
+                               new=mock.AsyncMock()) as mock_add_event, \
+             mock.patch.object(state, '_retry_task_status_update',
+                               new=mock.AsyncMock()):
+            await state.set_recovering_async(job_id=1,
+                                             task_id=0,
+                                             force_transit_to_recovering=False,
+                                             callback_func=mock.AsyncMock(),
+                                             **kwargs)
+        args = mock_add_event.await_args.args
+        # add_job_event_async(job_id, task_id, status, reason, code, ...)
+        return args[3], args[4]
+
+    @pytest.mark.asyncio
+    async def test_user_job_failure_reason_used(self):
+        reason, code = await self._run(
+            user_job_failure_reason='Job exited with exit code 1')
+        assert reason == 'Job exited with exit code 1'
+        assert code == state.USER_JOB_FAILURE_EVENT_CODE
+
+    @pytest.mark.asyncio
+    async def test_user_job_failure_wins_over_cluster_event(self):
+        reason, _ = await self._run(
+            cluster_event_reason='some cluster event',
+            user_job_failure_reason='Job exited with exit code 1')
+        assert reason == 'Job exited with exit code 1'
+
+    @pytest.mark.asyncio
+    async def test_external_failures_win_over_user_job_failure(self):
+        failures = [
+            state.ExternalClusterFailure(code='GPU_ERR', reason='gpu died')
+        ]
+        reason, code = await self._run(
+            external_failures=failures,
+            user_job_failure_reason='Job exited with exit code 1')
+        assert reason == 'gpu died'
+        assert code == 'GPU_ERR'
+
+    @pytest.mark.asyncio
+    async def test_default_reason_unchanged(self):
+        reason, code = await self._run()
+        assert reason == 'Cluster preempted or failed, recovering'
+        assert code is None
+
+
+class TestSetFailedEventCode:
+    """set_failed_async stamps USER_JOB_FAILURE only for user-error types.
+
+    FAILED and FAILED_SETUP mean the user's own program or setup command
+    failed; controller/infra/resource failure types must not carry the code.
+    """
+
+    async def _run(self, failure_type):
+        with mock.patch.object(state, 'add_job_event_async',
+                               new=mock.AsyncMock()) as mock_add_event, \
+             mock.patch.object(state, '_retry_session',
+                               new=mock.AsyncMock(return_value=True)):
+            await state.set_failed_async(job_id=1,
+                                         task_id=0,
+                                         failure_type=failure_type,
+                                         failure_reason='boom')
+        # add_job_event_async(job_id, task_id, status, reason, code)
+        return mock_add_event.await_args.args
+
+    @pytest.mark.asyncio
+    async def test_failed_stamps_user_job_failure(self):
+        args = await self._run(state.ManagedJobStatus.FAILED)
+        assert args[4] == state.USER_JOB_FAILURE_EVENT_CODE
+
+    @pytest.mark.asyncio
+    async def test_failed_setup_stamps_user_job_failure(self):
+        args = await self._run(state.ManagedJobStatus.FAILED_SETUP)
+        assert args[4] == state.USER_JOB_FAILURE_EVENT_CODE
+
+    @pytest.mark.asyncio
+    async def test_failed_controller_has_no_code(self):
+        args = await self._run(state.ManagedJobStatus.FAILED_CONTROLLER)
+        assert args[4] is None
+
+
+class TestCancelEventsOnlyOnTransition:
+    """CANCELLING/CANCELLED events are recorded only on a real transition.
+
+    The controller also calls these setters on already-terminal jobs (e.g.
+    right after a task fails); previously the event was written before the
+    row update was attempted, so every failed job's event log ended with a
+    spurious CANCELLING/CANCELLED pair.
+    """
+
+    async def _run(self, func, updated):
+        with mock.patch.object(state, 'add_job_event_async',
+                               new=mock.AsyncMock()) as mock_add_event, \
+             mock.patch.object(state, '_retry_session',
+                               new=mock.AsyncMock(return_value=updated)):
+            await func(1, mock.AsyncMock())
+        return mock_add_event
+
+    @pytest.mark.asyncio
+    async def test_cancelling_event_written_on_transition(self):
+        mock_add_event = await self._run(state.set_cancelling_async, True)
+        mock_add_event.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_cancelling_event_skipped_when_terminal(self):
+        mock_add_event = await self._run(state.set_cancelling_async, False)
+        mock_add_event.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_cancelled_event_written_on_transition(self):
+        mock_add_event = await self._run(state.set_cancelled_async, True)
+        mock_add_event.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_cancelled_event_skipped_when_not_cancelling(self):
+        mock_add_event = await self._run(state.set_cancelled_async, False)
+        mock_add_event.assert_not_awaited()
 
 
 # Fixed epoch timestamps (seconds) for the time-range fixture. submitted_at is
@@ -1250,3 +1379,111 @@ class TestStatusExprSeam:
             fields=['job_id', 'status', 'task_id'])
         seq_d = [refined[j['job_id']] for j in desc]
         assert seq_d == sorted(seq_d, reverse=True), seq_d
+
+
+class TestGetLatestPendingReasons:
+    """Pending-reason coverage via get_latest_recovery_and_pending_reasons."""
+
+    def test_empty_job_ids(self, _mock_managed_jobs_db_conn):
+        assert state.get_latest_recovery_and_pending_reasons([], [])[1] == {}
+
+    def test_latest_reason_wins_and_filters(self, _mock_managed_jobs_db_conn):
+        early = datetime.datetime(2026, 1, 1, 0, 0, 0)
+        late = datetime.datetime(2026, 1, 1, 0, 5, 0)
+        # Job 1: two PENDING events -> the latest reason wins.
+        state.add_job_event(1,
+                            0,
+                            state.ManagedJobStatus.PENDING,
+                            'Job submitted to queue',
+                            timestamp=early)
+        state.add_job_event(1,
+                            0,
+                            state.ManagedJobStatus.PENDING,
+                            'Job is in backoff',
+                            timestamp=late)
+        # Job 2: a RUNNING event is ignored; only the PENDING reason returns.
+        state.add_job_event(2,
+                            0,
+                            state.ManagedJobStatus.RUNNING,
+                            'Job started',
+                            timestamp=late)
+        state.add_job_event(2,
+                            0,
+                            state.ManagedJobStatus.PENDING,
+                            'Job submitted to queue',
+                            timestamp=early)
+        # Job 3 has a PENDING event but is not requested.
+        state.add_job_event(3,
+                            0,
+                            state.ManagedJobStatus.PENDING,
+                            'unrelated',
+                            timestamp=late)
+        result = state.get_latest_recovery_and_pending_reasons([], [1, 2])[1]
+        assert result == {
+            1: 'Job is in backoff',
+            2: 'Job submitted to queue',
+        }
+
+    def test_empty_reason_skipped(self, _mock_managed_jobs_db_conn):
+        early = datetime.datetime(2026, 1, 1, 0, 0, 0)
+        late = datetime.datetime(2026, 1, 1, 0, 5, 0)
+        # The most recent PENDING event has an empty reason -> fall back to
+        # the most recent non-empty one.
+        state.add_job_event(1,
+                            0,
+                            state.ManagedJobStatus.PENDING,
+                            'Job submitted to queue',
+                            timestamp=early)
+        state.add_job_event(1,
+                            0,
+                            state.ManagedJobStatus.PENDING,
+                            '',
+                            timestamp=late)
+        assert state.get_latest_recovery_and_pending_reasons([], [1])[1] == {
+            1: 'Job submitted to queue'
+        }
+
+    def test_no_pending_events_returns_empty(self, _mock_managed_jobs_db_conn):
+        state.add_job_event(1, 0, state.ManagedJobStatus.RUNNING, 'running')
+        assert state.get_latest_recovery_and_pending_reasons([], [1])[1] == {}
+
+
+class TestGetLatestRecoveryAndPendingReasons:
+    """Tests for the single-query get_latest_recovery_and_pending_reasons."""
+
+    def test_both_empty(self, _mock_managed_jobs_db_conn):
+        assert state.get_latest_recovery_and_pending_reasons([], []) == ({}, {})
+
+    def test_returns_reasons_per_status(self, _mock_managed_jobs_db_conn):
+        # Job 1 is recovering; job 2 is pending. Each reason must land in its
+        # own bucket, matched to the status it was requested under.
+        state.add_job_event(1, 0, state.ManagedJobStatus.RECOVERING,
+                            'OOMKilled')
+        state.add_job_event(2, 0, state.ManagedJobStatus.PENDING,
+                            'Job submitted to queue')
+        recovery, pending = state.get_latest_recovery_and_pending_reasons([1],
+                                                                          [2])
+        assert recovery == {1: 'OOMKilled'}
+        assert pending == {2: 'Job submitted to queue'}
+
+    def test_status_scoped_per_job(self, _mock_managed_jobs_db_conn):
+        # Job 1 has both a RECOVERING and a (later) PENDING event -- e.g. it
+        # went back to PENDING during launch backoff. When requested only under
+        # PENDING, its RECOVERING reason must not leak into the recovery bucket,
+        # and its PENDING reason must not appear in the recovery bucket either.
+        early = datetime.datetime(2026, 1, 1, 0, 0, 0)
+        late = datetime.datetime(2026, 1, 1, 0, 5, 0)
+        state.add_job_event(1,
+                            0,
+                            state.ManagedJobStatus.RECOVERING,
+                            'stale recovering',
+                            timestamp=early)
+        state.add_job_event(1,
+                            0,
+                            state.ManagedJobStatus.PENDING,
+                            'Job is in backoff',
+                            timestamp=late)
+        recovery, pending = state.get_latest_recovery_and_pending_reasons([],
+                                                                          [1])
+        assert recovery == {}
+        assert pending == {1: 'Job is in backoff'}

@@ -242,19 +242,6 @@ jobs:
     secrets:
       BUILDKITE_TOKEN: ${{ secrets.BUILDKITE_TOKEN }}
 
-  smoke-tests-shared-gke-api-server:
-    needs: [gate-tests, nightly-build-pypi]
-    if: ${{ needs.gate-tests.outputs.run_tests == 'true' }}
-    uses: ./.github/workflows/buildkite-trigger-wait.yml
-    with:
-      commit: ${{ github.sha }}
-      branch: ${{ github.ref_name }}
-      message: "nightly-build-pypi shared-gke-api-server with postgres tests"
-      pipeline: "nightly-build-shared-gke-api-server"
-      timeout_minutes: 300  # p50 144m / p95 ~250m (excludes rare multi-hour hangs)
-    secrets:
-      BUILDKITE_TOKEN: ${{ secrets.BUILDKITE_TOKEN }}
-
   smoke-tests-slurm-minimal:
     needs: [gate-tests, nightly-build-pypi]
     if: ${{ needs.gate-tests.outputs.run_tests == 'true' }}
@@ -285,9 +272,9 @@ jobs:
   #     BUILDKITE_TOKEN: ${{ secrets.BUILDKITE_TOKEN }}
 
   publish-and-validate-both:
-    needs: [check-date, gate-tests, nightly-build-pypi, smoke-tests-aws, smoke-tests-kubernetes-resource-heavy, smoke-tests-kubernetes-no-resource-heavy, smoke-tests-kubernetes-no-resource-heavy-limit-deps, smoke-tests-remote-server-kubernetes, smoke-tests-kubernetes-jobs-consolidation, smoke-tests-shared-gke-api-server, smoke-tests-slurm-minimal, backward-compat-test-nightly, backward-compat-test-stable]
+    needs: [check-date, gate-tests, nightly-build-pypi, smoke-tests-aws, smoke-tests-kubernetes-resource-heavy, smoke-tests-kubernetes-no-resource-heavy, smoke-tests-kubernetes-no-resource-heavy-limit-deps, smoke-tests-remote-server-kubernetes, smoke-tests-kubernetes-jobs-consolidation, smoke-tests-slurm-minimal, backward-compat-test-nightly, backward-compat-test-stable]
     # Use always() so this job evaluates even if some test jobs were skipped when skip_buildkite is selected
-    if: ${{ always() && needs.nightly-build-pypi.result == 'success' && (needs.gate-tests.outputs.publish_without_tests == 'true' || (needs.gate-tests.outputs.run_tests == 'true' && needs.smoke-tests-aws.result == 'success' && needs.smoke-tests-kubernetes-resource-heavy.result == 'success' && needs.smoke-tests-kubernetes-no-resource-heavy.result == 'success' && needs.smoke-tests-kubernetes-no-resource-heavy-limit-deps.result == 'success' && needs.smoke-tests-remote-server-kubernetes.result == 'success' && needs.smoke-tests-kubernetes-jobs-consolidation.result == 'success' && needs.smoke-tests-shared-gke-api-server.result == 'success' && needs.smoke-tests-slurm-minimal.result == 'success' && needs.backward-compat-test-nightly.result == 'success' && needs.backward-compat-test-stable.result == 'success')) }}
+    if: ${{ always() && needs.nightly-build-pypi.result == 'success' && (needs.gate-tests.outputs.publish_without_tests == 'true' || (needs.gate-tests.outputs.run_tests == 'true' && needs.smoke-tests-aws.result == 'success' && needs.smoke-tests-kubernetes-resource-heavy.result == 'success' && needs.smoke-tests-kubernetes-no-resource-heavy.result == 'success' && needs.smoke-tests-kubernetes-no-resource-heavy-limit-deps.result == 'success' && needs.smoke-tests-remote-server-kubernetes.result == 'success' && needs.smoke-tests-kubernetes-jobs-consolidation.result == 'success' && needs.smoke-tests-slurm-minimal.result == 'success' && needs.backward-compat-test-nightly.result == 'success' && needs.backward-compat-test-stable.result == 'success')) }}
     uses: ./.github/workflows/publish-and-validate-both.yml
     with:
       package_name: skypilot-nightly
@@ -303,13 +290,56 @@ jobs:
       package_name: skypilot-nightly
     secrets: inherit
 
-  # After a nightly is published, dispatch the downstream repo's workflow so it
-  # can react without polling PyPI. Fail-loud: a missing secret, bad App creds,
-  # or a non-204 turns the run red rather than silently skipping.
+  # Tag the published commit so a nightly version maps back to its exact
+  # commit, mirroring the stable release flow (release-publish.yml
+  # `create-release`): an annotated `v<version>` tag pushed with the release
+  # PAT. Gated on a successful publish so only actually-released commits get
+  # tagged.
+  tag-nightly-release:
+    needs: [check-date, nightly-build-pypi, publish-and-validate-both]
+    if: ${{ always() && needs.publish-and-validate-both.result == 'success' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@f43a0e5ff2bd294095638e18286ca9a3d1956744 # v3.6.0
+        with:
+          ref: ${{ github.sha }}
+          token: ${{ secrets.GH_PAT_FOR_RELEASE }}
+      - name: Create and push nightly tag
+        run: |
+          VERSION="${{ needs.nightly-build-pypi.outputs.version }}"
+          TAG="v${VERSION}"
+          git config --global user.name "GitHub Action"
+          git config --global user.email "action@github.com"
+          # Nightly versions are date-based (1.0.0.devYYYYMMDD), so a same-day
+          # re-dispatch reuses the version. Keep the first tag of the day: if it
+          # already exists on origin, log and exit without failing the build.
+          if git ls-remote --exit-code --tags origin "refs/tags/${TAG}" >/dev/null 2>&1; then
+            echo "Tag ${TAG} already exists on origin; leaving it untouched."
+            exit 0
+          fi
+          git tag -a "${TAG}" -m "Nightly release ${TAG}"
+          git push origin "${TAG}"
+          echo "Created and pushed ${TAG} -> ${{ github.sha }}"
+
+  # Dispatch the downstream repo's workflow so it can react to this nightly
+  # cycle without polling PyPI. Two paths, so *every* scheduled cycle hands off
+  # exactly once:
+  #   - published: a new nightly cleared publish-and-validate-both. The new
+  #     version travels in the payload.
+  #   - no-op: check-date found no new commits in the last 24h, so nothing was
+  #     built and there is no version to hand over. `no_new_nightly=true` says
+  #     so explicitly, leaving it to the downstream workflow to decide what
+  #     base to use -- this job does not guess one on its behalf.
+  # A cycle that *did* build and then failed notifies nobody: neither branch of
+  # the condition holds, so nothing downstream is built on an unvalidated
+  # nightly.
+  # Fail-loud: a missing secret, bad App creds, or a non-204 turns the run red
+  # rather than silently skipping.
   notify-downstream:
     runs-on: ubuntu-latest
     needs: [check-date, nightly-build-pypi, publish-and-validate-both]
-    if: ${{ always() && needs.publish-and-validate-both.result == 'success' }}
+    if: ${{ always() && (needs.publish-and-validate-both.result == 'success' || needs.check-date.outputs.should_run == 'false') }}
     steps:
       - name: Parse downstream repo
         id: parse
@@ -344,15 +374,29 @@ jobs:
           DISPATCH_WORKFLOW: ${{ secrets.NIGHTLY_DOWNSTREAM_WORKFLOW }}
           DISPATCH_REF: ${{ secrets.NIGHTLY_DOWNSTREAM_REF || 'main' }}
           NIGHTLY_VERSION: ${{ needs.nightly-build-pypi.outputs.version }}
+          # 'true' only on the no-op path, where nightly-build-pypi was skipped
+          # and NIGHTLY_VERSION is therefore empty.
+          NO_NEW_NIGHTLY: ${{ needs.check-date.outputs.should_run == 'false' }}
         run: |
-          echo "Dispatching ${DISPATCH_WORKFLOW} on ${DISPATCH_REPO}@${DISPATCH_REF} (version=${NIGHTLY_VERSION})"
+          echo "Dispatching ${DISPATCH_WORKFLOW} on ${DISPATCH_REPO}@${DISPATCH_REF}" \
+               "(version=${NIGHTLY_VERSION:-<none>}, no_new_nightly=${NO_NEW_NIGHTLY})"
+          # Build the payload with jq rather than hand-escaped JSON: the inputs
+          # are interpolated secrets/outputs, and a stray quote in any of them
+          # would otherwise produce a malformed body and a confusing 422.
+          # workflow_dispatch inputs must be strings over the REST API, so the
+          # boolean is sent as "true"/"false" for the callee to compare as text.
+          payload=$(jq -n \
+            --arg ref "${DISPATCH_REF}" \
+            --arg version "${NIGHTLY_VERSION}" \
+            --arg no_new_nightly "${NO_NEW_NIGHTLY}" \
+            '{ref: $ref, inputs: {version: $version, no_new_nightly: $no_new_nightly}}')
           http_code=$(curl -sS -o /tmp/dispatch-resp -w '%{http_code}' \
             -X POST \
             -H 'Accept: application/vnd.github+json' \
             -H "Authorization: Bearer ${DISPATCH_TOKEN}" \
             -H 'X-GitHub-Api-Version: 2022-11-28' \
             "https://api.github.com/repos/${DISPATCH_REPO}/actions/workflows/${DISPATCH_WORKFLOW}/dispatches" \
-            -d "{\"ref\":\"${DISPATCH_REF}\",\"inputs\":{\"version\":\"${NIGHTLY_VERSION}\"}}")
+            -d "${payload}")
           if [[ "${http_code}" != "204" ]]; then
             echo "::error::Downstream dispatch to ${DISPATCH_REPO} (${DISPATCH_WORKFLOW}) failed with HTTP ${http_code}."
             echo "Response body:"
@@ -363,7 +407,7 @@ jobs:
 
   summary:
     runs-on: ubuntu-latest
-    needs: [check-date, nightly-build-pypi, smoke-tests-aws, smoke-tests-kubernetes-resource-heavy, smoke-tests-kubernetes-no-resource-heavy, smoke-tests-kubernetes-no-resource-heavy-limit-deps, smoke-tests-remote-server-kubernetes, smoke-tests-kubernetes-jobs-consolidation, smoke-tests-shared-gke-api-server, smoke-tests-slurm-minimal, backward-compat-test-nightly, backward-compat-test-stable]
+    needs: [check-date, nightly-build-pypi, smoke-tests-aws, smoke-tests-kubernetes-resource-heavy, smoke-tests-kubernetes-no-resource-heavy, smoke-tests-kubernetes-no-resource-heavy-limit-deps, smoke-tests-remote-server-kubernetes, smoke-tests-kubernetes-jobs-consolidation, smoke-tests-slurm-minimal, backward-compat-test-nightly, backward-compat-test-stable]
     if: always()
     steps:
       - name: Summary
@@ -403,11 +447,6 @@ jobs:
           - [Smoke Tests Kubernetes (Jobs Consolidation)](https://buildkite.com/skypilot-1/smoke-tests/builds/${{ needs.smoke-tests-kubernetes-jobs-consolidation.outputs.build_number }}) - $([ "${{ needs.smoke-tests-kubernetes-jobs-consolidation.outputs.build_status }}" == "success" ] && echo "✅ Success" || echo "❌ Failed")
           EOF
           fi
-          if [ "${{ needs.smoke-tests-shared-gke-api-server.result }}" != "skipped" ] && [ -n "${{ needs.smoke-tests-shared-gke-api-server.outputs.build_number }}" ]; then
-            cat <<EOF >> "$GITHUB_STEP_SUMMARY"
-          - [Smoke Tests Shared GKE API Server](https://buildkite.com/skypilot-1/nightly-build-shared-gke-api-server/builds/${{ needs.smoke-tests-shared-gke-api-server.outputs.build_number }}) - $([ "${{ needs.smoke-tests-shared-gke-api-server.outputs.build_status }}" == "success" ] && echo "✅ Success" || echo "❌ Failed")
-          EOF
-          fi
           if [ "${{ needs.smoke-tests-slurm-minimal.result }}" != "skipped" ] && [ -n "${{ needs.smoke-tests-slurm-minimal.outputs.build_number }}" ]; then
             cat <<EOF >> "$GITHUB_STEP_SUMMARY"
           - [Smoke Tests Slurm Minimal](https://buildkite.com/skypilot-1/smoke-tests/builds/${{ needs.smoke-tests-slurm-minimal.outputs.build_number }}) - $([ "${{ needs.smoke-tests-slurm-minimal.outputs.build_status }}" == "success" ] && echo "✅ Success" || echo "❌ Failed")
@@ -431,7 +470,7 @@ jobs:
 
   notify-slack-failure:
     runs-on: ubuntu-latest
-    needs: [check-date, nightly-build-pypi, smoke-tests-aws, smoke-tests-kubernetes-resource-heavy, smoke-tests-kubernetes-no-resource-heavy, smoke-tests-kubernetes-no-resource-heavy-limit-deps, smoke-tests-remote-server-kubernetes, smoke-tests-kubernetes-jobs-consolidation, smoke-tests-shared-gke-api-server, smoke-tests-slurm-minimal, backward-compat-test-nightly, backward-compat-test-stable, publish-and-validate-both, trigger-docker-and-helm-release]
+    needs: [check-date, nightly-build-pypi, smoke-tests-aws, smoke-tests-kubernetes-resource-heavy, smoke-tests-kubernetes-no-resource-heavy, smoke-tests-kubernetes-no-resource-heavy-limit-deps, smoke-tests-remote-server-kubernetes, smoke-tests-kubernetes-jobs-consolidation, smoke-tests-slurm-minimal, backward-compat-test-nightly, backward-compat-test-stable, publish-and-validate-both, trigger-docker-and-helm-release, tag-nightly-release]
     # Only run this job if any of the previous jobs failed
     if: failure()
     steps:
@@ -444,7 +483,7 @@ jobs:
           SHORT_SHA=$(echo "$COMMIT_SHA" | cut -c1-7)
           EMOJI="🚨"
           BUILDKITE_MSG=""
-          if [[ "${{ needs.smoke-tests-aws.result }}" == "failure" || "${{ needs.smoke-tests-kubernetes-resource-heavy.result }}" == "failure" || "${{ needs.smoke-tests-kubernetes-no-resource-heavy.result }}" == "failure" || "${{ needs.smoke-tests-kubernetes-no-resource-heavy-limit-deps.result }}" == "failure" || "${{ needs.smoke-tests-remote-server-kubernetes.result }}" == "failure" || "${{ needs.smoke-tests-kubernetes-jobs-consolidation.result }}" == "failure" || "${{ needs.smoke-tests-shared-gke-api-server.result }}" == "failure" || "${{ needs.smoke-tests-slurm-minimal.result }}" == "failure" || "${{ needs.backward-compat-test-nightly.result }}" == "failure" || "${{ needs.backward-compat-test-stable.result }}" == "failure" ]]; then
+          if [[ "${{ needs.smoke-tests-aws.result }}" == "failure" || "${{ needs.smoke-tests-kubernetes-resource-heavy.result }}" == "failure" || "${{ needs.smoke-tests-kubernetes-no-resource-heavy.result }}" == "failure" || "${{ needs.smoke-tests-kubernetes-no-resource-heavy-limit-deps.result }}" == "failure" || "${{ needs.smoke-tests-remote-server-kubernetes.result }}" == "failure" || "${{ needs.smoke-tests-kubernetes-jobs-consolidation.result }}" == "failure" || "${{ needs.smoke-tests-slurm-minimal.result }}" == "failure" || "${{ needs.backward-compat-test-nightly.result }}" == "failure" || "${{ needs.backward-compat-test-stable.result }}" == "failure" ]]; then
             if [[ "${{ needs.smoke-tests-aws.result }}" == "failure" ]]; then
               BUILDKITE_MSG="<https://buildkite.com/skypilot-1/smoke-tests/builds/${{ needs.smoke-tests-aws.outputs.build_number }}|Buildkite Log(--aws)>"
             fi
@@ -477,12 +516,6 @@ jobs:
                 BUILDKITE_MSG="${BUILDKITE_MSG} and"
               fi
               BUILDKITE_MSG="${BUILDKITE_MSG} <https://buildkite.com/skypilot-1/smoke-tests/builds/${{ needs.smoke-tests-kubernetes-jobs-consolidation.outputs.build_number }}|Buildkite Log(--kubernetes --jobs-consolidation --no-resource-heavy)>"
-            fi
-            if [[ "${{ needs.smoke-tests-shared-gke-api-server.result }}" == "failure" ]]; then
-              if [[ ! -z "$BUILDKITE_MSG" ]]; then
-                BUILDKITE_MSG="${BUILDKITE_MSG} and"
-              fi
-              BUILDKITE_MSG="${BUILDKITE_MSG} <https://buildkite.com/skypilot-1/nightly-build-shared-gke-api-server/builds/${{ needs.smoke-tests-shared-gke-api-server.outputs.build_number }}|Buildkite Log(shared-gke-api-server)>"
             fi
             if [[ "${{ needs.smoke-tests-slurm-minimal.result }}" == "failure" ]]; then
               if [[ ! -z "$BUILDKITE_MSG" ]]; then

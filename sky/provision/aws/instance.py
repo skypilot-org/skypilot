@@ -160,9 +160,9 @@ def _merge_tag_specs(tag_specs: List[Dict[str, Any]],
     node provider tag specs is modified in-place.
 
     This allows users to add tags and override values of existing
-    tags with their own, and only applies to the resource type
-    'instance'. All other resource types are appended to the list of
-    tag specs.
+    tags with their own for any resource type already present in the
+    base specs. New resource types are appended to the list of tag
+    specs.
 
     Args:
         tag_specs (List[Dict[str, Any]]): base node provider tag specs
@@ -170,18 +170,23 @@ def _merge_tag_specs(tag_specs: List[Dict[str, Any]],
     """
 
     for user_tag_spec in user_tag_specs:
-        if user_tag_spec['ResourceType'] == 'instance':
-            for user_tag in user_tag_spec['Tags']:
-                exists = False
-                for tag in tag_specs[0]['Tags']:
-                    if user_tag['Key'] == tag['Key']:
-                        exists = True
-                        tag['Value'] = user_tag['Value']
-                        break
-                if not exists:
-                    tag_specs[0]['Tags'] += [user_tag]
-        else:
-            tag_specs += [user_tag_spec]
+        resource_type = user_tag_spec['ResourceType']
+        existing_tag_spec = next((tag_spec for tag_spec in tag_specs
+                                  if tag_spec['ResourceType'] == resource_type),
+                                 None)
+        if existing_tag_spec is None:
+            tag_specs.append(copy.deepcopy(user_tag_spec))
+            continue
+
+        for user_tag in user_tag_spec['Tags']:
+            exists = False
+            for tag in existing_tag_spec['Tags']:
+                if user_tag['Key'] == tag['Key']:
+                    exists = True
+                    tag['Value'] = user_tag['Value']
+                    break
+            if not exists:
+                existing_tag_spec['Tags'].append(copy.deepcopy(user_tag))
 
 
 def _create_instances(
@@ -203,6 +208,9 @@ def _create_instances(
 
     tag_specs = [{
         'ResourceType': 'instance',
+        'Tags': _format_tags(tags),
+    }, {
+        'ResourceType': 'volume',
         'Tags': _format_tags(tags),
     }]
     user_tag_specs = conf.get('TagSpecifications', [])
@@ -309,6 +317,19 @@ def _get_head_instance_id(instances: List) -> Optional[str]:
                 head_instance_id = inst.id
                 break
     return head_instance_id
+
+
+def _get_attached_volume_ids(instances: List[Any]) -> List[str]:
+    """Collect attached EBS volume IDs from instances."""
+    volume_ids: List[str] = []
+    seen: Set[str] = set()
+    for inst in instances:
+        for mapping in getattr(inst, 'block_device_mappings', []) or []:
+            volume_id = (mapping.get('Ebs') or {}).get('VolumeId')
+            if volume_id is not None and volume_id not in seen:
+                seen.add(volume_id)
+                volume_ids.append(volume_id)
+    return volume_ids
 
 
 def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
@@ -471,6 +492,15 @@ def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
             # empty tags will result in error in the API call
             ec2.meta.client.create_tags(Resources=resumed_instance_ids,
                                         Tags=_format_tags(tags))
+            resumed_volume_ids = _get_attached_volume_ids(resumed_instances)
+            if resumed_volume_ids:
+                try:
+                    ec2.meta.client.create_tags(Resources=resumed_volume_ids,
+                                                Tags=_format_tags(tags))
+                except aws.botocore_exceptions().ClientError as e:
+                    logger.warning(
+                        'Failed to update tags for resumed AWS volumes '
+                        f'{resumed_volume_ids}: {e}')
             for inst in resumed_instances:
                 inst.tags = _format_tags(tags)  # sync the tags info
         placement_zone = resumed_instances[0].placement['AvailabilityZone']

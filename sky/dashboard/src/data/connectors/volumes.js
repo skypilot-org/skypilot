@@ -39,6 +39,11 @@ export async function getVolumes() {
           usedby_clusters: volume.usedby_clusters,
           last_use: volume.last_use || null,
           error_message: volume.error_message || null,
+          // Whether the error above is one the volume can recover from. Servers
+          // older than this field report nothing, which reads as undefined --
+          // distinct from a definite false, so callers can tell "will not bind"
+          // from "cannot tell".
+          error_may_resolve: volume.error_may_resolve,
           creation_yaml: volume.creation_yaml || null,
         };
       }) || [];

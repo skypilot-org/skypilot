@@ -10,11 +10,13 @@ Usage example:
     statuses = sky.get(request_id)
 
 """
+import contextlib
 from http import cookiejar
 import json
 import logging
 import os
 import platform
+import re
 import subprocess
 import sys
 import typing
@@ -46,6 +48,7 @@ from sky.server.requests import request_names
 from sky.server.requests import requests as requests_lib
 from sky.skylet import autostop_lib
 from sky.skylet import constants
+from sky.skylet import runtime_utils
 from sky.ssh_node_pools import utils as ssh_utils
 from sky.usage import usage_lib
 from sky.utils import admin_policy_utils
@@ -426,6 +429,23 @@ def kubernetes_label_gpus(
     return server_common.get_request_id(response)
 
 
+def _check_slurm_host_path_volume_api_version(dag: 'sky.Dag') -> None:
+    if not any(
+            isinstance(volume_config, dict) and 'host_path' in volume_config
+            for task in dag.tasks
+            for volume_config in task.volumes.values()):
+        return
+    remote_api_version = versions.get_remote_api_version()
+    if (remote_api_version is None or remote_api_version <
+            server_constants.MIN_SLURM_HOST_PATH_VOLUME_API_VERSION):
+        with ux_utils.print_exception_no_traceback():
+            raise exceptions.APINotSupportedError(
+                'Slurm host_path volumes are not supported by this API '
+                'server. Please upgrade the API server to a version that '
+                f'supports API_VERSION >= '
+                f'{server_constants.MIN_SLURM_HOST_PATH_VOLUME_API_VERSION}.')
+
+
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @annotations.client_api
@@ -454,6 +474,7 @@ def optimize(
             for a task.
         exceptions.NoCloudAccessError: if no public clouds are enabled.
     """
+    _check_slurm_host_path_volume_api_version(dag)
     dag_str = dag_utils.dump_dag_to_yaml_str(dag)
 
     body = payloads.OptimizeBody(dag=dag_str,
@@ -490,7 +511,9 @@ def set_preferred_workspace(preferred: Optional[str]) -> Dict[str, Any]:
     """
     response = server_common.make_authenticated_request(
         'POST', '/users/me/workspace', json={'preferred': preferred})
-    response.raise_for_status()
+    # Render a permission denial (setting a workspace the user cannot access)
+    # as a clean message rather than a raw HTTPError traceback.
+    server_common.handle_request_error(response)
     return response.json()
 
 
@@ -545,7 +568,9 @@ def get_user_workspace(requested: Optional[str] = None) -> Dict[str, Any]:
     if requested is not None:
         url += f'?requested={urlparse.quote(requested)}'
     response = server_common.make_authenticated_request('GET', url)
-    response.raise_for_status()
+    # Render a permission denial (querying a workspace the user cannot access)
+    # as a clean message rather than a raw HTTPError traceback.
+    server_common.handle_request_error(response)
     return response.json()
 
 
@@ -582,6 +607,7 @@ def validate(
             validation. This is only required when a admin policy is in use,
             see: https://docs.skypilot.co/en/latest/cloud-setup/policy.html
     """
+    _check_slurm_host_path_volume_api_version(dag)
     remote_api_version = versions.get_remote_api_version()
 
     def _omit(version: int) -> bool:
@@ -678,6 +704,7 @@ def launch(
     no_setup: bool = False,
     clone_disk_from: Optional[str] = None,
     fast: bool = False,
+    resize: bool = False,
     # Internal only:
     # pylint: disable=invalid-name
     _need_confirmation: bool = False,
@@ -751,6 +778,11 @@ def launch(
           different availability zone or region.
         fast: [Experimental] If the cluster is already up and available,
           skip provisioning and setup steps.
+        resize: if True, resize the existing cluster to the ``num_nodes``
+          specified in the task. Supports both scaling up (adding workers)
+          and scaling down (removing workers). Scale-down requires no
+          running jobs on the cluster. If True, requires ``cluster_name``
+          to be set.
         _need_confirmation: (Internal only) If True, show the confirmation
             prompt.
 
@@ -788,6 +820,14 @@ def launch(
 
     Other exceptions may be raised depending on the backend.
     """
+    if (dryrun or _is_launched_by_jobs_controller or
+            _is_launched_by_sky_serve_controller):
+        usage_lib.skip_scarf_ping_for_current_operation()
+    if resize and cluster_name is None:
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(
+                'resize=True requires cluster_name to be set to an existing '
+                'cluster.')
     if cluster_name is None:
         cluster_name = cluster_utils.generate_cluster_name()
 
@@ -802,6 +842,12 @@ def launch(
                                  remote_api_version < 13):
         logger.warning('wait_for is not supported in your API server. '
                        'Please upgrade to a newer API server to use it.')
+    if resize and (remote_api_version is None or remote_api_version < 56):
+        with ux_utils.print_exception_no_traceback():
+            raise exceptions.APINotSupportedError(
+                'Cluster resize (--resize / resize=True) is not supported by '
+                'your API server. Please upgrade the API server to a version '
+                'that supports API_VERSION >= 56.')
 
     dag = dag_utils.convert_entrypoint_to_dag(task)
     # Override the autostop config from command line flags to task YAML.
@@ -847,6 +893,7 @@ def launch(
             no_setup,
             clone_disk_from,
             fast,
+            resize,
             _need_confirmation,
             _is_launched_by_jobs_controller,
             _is_launched_by_sky_serve_controller,
@@ -870,6 +917,7 @@ def _launch(
     no_setup: bool = False,
     clone_disk_from: Optional[str] = None,
     fast: bool = False,
+    resize: bool = False,
     # Internal only:
     # pylint: disable=invalid-name
     _need_confirmation: bool = False,
@@ -916,13 +964,54 @@ def _launch(
                 cluster_user_hash_str = f' (hash: {cluster_user_hash})'
 
         # Prompt if (1) --cluster is None, or (2) cluster doesn't exist, or (3)
-        # it exists but is STOPPED.
+        # it exists but is STOPPED, or (4) resize is requested and would
+        # change the node count.
         prompt = None
         if cluster_status is None:
-            prompt = (
-                f'Launching a new cluster {cluster_name!r}. '
-                # '{clone_source_str}. '
-                'Proceed?')
+            suffix = ''
+            if resize:
+                suffix = (f' (--resize will be ignored since {cluster_name!r} '
+                          f'does not exist)')
+            prompt = (f'Launching a new cluster {cluster_name!r}.{suffix} '
+                      'Proceed?')
+        elif resize:
+            # Check resize before STOPPED: a --resize on a stopped cluster
+            # should show a resize-aware prompt (and note the restart), not
+            # the generic "Restarting the stopped cluster" message.
+            current_nodes = cluster_record.get('nodes')
+            target_nodes = dag.tasks[0].num_nodes
+            user_name_str = ''
+            if cluster_user_hash != common_utils.get_user_hash():
+                user_name_str = (f' (created by another user '
+                                 f'{cluster_user_name!r}'
+                                 f'{cluster_user_hash_str})')
+            # A stopped cluster is restarted as part of the resize.
+            resume_str = ''
+            if cluster_status == status_lib.ClusterStatus.STOPPED:
+                resume_str = ' The stopped cluster will be restarted.'
+            if current_nodes is None:
+                # Record is missing the 'nodes' field (e.g. older server or
+                # partial status response). Avoid TypeError from comparing
+                # int to None; show a generic resize prompt without the
+                # delta.
+                prompt = (f'Resizing cluster {cluster_name!r}{user_name_str} '
+                          f'to {target_nodes} node(s).{resume_str} Proceed?')
+            elif current_nodes == target_nodes:
+                prompt = (f'Cluster {cluster_name!r}{user_name_str} already '
+                          f'has {current_nodes} node(s); --resize is a '
+                          f'no-op.{resume_str} Proceed?')
+            elif target_nodes > current_nodes:
+                delta = target_nodes - current_nodes
+                prompt = (f'Resizing cluster {cluster_name!r}{user_name_str} '
+                          f'from {current_nodes} to {target_nodes} node(s) '
+                          f'(+{delta} worker(s), scale up).{resume_str} '
+                          f'Proceed?')
+            else:
+                delta = current_nodes - target_nodes
+                prompt = (f'Resizing cluster {cluster_name!r}{user_name_str} '
+                          f'from {current_nodes} to {target_nodes} node(s) '
+                          f'(-{delta} worker(s), scale down). Excess '
+                          f'workers will be terminated.{resume_str} Proceed?')
         elif cluster_status == status_lib.ClusterStatus.STOPPED:
             user_name_str = ''
             if cluster_user_hash != common_utils.get_user_hash():
@@ -984,6 +1073,7 @@ def _launch(
             _is_launched_by_sky_serve_controller),
         disable_controller_check=_disable_controller_check,
         file_mounts_blob_id=file_mounts_blob_id,
+        resize=resize,
         extra_launch_context=_extra_launch_context or {},
         include_credentials=include_credentials,
     )
@@ -1056,6 +1146,8 @@ def exec(  # pylint: disable=redefined-builtin
         sky.exceptions.NotSupportedError: if the specified cluster is a
           controller that does not support this operation.
     """
+    if dryrun:
+        usage_lib.skip_scarf_ping_for_current_operation()
     dag = dag_utils.convert_entrypoint_to_dag(task)
     validate(dag, workdir_only=True)
     dag, file_mounts_blob_id = client_common.upload_mounts_to_api_server(
@@ -2054,7 +2146,8 @@ def storage_delete(name: str) -> server_common.RequestId[None]:
 @annotations.client_api
 def local_up(gpus: bool,
              name: Optional[str] = None,
-             port_start: Optional[int] = None) -> server_common.RequestId[None]:
+             port_start: Optional[int] = None,
+             num_nodes: int = 1) -> server_common.RequestId[None]:
     """Launches a Kubernetes cluster on local machines.
 
     Returns:
@@ -2068,7 +2161,10 @@ def local_up(gpus: bool,
             raise ValueError('`sky local up` is only supported when '
                              'running SkyPilot locally.')
 
-    body = payloads.LocalUpBody(gpus=gpus, name=name, port_start=port_start)
+    body = payloads.LocalUpBody(gpus=gpus,
+                                name=name,
+                                port_start=port_start,
+                                num_nodes=num_nodes)
     response = server_common.make_authenticated_request(
         'POST', '/local_up', json=json.loads(body.model_dump_json()))
     return server_common.get_request_id(response)
@@ -2445,7 +2541,19 @@ def stream_and_get(
                  None),
         stream=True)
     if response.status_code in [404, 400]:
-        detail = response.json().get('detail')
+        # ``response`` is a streaming request; on some pooled connections the
+        # small error body cannot be read back and raises a
+        # ChunkedEncodingError. Read the detail defensively and fall back to a
+        # status-based message so the user gets a clean error, not a traceback.
+        detail = None
+        try:
+            detail = response.json().get('detail')
+        except Exception:  # pylint: disable=broad-except
+            pass
+        if not detail:
+            detail = ('the request or log path was not found or is not '
+                      'accessible' if response.status_code == 404 else
+                      'the request was invalid')
         with ux_utils.print_exception_no_traceback():
             raise exceptions.ClientError(f'Failed to stream logs: {detail}')
     stream_request_id: Optional[server_common.RequestId[
@@ -2522,16 +2630,41 @@ def api_cancel(request_ids: Optional[Union[server_common.RequestId[T],
     return server_common.get_request_id(response)
 
 
+def _cmdline_api_server_port(cmdline: List[str]) -> int:
+    """Parses the port of an API server process from its command line.
+
+    Falls back to the default port for servers started without an explicit
+    --port argument (e.g., by an older SkyPilot version). Operates on the
+    joined command line because some platforms (e.g., macOS) report the
+    whole command line as a single element.
+    """
+    match = re.search(r'--port[= ](\d+)', ' '.join(cmdline))
+    if match is not None:
+        return int(match.group(1))
+    return server_common.DEFAULT_SERVER_PORT
+
+
 def _local_api_server_running(kill: bool = False) -> bool:
-    """Checks if the local api server is running."""
+    """Checks if the local api server on the current port is running.
+
+    Only considers server processes bound to the port this client is
+    configured for, so that multiple API servers on one machine (e.g., dev
+    servers on different ports) do not interfere with each other.
+    """
+    target_port = server_common.get_local_api_server_port()
+    found = False
     for process in psutil.process_iter(attrs=['pid', 'cmdline']):
         cmdline = process.info['cmdline']
         if cmdline and server_common.API_SERVER_CMD in ' '.join(cmdline):
+            if _cmdline_api_server_port(cmdline) != target_port:
+                continue
+            found = True
             if kill:
                 subprocess_utils.kill_children_processes(
                     parent_pids=[process.pid], force=True)
-            return True
-    return False
+            else:
+                return True
+    return found
 
 
 @usage_lib.entrypoint
@@ -2629,6 +2762,7 @@ def api_start(
     metrics: bool = False,
     metrics_port: Optional[int] = None,
     enable_basic_auth: bool = False,
+    port: Optional[int] = None,
 ) -> None:
     """Starts the API server.
 
@@ -2638,19 +2772,39 @@ def api_start(
     Args:
         deploy: Whether to deploy the API server, i.e. fully utilize the
             resources of the machine.
-        host: The host to deploy the API server. It will be set to 0.0.0.0
-            if deploy is True, to allow remote access.
+        host: The host to bind the API server to. Under deploy, the server
+            always binds a wildcard address for remote access: ``::`` when an
+            IPv6 host is given, otherwise ``0.0.0.0``. Without deploy the host
+            is used as-is.
         foreground: Whether to run the API server in the foreground (run in
             the current process).
         metrics: Whether to export metrics of the API server.
         metrics_port: The port to export metrics of the API server.
         enable_basic_auth: Whether to enable basic authentication
             in the API server.
+        port: The port to bind the API server to. Defaults to the
+            SKYPILOT_API_SERVER_LOCAL_PORT environment variable, or 46580.
+            Other client commands only find a server on a non-default port
+            if the same environment variable is exported.
     Returns:
         None
     """
+    if port is not None:
+        env_port = os.environ.get(constants.SKY_API_SERVER_LOCAL_PORT_ENV_VAR)
+        if env_port is not None and env_port != str(port):
+            logger.warning(
+                f'--port={port} overrides '
+                f'{constants.SKY_API_SERVER_LOCAL_PORT_ENV_VAR}={env_port} '
+                'for this command only.')
+        os.environ[constants.SKY_API_SERVER_LOCAL_PORT_ENV_VAR] = str(port)
+        # These caches may have been populated with URLs built from the old
+        # port; clear them so the override takes effect.
+        server_common.get_server_url.cache_clear()  # type: ignore
+        server_common.is_api_server_local.cache_clear()  # type: ignore
     if deploy:
-        host = '0.0.0.0'
+        # Deploy mode is for remote access, so always bind a wildcard of the
+        # requested host's address family.
+        host = '::' if server_common.is_ipv6_host(host) else '0.0.0.0'
     if host not in server_common.AVAILBLE_LOCAL_API_SERVER_HOSTS:
         raise ValueError(f'Invalid host: {host}. Should be one of: '
                          f'{server_common.AVAILBLE_LOCAL_API_SERVER_HOSTS}')
@@ -2675,6 +2829,12 @@ def api_start(
                 f'{api_server_url}\n'
                 f'{ux_utils.INDENT_LAST_SYMBOL}'
                 f'View API server logs at: {constants.API_SERVER_LOGS}')
+    local_port = server_common.get_local_api_server_port()
+    if local_port != server_common.DEFAULT_SERVER_PORT:
+        logger.info(
+            'Server is on a non-default port. For other commands and '
+            'terminals to reach it, run: export '
+            f'{constants.SKY_API_SERVER_LOCAL_PORT_ENV_VAR}={local_port}')
 
 
 @usage_lib.entrypoint
@@ -2697,8 +2857,10 @@ def api_stop() -> None:
 
     # Acquire the api server creation lock to prevent multiple processes from
     # stopping and starting the API server at the same time.
-    with filelock.FileLock(
-            os.path.expanduser(constants.API_SERVER_CREATION_LOCK_PATH)):
+    creation_lock_path = runtime_utils.expanduser(
+        constants.API_SERVER_CREATION_LOCK_PATH)
+    os.makedirs(os.path.dirname(creation_lock_path), exist_ok=True)
+    with filelock.FileLock(creation_lock_path):
         try:
             records = scheduler.get_controller_process_records()
             if records is not None:
@@ -2749,24 +2911,60 @@ def api_server_logs(follow: bool = True, tail: Optional[int] = None) -> None:
             tail_args.extend(['-n', '+1'])
         else:
             tail_args.extend(['-n', f'{tail}'])
-        log_path = os.path.expanduser(constants.API_SERVER_LOGS)
+        log_path = runtime_utils.expanduser(constants.API_SERVER_LOGS)
         subprocess.run(['tail', *tail_args, f'{log_path}'], check=False)
     else:
         stream_and_get(log_path=constants.API_SERVER_LOGS, tail=tail)
 
 
+def _writable_user_config_path() -> pathlib.Path:
+    """Returns the user config file that reads and writes should both use.
+
+    `get_user_config()` honors `SKYPILOT_GLOBAL_CONFIG` while
+    `get_user_config_path()` always points at the default path, so writing the
+    latter while reading the former lands the change in a file nobody reads.
+    Callers pair this with `_read_config_file()` so that the file they read is
+    always the file they write, including in the fallback branch below.
+    """
+    config_path = pathlib.Path(
+        skypilot_config.resolve_user_config_path() or
+        skypilot_config.get_user_config_path()).expanduser()
+    default_path = pathlib.Path(
+        skypilot_config.get_user_config_path()).expanduser()
+    if config_path == default_path:
+        return default_path
+    if os.access(config_path, os.W_OK):
+        return config_path
+    logger.warning(
+        f'{config_path} is not writable, saving to {default_path} instead. '
+        'It will only take effect once '
+        f'{skypilot_config.ENV_VAR_GLOBAL_CONFIG} '
+        'is unset.')
+    return default_path
+
+
+def _read_config_file(config_path: pathlib.Path) -> Dict[str, Any]:
+    """Reads the config at `config_path`, so writes cannot land in a copy.
+
+    The callers below rewrite a whole config file, so they must start from the
+    contents of the very file they are about to write. Seeding from
+    `get_user_config()` instead would, whenever the two paths differ, dump one
+    file's contents over the other and lose whatever it held.
+    """
+    if not config_path.exists():
+        return {}
+    return dict(skypilot_config.parse_and_validate_config_file(
+        str(config_path)))
+
+
 def _save_config_updates(endpoint: Optional[str] = None,
                          service_account_token: Optional[str] = None) -> None:
     """Save endpoint and/or service account token to config file."""
-    config_path = pathlib.Path(
-        skypilot_config.get_user_config_path()).expanduser()
+    config_path = _writable_user_config_path()
     with filelock.FileLock(config_path.with_suffix('.lock')):
         if not config_path.exists():
             config_path.touch()
-            config: Dict[str, Any] = {}
-        else:
-            config = skypilot_config.get_user_config()
-            config = dict(config)
+        config: Dict[str, Any] = _read_config_file(config_path)
 
         # Update endpoint if provided
         if endpoint is not None:
@@ -2788,14 +2986,12 @@ def _save_config_updates(endpoint: Optional[str] = None,
 
 def _clear_api_server_config() -> None:
     """Clear endpoint and service account token from config file."""
-    config_path = pathlib.Path(
-        skypilot_config.get_user_config_path()).expanduser()
+    config_path = _writable_user_config_path()
     with filelock.FileLock(config_path.with_suffix('.lock')):
         if not config_path.exists():
             return
 
-        config = skypilot_config.get_user_config()
-        config = dict(config)
+        config = _read_config_file(config_path)
         if 'api_server' in config:
             # We might not have set the endpoint in the config file, so we
             # need to check before deleting.
@@ -2805,10 +3001,59 @@ def _clear_api_server_config() -> None:
         skypilot_config.reload_config()
 
 
+def _clear_service_account_token() -> None:
+    """Clears only the service account token from the config file."""
+    config_path = _writable_user_config_path()
+    with filelock.FileLock(config_path.with_suffix('.lock')):
+        if not config_path.exists():
+            return
+
+        config = _read_config_file(config_path)
+        if 'service_account_token' not in config.get('api_server', {}):
+            # Nothing to clear; leave the config file untouched.
+            return
+        del config['api_server']['service_account_token']
+
+        yaml_utils.dump_yaml(str(config_path), config)
+        skypilot_config.reload_config()
+    click.secho(
+        f'Removed the service account token from {config_path}: it is not '
+        'scoped to an endpoint, so it would be sent instead of the credentials '
+        'obtained by this login.',
+        fg='yellow')
+
+
+@contextlib.contextmanager
+def _without_service_account_token() -> Iterator[None]:
+    """Hides the configured service account token from this process.
+
+    While a token is configured, every request authenticates with it and the
+    cookie jar is never consulted at all (see
+    `server_common._prepare_authenticated_request_params`), so the server cannot
+    report NEEDS_AUTH and the OAuth flow would be skipped. Popping the token for
+    the duration of the login achieves that without touching the config file, so
+    a login that never completes -- an unreachable server, say -- leaves the
+    token where it was.
+    """
+    config = skypilot_config.to_dict()
+    # Pop rather than set to None, so that the mutated config still validates if
+    # something reloads it while the override is active.
+    config.pop_nested(('api_server', 'service_account_token'), None)
+    with skypilot_config.replace_skypilot_config(config):
+        yield
+
+
 def _validate_endpoint(endpoint: Optional[str]) -> str:
     """Validate and normalize the endpoint URL."""
     if endpoint is None:
-        endpoint = click.prompt('Enter your SkyPilot API server endpoint')
+        # Offer the endpoint we would overwrite as the default, so that
+        # re-logging into the same server is just a press of Enter. We read the
+        # user config instead of the merged config, since the user config file
+        # is the one we write the endpoint back to.
+        default_endpoint = skypilot_config.get_user_config().get_nested(
+            ('api_server', 'endpoint'), None)
+        endpoint = click.prompt('Enter your SkyPilot API server endpoint',
+                                default=default_endpoint)
     # Check endpoint is a valid URL
     if (endpoint is not None and not endpoint.startswith('http://') and
             not endpoint.startswith('https://')):
@@ -2816,15 +3061,74 @@ def _validate_endpoint(endpoint: Optional[str]) -> str:
     return endpoint.rstrip('/')
 
 
-def _check_endpoint_in_env_var(is_login: bool) -> None:
-    # If the user has set the endpoint via the environment variable, we should
-    # not do anything as we can't disambiguate between the env var and the
-    # config file.
-    """Check if the endpoint is set in the environment variable."""
+def _resolve_login_endpoint(endpoint: Optional[str]) -> Tuple[str, bool]:
+    """Resolves which endpoint `api_login` should authenticate against.
+
+    Args:
+        endpoint: The endpoint explicitly requested by the user, if any.
+
+    Returns:
+        A tuple of the endpoint to log into, and whether the environment
+        variable was its only source, in which case it must not be persisted to
+        the config file. An explicit `--endpoint` is always persisted, which is
+        what the flag documents; the variable overriding it afterwards is the
+        user's own doing.
+    """
+    env_endpoint = os.environ.get(constants.SKY_API_SERVER_URL_ENV_VAR)
+    if env_endpoint is None:
+        return _validate_endpoint(endpoint), False
+
+    env_endpoint = env_endpoint.strip().rstrip('/')
+    if not env_endpoint:
+        # Set but empty. `get_server_url()` returns the empty value rather than
+        # falling back to the config file, so every command would resolve to an
+        # empty server URL -- saying so beats logging in against an endpoint
+        # that nothing else will use.
+        with ux_utils.print_exception_no_traceback():
+            raise RuntimeError(
+                f'{constants.SKY_API_SERVER_URL_ENV_VAR} is set to an empty '
+                'value, which makes every command resolve to an empty server '
+                'URL. Set it to an endpoint, or run unset '
+                f'{constants.SKY_API_SERVER_URL_ENV_VAR}.')
+    if endpoint is not None and endpoint.rstrip('/') != env_endpoint:
+        # Two different explicit endpoints; we cannot tell which one the user
+        # meant, and logging into one of them would leave the other in effect.
+        with ux_utils.print_exception_no_traceback():
+            raise RuntimeError(
+                'Cannot log into '
+                f'{server_common.redact_url_password(endpoint)}: the endpoint '
+                'is already set to '
+                f'{server_common.redact_url_password(env_endpoint)} by the '
+                f'environment variable {constants.SKY_API_SERVER_URL_ENV_VAR}. '
+                'Either drop the --endpoint flag to log into the endpoint from '
+                'the environment variable, or run unset '
+                f'{constants.SKY_API_SERVER_URL_ENV_VAR} to clear the '
+                'environment variable.')
+
+    if endpoint is not None:
+        # Same endpoint, explicitly asked for: honor `--endpoint` and persist
+        # it. `sky api info` suggests `sky api login --relogin -e <endpoint>`
+        # with the endpoint it resolved, which can be this one.
+        return _validate_endpoint(endpoint), False
+
+    # The environment variable takes precedence over the config file for every
+    # command, so it is already the effective endpoint; we only need to
+    # authenticate against it.
+    click.secho(
+        f'Using endpoint from {constants.SKY_API_SERVER_URL_ENV_VAR}: '
+        f'{server_common.redact_url_password(env_endpoint)}',
+        fg='yellow')
+    return _validate_endpoint(env_endpoint), True
+
+
+def _check_endpoint_in_env_var() -> None:
+    """Rejects logout when the endpoint is set in the environment variable."""
+    # Logging out clears the endpoint and credentials from the config file, but
+    # the environment variable would still point all commands at a server, so
+    # there is nothing sensible to clear.
     if constants.SKY_API_SERVER_URL_ENV_VAR in os.environ:
         with ux_utils.print_exception_no_traceback():
-            action = 'login to' if is_login else 'logout of'
-            raise RuntimeError(f'Cannot {action} API server when the endpoint '
+            raise RuntimeError('Cannot logout of API server when the endpoint '
                                'is set via the environment variable. Run unset '
                                f'{constants.SKY_API_SERVER_URL_ENV_VAR} to '
                                'clear the environment variable.')
@@ -2985,10 +3289,10 @@ def api_login(endpoint: Optional[str] = None,
     Returns:
         None
     """
-    _check_endpoint_in_env_var(is_login=True)
-
-    # Validate and normalize endpoint
-    endpoint = _validate_endpoint(endpoint)
+    # Resolve, validate and normalize the endpoint. `from_env` means the
+    # endpoint came from the environment variable, which already takes
+    # precedence over the config file, so the config file must be left alone.
+    endpoint, from_env = _resolve_login_endpoint(endpoint)
 
     def _show_logged_in_message(
             endpoint: str, dashboard_url: str, user: Optional[Dict[str, Any]],
@@ -3029,8 +3333,25 @@ def api_login(endpoint: Optional[str] = None,
             raise ValueError('Invalid service account token format. '
                              'Token must start with "sky_"')
 
-        # Save both endpoint and token to config in a single operation
-        _save_config_updates(endpoint=endpoint,
+        # Save both endpoint and token to config in a single operation. When
+        # the endpoint comes from the environment variable, save the token
+        # only, so the configured endpoint is left as-is.
+        if from_env:
+            # The token is not scoped to an endpoint, so it will also be used
+            # for the configured endpoint once the environment variable is
+            # unset. Say so rather than silently pairing a credential with a
+            # server it was not issued for.
+            config_endpoint = skypilot_config.get_nested(
+                ('api_server', 'endpoint'), None)
+            if config_endpoint is not None and config_endpoint.rstrip(
+                    '/') != endpoint:
+                click.secho(
+                    'Note: the token is saved for any endpoint, so it will '
+                    'also be used for '
+                    f'{server_common.redact_url_password(config_endpoint)} '
+                    f'once {constants.SKY_API_SERVER_URL_ENV_VAR} is unset.',
+                    fg='yellow')
+        _save_config_updates(endpoint=None if from_env else endpoint,
                              service_account_token=service_account_token)
 
         # Test the authentication by checking server health
@@ -3063,136 +3384,158 @@ def api_login(endpoint: Optional[str] = None,
     # Save endpoint and clear any residual service account token before the
     # first health check, so it uses cookie-based auth and the server can
     # correctly return NEEDS_AUTH when SSO is required.
-    _save_config_updates(endpoint=endpoint)
-    server_status, api_server_info = server_common.check_server_healthy(
-        endpoint)
-    if server_status == server_common.ApiServerStatus.NEEDS_AUTH or relogin:
-        # We detected an auth proxy, so go through the auth proxy cookie flow.
-        token: Optional[str] = None
+    with contextlib.ExitStack() as stack:
+        # Nothing is written to the config file until the login has succeeded:
+        # a login that fails should neither repoint the config nor destroy the
+        # credential of the endpoint it is pointing at. The residual token only
+        # has to be out of the way for the requests this login makes, so hide it
+        # in memory for the duration.
+        residual_token: Optional[str] = skypilot_config.get_nested(
+            ('api_server', 'service_account_token'), None)
+        if residual_token is not None:
+            stack.enter_context(_without_service_account_token())
+        server_status, api_server_info = server_common.check_server_healthy(
+            endpoint)
+        if server_status == server_common.ApiServerStatus.NEEDS_AUTH or relogin:
+            # We detected an auth proxy, so go through the auth proxy
+            # cookie flow.
+            token: Optional[str] = None
 
-        # Try methods in order:
-        # 1. New polling-based flow - only on servers >= API v30
-        # 2. Old localhost callback flow
-        # 3. Manual token entry
-        remote_api_version = versions.get_remote_api_version()
-        if remote_api_version is not None and remote_api_version >= 30:
-            token = _try_polling_auth(endpoint, no_browser=no_browser)
+            # Try methods in order:
+            # 1. New polling-based flow - only on servers >= API v30
+            # 2. Old localhost callback flow
+            # 3. Manual token entry
+            remote_api_version = versions.get_remote_api_version()
+            if remote_api_version is not None and remote_api_version >= 30:
+                token = _try_polling_auth(endpoint, no_browser=no_browser)
 
-        if token is None:
-            # Polling auth not available or failed, try localhost callback
-            token = _try_localhost_callback_auth(endpoint,
-                                                 no_browser=no_browser)
+            if token is None:
+                # Polling auth not available or failed, try localhost callback
+                token = _try_localhost_callback_auth(endpoint,
+                                                     no_browser=no_browser)
 
-        if token is None:
-            # All automatic methods failed, fall back to manual entry
-            token = _try_manual_token_entry(endpoint)
+            if token is None:
+                # All automatic methods failed, fall back to manual entry
+                token = _try_manual_token_entry(endpoint)
 
-        if not token:
-            with ux_utils.print_exception_no_traceback():
-                raise ValueError('Authentication failed.')
-
-        # Parse the token.
-        # b64decode will ignore invalid characters, but does some length and
-        # padding checks.
-        try:
-            data = base64.b64decode(token)
-        except binascii.Error as e:
-            raise ValueError(f'Malformed token: {token}') from e
-        try:
-            json_data = json.loads(data)
-        except (json.JSONDecodeError, UnicodeDecodeError) as e:
-            raise ValueError(f'Malformed token data: {data!r}') from e
-        if not isinstance(json_data, dict):
-            raise ValueError(f'Malformed token JSON: {json_data}')
-
-        if json_data.get('v') == 1:
-            user_hash = json_data.get('user')
-            cookie_dict = json_data['cookies']
-        elif 'v' not in json_data:
-            user_hash = None
-            cookie_dict = json_data
-        else:
-            raise ValueError(f'Unsupported token version: {json_data.get("v")}')
-
-        parsed_url = urlparse.urlparse(endpoint)
-        cookie_jar = cookiejar.MozillaCookieJar()
-        for (name, value) in cookie_dict.items():
-            # dict keys in JSON must be strings
-            assert isinstance(name, str)
-            if not isinstance(value, str):
-                raise ValueError('Malformed token - bad key/value: '
-                                 f'{name}: {value}')
-
-            # See CookieJar._cookie_from_cookie_tuple
-            # oauth2proxy default is Max-Age 604800
-            expires = int(time.time()) + 604800
-            domain = str(parsed_url.hostname)
-            domain_initial_dot = domain.startswith('.')
-            secure = parsed_url.scheme == 'https'
-            if not domain_initial_dot:
-                domain = '.' + domain
-
-            cookie_jar.set_cookie(
-                cookiejar.Cookie(
-                    version=0,
-                    name=name,
-                    value=value,
-                    port=None,
-                    port_specified=False,
-                    domain=domain,
-                    domain_specified=True,
-                    domain_initial_dot=domain_initial_dot,
-                    path='',
-                    path_specified=False,
-                    secure=secure,
-                    expires=expires,
-                    discard=False,
-                    comment=None,
-                    comment_url=None,
-                    rest=dict(),
-                ))
-
-        # Now that the cookies are parsed, save them to the cookie jar.
-        server_common.set_api_cookie_jar(cookie_jar)
-
-        # Set the user hash in the local file.
-        # If the server already has a token for this user set it to the local
-        # file, otherwise use the new user hash.
-        if (api_server_info.user is not None and
-                api_server_info.user.get('id') is not None):
-            _set_user_hash(api_server_info.user.get('id'))
-        else:
-            _set_user_hash(user_hash)
-    else:
-        # Check if basic auth is enabled
-        if api_server_info.basic_auth_enabled:
-            if api_server_info.user is None:
+            if not token:
                 with ux_utils.print_exception_no_traceback():
-                    raise ValueError(
-                        'Basic auth is enabled but no valid user is found')
+                    raise ValueError('Authentication failed.')
 
-        # Set the user hash in the local file.
-        if api_server_info.user is not None:
-            _set_user_hash(api_server_info.user.get('id'))
+            # Parse the token.
+            # b64decode will ignore invalid characters, but does some length and
+            # padding checks.
+            try:
+                data = base64.b64decode(token)
+            except binascii.Error as e:
+                raise ValueError(f'Malformed token: {token}') from e
+            try:
+                json_data = json.loads(data)
+            except (json.JSONDecodeError, UnicodeDecodeError) as e:
+                raise ValueError(f'Malformed token data: {data!r}') from e
+            if not isinstance(json_data, dict):
+                raise ValueError(f'Malformed token JSON: {json_data}')
 
-    dashboard_url = server_common.get_dashboard_url(endpoint)
+            if json_data.get('v') == 1:
+                user_hash = json_data.get('user')
+                cookie_dict = json_data['cookies']
+            elif 'v' not in json_data:
+                user_hash = None
+                cookie_dict = json_data
+            else:
+                raise ValueError(
+                    f'Unsupported token version: {json_data.get("v")}')
 
-    # see https://github.com/python/mypy/issues/5107 on why
-    # typing is disabled on this line
-    server_common.get_api_server_status_response.cache_clear()  # type: ignore
-    # After successful authentication, check server health again to get user
-    # identity
-    server_status, final_api_server_info = server_common.check_server_healthy(
-        endpoint)
-    # Sync local user hash from the authenticated health check response.
-    # This is the final source of truth for the user's identity on this
-    # server, ensuring the local hash matches regardless of which auth
-    # method was used earlier in the flow.
-    if (final_api_server_info.user is not None and
-            final_api_server_info.user.get('id') is not None):
-        _set_user_hash(final_api_server_info.user.get('id'))
-    _show_logged_in_message(endpoint, dashboard_url, final_api_server_info.user,
-                            server_status)
+            parsed_url = urlparse.urlparse(endpoint)
+            cookie_jar = cookiejar.MozillaCookieJar()
+            for (name, value) in cookie_dict.items():
+                # dict keys in JSON must be strings
+                assert isinstance(name, str)
+                if not isinstance(value, str):
+                    raise ValueError('Malformed token - bad key/value: '
+                                     f'{name}: {value}')
+
+                # See CookieJar._cookie_from_cookie_tuple
+                # oauth2proxy default is Max-Age 604800
+                expires = int(time.time()) + 604800
+                domain = str(parsed_url.hostname)
+                domain_initial_dot = domain.startswith('.')
+                secure = parsed_url.scheme == 'https'
+                if not domain_initial_dot:
+                    domain = '.' + domain
+
+                cookie_jar.set_cookie(
+                    cookiejar.Cookie(
+                        version=0,
+                        name=name,
+                        value=value,
+                        port=None,
+                        port_specified=False,
+                        domain=domain,
+                        domain_specified=True,
+                        domain_initial_dot=domain_initial_dot,
+                        path='',
+                        path_specified=False,
+                        secure=secure,
+                        expires=expires,
+                        discard=False,
+                        comment=None,
+                        comment_url=None,
+                        rest=dict(),
+                    ))
+
+            # Now that the cookies are parsed, save them to the cookie jar.
+            server_common.set_api_cookie_jar(cookie_jar)
+
+            # Set the user hash in the local file.
+            # If the server already has a token for this user set it to
+            # the local file, otherwise use the new user hash.
+            if (api_server_info.user is not None and
+                    api_server_info.user.get('id') is not None):
+                _set_user_hash(api_server_info.user.get('id'))
+            else:
+                _set_user_hash(user_hash)
+        else:
+            # Check if basic auth is enabled
+            if api_server_info.basic_auth_enabled:
+                if api_server_info.user is None:
+                    with ux_utils.print_exception_no_traceback():
+                        raise ValueError(
+                            'Basic auth is enabled but no valid user is found')
+
+            # Set the user hash in the local file.
+            if api_server_info.user is not None:
+                _set_user_hash(api_server_info.user.get('id'))
+
+        dashboard_url = server_common.get_dashboard_url(endpoint)
+
+        # see https://github.com/python/mypy/issues/5107 on why
+        # typing is disabled on this line
+        server_common.get_api_server_status_response.cache_clear(
+        )  # type: ignore
+        # After successful authentication, check server health again to
+        # get user identity
+        server_status, final_api_server_info = (
+            server_common.check_server_healthy(endpoint))
+        # Sync local user hash from the authenticated health check response.
+        # This is the final source of truth for the user's identity on this
+        # server, ensuring the local hash matches regardless of which auth
+        # method was used earlier in the flow.
+        if (final_api_server_info.user is not None and
+                final_api_server_info.user.get('id') is not None):
+            _set_user_hash(final_api_server_info.user.get('id'))
+        _show_logged_in_message(endpoint, dashboard_url,
+                                final_api_server_info.user, server_status)
+
+    # The login succeeded, so the cookies it saved are the credential for this
+    # endpoint from now on. Drop the residual token, which would otherwise be
+    # sent in their place. Anything that failed above leaves the file untouched.
+    # This is deliberately not gated on `residual_token`: that came from the
+    # in-memory config, which can disagree with the file, and the file is what
+    # we are about to rewrite. The call is a no-op when the file holds no token.
+    _clear_service_account_token()
+    if not from_env:
+        _save_config_updates(endpoint=endpoint)
 
 
 @usage_lib.entrypoint
@@ -3201,7 +3544,7 @@ def api_logout() -> None:
     """Logout of the API server.
 
     Clears all cookies and settings stored in ~/.sky/config.yaml"""
-    _check_endpoint_in_env_var(is_login=False)
+    _check_endpoint_in_env_var()
 
     if server_common.is_api_server_local():
         with ux_utils.print_exception_no_traceback():

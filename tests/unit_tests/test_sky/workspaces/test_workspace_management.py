@@ -44,13 +44,14 @@ class TestWorkspaceManagement(unittest.TestCase):
         import shutil
         shutil.rmtree(self.temp_dir)
 
-    @mock.patch('sky.skypilot_config.get_skypilot_config_lock_path')
+    @mock.patch('sky.skypilot_config.get_skypilot_config_lock')
+    @mock.patch('sky.skypilot_config.reload_config')
     @mock.patch('sky.skypilot_config.to_dict')
     @mock.patch('sky.skypilot_config.update_api_server_config_no_lock')
     def test_internal_update_workspaces_config(self, mock_update_no_lock,
-                                               mock_to_dict, mock_lock_path):
+                                               mock_to_dict, mock_reload,
+                                               mock_lock):
         """Test the internal helper for updating workspaces configuration."""
-        mock_lock_path.return_value = self.config_path + '.lock'
         mock_to_dict.return_value = self.sample_config.copy()
 
         new_workspaces = {
@@ -71,7 +72,10 @@ class TestWorkspaceManagement(unittest.TestCase):
 
         # Verify the function called the right methods
         mock_to_dict.assert_called_once()
-        mock_lock_path.assert_called_once()
+        # Acquires the distributed config lock and reloads from the backing
+        # store inside it (so a cross-replica-stale in-memory read can't clobber).
+        mock_lock.assert_called_once()
+        mock_reload.assert_called_once()
         mock_update_no_lock.assert_called_once()
 
         # Verify the written config has the updated workspaces
@@ -400,6 +404,69 @@ class TestWorkspaceManagement(unittest.TestCase):
         self.assertFalse(result.only_user_access_changes)
         self.assertFalse(result.private_changed)
         self.assertFalse(result.allowed_users_changed)
+
+    @mock.patch('sky.users.permission.permission_service.get_users_for_role')
+    @mock.patch('sky.workspaces.utils.get_workspace_users')
+    def test_compare_workspace_configs_read_access_only(
+            self, mock_get_users, mock_get_users_for_role):
+        """Only read_access changed -> classified as a user-access change.
+
+        read_access is an access-control field like private/allowed_users,
+        so changing it alone must not be treated as an "other" (infra) change
+        that requires the workspace to have no active resources.
+        """
+        mock_get_users_for_role.return_value = []
+        mock_get_users.return_value = ['user1']
+
+        current_config = {
+            'private': True,
+            'allowed_users': ['user1'],
+            'read_access': 'allowed_users',
+        }
+        new_config = {
+            'private': True,
+            'allowed_users': ['user1'],
+            'read_access': 'all',
+        }
+
+        result = core._compare_workspace_configs(current_config, new_config)
+
+        self.assertTrue(result.only_user_access_changes)
+        self.assertFalse(result.private_changed)
+        self.assertFalse(result.allowed_users_changed)
+
+    @mock.patch(
+        'sky.utils.resource_checker.check_no_active_resources_for_workspaces')
+    @mock.patch(
+        'sky.utils.resource_checker.check_users_workspaces_active_resources')
+    @mock.patch('sky.users.permission.permission_service.get_users_for_role')
+    @mock.patch('sky.workspaces.utils.get_workspace_users')
+    def test_validate_read_access_change_allowed_with_active_resources(
+            self, mock_get_users, mock_get_users_for_role, mock_check_users,
+            mock_check_no_active):
+        """A read_access-only change is allowed even when the workspace
+        has active resources: it removes no member and touches no infra, so it
+        must not reach the strict no-active-resources check.
+        """
+        mock_get_users_for_role.return_value = []
+        mock_get_users.return_value = ['user1']
+        mock_check_users.return_value = ('', [], {})
+        # Simulate active resources: fail loudly if the strict check is reached.
+        mock_check_no_active.side_effect = ValueError('has active resources')
+
+        base = {'private': True, 'allowed_users': ['user1']}
+        # Both directions must be allowed without raising.
+        core._validate_workspace_config_changes('ws', {
+            **base, 'read_access': 'allowed_users'
+        }, {
+            **base, 'read_access': 'all'
+        })
+        core._validate_workspace_config_changes('ws', {
+            **base, 'read_access': 'all'
+        }, {
+            **base, 'read_access': 'allowed_users'
+        })
+        mock_check_no_active.assert_not_called()
 
     @mock.patch('sky.workspaces.utils.get_workspace_users')
     def test_compare_workspace_configs_wildcard_users(self, mock_get_users):

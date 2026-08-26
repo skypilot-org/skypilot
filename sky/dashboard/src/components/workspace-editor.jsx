@@ -11,6 +11,7 @@ import {
 } from '@/data/connectors/workspaces';
 import { getClusters } from '@/data/connectors/clusters';
 import { getManagedJobs } from '@/data/connectors/jobs';
+import { NonCapitalizedTooltip } from '@/components/utils';
 import { Layout } from '@/components/elements/layout';
 import Link from 'next/link';
 import Head from 'next/head';
@@ -91,7 +92,11 @@ const WorkspaceConfigDescription = ({
 
   Object.entries(config).forEach(([cloud, cloudConfig]) => {
     // Skip non-cloud configuration keys
-    if (cloud === 'private' || cloud === 'allowed_users') {
+    if (
+      cloud === 'private' ||
+      cloud === 'allowed_users' ||
+      cloud === 'read_access'
+    ) {
       return;
     }
 
@@ -216,25 +221,53 @@ const WorkspaceConfigDescription = ({
   return null;
 };
 
-// Workspace badge component for private/public status
-const WorkspaceBadge = ({ isPrivate }) => {
-  if (isPrivate) {
-    return (
-      <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-700 border border-gray-300">
-        Private
-      </span>
-    );
-  }
+// Workspace badge component for private/public status. `readOnly` marks a
+// private workspace visible read-only to non-members (read_access: all); the
+// "Read-only" chip's tooltip names the scope (non-members, not the whole
+// workspace).
+const WorkspaceBadge = ({ isPrivate, readOnly = false }) => {
+  const base =
+    'inline-flex items-center px-2 py-1 rounded-full text-xs font-medium border';
   return (
-    <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-700 border border-green-300">
-      Public
+    <span className="inline-flex items-center gap-1">
+      {isPrivate ? (
+        <span className={`${base} bg-gray-100 text-gray-700 border-gray-300`}>
+          Private
+        </span>
+      ) : (
+        <span
+          className={`${base} bg-green-100 text-green-700 border-green-300`}
+        >
+          Public
+        </span>
+      )}
+      {readOnly && (
+        <NonCapitalizedTooltip
+          content="Non-members can view this workspace and its workloads but cannot modify them"
+          className="text-sm text-muted-foreground"
+        >
+          <span
+            className={`${base} whitespace-nowrap bg-blue-100 text-blue-700 border-blue-300`}
+          >
+            Read-only
+          </span>
+        </NonCapitalizedTooltip>
+      )}
     </span>
   );
 };
 
 // Detailed allowed users component for workspace editor
-const DetailedAllowedUsers = ({ workspaceConfig, allUsers }) => {
+const DetailedAllowedUsers = ({
+  workspaceConfig,
+  allUsers,
+  writable = true,
+}) => {
   if (!workspaceConfig.private) return null;
+  // Non-member (read-only-visible) view: the server strips allowed_users from
+  // the config, so there is no roster to show. Render nothing rather than a
+  // misleading "0 users" — the members exist, they are just not disclosed.
+  if (!writable) return null;
 
   // Get allowed users from config
   const allowedUsersFromConfig = workspaceConfig.allowed_users || [];
@@ -298,6 +331,13 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
   const router = useRouter();
   const [workspaceConfig, setWorkspaceConfig] = useState({});
   const [originalConfig, setOriginalConfig] = useState({});
+  // Server-computed read-only-visibility flag (accounts for the org-wide
+  // workspace_config.read_access fallback). Held separately from the
+  // editable config, which strips computed fields.
+  const [isReadOnlyVisible, setIsReadOnlyVisible] = useState(false);
+  // False when the caller is a non-member of this workspace (server strips the
+  // config down to the badges — no allowed_users / infra to show).
+  const [isWritable, setIsWritable] = useState(true);
   const [yamlValue, setYamlValue] = useState('');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -335,9 +375,19 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
           getUsers(),
         ]);
 
-        const config = allWorkspaces[workspaceName] || {};
+        // `writable` and `read_only` are server-computed flags (not persisted
+        // config). Strip them so they don't render in the YAML, get flagged as
+        // unknown infra keys, or get written back on save. `read_only` is kept
+        // separately for the badge.
+        const {
+          writable: writableFlag,
+          read_only: readOnly,
+          ...config
+        } = allWorkspaces[workspaceName] || {};
         setWorkspaceConfig(config);
         setOriginalConfig(config);
+        setIsReadOnlyVisible(readOnly === true);
+        setIsWritable(writableFlag !== false);
         setAllUsers(usersResponse || []);
 
         // Format as YAML with workspace name as top-level key
@@ -712,6 +762,7 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
                           </div>
                           <WorkspaceBadge
                             isPrivate={originalConfig.private === true}
+                            readOnly={isReadOnlyVisible}
                           />
                         </div>
                       </CardTitle>
@@ -779,6 +830,7 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
                       <DetailedAllowedUsers
                         workspaceConfig={originalConfig}
                         allUsers={allUsers}
+                        writable={isWritable}
                       />
                     </div>
                   </Card>
@@ -830,6 +882,8 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
                             <pre className="text-xs font-mono text-gray-600 whitespace-pre-wrap">
                               {`${workspaceName || 'my-workspace'}:
   private: true
+  # who can read it (default: allowed_users = members only; all = anyone)
+  read_access: all
   allowed_users:
   - user1@mydomain.com
   - user2@mydomain.com

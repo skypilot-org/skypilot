@@ -6,10 +6,13 @@ import datetime
 import enum
 import json
 import os
+import threading
 import time
 import traceback
 import typing
-from typing import Any, Callable, ClassVar, Dict, List, Optional, Union
+from typing import Any, Callable, ClassVar, Dict, List, Optional, Set, Union
+import urllib.parse
+import urllib.request
 import uuid
 
 from typing_extensions import ParamSpec
@@ -112,6 +115,10 @@ class UsageMessageToReport(MessageToReport):
         self.entrypoint: Optional[str] = None  # entrypoint_context
         #: Whether entrypoint is called by sky internal code.
         self.internal: bool = False  # set_internal
+        #: Whether the Scarf ping is suppressed for this entrypoint (e.g.
+        #: dryrun). Underscore-prefixed so it is excluded from the message
+        #: sent to Loki.
+        self._scarf_ping_skipped: bool = False  # skip_scarf_ping
 
         # Basic info for the clusters.
         #: Clusters operated by the command.
@@ -199,6 +206,12 @@ class UsageMessageToReport(MessageToReport):
 
     def set_internal(self):
         self.internal = True
+
+    def skip_scarf_ping(self):
+        self._scarf_ping_skipped = True
+
+    def scarf_ping_skipped(self) -> bool:
+        return self._scarf_ping_skipped
 
     def update_user_task_yaml(self, yaml_config_or_path: Union[Dict, str]):
         self.user_task_yaml = prepare_json_from_yaml_config(yaml_config_or_path)
@@ -748,6 +761,90 @@ def maybe_show_privacy_policy():
             pass
 
 
+# Scarf (https://scarf.sh) analytics: complements the Loki-based usage
+# collection above with a fire-and-forget ping that carries only the
+# entrypoint name and the SkyPilot version (no PII). Scarf attributes
+# usage by source IP, so the ping must originate from the client side:
+# a ping sent from a centralized API server deployment would collapse
+# all of its users into a single origin. Server-side processes are
+# therefore excluded via ENV_VAR_IS_SKYPILOT_SERVER.
+_SCARF_TIMEOUT_SECONDS = 1
+# Entrypoints already pinged by this process. Each entrypoint is only
+# reported once per process, so long-running SDK programs (e.g. calling
+# status() in a loop) do not send a request per call.
+_scarf_pinged_entrypoints: Set[str] = set()
+
+
+def _scarf_opted_out() -> bool:
+    if env_options.Options.DISABLE_LOGGING.get():
+        return True
+    # DO_NOT_TRACK and SCARF_NO_ANALYTICS are industry-standard opt-outs:
+    # any value other than unset, empty or '0' opts out.
+    for env_var in ('DO_NOT_TRACK', 'SCARF_NO_ANALYTICS'):
+        if os.environ.get(env_var, '0') not in ('', '0'):
+            return True
+    return False
+
+
+def _send_scarf_ping(params: Dict[str, str]) -> None:
+    try:
+        url = (constants.SCARF_GATEWAY_URL + '?' +
+               urllib.parse.urlencode(params))
+        with urllib.request.urlopen(url, timeout=_SCARF_TIMEOUT_SECONDS):
+            pass
+    except Exception:  # pylint: disable=broad-except
+        # Analytics must never break a command.
+        pass
+
+
+def _maybe_start_scarf_ping(entrypoint_name: str,
+                            internal: bool) -> Optional[threading.Thread]:
+    """Starts a background thread sending the Scarf ping for an entrypoint.
+
+    Returns the started thread, or None when the ping is skipped: on the
+    API server, for internal (controller-initiated) operations, for
+    operations marked via skip_scarf_ping_for_current_operation() (e.g.
+    dryrun), when the user opted out, or when this entrypoint was already
+    reported by this process.
+
+    Args:
+        entrypoint_name: the entrypoint to report.
+        internal: whether the operation was initiated by sky internal code.
+            Callers should pass the ``internal`` flag captured at entrypoint
+            entry: set_internal() calls made by nested sub-operations during
+            the entrypoint body (e.g. the implicit jobs queue query in
+            ``sky status``) do not make the entrypoint itself internal.
+    """
+    try:
+        if _scarf_opted_out():
+            return None
+        if os.environ.get(skylet_constants.ENV_VAR_IS_SKYPILOT_SERVER):
+            return None
+        if internal or messages.usage.scarf_ping_skipped():
+            return None
+        if entrypoint_name in _scarf_pinged_entrypoints:
+            return None
+        _scarf_pinged_entrypoints.add(entrypoint_name)
+        params = {'command': entrypoint_name, 'version': sky.__version__}
+        thread = threading.Thread(target=_send_scarf_ping,
+                                  args=(params,),
+                                  daemon=True)
+        thread.start()
+        return thread
+    except Exception:  # pylint: disable=broad-except
+        # Analytics must never break a command.
+        return None
+
+
+def skip_scarf_ping_for_current_operation() -> None:
+    """Skips the Scarf analytics ping for the current entrypoint.
+
+    Used for invocations that do not reflect actual usage, e.g. dryrun or
+    launches initiated by SkyPilot controllers rather than by users.
+    """
+    messages.usage.skip_scarf_ping()
+
+
 @contextlib.contextmanager
 def entrypoint_context(name: str, fallback: bool = False):
     """Context manager for entrypoint.
@@ -760,6 +857,11 @@ def entrypoint_context(name: str, fallback: bool = False):
     the global entrypoint to catch any exceptions that are not caught.
     """
     is_entry = messages.usage.entrypoint is None
+    # Capture the internal flag at entry for the Scarf ping decision:
+    # controllers call set_internal() before invoking an entrypoint, while
+    # set_internal() calls during the body come from nested sub-operations
+    # and do not make this entrypoint internal.
+    internal_at_entry = messages.usage.internal
     if is_entry and not fallback:
         for message in messages.values():
             message.start()
@@ -775,9 +877,18 @@ def entrypoint_context(name: str, fallback: bool = False):
         store_exception(e)
         raise
     finally:
+        # Start the Scarf ping before the (blocking) Loki send below so the
+        # two requests overlap, then bound the extra wait for the ping.
+        # Fallback contexts do not ping: the actual entrypoint, if any,
+        # already pinged with a more precise name.
+        scarf_thread = None
         if fallback:
             messages.usage.update_entrypoint(name)
+        else:
+            scarf_thread = _maybe_start_scarf_ping(name, internal_at_entry)
         _send_local_messages()
+        if scarf_thread is not None:
+            scarf_thread.join(timeout=_SCARF_TIMEOUT_SECONDS)
 
 
 T = typing.TypeVar('T')

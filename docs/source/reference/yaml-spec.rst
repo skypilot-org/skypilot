@@ -38,7 +38,6 @@ Below is the configuration syntax and some example values.  See details under ea
     :ref:`instance_type <yaml-spec-resources-instance-type>`: p3.8xlarge
     :ref:`use_spot <yaml-spec-resources-use-spot>`: false
     :ref:`disk_size <yaml-spec-resources-disk-size>`: 256
-    :ref:`ephemeral_storage <yaml-spec-resources-ephemeral-storage>`: 50
     :ref:`disk_tier <yaml-spec-resources-disk-tier>`: medium
     :ref:`network_tier <yaml-spec-resources-network-tier>`: best
     :ref:`max_hourly_cost <yaml-spec-resources-max-hourly-cost>`: 10.0
@@ -531,9 +530,13 @@ Units supported (case-insensitive):
 - TB (terabytes, 2^40 bytes)
 - PB (petabytes, 2^50 bytes)
 
-.. warning::
+.. note::
 
-   The disk size will be rounded down (floored) to the nearest gigabyte. For example, ``1500MB`` or ``2000MB`` will be rounded to ``1GB``.
+   On **Kubernetes**, this sets the ``resources.requests.ephemeral-storage`` field in the pod spec.
+   When :ref:`set_pod_resource_limits <config-yaml-kubernetes-set-pod-resource-limits>` is configured in the SkyPilot config, it also sets
+   ``resources.limits.ephemeral-storage`` using the multiplier defined there.
+
+   With this, the disk size will be rounded down (floored) to the nearest gigabyte. For example, ``1500MB`` will be rounded to ``1GB``.
 
 .. code-block:: yaml
 
@@ -546,51 +549,6 @@ OR
 
   resources:
     disk_size: 256GB
-
-
-
-.. _yaml-spec-resources-ephemeral-storage:
-
-``resources.ephemeral_storage``
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-Ephemeral storage to request for Kubernetes pods, specified as an integer in GB or as a string with units (e.g., ``50GB``).
-
-This sets the ``resources.requests.ephemeral-storage`` field in the Kubernetes pod spec.
-When :ref:`set_pod_resource_limits <config-yaml-kubernetes-set-pod-resource-limits>` is configured in the SkyPilot config, it also sets
-``resources.limits.ephemeral-storage`` using the multiplier defined there.
-
-This field is **only effective on Kubernetes**. It is ignored on other clouds.
-
-Increase this if your tasks download large datasets or produce significant temporary files that
-could exhaust the node's ephemeral storage and trigger pod evictions.
-
-Units supported (case-insensitive):
-
-- KB (kilobytes, 2^10 bytes)
-- MB (megabytes, 2^20 bytes)
-- GB (gigabytes, 2^30 bytes)
-- TB (terabytes, 2^40 bytes)
-- PB (petabytes, 2^50 bytes)
-
-.. warning::
-
-   The ephemeral storage size will be rounded down (floored) to the nearest gigabyte. For example, ``1500MB`` or ``2000MB`` will be rounded to ``1GB``.
-
-.. code-block:: yaml
-
-  resources:
-    infra: kubernetes
-    ephemeral_storage: 50
-
-OR
-
-.. code-block:: yaml
-
-  resources:
-    infra: kubernetes
-    ephemeral_storage: 50GB
-
 
 
 .. _yaml-spec-resources-disk-tier:
@@ -810,6 +768,17 @@ To find Azure images: https://docs.microsoft.com/en-us/azure/virtual-machines/li
 
   resources:
     image_id: microsoft-dsvm:ubuntu-2004:2004:21.11.04
+
+You can also boot from a private `Shared Image Gallery
+<https://learn.microsoft.com/en-us/azure/virtual-machines/shared-image-galleries>`_
+image by giving its full image-version resource ID. The gallery may live in a
+different subscription than the cluster, as long as your credentials can read
+it:
+
+.. code-block:: yaml
+
+  resources:
+    image_id: /subscriptions/<subscription-id>/resourceGroups/<resource-group>/providers/Microsoft.Compute/galleries/<gallery>/images/<image>/versions/<version>
 
 **OCI**
 
@@ -1128,7 +1097,8 @@ See :ref:`Nested SkyPilot from managed jobs <nested-skypilot-managed-jobs>` for 
 ``volumes``
 ~~~~~~~~~~~
 
-SkyPilot supports managing persistent and ephemeral volumes for tasks or jobs on Kubernetes clusters. Refer to :ref:`volumes on Kubernetes <volumes-on-kubernetes>` for more details.
+SkyPilot supports managed persistent and ephemeral volumes on Kubernetes, plus host path bind mounts for Slurm containers.
+Refer to :ref:`volumes on Kubernetes <volumes-on-kubernetes>` for managed volume details.
 
 Example:
 
@@ -1140,6 +1110,25 @@ Example:
     # Ephemeral volume
     /mnt/cache:
       size: 100Gi
+
+For Slurm tasks using Pyxis/Enroot, mount an existing absolute host path directly:
+
+.. code-block:: yaml
+
+  resources:
+    cloud: slurm
+    image_id: docker:ubuntu:24.04
+
+  volumes:
+    /data:
+      host_path: /shared/datasets
+      mode: ro  # Optional; defaults to ro. Use rw for a writable mount.
+
+Host and container paths must use safe POSIX path characters.
+Host paths may contain simple environment variable expansions such as ``$SLURM_JOB_ID``.
+
+Administrators can also declare cluster-wide binds applied to every containerized job; see
+:ref:`slurm.container_mounts <config-yaml-slurm-container-mounts>`.
 
 
 .. _yaml-spec-file-mounts:

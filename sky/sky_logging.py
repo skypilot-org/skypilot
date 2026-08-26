@@ -10,6 +10,7 @@ import threading
 import colorama
 
 from sky.skylet import constants
+from sky.skylet import runtime_utils
 from sky.utils import context
 from sky.utils import env_options
 from sky.utils import rich_utils
@@ -20,7 +21,7 @@ _FORMAT = ('%(levelname).1s %(asctime)s.%(msecs)03d PID=%(process)d '
 _DATE_FORMAT = '%m-%d %H:%M:%S'
 _SENSITIVE_LOGGER = ['sky.provisioner', 'sky.optimizer']
 
-DEBUG_LOG_DIR = os.path.expanduser('~/.sky/api_server/request_debug_logs')
+DEBUG_LOG_DIR = runtime_utils.expanduser('~/.sky/api_server/request_debug_logs')
 
 DEBUG = logging.DEBUG
 INFO = logging.INFO
@@ -160,17 +161,6 @@ _setup_logger()
 
 def init_logger(name: str) -> logging.Logger:
     return logging.getLogger(name)
-
-
-@contextlib.contextmanager
-def set_logging_level(logger: str, level: int):
-    logger = logging.getLogger(logger)
-    original_level = logger.level
-    logger.setLevel(level)
-    try:
-        yield
-    finally:
-        logger.setLevel(original_level)
 
 
 @contextlib.contextmanager

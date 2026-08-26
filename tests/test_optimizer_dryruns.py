@@ -4,6 +4,7 @@ import tempfile
 import textwrap
 import time
 from typing import Callable, Optional, Set
+import uuid
 
 from click import testing as cli_testing
 import pytest
@@ -73,7 +74,21 @@ def _test_resources(
         assert expected_cloud.is_same_cloud(resources.cloud)
 
 
+def _unique_cluster_name() -> str:
+    """A per-call unique cluster name for dryrun launches.
+
+    An unnamed launch falls back to the default cluster name, which is
+    deterministic per user -- so under pytest-xdist every unnamed dryrun
+    test in this file contends for the SAME cluster status lock, and a
+    loser surfaces ExecutionPausedError ("locked by another operation")
+    as a spurious failure. Unique names make the tests lock-disjoint.
+    """
+    return f'dryrun-{uuid.uuid4().hex[:8]}'
+
+
 def _test_resources_from_yaml(spec: str, cluster_name: str = None):
+    if cluster_name is None:
+        cluster_name = _unique_cluster_name()
     resources = sky.Resources.from_yaml_config(spec)
     with sky.Dag() as dag:
         task = sky.Task('test_task')
@@ -86,6 +101,8 @@ def _test_resources_launch(*resources_args,
                            cluster_name: str = None,
                            **resources_kwargs):
     """This function is testing for the core functions on client side."""
+    if cluster_name is None:
+        cluster_name = _unique_cluster_name()
     resources = _make_resources(*resources_args, **resources_kwargs)
     resources.validate()
     with sky.Dag() as dag:
@@ -96,7 +113,7 @@ def _test_resources_launch(*resources_args,
 
 
 def test_resources_aws(enable_all_clouds):
-    _test_resources_launch(infra='aws', instance_type='p3.2xlarge')
+    _test_resources_launch(infra='aws', instance_type='g4dn.xlarge')
 
 
 def test_resources_azure(enable_all_clouds):
@@ -141,10 +158,10 @@ def test_partial_tpu(enable_all_clouds):
     _test_resources_launch(accelerators='tpu-v3-8')
 
 
-def test_partial_v100(enable_all_clouds):
-    _test_resources_launch(sky.AWS(), accelerators='V100')
-    _test_resources_launch(sky.AWS(), accelerators='V100', use_spot=True)
-    _test_resources_launch(sky.AWS(), accelerators={'V100': 8})
+def test_partial_t4(enable_all_clouds):
+    _test_resources_launch(sky.AWS(), accelerators='T4')
+    _test_resources_launch(sky.AWS(), accelerators='T4', use_spot=True)
+    _test_resources_launch(sky.AWS(), accelerators={'T4': 8})
 
 
 def test_invalid_cloud_tpu(enable_all_clouds):
@@ -320,10 +337,10 @@ def test_instance_type_from_cpu_memory(enable_all_clouds, capfd):
 
 def test_instance_type_mistmatches_accelerators(enable_all_clouds):
     bad_instance_and_accs = [
-        # Actual: V100
-        ('p3.2xlarge', 'K80'),
+        # Actual: T4
+        ('g4dn.xlarge', 'K80'),
         # Actual: None
-        ('m4.2xlarge', 'V100'),
+        ('m4.2xlarge', 'T4'),
     ]
     for instance, acc in bad_instance_and_accs:
         with pytest.raises(exceptions.ResourcesMismatchError) as e:
@@ -346,15 +363,15 @@ def test_instance_type_mistmatches_accelerators(enable_all_clouds):
 
     with pytest.raises(exceptions.ResourcesMismatchError) as e:
         _test_resources_launch(sky.AWS(),
-                               instance_type='p3.16xlarge',
-                               accelerators={'V100': 1})
+                               instance_type='g4dn.12xlarge',
+                               accelerators={'T4': 1})
         assert 'Infeasible resource demands found' in str(e.value)
 
 
 def test_instance_type_matches_accelerators(enable_all_clouds):
     _test_resources_launch(sky.AWS(),
-                           instance_type='p3.2xlarge',
-                           accelerators='V100')
+                           instance_type='g4dn.xlarge',
+                           accelerators='T4')
     _test_resources_launch(sky.GCP(),
                            instance_type='n1-standard-2',
                            accelerators='V100')
@@ -371,8 +388,8 @@ def test_instance_type_matches_accelerators(enable_all_clouds):
                            accelerators={'H100': 8})
 
     _test_resources_launch(sky.AWS(),
-                           instance_type='p3.16xlarge',
-                           accelerators={'V100': 8})
+                           instance_type='g4dn.metal',
+                           accelerators={'T4': 8})
 
 
 def test_invalid_instance_type(enable_all_clouds):
@@ -386,8 +403,8 @@ def test_infer_cloud_from_instance_type(enable_all_clouds):
     # AWS instances
     _test_resources(instance_type='m5.12xlarge', expected_cloud=sky.AWS())
     _test_resources_launch(instance_type='m5.12xlarge')
-    _test_resources(instance_type='p3.8xlarge', expected_cloud=sky.AWS())
-    _test_resources_launch(instance_type='p3.8xlarge')
+    _test_resources(instance_type='g4dn.12xlarge', expected_cloud=sky.AWS())
+    _test_resources_launch(instance_type='g4dn.12xlarge')
     _test_resources(instance_type='g4dn.2xlarge', expected_cloud=sky.AWS())
     _test_resources_launch(instance_type='g4dn.2xlarge')
     # GCP instances
@@ -749,7 +766,9 @@ def test_ordered_resources(enable_all_clouds):
             ])
         dag = sky.optimize(dag)
         cli_runner = cli_testing.CliRunner()
-        request_id = sky.launch(task, dryrun=True)
+        request_id = sky.launch(task,
+                                dryrun=True,
+                                cluster_name=_unique_cluster_name())
         result = cli_runner.invoke(command.api_logs, [request_id])
         assert not result.exit_code
 
@@ -946,7 +965,8 @@ def test_candidate_logging(enable_all_clouds, capfd):
             sky.Resources(accelerators={'H200': 1}, use_spot=True),
         ])
     sky.optimize(dag)
-    sky.stream_and_get(sky.launch(dag, dryrun=True))
+    sky.stream_and_get(
+        sky.launch(dag, dryrun=True, cluster_name=_unique_cluster_name()))
     stdout, _ = capfd.readouterr()
     l4_section = any(
         'L4:1' in line and '✔' in line for line in stdout.splitlines())

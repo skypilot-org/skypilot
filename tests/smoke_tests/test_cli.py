@@ -23,9 +23,41 @@ from sky.server import common as server_common
 from sky.skylet import constants
 from sky.utils import common_utils
 
+# Check that `sky storage delete` removed the bucket AND that it stays
+# removed. Two lessons baked in (root-caused via CloudTrail, see #10353):
+#   1. The managed-job controller's post-job cleanup used to re-create the
+#      just-deleted bucket a few seconds after deletion (construct() on the
+#      task's storage mounts auto-creates missing buckets). A one-shot
+#      existence check right after delete races ahead of the recreation and
+#      false-passes, silently leaking the bucket. So after the bucket is
+#      first observed gone, hold the assertion open for another 60s and fail
+#      if it reappears.
+#   2. Use `get-bucket-location` rather than `head-bucket`: cross-region
+#      head-bucket keeps returning a redirect the CLI reports as success for
+#      a window after deletion, and this check may run on a cloud-cmd
+#      cluster whose default region differs from the bucket's.
 _CHECK_AWS_BUCKET_DOESNT_EXIST = (
-    'aws s3api head-bucket --bucket {bucket_name} 2>/dev/null && exit 1 || exit 0'
-)
+    'start=$SECONDS; '
+    'while aws s3api get-bucket-location --bucket {bucket_name} '
+    '>/dev/null 2>&1; do '
+    'if (( SECONDS - start > 120 )); then '
+    'echo "Bucket {bucket_name} still exists 120s after deletion"; '
+    'aws sts get-caller-identity || true; '
+    'aws s3api get-bucket-location --bucket {bucket_name} || true; '
+    'exit 1; fi; '
+    'echo "Bucket {bucket_name} still resolves, waiting..."; sleep 5; '
+    'done; '
+    'echo "Bucket {bucket_name} gone; verifying it stays gone '
+    '(no recreation)..."; '
+    'for i in 1 2 3 4 5 6; do '
+    'sleep 10; '
+    'if aws s3api get-bucket-location --bucket {bucket_name} '
+    '>/dev/null 2>&1; then '
+    'echo "Bucket {bucket_name} REAPPEARED after deletion (recreated at '
+    '+$((SECONDS-start))s)"; exit 1; fi; '
+    'done; '
+    'echo "Bucket {bucket_name} confirmed deleted and not recreated."; '
+    'exit 0')
 
 
 @pytest.mark.no_remote_server
@@ -59,7 +91,7 @@ def test_endpoint_output_basic_no_pg_conn_closed_errors(generic_cloud: str):
 def test_endpoint_output_config(generic_cloud: str):
     """Test that sky api info endpoint output is correct when config is set."""
 
-    endpoint = server_common.DEFAULT_SERVER_URL
+    endpoint = server_common.get_default_server_url()
 
     config = textwrap.dedent(f"""
     api_server:
@@ -100,7 +132,8 @@ def test_endpoint_output_env(generic_cloud: str):
                                   teardown=f'sky down -y {name}',
                                   env={
                                       constants.SKY_API_SERVER_URL_ENV_VAR:
-                                          server_common.DEFAULT_SERVER_URL
+                                          server_common.get_default_server_url(
+                                          )
                                   })
     smoke_tests_utils.run_one_test(test)
 
@@ -121,10 +154,15 @@ def test_sky_logout_wih_env_endpoint(generic_cloud: str):
 
 @pytest.mark.no_remote_server
 def test_sky_login_wih_env_endpoint(generic_cloud: str):
-    """Test that sky api login with env endpoint fails."""
+    """Test that sky api login uses the env endpoint, unless -e conflicts."""
     test = smoke_tests_utils.Test(
-        'sky_login_wih_env_endpoint', [
-            f's=$(SKYPILOT_DEBUG=0 sky api login -e https://SUPERFAKE_ENDPOINT.unreachable 2>&1 | tee /dev/stderr) && echo "\n===Validating endpoint output===" && echo "$s" | grep "Cannot login to API server when the endpoint is set via the environment variable. Run unset"',
+        'sky_login_wih_env_endpoint',
+        [
+            # A different -e is ambiguous, so it is rejected.
+            f's=$(SKYPILOT_DEBUG=0 sky api login -e https://OTHERFAKE_ENDPOINT.unreachable 2>&1 | tee /dev/stderr) && echo "\n===Validating endpoint output===" && echo "$s" | grep "the endpoint is already set to https://SUPERFAKE_ENDPOINT.unreachable by the environment variable"',
+            # Without -e, the env endpoint is used, so login gets as far as
+            # connecting to it (and fails, since it does not exist).
+            f's=$(SKYPILOT_DEBUG=0 sky api login 2>&1 | tee /dev/stderr) && echo "\n===Validating endpoint output===" && echo "$s" | grep "Using endpoint from {constants.SKY_API_SERVER_URL_ENV_VAR}: https://SUPERFAKE_ENDPOINT.unreachable" && echo "$s" | grep "Could not connect to SkyPilot API server at https://SUPERFAKE_ENDPOINT.unreachable"',
         ],
         timeout=smoke_tests_utils.get_timeout(generic_cloud),
         env={
@@ -170,8 +208,14 @@ def test_cli_auto_retry(generic_cloud: str):
     test = smoke_tests_utils.Test(
         'cli_auto_retry',
         [
-            # Chaos proxy will kill TCP connections every 30 seconds.
-            f'python tests/chaos/chaos_proxy.py --port {port} --interval 30 & echo $! > /tmp/{name}-chaos.pid',
+            # Chaos proxy kills TCP connections roughly every 30 seconds.
+            # The +/-10s jitter keeps the kill schedule from phase-locking
+            # to the client's reconnect cadence: without it, a kill landing
+            # in the small window between the job finishing and the log
+            # stream closing repeats on every attempt (the job runtime and
+            # reconnect timing are ~deterministic), turning a rare race into
+            # a deterministic failure. See #9246.
+            f'python tests/chaos/chaos_proxy.py --port {port} --interval 30 --jitter 10 & echo $! > /tmp/{name}-chaos.pid',
             # Wait until the proxy is actually listening on the port. The
             # background `&` returns control immediately and on slower CI
             # workers the first sky-launch would otherwise race the proxy

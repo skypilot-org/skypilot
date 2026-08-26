@@ -47,6 +47,67 @@ _INTERNAL_USER_IDS = (
 router = fastapi.APIRouter()
 
 
+def _is_admin(roles: List[str]) -> bool:
+    """Whether a role list means admin, i.e. `admin` is the only role.
+
+    Deliberately stricter than the `admin in roles` reads elsewhere, which
+    answer "does the viewer allowlist apply" rather than gating a grant. A
+    leftover role beside `admin` is unreachable (`update_role` replaces), and
+    `check_endpoint_permission` matches the blocklist against *any* of the
+    caller's roles, so it would still deny such a caller the admin endpoints.
+    """
+    return roles == [rbac.RoleName.ADMIN.value]
+
+
+def _caller_is_admin(user_id: str) -> bool:
+    """`_is_admin` for a caller whose roles have not been fetched yet."""
+    return _is_admin(permission.permission_service.get_user_roles(user_id))
+
+
+def _check_role_grantable(role: str, caller_user_id: str) -> None:
+    """Reject a role the caller may not grant, before anything is written.
+
+    An unrecognized role name must be rejected rather than passed through:
+    it has no Casbin policy at all, and the blocklist reads "no matching
+    policy" as allow, so such a role grants *more* than `user`, not less.
+    """
+    supported_roles = rbac.get_supported_roles()
+    if role not in supported_roles:
+        raise fastapi.HTTPException(
+            status_code=400,
+            detail=f'Invalid role {role!r}. Supported roles: '
+            f'{", ".join(supported_roles)}.')
+    if (role == rbac.RoleName.ADMIN.value and
+            not _caller_is_admin(caller_user_id)):
+        raise fastapi.HTTPException(
+            status_code=403, detail='Only admins can grant the admin role.')
+
+
+def _clamped_default_role(caller_user_id: str) -> str:
+    """The default role to seed a service account with, capped at the caller's.
+
+    `rbac.default_role` falls back to `admin`, so an operator who leaves it
+    unset while demoting individual people to `user` would otherwise hand a
+    non-admin an admin-scoped token just by omitting `role` -- the same
+    escalation `_check_role_grantable` blocks on the explicit path. A service
+    account must not out-rank the identity that created it.
+
+    Assumes the config was reloaded by the caller.
+    """
+    default_role = rbac.get_default_role()
+    if default_role != rbac.RoleName.ADMIN.value:
+        return default_role
+    caller_roles = permission.permission_service.get_user_roles(caller_user_id)
+    if _is_admin(caller_roles):
+        return default_role
+    if not caller_roles:
+        logger.warning(f'User {caller_user_id} holds no role; seeding their '
+                       f'service account with the most restricted role.')
+    # A caller can hold more than one role, and the order they come back in is
+    # not stable, so cap at the least privileged rather than the first.
+    return rbac.least_privileged_role(caller_roles)
+
+
 def get_user_type(user: models.User) -> str:
     """Get user type for a user for backward compatibility.
 
@@ -221,13 +282,14 @@ def get_user_workspace(
     # set `active_workspace` globally gets honored.
     if requested is None and skypilot_config.is_active_workspace_set():
         requested = skypilot_config.get_active_workspace()
-    accessible = sorted(workspaces_core.get_accessible_workspace_names())
     response: Dict[str, Any] = {
         'workspace': None,
         'source': None,
         'note': None,
         'preferred': user_for_resolve.preferred_workspace,
-        'accessible': accessible,
+        # Filled in AFTER resolution: the resolver can heal a missed
+        # first-login grant, which grows the accessible set.
+        'accessible': [],
     }
     try:
         resolution = workspaces_core.resolve_workspace_for_user(
@@ -245,14 +307,30 @@ def get_user_workspace(
         response['note'] = (e.note
                             if e.note else 'multiple workspaces accessible; '
                             'no preferred or active workspace set')
-        return response
     except exceptions.NoWorkspaceAccessError as e:
-        # One-line message from the raise site ("User <name> (<id>) has
-        # no accessible workspaces.") — short enough to fit in the tree
-        # row and more informative than a generic stand-in.
-        response['source'] = workspace_constants.WORKSPACE_SOURCE_NO_ACCESS
-        response['note'] = str(e)
-        return response
+        # The resolver answers "where would a *write* land", so it reports no
+        # access for a user whose every accessible workspace is read-only.
+        # Re-resolve at read level to report where that user's reads land,
+        # under a distinct state so the CLI / dashboard can say "read-only".
+        response['source'] = workspace_constants.WORKSPACE_SOURCE_READ_ONLY
+        try:
+            resolution = workspaces_core.resolve_workspace_for_user(
+                user_for_resolve,
+                requested=requested,
+                action=workspace_constants.WORKSPACE_ACTION_READ)
+        except (exceptions.NoWorkspaceAccessError,
+                exceptions.PermissionDeniedError):
+            # No read access either, so the original message is the truth.
+            # One-line message from the raise site ("User <name> (<id>) has
+            # no accessible workspaces.") — short enough to fit in the tree
+            # row and more informative than a generic stand-in.
+            response['source'] = workspace_constants.WORKSPACE_SOURCE_NO_ACCESS
+            response['note'] = str(e)
+        else:
+            response['workspace'] = resolution.workspace
+            response['note'] = ('read-only access only: reads land here, but '
+                                'launching requires membership of a writable '
+                                'workspace')
     except exceptions.PermissionDeniedError as e:
         # Per-workspace deny — raised when an explicit `requested`
         # workspace exists but the user can't access it. We keep the
@@ -262,10 +340,19 @@ def get_user_workspace(
         response['source'] = (
             workspace_constants.WORKSPACE_SOURCE_PERMISSION_DENIED)
         response['note'] = str(e)
-        return response
-    response['workspace'] = resolution.workspace
-    response['source'] = resolution.source
-    response['note'] = resolution.note
+    else:
+        response['workspace'] = resolution.workspace
+        response['source'] = resolution.source
+        response['note'] = resolution.note
+    # `accessible` keeps its historical meaning: the workspaces the user can
+    # launch into. Everything downstream treats it as a set of usable choices
+    # (dropdowns, "where do I create this"), so read-only-visible workspaces
+    # must NOT be folded in — they go in `read_only`, additively.
+    readable, writable = workspaces_core.get_workspace_access_sets()
+    response['accessible'] = sorted(writable)
+    # Workspaces the user can only view (read-only visibility for non-members):
+    # visible but not writable. Lets the CLI/dashboard list them separately.
+    response['read_only'] = sorted(readable - writable)
     return response
 
 
@@ -282,6 +369,10 @@ def user_create(user_create_body: payloads.UserCreateBody) -> None:
         raise fastapi.HTTPException(status_code=400,
                                     detail=f'Invalid role: {role}')
 
+    # Main-process handler: refresh config so runtime `rbac.default_role` /
+    # `workspaces` changes are honored without a server restart (executor
+    # requests reload per request, sync handlers like this one do not).
+    skypilot_config.safe_reload_config()
     if not role:
         role = rbac.get_default_role()
 
@@ -304,6 +395,11 @@ def user_create(user_create_body: payloads.UserCreateBody) -> None:
                         password=password_hash,
                         user_type=models.UserType.BASIC.value))
         permission.permission_service.update_role(user_hash, role)
+        # Grant any private-workspace access the config's allowed_users owes
+        # this user: an admin may have listed this username before the account
+        # existed, in which case the startup / config-update sync dropped it.
+        permission.permission_service.resync_workspace_policies_for_new_user(
+            user_hash)
 
 
 @router.post('/update')
@@ -335,7 +431,7 @@ def user_update(request: fastapi.Request,
             current_user.id)
         if not current_user_roles:
             raise fastapi.HTTPException(status_code=403, detail='Invalid user')
-        if current_user_roles[0] != rbac.RoleName.ADMIN.value:
+        if not _is_admin(current_user_roles):
             if need_update_role:
                 raise fastapi.HTTPException(
                     status_code=403, detail='Only admin can update user role')
@@ -411,7 +507,7 @@ def user_batch_update(request: fastapi.Request,
             current_user.id)
         if not current_user_roles:
             raise fastapi.HTTPException(status_code=403, detail='Invalid user')
-        if current_user_roles[0] != rbac.RoleName.ADMIN.value:
+        if not _is_admin(current_user_roles):
             raise fastapi.HTTPException(
                 status_code=403, detail='Only admin can update user roles')
 
@@ -568,6 +664,10 @@ def user_import(user_import_body: payloads.UserImportBody) -> Dict[str, Any]:
             status_code=400,
             detail=f'Missing required columns: {", ".join(missing_headers)}')
 
+    # Main-process handler: refresh config once (not per row) so rows that fall
+    # back to `rbac.default_role` honor a runtime change without a restart.
+    skypilot_config.safe_reload_config()
+
     # Parse user data
     users_to_create = []
     parse_errors = []
@@ -666,6 +766,9 @@ def user_import(user_import_body: payloads.UserImportBody) -> Dict[str, Any]:
 def user_export() -> Dict[str, Any]:
     """Export all users as CSV content."""
     try:
+        # Main-process handler: refresh config once so the roleless-user display
+        # fallback below reflects a runtime `rbac.default_role` change.
+        skypilot_config.safe_reload_config()
         # Get all users
         user_list = global_user_state.get_all_users()
 
@@ -803,6 +906,18 @@ def create_service_account_token(
             status_code=400,
             detail='Expiration days must be positive or 0 for never expire')
 
+    # Resolve the account's role up front, so we fail before creating anything
+    # and can seed the right role in one write. Refresh the config first for
+    # the same reason `seed_new_user_role` does: this handler runs in the main
+    # API-server process, which has no per-request config reload, so a runtime
+    # `rbac.default_role` change would otherwise be missed.
+    skypilot_config.safe_reload_config()
+    seed_role = token_body.role
+    if seed_role is not None:
+        _check_role_grantable(seed_role, auth_user.id)
+    else:
+        seed_role = _clamped_default_role(auth_user.id)
+
     try:
         # Generate a unique service account user ID
         service_account_user_id = _generate_service_account_user_id()
@@ -821,11 +936,9 @@ def create_service_account_token(
                 f'already exists ({service_account_user_id}). '
                 'Please use a different name.')
 
-        # Add service account to permission system with default role
-        # Import here to avoid circular imports
-        # pylint: disable=import-outside-toplevel
-        from sky.users.permission import permission_service
-        permission_service.add_user_if_not_exists(service_account_user_id)
+        # Seed the resolved role directly, so the account is never briefly
+        # more privileged than it ends up.
+        permission.seed_new_user_role(service_account_user_id, role=seed_role)
 
         # Handle expiration: 0 means "never expire"
         expires_in_days = token_body.expires_in_days
@@ -967,6 +1080,11 @@ def update_service_account_role(
             detail='You can only update roles for your own service accounts. '
             'Only admins can update roles for service accounts owned by other '
             'users.')
+
+    # Owning a service account does not entitle the caller to raise its role
+    # above their own. Kept outside the try below so the 400/403 is not
+    # swallowed into a 500 by the broad handler.
+    _check_role_grantable(role_body.role, auth_user.id)
 
     try:
         # Update service account role

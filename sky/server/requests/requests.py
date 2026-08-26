@@ -164,6 +164,51 @@ REQUEST_COLUMNS = [
 ]
 
 
+def _request_body_for_display(body: 'payloads.RequestBody', owner_user_id: str,
+                              caller_user_id: Optional[str]) -> str:
+    """Serialize a request body for a listing, scoped to the caller.
+
+    Returns the full body to the owner (and when ``caller_user_id`` is
+    ``None``); any other caller gets no body (``null``), so one user's body is
+    never exposed to another. The owner can still fetch the full body via
+    ``/api/get`` (``Request.encode()``).
+    """
+    if caller_user_id is None or owner_user_id == caller_user_id:
+        return body.model_dump_json()
+    return orjson.dumps(None).decode('utf-8')
+
+
+def validate_fields(fields: Optional[List[str]]) -> None:
+    """Validates a caller-supplied column list for a request query.
+
+    `fields` reaches the SQL SELECT list by string interpolation (the column
+    list cannot be a bound parameter), and some callers pass it straight from
+    a client query param. Anything not an exact known column name is rejected
+    so the interpolation can only ever emit column names.
+
+    Raises:
+        ValueError: if any field is not a known request column.
+    """
+    if not fields:
+        return
+    unknown = [field for field in fields if field not in REQUEST_COLUMNS]
+    if unknown:
+        raise ValueError(f'Unknown request field(s): {unknown}. '
+                         f'Valid fields: {REQUEST_COLUMNS}')
+
+
+def _columns_str(fields: Optional[List[str]]) -> str:
+    """Returns the validated SELECT column list for a request query.
+
+    Raises:
+        ValueError: if any field is not a known request column.
+    """
+    if not fields:
+        return ', '.join(REQUEST_COLUMNS)
+    validate_fields(fields)
+    return ', '.join(fields)
+
+
 class ScheduleType(enum.Enum):
     """The schedule type for the requests."""
     LONG = 'long'
@@ -268,7 +313,9 @@ class Request:
             row.append(getattr(payload, k))
         return tuple(row)
 
-    def readable_encode(self) -> payloads.RequestPayload:
+    def readable_encode(
+            self,
+            caller_user_id: Optional[str] = None) -> payloads.RequestPayload:
         """Serialize the SkyPilot API request for display purposes.
 
         This function should be called on the server side to serialize the
@@ -281,6 +328,9 @@ class Request:
         We do not use `encode` for display to avoid a large amount of data being
         sent to the client side, especially for the request table could include
         all the requests.
+
+        ``caller_user_id`` scopes the request body; see
+        ``_request_body_for_display``.
         """
         assert isinstance(self.request_body,
                           payloads.RequestBody), (self.name, self.request_body)
@@ -290,7 +340,9 @@ class Request:
             request_id=self.request_id,
             name=self.name,
             entrypoint=self.entrypoint.__name__,
-            request_body=self.request_body.model_dump_json(),
+            request_body=_request_body_for_display(self.request_body,
+                                                   self.user_id,
+                                                   caller_user_id),
             status=_status_value_for_client(self.status.value),
             return_value=orjson.dumps(None).decode('utf-8'),
             error=orjson.dumps(None).decode('utf-8'),
@@ -405,7 +457,9 @@ def get_new_request_id() -> str:
     return str(uuid.uuid4())
 
 
-def encode_requests(requests: List[Request]) -> List[payloads.RequestPayload]:
+def encode_requests(
+        requests: List[Request],
+        caller_user_id: Optional[str] = None) -> List[payloads.RequestPayload]:
     """Serialize the SkyPilot API request for display purposes.
 
         This function should be called on the server side to serialize the
@@ -433,7 +487,8 @@ def encode_requests(requests: List[Request]) -> List[payloads.RequestPayload]:
             name=request.name,
             entrypoint=request.entrypoint.__name__
             if request.entrypoint is not None else '',
-            request_body=request.request_body.model_dump_json()
+            request_body=_request_body_for_display(
+                request.request_body, request.user_id, caller_user_id)
             if request.request_body is not None else
             orjson.dumps(None).decode('utf-8'),
             status=_status_value_for_client(request.status.value),
@@ -749,18 +804,75 @@ async def update_status_msg_async(request_id: str, status_msg: str) -> None:
         request_id, status_msg)
 
 
+# UUID request ids are exactly 36 characters (8-4-4-4-12 with dashes). A
+# caller passing a string this long is looking up a full id, not a prefix.
+_FULL_REQUEST_ID_LEN = 36
+
+
+def _request_id_where(request_id: str) -> Tuple[str, Tuple[str, ...]]:
+    """WHERE fragment + params to look up a request by full id or by prefix.
+
+    Both branches use the ``request_id`` primary-key index instead of a full
+    table scan (SQLite's default case-insensitive ``LIKE`` cannot use the
+    BINARY-collated primary-key index -- verified with EXPLAIN QUERY PLAN:
+    ``LIKE`` -> ``SCAN``, ``=``/range -> ``SEARCH ... USING INDEX``), which is
+    what made every request lookup O(table size).
+
+    - A full-length id (the common ``/api/get`` status-poll case) uses an exact
+      ``request_id = ?`` match -- the most direct index lookup, mirroring the
+      Postgres request backend's ``_id_where``.
+    - A shorter (non-empty) string is a request-id prefix (CLI short-id / shell
+      completion), expressed as an indexed range ``request_id >= ? AND
+      request_id < ?`` rather than ``LIKE prefix || '%'``. Request ids are
+      lowercase UUIDs, so this case-sensitive match is equivalent to the old
+      ``LIKE`` and also matches the Postgres backend.
+
+    Raises ``ValueError`` on an empty ``request_id``: it is never a valid
+    lookup key, and matching all rows would silently turn a caller bug into a
+    full table scan. Callers that legitimately want "all requests" (e.g.
+    empty-input shell completion) must not go through this helper.
+    """
+    if not request_id:
+        raise ValueError('request_id must not be empty')
+    if len(request_id) >= _FULL_REQUEST_ID_LEN:
+        return 'request_id = ?', (request_id,)
+    last = request_id[-1]
+    if ord(last) >= 0x10FFFF:
+        # Can't form an upper bound past the maximum code point; fall back to a
+        # scan. Real request ids are ASCII UUIDs, so this only guards against
+        # malformed input rather than crashing on chr(0x110000).
+        return 'request_id LIKE ?', (request_id + '%',)
+    # Smallest string strictly greater than every string starting with prefix.
+    upper = request_id[:-1] + chr(ord(last) + 1)
+    return 'request_id >= ? AND request_id < ?', (request_id, upper)
+
+
+def _request_id_prefix_clause(prefix: str) -> Tuple[str, Tuple[str, ...]]:
+    """A ``WHERE`` clause (or '') + params for a request-id prefix listing.
+
+    Unlike :func:`_request_id_where` (an exact/prefix match that rejects an
+    empty id), the ``*_with_prefix`` listings and empty-input shell completion
+    treat an empty prefix as "all requests", so this returns an empty clause
+    (no filter) for an empty prefix and an index-friendly ``WHERE`` clause
+    otherwise.
+    """
+    if not prefix:
+        return '', ()
+    where, params = _request_id_where(prefix)
+    return f'WHERE {where}', params
+
+
 def _get_request_no_lock(
         request_id: str,
         fields: Optional[List[str]] = None) -> Optional[Request]:
     """Get a SkyPilot API request."""
     assert _DB is not None
-    columns_str = ', '.join(REQUEST_COLUMNS)
-    if fields:
-        columns_str = ', '.join(fields)
+    columns_str = _columns_str(fields)
+    where, params = _request_id_where(request_id)
     with _DB.conn:
         cursor = _DB.conn.cursor()
-        cursor.execute((f'SELECT {columns_str} FROM {REQUEST_TABLE} '
-                        'WHERE request_id LIKE ?'), (request_id + '%',))
+        cursor.execute(
+            f'SELECT {columns_str} FROM {REQUEST_TABLE} WHERE {where}', params)
         row = cursor.fetchone()
         if row is None:
             return None
@@ -774,12 +886,11 @@ async def _get_request_no_lock_async(
         fields: Optional[List[str]] = None) -> Optional[Request]:
     """Async version of _get_request_no_lock."""
     assert _DB is not None
-    columns_str = ', '.join(REQUEST_COLUMNS)
-    if fields:
-        columns_str = ', '.join(fields)
+    columns_str = _columns_str(fields)
+    where, params = _request_id_where(request_id)
     async with _DB.execute_fetchall_async(
-        (f'SELECT {columns_str} FROM {REQUEST_TABLE} '
-         'WHERE request_id LIKE ?'), (request_id + '%',)) as rows:
+            f'SELECT {columns_str} FROM {REQUEST_TABLE} WHERE {where}',
+            params) as rows:
         row = rows[0] if rows else None
         if row is None:
             return None
@@ -952,6 +1063,10 @@ class RequestTaskFilter:
             raise ValueError(
                 'Only one of exclude_request_names or include_request_names '
                 'can be provided, not both.')
+        # `fields` becomes the SELECT list by interpolation, and some callers
+        # pass it through from a client query param. Validate here so every
+        # caller of this filter is covered, not just the ones that remember to.
+        validate_fields(self.fields)
 
     def build_query(self) -> Tuple[str, List[Any]]:
         """Build the SQL query and filter parameters.
@@ -962,26 +1077,29 @@ class RequestTaskFilter:
         filters = []
         filter_params: List[Any] = []
         if self.status is not None:
-            status_list_str = ','.join(
-                repr(status.value) for status in self.status)
-            filters.append(f'status IN ({status_list_str})')
+            status_placeholders = ','.join(['?'] * len(self.status))
+            filters.append(f'status IN ({status_placeholders})')
+            filter_params.extend(status.value for status in self.status)
         if self.include_request_names is not None:
-            request_names_str = ','.join(
-                repr(name) for name in self.include_request_names)
-            filters.append(f'name IN ({request_names_str})')
+            name_placeholders = ','.join(['?'] *
+                                         len(self.include_request_names))
+            filters.append(f'name IN ({name_placeholders})')
+            filter_params.extend(self.include_request_names)
         if self.exclude_request_names is not None:
-            exclude_request_names_str = ','.join(
-                repr(name) for name in self.exclude_request_names)
-            filters.append(f'name NOT IN ({exclude_request_names_str})')
+            exclude_placeholders = ','.join(['?'] *
+                                            len(self.exclude_request_names))
+            filters.append(f'name NOT IN ({exclude_placeholders})')
+            filter_params.extend(self.exclude_request_names)
         if self.cluster_names is not None:
             if len(self.cluster_names) == 0:
                 # Empty IN () is invalid SQL in PostgreSQL.
                 # An empty list means "match nothing".
                 filters.append('1=0')
             else:
-                cluster_names_str = ','.join(
-                    repr(name) for name in self.cluster_names)
-                filters.append(f'{COL_CLUSTER_NAME} IN ({cluster_names_str})')
+                cluster_placeholders = ','.join(['?'] * len(self.cluster_names))
+                filters.append(
+                    f'{COL_CLUSTER_NAME} IN ({cluster_placeholders})')
+                filter_params.extend(self.cluster_names)
         if self.user_id is not None:
             filters.append(f'{COL_USER_ID} = ?')
             filter_params.append(self.user_id)
@@ -1374,10 +1492,10 @@ class SqliteRequestBackend(request_storage.RequestBackend):
         stale_ids = [rid for rid in existing if rid not in keep_ids]
         if not stale_ids:
             return
-        id_list_str = ','.join(repr(rid) for rid in stale_ids)
+        placeholders = ','.join(['?'] * len(stale_ids))
         await _DB.execute_and_commit_async(
             f'DELETE FROM {REQUEST_TABLE} '
-            f'WHERE request_id IN ({id_list_str})')
+            f'WHERE request_id IN ({placeholders})', tuple(stale_ids))
         logger.info(f'Deleted orphan internal daemon rows: {stale_ids}')
 
     @init_db
@@ -1417,13 +1535,13 @@ class SqliteRequestBackend(request_storage.RequestBackend):
         if not request_ids:
             return
         assert _DB is not None
-        id_list_str = ','.join(repr(rid) for rid in request_ids)
+        placeholders = ','.join(['?'] * len(request_ids))
         if sky_logging.logging_enabled(logger, sky_logging.DEBUG):
             logger.debug(f'Start deleting requests {request_ids}')
         try:
             await _DB.execute_and_commit_async(
                 f'DELETE FROM {REQUEST_TABLE} '
-                f'WHERE request_id IN ({id_list_str})')
+                f'WHERE request_id IN ({placeholders})', tuple(request_ids))
         finally:
             if sky_logging.logging_enabled(logger, sky_logging.DEBUG):
                 logger.debug(f'End deleting requests {request_ids}')
@@ -1469,6 +1587,12 @@ class SqliteRequestBackend(request_storage.RequestBackend):
                 if not _should_kill_request(request_id, request_record):
                     continue
                 assert request_record is not None
+                # When a user_id scope is given, only cancel requests owned by
+                # that user. Without this, an explicit request_ids list would
+                # bypass the scope entirely and let a caller cancel another
+                # user's request.
+                if (user_id is not None and request_record.user_id != user_id):
+                    continue
                 if request_record.pid is not None:
                     logger.debug(
                         f'Killing request process {request_record.pid}')
@@ -1510,15 +1634,12 @@ class SqliteRequestBackend(request_storage.RequestBackend):
             request_id_prefix: str,
             fields: Optional[List[str]] = None) -> Optional[List[Request]]:
         assert _DB is not None
-        if fields:
-            columns_str = ', '.join(fields)
-        else:
-            columns_str = ', '.join(REQUEST_COLUMNS)
+        columns_str = _columns_str(fields)
+        clause, params = _request_id_prefix_clause(request_id_prefix)
         with _DB.conn:
             cursor = _DB.conn.cursor()
-            cursor.execute((f'SELECT {columns_str} FROM {REQUEST_TABLE} '
-                            'WHERE request_id LIKE ?'),
-                           (request_id_prefix + '%',))
+            cursor.execute(
+                f'SELECT {columns_str} FROM {REQUEST_TABLE} {clause}', params)
             rows = cursor.fetchall()
             if not rows:
                 return None
@@ -1533,13 +1654,11 @@ class SqliteRequestBackend(request_storage.RequestBackend):
             request_id_prefix: str,
             fields: Optional[List[str]] = None) -> Optional[List[Request]]:
         assert _DB is not None
-        if fields:
-            columns_str = ', '.join(fields)
-        else:
-            columns_str = ', '.join(REQUEST_COLUMNS)
+        columns_str = _columns_str(fields)
+        clause, params = _request_id_prefix_clause(request_id_prefix)
         async with _DB.execute_fetchall_async(
-            (f'SELECT {columns_str} FROM {REQUEST_TABLE} '
-             'WHERE request_id LIKE ?'), (request_id_prefix + '%',)) as rows:
+                f'SELECT {columns_str} FROM {REQUEST_TABLE} {clause}',
+                params) as rows:
             if not rows:
                 return None
             if fields:
@@ -1555,9 +1674,9 @@ class SqliteRequestBackend(request_storage.RequestBackend):
         columns = 'status'
         if include_msg:
             columns += ', status_msg'
-        sql = (f'SELECT {columns} FROM {REQUEST_TABLE} '
-               f'WHERE request_id LIKE ?')
-        async with _DB.execute_fetchall_async(sql, (request_id + '%',)) as rows:
+        where, params = _request_id_where(request_id)
+        sql = f'SELECT {columns} FROM {REQUEST_TABLE} WHERE {where}'
+        async with _DB.execute_fetchall_async(sql, params) as rows:
             if rows is None or len(rows) == 0:
                 return None
             status = RequestStatus(rows[0][0])
@@ -1568,16 +1687,18 @@ class SqliteRequestBackend(request_storage.RequestBackend):
     async def get_api_request_ids_start_with(self,
                                              incomplete: str) -> List[str]:
         assert _DB is not None
+        # Empty input lists recent request ids for completion (match all).
+        clause, params = _request_id_prefix_clause(incomplete)
         async with _DB.execute_fetchall_async(
                 f"""SELECT request_id FROM {REQUEST_TABLE}
-                    WHERE request_id LIKE ?
+                    {clause}
                     ORDER BY
                         CASE
                             WHEN status IN ('PENDING', 'RUNNING') THEN 0
                             ELSE 1
                         END,
                         created_at DESC
-                    LIMIT 1000""", (f'{incomplete}%',)) as rows:
+                    LIMIT 1000""", params) as rows:
             if not rows:
                 return []
         return [row[0] for row in rows]

@@ -30,7 +30,10 @@ import {
   TableHead,
   TableBody,
   TableCell,
+  EmptyTableState,
 } from '@/components/ui/table';
+import { EmptyState } from '@/components/elements/EmptyState';
+import { isForceEmpty } from '@/lib/utils';
 import { sortData } from '@/data/utils';
 import {
   Dialog,
@@ -75,12 +78,26 @@ import {
   usePluginRoutes,
   usePluginRecipeTypes,
 } from '@/plugins/PluginProvider';
+import { useUrlFilterState } from '@/hooks/useUrlFilterState';
 
-// Define filter options for the YAML filter dropdown
-const RECIPE_PROPERTY_OPTIONS = [
-  { label: 'Name', value: 'name' },
-  { label: 'Type', value: 'recipe_type' },
-  { label: 'Owner', value: 'user_name' },
+// The filterable properties, declared once. `key` is the URL parameter and the
+// key into the typeahead's option lists; `label` is what lands on a chip.
+const RECIPE_FILTER_SCHEMA = [
+  { key: 'name', label: 'Name', kind: 'text' },
+  { key: 'type', label: 'Type', kind: 'text' },
+  { key: 'owner', label: 'Owner', kind: 'text' },
+];
+
+const RECIPE_PROPERTY_OPTIONS = RECIPE_FILTER_SCHEMA.map(({ key, label }) => ({
+  label,
+  value: key,
+}));
+
+// Every recipe property is single-valued, so a second chip on one property
+// replaces the first rather than stacking.
+const addRecipeFilter = (prevFilters, property, value) => [
+  ...prevFilters.filter((f) => f.property !== property),
+  { property, operator: ':', value },
 ];
 
 // Generate URL slug from recipe
@@ -249,7 +266,8 @@ function TemplateRow({
 function AllRecipesSection({ recipes, onPin, onDelete }) {
   const pluginRecipeTypes = usePluginRecipeTypes();
   const [deleteTarget, setDeleteTarget] = useState(null);
-  const [filters, setFilters] = useState([]);
+  // Filters live in the URL, keyed by name, so a filtered view is shareable.
+  const { filters, setFilters } = useUrlFilterState(RECIPE_FILTER_SCHEMA);
   const [sortConfig, setSortConfig] = useState({
     key: 'updated_at',
     direction: 'descending',
@@ -270,8 +288,8 @@ function AllRecipesSection({ recipes, onPin, onDelete }) {
 
     return {
       name: Array.from(names).sort(),
-      recipe_type: Array.from(types).sort(),
-      user_name: Array.from(owners).sort(),
+      type: Array.from(types).sort(),
+      owner: Array.from(owners).sort(),
     };
   }, [recipes]);
 
@@ -389,17 +407,21 @@ function AllRecipesSection({ recipes, onPin, onDelete }) {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {sortedAndFilteredTemplates.length === 0 ? (
-                <TableRow>
-                  <TableCell
-                    colSpan={7}
-                    className="text-center py-6 text-gray-500"
-                  >
-                    {recipes.length === 0
-                      ? 'No recipes available.'
-                      : 'No recipes match your filter criteria.'}
-                  </TableCell>
-                </TableRow>
+              {sortedAndFilteredTemplates.length === 0 || isForceEmpty() ? (
+                <EmptyTableState
+                  colSpan={7}
+                  icon={<FileCode className="w-5 h-5" />}
+                  title={
+                    recipes.length === 0
+                      ? 'No recipes available'
+                      : 'No recipes match your filter criteria'
+                  }
+                  description={
+                    recipes.length === 0
+                      ? 'Create a recipe to get started'
+                      : undefined
+                  }
+                />
               ) : (
                 sortedAndFilteredTemplates.map((recipe) => {
                   const typeInfo = getRecipeTypeInfo(
@@ -686,14 +708,9 @@ const RecipeFilterDropdown = ({
       property: getPropertyLabel(propertyValue),
       value: option,
     });
-    setFilters((prevFilters) => [
-      ...prevFilters,
-      {
-        property: getPropertyLabel(propertyValue),
-        operator: ':',
-        value: option,
-      },
-    ]);
+    setFilters((prevFilters) =>
+      addRecipeFilter(prevFilters, getPropertyLabel(propertyValue), option)
+    );
     setIsOpen(false);
     setValue('');
     inputRef.current.focus();
@@ -705,14 +722,9 @@ const RecipeFilterDropdown = ({
         property: getPropertyLabel(propertyValue),
         value: value,
       });
-      setFilters((prevFilters) => [
-        ...prevFilters,
-        {
-          property: getPropertyLabel(propertyValue),
-          operator: ':',
-          value: value,
-        },
-      ]);
+      setFilters((prevFilters) =>
+        addRecipeFilter(prevFilters, getPropertyLabel(propertyValue), value)
+      );
       setValue('');
       setIsOpen(false);
     } else if (e.key === 'Escape') {
@@ -1108,7 +1120,7 @@ function CreateRecipeModal({
             <Button
               type="submit"
               disabled={isSubmitting}
-              className="bg-sky-600 hover:bg-sky-700 text-white"
+              className="bg-[#1668e0] hover:bg-[#1257bd] text-white"
             >
               {isSubmitting ? (
                 <>
@@ -1256,20 +1268,6 @@ export function RecipeHub() {
     }
   };
 
-  // Empty state
-  const EmptyState = () => (
-    <div className="text-center py-12">
-      <p className="text-gray-500 mb-4">No recipes yet</p>
-      <button
-        onClick={() => setIsCreateModalOpen(true)}
-        className="bg-sky-600 hover:bg-sky-700 text-white flex items-center justify-center mx-auto rounded-md px-3 py-1.5 text-sm font-medium transition-colors duration-200"
-      >
-        <PlusIcon className="h-4 w-4 mr-2" />
-        Create Your First Template
-      </button>
-    </div>
-  );
-
   if (loading && allRecipes.length === 0) {
     return (
       <div className="flex justify-center items-center h-64">
@@ -1303,14 +1301,14 @@ export function RecipeHub() {
           <button
             onClick={handleRefresh}
             disabled={loading}
-            className="text-sky-blue hover:text-sky-blue-bright flex items-center"
+            className="text-[#1668e0] hover:text-[#1257bd] flex items-center"
           >
             <RotateCwIcon className="h-4 w-4 mr-1.5" />
             <span>Refresh</span>
           </button>
           <button
             onClick={() => setIsCreateModalOpen(true)}
-            className="ml-4 bg-sky-600 hover:bg-sky-700 text-white flex items-center rounded-md px-3 py-1 text-sm font-medium transition-colors duration-200"
+            className="ml-4 bg-[#1668e0] hover:bg-[#1257bd] text-white flex items-center rounded-md px-3 py-1 text-sm font-medium transition-colors duration-200"
             title="New Recipe"
           >
             <PlusIcon className="h-4 w-4 mr-2" />
@@ -1321,7 +1319,21 @@ export function RecipeHub() {
 
       {allRecipes.length === 0 ? (
         <Card>
-          <EmptyState />
+          <EmptyState
+            icon={<FileCode size={20} strokeWidth={1.75} />}
+            title="No recipes yet"
+            description="Create a reusable recipe for clusters, jobs, and more"
+            action={
+              <Button
+                size="sm"
+                onClick={() => setIsCreateModalOpen(true)}
+                className="bg-[#1668e0] hover:bg-[#1257bd] text-white"
+              >
+                <PlusIcon className="h-4 w-4 mr-2" />
+                Add Recipe
+              </Button>
+            }
+          />
         </Card>
       ) : (
         <div>

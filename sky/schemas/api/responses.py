@@ -1,7 +1,7 @@
 """Responses for the API server."""
 
 import enum
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import pydantic
 
@@ -90,6 +90,10 @@ class APIHealthResponse(ResponseBaseModel):
     external_proxy_auth_enabled: bool = False
     # Whether telemetry/usage collection is enabled
     telemetry_enabled: bool = True
+    # Whether GET /workspaces/config is restricted to admins (config payload
+    # includes admin-only secrets). Lets the dashboard hide the config UI for
+    # non-admins when enabled.
+    restrict_config_to_admins: bool = True
 
 
 class StatusResponse(ResponseBaseModel):
@@ -119,11 +123,16 @@ class StatusResponse(ResponseBaseModel):
     last_creation_command: Optional[str] = None
     is_managed: bool
     last_event: Optional[str] = None
-    # Latest LAUNCH_PROGRESS event reason for clusters in INIT status
-    # (rendered as LAUNCHING on the dashboard). None for all other
-    # statuses and for clusters that have not yet emitted a
-    # launch-progress event.
-    launch_status_reason: Optional[str] = None
+    # Disambiguates the overloaded INIT status for display (dashboard and
+    # CLI): 'launching' (actively provisioning) vs 'unhealthy' (flipped to
+    # INIT by an abnormal-state refresh, e.g. node terminated / OOMKilled /
+    # ray unhealthy). Values are status_lib.INIT_KIND_*. None for all
+    # non-INIT statuses.
+    init_kind: Optional[str] = None
+    # Human-readable reason to show for an INIT cluster: the abnormal-state
+    # explanation when init_kind == 'unhealthy', else the latest launch
+    # progress/status message. None when there is no reason to show.
+    init_status_reason: Optional[str] = None
     resources_str: Optional[str] = None
     resources_str_full: Optional[str] = None
     # credentials is a JSON, so we use Any here.
@@ -160,6 +169,10 @@ class ClusterJobRecord(ResponseBaseModel):
     status: job_lib.JobStatus
     log_path: str
     metadata: Dict[str, Any] = {}
+    # External links extracted from the job's logs (label -> url). Computed
+    # server-side by matching URLs harvested into `metadata` against the
+    # configured dashboard.external_links patterns.
+    links: Dict[str, str] = {}
 
 
 class UploadStatus(enum.Enum):
@@ -223,7 +236,12 @@ class ManagedJobRecord(ResponseBaseModel):
     current_cluster_name: Optional[str] = None
     cluster_name_on_cloud: Optional[str] = None
     job_id_on_pool_cluster: Optional[int] = None
-    accelerators: Optional[Dict[str, int]] = None
+    # Accelerator counts can be fractional (e.g. ``{'L4': 0.125}``) since
+    # SkyPilot supports fractional GPU requests, so mirror the
+    # ``Resources.accelerators`` type here. Narrowing this to ``int`` made
+    # the Jobs Dashboard reject every record whenever any job used a
+    # fractional GPU.
+    accelerators: Optional[Dict[str, Union[int, float]]] = None
     labels: Optional[Dict[str, str]] = None
     links: Optional[Dict[str, str]] = None
     # Node names for dashboard display (comma-separated)
@@ -273,5 +291,9 @@ class VolumeRecord(ResponseBaseModel):
     # Error message for volume in ERROR state (e.g., PVC pending due to
     # access mode mismatch)
     error_message: Optional[str] = None
+    # Whether the error above is one the volume can still recover from, such as
+    # a network filesystem that takes minutes to provision. False for a volume
+    # that will never bind, and for a volume with no error at all.
+    error_may_resolve: bool = False
     # YAML configuration used to create the volume
     creation_yaml: Optional[str] = None

@@ -156,7 +156,7 @@ class Resources:
     """
     # If any fields changed, increment the version. For backward compatibility,
     # modify the __setstate__ method to handle the old version.
-    _VERSION = 34  # add _docker_image from image_id dict 'docker' key.
+    _VERSION = 35  # remove ephemeral_storage; use disk_size for k8s.
 
     def __init__(
         self,
@@ -174,7 +174,6 @@ class Resources:
         zone: Optional[str] = None,
         image_id: Union[Dict[Optional[str], str], str, None] = None,
         disk_size: Optional[Union[str, int]] = None,
-        ephemeral_storage: Optional[Union[str, int]] = None,
         disk_tier: Optional[Union[str, resources_utils.DiskTier]] = None,
         network_tier: Optional[Union[str, resources_utils.NetworkTier]] = None,
         local_disk: Optional[str] = None,
@@ -355,6 +354,7 @@ class Resources:
                     job_recovery['strategy'] = strategy_name.upper()
                 self._job_recovery = job_recovery
 
+        self._disk_size: Optional[int] = None
         if disk_size is not None:
             self._disk_size = int(
                 resources_utils.parse_memory_resource(disk_size, 'disk_size'))
@@ -363,15 +363,6 @@ class Resources:
                     raise ValueError(
                         '"disk_size" must be a positive integer (in GB). '
                         f'Got: {disk_size!r}.')
-        else:
-            self._disk_size = DEFAULT_DISK_SIZE_GB
-
-        if ephemeral_storage is not None:
-            self._ephemeral_storage: Optional[int] = int(
-                resources_utils.parse_memory_resource(ephemeral_storage,
-                                                      'ephemeral_storage'))
-        else:
-            self._ephemeral_storage = None
 
         self._image_id: Optional[Dict[Optional[str], str]] = None
         self._docker_image: Optional[str] = None
@@ -506,7 +497,6 @@ class Resources:
         self._try_validate_labels()
         self._try_validate_local_disk()
         self._try_validate_max_hourly_cost()
-        self._try_validate_ephemeral_storage()
 
     # When querying the accelerators inside this func (we call self.accelerators
     # which is a @property), we will check the cloud's catalog, which can error
@@ -591,11 +581,6 @@ class Resources:
         if self.disk_size != DEFAULT_DISK_SIZE_GB:
             disk_size = f', disk_size={self.disk_size}'
 
-        ephemeral_storage = ''
-        if self._ephemeral_storage is not None:
-            ephemeral_storage = (
-                f', ephemeral_storage={self._ephemeral_storage}')
-
         ports = ''
         if self.ports is not None:
             ports = f', ports={self.ports}'
@@ -611,7 +596,7 @@ class Resources:
         hardware_str = (
             f'{instance_type}{use_spot}'
             f'{cpus}{memory}{accelerators}{accelerator_args}{image_id}'
-            f'{disk_tier}{network_tier}{disk_size}{ephemeral_storage}'
+            f'{disk_tier}{network_tier}{disk_size}'
             f'{local_disk}{max_hourly_cost}{ports}')
         # It may have leading ',' (for example, instance_type not set) or empty
         # spaces.  Remove them.
@@ -736,11 +721,13 @@ class Resources:
 
     @property
     def disk_size(self) -> int:
-        return self._disk_size
+        if self._disk_size is not None:
+            return self._disk_size
+        return DEFAULT_DISK_SIZE_GB
 
     @property
-    def ephemeral_storage(self) -> Optional[int]:
-        return self._ephemeral_storage
+    def disk_size_specified(self) -> bool:
+        return self._disk_size is not None
 
     @property
     def image_id(self) -> Optional[Dict[Optional[str], str]]:
@@ -1842,30 +1829,49 @@ class Resources:
                         'max_hourly_cost must be a positive number, '
                         f'got {self._max_hourly_cost}')
 
-    def _try_validate_ephemeral_storage(self) -> None:
-        if self._ephemeral_storage is None:
-            return
-        if self.cloud is not None and not isinstance(self.cloud,
-                                                     clouds.Kubernetes):
-            with ux_utils.print_exception_no_traceback():
-                raise ValueError(
-                    'ephemeral_storage is only supported on Kubernetes, '
-                    f'not on {self.cloud}.')
+    def _get_hourly_cost(self, region: Optional[str],
+                         zone: Optional[str]) -> float:
+        """Returns the joint hourly price of the instance and accelerators."""
+        assert self.cloud is not None, 'Cloud must be specified'
+        assert self._instance_type is not None, (
+            'Instance type must be specified')
+        # Instance.
+        hourly_cost = self.cloud.instance_type_to_hourly_cost(
+            self._instance_type, self.use_spot, region, zone)
+        # Accelerators (if any).
+        if self.accelerators is not None:
+            hourly_cost += self.cloud.accelerators_to_hourly_cost(
+                self.accelerators, self.use_spot, region, zone)
+        return hourly_cost
 
     def get_cost(self, seconds: float) -> float:
         """Returns cost in USD for the runtime in seconds."""
         hours = seconds / 3600
-        # Instance.
         assert self.cloud is not None, 'Cloud must be specified'
         assert self._instance_type is not None, (
             'Instance type must be specified')
-        hourly_cost = self.cloud.instance_type_to_hourly_cost(
-            self._instance_type, self.use_spot, self._region, self._zone)
-        # Accelerators (if any).
-        if self.accelerators is not None:
-            hourly_cost += self.cloud.accelerators_to_hourly_cost(
-                self.accelerators, self.use_spot, self._region, self._zone)
-        return float(hourly_cost * hours)
+        if self._region is None:
+            # Without a pinned region, pricing the instance and the
+            # accelerators independently would take each component's minimum
+            # across all regions, which can combine prices from different
+            # regions into a total that no single region offers (e.g., GCP
+            # a2-megagpu-16g is cheapest in us-central1 while A100 is cheapest
+            # in europe-west4). Take the cheapest *joint* price over the
+            # regions that actually offer these resources instead.
+            hourly_costs = []
+            for region in self.get_valid_regions_for_launchable():
+                try:
+                    hourly_costs.append(self._get_hourly_cost(
+                        region.name, None))
+                except ValueError:
+                    # The instance type or accelerator has no price listed in
+                    # this region.
+                    continue
+            if hourly_costs:
+                return float(min(hourly_costs) * hours)
+            # No region-specific price found; fall through to the region-free
+            # catalog lookup below.
+        return float(self._get_hourly_cost(self._region, self._zone) * hours)
 
     def get_accelerators_str(self) -> str:
         accelerators = self.accelerators
@@ -2140,7 +2146,7 @@ class Resources:
             self._accelerators is None,
             self._accelerator_args is None,
             not self._use_spot_specified,
-            self._disk_size == DEFAULT_DISK_SIZE_GB,
+            self._disk_size is None,
             self._disk_tier is None,
             self._network_tier is None,
             self._image_id is None,
@@ -2252,15 +2258,33 @@ class Resources:
         if current_override_configs is None:
             current_override_configs = {}
         new_override_configs = override.pop('_cluster_config_overrides', {})
-        overlaid_configs = skypilot_config.overlay_skypilot_config(
-            original_config=config_utils.Config(current_override_configs),
-            override_configs=new_override_configs,
-        )
-        override_configs = config_utils.Config()
+        # Only the incoming overrides are filtered to the overrideable
+        # keys. The existing overrides are kept as-is: they were already
+        # accepted when this Resources was constructed, and on the client
+        # the full set of overrideable keys is not known (the server may
+        # register additional keys via
+        # skypilot_config.register_task_overrideable_config_key), so
+        # re-filtering here would silently drop them before the server
+        # can act on them.
+        filtered_new_configs = config_utils.Config()
+        new_configs = config_utils.Config(new_override_configs or {})
+        missing = object()
         for key in constants.OVERRIDEABLE_CONFIG_KEYS_IN_TASK:
-            elem = overlaid_configs.get_nested(key, None)
-            if elem is not None:
-                override_configs.set_nested(key, elem)
+            elem = new_configs.get_nested(key, missing)
+            if elem is not missing:
+                # Explicit null values are kept so they can clear an
+                # existing override below.
+                filtered_new_configs.set_nested(key, elem)
+        override_configs = skypilot_config.overlay_skypilot_config(
+            original_config=config_utils.Config(current_override_configs),
+            override_configs=filtered_new_configs,
+        )
+        # A null-valued overrideable key (e.g. `--config gcp.vpc_name=null`)
+        # clears the task-level override so the CLI/global config value takes
+        # effect, instead of the existing task value surviving the overlay.
+        for key in constants.OVERRIDEABLE_CONFIG_KEYS_IN_TASK:
+            if override_configs.get_nested(key, missing) is None:
+                override_configs.pop_nested(key, None)
 
         current_autostop_config = None
         if self.autostop_config is not None:
@@ -2292,9 +2316,7 @@ class Resources:
                                           self.accelerator_args),
             use_spot=override.pop('use_spot', use_spot),
             job_recovery=override.pop('job_recovery', self.job_recovery),
-            disk_size=override.pop('disk_size', self.disk_size),
-            ephemeral_storage=override.pop('ephemeral_storage',
-                                           self._ephemeral_storage),
+            disk_size=override.pop('disk_size', self._disk_size),
             region=override.pop('region', self.region),
             zone=override.pop('zone', self.zone),
             image_id=override.pop('image_id', default_image_id),
@@ -2636,8 +2658,6 @@ class Resources:
             # exclusive by the schema validation.
             resources_fields['job_recovery'] = config.pop('job_recovery', None)
         resources_fields['disk_size'] = config.pop('disk_size', None)
-        resources_fields['ephemeral_storage'] = config.pop(
-            'ephemeral_storage', None)
         resources_fields['image_id'] = config.pop('image_id', None)
         resources_fields['disk_tier'] = config.pop('disk_tier', None)
         resources_fields['network_tier'] = config.pop('network_tier', None)
@@ -2658,8 +2678,28 @@ class Resources:
         resources_fields['_is_image_managed'] = config.pop(
             '_is_image_managed', None)
         resources_fields['_requires_fuse'] = config.pop('_requires_fuse', None)
-        resources_fields['_cluster_config_overrides'] = config.pop(
-            '_cluster_config_overrides', None)
+        cluster_config_overrides = config.pop('_cluster_config_overrides', None)
+        if cluster_config_overrides:
+            # A task's `config` field crosses the client/server boundary as
+            # `resources._cluster_config_overrides`, whose entry in the
+            # resources schema is just `{'type': 'object'}` — so unlike
+            # `job_recovery`, the resources-schema validation above does not
+            # cover its contents. Re-validate against the task-level config
+            # schema here: on the server (plugins loaded) this is the strict,
+            # plugin-aware schema, so keys and value shapes a lenient client
+            # passed through are enforced at deserialization.
+            # skip_none=False: the default strips top-level None-valued
+            # keys before validating, which would let an unknown section
+            # through as long as its value is null (it survives into the
+            # overrides regardless). Nested nulls are untouched either
+            # way, so `--config gcp.vpc_name=null` still validates.
+            common_utils.validate_schema(
+                cluster_config_overrides,
+                schemas.get_task_schema()['properties']['config'],
+                'Invalid resources.config override: ',
+                skip_none=False)
+        resources_fields['_cluster_config_overrides'] = (
+            cluster_config_overrides)
 
         if resources_fields['cpus'] is not None:
             resources_fields['cpus'] = str(resources_fields['cpus'])
@@ -2669,17 +2709,30 @@ class Resources:
             resources_fields['accelerator_args'] = dict(
                 resources_fields['accelerator_args'])
         if resources_fields['disk_size'] is not None:
-            # although it will end up being an int, we don't know at this point
-            # if it has units or not, so we store it as a string
-            resources_fields['disk_size'] = str(resources_fields['disk_size'])
-        if resources_fields['ephemeral_storage'] is not None:
-            resources_fields['ephemeral_storage'] = str(
-                resources_fields['ephemeral_storage'])
+            # TODO (kyuds): remove after v0.14.0
+            disk_size_val = int(
+                resources_utils.parse_memory_resource(
+                    str(resources_fields['disk_size']), 'disk_size'))
+            if disk_size_val == DEFAULT_DISK_SIZE_GB:
+                # Treat the default value as unspecified so that older
+                # configs that always emitted disk_size: 256 don't
+                # trigger ephemeral-storage requests on Kubernetes.
+                resources_fields['disk_size'] = None
+            else:
+                # although it will end up being an int, we don't know at
+                # this point if it has units or not, so we store as string
+                resources_fields['disk_size'] = str(
+                    resources_fields['disk_size'])
         if resources_fields['local_disk'] is not None:
             # may be integer by only specifying exact size.
             resources_fields['local_disk'] = str(resources_fields['local_disk'])
         resources_fields['_no_missing_accel_warnings'] = config.pop(
             '_no_missing_accel_warnings', None)
+
+        # Deprecated fields that may still appear in configs written by
+        # older SkyPilot versions. Pop them so the assertion below doesn't
+        # fire. ephemeral_storage was removed in favor of disk_size.
+        config.pop('ephemeral_storage', None)
 
         assert not config, f'Invalid resource args: {config.keys()}'
         return Resources(**resources_fields)
@@ -2707,8 +2760,7 @@ class Resources:
         if self._use_spot_specified:
             add_if_not_none('use_spot', self.use_spot)
         add_if_not_none('job_recovery', self.job_recovery)
-        add_if_not_none('disk_size', self.disk_size)
-        add_if_not_none('ephemeral_storage', self._ephemeral_storage)
+        add_if_not_none('disk_size', self._disk_size)
         image_id_config = self.image_id
         if self._docker_image is not None:
             image_id_dict = dict(image_id_config) if image_id_config else {}
@@ -2766,6 +2818,21 @@ class Resources:
         if self._requires_fuse is not None:
             config['_requires_fuse'] = self._requires_fuse
         return config
+
+    def __getstate__(self):
+        state = self.__dict__.copy()
+        # Persist whether disk_size was explicitly specified, and ensure
+        # _disk_size is always serialized as int so that older SkyPilot
+        # versions (which expect int) can unpickle safely.
+        state['_disk_size_specified'] = state.get('_disk_size') is not None
+        # TODO (kyuds): remove the always serialized to int and forward compat
+        # in v0.14.0
+        if state['_disk_size'] is None:
+            state['_disk_size'] = DEFAULT_DISK_SIZE_GB
+        # Forward compat: older versions expect _ephemeral_storage to exist
+        # (it was removed in this version in favor of disk_size).
+        state.setdefault('_ephemeral_storage', None)
+        return state
 
     def __setstate__(self, state):
         """Set state from pickled state, for backward compatibility."""
@@ -2937,11 +3004,15 @@ class Resources:
         if version < 31:
             self._max_hourly_cost = None
 
-        if version < 32:
-            self._ephemeral_storage = None
-
         if version < 34:
             self._docker_image = None
+
+        if version < 35:
+            state.pop('_ephemeral_storage', None)
+            if isinstance(state.get('_cloud', None), clouds.Kubernetes):
+                state['_disk_size'] = None
+        elif not state['_disk_size_specified']:
+            state['_disk_size'] = None
 
         if version < 33:
             # Route legacy AutostopConfig.hook / hook_timeout attrs into the

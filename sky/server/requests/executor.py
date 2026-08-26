@@ -21,6 +21,8 @@ See the [README.md](../README.md) for detailed architecture of the executor.
 import asyncio
 import concurrent.futures
 import contextlib
+import functools
+import inspect
 import multiprocessing
 import os
 import signal
@@ -54,16 +56,17 @@ from sky.server.requests import process
 from sky.server.requests import request_names
 from sky.server.requests import requests as api_requests
 from sky.server.requests import threads
+from sky.server.requests import workspace_access
 from sky.server.requests.queues import base as queue_base
 from sky.skylet import constants
 from sky.utils import annotations
 from sky.utils import common_utils
+from sky.utils import config_utils
 from sky.utils import context
 from sky.utils import context_utils
 from sky.utils import subprocess_utils
 from sky.utils import tempstore
 from sky.utils import timeline
-from sky.utils import yaml_utils
 from sky.utils.db import db_utils
 from sky.workspaces import constants as workspace_constants
 from sky.workspaces import core as workspaces_core
@@ -92,6 +95,15 @@ multiprocessing.set_start_method('spawn', force=True)
 # server process become overloaded.
 _REQUEST_THREADS_LIMIT = 128
 
+# Limit for the auth executor. Sized against the sync DB connection pool, not
+# against a request rate: these threads do DB lookups, so a worker cannot have
+# more of them doing useful work than it has connections, and the rest would
+# just queue inside the pool. The ceiling is single-digit per worker today, so
+# this leaves several times the headroom needed while staying far below the
+# point where the sheer number of threads in one process starts slowing its
+# request handling down.
+_AUTH_THREADS_LIMIT = 32
+
 # Max length of the retry reason in a request's backoff status message; the
 # reason comes from the exception message, so truncate to keep it readable.
 _RETRY_STATUS_MSG_REASON_MAX_LEN = 200
@@ -115,6 +127,37 @@ def get_request_thread_executor() -> threads.OnDemandThreadExecutor:
                 name='request_thread_executor',
                 max_workers=_REQUEST_THREADS_LIMIT)
         return _REQUEST_THREAD_EXECUTOR
+
+
+_AUTH_THREAD_EXECUTOR_LOCK = threading.Lock()
+# A separate pool for the short DB lookups that authentication middleware runs
+# on every request. Kept apart from _REQUEST_THREAD_EXECUTOR because the two
+# have very different lifetimes: a worker in the request executor can be held
+# for the whole life of a streaming request (e.g. `sky jobs logs` on a queued
+# job runs for as long as the job does), while these lookups take under a
+# millisecond. Sharing one pool means enough concurrent streams starve
+# authentication, and every request fails with 503 -- including requests that
+# have nothing to do with streaming. Separate pools keep that failure confined
+# to the streaming endpoints.
+_AUTH_THREAD_EXECUTOR: Optional[threads.OnDemandThreadExecutor] = None
+
+
+def get_auth_thread_executor() -> threads.OnDemandThreadExecutor:
+    """Lazy init and return the auth thread executor for current process.
+
+    For short, latency-sensitive work on the request hot path -- primarily the
+    DB lookups done by authentication middleware. Do not submit long-running or
+    streaming work here; that belongs in ``get_request_thread_executor()``,
+    whose exhaustion must not be able to lock users out.
+    """
+    global _AUTH_THREAD_EXECUTOR
+    if _AUTH_THREAD_EXECUTOR is not None:
+        return _AUTH_THREAD_EXECUTOR
+    with _AUTH_THREAD_EXECUTOR_LOCK:
+        if _AUTH_THREAD_EXECUTOR is None:
+            _AUTH_THREAD_EXECUTOR = threads.OnDemandThreadExecutor(
+                name='auth_thread_executor', max_workers=_AUTH_THREADS_LIMIT)
+        return _AUTH_THREAD_EXECUTOR
 
 
 class RequestQueue:
@@ -195,6 +238,67 @@ def _request_is_gone_or_cancelled(request_id: str) -> bool:
             request.status == api_requests.RequestStatus.CANCELLED)
 
 
+def _waiting_status_msg(reason: str, retry_suffix: str) -> str:
+    """Format a parked request's status message from a reason.
+
+    Single source of formatting for both the message written when the request
+    parks and the refreshes a continue condition pushes while it stays parked,
+    so the two cannot drift.
+    """
+    # status_msg is a single-line field, so strip color and collapse
+    # whitespace; the reason comes from an exception message or a live probe,
+    # so truncate to keep it readable.
+    reason = ' '.join(common_utils.remove_color(reason).split())
+    if len(reason) > _RETRY_STATUS_MSG_REASON_MAX_LEN:
+        reason = reason[:_RETRY_STATUS_MSG_REASON_MAX_LEN].rstrip() + '...'
+    return (f'{reason} ({retry_suffix})'
+            if reason else retry_suffix.capitalize())
+
+
+def _refresh_waiting_status_msg(request_id: str, retry_suffix: str,
+                                reason: str) -> None:
+    """Re-write a still-parked request's status message with a fresh reason.
+
+    Only touches a request that is still WAITING: the wait runs concurrently
+    with cancellation and with the resume that follows it, and a late refresh
+    must not resurrect a parked message on a request that has moved on.
+    """
+    with api_requests.update_request(request_id) as request_task:
+        if (request_task is None or
+                request_task.status != api_requests.RequestStatus.WAITING):
+            return
+        request_task.status_msg = _waiting_status_msg(reason, retry_suffix)
+
+
+def _wait_for_continue_condition(
+        condition: Any, *, is_cancelled: Callable[[], bool],
+        fallback_wait_seconds: float,
+        update_status_msg: Callable[[str], None]) -> bool:
+    """Run a continue condition's wait, tolerating an older ``wait()``.
+
+    The continue-condition contract is duck-typed (see
+    ``continue_condition.ContinueCondition``), and implementations live in
+    separately versioned packages, so ``update_status_msg`` is passed only to
+    a ``wait()`` that accepts it rather than raising TypeError on one that
+    does not.
+
+    The probe reads the signature, so a ``wait()`` wrapped by a decorator that
+    neither ``functools.wraps`` it nor declares ``**kwargs`` is treated as not
+    accepting the callback: the wait still runs, it just never reports a
+    reason.
+    """
+    kwargs: Dict[str, Any] = {
+        'is_cancelled': is_cancelled,
+        'fallback_wait_seconds': fallback_wait_seconds,
+    }
+    parameters = inspect.signature(condition.wait).parameters
+    if ('update_status_msg' in parameters or
+            any(parameter.kind is inspect.Parameter.VAR_KEYWORD
+                for parameter in parameters.values())):
+        kwargs['update_status_msg'] = update_status_msg
+    return condition.wait(**kwargs)
+
+
 class RequestWorker:
     """A worker that polls requests from the queue and runs them.
 
@@ -245,16 +349,10 @@ class RequestWorker:
                 time.sleep(0.1)
                 return
             request_id, ignore_return_value, _ = request_element
-            request = api_requests.get_request(request_id,
-                                               fields=['status', 'created_at'])
+            request = api_requests.get_request(request_id, fields=['status'])
             assert request is not None, f'Request with ID {request_id} is None'
             if request.status == api_requests.RequestStatus.CANCELLED:
                 return
-            if metrics_utils.METRICS_ENABLED:
-                metrics_utils.SKY_APISERVER_QUEUE_WAIT_SECONDS.labels(
-                    schedule_type=self.schedule_type.value,).observe(
-                        max(0,
-                            time.time() - request.created_at))
             del request
             logger.info(f'[{self}] Submitting request: {request_id}')
             # Start additional process to run the request, so that it can be
@@ -273,9 +371,16 @@ class RequestWorker:
                 elif self.schedule_type == api_requests.ScheduleType.SHORT:
                     metrics_utils.SKY_APISERVER_SHORT_EXECUTORS.dec()
             # Monitor the result of the request execution.
-            threading.Thread(target=self.handle_task_result,
-                             args=(fut, request_element),
-                             daemon=True).start()
+            try:
+                threading.Thread(target=self.handle_task_result,
+                                 args=(fut, request_element),
+                                 daemon=True).start()
+            except Exception:  # pylint: disable=broad-except
+                # handle_task_result owns the matching increment, so a thread
+                # that never starts would leak the slot for the lifetime of
+                # the process.
+                self._mark_executor_free()
+                raise
 
             logger.info(f'[{self}] Submitted request: {request_id}')
         except (Exception, SystemExit) as e:  # pylint: disable=broad-except
@@ -335,16 +440,10 @@ class RequestWorker:
             # a fixed backoff. Either way the wait runs in this monitor thread,
             # not an executor worker.
             condition = getattr(e, 'continue_condition', None)
-            # Surface why we are retrying, not just the wait time. status_msg
-            # is a single-line field, so strip color and collapse whitespace.
-            reason = ' '.join(common_utils.remove_color(str(e)).split())
-            if len(reason) > _RETRY_STATUS_MSG_REASON_MAX_LEN:
-                reason = reason[:_RETRY_STATUS_MSG_REASON_MAX_LEN].rstrip(
-                ) + '...'
             retry_suffix = ('waiting to resume' if condition is not None else
                             f'retrying in {retry_wait_seconds}s')
-            status_msg = (f'{reason} ({retry_suffix})'
-                          if reason else retry_suffix.capitalize())
+            # Surface why we are retrying, not just the wait time.
+            status_msg = _waiting_status_msg(str(e), retry_suffix)
             # Set request to WAITING status for visibility
             with api_requests.update_request(request_id) as request_task:
                 assert request_task is not None, request_id
@@ -352,10 +451,14 @@ class RequestWorker:
                 request_task.status_msg = status_msg
             try:
                 if condition is not None:
-                    should_reschedule = condition.wait(
+                    should_reschedule = _wait_for_continue_condition(
+                        condition,
                         is_cancelled=lambda: _request_is_gone_or_cancelled(
                             request_id),
-                        fallback_wait_seconds=retry_wait_seconds)
+                        fallback_wait_seconds=retry_wait_seconds,
+                        update_status_msg=functools.partial(
+                            _refresh_waiting_status_msg, request_id,
+                            retry_suffix))
                 else:
                     time.sleep(retry_wait_seconds)
                     should_reschedule = True
@@ -584,10 +687,21 @@ def override_request_env_and_config(
                 # processes (BurstableExecutor = ProcessPoolExecutor).
                 client_api_version = getattr(request_body, 'client_api_version',
                                              None)
+                # The access level this request needs on the active workspace,
+                # classified at the API boundary from the dispatched endpoint
+                # and stamped onto the body (see
+                # sky.server.requests.workspace_access). Reads only need
+                # 'read', which lets a user whose only accessible workspaces
+                # are read-only still list/view them; anything not declared
+                # read-only needs 'write'. An unstamped body (internal daemon
+                # tick, or a body persisted by an older server) falls back to
+                # 'write'.
+                ws_action = (getattr(request_body, 'workspace_access', None) or
+                             workspace_constants.WORKSPACE_ACTION_WRITE)
                 if _should_apply_workspace_resolver(is_daemon,
                                                     client_api_version):
                     resolution = workspaces_core.resolve_workspace_for_user(
-                        user)
+                        user, action=ws_action)
                     workspace_ctx = (skypilot_config.local_active_workspace_ctx(
                         resolution.workspace))
                     logger.debug(f'{request_id} resolved workspace '
@@ -614,7 +728,7 @@ def override_request_env_and_config(
                         # Reject requests that the user does not have
                         # permission to access.
                         workspaces_core.reject_request_for_unauthorized_workspace(  # pylint: disable=line-too-long
-                            user)
+                            user, ws_action)
                     except exceptions.PermissionDeniedError as e:
                         logger.debug(
                             f'{request_id} permission denied to workspace: '
@@ -773,7 +887,7 @@ def _request_execution_wrapper(request_id: str,
                 if sky_logging.logging_enabled(logger, sky_logging.DEBUG):
                     config = skypilot_config.to_dict()
                     logger.debug(f'request config: \n'
-                                 f'{yaml_utils.dump_yaml_str(dict(config))}')
+                                 f'{config_utils.dump_redacted_yaml(config)}')
                 (metrics_utils.SKY_APISERVER_PROCESS_EXECUTION_START_TOTAL.
                  labels(request=request_name, pid=pid).inc())
                 with metrics_utils.time_it(name=request_name,
@@ -1033,6 +1147,11 @@ async def prepare_request_async(
     # clients (no header) yield None, which the worker-side gate treats
     # as "skip the workspace resolver".
     request_body.client_api_version = versions.get_remote_api_version()
+    # Same reason as above: classify the access level this request needs on the
+    # caller's active workspace here, while the dispatched endpoint is still
+    # visible, and stamp it so the worker can enforce it. Overwrite
+    # unconditionally — a client-supplied value must never be trusted.
+    request_body.workspace_access = workspace_access.for_current_request()
     request = api_requests.Request(
         request_id=request_id,
         name=server_constants.REQUEST_NAME_PREFIX + request_name,

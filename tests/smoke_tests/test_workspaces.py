@@ -1,11 +1,13 @@
 # Smoke tests for SkyPilot workspaces functionality.
 
 import datetime
+import hashlib
 import json
 import os
 import tempfile
 import textwrap
 import time
+import uuid
 
 import boto3
 import pytest
@@ -13,6 +15,7 @@ from smoke_tests import smoke_tests_utils
 
 import sky
 from sky import skypilot_config
+from sky.skylet import constants
 from sky.utils import common_utils
 
 
@@ -118,6 +121,126 @@ def test_workspace_switching(generic_cloud: str):
     os.unlink(server_config_path)
     os.unlink(ws1_config_path)
     os.unlink(ws2_config_path)
+
+
+# ---------- Test private-workspace access for a pre-login user ----------
+@pytest.mark.no_remote_server
+@pytest.mark.no_dependency
+def test_workspace_private_access_pre_login_user(generic_cloud: str):
+    """A user added to allowed_users before first login gets access on login.
+
+    Reproduces the bug where an admin adds a user to a private workspace's
+    ``allowed_users`` before that user has ever contacted the server. The user
+    record only exists after first authenticated contact, so the startup
+    config->policy sync drops the entry. Without the fix, the user still has no
+    workspace access after their first login and hits NoWorkspaceAccessError;
+    the fix re-resolves the config on user creation and grants the missing
+    policy.
+
+    Requires a local API server so we can restart it with a private-workspace
+    config. The user's first authenticated contact is simulated with an
+    ``X-Auth-Request-Email`` header (the auth-proxy identity path), which is
+    what lazily creates the user record and runs the new-user policy setup.
+    ``rbac.default_role: user`` makes the new user a non-admin, so their
+    workspace access depends entirely on the private workspace's
+    ``allowed_users`` (admins can access every workspace and would mask the
+    bug).
+
+    After the access assertion, launches a tiny cluster as that user (the
+    private workspace is their only accessible one, so the server-side resolver
+    auto-selects it) and asserts via ``sky status`` that the cluster landed in
+    the private workspace.
+    """
+    if smoke_tests_utils.is_remote_server_test():
+        pytest.skip(
+            'This test requires a local API server it can restart with a '
+            'private-workspace config; skipped against a remote endpoint.')
+
+    # Unique per run so no user record exists at server-startup sync time and
+    # runs do not contaminate each other via the persisted users table.
+    suffix = uuid.uuid4().hex[:8]
+    user_name = f'presync-{suffix}@example.com'
+    ws_name = f'private-ws-{suffix}'
+    base_url = smoke_tests_utils.ENDPOINT.rsplit('/api/health', 1)[0]
+    name = smoke_tests_utils.get_cluster_name()
+    # The auth-proxy middleware derives the user id from the identity header
+    # as md5(user_name)[:USER_HASH_LENGTH] (see
+    # sky/server/server.py::_extract_user_from_header). The CLI ships the
+    # SKYPILOT_USER_ID / SKYPILOT_USER env vars as the request identity
+    # (common_utils.get_user_hash / get_local_user_name), so exporting the
+    # same hash+name makes `sky launch` / `sky status` run as the user the
+    # curl step logged in.
+    user_hash = hashlib.md5(
+        user_name.encode(),
+        usedforsecurity=False).hexdigest()[:common_utils.USER_HASH_LENGTH]
+    as_user = (f'export {constants.USER_ID_ENV_VAR}="{user_hash}"; '
+               f'export {constants.USER_ENV_VAR}="{user_name}"; ')
+
+    server_config_content = textwrap.dedent(f"""\
+        rbac:
+          default_role: user
+        workspaces:
+          default:
+            private: true
+          {ws_name}:
+            private: true
+            allowed_users:
+              - {user_name}
+    """)
+    with tempfile.NamedTemporaryFile(prefix='server_config_',
+                                     delete=False,
+                                     mode='w') as f:
+        f.write(server_config_content)
+        server_config_path = f.name
+
+    # A single authenticated GET of /users/me/workspace as the pre-login user:
+    #   * the auth middleware creates the user record and runs the new-user
+    #     policy setup (the fix grants the private-workspace policy here);
+    #   * the handler then reports the user's accessible workspaces.
+    # With the fix, `accessible` includes ws_name. Without it, `accessible` is
+    # empty (NoWorkspaceAccessError) and the assertion below fails with a repro
+    # message.
+    assert_access_cmd = (
+        f'resp=$(curl -sS -H "X-Auth-Request-Email: {user_name}" '
+        f'{base_url}/users/me/workspace); echo "$resp"; '
+        f'echo "$resp" | python3 -c "import sys, json; '
+        f'd = json.load(sys.stdin); '
+        f'''assert {ws_name!r} in d.get('accessible', []), '''
+        f'''\\"REPRO: pre-login user denied private-workspace access: \\" '''
+        f'+ repr(d)"')
+
+    test = smoke_tests_utils.Test(
+        'test_workspace_private_access_pre_login_user',
+        [
+            f'export {skypilot_config.ENV_VAR_GLOBAL_CONFIG}='
+            f'{server_config_path} && {smoke_tests_utils.SKY_API_RESTART}',
+            assert_access_cmd,
+            # Enable the cloud on the freshly-restarted server. Runs as the
+            # test user, whose requests resolve to the private workspace.
+            f'{as_user}sky check {generic_cloud}',
+            # Launch as the user. The private workspace is their only
+            # accessible workspace, so the server-side resolver must
+            # auto-select it (single-membership).
+            f'{as_user}sky launch -y -c {name} --infra {generic_cloud} '
+            f'{smoke_tests_utils.LOW_RESOURCE_ARG} echo hi',
+            # The cluster row must show the private workspace.
+            f'{as_user}s=$(sky status); echo "$s"; '
+            f'echo "$s" | grep {name} | grep {ws_name}',
+        ],
+        teardown=(
+            # Same identity + same server config, so the resolver picks the
+            # cluster's workspace and the down is not rejected for a
+            # workspace mismatch.
+            f'export {skypilot_config.ENV_VAR_GLOBAL_CONFIG}='
+            f'{server_config_path}; {as_user}sky down -y {name} || true; '
+            f'export {skypilot_config.ENV_VAR_GLOBAL_CONFIG}= && '
+            f'{smoke_tests_utils.SKY_API_RESTART}'),
+        timeout=smoke_tests_utils.get_timeout(generic_cloud),
+    )
+    # Skip the default `sky status -u` preamble: it authenticates as the ambient
+    # user, not the pre-login user we exercise via the auth header.
+    smoke_tests_utils.run_one_test(test, check_sky_status=False)
+    os.unlink(server_config_path)
 
 
 def _verify_cluster_created_by_user(cluster_name: str,

@@ -8,6 +8,7 @@ import React, {
   useRef,
 } from 'react';
 import PropTypes from 'prop-types';
+import { MANAGED_JOBS_SUMMARY_ARGS } from '@/data/connectors/constants';
 import { CircularProgress } from '@mui/material';
 import Link from 'next/link';
 import { useRouter } from 'next/router';
@@ -52,7 +53,10 @@ import {
   PlusIcon,
   MinusIcon,
   CopyIcon,
+  Users as UsersIcon,
 } from 'lucide-react';
+import { EmptyState } from '@/components/elements/EmptyState';
+import { isForceEmpty } from '@/lib/utils';
 import { Layout } from '@/components/elements/layout';
 import { useMobile } from '@/hooks/useMobile';
 import { useSidebar } from '@/components/elements/sidebar';
@@ -73,14 +77,15 @@ import {
   BatchRemoveFromWorkspacesDialog,
 } from '@/components/users-batch-dialogs';
 import { PluginSlot } from '@/plugins/PluginSlot';
+import { useTableColumns } from '@/plugins/PluginProvider';
 import { statusGroups } from '@/components/jobs';
 import {
   FilterDropdown,
   Filters,
-  updateURLParams as sharedUpdateURLParams,
-  updateFiltersByURLParams as sharedUpdateFiltersByURLParams,
   filterData,
 } from '@/components/shared/FilterSystem';
+import { useUrlFilterState } from '@/hooks/useUrlFilterState';
+import { hrefWithQueryKey } from '@/components/shared/filterSchema';
 import { trackUserAction, trackFilterUsed } from '@/lib/analytics';
 
 const ACTIVE_JOB_STATUSES = new Set(statusGroups.active);
@@ -100,29 +105,52 @@ const GPU_CONSUMING_JOB_STATUSES = new Set([
   'CANCELLING',
 ]);
 
-// Define filter options for the filter dropdown
-const PROPERTY_OPTIONS = [
+// The filterable properties, declared once. `key` is the URL parameter and the
+// `valueList` key for the typeahead; `label` is what lands on a chip, which
+// `evaluateCondition` lowercases to look up the field on each row.
+// `legacyKeys` are the spellings the old triple-array URLs carried, which the
+// dropdown chose to match a suggestion-list key rather than to read well.
+//
+// GPU and Infra are multi-valued: the table's counting path already reads
+// several values on either as alternatives (see `getFilteredCounts`), so they
+// join with a comma. The rest are single-valued -- a user has one name, one id,
+// one role -- and a second value could only ever empty the table.
+export const USER_FILTER_SCHEMA = [
+  { key: 'name', label: 'Name', kind: 'text' },
   {
-    label: 'Name',
-    value: 'name',
-  },
-  {
+    key: 'gpu',
     label: 'GPU',
-    value: 'gpu type', // Match valueList key
+    kind: 'enum',
+    multi: true,
+    legacyKeys: ['gpu type'],
   },
-  {
-    label: 'Infra',
-    value: 'infra',
-  },
-  {
-    label: 'User ID',
-    value: 'user id', // Match valueList key
-  },
-  {
-    label: 'Role',
-    value: 'role',
-  },
+  { key: 'infra', label: 'Infra', kind: 'enum', multi: true },
+  { key: 'userId', label: 'User ID', kind: 'text', legacyKeys: ['user id'] },
+  { key: 'role', label: 'Role', kind: 'text' },
 ];
+
+// Non-filter state that also belongs in a shared link. Deduplication defaults
+// to on, so only the off state needs to travel.
+const USER_VIEW_SCHEMA = [{ key: 'deduplicate', default: 'true' }];
+
+const PROPERTY_OPTIONS = USER_FILTER_SCHEMA.map(({ key, label }) => ({
+  label,
+  value: key,
+}));
+
+const MULTI_VALUE_LABELS = new Set(
+  USER_FILTER_SCHEMA.filter((e) => e.multi).map((e) => e.label)
+);
+
+// A multi-valued property stacks -- two GPU chips mean "either" -- and ignores
+// an exact duplicate. Everything else replaces, so the chip bar can never show
+// a filter the URL is unable to carry.
+const addFilter = (prevFilters, property, value) => {
+  const base = MULTI_VALUE_LABELS.has(property)
+    ? prevFilters.filter((f) => !(f.property === property && f.value === value))
+    : prevFilters.filter((f) => f.property !== property);
+  return [...base, { property, operator: ':', value }];
+};
 
 // Helper function to get GPU count with validation
 const getGPUCount = (accelerators, source) => {
@@ -194,10 +222,8 @@ export const getJobGpuCount = (job) => {
 const fetchClustersAndJobs = async () => {
   const [clustersResult, jobsResult] = await Promise.allSettled([
     dashboardCache.get(getClusters),
-    // Use shared cache key (no field filtering) - preloader uses same args
-    dashboardCache.get(getManagedJobs, [
-      { allUsers: true, skipFinished: true },
-    ]),
+    // Shared cache key — must match the preloader's args exactly
+    dashboardCache.get(getManagedJobs, [MANAGED_JOBS_SUMMARY_ARGS]),
   ]);
 
   const clustersData =
@@ -351,92 +377,39 @@ export function Users() {
   const [userSearchQuery, setUserSearchQuery] = useState('');
   const [serviceAccountSearchQuery, setServiceAccountSearchQuery] =
     useState('');
-  const [filters, setFilters] = useState([]);
+  // Filters and the shareable view state both live in the URL, keyed by name.
+  const { filters, setFilters, view, setView, initialQuery } =
+    useUrlFilterState(USER_FILTER_SCHEMA, USER_VIEW_SCHEMA);
   const [valueList, setValueList] = useState({
     name: [],
-    'user id': [],
+    userId: [],
     role: [],
-    'gpu type': [],
+    gpu: [],
     infra: [],
   });
   const [lastFetchedTime, setLastFetchedTime] = useState(null);
 
-  // Initialize deduplicateUsers from URL parameter
-  const getInitialDeduplicateUsers = () => {
-    if (typeof window !== 'undefined' && router.isReady) {
-      const deduplicateParam = router.query.deduplicate;
-      // If parameter is explicitly set, use it; otherwise default to true
-      if (deduplicateParam !== undefined) {
-        return deduplicateParam === 'true';
-      }
-    }
-    return true; // Default to deduplicated view
-  };
-
-  const [deduplicateUsers, setDeduplicateUsers] = useState(
-    getInitialDeduplicateUsers
+  // Deduplication is view state: on by default, so only the off state has to
+  // travel in the link.
+  const deduplicateUsers = view.deduplicate !== 'false';
+  const setDeduplicateUsers = useCallback(
+    (next) => setView('deduplicate', next ? 'true' : 'false'),
+    [setView]
   );
 
-  // Sync deduplicateUsers state with URL parameter
+  // An SSO deployment is more useful undeduplicated, since one person can hold
+  // several identities. Applied once, and only when the link did not say
+  // otherwise, so a shared URL always wins over the deployment default.
+  const ssoDefaultApplied = useRef(false);
   useEffect(() => {
-    if (router.isReady) {
-      const deduplicateParam = router.query.deduplicate;
-
-      // If URL has no deduplicate parameter, set it to the default
-      // Default to false for SSO (userEmail exists), true for non-SSO
-      if (deduplicateParam === undefined) {
-        const defaultValue = !userEmail; // false for SSO, true for non-SSO
-        updateDeduplicateURL(defaultValue);
-      } else {
-        const expectedState = deduplicateParam === 'true';
-        if (deduplicateUsers !== expectedState) {
-          setDeduplicateUsers(expectedState);
-        }
-      }
+    if (ssoDefaultApplied.current || !userEmail) {
+      return;
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [router.isReady, router.query.deduplicate, userEmail]);
-
-  // Helper function to update deduplicate in URL
-  const updateDeduplicateURL = (deduplicateValue) => {
-    const query = { ...router.query };
-    query.deduplicate = deduplicateValue.toString();
-
-    // Use replace to avoid adding to browser history
-    router.replace(
-      {
-        pathname: router.pathname,
-        query,
-      },
-      undefined,
-      { shallow: true }
-    );
-  };
-
-  // Helper function to update URL query parameters for filters
-  const updateURLParams = (filters) => {
-    sharedUpdateURLParams(router, filters);
-  };
-
-  // Create property map for filter URL parameters
-  const propertyMap = new Map([
-    ['name', 'Name'],
-    ['user id', 'User ID'], // Note: lowercase with space to match URL encoding
-    ['role', 'Role'],
-    ['gpu type', 'GPU'], // Note: lowercase with space to match URL encoding
-    ['infra', 'Infra'],
-  ]);
-
-  // Initialize filters from URL parameters
-  useEffect(() => {
-    if (router.isReady && activeMainTab === 'users') {
-      const urlFilters = sharedUpdateFiltersByURLParams(router, propertyMap);
-      if (urlFilters.length > 0) {
-        setFilters(urlFilters);
-      }
+    ssoDefaultApplied.current = true;
+    if (initialQuery.deduplicate === undefined) {
+      setView('deduplicate', 'false');
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [router.isReady, activeMainTab]);
+  }, [userEmail, initialQuery, setView]);
 
   // Handle URL parameters for tab selection
   useEffect(() => {
@@ -545,9 +518,7 @@ export function Users() {
     trackUserAction('refresh');
     dashboardCache.invalidate(getUsers);
     dashboardCache.invalidate(getClusters);
-    dashboardCache.invalidate(getManagedJobs, [
-      { allUsers: true, skipFinished: true },
-    ]);
+    dashboardCache.invalidate(getManagedJobs, [MANAGED_JOBS_SUMMARY_ARGS]);
 
     if (refreshDataRef.current) {
       refreshDataRef.current();
@@ -755,11 +726,19 @@ export function Users() {
     (tab) => {
       trackUserAction('tab_change', { tab });
       setActiveMainTab(tab);
-      if (tab === 'users') {
-        router.push('/users', undefined, { shallow: true });
-      } else {
-        router.push(`/users?tab=${tab}`, undefined, { shallow: true });
-      }
+      // Keep whatever else the address bar carries: the filter params are
+      // written straight to history, so rebuilding the query from scratch here
+      // would drop them and leave the chip bar describing an unshareable URL.
+      router.push(
+        hrefWithQueryKey(
+          '/users',
+          window.location.search,
+          'tab',
+          tab === 'users' ? undefined : tab
+        ),
+        undefined,
+        { shallow: true }
+      );
     },
     [router]
   );
@@ -871,7 +850,7 @@ export function Users() {
               propertyList={PROPERTY_OPTIONS}
               valueList={valueList}
               setFilters={setFilters}
-              updateURLParams={updateURLParams}
+              addFilter={addFilter}
               onFilterAdd={(property, value) =>
                 trackFilterUsed('user', { property, value })
               }
@@ -930,7 +909,6 @@ export function Users() {
               onChange={(e) => {
                 const newValue = e.target.checked;
                 setDeduplicateUsers(newValue);
-                updateDeduplicateURL(newValue);
               }}
               className="sr-only"
             />
@@ -976,11 +954,7 @@ export function Users() {
 
       {/* Display Active Filters - only for users tab */}
       {activeMainTab === 'users' && (
-        <Filters
-          filters={filters}
-          setFilters={setFilters}
-          updateURLParams={updateURLParams}
-        />
+        <Filters filters={filters} setFilters={setFilters} />
       )}
 
       {/* Error/Success messages positioned at top right, below navigation bar */}
@@ -1726,9 +1700,9 @@ function UsersTable({
 
         setValueList({
           name: Array.from(names).sort(),
-          'user id': Array.from(userIds).sort(),
+          userId: Array.from(userIds).sort(),
           role: Array.from(roles).sort(),
-          'gpu type': Array.from(gpuTypes).sort(),
+          gpu: Array.from(gpuTypes).sort(),
           infra: Array.from(infras).sort(),
         });
 
@@ -1792,7 +1766,10 @@ function UsersTable({
         usersWithCounts.map((user) => ({
           ...user,
           name: user.usernameDisplay,
-          'user id': user.userId, // Note: space to match "User ID" -> "user id" from toLowerCase()
+          // `evaluateCondition` looks the field up by the chip's label
+          // lowercased, so the User ID chip needs a matching field name. The
+          // URL key is `userId`; only this in-memory alias keeps the space.
+          'user id': user.userId,
         })),
         standardFilters
       );
@@ -2070,6 +2047,15 @@ function UsersTable({
     return '';
   };
 
+  // Columns contributed via useTableColumns() are rendered after the built-in
+  // Jobs column and sorted among themselves by header.order. Brings the Users
+  // table to parity with the clusters/jobs/volumes tables, which already render
+  // these dynamically-registered columns.
+  const extraColumns = useTableColumns('users', { deduplicateUsers });
+  const sortedExtraColumns = [...extraColumns].sort(
+    (a, b) => (a.header?.order ?? 100) - (b.header?.order ?? 100)
+  );
+
   const handleEditClick = async (userId, currentRole) => {
     await checkPermissionAndAct('cannot edit user role', () => {
       setEditingUserId(userId);
@@ -2241,20 +2227,27 @@ function UsersTable({
     );
   }
 
-  if (!filteredAndSortedUsers || filteredAndSortedUsers.length === 0) {
+  if (
+    !filteredAndSortedUsers ||
+    filteredAndSortedUsers.length === 0 ||
+    isForceEmpty()
+  ) {
     return (
-      <div className="text-center py-12">
-        <p className="text-lg font-semibold text-gray-500">
-          {filters.length > 0
-            ? 'No users match your filters.'
-            : 'No users found.'}
-        </p>
-        <p className="text-sm text-gray-400 mt-1">
-          {filters.length > 0
-            ? 'Try adjusting your filter criteria.'
-            : 'There are currently no users to display.'}
-        </p>
-      </div>
+      <Card>
+        <EmptyState
+          icon={<UsersIcon size={20} strokeWidth={1.75} />}
+          title={
+            filters.length > 0
+              ? 'No users match your filters'
+              : 'No users found'
+          }
+          description={
+            filters.length > 0
+              ? 'Try adjusting your filters'
+              : 'Add a user to grant them access'
+          }
+        />
+      </Card>
     );
   }
 
@@ -2442,6 +2435,23 @@ function UsersTable({
                 >
                   Jobs{getSortDirection('jobCount')}
                 </TableHead>
+                {sortedExtraColumns.map((col) => {
+                  const sortKey = col.header?.sortKey;
+                  return (
+                    <TableHead
+                      key={col.id}
+                      onClick={sortKey ? () => requestSort(sortKey) : undefined}
+                      className={`whitespace-nowrap w-1/6${
+                        sortKey
+                          ? ' sortable cursor-pointer hover:bg-gray-50'
+                          : ''
+                      }${col.header?.className ? ' ' + col.header.className : ''}`}
+                    >
+                      {col.header?.label}
+                      {sortKey ? getSortDirection(sortKey) : ''}
+                    </TableHead>
+                  );
+                })}
                 {/* Show Actions column if basicAuthEnabled and not deduplicating */}
                 {!deduplicateUsers &&
                   (basicAuthEnabled || currentUserRole === 'admin') && (
@@ -2629,6 +2639,14 @@ function UsersTable({
                         </Link>
                       )}
                     </TableCell>
+                    {sortedExtraColumns.map((col) => (
+                      <TableCell
+                        key={col.id}
+                        className={col.cell?.className || ''}
+                      >
+                        {col.cell?.render?.(user, { item: user })}
+                      </TableCell>
+                    ))}
                     {/* Actions cell logic - hide when deduplicating */}
                     {!deduplicateUsers &&
                       (basicAuthEnabled || currentUserRole === 'admin') && (
@@ -3127,20 +3145,22 @@ function ServiceAccountTokensView({
   return (
     <>
       {/* Tokens Table */}
-      {filteredTokens.length === 0 ? (
-        <div className="text-center py-12">
-          <KeyRoundIcon className="mx-auto h-12 w-12 text-gray-400" />
-          <h3 className="mt-2 text-sm font-medium text-gray-900">
-            {searchQuery?.trim()
-              ? 'No tokens match your search'
-              : 'No service accounts'}
-          </h3>
-          <p className="mt-1 text-sm text-gray-500">
-            {searchQuery?.trim()
-              ? 'Try adjusting your search terms.'
-              : 'No service accounts have been created yet.'}
-          </p>
-        </div>
+      {filteredTokens.length === 0 || isForceEmpty() ? (
+        <Card>
+          <EmptyState
+            icon={<KeyRoundIcon size={20} strokeWidth={1.75} />}
+            title={
+              searchQuery?.trim()
+                ? 'No tokens match your search'
+                : 'No service accounts'
+            }
+            description={
+              searchQuery?.trim()
+                ? 'Try a different search term'
+                : 'No service accounts have been created yet'
+            }
+          />
+        </Card>
       ) : (
         <>
           <div className="text-sm text-gray-500 mb-2">

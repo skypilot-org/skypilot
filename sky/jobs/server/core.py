@@ -55,6 +55,7 @@ from sky.utils import status_lib
 from sky.utils import subprocess_utils
 from sky.utils import timeline
 from sky.utils import ux_utils
+from sky.workspaces import constants as workspace_constants
 from sky.workspaces import core as workspaces_core
 
 if typing.TYPE_CHECKING:
@@ -216,26 +217,7 @@ def _upload_files_to_controller(dag: 'sky.Dag') -> Dict[str, str]:
 
 
 def _job_ids_to_str(job_ids: Optional[List[int]]) -> str:
-    if not job_ids:
-        return ''
-
-    if len(job_ids) == 1:
-        return str(job_ids[0])
-
-    job_ids = sorted(job_ids)
-    ranges = []
-    start = prev = job_ids[0]
-
-    for n in job_ids[1:]:
-        if n == prev + 1:
-            prev = n
-            continue
-        ranges.append(f'{start}-{prev}' if start != prev else str(start))
-        start = prev = n
-
-    # append last range
-    ranges.append(f'{start}-{prev}' if start != prev else str(start))
-    return ','.join(ranges)
+    return managed_job_utils.format_job_ids_as_ranges(job_ids)
 
 
 class _DefaultManagedJobRunner:
@@ -716,11 +698,11 @@ def launch(
     dag.resolve_and_validate_volumes()
     if not dag.is_chain() and not dag.is_job_group():
         with ux_utils.print_exception_no_traceback():
-            raise ValueError('Only single-task, chain DAG, or JobGroup is '
+            raise ValueError('Only single-task, chain DAG, or Job Group is '
                              f'allowed for job_launch. Dag: {dag}')
     if dag.is_job_group() and pool is not None:
         with ux_utils.print_exception_no_traceback():
-            raise ValueError('JobGroups do not support pools. Please remove '
+            raise ValueError('Job Groups do not support pools. Please remove '
                              'the --pool argument when launching a job group.')
     dag.validate()
     # TODO(aylei): use consolidated job controller instead of performing
@@ -749,18 +731,35 @@ def launch(
                         override_params['region'] = best_region
                     task_.set_resources_override(override_params)
 
-        # Warn if job group is not running on Kubernetes (networking won't work)
-        first_task = dag.tasks[0]
-        if first_task.best_resources is not None:
-            best_cloud = first_task.best_resources.cloud
-            if best_cloud is not None and str(
-                    best_cloud).lower() != 'kubernetes':
-                logger.warning(
-                    f'{colorama.Fore.YELLOW}Job group service discovery '
-                    f'(hostname-based networking) is only supported on '
-                    f'Kubernetes. Tasks will run on {best_cloud} but cannot '
-                    f'communicate with each other using hostnames.'
-                    f'{colorama.Style.RESET_ALL}')
+        # Post-optimization invariant: a group that still has in-group
+        # networking enabled (inter_connection unset or true) was placed
+        # by the same-infra path, which pins every job to one cloud (and
+        # to Kubernetes: unset degrades to False in the optimizer when
+        # placed elsewhere, and explicit true only ever gets Kubernetes
+        # candidates). Heterogeneous placements only arise via
+        # independent placement, which always carries
+        # inter_connection == False.
+        if dag.inter_connection is not False:
+            best_clouds = {
+                str(task_.best_resources.cloud)
+                for task_ in dag.tasks
+                if task_.best_resources is not None and
+                task_.best_resources.cloud is not None
+            }
+            if (len(best_clouds) > 1 or not all(cloud.lower() == 'kubernetes'
+                                                for cloud in best_clouds)):
+                with ux_utils.print_exception_no_traceback():
+                    raise RuntimeError(
+                        f'Internal error: Job Group {dag.name!r} requires '
+                        'in-group networking (inter_connection is enabled), '
+                        'which is only supported on a single Kubernetes '
+                        'cluster, but the optimizer placed it on '
+                        f'{sorted(best_clouds)}. This is likely a SkyPilot '
+                        'bug; please report it at '
+                        'https://github.com/skypilot-org/skypilot/issues. '
+                        'Set \'inter_connection: false\' '
+                        'in the job group header if the jobs do not need '
+                        'to reach each other by hostname.')
 
     # If there is a local postgres db, when the api server tries launching on
     # the remote jobs controller it will fail. therefore, we should remove this
@@ -880,9 +879,6 @@ def launch(
     controller_resources = controller_utils.get_controller_resources(
         controller=controller,
         task_resources=sum([list(t.resources) for t in dag.tasks], []))
-
-    if num_jobs and pool is None:
-        raise ValueError('Cannot specify num_jobs without pool.')
 
     num_jobs = num_jobs if num_jobs is not None else 1
     # We do this assignment after applying the admin policy, so that we don't
@@ -1238,7 +1234,15 @@ def queue(refresh: bool,
             does not exist.
         RuntimeError: if failed to get the managed jobs with ssh.
     """
-    jobs, _, _, _ = queue_v2(refresh, skip_finished, all_users, job_ids)
+    # The deprecated v1 queue body cannot request specific fields, so default
+    # to the lightweight field set to avoid returning heavy fields (e.g. the
+    # task YAML) for every job, which is expensive with many jobs.
+    jobs, _, _, _ = queue_v2(
+        refresh,
+        skip_finished,
+        all_users,
+        job_ids,
+        fields=list(managed_job_constants.DEFAULT_MANAGED_JOB_FIELDS))
 
     return jobs
 
@@ -1268,6 +1272,18 @@ def queue_v2_api(
         refresh, skip_finished, all_users, job_ids, user_match, workspace_match,
         name_match, pool_match, page, limit, statuses, fields, sort_by,
         sort_order, submitted_after, submitted_before)
+    if fields:
+        # The queue records carry every known column (None for the ones the
+        # query didn't select). Callers that pass ``fields`` have declared
+        # exactly what they read, so drop the other keys here; the response
+        # encoder's exclude_unset then leaves them out of the payload
+        # entirely. On wide job tables the key/None overhead otherwise
+        # dominates the response size (~1.4KB per job — tens of MB at tens
+        # of thousands of jobs). ``job_id``, ``task_id`` and ``status`` are
+        # always kept: the server force-selects them (see _update_fields)
+        # and clients key records on them.
+        keep = set(fields) | {'job_id', 'task_id', 'status'}
+        jobs = [{k: v for k, v in job.items() if k in keep} for job in jobs]
     return [responses.ManagedJobRecord(**job) for job in jobs
            ], total, status_counts, total_no_filter
 
@@ -1358,8 +1374,11 @@ def queue_v2(
             return [], 0, {}, 0
         user_hashes = [user.id for user in users]
 
+    # Visibility, not usability: read-only workspaces' jobs must be listed. See
+    # the same call in backend_utils for clusters.
     accessible_workspaces = list(
-        workspaces_core.get_accessible_workspace_names())
+        workspaces_core.get_accessible_workspace_names(
+            action=workspace_constants.WORKSPACE_ACTION_READ))
 
     if handle.is_grpc_enabled_with_flag:
         try:

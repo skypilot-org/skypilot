@@ -392,13 +392,37 @@ def test_from_yaml_config_secrets_type_conversion():
     assert task.get_plaintext_secrets(task_obj.secrets)['EMPTY_KEY'] == ''
 
 
-def test_from_yaml_config_secrets_validation():
-    """Test validation of secrets during YAML parsing."""
-    # Test None secret value
+def test_from_yaml_config_null_secret_becomes_managed_ref():
+    """A null secret value (no inline value) becomes a managed secret ref.
+
+    It is resolved at launch time (CLI ``--secret`` override or a managed
+    secrets provider) rather than rejected during YAML parsing.
+    """
     config = {'run': 'echo hello', 'secrets': {'API_KEY': None}}
 
-    with pytest.raises(ValueError, match='Secret variable.*is None'):
-        task.Task.from_yaml_config(config)
+    task_obj = task.Task.from_yaml_config(config)
+
+    assert task_obj.secrets == {}
+    refs = task_obj.managed_secret_refs
+    assert len(refs) == 1
+    assert refs[0].name == 'API_KEY'
+    assert refs[0].scope_override is None
+
+
+def test_from_yaml_config_null_or_empty_secrets_section():
+    """A null/empty ``secrets:`` section parses cleanly (no crash)."""
+    # ``secrets:`` with no value parses to None in YAML.
+    task_obj = task.Task.from_yaml_config({
+        'run': 'echo hello',
+        'secrets': None
+    })
+    assert task_obj.secrets == {}
+    assert not task_obj.managed_secret_refs
+
+    # Empty dict form.
+    task_obj = task.Task.from_yaml_config({'run': 'echo hello', 'secrets': {}})
+    assert task_obj.secrets == {}
+    assert not task_obj.managed_secret_refs
 
 
 def test_task_initialization_with_secrets():
@@ -466,19 +490,26 @@ def test_from_yaml_config_null_secrets_with_override():
     assert task_obj.envs == {'PUBLIC_VAR': 'public-value'}
 
 
-def test_from_yaml_config_null_secrets_without_override_fails():
-    """Test that null secrets without override fail appropriately."""
+def test_from_yaml_config_null_secrets_without_override_become_managed_refs():
+    """Without a CLI override, a null secret parses into a managed ref.
+
+    The value is resolved at launch time; enforcement of a missing value
+    moved from parse time to resolution time.
+    """
     config = {
-        'name': 'test-null-fail',
+        'name': 'test-null-managed-ref',
         'run': 'echo hello',
         'secrets': {
             'API_KEY': None
         }
     }
 
-    # Should fail without override
-    with pytest.raises(ValueError, match="Secret variable 'API_KEY' is None"):
-        task.Task.from_yaml_config(config)
+    task_obj = task.Task.from_yaml_config(config)
+
+    assert task_obj.secrets == {}
+    refs = task_obj.managed_secret_refs
+    assert len(refs) == 1
+    assert refs[0].name == 'API_KEY'
 
 
 def test_from_yaml_config_partial_null_secrets_override():
@@ -828,6 +859,49 @@ def test_resolve_volumes_dict_volume_success():
             assert r.cloud == registry.CLOUD_REGISTRY.from_str('aws')
 
 
+def test_resolve_volumes_inline_slurm_host_path():
+    t = task.Task.from_yaml_str("""
+resources:
+  cloud: slurm
+volumes:
+  /data:
+    host_path: /host/data
+  /scratch:
+    host_path: /host/scratch
+    mode: rw
+""")
+
+    t.resolve_and_validate_volumes()
+
+    assert t.volume_mounts is not None
+    assert [(mount.path, mount.volume_config.name_on_cloud,
+             mount.volume_config.config) for mount in t.volume_mounts] == [
+                 ('/data', '/host/data', {
+                     'host_path': '/host/data',
+                     'mode': 'ro',
+                 }),
+                 ('/scratch', '/host/scratch', {
+                     'host_path': '/host/scratch',
+                     'mode': 'rw',
+                 }),
+             ]
+
+
+@pytest.mark.parametrize('host_path,mode,error', [
+    ('relative/path', 'ro', 'absolute path'),
+    ('/', 'ro', 'root directory'),
+    ('/host/data', 'read-only', 'Supported modes'),
+])
+def test_resolve_volumes_inline_slurm_host_path_validation(
+        host_path, mode, error):
+    t = task.Task(resources=resources_lib.Resources(
+        cloud=registry.CLOUD_REGISTRY.from_str('slurm')))
+    t._volumes = {'/data': {'host_path': host_path, 'mode': mode}}
+
+    with pytest.raises(ValueError, match=error):
+        t.resolve_and_validate_volumes()
+
+
 def test_resolve_volumes_topology_conflict_between_volumes():
     t = task.Task()
     t._volumes = {'/mnt1': 'vol1', '/mnt2': 'vol2'}
@@ -934,14 +1008,15 @@ def test_resolve_volumes_dict_with_name_and_size():
         mock_resolve.assert_not_called()
 
 
-def test_resolve_volumes_invalid_dict_no_size_no_name():
-    """Test dict without 'size' or 'name' raises ValueError."""
+def test_resolve_volumes_invalid_dict_no_source():
+    """Test a dict without a supported volume source raises ValueError."""
     t = task.Task()
     t._volumes = {'/mnt': {'type': 'pd-standard'}}
     t.resources = [make_mock_resource()]
 
-    with pytest.raises(ValueError,
-                       match='Invalid volume config.*Either "size".*or "name"'):
+    with pytest.raises(
+            ValueError,
+            match='Invalid volume config.*"size".*"name".*"host_path"'):
         t.resolve_and_validate_volumes()
 
 
@@ -951,8 +1026,9 @@ def test_resolve_volumes_invalid_dict_empty():
     t._volumes = {'/mnt': {}}
     t.resources = [make_mock_resource()]
 
-    with pytest.raises(ValueError,
-                       match='Invalid volume config.*Either "size".*or "name"'):
+    with pytest.raises(
+            ValueError,
+            match='Invalid volume config.*"size".*"name".*"host_path"'):
         t.resolve_and_validate_volumes()
 
 

@@ -170,6 +170,16 @@ class RequestBody(BasePayload):
     # client-specific code. `None` means the request arrived without
     # the header — i.e. an old client.
     client_api_version: Optional[int] = None
+    # The access level this request needs on the caller's *active* workspace
+    # ('read' or 'write'), classified server-side in `prepare_request_async`
+    # from the dispatched endpoint. Like `client_api_version` above, it exists
+    # because the worker process that runs the request cannot see the
+    # dispatch-context ContextVar it is derived from. Clients do NOT populate
+    # this field — whatever they send is overwritten server-side. `None` means
+    # the request was not classified (e.g. an internal daemon tick); the
+    # worker-side gate then requires 'write'. See
+    # `sky.server.requests.workspace_access`.
+    workspace_access: Optional[str] = None
 
     def __init__(self, **data):
         data['env_vars'] = data.get('env_vars', request_body_env_vars())
@@ -204,6 +214,7 @@ class RequestBody(BasePayload):
         kwargs.pop('override_skypilot_config_path')
         kwargs.pop('file_mounts_blob_id')
         kwargs.pop('client_api_version', None)
+        kwargs.pop('workspace_access', None)
         return kwargs
 
     @property
@@ -307,6 +318,9 @@ class LaunchBody(RequestBody):
     is_launched_by_jobs_controller: bool = False
     is_launched_by_sky_serve_controller: bool = False
     disable_controller_check: bool = False
+    # When True, resize the existing cluster to the num_nodes specified in
+    # the task instead of performing a normal launch.
+    resize: bool = False
     extra_launch_context: Dict[str, Any] = {}
     # When True and the server supports it (API_VERSION >=
     # MIN_LAUNCH_CREDENTIALS_API_VERSION), the launch result will be a
@@ -502,6 +516,9 @@ class ServiceAccountTokenCreateBody(RequestBody):
     """The request body for creating a service account token."""
     token_name: str
     expires_in_days: Optional[int] = None
+    # Optional role for the new service account (e.g. 'admin'). When omitted,
+    # the account is seeded with the default role.
+    role: Optional[str] = None
 
 
 class ServiceAccountTokenDeleteBody(RequestBody):
@@ -817,6 +834,7 @@ class LocalUpBody(RequestBody):
     gpus: bool = True
     name: Optional[str] = None
     port_start: Optional[int] = None
+    num_nodes: int = 1
 
 
 class LocalDownBody(RequestBody):
@@ -997,6 +1015,13 @@ class CreateDebugDumpBody(RequestBody):
     recent_minutes: Optional[float] = None
     # Client-side info for troubleshooting (version, config, environment)
     client_info: Optional[Dict[str, Any]] = None
+    # Best-effort absolute wall-clock (time.time()) instant to stop the whole
+    # collection by. When reached, collection stops early and a partial dump is
+    # returned. None (the default) means no deadline == previous behavior. An
+    # absolute deadline (rather than a relative timeout) is used because this
+    # request is scheduled out-of-process: it charges executor queue wait
+    # before the build starts against the budget rather than ignoring it.
+    overall_deadline: Optional[float] = None
 
 
 class RequestPayload(BasePayload):

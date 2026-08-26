@@ -120,8 +120,8 @@ class TestGetUsersMeWorkspace(unittest.TestCase):
                               'resolve_workspace_for_user',
                               return_value=resolution),
             mock.patch.object(users_server.workspaces_core,
-                              'get_accessible_workspace_names',
-                              return_value=set(accessible)),
+                              'get_workspace_access_sets',
+                              return_value=(set(accessible), set(accessible))),
             # Pin the server-side `active_workspace` lookup to "unset"
             # so these tests don't depend on the test machine's actual
             # `~/.sky/config.yaml`. The fallback-to-server-config path
@@ -233,8 +233,9 @@ class TestGetUsersMeWorkspace(unittest.TestCase):
                                'resolve_workspace_for_user',
                                return_value=resolution) as resolve_mock, \
              mock.patch.object(users_server.workspaces_core,
-                               'get_accessible_workspace_names',
-                               return_value={'team-a', 'team-b'}), \
+                               'get_workspace_access_sets',
+                               return_value=({'team-a', 'team-b'},
+                                             {'team-a', 'team-b'})), \
              mock.patch.object(users_server.skypilot_config,
                                'is_active_workspace_set',
                                return_value=False):
@@ -268,8 +269,9 @@ class TestGetUsersMeWorkspace(unittest.TestCase):
                                'resolve_workspace_for_user',
                                return_value=resolution) as resolve_mock, \
              mock.patch.object(users_server.workspaces_core,
-                               'get_accessible_workspace_names',
-                               return_value={'server-pinned'}), \
+                               'get_workspace_access_sets',
+                               return_value=({'server-pinned'},
+                                             {'server-pinned'})), \
              mock.patch.object(users_server.skypilot_config,
                                'is_active_workspace_set',
                                return_value=True), \
@@ -303,8 +305,9 @@ class TestGetUsersMeWorkspace(unittest.TestCase):
                  side_effect=exceptions.WorkspaceAmbiguousError(
                      accessible=['team-a', 'team-b'])), \
              mock.patch.object(users_server.workspaces_core,
-                               'get_accessible_workspace_names',
-                               return_value={'team-a', 'team-b'}), \
+                               'get_workspace_access_sets',
+                               return_value=({'team-a', 'team-b'},
+                                             {'team-a', 'team-b'})), \
              mock.patch.object(users_server.skypilot_config,
                                'is_active_workspace_set',
                                return_value=False):
@@ -337,8 +340,9 @@ class TestGetUsersMeWorkspace(unittest.TestCase):
                      accessible=['team-a', 'team-b'],
                      note="preferred 'team-x' not accessible")), \
              mock.patch.object(users_server.workspaces_core,
-                               'get_accessible_workspace_names',
-                               return_value={'team-a', 'team-b'}), \
+                               'get_workspace_access_sets',
+                               return_value=({'team-a', 'team-b'},
+                                             {'team-a', 'team-b'})), \
              mock.patch.object(users_server.skypilot_config,
                                'is_active_workspace_set',
                                return_value=False):
@@ -347,6 +351,52 @@ class TestGetUsersMeWorkspace(unittest.TestCase):
         self.assertEqual(resp['source'],
                          workspace_constants.WORKSPACE_SOURCE_AMBIGUOUS)
         self.assertEqual(resp['note'], "preferred 'team-x' not accessible")
+
+    def test_accessible_computed_after_resolution(self):
+        """`accessible` must reflect post-resolution state: the resolver can
+        heal a missed first-login grant on this very request, and the
+        response must not advertise the pre-heal (empty) set."""
+        fresh = models.User(id='alice', name='alice')
+        resolution = workspaces_core.WorkspaceResolution(
+            workspace='private-ws',
+            source=workspace_constants.WORKSPACE_SOURCE_SINGLE_MEMBERSHIP)
+        order = []
+
+        def _resolve(*_args, **_kwargs):
+            order.append('resolve')
+            return resolution
+
+        def _access_sets(*_args, **_kwargs):
+            order.append('access_sets')
+            return {'private-ws'}, {'private-ws'}
+
+        patches = [
+            mock.patch.object(users_server.global_user_state,
+                              'get_user',
+                              return_value=fresh),
+            mock.patch.object(users_server.workspaces_core,
+                              'resolve_workspace_for_user',
+                              side_effect=_resolve),
+            mock.patch.object(users_server.workspaces_core,
+                              'get_workspace_access_sets',
+                              side_effect=_access_sets),
+            mock.patch.object(users_server.skypilot_config,
+                              'is_active_workspace_set',
+                              return_value=False),
+        ]
+        for p_ in patches:
+            p_.start()
+        try:
+            resp = users_server.get_user_workspace(_fake_request(
+                self.auth_user))
+        finally:
+            for p_ in patches:
+                p_.stop()
+        # Resolution must happen before the readable/writable sets are
+        # computed (both come from the single get_workspace_access_sets call).
+        self.assertEqual(order, ['resolve', 'access_sets'])
+        self.assertEqual(resp['workspace'], 'private-ws')
+        self.assertEqual(resp['accessible'], ['private-ws'])
 
     def test_no_workspace_access_surfaces_message_verbatim(self):
         """User has zero accessible workspaces. The raise-site message
@@ -364,8 +414,8 @@ class TestGetUsersMeWorkspace(unittest.TestCase):
                  'resolve_workspace_for_user',
                  side_effect=exceptions.NoWorkspaceAccessError(raise_msg)), \
              mock.patch.object(users_server.workspaces_core,
-                               'get_accessible_workspace_names',
-                               return_value=set()), \
+                               'get_workspace_access_sets',
+                               return_value=(set(), set())), \
              mock.patch.object(users_server.skypilot_config,
                                'is_active_workspace_set',
                                return_value=False):
@@ -376,6 +426,93 @@ class TestGetUsersMeWorkspace(unittest.TestCase):
                          workspace_constants.WORKSPACE_SOURCE_NO_ACCESS)
         self.assertEqual(resp['note'], raise_msg)
         self.assertEqual(resp['accessible'], [])
+
+    def test_read_only_only_user_gets_read_only_source(self):
+        """Every accessible workspace is read-only -> not `no-access`.
+
+        The resolver answers "where does a *write* land", so it raises
+        NoWorkspaceAccessError for this user. Reporting `no-access` would
+        contradict the `accessible` / `read_only` lists in the same payload
+        (the bug: "has no accessible workspaces" printed above four of them).
+        The handler re-resolves at read level instead.
+        """
+        fresh = models.User(id='alice', name='alice')
+        read_pick = workspaces_core.WorkspaceResolution(
+            workspace='default',
+            source=workspace_constants.WORKSPACE_SOURCE_DEFAULT_FALLBACK)
+
+        def _resolve(_user, requested=None, action=None):
+            del _user, requested
+            if action == workspace_constants.WORKSPACE_ACTION_READ:
+                return read_pick
+            raise exceptions.NoWorkspaceAccessError(
+                'User alice (alice) has no accessible workspaces.')
+
+        # (readable, writable): nothing writable; everything readable.
+        with mock.patch.object(users_server.global_user_state,
+                               'get_user',
+                               return_value=fresh), \
+             mock.patch.object(users_server.workspaces_core,
+                               'resolve_workspace_for_user',
+                               side_effect=_resolve), \
+             mock.patch.object(users_server.workspaces_core,
+                               'get_workspace_access_sets',
+                               return_value=({'default', 'pub'}, set())), \
+             mock.patch.object(users_server.skypilot_config,
+                               'is_active_workspace_set',
+                               return_value=False):
+            resp = users_server.get_user_workspace(_fake_request(
+                self.auth_user))
+        self.assertEqual(resp['source'],
+                         workspace_constants.WORKSPACE_SOURCE_READ_ONLY)
+        # Where this user's reads actually land.
+        self.assertEqual(resp['workspace'], 'default')
+        self.assertIn('read-only access only', resp['note'])
+        self.assertNotIn('no accessible workspaces', resp['note'])
+        # `accessible` means "where can I launch" — empty for this user. The
+        # read-only-visible ones are reported separately, so no consumer can
+        # mistake them for usable choices.
+        self.assertEqual(resp['accessible'], [])
+        self.assertEqual(resp['read_only'], ['default', 'pub'])
+
+    def test_read_only_only_user_with_several_readable_workspaces(self):
+        """Several readable workspaces: the resolver picks, so we report it.
+
+        `resolve_workspace_for_user(action='read')` no longer raises
+        AMBIGUOUS for a read-only-only user (see
+        `TestReadOnlyOnlyUser::test_several_read_only_workspaces_pick_
+        deterministically`), so this handler always gets a workspace back.
+        """
+        fresh = models.User(id='alice', name='alice')
+        read_pick = workspaces_core.WorkspaceResolution(
+            workspace='pub',
+            source=workspace_constants.WORKSPACE_SOURCE_READ_ONLY)
+
+        def _resolve(_user, requested=None, action=None):
+            del _user, requested
+            if action == workspace_constants.WORKSPACE_ACTION_READ:
+                return read_pick
+            raise exceptions.NoWorkspaceAccessError(
+                'User alice (alice) has no accessible workspaces.')
+
+        with mock.patch.object(users_server.global_user_state,
+                               'get_user',
+                               return_value=fresh), \
+             mock.patch.object(users_server.workspaces_core,
+                               'resolve_workspace_for_user',
+                               side_effect=_resolve), \
+             mock.patch.object(users_server.workspaces_core,
+                               'get_workspace_access_sets',
+                               return_value=({'pub', 'team'}, set())), \
+             mock.patch.object(users_server.skypilot_config,
+                               'is_active_workspace_set',
+                               return_value=False):
+            resp = users_server.get_user_workspace(_fake_request(
+                self.auth_user))
+        self.assertEqual(resp['source'],
+                         workspace_constants.WORKSPACE_SOURCE_READ_ONLY)
+        self.assertEqual(resp['workspace'], 'pub')
+        self.assertEqual(resp['read_only'], ['pub', 'team'])
 
     def test_permission_denied_surfaces_permission_denied_source(self):
         """Explicit `requested` workspace the user can't access. The
@@ -393,8 +530,9 @@ class TestGetUsersMeWorkspace(unittest.TestCase):
                  'resolve_workspace_for_user',
                  side_effect=exceptions.PermissionDeniedError(denied_msg)), \
              mock.patch.object(users_server.workspaces_core,
-                               'get_accessible_workspace_names',
-                               return_value={'team-a', 'team-b'}), \
+                               'get_workspace_access_sets',
+                               return_value=({'team-a', 'team-b'},
+                                             {'team-a', 'team-b'})), \
              mock.patch.object(users_server.skypilot_config,
                                'is_active_workspace_set',
                                return_value=False):

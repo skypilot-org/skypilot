@@ -45,6 +45,11 @@ def _patch_resolver(accessible, workspaces=None):
         mock.patch.object(workspaces_core,
                           '_accessible_workspace_names_for_user',
                           return_value=set(accessible)),
+        # Neutralize the zero-accessible one-shot re-sync: these tests
+        # exercise resolver precedence, not the self-heal (which has its
+        # own tests in TestZeroAccessibleResync).
+        mock.patch.object(workspaces_core.permission.permission_service,
+                          'resync_workspace_policies_for_new_user'),
     ]
 
 
@@ -583,6 +588,132 @@ class TestWorkspaceAmbiguousErrorSignature(unittest.TestCase):
         self.assertEqual(str(original), str(de))
 
 
+class TestZeroAccessibleResync(unittest.TestCase):
+    """Zero accessible workspaces triggers a one-shot policy re-sync.
+
+    The first-login grant (`resync_workspace_policies_for_new_user`) is keyed
+    on user creation and can fail transiently; the resolver retries it once
+    before denying, so a missed grant heals on the user's next request.
+    """
+
+    def setUp(self):
+        self.user = models.User(id='alice', name='alice')
+
+    def _patches(self, accessible_side_effect):
+        workspaces = {
+            'private-ws': {
+                'private': True,
+                'allowed_users': ['alice'],
+            },
+        }
+        resync = mock.patch.object(
+            workspaces_core.permission.permission_service,
+            'resync_workspace_policies_for_new_user')
+        return [
+            mock.patch.object(workspaces_core,
+                              '_load_workspaces',
+                              return_value=workspaces),
+            mock.patch.object(workspaces_core,
+                              '_accessible_workspace_names_for_user',
+                              side_effect=accessible_side_effect),
+        ], resync
+
+    def test_resync_heals_missed_grant(self):
+        """Empty, then the re-sync grants -> resolution succeeds."""
+        patches, resync_patch = self._patches([set(), {'private-ws'}])
+        with _Patcher(patches), resync_patch as mock_resync:
+            res = workspaces_core.resolve_workspace_for_user(self.user)
+        mock_resync.assert_called_once_with('alice')
+        self.assertEqual(res.workspace, 'private-ws')
+        self.assertEqual(res.source,
+                         workspace_constants.WORKSPACE_SOURCE_SINGLE_MEMBERSHIP)
+
+    def test_resync_called_once_then_denied(self):
+        """Still empty after the one-shot re-sync -> denied, no retry loop."""
+        patches, resync_patch = self._patches([set(), set()])
+        with _Patcher(patches), resync_patch as mock_resync:
+            with self.assertRaises(exceptions.NoWorkspaceAccessError):
+                workspaces_core.resolve_workspace_for_user(self.user)
+        mock_resync.assert_called_once_with('alice')
+
+    def test_no_resync_when_accessible(self):
+        """A user with access never pays for the re-sync."""
+        patches, resync_patch = self._patches([{'private-ws'}])
+        with _Patcher(patches), resync_patch as mock_resync:
+            res = workspaces_core.resolve_workspace_for_user(self.user)
+        mock_resync.assert_not_called()
+        self.assertEqual(res.workspace, 'private-ws')
+
+
+class TestResyncEdgeCases(unittest.TestCase):
+    """Hardening around the one-shot re-sync on deny paths."""
+
+    def setUp(self):
+        self.user = models.User(id='alice', name='alice')
+
+    def test_resync_failure_still_raises_clean_denial(self):
+        """A transient re-sync error must surface as NoWorkspaceAccessError,
+        not as the transient error (a 500 to the user)."""
+        patches = [
+            mock.patch.object(workspaces_core,
+                              '_load_workspaces',
+                              return_value={'private-ws': {
+                                  'private': True
+                              }}),
+            mock.patch.object(workspaces_core,
+                              '_accessible_workspace_names_for_user',
+                              return_value=set()),
+            mock.patch.object(workspaces_core.permission.permission_service,
+                              'resync_workspace_policies_for_new_user',
+                              side_effect=RuntimeError('lock timeout')),
+        ]
+        with _Patcher(patches):
+            with self.assertRaises(exceptions.NoWorkspaceAccessError):
+                workspaces_core.resolve_workspace_for_user(self.user)
+
+    def test_explicit_requested_heals_missed_grant(self):
+        """An explicit requested workspace also gets the one-shot heal:
+        denied -> re-sync -> re-check passes."""
+        check_calls = []
+
+        def _check(user, workspace, action='write'):
+            del user, action  # Signature mirrors check_workspace_permission.
+            check_calls.append(workspace)
+            if len(check_calls) == 1:
+                raise exceptions.PermissionDeniedError('no access')
+
+        resync = mock.patch.object(
+            workspaces_core.permission.permission_service,
+            'resync_workspace_policies_for_new_user')
+        with mock.patch.object(workspaces_core,
+                               'check_workspace_permission',
+                               side_effect=_check):
+            with resync as mock_resync:
+                res = workspaces_core.resolve_workspace_for_user(
+                    self.user, requested='private-ws')
+        mock_resync.assert_called_once_with('alice')
+        self.assertEqual(check_calls, ['private-ws', 'private-ws'])
+        self.assertEqual(res.workspace, 'private-ws')
+        self.assertEqual(res.source,
+                         workspace_constants.WORKSPACE_SOURCE_EXPLICIT)
+
+    def test_explicit_requested_still_denied_after_resync(self):
+        """If the re-sync does not help, the original denial propagates and
+        the re-sync ran exactly once (no retry loop)."""
+        resync = mock.patch.object(
+            workspaces_core.permission.permission_service,
+            'resync_workspace_policies_for_new_user')
+        with mock.patch.object(
+                workspaces_core,
+                'check_workspace_permission',
+                side_effect=exceptions.PermissionDeniedError('no access')):
+            with resync as mock_resync:
+                with self.assertRaises(exceptions.PermissionDeniedError):
+                    workspaces_core.resolve_workspace_for_user(
+                        self.user, requested='private-ws')
+        mock_resync.assert_called_once_with('alice')
+
+
 class TestNoWorkspaceAccessError(unittest.TestCase):
     """NoWorkspaceAccessError must remain a PermissionDeniedError subclass
     so existing `except PermissionDeniedError` handlers keep catching the
@@ -592,6 +723,166 @@ class TestNoWorkspaceAccessError(unittest.TestCase):
         self.assertTrue(
             issubclass(exceptions.NoWorkspaceAccessError,
                        exceptions.PermissionDeniedError))
+
+
+class TestReadOnlyOnlyUser(unittest.TestCase):
+    """A user with no writable workspace, only read-only visibility.
+
+    Reproduces the common locked-down-`default` case: the user is not a member
+    of any writable workspace but can read a read-only one. Read requests must
+    resolve an active workspace (so listing works); write requests must not.
+    """
+
+    def setUp(self):
+        self.user = models.User(id='bob', name='bob')
+
+    def _patches(self, read_only=('ws-ro',)):
+        # write -> nothing accessible; read -> the read-only workspace(s).
+        def _acc(user_id, names, action='read'):
+            del user_id, names
+            return set(read_only) if action == 'read' else set()
+
+        return [
+            mock.patch.object(
+                workspaces_core,
+                '_load_workspaces',
+                return_value={ws: {
+                    'private': True
+                } for ws in read_only}),
+            mock.patch.object(workspaces_core,
+                              '_accessible_workspace_names_for_user',
+                              side_effect=_acc),
+            mock.patch.object(workspaces_core.permission.permission_service,
+                              'resync_workspace_policies_for_new_user'),
+        ]
+
+    def test_read_resolves_the_read_only_workspace(self):
+        with _Patcher(self._patches()):
+            res = workspaces_core.resolve_workspace_for_user(self.user,
+                                                             action='read')
+        self.assertEqual(res.workspace, 'ws-ro')
+
+    def test_write_is_denied(self):
+        with _Patcher(self._patches()):
+            with self.assertRaises(exceptions.NoWorkspaceAccessError):
+                workspaces_core.resolve_workspace_for_user(self.user,
+                                                           action='write')
+
+    def test_several_read_only_workspaces_pick_deterministically(self):
+        """No writable workspace + several readable ones -> pick, don't raise.
+
+        AMBIGUOUS is a *write* problem (a new resource lands in exactly one
+        workspace and only the user can choose). Raising it here left such a
+        user unable to read anything at all — every request resolves the active
+        workspace first — and its recovery hint ("set a preferred workspace") is
+        a dead end for them, because `set_user_preferred_workspace` requires
+        write access. `default` is deliberately absent so the default-fallback
+        branch cannot mask this.
+        """
+        with _Patcher(self._patches(read_only=('zeta', 'pub', 'team'))):
+            res = workspaces_core.resolve_workspace_for_user(self.user,
+                                                             action='read')
+        # Sorted-first, so the pick is stable across processes and restarts.
+        self.assertEqual(res.workspace, 'pub')
+        self.assertEqual(res.source,
+                         workspace_constants.WORKSPACE_SOURCE_READ_ONLY)
+
+    def test_several_read_only_workspaces_write_still_denied(self):
+        with _Patcher(self._patches(read_only=('zeta', 'pub', 'team'))):
+            with self.assertRaises(exceptions.NoWorkspaceAccessError):
+                workspaces_core.resolve_workspace_for_user(self.user,
+                                                           action='write')
+
+    def test_read_with_several_writable_workspaces_still_ambiguous(self):
+        """Scope guard: the pick applies ONLY to the read-only-only case.
+
+        A member of several writable workspaces who has not chosen one still
+        gets AMBIGUOUS on a read, exactly as before — that user *can* act on
+        the recovery hint, and silently picking for them would hide which
+        workspace their next launch lands in.
+        """
+
+        def _acc(user_id, names, action='read'):
+            del user_id, names, action
+            return {'team-a', 'team-b'}
+
+        patches = [
+            mock.patch.object(workspaces_core,
+                              '_load_workspaces',
+                              return_value={
+                                  'team-a': {},
+                                  'team-b': {}
+                              }),
+            mock.patch.object(workspaces_core,
+                              '_accessible_workspace_names_for_user',
+                              side_effect=_acc),
+            mock.patch.object(workspaces_core.permission.permission_service,
+                              'resync_workspace_policies_for_new_user'),
+        ]
+        with _Patcher(patches):
+            with self.assertRaises(exceptions.WorkspaceAmbiguousError):
+                workspaces_core.resolve_workspace_for_user(self.user,
+                                                           action='read')
+
+
+class TestReadOnlyExcludedFromActiveSelection(unittest.TestCase):
+    """Auto-selecting the active workspace considers only WRITABLE workspaces.
+
+    A read-only workspace (a non-member's read-only visibility) is visible but
+    can never be a user's active workspace, so it must not count toward
+    auto-select or cause a spurious WorkspaceAmbiguousError when the user has
+    exactly one writable workspace. Regression test for a read command failing
+    with "You belong to multiple workspaces" when one of them is only
+    read-only.
+    """
+
+    def setUp(self):
+        self.user = models.User(id='alice', name='alice')
+
+    def _patches(self, writable, readable):
+        workspaces = {ws: {'private': True} for ws in readable}
+
+        def _acc(user_id, names, action='write'):
+            del user_id, names
+            return set(readable) if action == 'read' else set(writable)
+
+        return [
+            mock.patch.object(workspaces_core,
+                              '_load_workspaces',
+                              return_value=workspaces),
+            mock.patch.object(workspaces_core,
+                              '_accessible_workspace_names_for_user',
+                              side_effect=_acc),
+            mock.patch.object(workspaces_core.permission.permission_service,
+                              'resync_workspace_policies_for_new_user'),
+        ]
+
+    def test_read_only_not_counted_in_ambiguity(self):
+        # One writable ('pub') + one read-only ('pub1'). A read request must
+        # auto-select the single writable, NOT raise ambiguity over both.
+        with _Patcher(self._patches(writable=['pub'], readable=['pub',
+                                                                'pub1'])):
+            res = workspaces_core.resolve_workspace_for_user(self.user,
+                                                             action='read')
+        self.assertEqual(res.workspace, 'pub')
+
+    def test_multiple_writable_still_ambiguous(self):
+        # Two genuinely writable workspaces still can't be auto-picked.
+        with _Patcher(
+                self._patches(writable=['pub', 'pub1'],
+                              readable=['pub', 'pub1'])):
+            with self.assertRaises(exceptions.WorkspaceAmbiguousError):
+                workspaces_core.resolve_workspace_for_user(self.user,
+                                                           action='read')
+
+    def test_write_request_ignores_read_only(self):
+        # A write request with one writable + one read-only resolves to the
+        # writable and never the read-only.
+        with _Patcher(self._patches(writable=['pub'], readable=['pub',
+                                                                'pub1'])):
+            res = workspaces_core.resolve_workspace_for_user(self.user,
+                                                             action='write')
+        self.assertEqual(res.workspace, 'pub')
 
 
 if __name__ == '__main__':

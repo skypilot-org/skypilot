@@ -13,11 +13,13 @@ import click
 import pytest
 import requests
 
+from sky import exceptions
 from sky import skypilot_config
 from sky.client import sdk as client_sdk
 from sky.server import common as server_common
 from sky.server import rest as server_rest
 from sky.server.constants import API_COOKIE_FILE_ENV_VAR
+from sky.skylet import constants
 from sky.utils import common as common_utils
 
 
@@ -129,6 +131,44 @@ def test_api_info_with_cookie_file(set_api_cookie_jar):
             assert response["version"] is not None
             assert mock_make_request.call_count == 1
             assert mock_make_request.call_args[0] == ('GET', '/api/health')
+
+
+@pytest.mark.parametrize(
+    'deploy,host,expected_host',
+    [
+        # Deploy always binds a wildcard for remote access.
+        (True, '127.0.0.1', '0.0.0.0'),
+        (True, 'localhost', '0.0.0.0'),
+        (True, '0.0.0.0', '0.0.0.0'),
+        # Any IPv6 host under deploy binds the IPv6 wildcard.
+        (True, '::', '::'),
+        (True, '::1', '::'),
+        # A full-length IPv6 literal (no '::') is still detected; the deploy
+        # override runs before allowlist validation, so '::' passes.
+        (True, '2001:db8:0:0:0:0:0:1', '::'),
+        # Non-deploy leaves the host untouched.
+        (False, '127.0.0.1', '127.0.0.1'),
+        (False, '::1', '::1'),
+    ])
+def test_api_start_host_resolution(deploy, host, expected_host):
+    """api_start resolves/validates the bind host and forwards it to start."""
+    with mock.patch('sky.server.common.is_api_server_local',
+                    return_value=True), \
+         mock.patch('sky.server.common.check_server_healthy_or_start_fn'
+                   ) as mock_start:
+        client_sdk.api_start(deploy=deploy, host=host)
+    assert mock_start.call_count == 1
+    # check_server_healthy_or_start_fn(deploy, host, foreground, ...)
+    assert mock_start.call_args[0][1] == expected_host
+
+
+def test_api_start_rejects_invalid_host():
+    """api_start rejects hosts outside the local allowlist."""
+    with mock.patch('sky.server.common.is_api_server_local',
+                    return_value=True), \
+         mock.patch('sky.server.common.check_server_healthy_or_start_fn'):
+        with pytest.raises(ValueError, match='Invalid host'):
+            client_sdk.api_start(deploy=False, host='192.168.1.5')
 
 
 def test_api_login(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
@@ -274,6 +314,388 @@ def test_api_login(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
             mock.call("http://localhost:8080"),
             mock.call("http://localhost:8080")
         ])
+
+
+def _mock_healthy_check():
+    """Returns a mock of check_server_healthy that reports a healthy server."""
+    mock_check = mock.patch('sky.server.common.check_server_healthy')
+    return mock_check
+
+
+def test_api_login_with_env_endpoint(monkeypatch: pytest.MonkeyPatch,
+                                     tmp_path: Path):
+    """Login uses the env var endpoint and does not write it to the config."""
+    config_path = tmp_path / "config.yaml"
+    monkeypatch.setattr('sky.skypilot_config.get_user_config_path',
+                        lambda: str(config_path))
+    env_endpoint = "http://env.skypilot.co"
+    monkeypatch.setenv(constants.SKY_API_SERVER_URL_ENV_VAR, env_endpoint + '/')
+
+    with _mock_healthy_check() as mock_check:
+        mock_check.return_value = (
+            server_common.ApiServerStatus.HEALTHY,
+            server_common.ApiServerInfo(
+                status=server_common.ApiServerStatus.HEALTHY,
+                basic_auth_enabled=False))
+        client_sdk.api_login()
+
+    # Logged into the endpoint from the env var, with the trailing slash
+    # stripped.
+    mock_check.assert_has_calls(
+        [mock.call(env_endpoint),
+         mock.call(env_endpoint)])
+    # The env var already takes precedence for every command, so the endpoint
+    # must not be persisted to the config file.
+    config = skypilot_config.get_user_config()
+    assert 'endpoint' not in config.get('api_server', {})
+
+
+def test_api_login_env_endpoint_keeps_config_endpoint(
+        monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+    """An env var login leaves an existing configured endpoint untouched."""
+    config_path = tmp_path / "config.yaml"
+    monkeypatch.setattr('sky.skypilot_config.get_user_config_path',
+                        lambda: str(config_path))
+    config_endpoint = "http://config.skypilot.co"
+    env_endpoint = "http://env.skypilot.co"
+
+    with _mock_healthy_check() as mock_check:
+        mock_check.return_value = (
+            server_common.ApiServerStatus.HEALTHY,
+            server_common.ApiServerInfo(
+                status=server_common.ApiServerStatus.HEALTHY,
+                basic_auth_enabled=False))
+        # First login without the env var, which configures the endpoint.
+        client_sdk.api_login(config_endpoint)
+        assert skypilot_config.get_user_config(
+        )['api_server']['endpoint'] == config_endpoint
+
+        # Then login again with the env var set.
+        monkeypatch.setenv(constants.SKY_API_SERVER_URL_ENV_VAR, env_endpoint)
+        client_sdk.api_login()
+
+    # The configured endpoint is preserved, so unsetting the env var falls back
+    # to the server the user logged into earlier.
+    assert skypilot_config.get_user_config(
+    )['api_server']['endpoint'] == config_endpoint
+    mock_check.assert_called_with(env_endpoint)
+
+
+def test_api_login_env_endpoint_with_conflicting_flag(
+        monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+    """`-e` pointing elsewhere than the env var is ambiguous, so it errors."""
+    config_path = tmp_path / "config.yaml"
+    monkeypatch.setattr('sky.skypilot_config.get_user_config_path',
+                        lambda: str(config_path))
+    monkeypatch.setenv(constants.SKY_API_SERVER_URL_ENV_VAR,
+                       "http://env.skypilot.co")
+
+    with pytest.raises(RuntimeError, match='already set to'):
+        client_sdk.api_login("http://other.skypilot.co")
+
+
+def test_api_login_env_endpoint_with_matching_flag(
+        monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+    """`-e` matching the env var is not ambiguous, so login proceeds.
+
+    `sky api info` suggests `sky api login --relogin -e <endpoint>` with the
+    endpoint it resolved, which can be the one from the env var.
+    """
+    config_path = tmp_path / "config.yaml"
+    monkeypatch.setattr('sky.skypilot_config.get_user_config_path',
+                        lambda: str(config_path))
+    endpoint = "http://env.skypilot.co"
+    monkeypatch.setenv(constants.SKY_API_SERVER_URL_ENV_VAR, endpoint)
+
+    with _mock_healthy_check() as mock_check:
+        mock_check.return_value = (
+            server_common.ApiServerStatus.HEALTHY,
+            server_common.ApiServerInfo(
+                status=server_common.ApiServerStatus.HEALTHY,
+                basic_auth_enabled=False))
+        client_sdk.api_login(endpoint + '/')
+
+    mock_check.assert_called_with(endpoint)
+    # An explicit --endpoint is persisted even when the variable names the same
+    # endpoint: that is what the flag documents, and the config then agrees with
+    # what is in effect.
+    config = skypilot_config.get_user_config()
+    assert config['api_server']['endpoint'] == endpoint
+
+
+def _login_with_sa_token(endpoint: str, token: str = "sky_test_token") -> None:
+    """Logs in with a service account token, so the config file holds one."""
+    with _mock_healthy_check() as mock_check:
+        mock_check.return_value = (
+            server_common.ApiServerStatus.HEALTHY,
+            server_common.ApiServerInfo(
+                status=server_common.ApiServerStatus.HEALTHY,
+                basic_auth_enabled=False))
+        client_sdk.api_login(endpoint, service_account_token=token)
+    assert skypilot_config.get_user_config(
+    )['api_server']['service_account_token'] == token
+
+
+def test_api_login_env_endpoint_hides_sa_token_from_health_check(
+        monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+    """The residual sa token is hidden in memory, not deleted, during login.
+
+    The token is not scoped to an endpoint, so leaving it visible would
+    authenticate the health check against the env var endpoint and mask the
+    NEEDS_AUTH response that the SSO flow depends on. Deleting it from the
+    config file instead would destroy the configured endpoint's credential even
+    when the login never completes.
+    """
+    config_path = tmp_path / "config.yaml"
+    monkeypatch.setattr('sky.skypilot_config.get_user_config_path',
+                        lambda: str(config_path))
+    config_endpoint = "http://config.skypilot.co"
+    _login_with_sa_token(config_endpoint)
+
+    monkeypatch.setenv(constants.SKY_API_SERVER_URL_ENV_VAR,
+                       "http://env.skypilot.co")
+    sa_token_at_health_check = []
+
+    def _unreachable_server(endpoint):
+        sa_token_at_health_check.append(
+            skypilot_config.get_nested(('api_server', 'service_account_token'),
+                                       default_value=None))
+        raise exceptions.ApiServerConnectionError(endpoint)
+
+    with mock.patch('sky.server.common.check_server_healthy',
+                    side_effect=_unreachable_server):
+        with pytest.raises(exceptions.ApiServerConnectionError):
+            client_sdk.api_login()
+
+    # Hidden from the health check...
+    assert sa_token_at_health_check[0] is None
+    # ...but still on disk, since the login never completed.
+    config = skypilot_config.get_user_config()
+    assert config['api_server']['service_account_token'] == 'sky_test_token'
+    assert config['api_server']['endpoint'] == config_endpoint
+
+
+def test_api_login_env_endpoint_clears_residual_sa_token_on_success(
+        monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+    """A completed login removes the residual sa token from disk.
+
+    The cookies it saved are the credential for that endpoint from now on, and
+    the token would be sent in their place.
+    """
+    config_path = tmp_path / "config.yaml"
+    monkeypatch.setattr('sky.skypilot_config.get_user_config_path',
+                        lambda: str(config_path))
+    config_endpoint = "http://config.skypilot.co"
+    _login_with_sa_token(config_endpoint)
+
+    monkeypatch.setenv(constants.SKY_API_SERVER_URL_ENV_VAR,
+                       "http://env.skypilot.co")
+    with _mock_healthy_check() as mock_check:
+        mock_check.return_value = (
+            server_common.ApiServerStatus.HEALTHY,
+            server_common.ApiServerInfo(
+                status=server_common.ApiServerStatus.HEALTHY,
+                basic_auth_enabled=False))
+        client_sdk.api_login()
+
+    config = skypilot_config.get_user_config()
+    assert 'service_account_token' not in config.get('api_server', {})
+    # Only the token is dropped; the configured endpoint is kept.
+    assert config['api_server']['endpoint'] == config_endpoint
+
+
+def test_api_login_env_endpoint_with_sa_token_keeps_config_endpoint(
+        monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+    """Login with a token and the env var set saves the token, not the endpoint.
+    """
+    config_path = tmp_path / "config.yaml"
+    monkeypatch.setattr('sky.skypilot_config.get_user_config_path',
+                        lambda: str(config_path))
+    config_endpoint = "http://config.skypilot.co"
+    env_endpoint = "http://env.skypilot.co"
+    monkeypatch.setenv(constants.SKY_API_SERVER_URL_ENV_VAR, env_endpoint)
+    config_path.write_text(f'api_server:\n  endpoint: {config_endpoint}\n')
+    skypilot_config.reload_config()
+
+    with _mock_healthy_check() as mock_check:
+        mock_check.return_value = (
+            server_common.ApiServerStatus.HEALTHY,
+            server_common.ApiServerInfo(
+                status=server_common.ApiServerStatus.HEALTHY,
+                basic_auth_enabled=False))
+        client_sdk.api_login(service_account_token="sky_test_token")
+
+    mock_check.assert_called_with(env_endpoint)
+    config = skypilot_config.get_user_config()
+    assert config['api_server']['service_account_token'] == 'sky_test_token'
+    assert config['api_server']['endpoint'] == config_endpoint
+
+
+def test_api_login_prompt_defaults_to_config_endpoint(
+        monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+    """Without `-e` or the env var, the prompt defaults to the config endpoint.
+    """
+    config_path = tmp_path / "config.yaml"
+    monkeypatch.setattr('sky.skypilot_config.get_user_config_path',
+                        lambda: str(config_path))
+    monkeypatch.delenv(constants.SKY_API_SERVER_URL_ENV_VAR, raising=False)
+    config_endpoint = "http://config.skypilot.co"
+    config_path.write_text(f'api_server:\n  endpoint: {config_endpoint}\n')
+    skypilot_config.reload_config()
+
+    prompt_kwargs = {}
+
+    def _fake_prompt(text, **kwargs):
+        del text  # Unused.
+        prompt_kwargs.update(kwargs)
+        # click.prompt returns the default when the user just presses Enter.
+        return kwargs['default']
+
+    monkeypatch.setattr('click.prompt', _fake_prompt)
+    with _mock_healthy_check() as mock_check:
+        mock_check.return_value = (
+            server_common.ApiServerStatus.HEALTHY,
+            server_common.ApiServerInfo(
+                status=server_common.ApiServerStatus.HEALTHY,
+                basic_auth_enabled=False))
+        client_sdk.api_login()
+
+    assert prompt_kwargs['default'] == config_endpoint
+    mock_check.assert_called_with(config_endpoint)
+
+
+def test_api_login_redacts_password_in_endpoint(monkeypatch: pytest.MonkeyPatch,
+                                                tmp_path: Path, capsys):
+    """Neither the warning nor the conflict error may echo an inline password."""
+    config_path = tmp_path / "config.yaml"
+    monkeypatch.setattr('sky.skypilot_config.get_user_config_path',
+                        lambda: str(config_path))
+    monkeypatch.setenv(constants.SKY_API_SERVER_URL_ENV_VAR,
+                       "http://user:sup3rsecret@env.skypilot.co")
+
+    # The conflict error mentions both endpoints.
+    with pytest.raises(RuntimeError) as exc_info:
+        client_sdk.api_login("http://user:al5osecret@other.skypilot.co")
+    assert 'sup3rsecret' not in str(exc_info.value)
+    assert 'al5osecret' not in str(exc_info.value)
+
+    # And so does the warning on the happy path.
+    with _mock_healthy_check() as mock_check:
+        mock_check.return_value = (
+            server_common.ApiServerStatus.HEALTHY,
+            server_common.ApiServerInfo(
+                status=server_common.ApiServerStatus.HEALTHY,
+                basic_auth_enabled=False))
+        client_sdk.api_login()
+    warning = [
+        line for line in capsys.readouterr().out.splitlines()
+        if 'Using endpoint from' in line
+    ]
+    assert len(warning) == 1
+    assert 'sup3rsecret' not in warning[0]
+    # Note: the "Logged into ..." line and the dashboard URL still show the
+    # endpoint verbatim, which predates this change and is deliberate -- the
+    # dashboard URL is meant to be opened, so it needs its credentials.
+    # The real endpoint is still the one we authenticate against.
+    mock_check.assert_called_with("http://user:sup3rsecret@env.skypilot.co")
+
+
+def test_api_login_writes_the_config_file_it_reads(
+        monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+    """The endpoint is written to the config file that is actually in effect.
+
+    Reads honor SKYPILOT_GLOBAL_CONFIG, so writing the default path instead
+    would leave the endpoint in a file nobody reads.
+    """
+    default_path = tmp_path / "default.yaml"
+    override_path = tmp_path / "override.yaml"
+    override_path.write_text(
+        'api_server:\n  endpoint: http://old.skypilot.co\n')
+    monkeypatch.setattr('sky.skypilot_config.get_user_config_path',
+                        lambda: str(default_path))
+    monkeypatch.setenv(skypilot_config.ENV_VAR_GLOBAL_CONFIG,
+                       str(override_path))
+    skypilot_config.reload_config()
+
+    new_endpoint = "http://new.skypilot.co"
+    with _mock_healthy_check() as mock_check:
+        mock_check.return_value = (
+            server_common.ApiServerStatus.HEALTHY,
+            server_common.ApiServerInfo(
+                status=server_common.ApiServerStatus.HEALTHY,
+                basic_auth_enabled=False))
+        client_sdk.api_login(new_endpoint)
+
+    assert 'endpoint: http://new.skypilot.co' in override_path.read_text()
+    # The default path is not touched, so it cannot shadow the override later.
+    assert not default_path.exists()
+    assert skypilot_config.get_user_config(
+    )['api_server']['endpoint'] == new_endpoint
+
+
+def test_api_login_writes_do_not_clobber_the_other_config(
+        monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+    """A write must start from the file it is about to write.
+
+    When the resolved config file cannot be written, login falls back to the
+    default path. Seeding the new contents from the resolved file instead would
+    dump it over the default one and lose whatever that held.
+    """
+    default_path = tmp_path / "default.yaml"
+    override_path = tmp_path / "override.yaml"
+    default_path.write_text('docker:\n  run_options: [--mine]\n')
+    override_path.write_text('kubernetes:\n  allowed_contexts: [theirs]\n')
+    monkeypatch.setattr('sky.skypilot_config.get_user_config_path',
+                        lambda: str(default_path))
+    monkeypatch.setenv(skypilot_config.ENV_VAR_GLOBAL_CONFIG,
+                       str(override_path))
+    # Stand in for the resolved file being unwritable, without depending on
+    # file modes (a test running as root can write a read-only file).
+    monkeypatch.setattr('sky.client.sdk._writable_user_config_path',
+                        lambda: default_path)
+    skypilot_config.reload_config()
+
+    with _mock_healthy_check() as mock_check:
+        mock_check.return_value = (
+            server_common.ApiServerStatus.HEALTHY,
+            server_common.ApiServerInfo(
+                status=server_common.ApiServerStatus.HEALTHY,
+                basic_auth_enabled=False))
+        client_sdk.api_login("http://new.skypilot.co")
+
+    written = default_path.read_text()
+    assert 'endpoint: http://new.skypilot.co' in written
+    # Its own settings survive, and the other file's do not leak in.
+    assert '--mine' in written
+    assert 'theirs' not in written
+    assert 'theirs' in override_path.read_text()
+
+
+def test_api_login_rejects_empty_env_endpoint(monkeypatch: pytest.MonkeyPatch,
+                                              tmp_path: Path):
+    """An empty env var is set, not unset, and misdirects every command.
+
+    `get_server_url()` returns the empty value rather than falling back to the
+    config file, so logging in and reporting success would leave every later
+    command resolving to an empty URL.
+    """
+    config_path = tmp_path / "config.yaml"
+    monkeypatch.setattr('sky.skypilot_config.get_user_config_path',
+                        lambda: str(config_path))
+    monkeypatch.setenv(constants.SKY_API_SERVER_URL_ENV_VAR, "")
+
+    with pytest.raises(RuntimeError, match='set to an empty value'):
+        client_sdk.api_login("http://newly-set.skypilot.co")
+    # Nothing was written on the way out.
+    assert not config_path.exists()
+
+
+def test_api_logout_with_env_endpoint(monkeypatch: pytest.MonkeyPatch):
+    """Logout still errors out when the endpoint is set via the env var."""
+    monkeypatch.setenv(constants.SKY_API_SERVER_URL_ENV_VAR,
+                       "http://env.skypilot.co")
+    with pytest.raises(RuntimeError, match='Cannot logout of API server'):
+        client_sdk.api_logout()
 
 
 def test_api_login_user_hash_token(monkeypatch: pytest.MonkeyPatch,
@@ -481,9 +903,11 @@ def test_api_login_user_hash_server_healthy(monkeypatch: pytest.MonkeyPatch,
 
 def test_api_login_clears_residual_sa_token(monkeypatch: pytest.MonkeyPatch,
                                             tmp_path: Path):
-    """After login with sa token, a subsequent login without token should clear
-    the residual sa token from config before the first health check, so the
-    server can return NEEDS_AUTH and trigger the SSO flow."""
+    """After login with sa token, a subsequent login without token must not
+    authenticate with the residual sa token, so the server can return NEEDS_AUTH
+    and trigger the SSO flow. The token is hidden in memory for the duration of
+    the login and removed from the config file once the login has succeeded, so
+    that a login which fails part way through leaves the credential alone."""
     config_path = tmp_path / "config.yaml"
     user_hash_path = tmp_path / "user_hash"
     monkeypatch.setattr('sky.utils.common_utils.USER_HASH_FILE',
@@ -514,9 +938,9 @@ def test_api_login_clears_residual_sa_token(monkeypatch: pytest.MonkeyPatch,
     assert config['api_server']['service_account_token'] == 'sky_test_token'
     assert user_hash_path.read_text() == sa_user_hash
 
-    # Step 2: Login again without token. The residual sa token should be
-    # cleared before the first health check. With the sa token gone, the
-    # server returns NEEDS_AUTH, triggering the SSO flow.
+    # Step 2: Login again without token. The residual sa token must not be
+    # visible to the first health check. With the sa token gone, the server
+    # returns NEEDS_AUTH, triggering the SSO flow.
     sa_token_at_health_check = []
 
     def _capture_check_server_healthy(endpoint):
@@ -532,11 +956,24 @@ def test_api_login_clears_residual_sa_token(monkeypatch: pytest.MonkeyPatch,
         with pytest.raises(StopIteration):
             client_sdk.api_login(test_endpoint)
 
-    # The sa token must have been cleared from config BEFORE the first
-    # health check was made.
+    # The sa token must not have been visible to the first health check.
     assert sa_token_at_health_check[0] is None
+    # This login was aborted, so the credential is still on disk.
+    config = skypilot_config.get_user_config()
+    assert config['api_server']['service_account_token'] == 'sky_test_token'
+
+    # Step 3: A login that completes removes it, since the cookies it saved are
+    # the credential for this endpoint from now on.
+    with mock.patch('sky.server.common.check_server_healthy') as mock_check:
+        mock_check.return_value = (
+            server_common.ApiServerStatus.HEALTHY,
+            server_common.ApiServerInfo(
+                status=server_common.ApiServerStatus.HEALTHY,
+                basic_auth_enabled=False))
+        client_sdk.api_login(test_endpoint)
     config = skypilot_config.get_user_config()
     assert 'service_account_token' not in config.get('api_server', {})
+    assert config['api_server']['endpoint'] == test_endpoint
 
 
 def test_api_login_syncs_hash_from_final_health_check(
@@ -940,3 +1377,40 @@ def test_get_request_id():
     mock_response.reason = 'OK'
     request_id = server_common.get_request_id(mock_response)
     assert request_id == 'test_request_id'
+
+
+def _interrupted_entrypoint():
+    """Module-level entrypoint so Request.encode() can pickle it."""
+
+
+def test_get_interrupted_request_raises_request_interrupted_error():
+    """sdk.get() rebuilds the server's 500 payload into
+    RequestInterruptedError — not a generic RuntimeError — so callers (and
+    the retry decorator) can react to the interruption specifically."""
+    from sky import exceptions
+    from sky.server.requests import payloads as requests_payloads
+    from sky.server.requests import requests as requests_lib
+
+    request = requests_lib.Request(request_id='interrupted-req',
+                                   name='sky.launch',
+                                   entrypoint=_interrupted_entrypoint,
+                                   request_body=requests_payloads.RequestBody(),
+                                   status=requests_lib.RequestStatus.CANCELLED,
+                                   created_at=0.0,
+                                   user_id='user-123',
+                                   should_retry=True)
+    request.set_error(
+        exceptions.RequestInterruptedError(
+            'Request was interrupted by an API server restart.'))
+
+    with mock.patch('sky.server.common.make_authenticated_request'
+                   ) as mock_make_request:
+        mock_response = mock.Mock()
+        mock_response.status_code = 500
+        mock_response.json.return_value = {
+            'detail': request.encode().model_dump()
+        }
+        mock_make_request.return_value = mock_response
+
+        with pytest.raises(exceptions.RequestInterruptedError):
+            client_sdk.get('interrupted-req')
