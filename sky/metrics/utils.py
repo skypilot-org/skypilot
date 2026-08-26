@@ -341,6 +341,46 @@ SKY_APISERVER_QUEUE_WAIT_SECONDS = prom.Histogram(
              120.0, 300.0, 600.0, float('inf')),
 )
 
+# --- ~/sky_logs retention ---
+#
+# Written once per hourly sweep by _prune_sky_logs() in the main API server
+# process. The gauges take a pid label + 'liveall' so only the process that
+# actually runs the sweep produces a series: the aggregating modes strip the
+# pid label and would merge in a phantom 0.0 from every worker process that
+# merely imports this module, and their non-live variants would keep serving
+# the last value after the writer exits.
+
+# Prune cost scales with this number, not with the number of dirs actually
+# expired, so it is the series to watch when the hourly sweep gets slow.
+SKY_APISERVER_SKY_LOGS_TOP_LEVEL_ENTRIES = prom.Gauge(
+    'sky_apiserver_sky_logs_top_level_entries',
+    'Top-level entries in ~/sky_logs at the last retention sweep',
+    ['pid'],
+    multiprocess_mode='liveall',
+)
+
+SKY_APISERVER_SKY_LOGS_PRUNE_DURATION_SECONDS = prom.Gauge(
+    'sky_apiserver_sky_logs_prune_duration_seconds',
+    'Wall time of the last ~/sky_logs retention sweep',
+    ['pid'],
+    multiprocess_mode='liveall',
+)
+
+# Measures the filesystem hosting ~/sky_logs, not the directory itself: exact
+# for deployments that give ~/sky_logs its own volume, an over-estimate for
+# those where it shares a filesystem with other data.
+SKY_APISERVER_SKY_LOGS_FS_USED_BYTES = prom.Gauge(
+    'sky_apiserver_sky_logs_fs_used_bytes',
+    'Used bytes on the filesystem hosting ~/sky_logs',
+    ['pid'],
+    multiprocess_mode='liveall',
+)
+
+SKY_APISERVER_SKY_LOGS_PRUNED_ENTRIES_TOTAL = prom.Counter(
+    'sky_apiserver_sky_logs_pruned_entries_total',
+    'Expired ~/sky_logs artifacts removed by the retention sweep',
+)
+
 # --- Managed Jobs Metrics ---
 
 # Per-controller-process gauges (consolidation mode only).
