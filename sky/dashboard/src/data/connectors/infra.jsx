@@ -1275,6 +1275,9 @@ async function getSlurmServiceGPUs() {
         gpu_free: node.free_gpus || 0,
         cluster: clusterName,
         partition: node.partition || 'default', // partition might be null
+        // Raw sinfo state (e.g. 'idle~'); the '~' suffix marks a powered-down
+        // cloud node. Carried so the infra table can count only up nodes.
+        node_state: node.node_state,
       };
     }
 
