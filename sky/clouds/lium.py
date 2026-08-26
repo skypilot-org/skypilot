@@ -1,6 +1,7 @@
 """Lium Cloud."""
 
 import json
+import os
 import typing
 from typing import Any, Dict, Iterator, List, Optional, Tuple, Union
 
@@ -228,6 +229,15 @@ class Lium(clouds.Cloud):
                 f'    Get an API key at https://lium.io. The key is read from '
                 f'{_CREDENTIAL_FILE} or '
                 f'${lium_utils.API_KEY_ENV_VAR}.')
+
+        if not os.path.exists(os.path.expanduser(_CREDENTIAL_FILE)):
+            # Only the file travels to a remote machine, so a key that lives
+            # in the environment alone leaves a controller without one.
+            return True, (
+                f'The API key comes from ${lium_utils.API_KEY_ENV_VAR}. '
+                f'Managed jobs and a remote API server read {_CREDENTIAL_FILE} '
+                'instead, so run `lium init` to write the key to that file '
+                'as well.')
 
         return True, None
 

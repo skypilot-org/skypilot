@@ -7,19 +7,56 @@ types and pricing information for Lium.
 import typing
 from typing import Dict, List, Optional, Tuple, Union
 
+from sky import exceptions
+from sky import sky_logging
+from sky.adaptors import common as adaptors_common
 from sky.catalog import common
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
-    from sky.clouds import cloud
+    import pandas as pd
+    import requests
 
-# Lium node inventory changes through the day, so the catalog is refreshed
-# more often than the clouds with a fixed instance list.
-_df = common.read_catalog('lium/vms.csv', pull_frequency_hours=7)
+    from sky.clouds import cloud
+else:
+    pd = adaptors_common.LazyImport('pandas')
+    requests = adaptors_common.LazyImport('requests')
+
+logger = sky_logging.init_logger(__name__)
+
+_CATALOG_COLUMNS = [
+    'InstanceType', 'AcceleratorName', 'AcceleratorCount', 'vCPUs', 'MemoryGiB',
+    'Price', 'Region', 'GpuInfo', 'SpotPrice'
+]
+
+_catalog: Optional['pd.DataFrame'] = None
+
+
+def _get_df() -> 'pd.DataFrame':
+    """Returns the catalog, or an empty one while it is not published yet.
+
+    The cloud reaches a SkyPilot release before its file reaches the catalog
+    repository. Until then Lium offers nothing, rather than breaking every
+    command that walks the clouds.
+    """
+    global _catalog
+    if _catalog is None:
+        # Lium node inventory changes through the day, so the catalog is
+        # refreshed more often than the clouds with a fixed instance list.
+        catalog = common.read_catalog('lium/vms.csv', pull_frequency_hours=7)
+        try:
+            # The read is lazy, so the download runs on the first column read.
+            catalog.columns  # pylint: disable=pointless-statement
+            _catalog = catalog
+        except (exceptions.CloudError,
+                requests.exceptions.RequestException) as e:
+            logger.warning(f'The Lium catalog is not available: {e}')
+            _catalog = pd.DataFrame(columns=_CATALOG_COLUMNS)
+    return _catalog
 
 
 def instance_type_exists(instance_type: str) -> bool:
-    return common.instance_type_exists_impl(_df, instance_type)
+    return common.instance_type_exists_impl(_get_df(), instance_type)
 
 
 def validate_region_zone(
@@ -28,7 +65,7 @@ def validate_region_zone(
     if zone is not None:
         with ux_utils.print_exception_no_traceback():
             raise ValueError('Lium does not support zones.')
-    return common.validate_region_zone_impl('lium', _df, region, zone)
+    return common.validate_region_zone_impl('lium', _get_df(), region, zone)
 
 
 def get_hourly_cost(instance_type: str,
@@ -39,13 +76,14 @@ def get_hourly_cost(instance_type: str,
     if use_spot:
         with ux_utils.print_exception_no_traceback():
             raise ValueError('Lium does not support spot instances.')
-    return common.get_hourly_cost_impl(_df, instance_type, use_spot, region,
-                                       zone)
+    return common.get_hourly_cost_impl(_get_df(), instance_type, use_spot,
+                                       region, zone)
 
 
 def get_vcpus_mem_from_instance_type(
         instance_type: str) -> Tuple[Optional[float], Optional[float]]:
-    return common.get_vcpus_mem_from_instance_type_impl(_df, instance_type)
+    return common.get_vcpus_mem_from_instance_type_impl(_get_df(),
+                                                        instance_type)
 
 
 def get_default_instance_type(
@@ -58,14 +96,15 @@ def get_default_instance_type(
         use_spot: bool = False,
         max_hourly_cost: Optional[float] = None) -> Optional[str]:
     del disk_tier, local_disk  # Lium has no disk tiers.
-    return common.get_instance_type_for_cpus_mem_impl(_df, cpus, memory, region,
-                                                      zone, use_spot,
+    return common.get_instance_type_for_cpus_mem_impl(_get_df(), cpus, memory,
+                                                      region, zone, use_spot,
                                                       max_hourly_cost)
 
 
 def get_accelerators_from_instance_type(
         instance_type: str) -> Optional[Dict[str, Union[int, float]]]:
-    return common.get_accelerators_from_instance_type_impl(_df, instance_type)
+    return common.get_accelerators_from_instance_type_impl(
+        _get_df(), instance_type)
 
 
 def get_instance_type_for_accelerator(
@@ -84,7 +123,7 @@ def get_instance_type_for_accelerator(
     if use_spot:
         return None, ['Lium does not support spot instances.']
     return common.get_instance_type_for_accelerator_impl(
-        df=_df,
+        df=_get_df(),
         acc_name=acc_name,
         acc_count=acc_count,
         cpus=cpus,
@@ -99,7 +138,8 @@ def get_region_zones_for_instance_type(instance_type: str,
                                        use_spot: bool) -> List['cloud.Region']:
     if use_spot:
         return []
-    df = _df[_df['InstanceType'] == instance_type]
+    catalog = _get_df()
+    df = catalog[catalog['InstanceType'] == instance_type]
     return common.get_region_zones(df, use_spot)
 
 
@@ -113,6 +153,7 @@ def list_accelerators(
         require_price: bool = True) -> Dict[str, List[common.InstanceTypeInfo]]:
     """Returns all instance types in Lium offering GPUs."""
     del require_price  # unused
-    return common.list_accelerators_impl('Lium', _df, gpus_only, name_filter,
-                                         region_filter, quantity_filter,
-                                         case_sensitive, all_regions)
+    return common.list_accelerators_impl('Lium', _get_df(), gpus_only,
+                                         name_filter, region_filter,
+                                         quantity_filter, case_sensitive,
+                                         all_regions)

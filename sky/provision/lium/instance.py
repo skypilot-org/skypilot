@@ -44,8 +44,10 @@ def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
     instance_type = node_config['InstanceType']
     node = lium_utils.find_cheapest_free_node(instance_type, region)
     if node is None:
-        raise RuntimeError(f'No free Lium node offers {instance_type} in '
-                           f'region {region}.')
+        raise RuntimeError(
+            f'No free Lium node in region {region} carries the shape '
+            f'{instance_type} asks for. The catalog may quote a node that is '
+            'now rented; a refreshed catalog names the nodes on offer.')
 
     pod_name = f'{cluster_name_on_cloud}-head'
     logger.info(f'Renting node {node.id} ({instance_type}) as {pod_name}.')
@@ -100,21 +102,23 @@ def get_cluster_info(
         provider_config: Optional[Dict[str, Any]] = None) -> common.ClusterInfo:
     """Returns the SSH endpoints of a cluster."""
     del region  # unused
-    # A pod without an SSH endpoint is not reachable yet, so it is left out.
-    pods = {
-        pod_id: pod for pod_id, pod in lium_utils.get_cluster_pods(
-            cluster_name_on_cloud).items() if pod.host is not None
-    }
-    instances: Dict[str, List[common.InstanceInfo]] = {
-        pod_id: [
+    pods: Dict[str, lium_utils.LiumPod] = {}
+    instances: Dict[str, List[common.InstanceInfo]] = {}
+    for pod_id, pod in lium_utils.get_cluster_pods(
+            cluster_name_on_cloud).items():
+        host = pod.host
+        if host is None:
+            # The pod is not reachable until Lium reports its SSH endpoint.
+            continue
+        pods[pod_id] = pod
+        instances[pod_id] = [
             common.InstanceInfo(instance_id=pod_id,
-                                internal_ip=pod.host,
-                                external_ip=pod.host,
+                                internal_ip=host,
+                                external_ip=host,
                                 ssh_port=pod.ssh_port,
                                 tags={},
                                 node_name=pod.name)
-        ] for pod_id, pod in pods.items()
-    }
+        ]
 
     return common.ClusterInfo(instances=instances,
                               head_instance_id=_head_pod_id(pods),
