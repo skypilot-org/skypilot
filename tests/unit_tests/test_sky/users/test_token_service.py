@@ -22,7 +22,7 @@ class TestTokenService:
             mock_global_state.get_system_config.return_value = None
             mock_global_state.get_or_set_system_config.side_effect = (
                 lambda _key, value: value)
-            mock_global_state.get_all_service_account_tokens.return_value = []
+            mock_global_state.count_service_account_tokens.return_value = 0
 
             service = token_service.TokenService()
 
@@ -482,29 +482,29 @@ class TestSecretBootstrap:
             mock_global_state.set_system_config.assert_not_called()
 
     @staticmethod
-    def _bootstrap_with_existing_tokens(existing_tokens):
-        """Bootstrap a secret against a DB holding `existing_tokens`."""
+    def _bootstrap_with_existing_tokens(existing_token_count):
+        """Bootstrap a secret against a DB holding that many token rows."""
         with mock.patch('sky.users.token_service.global_user_state'
                        ) as mock_global_state:
             mock_global_state.get_system_config.return_value = None
             mock_global_state.get_or_set_system_config.side_effect = (
                 lambda _key, value: value)
-            mock_global_state.get_all_service_account_tokens.return_value = (
-                existing_tokens)
+            mock_global_state.count_service_account_tokens.return_value = (
+                existing_token_count)
             with mock.patch.object(token_service, 'logger') as mock_logger:
                 token_service.TokenService().ensure_secret_loaded()
             return mock_logger
 
     def test_generating_over_existing_tokens_logs_error(self):
         """The alertable case: a new secret orphans tokens that already exist."""
-        mock_logger = self._bootstrap_with_existing_tokens([{'token_id': 't1'}])
+        mock_logger = self._bootstrap_with_existing_tokens(1)
         mock_logger.error.assert_called_once()
         assert ('NEW JWT signing secret while 1 service'
                 in mock_logger.error.call_args[0][0])
 
     def test_first_time_bootstrap_does_not_log_error(self):
         """A brand-new deployment generating the secret is routine."""
-        mock_logger = self._bootstrap_with_existing_tokens([])
+        mock_logger = self._bootstrap_with_existing_tokens(0)
         mock_logger.error.assert_not_called()
 
     def test_waiting_on_a_stuck_load_gives_up(self):
@@ -568,6 +568,23 @@ class TestSecretBootstrap:
 
         assert service.secret_key == 'loaded-by-the-holder'
 
+    def test_empty_secret_adopted_from_a_race_is_rejected_too(self):
+        """The guard must cover the adopt exit, not only the read exit.
+
+        The read says "no row", then the insert loses to a writer that stored
+        an empty value, so the read-back hands one back. Caching it would sign
+        and verify with a key PyJWT rejects on every request.
+        """
+        with mock.patch('sky.users.token_service.global_user_state'
+                       ) as mock_global_state:
+            mock_global_state.get_system_config.return_value = None
+            mock_global_state.get_or_set_system_config.return_value = ''
+
+            service = token_service.TokenService()
+            with pytest.raises(token_service.JWTSecretUnavailableError):
+                service.ensure_secret_loaded()
+            assert service.secret_key is None
+
     def test_empty_stored_secret_is_corruption_not_absence(self):
         """An empty row must not be treated as "no secret yet".
 
@@ -584,6 +601,18 @@ class TestSecretBootstrap:
 
             mock_global_state.get_or_set_system_config.assert_not_called()
             assert service.secret_key is None
+
+    def test_secret_loaded_predicate_tracks_the_cache(self):
+        """The request path gates its executor dispatch on this."""
+        existing = secrets.token_urlsafe(32)
+        with mock.patch('sky.users.token_service.global_user_state'
+                       ) as mock_global_state:
+            mock_global_state.get_system_config.return_value = existing
+
+            service = token_service.TokenService()
+            assert not service.secret_loaded()
+            service.ensure_secret_loaded()
+            assert service.secret_loaded()
 
     def test_loaded_secret_needs_no_further_db_calls(self):
         """The steady state stays off the database."""

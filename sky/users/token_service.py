@@ -59,14 +59,16 @@ def _warn_if_tokens_predate_new_secret() -> None:
     which should be impossible and is worth an alertable log line.
     """
     try:
-        tokens = global_user_state.get_all_service_account_tokens()
+        # A count, not the rows: this runs while holding the load lock and an
+        # auth executor thread, against a database that may be degraded.
+        count = global_user_state.count_service_account_tokens()
     except Exception as e:  # pylint: disable=broad-except
         logger.warning(f'Generated a new JWT signing secret; could not check '
                        f'whether service account tokens predate it: {e}')
         return
-    if tokens:
+    if count:
         logger.error(
-            f'Generated a NEW JWT signing secret while {len(tokens)} service '
+            f'Generated a NEW JWT signing secret while {count} service '
             f'account token(s) already exist. Those tokens can no longer be '
             f'verified and have to be rotated. This means the previous secret '
             f'was lost from the database.')
@@ -81,6 +83,15 @@ class TokenService:
     def __init__(self):
         self.secret_key = None
         self.init_lock = threading.Lock()
+
+    def secret_loaded(self) -> bool:
+        """Whether the signing secret is already in memory.
+
+        Lets the request path skip dispatching `ensure_secret_loaded` to the
+        auth executor in the steady state. `secret_key` is assigned once and
+        never reassigned, so reading it unlocked is safe.
+        """
+        return self.secret_key is not None
 
     def ensure_secret_loaded(self) -> None:
         """Load the signing secret, generating it on a new deployment.
@@ -127,22 +138,28 @@ class TokenService:
         """
         try:
             secret = _read_secret_from_db()
-            if secret:
+            if secret is None:
+                candidate = secrets.token_urlsafe(64)
+                secret = global_user_state.get_or_set_system_config(
+                    JWT_SECRET_DB_KEY, candidate)
+                if secret == candidate:
+                    _warn_if_tokens_predate_new_secret()
+                else:
+                    logger.info('Adopted the JWT signing secret stored '
+                                'concurrently by another API server.')
+            else:
                 logger.debug('Retrieved existing JWT secret from database')
-                return secret
-            if secret is not None:
-                # An empty stored value is corruption, and it is neither of the
-                # two cases this function handles. Generating would clobber
-                # whatever is really meant to be there, and adopting it would
-                # hand PyJWT a key it rejects (`InvalidKeyError`) on every
-                # single request, surfacing as a misleading 401.
+            # One check for both exits above. An empty stored value is
+            # corruption and neither of the two cases this function handles:
+            # generating over it would clobber whatever is really meant to be
+            # there, and using it hands PyJWT a key it rejects
+            # (`InvalidKeyError`) on every request, which is not an
+            # `InvalidTokenError` and so surfaces as a misleading 401.
+            if not secret:
                 raise ValueError(
                     f'System config {JWT_SECRET_DB_KEY!r} holds an empty '
                     'value. Restore or delete the row to let the server '
                     'bootstrap a secret.')
-            new_secret = secrets.token_urlsafe(64)
-            stored = global_user_state.get_or_set_system_config(
-                JWT_SECRET_DB_KEY, new_secret)
         except Exception as e:  # pylint: disable=broad-except
             # Never fall back to an in-memory secret: this process would sign
             # tokens nothing else -- including itself after a restart -- can
@@ -152,12 +169,7 @@ class TokenService:
             raise JWTSecretUnavailableError(
                 'The JWT signing secret could not be loaded from the server '
                 'database.') from e
-        if stored == new_secret:
-            _warn_if_tokens_predate_new_secret()
-        else:
-            logger.info('Adopted the JWT signing secret stored concurrently '
-                        'by another API server.')
-        return stored
+        return secret
 
     def create_token(self,
                      creator_user_id: str,

@@ -96,6 +96,7 @@ from sky.usage import usage_lib
 from sky.users import permission
 from sky.users import rbac
 from sky.users import server as users_rest
+from sky.users import token_service
 from sky.utils import admin_policy_utils
 from sky.utils import command_runner
 from sky.utils import common as common_lib
@@ -509,12 +510,7 @@ class BearerTokenMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
             return _bearer_auth_401_response(
                 {'detail': 'Service account authentication disabled'})
 
-        # Imported here rather than at module scope to avoid a circular
-        # import, and outside the `try` because the `except` clauses below
-        # name it.
-        # pylint: disable=import-outside-toplevel
-        from sky.users import token_service as token_service_lib
-        token_service = token_service_lib.token_service
+        service = token_service.token_service
 
         try:
             # Load the signing secret off the event loop and under the same
@@ -522,12 +518,19 @@ class BearerTokenMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
             # service-account-authenticated request of a process this reads
             # the database, and every other DB call in this handler is
             # bounded for the reasons db_lookup's docstring gives.
-            await db_lookup.call_with_deadline(
-                token_service.ensure_secret_loaded)
+            #
+            # Gated, because after that first request this is an `is not None`
+            # check. The auth executor rejects rather than queues once its 32
+            # slots are in flight, so dispatching a no-op would let a request
+            # needing no database work be turned away with a worker-exhausted
+            # 503 -- on the scarcest resource in exactly the degraded-database
+            # conditions this path has to survive.
+            if not service.secret_loaded():
+                await db_lookup.call_with_deadline(service.ensure_secret_loaded)
 
             # Verify and decode JWT token. Pure CPU work now that the secret
             # is loaded.
-            payload = token_service.verify_token(sa_token)
+            payload = service.verify_token(sa_token)
 
             if payload is None:
                 logger.warning('Service account token verification failed')
@@ -630,7 +633,7 @@ class BearerTokenMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
             logger.error(f'Concurrent worker exhausted during service account '
                          f'auth: {e}')
             return db_lookup.worker_exhausted_response()
-        except token_service_lib.JWTSecretUnavailableError as e:
+        except token_service.JWTSecretUnavailableError as e:
             # Above the catch-all on purpose: a 401 would tell the caller its
             # token is bad and send it off to rotate credentials, when the
             # token is fine and the database is not.
@@ -4071,6 +4074,13 @@ if __name__ == '__main__':
     # Restore the server user hash
     logger.info('Initializing server user hash')
     _init_or_restore_server_user_hash()
+    # Bootstrap the JWT signing secret here, in the parent process, before
+    # uvicorn forks its workers. Generation then happens exactly once and
+    # before any request exists, so no two workers can race to create it.
+    # Workers do not inherit the cache, so each still reads the row lazily on
+    # its first service-account-authenticated request.
+    logger.info('Initializing JWT signing secret')
+    token_service.token_service.ensure_secret_loaded()
     # Set up consolidation mode signal file. Needs global user state DB access
     # to check for existing controller clusters. Placed after user hash restore
     # to avoid accidentally using the wrong server hash.

@@ -709,6 +709,45 @@ class TestBearerTokenMiddleware:
                 f'asyncio.to_thread).')
 
     @pytest.mark.asyncio
+    async def test_loaded_secret_costs_no_executor_dispatch(
+            self, middleware, base_mock_request, mock_call_next,
+            mock_token_row):
+        """Once the secret is loaded, the request must not dispatch at all.
+
+        The auth executor rejects rather than queues past its 32 in-flight
+        slots, so a no-op dispatch can turn away a request that needs no
+        database work -- while the database is degraded, which is when that
+        matters most.
+        """
+        base_mock_request.headers = {'authorization': 'Bearer sky_valid_token'}
+
+        mock_payload = {
+            'sub': 'sa-123456',
+            'name': 'test-service-account',
+            'token_id': 'token_123'
+        }
+        mock_user_info = mock.Mock()
+        mock_user_info.name = 'test-service-account'
+
+        with mock.patch.dict(
+                os.environ,
+            {constants.ENV_VAR_ENABLE_SERVICE_ACCOUNTS: 'true'}), \
+                mock.patch('sky.users.token_service.token_service') as mock_token_service, \
+                mock.patch('sky.global_user_state.get_service_account_token_by_hash',
+                           return_value=mock_token_row), \
+                mock.patch('sky.global_user_state.get_user',
+                           return_value=mock_user_info):
+
+            mock_token_service.secret_loaded.return_value = True
+            mock_token_service.verify_token.return_value = mock_payload
+
+            response = await middleware.dispatch(base_mock_request,
+                                                 mock_call_next)
+
+            assert response.status_code == 200
+            mock_token_service.ensure_secret_loaded.assert_not_called()
+
+    @pytest.mark.asyncio
     async def test_secret_unavailable_is_503_not_401(self, middleware,
                                                      base_mock_request,
                                                      mock_call_next):
@@ -724,6 +763,7 @@ class TestBearerTokenMiddleware:
             {constants.ENV_VAR_ENABLE_SERVICE_ACCOUNTS: 'true'}), \
                 mock.patch('sky.users.token_service.token_service') as mock_token_service:
 
+            mock_token_service.secret_loaded.return_value = False
             mock_token_service.ensure_secret_loaded.side_effect = (
                 token_service_lib.JWTSecretUnavailableError('db down'))
 
@@ -749,6 +789,7 @@ class TestBearerTokenMiddleware:
                 mock.patch('sky.users.token_service.token_service') as mock_token_service, \
                 mock.patch.object(db_lookup, 'AUTH_DB_TIMEOUT_SECONDS', 0.05):
 
+            mock_token_service.secret_loaded.return_value = False
             mock_token_service.ensure_secret_loaded.side_effect = _blocking(
                 None)
 
@@ -784,6 +825,7 @@ class TestBearerTokenMiddleware:
                 mock.patch('sky.global_user_state.get_user',
                            return_value=mock_user_info):
 
+            mock_token_service.secret_loaded.return_value = False
             mock_token_service.ensure_secret_loaded.side_effect = _blocking(
                 None)
             mock_token_service.verify_token.return_value = mock_payload

@@ -69,3 +69,17 @@ def test_get_or_set_is_per_key(tmp_path, monkeypatch):
     global_user_state.get_or_set_system_config('a', '1')
     assert global_user_state.get_or_set_system_config('b', '2') == '2'
     assert global_user_state.get_system_config('a') == '1'
+
+
+def test_count_service_account_tokens(tmp_path, monkeypatch):
+    """The orphan-token alarm counts rows instead of loading them."""
+    _fresh_db(tmp_path, monkeypatch)
+    assert global_user_state.count_service_account_tokens() == 0
+
+    global_user_state.add_service_account_token(token_id='t1',
+                                                token_name='ci',
+                                                token_hash='h1',
+                                                creator_user_hash='alice',
+                                                service_account_user_id='sa-1',
+                                                expires_at=None)
+    assert global_user_state.count_service_account_tokens() == 1
