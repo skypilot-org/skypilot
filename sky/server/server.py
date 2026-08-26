@@ -139,6 +139,34 @@ logger = sky_logging.init_logger(__name__)
 # through posix_spawn instead of fork_exec.
 _KUBECTL_PATH: Optional[str] = shutil.which('kubectl')
 
+_DEFAULT_METRICS_PORT = 9090
+
+
+def _get_metrics_port_from_env() -> int:
+    """Return the configured API metrics port or the default port."""
+    value = os.environ.get(constants.ENV_VAR_SERVER_METRICS_PORT)
+    if value is None:
+        return _DEFAULT_METRICS_PORT
+    try:
+        port = int(value)
+    except ValueError as e:
+        raise ValueError(
+            f'{constants.ENV_VAR_SERVER_METRICS_PORT} must be an integer, '
+            f'got {value!r}') from e
+    if not 1 <= port <= 65535:
+        raise ValueError(
+            f'{constants.ENV_VAR_SERVER_METRICS_PORT} must be between 1 and '
+            f'65535, got {port}')
+    return port
+
+
+def _validate_api_server_ports(api_port: int, metrics_port: int) -> None:
+    """Reject configurations that bind the API and metrics servers together."""
+    if api_port == metrics_port:
+        logger.error('port and metrics-port cannot be the same, exiting.')
+        raise ValueError('port and metrics-port cannot be the same')
+
+
 # TODO(zhwu): Streaming requests, such log tailing after sky launch or sky logs,
 # need to be detached from the main requests queue. Otherwise, the streaming
 # response will block other requests from being processed.
@@ -4014,11 +4042,11 @@ if __name__ == '__main__':
     parser.add_argument('--deploy', action='store_true')
     # Serve metrics on a separate port to isolate it from the application APIs:
     # metrics port will not be exposed to the public network typically.
-    parser.add_argument('--metrics-port', default=9090, type=int)
+    parser.add_argument('--metrics-port',
+                        default=_get_metrics_port_from_env(),
+                        type=int)
     cmd_args = parser.parse_args()
-    if cmd_args.port == cmd_args.metrics_port:
-        logger.error('port and metrics-port cannot be the same, exiting.')
-        raise ValueError('port and metrics-port cannot be the same')
+    _validate_api_server_ports(cmd_args.port, cmd_args.metrics_port)
 
     # Fail fast if the port is not available to avoid corrupt the state
     # of potential running server instance.

@@ -2811,7 +2811,7 @@
           "type": "prometheus",
           "uid": "prometheus"
         },
-        "definition": "label_values(sky_apiserver_requests_total{app=\"$app\"},pod)",
+        "definition": "label_values(kube_pod_info{pod=~\"$app-server-.+\"},pod)",
         "includeAll": true,
         "label": "Replica",
         "multi": true,
@@ -2819,7 +2819,7 @@
         "options": [],
         "query": {
           "qryType": 1,
-          "query": "label_values(sky_apiserver_requests_total{app=\"$app\"},pod)",
+          "query": "label_values(kube_pod_info{pod=~\"$app-server-.+\"},pod)",
           "refId": "PrometheusVariableQueryEditor-VariableQuery"
         },
         "refresh": 2,
