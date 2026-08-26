@@ -129,7 +129,13 @@ SKY_UV_INSTALL_DIR = '"$HOME/.local/bin"'
 # unset PYTHONPATH in case the user provided docker image set it.
 # UV_LINK_MODE=copy avoids a uv >=0.10.5 bug where clone/reflink mode
 # strips execute permissions on XFS filesystems, breaking Ray binaries.
-SKY_UV_CMD = ('UV_LINK_MODE=copy UV_SYSTEM_PYTHON=false '
+# UV_NO_CONFIG=1 stops uv from discovering a pyproject.toml/uv.toml from the
+# image (we run uv with cwd=$HOME, so an image whose home dir is a uv project
+# would otherwise leak its [tool.uv] settings into the runtime resolution;
+# override-dependencies in particular silently override our own pins and can
+# break the runtime venv). #7259 scoped this to `uv run` only; the same
+# isolation is needed for `uv venv` and `uv pip`.
+SKY_UV_CMD = ('UV_NO_CONFIG=1 UV_LINK_MODE=copy UV_SYSTEM_PYTHON=false '
               f'{SKY_UNSET_PYTHONPATH_AND_SET_CWD} {SKY_UV_INSTALL_DIR}/uv')
 # This won't reinstall uv if it's already installed, so it's safe to re-run.
 SKY_UV_INSTALL_CMD = (f'{SKY_UV_CMD} -V >/dev/null 2>&1 || '
