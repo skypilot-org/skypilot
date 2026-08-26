@@ -1425,16 +1425,21 @@ _SLURM_FEDERATE_CURL_HEADROOM_SECONDS = 5
 def get_slurm_metrics_clusters() -> List[str]:
     """Slurm clusters opted into GPU metrics federation.
 
-    A cluster participates when ``slurm.cluster_configs.<name>.
-    prometheus_url`` is set: the URL of a Prometheus reachable *from the
-    cluster's login node* (typically running inside the cluster) that
-    scrapes the cluster's node/DCGM exporters. No SSH probing happens
-    here — enumeration reads only local config.
+    A cluster participates when it is allowed by ``slurm.allowed_clusters``
+    (the analog of ``kubernetes.allowed_contexts``; defaults to every cluster
+    in ``~/.slurm/config``) *and* ``slurm.cluster_configs.<name>.prometheus_url``
+    is set: the URL of a Prometheus reachable *from the cluster's login node*
+    (typically running inside the cluster) that scrapes the cluster's node/DCGM
+    exporters. No SSH probing happens here — enumeration reads only local config.
     """
     try:
         # pylint: disable=import-outside-toplevel
-        from sky.provision.slurm import utils as slurm_utils
-        names = slurm_utils.get_all_slurm_cluster_names()
+        from sky import clouds
+        # Scope federation to the same clusters the rest of SkyPilot uses,
+        # honoring slurm.allowed_clusters (mirrors how the Kubernetes federation
+        # respects allowed_contexts). Defaults to all clusters in
+        # ~/.slurm/config when allowed_clusters is unset.
+        names = clouds.Slurm.existing_allowed_clusters(silent=True)
     except Exception as e:  # pylint: disable=broad-except
         logger.debug(f'Could not enumerate Slurm clusters: {e}')
         return []

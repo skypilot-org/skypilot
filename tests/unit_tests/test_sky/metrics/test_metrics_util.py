@@ -910,16 +910,35 @@ def _slurm_config(keys, default_value=None, **_):
 
 def test_get_slurm_metrics_clusters_requires_prometheus_url(monkeypatch):
     monkeypatch.setattr(utils.skypilot_config, 'get_nested', _slurm_config)
-    with mock.patch('sky.provision.slurm.utils.get_all_slurm_cluster_names',
+    with mock.patch('sky.clouds.Slurm.existing_allowed_clusters',
                     return_value=['hpc', 'other']):
         assert utils.get_slurm_metrics_clusters() == ['hpc']
 
 
 def test_get_slurm_metrics_clusters_tolerates_enumeration_failure(monkeypatch):
     monkeypatch.setattr(utils.skypilot_config, 'get_nested', _slurm_config)
-    with mock.patch('sky.provision.slurm.utils.get_all_slurm_cluster_names',
+    with mock.patch('sky.clouds.Slurm.existing_allowed_clusters',
                     side_effect=ValueError('bad slurm ssh config')):
         assert utils.get_slurm_metrics_clusters() == []
+
+
+def test_get_slurm_metrics_clusters_respects_allowed_clusters(monkeypatch):
+    # A cluster with a prometheus_url that is NOT in allowed_clusters is
+    # excluded: federation is scoped to slurm.allowed_clusters (via
+    # Slurm.existing_allowed_clusters), mirroring the Kubernetes federation's
+    # use of allowed_contexts.
+    def _cfg(keys, default_value=None, **_):
+        if tuple(keys) in (
+            ('slurm', 'cluster_configs', 'hpc', 'prometheus_url'),
+            ('slurm', 'cluster_configs', 'blocked', 'prometheus_url'),
+        ):
+            return _SLURM_PROM_URL
+        return default_value
+
+    monkeypatch.setattr(utils.skypilot_config, 'get_nested', _cfg)
+    with mock.patch('sky.clouds.Slurm.existing_allowed_clusters',
+                    return_value=['hpc']):
+        assert utils.get_slurm_metrics_clusters() == ['hpc']
 
 
 def test_get_metrics_for_slurm_cluster_curl_and_stamping(monkeypatch):
