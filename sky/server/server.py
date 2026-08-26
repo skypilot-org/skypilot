@@ -2079,6 +2079,43 @@ async def _reject_cluster_write_for_unauthorized(
         raise fastapi.HTTPException(status_code=403, detail=str(e)) from e
 
 
+def _reject_cluster_read_for_unauthorized_sync(
+        auth_user: Optional['models.User'],
+        cluster_name: Optional[str]) -> None:
+    """Rejects reading an existing cluster's logs/state without access.
+
+    Read-side counterpart of ``_reject_cluster_write_for_unauthorized`` for the
+    cluster-read-by-name family (provision_logs / download_logs / ...). Reading
+    a cluster's logs must be gated by the cluster's *own* workspace (READ); the
+    executor's active-workspace gate only checks the caller's active workspace,
+    and the sync handlers bypass the executor gate entirely.
+
+    Raises 404 (not 403) on a permission miss so an inaccessible cluster is
+    indistinguishable from a nonexistent one, avoiding existence disclosure.
+    A no-auth server (``auth_user is None``) is left unscoped, matching the
+    rest of the RBAC surface.
+    """
+    if auth_user is None or cluster_name is None:
+        return
+    try:
+        workspaces_core.check_cluster_read_permission(auth_user, cluster_name)
+    except exceptions.PermissionDeniedError as e:
+        raise fastapi.HTTPException(
+            status_code=404,
+            detail=f'Cluster {cluster_name!r} not found.') from e
+
+
+async def _reject_cluster_read_for_unauthorized(
+        request: fastapi.Request, cluster_name: Optional[str]) -> None:
+    """Async wrapper of ``_reject_cluster_read_for_unauthorized_sync``."""
+    auth_user = request.state.auth_user
+    if auth_user is None or cluster_name is None:
+        return
+    await context_utils.to_thread_with_executor(
+        None, _reject_cluster_read_for_unauthorized_sync, auth_user,
+        cluster_name)
+
+
 @app.post('/exec')
 # pylint: disable=redefined-builtin
 async def exec(request: fastapi.Request, exec_body: payloads.ExecBody) -> None:
@@ -2284,12 +2321,37 @@ async def logs(
     )
 
 
+def _staging_user_hash(request: fastapi.Request, body_user_hash: str) -> str:
+    """Resolves the staging-directory owner for download/download_logs.
+
+    The staging dir key (``api_server_user_logs_dir_prefix``) must be the
+    caller's *own* identity, not a client-supplied value, so a caller cannot
+    read/write another user's staging dir by naming their user_hash. When the
+    server runs without auth (``auth_user is None`` — e.g. basic-auth in
+    ingress) there is no server-side identity, so we preserve the existing
+    behavior and fall back to the body value.
+    """
+    auth_user = request.state.auth_user
+    if auth_user is not None:
+        return auth_user.id
+    return body_user_hash
+
+
 @app.post('/download_logs')
 async def download_logs(
         request: fastapi.Request,
         cluster_jobs_body: payloads.ClusterJobsDownloadLogsBody) -> None:
     """Downloads the logs of a job."""
-    user_hash = cluster_jobs_body.env_vars[constants.USER_ID_ENV_VAR]
+    # Concern (a): may the caller fetch this cluster's logs at all? Gate on the
+    # cluster's own workspace (READ); the executor's active-workspace gate does
+    # not cover an existing cluster in another workspace.
+    await _reject_cluster_read_for_unauthorized(request,
+                                                cluster_jobs_body.cluster_name)
+    # Concern (b): whose staging dir do we write to? Bind it to the caller's own
+    # identity so a caller cannot stage into another user's dir by supplying
+    # their user_hash. No-auth servers fall back to the body value.
+    user_hash = _staging_user_hash(
+        request, cluster_jobs_body.env_vars[constants.USER_ID_ENV_VAR])
     logs_dir_on_api_server = pathlib.Path(
         bs.get_blob_storage().download_tmp_dir(user_hash))
     logs_dir_on_api_server.expanduser().mkdir(parents=True, exist_ok=True)
@@ -2314,7 +2376,11 @@ async def download(download_body: payloads.DownloadBody,
     folder_paths = [
         pathlib.Path(folder_path) for folder_path in download_body.folder_paths
     ]
-    user_hash = download_body.env_vars[constants.USER_ID_ENV_VAR]
+    # Bind the staging dir to the caller's own identity so a caller can only
+    # read their OWN staging dir, not another user's by supplying their
+    # user_hash. No-auth servers fall back to the body value.
+    user_hash = _staging_user_hash(
+        request, download_body.env_vars[constants.USER_ID_ENV_VAR])
     logs_dir_on_api_server = common.api_server_user_logs_dir_prefix(user_hash)
     download_tmp = bs.get_blob_storage().download_tmp_dir(user_hash)
     for folder_path in folder_paths:
@@ -2384,13 +2450,19 @@ async def download(download_body: payloads.DownloadBody,
 
 # TODO(aylei): run it asynchronously after global_user_state support async op
 @app.post('/provision_logs')
-def provision_logs(provision_logs_body: payloads.ProvisionLogsBody,
+def provision_logs(request: fastapi.Request,
+                   provision_logs_body: payloads.ProvisionLogsBody,
                    follow: bool = True,
                    tail: int = 0) -> fastapi.responses.StreamingResponse:
     """Streams the provision.log for the latest launch request of a cluster."""
     log_path = None
     cluster_name = provision_logs_body.cluster_name
     worker = provision_logs_body.worker
+    # Gate on the cluster's own workspace (READ): this sync handler bypasses
+    # the executor's active-workspace gate, so without this any user could
+    # stream any cluster's provision log by name. 404 (not 403) on a miss.
+    _reject_cluster_read_for_unauthorized_sync(request.state.auth_user,
+                                               cluster_name)
     # stream head node logs
     if worker is None:
         # Prefer clusters table first, then cluster_history as fallback.
@@ -3773,9 +3845,29 @@ async def download_debug_dump(
 
 # === Internal APIs ===
 @app.get('/api/completion/cluster_name')
-async def complete_cluster_name(incomplete: str,) -> List[str]:
-    return await asyncio.to_thread(
-        global_user_state.get_cluster_names_start_with, incomplete)
+async def complete_cluster_name(request: fastapi.Request,
+                                incomplete: str) -> List[str]:
+    # Object-scoping: only suggest clusters in workspaces the caller can access
+    # (READ), matching the workspace-scoped visibility of the cluster list. A
+    # no-auth server (auth_user is None) is treated as unscoped, like the rest
+    # of the RBAC surface.
+    names_and_workspaces = await asyncio.to_thread(
+        global_user_state.get_cluster_names_and_workspaces_start_with,
+        incomplete)
+    auth_user = request.state.auth_user
+    if auth_user is None:
+        return [name for name, _ in names_and_workspaces]
+    # Offload the casbin permission check off the event loop (it acquires the
+    # enforcer read lock and may hit the DB on a cache miss).
+    accessible = await asyncio.to_thread(
+        permission.permission_service.get_accessible_workspace_names,
+        auth_user.id, {workspace for _, workspace in names_and_workspaces},
+        action=workspace_constants.WORKSPACE_ACTION_READ)
+    accessible_set = set(accessible)
+    return [
+        name for name, workspace in names_and_workspaces
+        if workspace in accessible_set
+    ]
 
 
 @app.get('/api/completion/storage_name')

@@ -51,6 +51,9 @@ _DEFAULT_USER_BLOCKLIST = [{
 }, {
     'path': '/debug/dump_download/:filename',
     'method': 'GET'
+}, {
+    'path': '/kubernetes_label_gpus',
+    'method': 'POST'
 }]
 
 # Default allowlist for the viewer role. Viewer is allowlist-based: any
