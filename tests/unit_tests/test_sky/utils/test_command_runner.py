@@ -1147,7 +1147,7 @@ class TestRsyncTimeout:
         assert len(calls) == 1
 
 
-def +(command: str):
+def _extract_exclude_from_path(command: str):
     """Return the path passed to rsync's --exclude-from, or None.
 
     The path is shell-quoted in the command, so tokenize with shlex to undo
