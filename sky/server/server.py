@@ -3239,6 +3239,28 @@ async def _get_cluster_and_validate(
             all_users=True,
             summary_response=True)
 
+        if not cluster_records:
+            # A miss here is not necessarily a missing cluster. This is a
+            # sync-style path in the API-server process: `core.status()` ->
+            # `get_clusters()` filters on the workspace config this process
+            # loaded at boot (plus the request-scoped `_load_workspaces()`
+            # memo, which nothing clears in the HTTP process), so a cluster
+            # in a workspace created via `/workspaces/create` after startup
+            # (an executor-side write) is filtered out and looks nonexistent
+            # here, indefinitely. Refresh and retry once, on the miss path
+            # only: the hot path (known cluster) pays nothing, and a genuine
+            # miss pays one config reload before the 404 it was getting
+            # anyway.
+            await context_utils.to_thread_with_executor(
+                thread_pool_executor,
+                common.refresh_workspace_state_for_sync_handler)
+            cluster_records = await context_utils.to_thread_with_executor(
+                thread_pool_executor,
+                core.status,
+                cluster_name,
+                all_users=True,
+                summary_response=True)
+
     if not cluster_records:
         raise fastapi.HTTPException(status_code=404,
                                     detail=f'Cluster {cluster_name} not found')

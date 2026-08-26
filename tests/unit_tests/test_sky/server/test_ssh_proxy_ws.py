@@ -13,6 +13,7 @@ import pytest
 
 from sky import clouds
 from sky.server import server
+from sky.utils import status_lib
 
 
 def _make_websocket():
@@ -158,3 +159,65 @@ async def test_validate_cluster_for_ssh_proxy_ws_truncates_long_reason():
 
     assert result is None
     websocket.close.assert_awaited_once_with(code=1008, reason='x' * 123)
+
+
+# _get_cluster_and_validate: stale-workspace-config miss path ---------------
+
+
+def _up_k8s_record():
+    handle = mock.MagicMock()
+    handle.launched_resources.cloud = clouds.Kubernetes()
+    return {'status': status_lib.ClusterStatus.UP, 'handle': handle}
+
+
+@pytest.mark.asyncio
+async def test_get_cluster_and_validate_known_cluster_does_not_refresh():
+    """Hot path: a cluster this process already sees costs no config reload."""
+    record = _up_k8s_record()
+    with mock.patch.object(server.core, 'status', return_value=[record]) as \
+            status, mock.patch.object(
+                server.common,
+                'refresh_workspace_state_for_sync_handler') as refresh:
+        handle = await server._get_cluster_and_validate('my-cluster',
+                                                        clouds.Kubernetes)
+
+    assert handle is record['handle']
+    assert status.call_count == 1
+    refresh.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_get_cluster_and_validate_refreshes_and_retries_on_miss():
+    """A miss caused by a stale process-cached workspace config must not
+    surface as 404: a cluster in a workspace created via `/workspaces/create`
+    after the server booted is filtered out of `core.status()` until this
+    process reloads its config. The reload happens on the miss path only."""
+    record = _up_k8s_record()
+    with mock.patch.object(server.core, 'status',
+                           side_effect=[[], [record]]) as status, \
+            mock.patch.object(
+                server.common,
+                'refresh_workspace_state_for_sync_handler') as refresh:
+        handle = await server._get_cluster_and_validate('new-ws-cluster',
+                                                        clouds.Kubernetes)
+
+    assert handle is record['handle']
+    assert status.call_count == 2
+    refresh.assert_called_once_with()
+
+
+@pytest.mark.asyncio
+async def test_get_cluster_and_validate_genuine_miss_still_404s():
+    """A cluster that is missing even after a refresh is a real 404."""
+    with mock.patch.object(server.core, 'status',
+                           side_effect=[[], []]) as status, \
+            mock.patch.object(
+                server.common,
+                'refresh_workspace_state_for_sync_handler') as refresh:
+        with pytest.raises(fastapi.HTTPException) as exc_info:
+            await server._get_cluster_and_validate('ghost', clouds.Kubernetes)
+
+    assert exc_info.value.status_code == 404
+    assert exc_info.value.detail == 'Cluster ghost not found'
+    assert status.call_count == 2
+    refresh.assert_called_once_with()
