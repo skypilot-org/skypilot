@@ -19,6 +19,7 @@ from sky.server import constants as server_constants
 from sky.server import server
 from sky.server.requests import executor
 from sky.skylet import constants
+from sky.users import token_service
 from sky.utils import common_utils
 from sky.utils import config_utils
 
@@ -1443,3 +1444,28 @@ class TestServerUserHashBootstrap:
 
             m.assert_not_called()
             m_apply.assert_called_once_with('existing-hash')
+
+
+class TestJwtSecretStartupBootstrap:
+    """Pre-forking the secret is an optimisation, not a startup requirement.
+
+    Workers still load it lazily, so a corrupt row must not crashloop the whole
+    server and take the dashboard and every interactive user down with
+    service-account auth.
+    """
+
+    def test_a_failed_bootstrap_does_not_abort_startup(self):
+        with mock.patch(
+                'sky.users.token_service.token_service') as mock_token_service:
+            mock_token_service.ensure_secret_loaded.side_effect = (
+                token_service.JWTSecretUnavailableError('corrupt row'))
+
+            server._bootstrap_jwt_secret()
+
+            mock_token_service.ensure_secret_loaded.assert_called_once()
+
+    def test_a_healthy_bootstrap_loads_the_secret(self):
+        with mock.patch(
+                'sky.users.token_service.token_service') as mock_token_service:
+            server._bootstrap_jwt_secret()
+            mock_token_service.ensure_secret_loaded.assert_called_once()

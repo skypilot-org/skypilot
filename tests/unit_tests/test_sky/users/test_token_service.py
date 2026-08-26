@@ -568,6 +568,25 @@ class TestSecretBootstrap:
 
         assert service.secret_key == 'loaded-by-the-holder'
 
+    def test_a_refused_secret_is_never_announced_as_healthy(self):
+        """Validation must precede the log line, not follow it.
+
+        Announcing an adopted secret and then refusing it leaves an operator
+        debugging exactly this corruption reading a success line first.
+        """
+        with mock.patch('sky.users.token_service.global_user_state'
+                       ) as mock_global_state:
+            mock_global_state.get_system_config.return_value = None
+            mock_global_state.get_or_set_system_config.return_value = ''
+
+            service = token_service.TokenService()
+            with mock.patch.object(token_service, 'logger') as mock_logger:
+                with pytest.raises(token_service.JWTSecretUnavailableError):
+                    service.ensure_secret_loaded()
+
+            assert not any(
+                'Adopted' in str(c) for c in mock_logger.info.mock_calls)
+
     def test_empty_secret_adopted_from_a_race_is_rejected_too(self):
         """The guard must cover the adopt exit, not only the read exit.
 

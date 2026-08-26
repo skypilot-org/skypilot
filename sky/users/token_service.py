@@ -51,6 +51,25 @@ def _read_secret_from_db() -> Optional[str]:
         max_retries=_SECRET_READ_MAX_RETRIES)
 
 
+def _validated_secret(secret: str) -> str:
+    """Return `secret`, refusing an empty stored value.
+
+    An empty value is corruption and neither of the two cases the bootstrap
+    handles: generating over it would clobber whatever is really meant to be
+    there, and using it hands PyJWT a key it rejects (`InvalidKeyError`) on
+    every request. That is not an `InvalidTokenError`, so it escapes
+    `verify_token` and surfaces as a misleading 401.
+
+    Applied at each point a value is obtained rather than once at the end, so
+    a value about to be refused is never first announced as a healthy secret.
+    """
+    if not secret:
+        raise ValueError(f'System config {JWT_SECRET_DB_KEY!r} holds an empty '
+                         'value. Restore or delete the row to let the server '
+                         'bootstrap a secret.')
+    return secret
+
+
 def _warn_if_tokens_predate_new_secret() -> None:
     """Flag a freshly generated secret that orphans existing tokens.
 
@@ -140,26 +159,17 @@ class TokenService:
             secret = _read_secret_from_db()
             if secret is None:
                 candidate = secrets.token_urlsafe(64)
-                secret = global_user_state.get_or_set_system_config(
-                    JWT_SECRET_DB_KEY, candidate)
+                secret = _validated_secret(
+                    global_user_state.get_or_set_system_config(
+                        JWT_SECRET_DB_KEY, candidate))
                 if secret == candidate:
                     _warn_if_tokens_predate_new_secret()
                 else:
                     logger.info('Adopted the JWT signing secret stored '
                                 'concurrently by another API server.')
             else:
+                secret = _validated_secret(secret)
                 logger.debug('Retrieved existing JWT secret from database')
-            # One check for both exits above. An empty stored value is
-            # corruption and neither of the two cases this function handles:
-            # generating over it would clobber whatever is really meant to be
-            # there, and using it hands PyJWT a key it rejects
-            # (`InvalidKeyError`) on every request, which is not an
-            # `InvalidTokenError` and so surfaces as a misleading 401.
-            if not secret:
-                raise ValueError(
-                    f'System config {JWT_SECRET_DB_KEY!r} holds an empty '
-                    'value. Restore or delete the row to let the server '
-                    'bootstrap a secret.')
         except Exception as e:  # pylint: disable=broad-except
             # Never fall back to an in-memory secret: this process would sign
             # tokens nothing else -- including itself after a restart -- can
