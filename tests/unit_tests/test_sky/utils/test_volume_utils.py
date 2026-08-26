@@ -382,6 +382,29 @@ class TestVolumeMount:
         assert 'not ready' in str(exc_info.value)
         assert 'Error: Storage quota exceeded' in str(exc_info.value)
 
+    @mock.patch('sky.global_user_state.get_volume_by_name')
+    def test_resolve_volume_still_being_provisioned(self, mock_get_volume):
+        """Being provisioned is not-ready, and is not a reason to refuse.
+
+        A class that binds Immediately provisions asynchronously, so a volume
+        reads not-ready for as long as its backend takes -- minutes, for a
+        network filesystem. Refusing here is what made creating such a volume
+        and using it two steps. Kept in step with the check that runs on every
+        launch, which lets the same reason through.
+        """
+        mock_get_volume.return_value = {
+            'name': 'test-volume',
+            'handle': None,
+            'status': status_lib.VolumeStatus.NOT_READY,
+            'error_message': f'{volume.PVC_PROVISIONING_MESSAGE} If this does '
+                             f'not resolve, the storage class may be '
+                             f'misconfigured.',
+        }
+
+        mount = volume.VolumeMount.resolve('/data', 'test-volume')
+
+        assert mount.volume_name == 'test-volume'
+
     def test_to_yaml_config_with_sub_path(self):
         """Test to_yaml_config includes sub_path when set."""
         volume_config = models.VolumeConfig(

@@ -1,4 +1,7 @@
 """Kubernetes volume provisioning (PVC and hostPath)."""
+import decimal
+import enum
+import re
 import time as time_module
 from typing import Any, Dict, List, Optional, Set, Tuple
 
@@ -10,13 +13,90 @@ from sky.provision import constants
 from sky.provision.kubernetes import config as config_lib
 from sky.provision.kubernetes import constants as k8s_constants
 from sky.provision.kubernetes import utils as kubernetes_utils
-from sky.utils import resources_utils
 from sky.utils import volume as volume_lib
 
 logger = sky_logging.init_logger(__name__)
 
+# A volume's size is recorded in gibibytes, which is also the unit the PVC
+# spec is written in.
+_BYTES_PER_GIB = 1024**3
+
 PVC_FAILING_EVENT_REASONS = ('ProvisioningFailed',)
 WARNING_EVENT_TYPE = 'Warning'
+# Normal event reasons that explain why a claim is still pending. Reported to
+# the user, never treated as failures -- the PV controller and the provisioner
+# record these while working, and every reason either of them uses to report a
+# problem is a Warning, which is judged separately.
+#
+# They report progress in this order, and the newest is the one worth showing:
+# nothing has claimed the volume yet, a pod has but is not scheduled, the
+# provisioner has been handed it, the provisioner is working on it.
+PVC_PENDING_EVENT_REASONS = ('WaitForFirstConsumer', 'WaitForPodScheduled',
+                             'ExternalProvisioning', 'Provisioning')
+
+# CSI is a gRPC interface, so a provisioner's failure message carries the code
+# the storage backend returned, in grpc-go's standard rendering.
+_GRPC_CODE_PATTERN = re.compile(r'\bcode = (\w+)')
+# Codes whose documented recovery behaviour is that the caller has to change
+# something before retrying, so retrying as-is cannot succeed. Taken from the
+# CreateVolume error table in the CSI spec: INVALID_ARGUMENT ("use different
+# parameters"), ALREADY_EXISTS ("fix the arguments or use a different name"),
+# OUT_OF_RANGE ("fix the capacity range"), NOT_FOUND ("verify the source").
+# InvalidArgument is also exactly what sig-storage's provisioner library calls
+# an infeasible error, after which it retries only every retry-interval-max.
+#
+# Deliberately conservative: leaving a code out costs time (the claim falls back
+# to the slower judgement below), while wrongly including one fails a launch
+# whose volume was going to work.
+_TERMINAL_GRPC_CODES = ('InvalidArgument', 'AlreadyExists', 'OutOfRange',
+                        'NotFound')
+# Codes that mean the CreateVolume call may still be running. From
+# external-provisioner's own checkError(), which maps exactly these to
+# "provisioning in background". A network filesystem reports these while it is
+# being created -- GKE Filestore emits DeadlineExceeded ("volume not ready,
+# current state: CREATING") and Aborted ("an operation with the given volume key
+# already exists") for minutes on the way to a healthy volume -- so they must
+# never fail a launch.
+_IN_PROGRESS_GRPC_CODES = ('Canceled', 'DeadlineExceeded', 'Unavailable',
+                           'Aborted')
+
+
+class PvcFailure(enum.Enum):
+    """What a failure reported on a PVC says about waiting any longer."""
+    # The request has to change; waiting cannot help.
+    TERMINAL = 'terminal'
+    # The call may still be running, or the obstacle may clear by itself.
+    IN_PROGRESS = 'in_progress'
+    # No code to go on: another provisioner, or a failure raised before the
+    # gRPC call. Judged on how long it persists instead.
+    UNKNOWN = 'unknown'
+
+
+def classify_pvc_failure(message: Optional[str]) -> PvcFailure:
+    """Classifies a PVC failure event message by the gRPC code it carries.
+
+    A message can carry more than one code: grpc-go wraps a status in another
+    status, giving `code = Unknown desc = rpc error: code = InvalidArgument
+    desc = ...`, where the outer code is the less specific of the two. So every
+    code is read, and:
+
+    - any sign that the call may still be running wins outright, wherever it
+      appears. The cost of missing a terminal code is waiting; the cost of
+      inventing one is failing a launch whose volume was going to work.
+    - otherwise the innermost code decides, since that is the one the storage
+      backend actually returned.
+    """
+    codes = _GRPC_CODE_PATTERN.findall(message or '')
+    if not codes:
+        return PvcFailure.UNKNOWN
+    if any(code in _IN_PROGRESS_GRPC_CODES for code in codes):
+        return PvcFailure.IN_PROGRESS
+    if codes[-1] in _TERMINAL_GRPC_CODES:
+        return PvcFailure.TERMINAL
+    # Everything else -- ResourceExhausted, Internal, Unknown, PermissionDenied
+    # -- is neither provably hopeless nor provably in flight. Quota, for one,
+    # can be raised while a launch waits.
+    return PvcFailure.UNKNOWN
 
 
 def _is_rbac_permission_error(e: Exception) -> bool:
@@ -565,10 +645,18 @@ def _first_pvc_failure_event(context: Optional[str], namespace: str,
 
     A failing event is the only positive evidence that a pending PVC will not
     bind on its own; a pending PVC without one may still be mid-provisioning.
+
+    A warning the provisioner reports while its CreateVolume call is still
+    running is not such evidence: a network filesystem being created emits them
+    for minutes and then binds. Counting those made a volume read as unusable
+    for the middle of its own creation, which in turn refused every launch that
+    wanted it.
     """
     for event in kubernetes_utils.get_pvc_events(context, namespace, pvc_name):
         if (event.type == WARNING_EVENT_TYPE or
                 event.reason in PVC_FAILING_EVENT_REASONS):
+            if classify_pvc_failure(event.message) == PvcFailure.IN_PROGRESS:
+                continue
             if event.message:
                 return f'{event.reason}: {event.message}'
             return str(event.reason)
@@ -608,10 +696,11 @@ def _get_pvc_error(context: Optional[str], namespace: str,
         # Immediate binding: provisioning has started and has not finished.
         # Word this as in-progress -- provisioning a network volume can
         # legitimately take minutes -- while still reporting it as not ready.
-        return (f'PVC is pending: the PersistentVolume is still being '
-                f'provisioned. If this does not resolve, the storage class '
-                f'may be misconfigured or the cluster may be out of storage '
-                f'capacity. {debug_hint}')
+        # The first sentence is the shared constant, which is what tells a
+        # caller deciding whether to refuse a launch that waiting is enough.
+        return (f'{volume_lib.PVC_PROVISIONING_MESSAGE} If this does not '
+                f'resolve, the storage class may be misconfigured or the '
+                f'cluster may be out of storage capacity. {debug_hint}')
 
     if pvc_phase == 'Lost':
         return ('PVC is in Lost state. The bound PersistentVolume '
@@ -621,25 +710,34 @@ def _get_pvc_error(context: Optional[str], namespace: str,
     return None
 
 
-def get_all_volumes_errors(
+def get_all_volumes_state(
     configs: List[models.VolumeConfig],
-) -> Tuple[Dict[str, Optional[str]], Set[str]]:
-    """Gets error messages for all Kubernetes PVC volumes.
+) -> Tuple[Dict[str, Optional[str]], Dict[str, models.ObservedVolumeState],
+           Set[str]]:
+    """Gets the cluster's view of all Kubernetes PVC volumes.
+
+    Both the error check and the cloud-owned fields come out of the same PVC
+    objects, so they are read in one pass: no volume can be judged against one
+    version of a PVC and described from another, and the listing is not paid
+    for twice.
 
     Args:
         configs: List of VolumeConfig objects.
 
     Returns:
-        A tuple of (errors, failed_volume_names):
+        A tuple of (errors, observed, failed_volume_names):
         - errors maps volume name to an error message, or to None when the
           volume is healthy.
+        - observed maps volume name to what the PVC reports about the fields
+          the cluster owns. Absent for a volume whose PVC could not be read.
         - failed_volume_names holds volumes whose status could not be
           determined because the cluster could not be queried. Callers must
           leave the recorded status of these volumes untouched rather than
           reading their absence from ``errors`` as "healthy".
 
-        Every input config lands in exactly one of the two, so a caller never
-        has to guess what an absent volume means.
+        Every input config lands in exactly one of errors and
+        failed_volume_names, so a caller never has to guess what an absent
+        volume means.
     """
     # Keyed by (context, namespace): the same PVC name may exist in several
     # namespaces, and resolving it against the wrong one would mismatch.
@@ -647,6 +745,7 @@ def get_all_volumes_errors(
                                                     models.VolumeConfig]] = {}
 
     volume_errors: Dict[str, Optional[str]] = {}
+    observed: Dict[str, models.ObservedVolumeState] = {}
     failed_volume_names: Set[str] = set()
 
     for config in configs:
@@ -683,6 +782,7 @@ def get_all_volumes_errors(
             seen_pvc_names.add(pvc.metadata.name)
             volume_errors[vol_config.name] = _get_pvc_error(
                 context, namespace, pvc)
+            observed[vol_config.name] = _observed_volume_state(pvc)
 
         # A registered PVC missing from the labelled listing is either a
         # use_existing volume (adopted as-is, so it never got the skypilot
@@ -717,8 +817,9 @@ def get_all_volumes_errors(
                 continue
             volume_errors[vol_config.name] = _get_pvc_error(
                 context, namespace, pvc)
+            observed[vol_config.name] = _observed_volume_state(pvc)
 
-    return volume_errors, failed_volume_names
+    return volume_errors, observed, failed_volume_names
 
 
 def _check_storage_class_volume_binding_mode(context: Optional[str],
@@ -806,6 +907,77 @@ def _check_pvc_access_mode_error(context: Optional[str],
             f'kubectl describe pvc {pvc_name} -n {namespace}')
 
 
+def _pvc_capacity(pvc_obj: Any) -> Optional[str]:
+    """Returns the capacity the PVC's bound volume actually has, if any.
+
+    ``status.capacity`` is the real size of the underlying volume, while
+    ``spec.resources.requests`` is only what was asked for: a request can be
+    rounded up by the provisioner, expanded later, or not yet fulfilled. A
+    claim that is not bound reports nothing here.
+    """
+    capacity = getattr(getattr(pvc_obj, 'status', None), 'capacity', None)
+    if isinstance(capacity, dict):
+        return capacity.get('storage')
+    return None
+
+
+def _parse_pvc_size(size_quantity: Optional[str],
+                    pvc_name: str) -> Optional[str]:
+    """Normalizes a Kubernetes storage quantity to a volume size in GiB.
+
+    Shared by the create and refresh paths so the two cannot record the same
+    PVC differently.
+
+    Parsed by the Kubernetes client rather than `resources_utils`, which reads
+    a quantity by SkyPilot's rules rather than Kubernetes': a bare number is
+    bytes to Kubernetes and gigabytes to SkyPilot, and the decimal suffixes a
+    claim can perfectly well be written with (`2G`, `500M`) are not units it
+    knows at all. A claim SkyPilot did not create -- which is every
+    `use_existing` volume -- is written however its author wrote it.
+
+    Rounds to the nearest GiB, since that is the only unit a volume's size is
+    recorded in: a claim written `2G` is 1.86GiB, and reporting 1Gi for it
+    would look like half the volume went missing.
+    """
+    if not size_quantity:
+        return None
+    try:
+        size_bytes = kubernetes.parse_quantity(size_quantity)
+        size = int(
+            decimal.Decimal(size_bytes / _BYTES_PER_GIB).quantize(
+                decimal.Decimal('1'), rounding=decimal.ROUND_HALF_UP))
+    except Exception as e:  # pylint: disable=broad-except
+        # Just log the error since it is not critical: a volume whose size
+        # cannot be read keeps the one already recorded.
+        logger.warning(f'Failed to parse PVC size {size_quantity!r} '
+                       f'for PVC {pvc_name}: {e}')
+        return None
+    if size <= 0:
+        # Under half a gibibyte. Volume creation rejects '0' as a size, so
+        # recording it here would put a value in the database that the same
+        # volume could not have been created with.
+        logger.warning(f'Ignoring PVC size {size_quantity!r} for PVC '
+                       f'{pvc_name}: rounds to less than 1Gi.')
+        return None
+    return str(size)
+
+
+def _observed_volume_state(pvc_obj: Any) -> models.ObservedVolumeState:
+    """Reads the fields of a PVC that the cluster, not our config, owns.
+
+    Only reports what the PVC actually says, so that a caller merging this into
+    a recorded config never clears a value it cannot see.
+    """
+    pvc_name = pvc_obj.metadata.name
+    return models.ObservedVolumeState(
+        size=_parse_pvc_size(_pvc_capacity(pvc_obj), pvc_name),
+        # An empty storageClassName is the Kubernetes way of opting out of
+        # dynamic provisioning, not a class name to record.
+        storage_class_name=(getattr(pvc_obj.spec, 'storage_class_name', None) or
+                            None),
+    )
+
+
 def _populate_config_from_pvc(config: models.VolumeConfig,
                               pvc_obj: Any) -> None:
     """Populate missing fields in config from a PVC object.
@@ -838,28 +1010,14 @@ def _populate_config_from_pvc(config: models.VolumeConfig,
             config.config['access_mode'] = pvc_access_mode
 
     # Populate size if not set (prefer bound capacity, fallback to requested)
-    pvc_size = None
-    size_quantity = None
-    # Try status.capacity (dict) - actual bound size
-    capacity = getattr(getattr(pvc_obj, 'status', None), 'capacity', None)
-    if isinstance(capacity, dict) and 'storage' in capacity:
-        size_quantity = capacity['storage']
+    size_quantity = _pvc_capacity(pvc_obj)
     # Fallback to spec.resources.requests (dict) - requested size
     if size_quantity is None:
         requests = getattr(getattr(pvc_obj.spec, 'resources', None), 'requests',
                            None)
         if isinstance(requests, dict):
             size_quantity = requests.get('storage')
-    # Parse and normalize the size if found
-    if size_quantity:
-        try:
-            # Normalize to GB string (e.g., '20')
-            pvc_size = resources_utils.parse_memory_resource(
-                size_quantity, 'size', allow_rounding=True)
-        except ValueError as e:
-            # Just log the error since it is not critical.
-            logger.warning(f'Failed to parse PVC size {size_quantity!r} '
-                           f'for PVC {pvc_name}: {e}')
+    pvc_size = _parse_pvc_size(size_quantity, pvc_name)
     if pvc_size is not None:
         if config.size is not None and config.size != pvc_size:
             logger.warning(f'PVC {pvc_name} has size {pvc_size} but config '

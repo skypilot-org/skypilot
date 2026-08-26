@@ -45,10 +45,17 @@ import { useRouter } from 'next/router';
 import { TimestampWithTooltip, LastUpdatedTimestamp } from '@/components/utils';
 import { StatusBadge } from '@/components/elements/StatusBadge';
 import {
+  TruncatedDetails,
+  ExpandedDetailsRow,
+  isDetailsToggle,
+} from '@/components/elements/TruncatedDetails';
+import {
   FilterDropdown,
   Filters,
   filterData,
 } from '@/components/shared/FilterSystem';
+import { useUrlFilterState } from '@/hooks/useUrlFilterState';
+import { hrefWithQueryKey } from '@/components/shared/filterSchema';
 import { PluginSlot } from '@/plugins/PluginSlot';
 import { usePluginComponents, useTableColumns } from '@/plugins/PluginProvider';
 import dashboardCache from '@/lib/cache';
@@ -60,19 +67,36 @@ const REFRESH_INTERVAL = REFRESH_INTERVALS.REFRESH_INTERVAL;
 const VOLUMES_PAGE_SIZE_OPTIONS = [10, 30, 50, 100, 200];
 const VOLUMES_PAGE_SIZE_STORAGE_KEY = 'skypilot-volumes-page-size';
 
-// Properties offered by the filter dropdown. `value` keys into `valueList` for
-// the typeahead; `label` is what lands in `filter.property`, which
-// `evaluateCondition` lowercases to look up the field on each volume.
-const PROPERTY_OPTIONS = [
-  { label: 'Name', value: 'name' },
-  { label: 'Status', value: 'status' },
-  { label: 'Infra', value: 'infra' },
-  { label: 'Type', value: 'type' },
-  { label: 'User', value: 'user' },
+// The filterable properties, declared once. `key` is the URL parameter and the
+// `valueList` key for the typeahead; `label` is what lands in
+// `filter.property`, which `evaluateCondition` lowercases to look up the field
+// on each volume.
+const VOLUME_FILTER_SCHEMA = [
+  { key: 'name', label: 'Name', kind: 'text' },
+  { key: 'status', label: 'Status', kind: 'enum', multi: true },
+  { key: 'infra', label: 'Infra', kind: 'text' },
+  { key: 'type', label: 'Type', kind: 'enum', multi: true },
+  { key: 'user', label: 'User', kind: 'text' },
 ];
 
-// Filters are kept in local state only, so there is nothing to sync to the URL.
-const noopUpdateURLParams = () => {};
+const PROPERTY_OPTIONS = VOLUME_FILTER_SCHEMA.map(({ key, label }) => ({
+  label,
+  value: key,
+}));
+
+// Properties whose values are alternatives rather than extra conditions: two
+// Status chips mean "either", every other property replaces.
+const OR_PROPERTIES = VOLUME_FILTER_SCHEMA.filter((e) => e.multi === true).map(
+  (e) => e.label
+);
+const MULTI_VALUE_LABELS = new Set(OR_PROPERTIES);
+
+const addFilter = (prevFilters, property, value) => {
+  const base = MULTI_VALUE_LABELS.has(property)
+    ? prevFilters.filter((f) => !(f.property === property && f.value === value))
+    : prevFilters.filter((f) => f.property !== property);
+  return [...base, { property, operator: ':', value }];
+};
 
 export function Volumes() {
   const router = useRouter();
@@ -95,10 +119,19 @@ export function Volumes() {
   const handleTabChange = useCallback(
     (tab) => {
       setActiveTab(tab);
-      const query = tab === 'volumes' ? {} : { tab };
-      router.replace({ pathname: router.pathname, query }, undefined, {
-        shallow: true,
-      });
+      // Keep whatever else the address bar carries -- the filter params are
+      // written straight to history, so `router.query` may not have caught up
+      // and rebuilding the query from it would drop them.
+      router.replace(
+        hrefWithQueryKey(
+          router.pathname,
+          window.location.search,
+          'tab',
+          tab === 'volumes' ? undefined : tab
+        ),
+        undefined,
+        { shallow: true }
+      );
     },
     [router]
   );
@@ -481,7 +514,7 @@ export function Volumes() {
   );
 }
 
-function VolumesTable({
+export function VolumesTable({
   refreshInterval,
   setLoading,
   refreshDataRef,
@@ -490,7 +523,8 @@ function VolumesTable({
   preloadingComplete,
 }) {
   const [data, setData] = useState([]);
-  const [filters, setFilters] = useState([]);
+  // Filters live in the URL, keyed by name, so a filtered view is shareable.
+  const { filters, setFilters } = useUrlFilterState(VOLUME_FILTER_SCHEMA);
   const [sortConfig, setSortConfig] = useState({
     key: null,
     direction: 'ascending',
@@ -507,6 +541,26 @@ function VolumesTable({
       10
     )
   );
+  // Held at table level so at most one row is expanded at a time.
+  const [expandedRowId, setExpandedRowId] = useState(null);
+  const expandedRowRef = useRef(null);
+
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (
+        expandedRowId &&
+        expandedRowRef.current &&
+        !expandedRowRef.current.contains(event.target) &&
+        !isDetailsToggle(event.target)
+      ) {
+        setExpandedRowId(null);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [expandedRowId]);
 
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -552,7 +606,8 @@ function VolumesTable({
     // resolve the property name to a field.
     return filterData(
       data.map((volume) => ({ ...volume, user: volume.user_name })),
-      filters
+      filters,
+      { orProperties: OR_PROPERTIES }
     );
   }, [data, filters]);
 
@@ -654,6 +709,14 @@ function VolumesTable({
 
   const pluginColumns = useTableColumns('volumes');
 
+  // Volumes are usable most of the time, so a column of dashes would be noise.
+  // Judge over the whole dataset, not the current page or filter, so the column
+  // does not come and go while paging.
+  const anyVolumeHasDetails = useMemo(
+    () => data.some((volume) => volume.error_message),
+    [data]
+  );
+
   const sortableHeader = (label, sortKey) => (
     <TableHead
       className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50"
@@ -740,6 +803,33 @@ function VolumesTable({
         </TableCell>
       ),
     },
+    // What the status means: a CSI provisioner's own words on why the volume is
+    // not ready, which until now only a tooltip on the badge revealed. Last
+    // before the actions, as in the jobs table: the text is wide, and it reads
+    // as an aside rather than a property of the volume.
+    ...(anyVolumeHasDetails
+      ? [
+          {
+            id: 'details',
+            order: 999,
+            renderHeader: () => <TableHead>Details</TableHead>,
+            renderCell: (volume) => (
+              <TableCell>
+                {volume.error_message ? (
+                  <TruncatedDetails
+                    text={volume.error_message}
+                    rowId={volume.name}
+                    expandedRowId={expandedRowId}
+                    setExpandedRowId={setExpandedRowId}
+                  />
+                ) : (
+                  '-'
+                )}
+              </TableCell>
+            ),
+          },
+        ]
+      : []),
     {
       id: 'actions',
       order: 1000,
@@ -806,18 +896,14 @@ function VolumesTable({
             propertyList={PROPERTY_OPTIONS}
             valueList={valueList}
             setFilters={setFilters}
-            updateURLParams={noopUpdateURLParams}
+            addFilter={addFilter}
             placeholder="Filter volumes"
           />
         </div>
       </div>
       {filters.length > 0 && (
         <div className="mb-2">
-          <Filters
-            filters={filters}
-            setFilters={setFilters}
-            updateURLParams={noopUpdateURLParams}
-          />
+          <Filters filters={filters} setFilters={setFilters} />
         </div>
       )}
 
@@ -846,13 +932,24 @@ function VolumesTable({
                 </TableRow>
               ) : paginatedData.length > 0 && !isForceEmpty() ? (
                 paginatedData.map((volume) => (
-                  <TableRow key={volume.name}>
-                    {visibleColumns.map((col) =>
-                      React.cloneElement(col.renderCell(volume), {
-                        key: col.id,
-                      })
+                  <React.Fragment key={volume.name}>
+                    <TableRow>
+                      {visibleColumns.map((col) =>
+                        React.cloneElement(col.renderCell(volume), {
+                          key: col.id,
+                        })
+                      )}
+                    </TableRow>
+                    {/* A volume can become ready while its reason is
+                        expanded, taking the column with it. */}
+                    {expandedRowId === volume.name && volume.error_message && (
+                      <ExpandedDetailsRow
+                        text={volume.error_message}
+                        colSpan={totalColSpan}
+                        innerRef={expandedRowRef}
+                      />
                     )}
-                  </TableRow>
+                  </React.Fragment>
                 ))
               ) : (
                 <EmptyTableState

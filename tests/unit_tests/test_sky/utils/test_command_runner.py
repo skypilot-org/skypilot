@@ -377,15 +377,55 @@ class TestSlurmCommandRunnerUserImpersonation:
             container_args=None,
             slurm_user=slurm_user)
 
+    @staticmethod
+    def _payload(command):
+        """The inner login-shell command wrap_command_as_user builds."""
+        return f'cd -- "$HOME" || exit 1; {command}'
+
     def test_wrap_command_as_user(self):
         command = 'echo "$HOME" && printf %s "a b"'
 
         wrapped = command_runner.wrap_command_as_user(command, 'alice')
 
         assert shlex.split(wrapped) == [
-            'su', '--login', '--shell', '/bin/bash', '--command', command, '--',
-            'alice'
+            'su', '--login', '--shell', '/bin/bash', '--command',
+            self._payload(command), '--', 'alice'
         ]
+
+    def test_wrap_command_as_user_with_sudo_targets_user_not_root(self):
+        command = 'echo "$HOME" && printf %s "a b"'
+
+        wrapped = command_runner.wrap_command_as_user(command,
+                                                      'alice',
+                                                      use_sudo=True)
+
+        argv = shlex.split(wrapped)
+        assert argv == [
+            'sudo', '--non-interactive', '-H', '-u', 'alice', '--', '/bin/bash',
+            '--login', '-c',
+            self._payload(command)
+        ]
+        # sudo must drop to the target user rather than running as root, so
+        # that deployers never need to grant passwordless sudo to `su`.
+        assert argv[argv.index('-u') + 1] == 'alice'
+        assert 'su' not in argv
+
+    def test_wrap_command_as_user_preserves_shell_argv0(self):
+        # `$0`/`$@` must survive to the inner shell verbatim: the rsync
+        # integration relies on `exec rsync "$@"` being expanded once, by the
+        # inner shell, with `$0` set to the passed argv0.
+        command = 'exec rsync "$@"'
+
+        for use_sudo in (False, True):
+            wrapped = command_runner.wrap_command_as_user(command,
+                                                          'alice',
+                                                          shell_argv0='rsync',
+                                                          use_sudo=use_sudo)
+            argv = shlex.split(wrapped)
+            assert argv[-1] == 'rsync'
+            assert self._payload(command) in argv
+            # Exactly one inner shell, as _inline_command_quote_levels assumes.
+            assert argv.count('/bin/bash') == 1
 
     def test_login_node_run_as_user(self):
         runner = self._login_runner('alice')
@@ -397,8 +437,8 @@ class TestSlurmCommandRunnerUserImpersonation:
 
         remote_command = mock_run.call_args.args[1]
         assert shlex.split(remote_command) == [
-            'su', '--login', '--shell', '/bin/bash', '--command', 'squeue --me',
-            '--', 'alice'
+            'su', '--login', '--shell', '/bin/bash', '--command',
+            self._payload('squeue --me'), '--', 'alice'
         ]
 
     def test_login_node_run_as_user_with_sudo(self):
@@ -411,8 +451,9 @@ class TestSlurmCommandRunnerUserImpersonation:
 
         remote_command = mock_run.call_args.args[1]
         assert shlex.split(remote_command) == [
-            'sudo', '--non-interactive', '--', 'su', '--login', '--shell',
-            '/bin/bash', '--command', 'squeue --me', '--', 'alice'
+            'sudo', '--non-interactive', '-H', '-u', 'alice', '--', '/bin/bash',
+            '--login', '-c',
+            self._payload('squeue --me')
         ]
 
     def test_login_node_sudo_failure_propagates(self):
@@ -447,8 +488,9 @@ class TestSlurmCommandRunnerUserImpersonation:
 
         remote_command = mock_rsync.call_args.kwargs['remote_rsync_command']
         assert shlex.split(remote_command) == [
-            'sudo', '--non-interactive', '--', 'su', '--login', '--shell',
-            '/bin/bash', '--command', 'exec rsync "$@"', '--', 'alice', 'rsync'
+            'sudo', '--non-interactive', '-H', '-u', 'alice', '--', '/bin/bash',
+            '--login', '-c',
+            self._payload('exec rsync "$@"'), 'rsync'
         ]
 
     def test_srun_as_user(self):
@@ -460,13 +502,13 @@ class TestSlurmCommandRunnerUserImpersonation:
             runner.run('whoami')
 
         remote_command = shlex.split(mock_run.call_args.args[1])
-        assert remote_command[:8] == [
-            'sudo', '--non-interactive', '--', 'su', '--login', '--shell',
-            '/bin/bash', '--command'
+        assert remote_command[:9] == [
+            'sudo', '--non-interactive', '-H', '-u', 'alice', '--', '/bin/bash',
+            '--login', '-c'
         ]
-        assert remote_command[9:] == ['--', 'alice']
-        assert remote_command[8].startswith('srun --unbuffered')
-        assert 'whoami' in remote_command[8]
+        assert len(remote_command) == 10
+        assert remote_command[9].startswith(self._payload('srun --unbuffered'))
+        assert 'whoami' in remote_command[9]
 
     def test_srun_rsync_as_user(self):
         runner = self._slurm_runner('alice', ssh_user='ubuntu')
@@ -477,13 +519,13 @@ class TestSlurmCommandRunnerUserImpersonation:
 
         remote_command = mock_rsync.call_args.kwargs['remote_rsync_command']
         argv = shlex.split(remote_command)
-        assert argv[:8] == [
-            'sudo', '--non-interactive', '--', 'su', '--login', '--shell',
-            '/bin/bash', '--command'
+        assert argv[:9] == [
+            'sudo', '--non-interactive', '-H', '-u', 'alice', '--', '/bin/bash',
+            '--login', '-c'
         ]
-        assert argv[8].startswith('exec srun --unbuffered')
-        assert argv[8].endswith('rsync "$@"')
-        assert argv[9:] == ['--', 'alice', 'rsync']
+        assert argv[9].startswith(self._payload('exec srun --unbuffered'))
+        assert argv[9].endswith('rsync "$@"')
+        assert argv[10:] == ['rsync']
 
 
 def test_kubernetes_runner_adds_container_flag_to_kubectl_exec() -> None:

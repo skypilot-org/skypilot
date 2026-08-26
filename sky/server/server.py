@@ -67,6 +67,7 @@ from sky.server import config as server_config
 from sky.server import constants as server_constants
 from sky.server import csp_utils
 from sky.server import daemons
+from sky.server import loop_stall
 from sky.server import metrics
 from sky.server import middleware_utils
 from sky.server import plugins
@@ -680,14 +681,12 @@ class AuthProxyMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
                 logger.error(f'Concurrent worker exhausted during auth proxy '
                              f'user upsert: {e}')
                 return db_lookup.worker_exhausted_response()
-            if newly_added:
-                # Offload the blocking config reload + role seed to a worker
-                # thread so this async middleware doesn't block the event loop.
-                # The reload lets a runtime `rbac.default_role` change take
-                # effect for this new user without a restart (the main
-                # API-server process does not reload config per request).
-                await asyncio.to_thread(permission.seed_new_user_role,
-                                        auth_user.id)
+            # Same deadline as the upsert above; see the helper for why a new
+            # user's seed is awaited while a returning one's repair is queued.
+            failed = await db_lookup.ensure_role_for_authenticated_user(
+                auth_user.id, newly_added)
+            if failed is not None:
+                return failed
 
         # Store user info in request.state for access by GET endpoints
         if auth_user is not None:
@@ -768,36 +767,49 @@ async def cleanup_unreferenced_file_mounts():
                          f'{common_utils.format_exception(e)}')
 
 
-async def cleanup_download_tmp():
-    """Delete expired download tmp directories.
+async def cleanup_clients_tmp():
+    """Delete expired client tmp directories and deprecated task YAMLs.
 
     Downloaded logs are transient — synced from the cluster for the client
     to download, then no longer needed.  Clean up anything older than the
     blob GC grace period (1 hour by default).
     """
+
+    def _do_cleanup():
+        tmp_dir = bs.get_blob_storage().download_tmp_base_dir()
+        if tmp_dir is None:
+            # Backend shares the persistent log dir; no separate
+            # cleanup needed.
+            return
+        if not os.path.exists(tmp_dir):
+            return
+        cutoff = time.time() - bs.GC_GRACE_SECONDS
+        for user_entry in os.scandir(tmp_dir):
+            if not user_entry.is_dir():
+                continue
+            for entry in os.scandir(user_entry.path):
+                if entry.is_dir():
+                    try:
+                        if entry.stat().st_mtime < cutoff:
+                            shutil.rmtree(entry.path, ignore_errors=True)
+                    except OSError:
+                        pass
+                elif entry.name.endswith('_translated.yaml'):
+                    # Deprecated: task YAMLs are no longer persisted, so any
+                    # file left here is unreferenced regardless of its age.
+                    # TODO(aylei): remove in next major release
+                    try:
+                        os.remove(entry.path)
+                    except OSError:
+                        pass
+
     while True:
         await asyncio.sleep(3600)
         try:
-            tmp_dir = bs.get_blob_storage().download_tmp_base_dir()
-            if tmp_dir is None:
-                # Backend shares the persistent log dir; no separate
-                # cleanup needed.
-                continue
-            if not os.path.exists(tmp_dir):
-                continue
-            cutoff = time.time() - bs.GC_GRACE_SECONDS
-            for user_entry in os.scandir(tmp_dir):
-                if not user_entry.is_dir():
-                    continue
-                for entry in os.scandir(user_entry.path):
-                    if entry.is_dir():
-                        try:
-                            if entry.stat().st_mtime < cutoff:
-                                shutil.rmtree(entry.path, ignore_errors=True)
-                        except OSError:
-                            pass
+            # Offloaded to a worker thread: the event loop must not block.
+            await anyio.to_thread.run_sync(_do_cleanup, abandon_on_cancel=True)
         except Exception as e:  # pylint: disable=broad-except
-            logger.error('Error in cleanup_download_tmp: '
+            logger.error('Error in cleanup_clients_tmp: '
                          f'{common_utils.format_exception(e)}')
 
 
@@ -863,8 +875,21 @@ async def cleanup_sky_logs():
         await asyncio.sleep(3600)
 
 
-async def loop_lag_monitor(loop: asyncio.AbstractEventLoop,
-                           interval: float = 0.1) -> None:
+# Cadence of the per-worker loop lag timer. Also the heartbeat interval the
+# stall watchdog measures against, so the two must agree.
+LOOP_LAG_INTERVAL = 0.1
+
+
+async def loop_lag_monitor(
+        loop: asyncio.AbstractEventLoop,
+        interval: float = LOOP_LAG_INTERVAL,
+        stall_watchdog: Optional[loop_stall.LoopStallWatchdog] = None) -> None:
+    """Measures the loop's own scheduling lag on a fixed timer.
+
+    The single tick on the loop for this: it feeds the lag metrics when those
+    are enabled, and the stall watchdog's heartbeat when that is enabled. Each
+    consumer is gated on its own, so neither can silently disable the other.
+    """
     target = loop.time() + interval
 
     pid = str(os.getpid())
@@ -880,17 +905,21 @@ async def loop_lag_monitor(loop: asyncio.AbstractEventLoop,
         nonlocal target, lag_max_window_end, lag_max_in_window
         now = loop.time()
         lag = max(0.0, now - target)
-        if lag_threshold is not None and lag > lag_threshold:
-            logger.warning(f'Event loop lag {lag} seconds exceeds threshold '
-                           f'{lag_threshold} seconds.')
-        metrics_utils.SKY_APISERVER_EVENT_LOOP_LAG_SECONDS.observe(lag)
-        if now >= lag_max_window_end:
-            lag_max_window_end = now + lag_max_window_seconds
-            lag_max_in_window = lag
-        else:
-            lag_max_in_window = max(lag_max_in_window, lag)
-        metrics_utils.SKY_APISERVER_EVENT_LOOP_LAG_MAX_SECONDS.labels(
-            pid=pid).set(lag_max_in_window)
+        if stall_watchdog is not None:
+            stall_watchdog.beat()
+        if metrics_utils.METRICS_ENABLED:
+            if lag_threshold is not None and lag > lag_threshold:
+                logger.warning(
+                    f'Event loop lag {lag} seconds exceeds threshold '
+                    f'{lag_threshold} seconds.')
+            metrics_utils.SKY_APISERVER_EVENT_LOOP_LAG_SECONDS.observe(lag)
+            if now >= lag_max_window_end:
+                lag_max_window_end = now + lag_max_window_seconds
+                lag_max_in_window = lag
+            else:
+                lag_max_in_window = max(lag_max_in_window, lag)
+            metrics_utils.SKY_APISERVER_EVENT_LOOP_LAG_MAX_SECONDS.labels(
+                pid=pid).set(lag_max_in_window)
         target = now + interval
         loop.call_at(target, tick)
 
@@ -932,11 +961,24 @@ async def lifespan(app: fastapi.FastAPI):  # pylint: disable=redefined-outer-nam
     asyncio.create_task(cleanup_upload_ids())
     # Start periodic version check task (runs daily)
     asyncio.create_task(version_check.check_versions_periodically())
-    if metrics_utils.METRICS_ENABLED:
-        # Start monitoring the event loop lag in each server worker
-        # event loop (process).
-        asyncio.create_task(loop_lag_monitor(asyncio.get_event_loop()))
-    yield
+    # Attribute event loop stalls to the code that caused them. Not gated on
+    # METRICS_ENABLED: its primary output is a log line, which is the only
+    # thing available when debugging a deployment after the fact.
+    stall_watchdog = loop_stall.start_watchdog(
+        heartbeat_interval=LOOP_LAG_INTERVAL)
+    if metrics_utils.METRICS_ENABLED or stall_watchdog is not None:
+        # One timer per worker loop, shared by the lag metrics and the stall
+        # watchdog's heartbeat.
+        asyncio.create_task(
+            loop_lag_monitor(asyncio.get_event_loop(),
+                             stall_watchdog=stall_watchdog))
+    try:
+        yield
+    finally:
+        # Runs after uvicorn has drained its connections, so a stall during
+        # the drain itself is still attributed.
+        if stall_watchdog is not None:
+            stall_watchdog.stop()
 
 
 class SecurityHeadersMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
@@ -4027,10 +4069,9 @@ if __name__ == '__main__':
     logger.info(f'Max db connections: {max_db_connections}')
 
     # Reserve memory for jobs and serve/pool controller in consolidation mode.
+    # setup_consolidation_mode_on_startup() above has written the signal file.
     reserved_memory_mb = (
         controller_utils.compute_memory_reserved_for_controllers(
-            reserve_for_controllers=os.environ.get(
-                constants.OVERRIDE_CONSOLIDATION_MODE) is not None,
             # For jobs controller, we need to reserve for both jobs and
             # pool controller.
             reserve_extra_for_pool=not os.environ.get(
@@ -4051,9 +4092,11 @@ if __name__ == '__main__':
         background = uvloop.new_event_loop()
         if os.environ.get(constants.ENV_VAR_SERVER_METRICS_ENABLED):
             metrics.maybe_register_managed_jobs_collector()
-            metrics_server = metrics.build_metrics_server(
-                cmd_args.host, cmd_args.metrics_port)
-            global_tasks.append(background.create_task(metrics_server.serve()))
+            # Deliberately not on `background`: the scrape shares that
+            # loop's anyio thread limiter with every daemon below, and the
+            # ones that unlink files a batch at a time can hold the scrape
+            # off for tens of seconds. See metrics.start_metrics_server().
+            metrics.start_metrics_server(cmd_args.host, cmd_args.metrics_port)
             # Reap per-pid prometheus multiproc files left behind by
             # workers that crashed (SIGKILL, OOM, hard crash) and never
             # called mark_process_dead. Without this, MultiProcessCollector
@@ -4073,7 +4116,7 @@ if __name__ == '__main__':
         # be a singleton task.
         global_tasks.append(
             background.create_task(cleanup_unreferenced_file_mounts()))
-        global_tasks.append(background.create_task(cleanup_download_tmp()))
+        global_tasks.append(background.create_task(cleanup_clients_tmp()))
         global_tasks.append(background.create_task(cleanup_sky_logs()))
         threading.Thread(target=background.run_forever, daemon=True).start()
 
@@ -4118,6 +4161,7 @@ if __name__ == '__main__':
 
         for gt in global_tasks:
             gt.cancel()
+        metrics.stop_metrics_server()
         for plugin in plugins.get_plugins():
             plugin.shutdown()
         subprocess_utils.run_in_parallel(lambda worker: worker.cancel(),

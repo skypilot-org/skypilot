@@ -46,6 +46,7 @@ from sky.jobs import scheduler
 from sky.jobs import state as managed_job_state
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.schemas.api import responses
+from sky.server.requests import requests as requests_lib
 from sky.skylet import constants
 from sky.skylet import job_lib
 from sky.skylet import log_lib
@@ -104,7 +105,13 @@ _LOG_STREAM_CHECK_CONTROLLER_GAP_SECONDS = 5
 _PROVISION_LOG_POLL_GAP_SECONDS = 1
 
 _JOB_STATUS_FETCH_TIMEOUT_SECONDS = 30
-JOB_STATUS_FETCH_TOTAL_TIMEOUT_SECONDS = 60
+
+# Defaults for the transient status-check window; see
+# TransientStatusCheckWindow for why both a time and a retry budget are
+# needed. Both are overridable under `jobs.status_check` in
+# ~/.sky/config.yaml.
+JOB_STATUS_FETCH_MIN_ELAPSED_SECONDS = 60
+JOB_STATUS_FETCH_MIN_RETRIES = 5
 
 # Pattern matching the "From controller <UUID>" line that the controller
 # emits at job-claim time (see sky/jobs/controller.py: run_job). Used by
@@ -518,6 +525,106 @@ class JobStatusLogger:
         """
         self.flush()
         self._message = None
+
+
+class TransientStatusCheckWindow:
+    """Tracks a run of consecutive transient job-status-check failures.
+
+    The controller polls its job's status every
+    JOB_STATUS_CHECK_GAP_SECONDS. A check can fail for reasons that say
+    nothing about whether the job is alive: a transport error on the way to
+    the cluster, or a provider API error while refreshing cluster status. To
+    avoid tearing down a healthy job on such a blip, the controller retries
+    before escalating to recovery -- which cancels the job and relaunches it.
+
+    A run is only treated as the job being unhealthy once *both* budgets are
+    exhausted: at least ``min_elapsed_seconds`` have passed since the first
+    failure in the run, *and* at least ``min_retries`` retries have been
+    made. Requiring both is deliberate, because either alone is unreliable:
+
+    - Elapsed time alone: a single status-check round can itself take far
+      longer than the time budget, because the cluster-status refresh that
+      runs before recovery does its own retried probes of the cluster. The
+      budget can therefore be fully consumed within the round that opened
+      the window, and the job is torn down without ever being retried --
+      the retry exists on paper only.
+    - Retry count alone: a burst of failures that each return immediately
+      (a connection error, say) can exhaust a retry count in a couple of
+      seconds, long before a transient condition has had a chance to clear.
+
+    A successful status check ends the run; see ``reset()``.
+    """
+
+    def __init__(self,
+                 min_elapsed_seconds: Optional[float] = None,
+                 min_retries: Optional[int] = None) -> None:
+        if min_elapsed_seconds is None:
+            min_elapsed_seconds = skypilot_config.get_nested(
+                ('jobs', 'status_check', 'min_elapsed_seconds'),
+                JOB_STATUS_FETCH_MIN_ELAPSED_SECONDS)
+        if min_retries is None:
+            min_retries = skypilot_config.get_nested(
+                ('jobs', 'status_check', 'min_retries'),
+                JOB_STATUS_FETCH_MIN_RETRIES)
+        self._min_elapsed_seconds = min_elapsed_seconds
+        self._min_retries = min_retries
+        self._start_time: Optional[float] = None
+        self._retries = 0
+        self._backoff: Optional[common_utils.Backoff] = None
+
+    def record_failure(self) -> None:
+        """Opens the run if it is not already open."""
+        if self._start_time is None:
+            self._start_time = time.time()
+            self._backoff = common_utils.Backoff(initial_backoff=1,
+                                                 max_backoff_factor=5)
+
+    def reset(self) -> None:
+        """Ends the run, e.g. after a successful check or after a recovery."""
+        self._start_time = None
+        self._retries = 0
+        self._backoff = None
+
+    @property
+    def active(self) -> bool:
+        return self._start_time is not None
+
+    @property
+    def elapsed(self) -> float:
+        """Seconds since the first failure in the current run."""
+        if self._start_time is None:
+            return 0.0
+        return time.time() - self._start_time
+
+    @property
+    def retries(self) -> int:
+        """Retries made in the current run."""
+        return self._retries
+
+    @property
+    def exhausted(self) -> bool:
+        """Whether both budgets are spent, i.e. the job looks unhealthy."""
+        return (self.elapsed >= self._min_elapsed_seconds and
+                self._retries >= self._min_retries)
+
+    def next_backoff(self) -> float:
+        """Records a retry and returns how long to wait before making it."""
+        assert self._backoff is not None, (
+            'record_failure() must be called before next_backoff()')
+        self._retries += 1
+        backoff_time = self._backoff.current_backoff()
+        remaining = self._min_elapsed_seconds - self.elapsed
+        if remaining > 0:
+            # Do not sleep past the time budget: the retry budget may already
+            # be satisfied, in which case the run should be re-evaluated as
+            # soon as the time budget expires.
+            return min(backoff_time, remaining)
+        return backoff_time
+
+    def summary(self) -> str:
+        """Human-readable description of what has been spent so far."""
+        return (f'{self.elapsed:.1f} seconds and {self._retries} '
+                f'{"retry" if self._retries == 1 else "retries"}')
 
 
 async def get_job_status(
@@ -1706,6 +1813,73 @@ def _provision_status_headline(provision_msg: str) -> Optional[str]:
     return None
 
 
+def _parked_launch_reason(job_id: int, task_id: Optional[int]) -> Optional[str]:
+    """The status message of a parked cluster launch for this job, if any.
+
+    A launch that parks (``exceptions.ExecutionPausedError`` -- waiting on a
+    cluster lock, on queue admission, ...) ends its rich status, so the
+    provisioning headline relayed into the controller log goes away and the
+    waiting line loses the one explanation it had. The parked request keeps
+    carrying that explanation in its status message, so read it from there.
+
+    The request being read is co-located in both topologies, which is not
+    obvious: under consolidation the controller *is* the API server, and on a
+    dedicated controller this code runs on the controller host (the log stream
+    gets there via ``ManagedJobCodeGen.stream_logs`` + ``run_on_head``) while
+    the controller submits its launches to its own local API server -- see
+    ``recovery_strategy.ENV_VARS_TO_CLEAR``, which clears
+    ``SKY_API_SERVER_URL_ENV_VAR`` precisely so that a local server is used
+    there. So the launch request is in the store this reads, either way.
+
+    Best-effort regardless: any failure (no requests database in this context,
+    a schema difference, a concurrent write) returns None, which leaves the
+    caller showing exactly what it showed before.
+    """
+    try:
+        task_name = managed_job_state.get_task_name(job_id, task_id or 0)
+        if task_name is None:
+            return None
+        cluster_name = generate_managed_job_cluster_name(task_name, job_id)
+        parked = requests_lib.get_request_tasks(
+            requests_lib.RequestTaskFilter(
+                status=[requests_lib.RequestStatus.WAITING],
+                cluster_names=[cluster_name],
+                include_request_names=['sky.launch'],
+                fields=['status_msg', 'created_at'],
+                sort=True,
+                limit=1,
+            ))
+        if not parked:
+            return None
+        return parked[0].status_msg or None
+    except Exception as e:  # pylint: disable=broad-except
+        logger.debug(f'Could not read the parked launch reason for job '
+                     f'{job_id}: {e}')
+        return None
+
+
+def _live_headline(provision_msg: Optional[str]) -> Optional[str]:
+    """The headline of a relayed cluster-launch status, if it has one."""
+    if provision_msg is None:
+        return None
+    return _provision_status_headline(provision_msg)
+
+
+def _waiting_line_detail(provision_msg: Optional[str],
+                         parked_reason: Optional[str]) -> Optional[str]:
+    """The detail line shown under "Waiting for task to start", if any.
+
+    A live cluster-launch status wins: its headline is what the job is doing
+    right now. When there is none the launch may have parked -- which ends its
+    rich status, so nothing is relayed any more -- and then the parked request's
+    own message is the only thing that still says what the job waits for.
+    """
+    headline = _live_headline(provision_msg)
+    if headline is not None:
+        return headline
+    return parked_reason
+
+
 def stream_logs_by_id(
         job_id: int,
         follow: bool = True,
@@ -2127,6 +2301,11 @@ def stream_logs_by_id(
                 logger.debug(
                     f'INFO: The log is not ready yet{status_str}. '
                     f'Waiting for {JOB_STATUS_CHECK_GAP_SECONDS} seconds.')
+                # Looked up lazily below: a normally provisioning job has a
+                # live headline and never needs it, and this runs once per
+                # status check per streaming client.
+                parked_reason: Optional[str] = None
+                parked_reason_read = False
                 # Poll the controller log frequently for provisioning spinner
                 # updates, but only re-check the (more expensive) managed job
                 # status every JOB_STATUS_CHECK_GAP_SECONDS.
@@ -2137,13 +2316,15 @@ def stream_logs_by_id(
                     # the live cluster-launch status, so it's clear the job is
                     # waiting on its cluster to be provisioned.
                     provision_msg = _latest_provision_status_msg()
-                    # Show only the blue headline of the cluster-launch status
-                    # as a secondary detail under the waiting line; show nothing
-                    # when there is no headline to display.
-                    headline = (None if provision_msg is None else
-                                _provision_status_headline(provision_msg))
-                    provision_str = (''
-                                     if headline is None else f'\n  {headline}')
+                    if (_live_headline(provision_msg) is None and
+                            not parked_reason_read):
+                        # Nothing live to show: read the parked reason, once per
+                        # status check rather than once per second like this
+                        # loop.
+                        parked_reason_read = True
+                        parked_reason = _parked_launch_reason(job_id, task_id)
+                    detail = _waiting_line_detail(provision_msg, parked_reason)
+                    provision_str = ('' if detail is None else f'\n  {detail}')
                     msg = _JOB_WAITING_STATUS_MESSAGE.format(
                         status_str=status_str,
                         provision_str=provision_str,

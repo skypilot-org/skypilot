@@ -2532,7 +2532,7 @@ class TestKubernetesVolumeNameValidation(unittest.TestCase):
             self.assertTrue(ok, msg=f'{name} should be valid, got: {reason}')
 
     def test_invalid_due_to_length(self):
-        too_long = 'a' * 254  # > 253
+        too_long = 'a' * 254  # > 63, the pod-label cap
         ok, reason = kubernetes.Kubernetes.is_volume_name_valid(too_long)
         self.assertFalse(ok)
         self.assertIn('maximum length', reason or '')
@@ -4519,6 +4519,179 @@ class TestKubernetesEfaSameAzAffinity(unittest.TestCase):
         rendered = self._render_same_az_affinity(same_az=False)
         self.assertNotIn('topology.kubernetes.io/zone', rendered)
         self.assertNotIn('skypilot-cluster-name', rendered)
+
+
+class TestKubernetesOciRoceHostNetworkOptOut(unittest.TestCase):
+    """An explicit pod_config `hostNetwork` must win over the OCI RoCE default.
+
+    OCI RoCE turns host networking on by default, but OCI also documents an
+    SR-IOV deployment where pods keep their own netns. Before the fix the two
+    halves disagreed: pod_config switched the pod off host networking while
+    SkyPilot still wired up the Ray-port probe for a host-networked pod. The
+    opt-out must not disturb the device access (privileged + /dev/infiniband),
+    which that deployment still needs.
+    """
+
+    def _deploy_vars(self, network_type, pod_config=None):
+        gpu_resources = mock.MagicMock()
+        gpu_resources.instance_type = '8CPU--32GB--GB300:4'
+        gpu_resources.accelerators = {'GB300': 4}
+        gpu_resources.use_spot = False
+        gpu_resources.region = 'oci-context'
+        gpu_resources.zone = None
+        gpu_resources.cluster_config_overrides = {}
+        gpu_resources.image_id = None
+        setattr(gpu_resources, 'assert_launchable', lambda: gpu_resources)
+        gpu_resources.network_tier = resources_utils.NetworkTier.BEST
+
+        region_config = {
+            ('kubernetes', 'remote_identity'): 'SERVICE_ACCOUNT',
+            ('kubernetes', 'provision_timeout'): 10,
+            ('kubernetes', 'high_availability', 'storage_class_name'): None,
+            ('kubernetes', 'pod_config'): pod_config or {},
+        }
+
+        with patch('sky.provision.kubernetes.utils.get_kubernetes_nodes'), \
+             patch('sky.provision.kubernetes.utils.'
+                   'get_current_kube_config_context_name',
+                   return_value='oci-context'), \
+             patch('sky.provision.kubernetes.utils.'
+                   'get_kube_config_context_namespace',
+                   return_value='default'), \
+             patch('sky.provision.kubernetes.utils.get_accelerator_label_keys',
+                   return_value=[]), \
+             patch('sky.provision.kubernetes.utils.'
+                   'get_accelerator_label_key_values',
+                   return_value=('accelerator', ['GB300'], None, None)), \
+             patch('sky.provision.kubernetes.utils.get_gpu_resource_key',
+                   return_value='nvidia.com/gpu'), \
+             patch('sky.provision.kubernetes.utils.is_kubeconfig_exec_auth',
+                   return_value=(False, None)), \
+             patch('sky.skypilot_config.get_workspace_cloud') as mock_ws, \
+             patch('sky.skypilot_config.get_effective_region_config',
+                   side_effect=lambda cloud, keys, region, default_value=None,
+                   override_configs=None: region_config.get(
+                       (cloud,) + keys, default_value)), \
+             patch('sky.provision.kubernetes.network_utils.get_port_mode'
+                  ) as mock_pm, \
+             patch('sky.catalog.get_image_id_from_tag',
+                   return_value='img:latest'), \
+             patch('sky.clouds.kubernetes.Kubernetes._detect_network_type',
+                   return_value=(network_type, None)):
+            mock_ws.return_value.get.return_value = None
+            mock_pm.return_value.value = 'portforward'
+            k8s_cloud = kubernetes.Kubernetes()
+            return k8s_cloud.make_deploy_resources_variables(
+                resources=gpu_resources,
+                cluster_name=resources_utils.ClusterName(display_name='c',
+                                                         name_on_cloud='c'),
+                region=mock.MagicMock(name='oci-context'),
+                zones=None,
+                num_nodes=2,
+                dryrun=False)
+
+    def test_oci_roce_defaults_to_host_network(self):
+        from sky.provision.kubernetes.utils import (
+            KubernetesHighPerformanceNetworkType as N)
+        deploy_vars = self._deploy_vars(N.OCI_ROCE)
+        self.assertTrue(deploy_vars['k8s_host_network'])
+        self.assertIn('SKYPILOT_HOST_NETWORK', deploy_vars['k8s_env_vars'])
+
+    def test_explicit_false_opts_out_but_keeps_device_access(self):
+        from sky.provision.kubernetes.utils import (
+            KubernetesHighPerformanceNetworkType as N)
+        deploy_vars = self._deploy_vars(
+            N.OCI_ROCE, pod_config={'spec': {
+                'hostNetwork': False
+            }})
+        # The fix: the probe machinery must follow the pod, not the cloud.
+        self.assertFalse(deploy_vars['k8s_host_network'])
+        self.assertNotIn('SKYPILOT_HOST_NETWORK', deploy_vars['k8s_env_vars'])
+        # Scoped: privileged + /dev/infiniband are still needed on OCI RoCE
+        # shapes without an RDMA device plugin, so they must be untouched.
+        self.assertTrue(deploy_vars['k8s_enable_oci_roce'])
+        self.assertTrue(deploy_vars['k8s_ipc_lock_capability'])
+
+    def test_pod_config_true_on_non_oci_still_host_networked(self):
+        from sky.provision.kubernetes.utils import (
+            KubernetesHighPerformanceNetworkType as N)
+        deploy_vars = self._deploy_vars(
+            N.NONE, pod_config={'spec': {
+                'hostNetwork': True
+            }})
+        self.assertTrue(deploy_vars['k8s_host_network'])
+
+    def test_non_oci_without_pod_config_is_not_host_networked(self):
+        from sky.provision.kubernetes.utils import (
+            KubernetesHighPerformanceNetworkType as N)
+        deploy_vars = self._deploy_vars(N.NONE)
+        self.assertFalse(deploy_vars['k8s_host_network'])
+
+    def _render_host_network_block(self, **variables):
+        """Render the hostNetwork block from the live template, so the gate
+        itself is asserted -- not only the deploy var."""
+        import jinja2
+
+        import sky
+        template_path = os.path.join(os.path.dirname(sky.__file__), 'templates',
+                                     'kubernetes-ray.yml.j2')
+        with open(template_path, 'r', encoding='utf-8') as fin:
+            full = fin.read()
+        begin = full.index('{% if k8s_host_network %}')
+        end = full.index('{% endif %}', begin) + len('{% endif %}')
+        return jinja2.Template(full[begin:end]).render(**variables)
+
+    def _render_block(self, marker, **variables):
+        """Render one `{% if %}`-delimited block from the live template."""
+        import jinja2
+
+        import sky
+        template_path = os.path.join(os.path.dirname(sky.__file__), 'templates',
+                                     'kubernetes-ray.yml.j2')
+        with open(template_path, 'r', encoding='utf-8') as fin:
+            full = fin.read()
+        begin = full.index(marker)
+        end = full.index('{% endif %}', begin) + len('{% endif %}')
+        return jinja2.Template(full[begin:end]).render(**variables)
+
+    def test_opting_out_restores_container_ports(self):
+        """Locks the port list to k8s_host_network, not to the network type.
+
+        Characterization test, not a regression test: it passes before and
+        after the fix, because this gate was always correct -- what was wrong
+        was the value fed to it. It is here to make the blast radius explicit.
+        k8s_host_network gates six sites beyond hostNetwork itself (one-pod-
+        per-node antiAffinity, the Downward-API pod name, the worker's Ray-port
+        handling, and this port list), so an OCI RoCE pod that opted out used
+        to lose its containerPorts while not being host-networked. Fails if
+        anyone re-gates this on k8s_enable_oci_roce.
+        """
+        opted_out = self._render_block('{% if not k8s_host_network %}',
+                                       k8s_host_network=False,
+                                       ray_port=6379,
+                                       ray_dashboard_port=8265)
+        self.assertIn('containerPort: 22', opted_out)
+
+        host_networked = self._render_block('{% if not k8s_host_network %}',
+                                            k8s_host_network=True,
+                                            ray_port=6379,
+                                            ray_dashboard_port=8265)
+        self.assertNotIn('containerPort', host_networked)
+
+    def test_template_gate_follows_host_network_not_oci_roce(self):
+        # The whole point of the fix: OCI RoCE alone must no longer force
+        # hostNetwork onto the pod when the user opted out.
+        opted_out = self._render_host_network_block(k8s_host_network=False,
+                                                    k8s_enable_oci_roce=True)
+        self.assertNotIn('hostNetwork: true', opted_out)
+        self.assertNotIn('ClusterFirstWithHostNet', opted_out)
+
+        default_on = self._render_host_network_block(k8s_host_network=True,
+                                                     k8s_enable_oci_roce=True)
+        self.assertIn('hostNetwork: true', default_on)
+        # dnsPolicy must stay paired with it: under hostNetwork the default
+        # policy cannot resolve in-cluster Service DNS.
+        self.assertIn('dnsPolicy: ClusterFirstWithHostNet', default_on)
 
 
 class TestKubernetesSpotLabelContext(unittest.TestCase):

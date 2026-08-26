@@ -154,10 +154,15 @@ def test_sky_logout_wih_env_endpoint(generic_cloud: str):
 
 @pytest.mark.no_remote_server
 def test_sky_login_wih_env_endpoint(generic_cloud: str):
-    """Test that sky api login with env endpoint fails."""
+    """Test that sky api login uses the env endpoint, unless -e conflicts."""
     test = smoke_tests_utils.Test(
-        'sky_login_wih_env_endpoint', [
-            f's=$(SKYPILOT_DEBUG=0 sky api login -e https://SUPERFAKE_ENDPOINT.unreachable 2>&1 | tee /dev/stderr) && echo "\n===Validating endpoint output===" && echo "$s" | grep "Cannot login to API server when the endpoint is set via the environment variable. Run unset"',
+        'sky_login_wih_env_endpoint',
+        [
+            # A different -e is ambiguous, so it is rejected.
+            f's=$(SKYPILOT_DEBUG=0 sky api login -e https://OTHERFAKE_ENDPOINT.unreachable 2>&1 | tee /dev/stderr) && echo "\n===Validating endpoint output===" && echo "$s" | grep "the endpoint is already set to https://SUPERFAKE_ENDPOINT.unreachable by the environment variable"',
+            # Without -e, the env endpoint is used, so login gets as far as
+            # connecting to it (and fails, since it does not exist).
+            f's=$(SKYPILOT_DEBUG=0 sky api login 2>&1 | tee /dev/stderr) && echo "\n===Validating endpoint output===" && echo "$s" | grep "Using endpoint from {constants.SKY_API_SERVER_URL_ENV_VAR}: https://SUPERFAKE_ENDPOINT.unreachable" && echo "$s" | grep "Could not connect to SkyPilot API server at https://SUPERFAKE_ENDPOINT.unreachable"',
         ],
         timeout=smoke_tests_utils.get_timeout(generic_cloud),
         env={

@@ -18,12 +18,46 @@ from sky.utils import registry
 from sky.utils import rich_utils
 from sky.utils import status_lib
 from sky.utils import ux_utils
+from sky.utils import volume as volume_utils
+from sky.workspaces import constants as workspace_constants
+from sky.workspaces import core as workspaces_core
 
 logger = sky_logging.init_logger(__name__)
 
 # Filelocks for the storage management.
 VOLUME_LOCK_PATH = os.path.expanduser('~/.sky/.{volume_name}.lock')
 VOLUME_LOCK_TIMEOUT_SECONDS = 20
+
+
+def _apply_observed_state(
+        config: models.VolumeConfig,
+        observed: Optional[models.ObservedVolumeState]) -> bool:
+    """Brings a volume config in line with what the cloud reports.
+
+    Returns whether anything changed, so a config that already matches is not
+    re-pickled and re-written on every refresh.
+
+    Only fields the cloud owns are touched, and only when it reported one: a
+    missing value means the cloud had no answer, never that the recorded value
+    should be dropped.
+    """
+    if observed is None:
+        return False
+    changed = False
+    if observed.size is not None and observed.size != config.size:
+        logger.info(f'Volume {config.name} size changed from '
+                    f'{config.size} to {observed.size}.')
+        config.size = observed.size
+        changed = True
+    # Back-fill only. A storage class is fixed once the backing resource has
+    # one, so a recorded value is not something the cloud can contradict --
+    # but volumes created before SkyPilot read it back, or before the cluster
+    # had a default class to assign, have nothing recorded at all.
+    if (observed.storage_class_name is not None and
+            config.config.get('storage_class_name') is None):
+        config.config['storage_class_name'] = observed.storage_class_name
+        changed = True
+    return changed
 
 
 def volume_refresh(volume_names: Optional[List[str]] = None) -> None:
@@ -69,22 +103,26 @@ def volume_refresh(volume_names: Optional[List[str]] = None) -> None:
         cloud_to_volume_names.setdefault(cloud, set()).add(volume.get('name'))
         volume_name_to_config[volume.get('name')] = config
 
-    # Check for volume errors (e.g., misconfiguration)
+    # Check for volume errors (e.g., misconfiguration), and read back the
+    # fields the cloud owns rather than the config.
     cloud_to_volume_errors: Dict[str, Dict[str, Optional[str]]] = {}
+    cloud_to_observed: Dict[str, Dict[str, models.ObservedVolumeState]] = {}
     cloud_to_error_failed_names: Dict[str, Set[str]] = {}
     for cloud, configs in cloud_to_configs.items():
         try:
-            # A cloud with no error check of its own returns both empty, which
+            # A cloud with no error check of its own returns all empty, which
             # leaves its volumes eligible for a status update driven by their
             # usedby info alone.
-            volume_errors, error_failed_names = (
-                provision.get_all_volumes_errors(cloud, configs))
+            volume_errors, observed, error_failed_names = (
+                provision.get_all_volumes_state(cloud, configs))
             cloud_to_volume_errors[cloud] = volume_errors
+            cloud_to_observed[cloud] = observed
             cloud_to_error_failed_names[cloud] = error_failed_names
         except Exception as e:  # pylint: disable=broad-except
             logger.warning(
                 f'Failed to get volume errors for volumes on {cloud}: {e}')
             cloud_to_volume_errors[cloud] = {}
+            cloud_to_observed[cloud] = {}
             # Do not let an unreadable cloud silently clear every volume's
             # error and mark them all healthy -- keep their current status.
             cloud_to_error_failed_names[cloud] = cloud_to_volume_names.get(
@@ -194,6 +232,13 @@ def volume_refresh(volume_names: Optional[List[str]] = None) -> None:
             # the region to the in-cluster context name for these volumes.
             need_refresh, volume_config = provision.refresh_volume_config(
                 volume_config.cloud, volume_config)
+            # The observed state was read before the lock, so it is merged into
+            # the handle just re-read under it, not into the copy it was fetched
+            # with.
+            if _apply_observed_state(
+                    volume_config,
+                    cloud_to_observed.get(cloud, {}).get(volume_name)):
+                need_refresh = True
             if need_refresh:
                 global_user_state.update_volume_config(volume_name,
                                                        volume_config)
@@ -206,11 +251,16 @@ def volume_list(
 ) -> List[responses.VolumeRecord]:
     """Gets volumes from the database.
 
+    Only volumes in workspaces the calling user can read are returned, matching
+    how clusters and managed jobs are already listed.
+
     Args:
         is_ephemeral: Whether to include ephemeral volumes.
         refresh: If True, refresh volume state from cloud APIs before returning.
         volume_names: If given, return only these volumes, and scope a
-            `refresh` to them rather than re-probing the whole table. Names
+            `refresh` to them rather than re-probing the whole table. Narrows
+            within the caller's accessible workspaces and never past them, so
+            naming a volume the caller cannot read still returns nothing. Names
             with no volume are ignored, the same as an empty listing.
 
     Returns:
@@ -235,17 +285,41 @@ def volume_list(
                 'usedby_fetch_failed': bool,
                 'is_ephemeral': bool,
                 'error_message': Optional[str],
+                'error_may_resolve': bool,
             }
         ]
     """
+    # Visibility, not usability: read-only workspaces' volumes must be listed.
+    # See the same call in jobs/server/core.py for managed jobs and in
+    # backend_utils for clusters.
+    accessible_workspaces = workspaces_core.get_accessible_workspace_names(
+        action=workspace_constants.WORKSPACE_ACTION_READ)
+    requested_names = None if volume_names is None else set(volume_names)
     if refresh:
-        volume_refresh(volume_names)
+        # Keep the reconcile proportional to what this caller can see: a user
+        # who reads one workspace should not drive cloud API calls against
+        # contexts reachable only from another. volume_refresh groups its cloud
+        # calls by the (context, namespace) pairs of the volumes it is handed,
+        # so narrowing the set narrows the calls. The daemon in
+        # sky/server/daemons.py still refreshes the whole table.
+        # Requested names narrow this again, within the accessible set.
+        volume_refresh(volume_names=[
+            volume['name']
+            for volume in global_user_state.get_volumes(
+                workspaces_filter=accessible_workspaces)
+            if requested_names is None or volume['name'] in requested_names
+        ])
     with rich_utils.safe_status(ux_utils.spinner_message('Listing volumes')):
-        if volume_names is None:
-            volumes = global_user_state.get_volumes(is_ephemeral=is_ephemeral)
-        else:
-            volumes = global_user_state.get_volumes_from_names(
-                volume_names, is_ephemeral=is_ephemeral)
+        volumes = global_user_state.get_volumes(
+            is_ephemeral=is_ephemeral, workspaces_filter=accessible_workspaces)
+        if requested_names is not None:
+            # Applied after the workspace filter and never instead of it, so
+            # naming a volume in a workspace the caller cannot read reveals
+            # nothing.
+            volumes = [
+                volume for volume in volumes
+                if volume['name'] in requested_names
+            ]
         all_users = global_user_state.get_all_users()
         user_map = {user.id: user.name for user in all_users}
 
@@ -258,6 +332,7 @@ def volume_list(
                 continue
 
             status = volume.get('status')
+            error_message = volume.get('error_message')
             record: Dict[str, Any] = {
                 'name': volume_name,
                 'launched_at': volume.get('launched_at'),
@@ -271,7 +346,13 @@ def volume_list(
                 'usedby_clusters': volume.get('usedby_clusters', []),
                 'usedby_fetch_failed': False,
                 'is_ephemeral': volume.get('is_ephemeral', False),
-                'error_message': volume.get('error_message'),
+                'error_message': error_message,
+                # NOT_READY covers both a volume still being provisioned and
+                # one that will never bind. Only the recorded reason tells them
+                # apart, so decide it here rather than leave every caller to
+                # match on the message.
+                'error_may_resolve':
+                    volume_utils.volume_error_may_resolve(error_message),
                 'creation_yaml': volume.get('creation_yaml'),
                 'type': config.type,
                 'cloud': config.cloud,
@@ -358,8 +439,8 @@ def _initial_volume_status(
     optimistic behavior everywhere else on this path.
     """
     try:
-        volume_errors, failed_volume_names = provision.get_all_volumes_errors(
-            cloud, [config])
+        volume_errors, _, failed_volume_names = (
+            provision.get_all_volumes_state(cloud, [config]))
     except Exception as e:  # pylint: disable=broad-except
         logger.debug(f'Failed to check the initial status of volume '
                      f'{config.name}: {e}')
@@ -386,6 +467,9 @@ def volume_apply(
     creation_yaml: Optional[str] = None,
 ) -> None:
     """Creates or registers a volume.
+
+    Callers validate the volume themselves; /volumes/apply does it for API
+    clients, and the in-process callers construct their own names and configs.
 
     Args:
         name: The name of the volume.

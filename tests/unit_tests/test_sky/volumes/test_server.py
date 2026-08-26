@@ -100,6 +100,7 @@ class TestVolumeServer:
         # Mock cloud registry
         mock_cloud = mock.MagicMock()
         mock_cloud.is_same_cloud.return_value = True
+        mock_cloud.is_volume_name_valid.return_value = (True, None)
         mock_cloud_registry = mock.MagicMock()
         mock_cloud_registry.from_str.return_value = mock_cloud
         monkeypatch.setattr('sky.utils.registry.CLOUD_REGISTRY',
@@ -156,6 +157,7 @@ class TestVolumeServer:
         # Mock cloud registry
         mock_cloud = mock.MagicMock()
         mock_cloud.is_same_cloud.return_value = True
+        mock_cloud.is_volume_name_valid.return_value = (True, None)
         mock_cloud_registry = mock.MagicMock()
         mock_cloud_registry.from_str.return_value = mock_cloud
         monkeypatch.setattr('sky.utils.registry.CLOUD_REGISTRY',
@@ -208,6 +210,7 @@ class TestVolumeServer:
         # Mock cloud registry
         mock_cloud = mock.MagicMock()
         mock_cloud.is_same_cloud.return_value = True
+        mock_cloud.is_volume_name_valid.return_value = (True, None)
         mock_cloud_registry = mock.MagicMock()
         mock_cloud_registry.from_str.return_value = mock_cloud
         monkeypatch.setattr('sky.utils.registry.CLOUD_REGISTRY',
@@ -350,6 +353,7 @@ class TestVolumeServer:
         # Mock cloud registry
         mock_cloud = mock.MagicMock()
         mock_cloud.is_same_cloud.return_value = True  # Is Kubernetes
+        mock_cloud.is_volume_name_valid.return_value = (True, None)
         mock_cloud_registry = mock.MagicMock()
         mock_cloud_registry.from_str.return_value = mock_cloud
         monkeypatch.setattr('sky.utils.registry.CLOUD_REGISTRY',
@@ -557,6 +561,7 @@ class TestVolumeServer:
         # Mock cloud registry
         mock_cloud = mock.MagicMock()
         mock_cloud.is_same_cloud.return_value = True
+        mock_cloud.is_volume_name_valid.return_value = (True, None)
         mock_cloud_registry = mock.MagicMock()
         mock_cloud_registry.from_str.return_value = mock_cloud
         monkeypatch.setattr('sky.utils.registry.CLOUD_REGISTRY',
@@ -572,12 +577,14 @@ class TestVolumeServer:
             mock_state.request_id = 'test-request-id'
             mock_state.auth_user = None
 
-            # Test data for RunPod network volume
+            # Test data for RunPod network volume. The zone carries the
+            # DataCenterId, which RunPod network volumes require.
             apply_body = {
                 'name': 'test-runpod-volume',
                 'volume_type': volume.VolumeType.RUNPOD_NETWORK_VOLUME.value,
                 'cloud': 'runpod',
                 'region': 'us-east',
+                'zone': 'CA-MTL-1',
                 'size': '100',
                 'config': {}
             }

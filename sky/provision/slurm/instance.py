@@ -530,8 +530,6 @@ def _create_virtual_instance(
     sky_cluster_home_dir = _sky_cluster_home_dir(sky_base_dir,
                                                  cluster_name_on_cloud)
     ready_signal = f'{sky_cluster_home_dir}/.sky_sbatch_ready'
-    slurm_marker_file = (
-        f'{sky_cluster_home_dir}/{slurm_utils.SLURM_MARKER_FILE}')
 
     # For non-Docker Hub registries, pyxis/enroot requires '#' separator
     # between registry and path. See:
@@ -586,6 +584,11 @@ def _create_virtual_instance(
         mount_paths = [
             f'{remote_home_dir}:{remote_home_dir}',
             f'{host_ccache_dir}:{container_ccache_dir}',
+            # Share only skylet state between the host and container.
+            # Mounting the full runtime dir exposes the host venv.
+            # The container then skips its own venv.
+            # The host python symlink is invalid inside the container.
+            f'{skypilot_runtime_dir}/.sky:{skypilot_runtime_dir}/.sky',
         ]
         # When workdir differs from remote_home_dir (e.g. workdir is on
         # NFS at /home/ubuntu while $HOME is /home_local/ubuntu), mount
@@ -661,6 +664,37 @@ echo "[container-init] Packages installed in $((SECONDS - INIT_START))s"
             f'echo "[container] Ready in $((SECONDS - CONTAINER_START))s"\n'
             f'touch {container_marker_file} {ready_signal}')
 
+    # sbatch batch script ── lives as long as the allocation
+    #   └─ keeper srun client (host side, never enters the container)
+    #        └─ keeper step ── outer loop restarts the step
+    #             └─ run the start spec FOREGROUND ── inner loop restarts skylet
+    #                  └─ skylet (the step cgroup owns it)
+    #
+    # attempt_skylet (any shape, possibly in-container)
+    #   └─ writes <runtime_dir>/.sky/skylet_start ──► read by the keeper loop
+    #        (runtime dir = the same host path in both shapes)
+    #
+    # A nohup'd skylet dies here: proctrack/cgroup reaps whatever a short-lived
+    # step leaves behind. The keeper stays out of the workload container because
+    # the Slurm CLIs, munge, and slurm.conf exist only on the host.
+    keeper_start_file = (
+        f'{skypilot_runtime_dir}/{skylet_constants.SKYLET_START_FILE}')
+    # A spec written in the container inherits HOME=/root.
+    # The keeper restores the host HOME before running it.
+    keeper_loop = (f'while true; do '
+                   f'if [ -f {keeper_start_file} ]; then '
+                   f'HOME={sky_cluster_home_dir} bash {keeper_start_file}; '
+                   f'fi; '
+                   f'sleep 5; done')
+    skylet_keeper_block = (
+        'SKY_HEAD_NODE=$(scontrol show hostnames "$SLURM_JOB_NODELIST" '
+        '| head -n1)\n'
+        f'( while true; do '
+        f'srun --overlap --jobid=$SLURM_JOB_ID --nodes=1 --ntasks=1 '
+        f'--nodelist=$SKY_HEAD_NODE '
+        f'bash -c {shlex.quote(keeper_loop)}; '
+        f'sleep 5; done ) &')
+
     # By default stdout and stderr will be written to $HOME/slurm-%j.out
     # (because we invoke sbatch from $HOME). Redirect elsewhere to not pollute
     # the home directory.
@@ -672,9 +706,6 @@ echo "[container-init] Packages installed in $((SECONDS - INIT_START))s"
         # GB convention.
         mem_in_mb = int(float(resources['memory']) * 1024)
         mem_directive = f'#SBATCH --mem={mem_in_mb}M\n'
-    # TODO(kevin): Pass --overlap to the cleanup sruns below so cleanup can
-    # proceed even when task steps that survived SIGTERM still hold the
-    # allocation's resources.
     # pylint: disable=line-too-long
     # fmt: off
     provision_script = f"""\
@@ -692,8 +723,8 @@ echo "[container-init] Packages installed in $((SECONDS - INIT_START))s"
 # Cleanup function to remove cluster dirs on job termination.
 cleanup() {{
     saved_exit=$?
-    # The Skylet is daemonized, so it is not automatically terminated when
-    # the Slurm job is terminated, we need to kill it manually.
+    # Prevent the keeper from restarting Skylet during cleanup.
+    rm -f "{skypilot_runtime_dir}/{skylet_constants.SKYLET_START_FILE}"
     echo "Terminating Skylet..."
     if [ -f "{skypilot_runtime_dir}/.sky/skylet_pid" ]; then
         kill $(cat "{skypilot_runtime_dir}/.sky/skylet_pid") 2>/dev/null || true
@@ -703,13 +734,13 @@ cleanup() {{
     # This is only needed when container_scope=global.
     # When container_scope=job, named containers are removed automatically
     # at the end of the Slurm job, see: https://github.com/NVIDIA/pyxis/wiki/Setup#slurm-epilog
-    srun --nodes={num_nodes} --ntasks-per-node=1 enroot remove -f {shlex.quote(_enroot_container_name_global_scope(cluster_name_on_cloud))} 2>/dev/null || true
+    srun --overlap --nodes={num_nodes} --ntasks-per-node=1 enroot remove -f {shlex.quote(_enroot_container_name_global_scope(cluster_name_on_cloud))} 2>/dev/null || true
     # Clean up sky runtime directory on each node.
     # NOTE: We can do this because --nodes for both this srun and the
     # sbatch is the same number. Otherwise, there are no guarantees
     # that this srun will run on the same subset of nodes as the srun
     # that created the sky directories.
-    srun --nodes={num_nodes} rm -rf {skypilot_runtime_dir}
+    srun --overlap --nodes={num_nodes} rm -rf {skypilot_runtime_dir}
     rm -rf {sky_cluster_home_dir}
     exit $saved_exit
 }}
@@ -722,16 +753,18 @@ trap 'exit 0' TERM
 # Create sky home directory and subdirectories for the cluster.
 mkdir -p {sky_cluster_home_dir}/sky_logs {sky_cluster_home_dir}/sky_workdir {sky_cluster_home_dir}/.sky
 # Create sky runtime directory on each node.
-srun --nodes={num_nodes} mkdir -p {skypilot_runtime_dir}
+srun --nodes={num_nodes} mkdir -p {skypilot_runtime_dir}/.sky
 # Marker file to indicate we're in a Slurm cluster.
-touch {slurm_marker_file}
+srun --nodes={num_nodes} touch {skypilot_runtime_dir}/.sky/{slurm_utils.SLURM_MARKER_FILE}
 # Store proctrack type for task executor to read.
 echo '{proctrack_type or "unknown"}' > {sky_cluster_home_dir}/{skylet_constants.SLURM_PROCTRACK_TYPE_FILE}
 # Suppress login messages.
 touch {sky_cluster_home_dir}/.hushlogin
 {container_block}
 {f'touch {ready_signal}' if container_image is None else ''}
-{'sleep infinity' if container_image is None else 'wait'}
+# Host-side keeper step that starts skylet and restarts it if it dies.
+{skylet_keeper_block}
+{'sleep infinity' if container_image is None else 'wait "$CONTAINER_PID"'}
 """
     # fmt: on
     # pylint: enable=line-too-long

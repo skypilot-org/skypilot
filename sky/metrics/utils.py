@@ -220,6 +220,18 @@ SKY_APISERVER_EVENT_LOOP_LAG_MAX_SECONDS = prom.Gauge(
     multiprocess_mode='liveall',
 )
 
+# Source attribution for the stalls the two series above only measure: one
+# increment per stall, labeled with the code that was blocking the loop. The
+# writer caps how many distinct label values it will emit per process
+# (collapsing the rest into 'other'), so this stays low cardinality even if a
+# deployment manages to stall in many different places. See
+# sky/server/loop_stall.py.
+SKY_APISERVER_EVENT_LOOP_STALL_TOTAL = prom.Counter(
+    'sky_apiserver_event_loop_stall_total',
+    'Event loop stalls, by the code that was blocking the loop',
+    ['source'],
+)
+
 SKY_APISERVER_WEBSOCKET_CONNECTIONS = prom.Gauge(
     'sky_apiserver_websocket_connections',
     'Number of websocket connections',
@@ -481,6 +493,16 @@ def record_federation_payload(context: str, route: str, num_bytes: int) -> None:
     if METRICS_ENABLED:
         SKY_APISERVER_FEDERATION_PAYLOAD_BYTES.labels(
             context=context, route=route).observe(num_bytes)
+
+
+def record_event_loop_stall(source: str) -> None:
+    """Records one event loop stall attributed to `source` (non-blocking).
+
+    Called from the stall watchdog thread, so it must not block: a pure
+    in-memory inc() with no I/O.
+    """
+    if METRICS_ENABLED:
+        SKY_APISERVER_EVENT_LOOP_STALL_TOTAL.labels(source=source).inc()
 
 
 def record_federation_outcome(context: str, route: str, outcome: str) -> None:

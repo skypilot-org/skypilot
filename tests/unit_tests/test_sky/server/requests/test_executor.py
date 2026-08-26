@@ -797,7 +797,12 @@ class _RecordingCondition(continue_condition_lib.ContinueCondition):
         self._verdict = verdict
         self.calls = []
 
-    def wait(self, *, is_cancelled, fallback_wait_seconds) -> bool:
+    def wait(self,
+             *,
+             is_cancelled,
+             fallback_wait_seconds,
+             update_status_msg=None) -> bool:
+        del update_status_msg  # This condition reports no reason.
         self.calls.append({
             'is_cancelled': is_cancelled(),
             'fallback_wait_seconds': fallback_wait_seconds,
@@ -870,6 +875,144 @@ def test_pause_base_condition_dropped_if_cancelled_during_wait(
     assert pause_harness.queue_items == []
 
 
+class _ReportingCondition(continue_condition_lib.ContinueCondition):
+    """A condition that pushes fresh reasons while parked."""
+
+    def __init__(self, reasons, before_report=None):
+        self._reasons = reasons
+        self._before_report = before_report
+        self.got_updater = None
+
+    def wait(self,
+             *,
+             is_cancelled,
+             fallback_wait_seconds,
+             update_status_msg=None) -> bool:
+        del is_cancelled, fallback_wait_seconds
+        self.got_updater = update_status_msg
+        if self._before_report is not None:
+            self._before_report()
+        for reason in self._reasons:
+            assert update_status_msg is not None
+            update_status_msg(reason)
+        return True
+
+
+def test_pause_status_msg_refreshed_while_parked(pause_harness):
+    """A parked request's status message follows the condition's latest reason.
+
+    A pause can last hours (e.g. waiting on queue admission), so the message
+    the client is shown must not be frozen at the one written when the request
+    parked. The scheduler owns the formatting, so the refreshed message carries
+    the same suffix as the initial one.
+    """
+    condition = _ReportingCondition(
+        reasons=['Pending (Queue: q, Position: 4)', 'Pending (Queue: q)'])
+
+    pause_harness.run(condition, retry_wait_seconds=30)
+
+    assert condition.got_updater is not None
+    updated = requests_lib.get_request(pause_harness.request_id,
+                                       fields=['status_msg'])
+    # The last reason wins, formatted exactly like the initial message.
+    assert updated.status_msg == 'Pending (Queue: q) (waiting to resume)'
+
+
+def test_pause_status_msg_refresh_skipped_once_not_waiting(pause_harness):
+    """A late refresh must not resurrect a parked message.
+
+    The wait runs concurrently with cancellation (and with the resume that
+    follows it), so a reason arriving after the request left WAITING must be
+    dropped rather than overwrite the newer state's message.
+    """
+
+    def cancel():
+        with requests_lib.update_request(pause_harness.request_id) as request:
+            request.status = requests_lib.RequestStatus.CANCELLED
+            request.status_msg = 'cancelled by user'
+
+    condition = _ReportingCondition(reasons=['Pending (Queue: q, Position: 4)'],
+                                    before_report=cancel)
+
+    pause_harness.run(condition, retry_wait_seconds=30)
+
+    updated = requests_lib.get_request(pause_harness.request_id,
+                                       fields=['status_msg'])
+    assert updated.status_msg == 'cancelled by user'
+
+
+def test_pause_status_msg_reason_truncated(pause_harness):
+    """A long reason is truncated but keeps the suffix readable."""
+    condition = _ReportingCondition(reasons=['x' * 500])
+
+    pause_harness.run(condition, retry_wait_seconds=30)
+
+    updated = requests_lib.get_request(pause_harness.request_id,
+                                       fields=['status_msg'])
+    assert updated.status_msg.endswith('... (waiting to resume)')
+    assert len(updated.status_msg) < 250
+
+
+class _LegacyWaitCondition:
+    """A duck-typed condition whose wait() predates update_status_msg."""
+
+    def __init__(self):
+        self.calls = []
+
+    def wait(self, *, is_cancelled, fallback_wait_seconds) -> bool:
+        self.calls.append(fallback_wait_seconds)
+        del is_cancelled
+        return True
+
+
+class _KwargsWaitCondition:
+    """A duck-typed condition that absorbs unknown kwargs."""
+
+    def __init__(self):
+        self.kwargs = []
+
+    def wait(self, *, is_cancelled, fallback_wait_seconds, **kwargs) -> bool:
+        del is_cancelled, fallback_wait_seconds
+        self.kwargs.append(sorted(kwargs))
+        return True
+
+
+def test_pause_tolerates_condition_wait_without_the_new_kwarg(pause_harness):
+    """A condition from a separately versioned package still waits normally.
+
+    The continue-condition contract is duck-typed, so an implementation whose
+    wait() predates update_status_msg must keep parking the request rather than
+    failing the call and degrading to a fixed-backoff retry loop.
+    """
+    condition = _LegacyWaitCondition()
+
+    request_element = pause_harness.run(condition, retry_wait_seconds=30)
+
+    assert condition.calls == [30]
+    assert pause_harness.queue_items == [request_element]
+
+
+def test_pause_passes_the_new_kwarg_to_a_kwargs_absorbing_wait(pause_harness):
+    """A wait() with **kwargs is given the updater rather than skipped."""
+    condition = _KwargsWaitCondition()
+
+    pause_harness.run(condition, retry_wait_seconds=30)
+
+    assert condition.kwargs == [['update_status_msg']]
+
+
+@pytest.mark.parametrize(('reason', 'suffix', 'expected'), [
+    ('Pending (Queue: q)', 'waiting to resume',
+     'Pending (Queue: q) (waiting to resume)'),
+    ('multi\nline   reason', 'retrying in 5s',
+     'multi line reason (retrying in 5s)'),
+    ('', 'waiting to resume', 'Waiting to resume'),
+])
+def test_waiting_status_msg_formatting(reason, suffix, expected):
+    """Whitespace is collapsed, and an empty reason leaves just the suffix."""
+    assert executor._waiting_status_msg(reason, suffix) == expected
+
+
 def test_pause_marks_executor_free_before_wait(pause_harness, monkeypatch):
     """The freed worker process is accounted for before the pause wait runs.
 
@@ -891,8 +1034,12 @@ def test_pause_marks_executor_free_before_wait(pause_harness, monkeypatch):
 
     class _GaugeWatchingCondition(continue_condition_lib.ContinueCondition):
 
-        def wait(self, *, is_cancelled, fallback_wait_seconds) -> bool:
-            del is_cancelled, fallback_wait_seconds
+        def wait(self,
+                 *,
+                 is_cancelled,
+                 fallback_wait_seconds,
+                 update_status_msg=None) -> bool:
+            del is_cancelled, fallback_wait_seconds, update_status_msg
             inc_count_at_wait.append(gauge.inc.call_count)
             return True
 

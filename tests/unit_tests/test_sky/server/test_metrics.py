@@ -2,11 +2,13 @@
 
 import base64
 import os
+import socket
 import threading
 import time
 from unittest.mock import AsyncMock
 from unittest.mock import MagicMock
 from unittest.mock import patch
+import urllib.request
 
 import fastapi
 from prometheus_client import CollectorRegistry
@@ -302,9 +304,12 @@ async def test_multiproc_reaper_daemon_loops_and_cancels(tmp_path):
                side_effect=fake_reap):
         task = asyncio.create_task(
             metrics.multiproc_reaper_daemon(interval_seconds=0))
-        # Yield enough times for several ticks to run.
-        for _ in range(5):
-            await asyncio.sleep(0)
+        # The daemon reaps on a worker thread (asyncio.to_thread), so
+        # yielding a fixed number of times races that thread getting
+        # scheduled -- under load it loses. Wait for the first tick.
+        deadline = time.time() + 10
+        while call_count['n'] < 1 and time.time() < deadline:
+            await asyncio.sleep(0.01)
         task.cancel()
         try:
             await task
@@ -1297,3 +1302,79 @@ def test_metrics_endpoint_responsive_with_hung_plugin_collector():
         prom.REGISTRY.unregister(wrapper)
         metrics._plugin_collectors.remove(wrapper)
         metrics._resilient_collectors.remove(wrapper)
+
+
+def _live_thread_named(name):
+    for thread in threading.enumerate():
+        if thread.name == name:
+            return thread
+    return None
+
+
+def test_start_metrics_server_serves_from_its_own_thread(monkeypatch):
+    """The metrics app must be served from a thread, hence an event loop,
+    of its own.
+
+    A sync endpoint is dispatched through the serving loop's *default*
+    anyio thread limiter, so sharing a loop with the API server's
+    background daemons makes a scrape queue behind however much
+    ``anyio`` thread work they have outstanding -- enough to push it past
+    the Prometheus scrape timeout and flap the target to ``up == 0``.
+    Keeping the server on a private thread is what decouples them, so
+    assert on the thread rather than only on the response.
+    """
+    monkeypatch.delenv('PROMETHEUS_MULTIPROC_DIR', raising=False)
+    # Port 0: let the kernel pick, then read the bound port back, so the
+    # test cannot lose a race for a hardcoded port.
+    server = metrics.start_metrics_server('127.0.0.1', 0)
+    try:
+        assert _wait_until(lambda: server.started), 'server never started'
+        thread = _live_thread_named('metrics-server')
+        assert thread is not None, 'no dedicated metrics-server thread'
+        assert thread is not threading.main_thread()
+
+        port = server.servers[0].sockets[0].getsockname()[1]
+        with urllib.request.urlopen(f'http://127.0.0.1:{port}/metrics',
+                                    timeout=30) as response:
+            body = response.read()
+            assert response.status == 200
+            assert response.headers['content-type'] == CONTENT_TYPE_LATEST
+        assert body  # the collectors produced something
+    finally:
+        metrics.stop_metrics_server()
+    assert _wait_until(lambda: not thread.is_alive()), 'thread did not exit'
+
+
+def test_stop_metrics_server_without_start_is_noop():
+    """Shutdown runs unconditionally, including when metrics are disabled
+    and no server was ever started."""
+    saved = metrics._metrics_server
+    metrics._metrics_server = None
+    try:
+        metrics.stop_metrics_server()
+    finally:
+        metrics._metrics_server = saved
+
+
+def test_metrics_server_reports_a_bind_failure(monkeypatch):
+    """A metrics server that never came up must say so.
+
+    uvicorn answers an unbindable port with sys.exit(1), i.e. SystemExit,
+    which is not an Exception and which threading.excepthook drops
+    silently -- so the thread would just vanish and the scrape target
+    would look down for no stated reason.
+    """
+    monkeypatch.delenv('PROMETHEUS_MULTIPROC_DIR', raising=False)
+    blocker = socket.socket()
+    blocker.bind(('127.0.0.1', 0))
+    blocker.listen(1)
+    port = blocker.getsockname()[1]
+    try:
+        with patch.object(metrics, 'logger') as mock_logger:
+            server = metrics.start_metrics_server('127.0.0.1', port)
+            assert _wait_until(lambda: _live_thread_named('metrics-server') is
+                               None), ('thread outlived the failed bind')
+            assert not server.started
+            assert mock_logger.error.called, 'bind failure was not reported'
+    finally:
+        blocker.close()
