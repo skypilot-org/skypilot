@@ -1556,18 +1556,52 @@ def test_add_and_remove_pod_annotations_with_autostop():
 @pytest.mark.kubernetes
 def test_volumes_on_kubernetes():
     name = smoke_tests_utils.get_cluster_name()
+    # Volume names on the API server and PVC names in the cluster are both
+    # shared namespaces, so every name here carries the run's id. With fixed
+    # names a concurrent run adopts this run's volumes -- `sky volumes apply`
+    # is idempotent by name -- and then deletes them in its own teardown.
+    pvc0 = f'{name}-pvc0'
+    pvc1 = f'{name}-pvc1'
+    # existing0 is imported under its PVC's own name; existing1 is imported
+    # under a different volume name, matched by its skypilot-name label.
+    existing0 = f'{name}-existing0'
+    existing1 = f'{name}-existing1'
+    vol_existing1 = f'{name}-vol-existing1'
+    name_on_cloud = common_utils.make_cluster_name_on_cloud(
+        name, sky.Kubernetes.max_cluster_name_length())
+    # A launch names the volume it creates for an inline `volumes:` entry after
+    # the cluster, so matching on `{name}` alone would also match the volumes
+    # above. The grep for this prefix after the first launch is what keeps it
+    # honest: on a wrong prefix the delete check below would pass vacuously.
+    ephemeral_prefix = f'{name_on_cloud}-'
+    # The PVCs that must be gone once the volumes are deleted. SkyPilot labels
+    # every PVC it creates with the volume it backs, and an inline one with its
+    # cluster, so these select exactly this run's -- a name substring would also
+    # match another run's PVCs.
+    pvc_selectors = (f'"skypilot-name={pvc0}" "skypilot-name={pvc1}" '
+                     f'"skypilot-cluster-name={name_on_cloud}"')
+    list_deleted_pvcs = (f'for sel in {pvc_selectors}; do '
+                         'kubectl get pvc --no-headers -l "$sel"; done')
+    # Read before the deletes, so that the check after them cannot pass on a
+    # selector that never matched anything in the first place.
+    assert_pvcs_present = (
+        f'for sel in {pvc_selectors}; do '
+        'p=$(kubectl get pvc --no-headers -l "$sel"); echo "$sel -> $p"; '
+        '[ -n "$p" ] || { echo "no PVC is labelled $sel"; exit 1; }; done')
     test = smoke_tests_utils.Test(
         'volumes_on_kubernetes',
         [
             smoke_tests_utils.launch_cluster_for_cloud_cmd('kubernetes', name),
+            # No pre-emptive delete: the names are unique to this run, so there
+            # is nothing stale to clear, and a delete here is what would make a
+            # concurrent run destructive rather than merely confusing.
             smoke_tests_utils.run_cloud_cmd_on_cluster(
                 name,
-                f'kubectl delete pvc existing0 --ignore-not-found && '
                 f'kubectl create -f - <<EOF\n'
                 f'apiVersion: v1\n'
                 f'kind: PersistentVolumeClaim\n'
                 f'metadata:\n'
-                f'  name: existing0\n'
+                f'  name: {existing0}\n'
                 f'spec:\n'
                 f'  accessModes:\n'
                 f'    - ReadWriteOnce\n'
@@ -1578,14 +1612,13 @@ def test_volumes_on_kubernetes():
             ),
             smoke_tests_utils.run_cloud_cmd_on_cluster(
                 name,
-                f'kubectl delete pvc existing1 --ignore-not-found && '
                 f'kubectl create -f - <<EOF\n'
                 f'apiVersion: v1\n'
                 f'kind: PersistentVolumeClaim\n'
                 f'metadata:\n'
-                f'  name: existing1\n'
+                f'  name: {existing1}\n'
                 f'  labels:\n'
-                f'    skypilot-name: vol-existing1\n'
+                f'    skypilot-name: {vol_existing1}\n'
                 f'spec:\n'
                 f'  accessModes:\n'
                 f'    - ReadWriteOnce\n'
@@ -1597,46 +1630,49 @@ def test_volumes_on_kubernetes():
             smoke_tests_utils.run_cloud_cmd_on_cluster(
                 name, 'end=$((SECONDS+60)); '
                 'while [ $SECONDS -lt $end ]; do '
-                'if kubectl get pvc existing0; then exit 0; fi; '
+                f'if kubectl get pvc {existing0}; then exit 0; fi; '
                 'sleep 1; '
                 'done; '
-                'echo "Timeout waiting for PVC existing0 to appear"; '
+                f'echo "Timeout waiting for PVC {existing0} to appear"; '
                 'kubectl get pvc; exit 1'),
-            f'sky volumes apply -y -n pvc0 --type k8s-pvc --size 2GB',
-            f'sky volumes apply -y -n existing0 --type k8s-pvc --size 2GB --use-existing',
-            f'sky volumes apply -y -n vol-existing1 --type k8s-pvc --size 2GB --use-existing',
-            f'vols=$(sky volumes ls) && echo "$vols" && echo "$vols" | grep "pvc0" && echo "$vols" | grep "existing0" && echo "$vols" | grep "vol-existing1"',
+            f'sky volumes apply -y -n {pvc0} --type k8s-pvc --size 2GB',
+            f'sky volumes apply -y -n {existing0} --type k8s-pvc --size 2GB --use-existing',
+            f'sky volumes apply -y -n {vol_existing1} --type k8s-pvc --size 2GB --use-existing',
+            f'vols=$(sky volumes ls) && echo "$vols" && echo "$vols" | grep "{pvc0}" && echo "$vols" | grep "{existing0}" && echo "$vols" | grep "{vol_existing1}"',
             # `apply` only starts provisioning; launching before the claims
             # bind is refused with VolumeNotReadyError.
-            smoke_tests_utils.get_cmd_wait_until_volume_is_ready('pvc0'),
-            smoke_tests_utils.get_cmd_wait_until_volume_is_ready('existing0'),
-            smoke_tests_utils.get_cmd_wait_until_volume_is_ready(
-                'vol-existing1'),
-            f'sky launch -y -c {name} --infra kubernetes tests/test_yamls/pvc_volume.yaml',
+            smoke_tests_utils.get_cmd_wait_until_volume_is_ready(pvc0),
+            smoke_tests_utils.get_cmd_wait_until_volume_is_ready(existing0),
+            smoke_tests_utils.get_cmd_wait_until_volume_is_ready(vol_existing1),
+            # The volume names the task YAML mounts are prefixed with
+            # ${VOL_PREFIX}, which `volumes:` substitutes from the task envs.
+            f'sky launch -y -c {name} --infra kubernetes --env VOL_PREFIX={name} tests/test_yamls/pvc_volume.yaml',
             f'sky logs {name} 1 --status',  # Ensure the job succeeded.
-            f'vols=$(sky volumes ls) && echo "$vols" && echo "$vols" | grep "{name}"',
+            f'vols=$(sky volumes ls) && echo "$vols" && echo "$vols" | grep "{ephemeral_prefix}"',
             # Test volume mounting warning on relaunch with new volume
             # Create a new volume pvc1
-            f'sky volumes apply -y -n pvc1 --type k8s-pvc --size 2GB',
+            f'sky volumes apply -y -n {pvc1} --type k8s-pvc --size 2GB',
             # pvc1 is mounted by the last launch below, so it has to bind
             # first; readiness does not make the relaunch mount it.
-            smoke_tests_utils.get_cmd_wait_until_volume_is_ready('pvc1'),
+            smoke_tests_utils.get_cmd_wait_until_volume_is_ready(pvc1),
             # Launch with the new volume - should show warning that pvc1 and /mnt/data4 won't be mounted
-            f's=$(sky launch -y -c {name} --infra kubernetes tests/test_yamls/pvc_volume_with_new.yaml 2>&1 | tee /dev/stderr) && echo "$s" | grep -i "WARNING: New ephemeral volume(s) with path /mnt/data4 and new volume(s) pvc1 specified in task but not mounted"',
+            f's=$(sky launch -y -c {name} --infra kubernetes --env VOL_PREFIX={name} tests/test_yamls/pvc_volume_with_new.yaml 2>&1 | tee /dev/stderr) && echo "$s" | grep -i "WARNING: New ephemeral volume(s) with path /mnt/data4 and new volume(s) {pvc1} specified in task but not mounted"',
             f'sky logs {name} 2 --status',  # Ensure the second job succeeded.
             f'sky down -y {name}',
-            f'sky launch -y -c {name} --infra kubernetes tests/test_yamls/pvc_volume_with_new.yaml --env HAVE_SUB_DIR=true --env NEW_LAUNCH=true',
+            f'sky launch -y -c {name} --infra kubernetes --env VOL_PREFIX={name} tests/test_yamls/pvc_volume_with_new.yaml --env HAVE_SUB_DIR=true --env NEW_LAUNCH=true',
             f'sky logs {name} 1 --status',  # Ensure the first job on the new cluster succeeded.
-            f'sky down -y {name} && sky volumes ls && sky volumes delete pvc0 existing0 pvc1 vol-existing1 -y',
+            smoke_tests_utils.run_cloud_cmd_on_cluster(name,
+                                                       assert_pvcs_present),
+            f'sky down -y {name} && sky volumes ls && sky volumes delete {pvc0} {existing0} {pvc1} {vol_existing1} -y',
             # Volume deletion is asynchronous, so poll until each deleted
             # volume disappears from `sky volumes ls` instead of checking once.
-            smoke_tests_utils.get_cmd_wait_until_volume_is_not_found('pvc0'),
+            smoke_tests_utils.get_cmd_wait_until_volume_is_not_found(pvc0),
+            smoke_tests_utils.get_cmd_wait_until_volume_is_not_found(existing0),
+            smoke_tests_utils.get_cmd_wait_until_volume_is_not_found(pvc1),
             smoke_tests_utils.get_cmd_wait_until_volume_is_not_found(
-                'existing0'),
-            smoke_tests_utils.get_cmd_wait_until_volume_is_not_found('pvc1'),
+                vol_existing1),
             smoke_tests_utils.get_cmd_wait_until_volume_is_not_found(
-                'vol-existing1'),
-            smoke_tests_utils.get_cmd_wait_until_volume_is_not_found(name),
+                ephemeral_prefix, match_prefix=True),
             smoke_tests_utils.run_cloud_cmd_on_cluster(
                 name,
                 # PVC teardown for deleted volumes is asynchronous, so poll
@@ -1645,30 +1681,36 @@ def test_volumes_on_kubernetes():
                 # must be preserved.
                 'end=$((SECONDS+120)); '
                 'while [ $SECONDS -lt $end ]; do '
-                'pvcs=$(kubectl get pvc); echo "$pvcs"; '
-                'if ! echo "$pvcs" | grep -q "pvc0" && '
-                '! echo "$pvcs" | grep -q "pvc1" && '
-                f'! echo "$pvcs" | grep -q "{name}"; then break; fi; '
-                'echo "Waiting for deleted volume PVCs to be removed..."; '
+                f'left=$({list_deleted_pvcs}); '
+                'if [ -z "$left" ]; then break; fi; '
+                'echo "Waiting for PVCs of deleted volumes: $left"; '
                 'sleep 5; '
-                'done && '
-                'pvcs=$(kubectl get pvc) && echo "$pvcs" && '
-                'if echo "$pvcs" | grep -q "pvc0"; then echo "pvc for volume pvc0 not deleted" && exit 1; else echo "pvc for volume pvc0 deleted"; fi && '
-                'if echo "$pvcs" | grep -q "pvc1"; then echo "pvc for volume pvc1 not deleted" && exit 1; else echo "pvc for volume pvc1 deleted"; fi && '
-                f'if echo "$pvcs" | grep -q "{name}"; then echo "pvc for ephemeral volume of cluster {name} not deleted" && exit 1; else echo "pvc for ephemeral volume of cluster {name} deleted"; fi && '
-                # existing0 was imported with use_existing=True; the underlying PVC is preserved on delete.
-                'if ! echo "$pvcs" | grep -q "existing0"; then echo "pvc for imported volume existing0 was unexpectedly deleted" && exit 1; else echo "pvc for imported volume existing0 preserved"; fi && '
-                # vol-existing1 wraps an imported PVC named "existing1" (matched by label); that PVC is preserved on delete.
-                'if ! echo "$pvcs" | grep -q "existing1"; then echo "pvc for imported volume vol-existing1 was unexpectedly deleted" && exit 1; else echo "pvc for imported volume vol-existing1 preserved"; fi',
+                'done; '
+                f'left=$({list_deleted_pvcs}); '
+                'if [ -n "$left" ]; then '
+                'echo "PVCs of deleted volumes still present: $left"; '
+                'kubectl get pvc; exit 1; fi && '
+                'echo "PVCs of deleted volumes are gone" && '
+                f'kubectl get pvc {existing0} && '
+                f'kubectl get pvc {existing1} && '
+                'echo "PVCs of imported volumes preserved"',
             ),
         ],
         smoke_tests_utils.chain_teardown(
-            smoke_tests_utils.down_cluster_for_cloud_cmd(name),
-            'vols=$(sky volumes ls) && echo "$vols"', *[
+            'vols=$(sky volumes ls) && echo "$vols"',
+            *[
                 f'if echo "$vols" | grep -q "{vol}"; then '
                 f'sky volumes delete {vol} -y; fi'
-                for vol in ['existing0', 'pvc0', 'pvc1', 'vol-existing1']
-            ]),
+                for vol in [existing0, pvc0, pvc1, vol_existing1]
+            ],
+            # The imported PVCs outlive the volumes that wrapped them --
+            # use_existing preserves the backing resource -- so nothing else
+            # would ever delete them. `--wait=false` so a still-running test
+            # cluster holding the claim does not stall the teardown.
+            smoke_tests_utils.run_cloud_cmd_on_cluster(
+                name, f'kubectl delete pvc {existing0} {existing1} '
+                f'--ignore-not-found --wait=false'),
+            smoke_tests_utils.down_cluster_for_cloud_cmd(name)),
     )
     smoke_tests_utils.run_one_test(test)
 
@@ -1676,27 +1718,30 @@ def test_volumes_on_kubernetes():
 # ---------- Enable Docker on Kubernetes ----------
 @pytest.mark.kubernetes
 @pytest.mark.parametrize(
-    'yaml_file,volumes_needed,sidecar,cache_mount',
+    'yaml_file,case,uses_volumes,sidecar,cache_mount',
     [
-        ('tests/test_yamls/test_enable_all_default.yaml', [], 'dind',
+        ('tests/test_yamls/test_enable_all_default.yaml', 'all', False, 'dind',
          '/var/lib/docker'),
-        ('tests/test_yamls/test_enable_all_dv.yaml',
-         ['docker-all-vol0', 'docker-all-vol1'], 'dind', '/var/lib/docker'),
-        ('tests/test_yamls/test_enable_build_default.yaml', [], 'buildkitd',
-         '/home/user/.local/share/buildkit'),
-        ('tests/test_yamls/test_enable_build_dv.yaml', [
-            'docker-build-vol0', 'docker-build-vol1'
-        ], 'buildkitd', '/home/user/.local/share/buildkit'),
+        ('tests/test_yamls/test_enable_all_dv.yaml.j2', 'all-dv', True, 'dind',
+         '/var/lib/docker'),
+        ('tests/test_yamls/test_enable_build_default.yaml', 'build', False,
+         'buildkitd', '/home/user/.local/share/buildkit'),
+        ('tests/test_yamls/test_enable_build_dv.yaml.j2', 'build-dv', True,
+         'buildkitd', '/home/user/.local/share/buildkit'),
     ],
 )
-def test_enable_docker_on_kubernetes(yaml_file, volumes_needed, sidecar,
+def test_enable_docker_on_kubernetes(yaml_file, case, uses_volumes, sidecar,
                                      cache_mount):
-    name = smoke_tests_utils.get_cluster_name()
+    # Volume names are shared with any concurrent run, and get_cluster_name()
+    # keys off the (shared) test function name -- so the case id goes into both
+    # the cluster name and the volume names.
+    name = f'{smoke_tests_utils.get_cluster_name()}-{case}'
     name_on_cloud = common_utils.make_cluster_name_on_cloud(
         name, sky.Kubernetes.max_cluster_name_length())
 
+    volumes = [f'{name}-vol0', f'{name}-vol1'] if uses_volumes else []
     setup_cmds: List[str] = []
-    for vol in volumes_needed:
+    for vol in volumes:
         setup_cmds.append(
             f'sky volumes apply -y -n {vol} --type k8s-pvc --size 2GB')
         # `apply` only starts provisioning; the launch below mounts the volume
@@ -1710,31 +1755,41 @@ def test_enable_docker_on_kubernetes(yaml_file, volumes_needed, sidecar,
         f'kubectl exec {name_on_cloud}-head -c {sidecar} -- df -a '
         f'| grep {cache_mount}')
 
-    test_cmds: List[str] = [
-        *setup_cmds,
-        f'sky launch -y -c {name} --infra kubernetes {yaml_file}',
-        f'sky logs {name} 1 --status',
-        # Pin the cloud-cmd helper to the context the target landed on so its
-        # in-cluster kubectl can see the target's resources.
-        smoke_tests_utils.resolve_k8s_context_cmd(name),
-        smoke_tests_utils.launch_cloud_cmd_on_landed_context(name),
-        smoke_tests_utils.run_cloud_cmd_on_cluster(name, verify_mount_cmd),
-    ]
+    # The _dv cases take their volume names from this run, through a template;
+    # the default ones have nothing to fill in and are launched as they are.
+    content = pathlib.Path(yaml_file).read_text()
+    if volumes:
+        content = jinja2.Template(content).render(mount_volume=volumes[0],
+                                                  cache_volume=volumes[1])
 
-    teardown_parts = [
-        f'sky down -y {name}',
-        smoke_tests_utils.down_cluster_for_cloud_cmd(name),
-    ]
-    for vol in volumes_needed:
-        teardown_parts.append(f'sky volumes delete {vol} -y || true')
-    teardown = smoke_tests_utils.chain_teardown(*teardown_parts)
+    with tempfile.NamedTemporaryFile('w', suffix='.yaml') as f:
+        f.write(content)
+        f.flush()
+        test_cmds: List[str] = [
+            *setup_cmds,
+            f'sky launch -y -c {name} --infra kubernetes {f.name}',
+            f'sky logs {name} 1 --status',
+            # Pin the cloud-cmd helper to the context the target landed on so
+            # its in-cluster kubectl can see the target's resources.
+            smoke_tests_utils.resolve_k8s_context_cmd(name),
+            smoke_tests_utils.launch_cloud_cmd_on_landed_context(name),
+            smoke_tests_utils.run_cloud_cmd_on_cluster(name, verify_mount_cmd),
+        ]
 
-    test = smoke_tests_utils.Test(
-        'enable_docker_on_kubernetes',
-        test_cmds,
-        teardown,
-    )
-    smoke_tests_utils.run_one_test(test)
+        teardown_parts = [
+            f'sky down -y {name}',
+            smoke_tests_utils.down_cluster_for_cloud_cmd(name),
+        ]
+        for vol in volumes:
+            teardown_parts.append(f'sky volumes delete {vol} -y || true')
+        teardown = smoke_tests_utils.chain_teardown(*teardown_parts)
+
+        test = smoke_tests_utils.Test(
+            'enable_docker_on_kubernetes',
+            test_cmds,
+            teardown,
+        )
+        smoke_tests_utils.run_one_test(test)
 
 
 @pytest.mark.kubernetes
@@ -2198,7 +2253,11 @@ def test_volume_used_before_its_rejection_is_recorded(attach_via):
     the claim throughout. That the launch got that far is the assertion: a
     refusal would have said the volume is not ready instead.
     """
-    name = smoke_tests_utils.get_cluster_name()
+    # Both cases would otherwise share this name -- get_cluster_name() keys off
+    # the test function -- and with it the volume and the cluster-scoped storage
+    # class, whenever the run does not serialize its Kubernetes tests.
+    attach_id = attach_via.split('_')[0]
+    name = f'{smoke_tests_utils.get_cluster_name()}-{attach_id}'
     volume_name = f'{name}-imm'
     volume_yaml = textwrap.dedent(f"""\
         name: {volume_name}
@@ -2412,9 +2471,13 @@ def test_ephemeral_pending_volume_on_kubernetes(binding_mode):
     Both binding modes are covered because they fail in different places. An
     Immediate claim is already being provisioned when the pods appear, so its
     events start before them; a WaitForFirstConsumer claim is not touched until
-    the scheduler picks a node for a pod.
+    the scheduler picks a node for a pod. That coverage rests on the suffix
+    below: a StorageClass is cluster-scoped and named after the test, so without
+    it -- whenever the run does not serialize its Kubernetes tests -- the case
+    that creates the class last decides the binding mode both of them see.
     """
-    name = smoke_tests_utils.get_cluster_name()
+    mode_id = 'imm' if binding_mode == 'Immediate' else 'wffc'
+    name = f'{smoke_tests_utils.get_cluster_name()}-{mode_id}'
     task_yaml = textwrap.dedent(f"""\
         resources:
           cpus: 0.1+
