@@ -2367,14 +2367,24 @@ export function ManagedJobsTable({
           if (errorText === externalErrorsDismissed) return null;
           return (
             <div className="mb-3 flex items-start justify-between rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
-              <span>
-                Failed to fetch Slurm jobs from{' '}
-                {externalFetchErrors.length === 1
-                  ? 'cluster'
-                  : 'clusters'}{' '}
-                {externalFetchErrors.map((f) => f.cluster).join(', ')} — their
-                jobs may be missing or stale. ({errorText})
-              </span>
+              <div>
+                <div>
+                  Failed to fetch Slurm jobs from{' '}
+                  {externalFetchErrors.length === 1
+                    ? 'cluster'
+                    : 'clusters'}{' '}
+                  {externalFetchErrors.map((f) => f.cluster).join(', ')} —
+                  their jobs may be missing or stale.
+                </div>
+                {externalFetchErrors.map((f) => (
+                  <div
+                    key={f.cluster}
+                    className="mt-1 font-mono text-xs text-amber-700"
+                  >
+                    {f.cluster}: {f.error}
+                  </div>
+                ))}
+              </div>
               <button
                 onClick={() => setExternalErrorsDismissed(errorText)}
                 className="ml-3 flex-shrink-0 font-medium text-amber-800 hover:text-amber-900"
