@@ -1145,6 +1145,25 @@ def test_prune_sky_logs_removes_expired_file_upload_logs(
     assert fresh_log.exists()
 
 
+def test_prune_sky_logs_does_not_follow_symlinks(tmp_path, monkeypatch,
+                                                 _no_provision_log_paths):
+    """Symlinks are never traversed, so their targets are left untouched."""
+    monkeypatch.setattr(constants, 'SKY_LOGS_DIRECTORY', str(tmp_path))
+    now = 1_000_000.0
+    outside = _touch_dir(tmp_path / 'outside' / 'target', now - 10_000)
+    (tmp_path / 'sky-2020-01-01-00-00-00-000000').symlink_to(outside)
+    outside_file = _touch_file(tmp_path / 'outside' / 'target.log',
+                               now - 10_000)
+    (tmp_path / 'file_uploads').mkdir()
+    (tmp_path / 'file_uploads' / 'sky-link.log').symlink_to(outside_file)
+
+    removed = server._prune_sky_logs(cutoff=now - 5_000)
+
+    assert removed == 0
+    assert outside.exists()
+    assert outside_file.exists()
+
+
 def test_prune_sky_logs_missing_dir_is_noop(tmp_path, monkeypatch):
     monkeypatch.setattr(constants, 'SKY_LOGS_DIRECTORY',
                         str(tmp_path / 'does-not-exist'))

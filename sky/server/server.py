@@ -18,6 +18,7 @@ import resource
 import shlex
 import shutil
 import socket
+import stat
 import struct
 import subprocess
 import sys
@@ -851,12 +852,18 @@ def _prune_sky_logs(cutoff: float) -> int:
         for path in global_user_state.get_all_cluster_provision_log_paths()
     }
     removed = 0
+    # os.stat releases the GIL during the stat syscall; DirEntry.stat() and
+    # is_dir() on Python 3.10 do not (fixed in 3.11.0, python/cpython#89175).
+    # On a high-latency filesystem (e.g. ~/sky_logs on NFS at ~1ms per stat),
+    # a DirEntry-based walk over tens of thousands of entries becomes one long
+    # GIL critical section that starves every other thread in the process.
+    # Safe to use the DirEntry methods again once the minimum Python is 3.11.
     for entry in os.scandir(sky_logs_dir):
         if not entry.name.startswith('sky-') or entry.name in protected_dirs:
             continue
         try:
-            if (entry.is_dir(follow_symlinks=False) and
-                    entry.stat().st_mtime < cutoff):
+            st = os.stat(entry.path, follow_symlinks=False)
+            if stat.S_ISDIR(st.st_mode) and st.st_mtime < cutoff:
                 shutil.rmtree(entry.path, ignore_errors=True)
                 removed += 1
         except OSError:
@@ -867,8 +874,8 @@ def _prune_sky_logs(cutoff: float) -> int:
     if os.path.isdir(file_uploads_dir):
         for entry in os.scandir(file_uploads_dir):
             try:
-                if (entry.is_file(follow_symlinks=False) and
-                        entry.stat().st_mtime < cutoff):
+                st = os.stat(entry.path, follow_symlinks=False)
+                if stat.S_ISREG(st.st_mode) and st.st_mtime < cutoff:
                     os.remove(entry.path)
                     removed += 1
             except OSError:
