@@ -1404,3 +1404,42 @@ def test_api_stream_log_path_admin_only(_request_authz_env, monkeypatch):
                       headers={
                           'user-agent': 'curl'
                       }).status_code == 404
+
+
+class TestServerUserHashBootstrap:
+    """The server user hash must not be clobbered by a racing replica.
+
+    Replicas apply the hash locally after writing it, so an overwriting write
+    leaves them disagreeing on the server id they have already applied.
+    """
+
+    def test_bootstrap_adopts_the_stored_hash(self):
+        with mock.patch('sky.global_user_state.get_system_config',
+                        return_value=None), \
+                mock.patch('sky.global_user_state.get_or_set_system_config',
+                           return_value='hash-from-the-other-replica') as m, \
+                mock.patch('sky.global_user_state.set_system_config') as m_set, \
+                mock.patch('sky.utils.common_utils.get_user_hash',
+                           return_value='our-own-hash'), \
+                mock.patch('sky.utils.common_utils.set_user_hash_locally') as m_apply, \
+                mock.patch('sky.utils.common.refresh_server_id'):
+
+            server._init_or_restore_server_user_hash()
+
+            m.assert_called_once()
+            # Never the overwriting variant.
+            m_set.assert_not_called()
+            # Applied locally: the winner's hash, not the one we generated.
+            m_apply.assert_called_once_with('hash-from-the-other-replica')
+
+    def test_existing_hash_is_reused_without_a_write(self):
+        with mock.patch('sky.global_user_state.get_system_config',
+                        return_value='existing-hash'), \
+                mock.patch('sky.global_user_state.get_or_set_system_config') as m, \
+                mock.patch('sky.utils.common_utils.set_user_hash_locally') as m_apply, \
+                mock.patch('sky.utils.common.refresh_server_id'):
+
+            server._init_or_restore_server_user_hash()
+
+            m.assert_not_called()
+            m_apply.assert_called_once_with('existing-hash')

@@ -509,12 +509,24 @@ class BearerTokenMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
             return _bearer_auth_401_response(
                 {'detail': 'Service account authentication disabled'})
 
-        try:
-            # Import here to avoid circular imports
-            # pylint: disable=import-outside-toplevel
-            from sky.users.token_service import token_service
+        # Imported here rather than at module scope to avoid a circular
+        # import, and outside the `try` because the `except` clauses below
+        # name it.
+        # pylint: disable=import-outside-toplevel
+        from sky.users import token_service as token_service_lib
+        token_service = token_service_lib.token_service
 
-            # Verify and decode JWT token
+        try:
+            # Load the signing secret off the event loop and under the same
+            # deadline as the lookups below. On the first
+            # service-account-authenticated request of a process this reads
+            # the database, and every other DB call in this handler is
+            # bounded for the reasons db_lookup's docstring gives.
+            await db_lookup.call_with_deadline(
+                token_service.ensure_secret_loaded)
+
+            # Verify and decode JWT token. Pure CPU work now that the secret
+            # is loaded.
             payload = token_service.verify_token(sa_token)
 
             if payload is None:
@@ -618,6 +630,12 @@ class BearerTokenMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
             logger.error(f'Concurrent worker exhausted during service account '
                          f'auth: {e}')
             return db_lookup.worker_exhausted_response()
+        except token_service_lib.JWTSecretUnavailableError as e:
+            # Above the catch-all on purpose: a 401 would tell the caller its
+            # token is bad and send it off to rotate credentials, when the
+            # token is fine and the database is not.
+            logger.error(f'Service account auth unavailable: {e}')
+            return db_lookup.jwt_secret_unavailable_response()
         except Exception as e:  # pylint: disable=broad-except
             logger.error(f'Service account authentication failed: {e}',
                          exc_info=True)
@@ -3983,9 +4001,12 @@ def _init_or_restore_server_user_hash():
         apply_user_hash(user_hash)
         return
 
-    # Initial deployment, generate a user hash and save it to the db.
-    user_hash = common_utils.get_user_hash()
-    global_user_state.set_system_config(_SERVER_USER_HASH_KEY, user_hash)
+    # Initial deployment. Insert-if-absent and apply whatever is live
+    # afterwards: replicas starting together would otherwise each generate a
+    # hash and the last write would win, leaving them disagreeing on the
+    # server id they have already applied locally.
+    user_hash = global_user_state.get_or_set_system_config(
+        _SERVER_USER_HASH_KEY, common_utils.get_user_hash())
     apply_user_hash(user_hash)
 
 

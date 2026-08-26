@@ -3615,6 +3615,51 @@ def set_system_config(config_key: str, config_value: str) -> None:
         session.commit()
 
 
+@metrics_lib.time_me
+def get_or_set_system_config(config_key: str, config_value: str) -> str:
+    """Read a system configuration value, inserting `config_value` if absent.
+
+    Returns the value that is live in the database after the call, which is
+    the pre-existing one whenever a row was already there -- callers must use
+    the return value rather than assume `config_value` won. Unlike
+    `set_system_config` this can never overwrite, so servers racing to
+    bootstrap the same key converge on a single value. Use it for keys others
+    already depend on, where losing the original is not recoverable.
+    """
+    engine = _db_manager.get_engine()
+    current_time = int(time.time())
+
+    with orm.Session(engine) as session:
+        if engine.dialect.name == db_utils.SQLAlchemyDialect.SQLITE.value:
+            insert_func = sqlite.insert
+        elif (engine.dialect.name == db_utils.SQLAlchemyDialect.POSTGRESQL.value
+             ):
+            insert_func = postgresql.insert
+        else:
+            raise ValueError('Unsupported database dialect')
+
+        insert_stmnt = insert_func(system_config_table).values(
+            config_key=config_key,
+            config_value=config_value,
+            created_at=current_time,
+            updated_at=current_time)
+
+        session.execute(
+            insert_stmnt.on_conflict_do_nothing(
+                index_elements=[system_config_table.c.config_key]))
+        session.commit()
+
+        # Read back rather than trusting `config_value`: on conflict the row
+        # kept whatever the winner wrote, and that is the value callers must
+        # use.
+        row = session.query(system_config_table).filter_by(
+            config_key=config_key).first()
+    if row is None:
+        raise RuntimeError(f'System config {config_key!r} is missing right '
+                           'after inserting it; it was concurrently deleted.')
+    return row.config_value
+
+
 def get_max_db_connections() -> Optional[int]:
     """Get the maximum number of connections for the engine."""
     engine = _db_manager.get_engine()
