@@ -142,8 +142,14 @@ _RESIZE_STATE_MESSAGES = {
 # mounted by something else -- `get_all_volumes_usedby` only counts pods
 # SkyPilot created -- so that side says what will finish the resize rather
 # than asserting nothing is using it.
-_RESIZE_PENDING_IN_USE = ('A cluster or job is using it, so the node grows the '
-                          'filesystem without anything being restarted.')
+#
+# Growing a mounted volume needs the storage driver to support it, which
+# SkyPilot does not ask about, so the in-use side promises no more than
+# "usually" and leaves the way out in the sentence rather than sending
+# everyone down it.
+_RESIZE_PENDING_IN_USE = ('A cluster or job is using it, so the node usually '
+                          'grows the filesystem without a restart. If it stays '
+                          'this way, restart the cluster or job using it.')
 _RESIZE_PENDING_UNUSED = ('The node grows the filesystem the next time '
                           'something mounts the volume; start or restart a '
                           'cluster or job that uses it.')
@@ -183,8 +189,8 @@ def resize_display_message(resize_status: Optional[str],
             action = _RESIZE_PENDING_IN_USE
             # The one place the cloud's own words are dropped. Kubernetes sets
             # the same "(re-)start a pod" message whether or not the volume is
-            # mounted, so on a volume that is, it contradicts the sentence
-            # after it -- and it is the half that is wrong.
+            # mounted, so on a volume that is, it leads with the instruction
+            # the sentence after it says to try only if waiting does not work.
             why = None
         else:
             action = _RESIZE_PENDING_UNUSED

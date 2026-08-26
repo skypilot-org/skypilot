@@ -871,11 +871,13 @@ class TestResizeDisplayMessage:
 
         assert 'filesystem' in message
 
-    def test_a_volume_in_use_is_not_told_to_restart_anything(self):
-        """Kubernetes grows the filesystem of a mounted volume by itself.
+    def test_a_volume_in_use_is_not_sent_to_restart_first(self):
+        """Kubernetes usually grows the filesystem of a mounted volume itself.
 
         Its own words say "(re-)start a pod" either way, which would send
-        someone to restart a job that is about to finish on its own.
+        someone to restart a job that is about to finish on its own. Restarting
+        is the fallback, since growing a mounted volume needs a driver that
+        supports it -- so it is offered, not led with.
         """
         message = volume.resize_display_message(
             'pending_on_node',
@@ -883,13 +885,12 @@ class TestResizeDisplayMessage:
             'resize of volume on node.',
             known_in_use=True)
 
-        assert 'without anything being restarted' in message
-        # Kubernetes sets that message whether or not the volume is mounted,
-        # so keeping it here would contradict the sentence after it.
+        assert 'usually grows the filesystem without a restart' in message
+        # Kubernetes sets that message whether or not the volume is mounted, so
+        # keeping it would lead with the fallback.
         assert '(re-)start a pod' not in message
-        # Not an instruction to restart anything.
-        assert 'Restart' not in message
-        assert 'start or restart' not in message
+        # And the fallback is still reachable, conditioned on waiting failing.
+        assert 'If it stays this way, restart' in message
 
     def test_a_volume_nothing_is_using_is_told_what_will_finish_it(self):
         message = volume.resize_display_message('pending_on_node',

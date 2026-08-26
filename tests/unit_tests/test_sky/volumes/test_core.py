@@ -2539,7 +2539,7 @@ class TestVolumeRefreshResizeState:
 
         records = core.volume_list()
 
-        assert ('without anything being restarted'
+        assert ('usually grows the filesystem without a restart'
                 in records[0]['resize_message'])
 
     def test_the_fields_survive_the_response_model(self, monkeypatch):

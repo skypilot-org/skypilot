@@ -156,10 +156,13 @@ class VolumeResizeStatus(enum.Enum):
     IN_PROGRESS = 'in_progress'
     # The new capacity is allocated, but the filesystem is grown by the node
     # that mounts the volume, so the volume keeps its old size until that
-    # happens. For a volume in use it happens on its own, without restarting
-    # anything; for one nothing is using, it waits indefinitely.
+    # happens. For a volume in use it usually happens on its own, without
+    # restarting anything; for one nothing is using, it waits indefinitely.
     PENDING_ON_NODE = 'pending_on_node'
     # The resize stopped short. The recorded size is still the real one.
+    #
+    # Only clusters that report a failed resize can produce this: where they
+    # do not, a resize that can never succeed keeps reporting IN_PROGRESS.
     FAILED = 'failed'
 
 
