@@ -46,6 +46,7 @@ class TestJobProtoToDict:
             infra="-",
             accelerators={"H100": 8.0},
             recovery_count=0,
+            exit_codes=managed_jobsv1_pb2.ExitCodes(codes=[137, 23]),
             # Optional fields
             workspace="default",
             details=None,
@@ -114,6 +115,7 @@ class TestJobProtoToDict:
         # Check map fields
         assert job_dict['accelerators'] == {"H100": 8.0}
         assert job_dict['metadata'] == {}
+        assert job_dict['exit_codes'] == [137, 23]
 
     def test_optional_fields_missing(self):
         """Test that missing optional fields are set to None."""
@@ -124,7 +126,7 @@ class TestJobProtoToDict:
         optional_fields = [
             'workspace', 'details', 'failure_reason', 'user_name', 'user_hash',
             'submitted_at', 'start_at', 'end_at', 'user_yaml', 'entrypoint',
-            'pool', 'pool_hash'
+            'pool', 'pool_hash', 'exit_codes'
         ]
 
         for field in optional_fields:

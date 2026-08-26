@@ -959,6 +959,65 @@ class TestSetFailedEventCode:
         assert args[4] is None
 
 
+class TestSetFailedExitCodes:
+    """Failed task exit codes are persisted as structured queue data."""
+
+    @pytest.mark.asyncio
+    async def test_exit_codes_round_trip_for_terminal_task(
+            self, _mock_managed_jobs_db_conn):
+        """The failed task keeps the exact ordered exit-code list."""
+        job_id = state.set_job_info_without_job_id(name='exit-code-job',
+                                                   workspace='default',
+                                                   entrypoint='echo test',
+                                                   pool=None,
+                                                   pool_hash=None,
+                                                   user_hash='user')
+        state.set_pending(job_id,
+                          task_id=0,
+                          task_name='task',
+                          resources_str='{}',
+                          metadata='{}')
+
+        await state.set_failed_async(job_id=job_id,
+                                     task_id=0,
+                                     failure_type=state.ManagedJobStatus.FAILED,
+                                     failure_reason='worker failed',
+                                     exit_codes=[137, 23])
+
+        jobs, _ = state.get_managed_jobs_with_filters(
+            fields=['job_id', 'task_id', 'status', 'exit_codes'],
+            job_ids=[job_id])
+        assert jobs[0]['exit_codes'] == [137, 23]
+
+    @pytest.mark.asyncio
+    async def test_unavailable_exit_codes_remain_none(
+            self, _mock_managed_jobs_db_conn):
+        """Failure text containing a code is never parsed into exit_codes."""
+        job_id = state.set_job_info_without_job_id(name='no-exit-code-job',
+                                                   workspace='default',
+                                                   entrypoint='echo test',
+                                                   pool=None,
+                                                   pool_hash=None,
+                                                   user_hash='user')
+        state.set_pending(job_id,
+                          task_id=0,
+                          task_name='task',
+                          resources_str='{}',
+                          metadata='{}')
+
+        await state.set_failed_async(
+            job_id=job_id,
+            task_id=0,
+            failure_type=state.ManagedJobStatus.FAILED,
+            failure_reason='Job exited with exit code 91',
+            exit_codes=None)
+
+        jobs, _ = state.get_managed_jobs_with_filters(
+            fields=['job_id', 'task_id', 'status', 'exit_codes'],
+            job_ids=[job_id])
+        assert jobs[0]['exit_codes'] is None
+
+
 class TestCancelEventsOnlyOnTransition:
     """CANCELLING/CANCELLED events are recorded only on a real transition.
 
