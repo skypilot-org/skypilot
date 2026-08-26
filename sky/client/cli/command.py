@@ -5684,15 +5684,24 @@ def volumes_ls(names: List[str],
             volume for volume in all_volumes if volume.name in requested
         ]
         if not json_output:
-            # Report a name that matched nothing, as `sky volumes delete`
-            # does, rather than showing an empty table and letting a typo read
-            # as "the volume is gone" -- the message a not-ready volume points
-            # here with makes that an easy mistake. Not on the json path,
-            # where an empty array already says it and a stray line would
-            # break parsing.
-            found = {volume.name for volume in all_volumes}
-            for missing in sorted(requested - found):
-                click.echo(f'Volume {missing} not found.')
+            # Report what matched nothing, rather than showing an empty table
+            # and letting a typo read as "the volume is gone" -- the message a
+            # not-ready volume points here with makes that an easy mistake.
+            # Not on the json path, where an empty array already says it and a
+            # stray line would break parsing.
+            missing = sorted(requested - {v.name for v in all_volumes})
+            if len(missing) == 1:
+                # Worded as `sky volumes delete` words it.
+                click.echo(f'Volume {missing[0]} not found.')
+            elif missing:
+                # One line rather than one per name: here a miss is the whole
+                # answer for that name, so a list reads better than a stack.
+                click.echo(f'Volumes not found: {", ".join(missing)}.')
+            if not all_volumes:
+                # Nothing left to tabulate. The empty table renders as "No
+                # existing volumes.", which is a claim about the whole table --
+                # and a filtered listing never looked at the whole table.
+                return
     if json_output:
         click.echo(
             json.dumps(

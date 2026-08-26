@@ -1397,15 +1397,17 @@ class TestVolumesLsReportsNamesThatMatchNothing:
     """
 
     @staticmethod
-    def _patch(monkeypatch):
+    def _patch(monkeypatch, stub_table=True):
         monkeypatch.setattr('sky.volumes.client.sdk.ls',
                             mock.MagicMock(return_value='request-id'))
         monkeypatch.setattr(
             'sky.client.sdk.stream_and_get',
             mock.MagicMock(
                 return_value=[TestVolumesLsByName._record('vol-a', 'READY')]))
-        monkeypatch.setattr('sky.client.cli.table_utils.format_volume_table',
-                            lambda *args, **kwargs: 'TABLE')
+        if stub_table:
+            monkeypatch.setattr(
+                'sky.client.cli.table_utils.format_volume_table',
+                lambda *args, **kwargs: 'TABLE')
 
     def test_an_unmatched_name_is_reported(self, monkeypatch):
         self._patch(monkeypatch)
@@ -1428,3 +1430,39 @@ class TestVolumesLsReportsNamesThatMatchNothing:
         assert not result.exit_code, result.output
         assert json.loads(result.output) == []
         assert 'not found' not in result.output
+
+    def test_several_unmatched_names_are_reported_on_one_line(
+            self, monkeypatch):
+        self._patch(monkeypatch)
+
+        result = cli_testing.CliRunner().invoke(command.volumes_ls,
+                                                ['nope', 'alsonope'])
+
+        assert not result.exit_code, result.output
+        assert 'Volumes not found: alsonope, nope.' in result.output
+        # One line for the lot, not one per name.
+        assert result.output.count('not found') == 1
+
+    def test_matching_nothing_does_not_claim_the_table_is_empty(
+            self, monkeypatch):
+        """`format_volume_table` renders an empty list as "No existing
+        volumes.", which is a statement about the whole table -- untrue, and
+        confusing, when the caller filtered by name and simply missed.
+        """
+        self._patch(monkeypatch, stub_table=False)
+
+        result = cli_testing.CliRunner().invoke(command.volumes_ls, ['nope'])
+
+        assert not result.exit_code, result.output
+        assert 'Volume nope not found.' in result.output
+        assert 'No existing volumes.' not in result.output
+
+    def test_a_partial_match_still_lists_what_did_match(self, monkeypatch):
+        self._patch(monkeypatch, stub_table=False)
+
+        result = cli_testing.CliRunner().invoke(command.volumes_ls,
+                                                ['vol-a', 'nope'])
+
+        assert not result.exit_code, result.output
+        assert 'Volume nope not found.' in result.output
+        assert 'vol-a' in result.output
