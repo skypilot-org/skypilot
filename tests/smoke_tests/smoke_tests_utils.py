@@ -382,13 +382,20 @@ def get_cmd_wait_until_job_status_contains_matching_job_name(
 # than a fixed column index. This keeps the wait robust regardless of which
 # columns the server renders (e.g. on a shared server where jobs from
 # multiple workspaces are listed and the WORKSPACE column appears).
+#
+# `sky jobs queue` defaults to showing only the latest 50 jobs. On a shared
+# server, a job that stays queued for a while can be pushed out of that window
+# by unrelated jobs submitted after it; the awk below then matches nothing and
+# the wait spins on an empty status until it times out, even though the job did
+# reach the expected state. Pass an explicit high --limit so the row stays
+# visible for the whole wait.
 _WAIT_UNTIL_MANAGED_JOB_STATUS_CONTAINS_MATCHING_JOB_NAME = (
     'start_time=$SECONDS; '
     'while true; do '
     'if (( $SECONDS - $start_time > {timeout} )); then '
     '  echo "Timeout after {timeout} seconds waiting for job status \'{job_status}\'"; exit 1; '
     'fi; '
-    'current_queue=$(sky jobs queue); '
+    'current_queue=$(sky jobs queue --limit 1000); '
     'current_status=$(echo "$current_queue" | '
     r'awk "{{name_found=0; '
     r'for (i=1; i<=NF; i++) if (\$i == \"{job_name}\") name_found=1; '
