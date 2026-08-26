@@ -3210,7 +3210,9 @@ def _update_cluster_status(
             hint = kubernetes_utils.match_kubernetes_failure_hint_text(
                 log_message)
             if hint:
-                log_message += f' {hint}'
+                # Own line: the remedy reads as a separate statement from the
+                # diagnosis, both in the terminal and in the dashboard event.
+                log_message += f'\n{hint}'
         # Do not add event if the cluster is already in INIT status.
         if status != status_lib.ClusterStatus.INIT:
             global_user_state.add_cluster_event(

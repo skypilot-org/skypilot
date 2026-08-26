@@ -2215,11 +2215,9 @@ KUBERNETES_FAILURE_HINTS: List[Tuple[List[str], str]] = [
     # NO_MEMORY_LIMIT_MARKER must precede 'OOMKilled': an unbounded-OOM reason
     # contains both, and the first match wins.
     ([NO_MEMORY_LIMIT_MARKER],
-     'The container had no memory limit, so nothing capped it before the node '
-     'itself ran out of memory -- a node-level OOM kill, which can also '
-     'disrupt other pods on that node. To fix: set `kubernetes.'
-     'set_pod_resource_limits` to cap every pod at its memory request, and/or '
-     'increase `resources.memory` in your task YAML. See '
+     'The container had no memory limit, so the node ran out of memory '
+     'instead -- a node-level OOM that can kill other pods too. To fix: set '
+     '`kubernetes.set_pod_resource_limits`: '
      f'{SET_POD_RESOURCE_LIMITS_DOC_URL}'),
     (['OOMKilled'],
      'The container ran out of memory. To fix: Increase the memory request with '
