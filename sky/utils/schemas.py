@@ -2171,6 +2171,13 @@ def get_config_schema():
                             'submit_as_user': {
                                 'type': 'boolean',
                             },
+                            # URL of a Prometheus reachable from the
+                            # cluster's login node that scrapes the
+                            # cluster's node/DCGM exporters; opts the
+                            # cluster into /gpu-metrics federation.
+                            'prometheus_url': {
+                                'type': 'string',
+                            },
                             'pricing': _PRICING_SCHEMA,
                             'sbatch_options': _SBATCH_OPTIONS_SCHEMA,
                             'gpu_partition_map': _GPU_PARTITION_MAP_SCHEMA,

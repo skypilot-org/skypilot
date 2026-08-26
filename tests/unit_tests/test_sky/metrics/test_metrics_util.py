@@ -748,6 +748,32 @@ def test_add_cluster_name_label_skips_already_labeled():
         assert line.count('cluster=') == 1
 
 
+def test_add_cluster_name_label_replace_existing():
+    """replace_existing re-attributes source-side cluster labels.
+
+    Prometheus /federate applies the source's global.external_labels to
+    every exported series; on the Slurm path that label must become the
+    SkyPilot context or the series are invisible to cluster="slurm/<c>"
+    queries. Escaped quotes and braces in values must not confuse it, and
+    unlabeled / differently named labels behave as before.
+    """
+    text = ('foo{cluster="site-prom",bar="baz"} 1.0\n'
+            'foo{bar="}",cluster="a \\"quoted\\" name"} 2.0\n'
+            'foo{k8s_cluster="other"} 3.0\n'
+            'foo{cluster=""} 4.0')
+    result = asyncio.run(
+        utils.add_cluster_name_label(text, 'slurm/hpc', replace_existing=True))
+    assert result.split('\n') == [
+        'foo{cluster="slurm/hpc",bar="baz"} 1.0',
+        'foo{bar="}",cluster="slurm/hpc"} 2.0',
+        'foo{cluster="slurm/hpc",k8s_cluster="other"} 3.0',
+        'foo{cluster="slurm/hpc"} 4.0',
+    ]
+    for line in result.split('\n'):
+        # Exactly one real cluster label per line (k8s_cluster is not one).
+        assert len(utils._CLUSTER_LABEL_RE.findall(line)) == 1
+
+
 def test_add_cluster_name_label_does_not_match_cluster_suffix_labels():
     """A label like `k8s_cluster` is not mistaken for a `cluster` label."""
     text = 'foo{k8s_cluster="other"} 1.0'
@@ -865,3 +891,98 @@ def test_start_svc_port_forward_terminates_on_timeout():
         # Verify subprocess was terminated
         mock_process.terminate.assert_called_once()
         mock_process.wait.assert_called()
+
+
+# --- Slurm federation ---
+# get_slurm_metrics_clusters() / get_metrics_for_slurm_cluster(): the login-
+# node curl transport, its timeout budget, and the cluster="slurm/<name>"
+# stamping that keeps Slurm series interchangeable with Kubernetes contexts.
+
+_SLURM_PROM_URL = 'http://prometheus.hpc.internal:9090/'
+
+
+def _slurm_config(keys, default_value=None, **_):
+    # Only cluster 'hpc' opted in via slurm.cluster_configs.hpc.prometheus_url.
+    if tuple(keys) == ('slurm', 'cluster_configs', 'hpc', 'prometheus_url'):
+        return _SLURM_PROM_URL
+    return default_value
+
+
+def test_get_slurm_metrics_clusters_requires_prometheus_url(monkeypatch):
+    monkeypatch.setattr(utils.skypilot_config, 'get_nested', _slurm_config)
+    with mock.patch('sky.provision.slurm.utils.get_all_slurm_cluster_names',
+                    return_value=['hpc', 'other']):
+        assert utils.get_slurm_metrics_clusters() == ['hpc']
+
+
+def test_get_slurm_metrics_clusters_tolerates_enumeration_failure(monkeypatch):
+    monkeypatch.setattr(utils.skypilot_config, 'get_nested', _slurm_config)
+    with mock.patch('sky.provision.slurm.utils.get_all_slurm_cluster_names',
+                    side_effect=ValueError('bad slurm ssh config')):
+        assert utils.get_slurm_metrics_clusters() == []
+
+
+def test_get_metrics_for_slurm_cluster_curl_and_stamping(monkeypatch):
+    monkeypatch.setattr(utils.skypilot_config, 'get_nested', _slurm_config)
+    body = (
+        'DCGM_FI_DEV_GPU_UTIL{gpu="0",instance="n1:9400"} 5\n'
+        'node_cpu_seconds_total{instance="n1:9100",mode="idle"} 9\n'
+        # The cluster's Prometheus stamped its own external label.
+        'node_memory_MemTotal_bytes{cluster="site-prom",instance="n1"} 7\n')
+    stats = utils.FederationStats(has_port_forward=False)
+    with mock.patch('sky.provision.slurm.utils.run_on_login_node',
+                    return_value=(0, body, '')) as run:
+        out = asyncio.run(
+            utils.get_metrics_for_slurm_cluster('hpc', stats=stats))
+
+    cluster, cmd = run.call_args.args
+    assert cluster == 'hpc'
+    # The SSH invocation is bounded by the whole (default 30s) budget; curl's
+    # own limit leaves headroom inside it for the SSH connect.
+    assert run.call_args.kwargs == {'timeout': 30}
+    assert cmd.startswith("curl -g -sS --fail -m 25 '")
+    # Trailing slash folded, match[] patterns percent-encoded, DCGM + node
+    # exporter series only.
+    assert "'http://prometheus.hpc.internal:9090/federate?match[]=" in cmd
+    assert '%7B__name__%3D~%22node_memory_MemAvailable_bytes%7C' in cmd
+    assert 'DCGM_.%2A' in cmd
+    assert 'node_cpu_seconds_total%7Bmode%3D%22idle%22%7D' in cmd
+
+    assert out.splitlines() == [
+        'DCGM_FI_DEV_GPU_UTIL{cluster="slurm/hpc",gpu="0",instance="n1:9400"} 5',
+        'node_cpu_seconds_total{cluster="slurm/hpc",instance="n1:9100",'
+        'mode="idle"} 9',
+        # Re-attributed, not skipped: the Slurm path replaces the label.
+        'node_memory_MemTotal_bytes{cluster="slurm/hpc",instance="n1"} 7',
+    ]
+    assert stats.federate_seconds is not None
+    assert stats.body_bytes == len(body.encode('utf-8'))
+    # No port-forward phase on this transport.
+    assert stats.summary().startswith('federate=')
+
+
+def test_get_metrics_for_slurm_cluster_budget_scales_curl_limit(monkeypatch):
+    monkeypatch.setattr(utils.skypilot_config, 'get_nested', _slurm_config)
+    with mock.patch('sky.provision.slurm.utils.run_on_login_node',
+                    return_value=(0, '', '')) as run:
+        asyncio.run(utils.get_metrics_for_slurm_cluster('hpc', timeout=12))
+    assert run.call_args.kwargs == {'timeout': 12}
+    assert run.call_args.args[1].startswith('curl -g -sS --fail -m 7 ')
+
+
+def test_get_metrics_for_slurm_cluster_nonzero_exit_raises(monkeypatch):
+    monkeypatch.setattr(utils.skypilot_config, 'get_nested', _slurm_config)
+    with mock.patch('sky.provision.slurm.utils.run_on_login_node',
+                    return_value=(22, '',
+                                  'curl: (22) The requested URL returned '
+                                  'error: 404')):
+        with pytest.raises(RuntimeError, match=r'exited 22: curl: \(22\)'):
+            asyncio.run(utils.get_metrics_for_slurm_cluster('hpc'))
+
+
+def test_get_metrics_for_slurm_cluster_unconfigured_raises(monkeypatch):
+    monkeypatch.setattr(utils.skypilot_config, 'get_nested', _slurm_config)
+    with mock.patch('sky.provision.slurm.utils.run_on_login_node') as run:
+        with pytest.raises(ValueError, match='No prometheus_url'):
+            asyncio.run(utils.get_metrics_for_slurm_cluster('other'))
+    run.assert_not_called()
