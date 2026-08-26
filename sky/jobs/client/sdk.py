@@ -545,7 +545,8 @@ def tail_logs(
         '/jobs/logs',
         json=json.loads(body.model_dump_json()),
         stream=True,
-        timeout=(5, None))
+        timeout=(client_common.API_SERVER_REQUEST_CONNECTION_TIMEOUT_SECONDS,
+                 client_common.API_SERVER_REQUEST_STREAM_READ_TIMEOUT_SECONDS))
     request_id: server_common.RequestId[int] = server_common.get_request_id(
         response)
     if preload_content:
