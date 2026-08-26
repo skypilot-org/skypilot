@@ -5645,10 +5645,34 @@ def volumes_ls(names: List[str],
 
     Pass one or more volume names to show only those. Combined with --refresh,
     only the named volumes are re-probed, which is much cheaper than refreshing
-    every volume when you are waiting on one you just created.
+    every volume when you are waiting on one you just created. Names are exact;
+    unlike sky volumes delete, this does not take glob patterns.
+
+    Examples:
+
+    .. code-block:: bash
+
+        # Show every volume.
+        sky volumes ls
+        \b
+        # Show one volume, re-probing just that one.
+        sky volumes ls my-vol -r
+        \b
+        # Read a volume's status from a script.
+        sky volumes ls my-vol -o json
     """
     request_id = volumes_sdk.ls(refresh=refresh, names=names)
-    all_volumes = sdk.stream_and_get(request_id)
+    json_output = output_format == flags.OUTPUT_FORMAT_JSON
+    if json_output:
+        # Keep stdout parseable. A request's server-side logs are streamed back
+        # here, and volume_refresh logs a line exactly when a volume's status
+        # changes -- the NOT_READY -> READY tick a poller is waiting for. Ahead
+        # of the JSON that is the one iteration a parser cannot read, so send
+        # the stream to a sink, as `sky check -o json` does.
+        all_volumes = sdk.stream_and_get(request_id,
+                                         output_stream=io.StringIO())
+    else:
+        all_volumes = sdk.stream_and_get(request_id)
     if names:
         # Filter here as well as on the server. An API server older than this
         # change ignores the names and returns every volume; narrowing again
@@ -5659,7 +5683,17 @@ def volumes_ls(names: List[str],
         all_volumes = [
             volume for volume in all_volumes if volume.name in requested
         ]
-    if output_format == flags.OUTPUT_FORMAT_JSON:
+        if not json_output:
+            # Report a name that matched nothing, as `sky volumes delete`
+            # does, rather than showing an empty table and letting a typo read
+            # as "the volume is gone" -- the message a not-ready volume points
+            # here with makes that an easy mistake. Not on the json path,
+            # where an empty array already says it and a stray line would
+            # break parsing.
+            found = {volume.name for volume in all_volumes}
+            for missing in sorted(requested - found):
+                click.echo(f'Volume {missing} not found.')
+    if json_output:
         click.echo(
             json.dumps(
                 [volume.model_dump(mode='json') for volume in all_volumes],

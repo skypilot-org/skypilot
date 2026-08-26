@@ -136,8 +136,10 @@ def ls(
             updated periodically by the background daemon.
         names: If given, list only these volumes, and narrow a `refresh` to
             them instead of re-probing every volume. An API server older than
-            this argument ignores it and returns every volume, so callers that
-            need exactly the named ones must narrow the result themselves.
+            this argument ignores it: it returns every volume, and a `refresh`
+            re-probes the whole table rather than the named subset. The result
+            is still correct but the call is no cheaper, and callers that need
+            exactly the named volumes must narrow the result themselves.
 
     Returns:
         The request ID of the list request.
@@ -147,7 +149,11 @@ def ls(
         params['refresh'] = 'true'
     if names:
         # Repeated `names=` query params; a server that predates this one
-        # ignores them and returns every volume.
+        # ignores them and returns every volume. Note this is the only
+        # list-valued param here: `requests` expands a list into repeated
+        # params, but make_authenticated_request_async str()s each value, so
+        # an async caller would send "['a']" and needs to join the names
+        # itself.
         params['names'] = list(names)
     response = server_common.make_authenticated_request(
         'GET',

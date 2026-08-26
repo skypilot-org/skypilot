@@ -1339,3 +1339,92 @@ class TestVolumesLsJsonOutput:
         # The table only shows MESSAGE conditionally; JSON must always carry
         # the reason, since that is the whole point of polling it.
         assert payload[0]['error_message'] == 'PVC is pending: still binding.'
+
+
+class TestVolumesLsJsonStaysParseable:
+    """A request's server-side logs are streamed back to the client, so the
+    json path has to keep them off stdout.
+
+    volume_refresh logs a line exactly when a volume's status changes -- the
+    NOT_READY -> READY tick a poller is waiting on -- so the polluted iteration
+    would be the one the caller actually cares about.
+    """
+
+    @staticmethod
+    def _patch(monkeypatch):
+        monkeypatch.setattr('sky.volumes.client.sdk.ls',
+                            mock.MagicMock(return_value='request-id'))
+
+        def fake_stream_and_get(request_id, output_stream=None, **kwargs):
+            del request_id, kwargs
+            # What the real one does: replay the request's log to
+            # output_stream, where None means stdout.
+            print('Update volume vol-a status to READY',
+                  file=output_stream,
+                  flush=True)
+            return [TestVolumesLsByName._record('vol-a', 'READY')]
+
+        monkeypatch.setattr('sky.client.sdk.stream_and_get',
+                            fake_stream_and_get)
+
+    def test_a_streamed_log_line_does_not_break_the_json(self, monkeypatch):
+        self._patch(monkeypatch)
+
+        result = cli_testing.CliRunner().invoke(command.volumes_ls,
+                                                ['-r', '-o', 'json'])
+
+        assert not result.exit_code, result.output
+        assert [v['name'] for v in json.loads(result.output)] == ['vol-a']
+
+    def test_the_table_still_shows_the_line(self, monkeypatch):
+        """Only json suppresses the stream; a human reading the table wants
+        to see what the server is doing."""
+        self._patch(monkeypatch)
+        monkeypatch.setattr('sky.client.cli.table_utils.format_volume_table',
+                            lambda *args, **kwargs: 'TABLE')
+
+        result = cli_testing.CliRunner().invoke(command.volumes_ls, ['-r'])
+
+        assert not result.exit_code, result.output
+        assert 'Update volume vol-a status to READY' in result.output
+
+
+class TestVolumesLsReportsNamesThatMatchNothing:
+    """A typo must not read as "the volume is gone".
+
+    The message a not-ready volume points here with makes that an easy mistake,
+    and `sky volumes delete` already reports an unmatched name.
+    """
+
+    @staticmethod
+    def _patch(monkeypatch):
+        monkeypatch.setattr('sky.volumes.client.sdk.ls',
+                            mock.MagicMock(return_value='request-id'))
+        monkeypatch.setattr(
+            'sky.client.sdk.stream_and_get',
+            mock.MagicMock(
+                return_value=[TestVolumesLsByName._record('vol-a', 'READY')]))
+        monkeypatch.setattr('sky.client.cli.table_utils.format_volume_table',
+                            lambda *args, **kwargs: 'TABLE')
+
+    def test_an_unmatched_name_is_reported(self, monkeypatch):
+        self._patch(monkeypatch)
+
+        result = cli_testing.CliRunner().invoke(command.volumes_ls,
+                                                ['vol-a', 'nope'])
+
+        assert not result.exit_code, result.output
+        assert 'Volume nope not found.' in result.output
+        # The one that does exist is still listed.
+        assert 'TABLE' in result.output
+
+    def test_json_says_it_with_an_empty_array_instead(self, monkeypatch):
+        """Stdout on the json path stays machine-readable."""
+        self._patch(monkeypatch)
+
+        result = cli_testing.CliRunner().invoke(command.volumes_ls,
+                                                ['nope', '-o', 'json'])
+
+        assert not result.exit_code, result.output
+        assert json.loads(result.output) == []
+        assert 'not found' not in result.output

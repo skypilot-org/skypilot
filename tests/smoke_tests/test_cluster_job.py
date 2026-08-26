@@ -1612,6 +1612,14 @@ def test_volumes_on_kubernetes():
             smoke_tests_utils.get_cmd_wait_until_volume_is_ready('existing0'),
             smoke_tests_utils.get_cmd_wait_until_volume_is_ready(
                 'vol-existing1'),
+            # Name filter and `-o json` end to end: exactly the named volume
+            # comes back, and stdout parses -- which it would not if a
+            # server-side log line were streamed onto it.
+            'vols=$(sky volumes ls pvc0 -o json) && echo "$vols" && '
+            'echo "$vols" | python3 -c \''
+            'import json, sys; '
+            'sys.exit(0 if [v["name"] for v in json.load(sys.stdin)] == '
+            '["pvc0"] else 1)\'',
             f'sky launch -y -c {name} --infra kubernetes tests/test_yamls/pvc_volume.yaml',
             f'sky logs {name} 1 --status',  # Ensure the job succeeded.
             f'vols=$(sky volumes ls) && echo "$vols" && echo "$vols" | grep "{name}"',

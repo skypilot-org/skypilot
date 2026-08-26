@@ -644,3 +644,51 @@ class TestVolumeServer:
             assert response.status_code == 400
             assert 'Runpod network volume is only supported on Runpod' in response.json(
             )['detail']
+
+
+class TestVolumeListNamesReachTheRequestBody:
+    """The `names` query parameter has to survive the trip to core.volume_list.
+
+    It is renamed on the way -- `?names=` on the wire, `volume_names` in the
+    body, matched to the core signature only by `to_kwargs()` doing a
+    model_dump. Nothing else exercises that seam: the CLI tests stop at the SDK
+    call and the core tests start at volume_list.
+    """
+
+    @staticmethod
+    def _request_body(monkeypatch, url):
+        mock_schedule_async = mock.AsyncMock()
+        monkeypatch.setattr(executor, 'schedule_request_async',
+                            mock_schedule_async)
+        app = fastapi.FastAPI()
+        app.include_router(server.router, prefix='/volumes')
+        client = TestClient(app)
+        with mock.patch.object(fastapi.Request, 'state') as mock_state:
+            mock_state.request_id = 'test-request-id'
+            mock_state.auth_user = None
+            assert client.get(url).status_code == 200
+        return mock_schedule_async.call_args[1]['request_body']
+
+    def test_repeated_names_arrive_as_a_list(self, monkeypatch):
+        body = self._request_body(monkeypatch, '/volumes?names=a&names=b')
+
+        assert body.volume_names == ['a', 'b']
+
+    def test_no_names_means_every_volume(self, monkeypatch):
+        """None, not [] -- an empty list would mean "no volumes"."""
+        body = self._request_body(monkeypatch, '/volumes')
+
+        assert body.volume_names is None
+
+    def test_the_body_field_matches_the_core_signature(self):
+        """to_kwargs() feeds the body straight into volume_list as kwargs, so a
+        field renamed on either side would only fail at request time."""
+        import inspect
+
+        from sky.volumes.server import core
+
+        kwargs = payloads.VolumeListBody(refresh=False,
+                                         volume_names=['a']).to_kwargs()
+        parameters = inspect.signature(core.volume_list).parameters
+        assert set(kwargs).issubset(set(parameters))
+        assert kwargs['volume_names'] == ['a']
