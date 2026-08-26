@@ -46,6 +46,7 @@ import {
   TimestampWithTooltip,
   LastUpdatedTimestamp,
   NonCapitalizedTooltip as Tooltip,
+  formatSize,
 } from '@/components/utils';
 import { StatusBadge } from '@/components/elements/StatusBadge';
 import {
@@ -70,13 +71,6 @@ const REFRESH_INTERVAL = REFRESH_INTERVALS.REFRESH_INTERVAL;
 
 const VOLUMES_PAGE_SIZE_OPTIONS = [10, 30, 50, 100, 200];
 const VOLUMES_PAGE_SIZE_STORAGE_KEY = 'skypilot-volumes-page-size';
-
-// Sizes come from the API as a number of GiB.
-export const formatSize = (size) => {
-  if (size == null) return '-';
-  if (size >= 1024) return `${+(size / 1024).toFixed(1)}Ti`;
-  return `${size}Gi`;
-};
 
 // The filterable properties, declared once. `key` is the URL parameter and the
 // `valueList` key for the typeahead; `label` is what lands in
@@ -711,6 +705,13 @@ export function VolumesTable({
     if (!volume.resize_status || volume.resize_target_size == null) {
       return size;
     }
+    // Both sizes are whole GiB, so a resize smaller than that -- or one whose
+    // new space has landed while the state has not cleared -- would render an
+    // arrow pointing at the size it already shows. The reason still reaches
+    // the user through the details column.
+    if (Number(volume.resize_target_size) <= Number(volume.size)) {
+      return size;
+    }
     const target = formatSize(volume.resize_target_size);
     return (
       <Tooltip content={volume.resize_message}>
@@ -739,6 +740,10 @@ export function VolumesTable({
   // Volumes are usable most of the time, so a column of dashes would be noise.
   // Judge over the whole dataset, not the current page or filter, so the column
   // does not come and go while paging.
+  //
+  // One cell, so a volume with both an error and a resize shows the error: it
+  // is the one that says the volume is unusable. The volume's own page has
+  // room and shows both -- deliberately, not by oversight.
   const volumeDetails = (volume) =>
     volume.error_message || volume.resize_message || null;
 

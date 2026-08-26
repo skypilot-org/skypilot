@@ -4,7 +4,6 @@ import { useRouter } from 'next/router';
 import Link from 'next/link';
 import { StatusBadge } from '@/components/elements/StatusBadge';
 import { getVolumes } from '@/data/connectors/volumes';
-import { formatSize } from '@/components/volumes';
 import dashboardCache from '@/lib/cache';
 import {
   RotateCwIcon,
@@ -17,6 +16,7 @@ import {
   CustomTooltip as Tooltip,
   NonCapitalizedTooltip,
   formatFullTimestamp,
+  formatSize,
 } from '@/components/utils';
 import { useMobile } from '@/hooks/useMobile';
 import Head from 'next/head';

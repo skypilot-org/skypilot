@@ -247,6 +247,20 @@ describe('VolumesTable size column while a resize is pending', () => {
     expect(expanded.textContent).toContain('finish the resize.');
   });
 
+  it('ignores a target that rounds to the size already shown', async () => {
+    // Sizes are whole GiB on both sides, so a resize smaller than that -- or
+    // one whose space has landed while the state has not cleared -- would
+    // render an arrow pointing at the size next to it.
+    const { container } = await renderTable([
+      { ...resizing('pending_on_node'), resize_target_size: 1 },
+    ]);
+
+    const row = container.querySelector('table tbody tr');
+    expect(row.textContent).not.toContain('→');
+    // The reason still reaches the user through the details column.
+    expect(container.textContent).toContain('Restart the cluster');
+  });
+
   it('ignores a status from a server that reports no target size', async () => {
     // An older server sends none of these fields; a half-populated row must
     // not render a dangling arrow.
