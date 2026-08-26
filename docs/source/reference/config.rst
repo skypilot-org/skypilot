@@ -2235,6 +2235,28 @@ With ``mode: sriov``, SkyPilot does not enable host networking and does not
 mount ``/dev/infiniband`` or run the container privileged — an SR-IOV device
 plugin configured with ``isRdma`` injects the RDMA character devices itself.
 
+.. note::
+
+    This is a deliberate deviation from Oracle's SR-IOV example manifest, which
+    keeps both. There are two ways a container can receive RDMA character
+    devices, and it needs one: a ``/dev/infiniband`` hostPath, which grants no
+    device-cgroup access and so requires ``privileged: true``; or a device
+    plugin running with ``isRdma``, which grants both and hands the pod only
+    its own virtual functions. Doing both means the hostPath shadows the
+    injected devices with every device on the node, which puts ``privileged``
+    back — the thing the SR-IOV model exists to avoid.
+
+    If your device plugin does *not* set ``isRdma``, nothing injects the
+    devices and the pod has no RDMA. Add them back through
+    :ref:`pod_config <config-yaml-kubernetes-pod-config>`.
+
+Two cluster-side prerequisites are outside SkyPilot's control. Multus must be
+installed, since the attachment is delivered through its annotation. And if the
+context uses :ref:`Kueue <config-yaml-kubernetes-kueue>`, the ClusterQueue must
+list the VF resource in ``coveredResources`` *and* give it a quota in a
+ResourceFlavor — a ClusterQueue that does not cover a requested extended
+resource never admits the workload, so jobs sit pending with no error.
+
 .. _config-yaml-kubernetes-context-configs:
 
 ``kubernetes.context_configs``

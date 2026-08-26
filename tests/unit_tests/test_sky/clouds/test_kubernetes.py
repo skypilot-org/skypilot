@@ -4694,6 +4694,9 @@ class TestKubernetesOciRoceHostNetworkOptOut(unittest.TestCase):
         self.assertIn('dnsPolicy: ClusterFirstWithHostNet', default_on)
 
 
+_UNSET = object()
+
+
 class TestKubernetesRdmaMode(unittest.TestCase):
     """`kubernetes.rdma.mode` selects how RDMA NICs reach the pod.
 
@@ -4707,10 +4710,14 @@ class TestKubernetesRdmaMode(unittest.TestCase):
                      pod_config=None,
                      node_alloc=None,
                      network_type=None,
-                     nodes=None):
+                     nodes=None,
+                     accelerators=_UNSET):
+        if accelerators is _UNSET:
+            accelerators = {'GB300': 4}
         gpu_resources = mock.MagicMock()
-        gpu_resources.instance_type = '8CPU--32GB--GB300:4'
-        gpu_resources.accelerators = {'GB300': 4}
+        gpu_resources.instance_type = ('8CPU--32GB--GB300:4'
+                                       if accelerators else '8CPU--32GB')
+        gpu_resources.accelerators = accelerators
         gpu_resources.use_spot = False
         gpu_resources.region = 'oci-context'
         gpu_resources.zone = None
@@ -4836,20 +4843,78 @@ class TestKubernetesRdmaMode(unittest.TestCase):
         self.assertFalse(deploy_vars['k8s_host_network'])
         self.assertTrue(deploy_vars['k8s_rdma_host_device_access'])
 
-    def test_pod_config_outranks_the_context_mode(self):
-        # A task's pod_config is more specific than an admin's per-context
-        # default, so it wins -- here putting the pod back on the host network
-        # even though the context selected SR-IOV.
+    def test_sriov_widens_the_hca_list_to_the_vf_family(self):
+        """A VF pod cannot see the host's physical functions.
+
+        The Grace profiles name those PFs exactly, and NCCL answers a list that
+        matches nothing by falling back to TCP -- no error, just a slow job.
+        Oracle makes the same substitution between its two reference manifests
+        for one shape, and it is the only NCCL difference between them.
+        """
         deploy_vars = self._deploy_vars(
             rdma={
                 'mode': 'sriov',
                 'resource': 'nvidia.com/mlnxnics',
                 'networks': 'network-operator/sriov-net',
+            })
+        self.assertEqual(deploy_vars['k8s_env_vars']['NCCL_IB_HCA'], 'mlx5')
+
+    def test_host_network_keeps_the_exact_hca_list(self):
+        # Control for the test above: sharing the node's namespace is exactly
+        # when the PF names are the right ones to name.
+        deploy_vars = self._deploy_vars()
+        self.assertTrue(
+            deploy_vars['k8s_env_vars']['NCCL_IB_HCA'].startswith('=mlx5_0'))
+
+    def test_cpu_only_task_needs_no_virtual_functions(self):
+        """OCI RoCE is detected from node labels, with no GPU request implied.
+
+        A CPU-only task therefore reaches the SR-IOV path with nothing to size
+        VFs against. It should come out an ordinary pod rather than failing on
+        a count it never needed.
+        """
+        deploy_vars = self._deploy_vars(rdma={
+            'mode': 'sriov',
+            'resource': 'nvidia.com/mlnxnics',
+            'networks': 'network-operator/sriov-net',
+        },
+                                        accelerators=None)
+        self.assertIsNone(deploy_vars['k8s_rdma_nic_resource'])
+        self.assertIsNone(deploy_vars['k8s_rdma_nic_count'])
+        self.assertIsNone(deploy_vars['k8s_rdma_networks'])
+        # The mode still applies: this cluster is pod-networked, so a CPU pod
+        # on it is not put on the host network either.
+        self.assertFalse(deploy_vars['k8s_host_network'])
+        self.assertFalse(deploy_vars['k8s_rdma_host_device_access'])
+
+    def test_networks_rejects_a_list(self):
+        # The value is repeated once per VF, so a list would yield more
+        # attachments than the resource request -- a CNI-time failure far from
+        # the config that caused it.
+        with self.assertRaises(ValueError) as ctx:
+            self._deploy_vars(
+                rdma={
+                    'mode': 'sriov',
+                    'resource': 'nvidia.com/mlnxnics',
+                    'networks': 'network-operator/a,network-operator/b',
+                })
+        self.assertIn('single', str(ctx.exception))
+
+    def test_host_network_against_sriov_is_rejected(self):
+        # In the host network namespace the pod's virtual functions are
+        # unreachable, so the combination would run without RDMA -- the one
+        # failure this feature must not produce quietly.
+        with self.assertRaises(ValueError) as ctx:
+            self._deploy_vars(rdma={
+                'mode': 'sriov',
+                'resource': 'nvidia.com/mlnxnics',
+                'networks': 'network-operator/sriov-net',
             },
-            pod_config={'spec': {
-                'hostNetwork': True
-            }})
-        self.assertTrue(deploy_vars['k8s_host_network'])
+                              pod_config={'spec': {
+                                  'hostNetwork': True
+                              }})
+        self.assertIn('hostNetwork', str(ctx.exception))
+        self.assertIn('without RDMA', str(ctx.exception))
 
     def test_nic_count_ignores_other_shapes_sharing_the_label_key(self):
         """The ratio must come from a node the pod can actually land on.

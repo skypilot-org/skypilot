@@ -887,6 +887,14 @@ class Kubernetes(clouds.Cloud):
         network_type, metadata = self._detect_network_type(
             context, resources.network_tier, k8s_acc_label_key,
             k8s_resource_key, acc_count, acc_type)
+        oci_roce_enabled = (
+            network_type == KubernetesHighPerformanceNetworkType.OCI_ROCE)
+        # Resolved here rather than next to the rest of the RDMA handling
+        # below, because the NCCL profile picked a few lines down depends on
+        # it: a pod holding SR-IOV VFs cannot see the host's physical
+        # functions, so the HCA list has to change with the delivery model.
+        rdma_mode = self._resolve_rdma_mode(context, oci_roce_enabled)
+        sriov_mode = (rdma_mode == kubernetes_enums.KubernetesRdmaMode.SRIOV)
 
         k8s_efa_count = None
         if network_type == KubernetesHighPerformanceNetworkType.AWS_EFA:
@@ -922,7 +930,8 @@ class Kubernetes(clouds.Cloud):
                 # Add high-performance networking environment variables for
                 # clusters with high performance networking. Pass acc_type so
                 # OCI can pick a shape-specific NCCL profile (e.g. GB200).
-                network_env_vars = network_type.get_network_env_vars(acc_type)
+                network_env_vars = network_type.get_network_env_vars(
+                    acc_type, pod_local_rdma=sriov_mode)
                 k8s_env_vars.update(network_env_vars)
 
         # We specify object-store-memory to be 500MB to avoid taking up too
@@ -1022,41 +1031,33 @@ class Kubernetes(clouds.Cloud):
         # host namespace can opt out with `hostNetwork: false`. This value is
         # also what gates `hostNetwork` in kubernetes-ray.yml.j2, so the pod
         # and the probe can no longer disagree about which mode it is in.
-        oci_roce_enabled = (
-            network_type == KubernetesHighPerformanceNetworkType.OCI_ROCE)
         merged_pod_config = kubernetes_utils.resolve_effective_pod_config(
             resources.cluster_config_overrides, self, context)
-
-        # How RDMA NICs reach pods on this context. Unset keeps the historical
-        # behavior, so this is additive: only a context that sets a mode sees
-        # any change.
-        #
-        # Scoped to the one network type whose NIC delivery this describes,
-        # matching how every other per-cloud NIC injection is gated (AWS EFA
-        # below, CoreWeave and Together in the template). A tenant-wide
-        # `kubernetes.rdma` therefore applies only where it is meaningful
-        # instead of failing launches on the rest of a mixed fleet. The
-        # mechanism itself -- an SR-IOV device plugin plus Multus -- is not
-        # OCI-specific, so widening this is moving one condition.
-        rdma_mode = None
-        if oci_roce_enabled:
-            rdma_mode = skypilot_config.get_effective_region_config(
-                cloud=cloud_config_str,
-                region=context,
-                keys=('rdma', 'mode'),
-                default_value=None)
-            if rdma_mode is not None:
-                rdma_mode = kubernetes_enums.KubernetesRdmaMode(
-                    rdma_mode.lower())
 
         # Precedence: a task's pod_config is more specific than an admin's
         # per-context mode, which in turn is more specific than what the
         # detected network type implies.
         pod_config_host_network = merged_pod_config.get('spec',
                                                         {}).get('hostNetwork')
+        # The one combination with no coherent meaning. Host networking puts
+        # the pod in the node's network namespace, where the VF attachments
+        # resolve to nothing -- the pod would schedule, run, and quietly move
+        # its traffic over TCP. Every other failure here is loud, so this one
+        # is too.
+        if pod_config_host_network and sriov_mode:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    f'pod_config sets hostNetwork: true, but context '
+                    f'{context!r} declares kubernetes.rdma.mode: '
+                    f'{kubernetes_enums.KubernetesRdmaMode.SRIOV.value!r}. '
+                    'The two describe different ways of reaching the RDMA '
+                    'fabric and cannot be combined: in the host network '
+                    'namespace the pod\'s virtual functions are unreachable, '
+                    'so it would run without RDMA. Drop the hostNetwork '
+                    'override, or unset rdma.mode to use host networking.')
         if pod_config_host_network is not None:
             k8s_host_network = bool(pod_config_host_network)
-        elif rdma_mode == kubernetes_enums.KubernetesRdmaMode.SRIOV:
+        elif sriov_mode:
             k8s_host_network = False
         else:
             k8s_host_network = oci_roce_enabled
@@ -1069,7 +1070,7 @@ class Kubernetes(clouds.Cloud):
         # node instead of its own VFs. Not keyed on k8s_host_network: an
         # explicit pod_config `hostNetwork: false` alone keeps today's device
         # access, so only declaring a mode changes it.
-        if rdma_mode == kubernetes_enums.KubernetesRdmaMode.SRIOV:
+        if sriov_mode:
             k8s_rdma_host_device_access = False
         else:
             k8s_rdma_host_device_access = oci_roce_enabled
@@ -1078,10 +1079,17 @@ class Kubernetes(clouds.Cloud):
         # configured the device plugin on this cluster, so they are declared
         # rather than guessed; the count is derived, since it follows from the
         # node and the GPUs requested.
+        #
+        # Only when the task asks for accelerators. OCI RoCE is detected from
+        # node labels alone, so a CPU-only task can reach here on an SR-IOV
+        # context; it has no GPUs to size VFs against and no use for them.
+        # Skipping just this part rather than the whole block is deliberate --
+        # the mode still turns host networking off, which is what makes such a
+        # pod an ordinary one on a pod-networked cluster.
         k8s_rdma_nic_resource = None
         k8s_rdma_nic_count = None
         k8s_rdma_networks = None
-        if rdma_mode == kubernetes_enums.KubernetesRdmaMode.SRIOV:
+        if sriov_mode and acc_count:
             k8s_rdma_nic_resource = skypilot_config.get_effective_region_config(
                 cloud=cloud_config_str,
                 region=context,
@@ -1104,6 +1112,17 @@ class Kubernetes(clouds.Cloud):
                         '"nvidia.com/rdma-vf") and the '
                         'NetworkAttachmentDefinition to attach (e.g. '
                         '"default/rdma-vf").')
+            # One attachment, repeated below once per VF. A value that is
+            # already a list would be repeated too, leaving more attachments
+            # than the resource request -- which fails at CNI time, far from
+            # the config that caused it.
+            if ',' in k8s_rdma_networks:
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(
+                        f'kubernetes.rdma.networks for context {context!r} is '
+                        f'{k8s_rdma_networks!r}, but it names a single '
+                        'NetworkAttachmentDefinition, not a list. SkyPilot '
+                        'repeats it once per virtual function it requests.')
             k8s_rdma_nic_count = self._derive_rdma_nic_count(
                 context, k8s_rdma_nic_resource, k8s_acc_label_key,
                 k8s_acc_label_values, k8s_resource_key, acc_count)
@@ -1259,10 +1278,11 @@ class Kubernetes(clouds.Cloud):
         deploy_vars['k8s_ipc_lock_capability'] = (
             network_type.requires_ipc_lock_capability())
 
-        # OCI OKE RoCE: privileged containers plus a hostPath mount of
-        # /dev/infiniband, for shapes with no RDMA device plugin. hostNetwork
-        # is gated on k8s_host_network instead (see comment there), so it can
-        # be turned off from pod_config without losing the device access.
+        # Superseded by k8s_rdma_host_device_access, which is what the
+        # template now gates the privileged container and the /dev/infiniband
+        # hostPath on. Still published because it answers a different question
+        # -- whether this is an OCI RoCE cluster at all, rather than how its
+        # NICs are delivered -- which consumers outside this repo may read.
         deploy_vars['k8s_enable_oci_roce'] = oci_roce_enabled
 
         # User-specified APT mirror candidates for pod package installs.
@@ -1687,6 +1707,43 @@ class Kubernetes(clouds.Cloud):
             f'{cls.canonical_name()}/{c}'
             for c in cls.existing_allowed_contexts(silent=True)
         ]
+
+    @classmethod
+    def _resolve_rdma_mode(
+        cls, context: str, oci_roce_enabled: bool
+    ) -> Optional[kubernetes_enums.KubernetesRdmaMode]:
+        """How RDMA NICs reach pods on this context, or None for the default.
+
+        Unset keeps the historical behavior, so this is additive: only a
+        context that declares a mode sees any change.
+
+        Scoped to the one network type whose NIC delivery it describes,
+        matching how every other per-cloud NIC injection is gated (AWS EFA,
+        CoreWeave and Together). A tenant-wide ``kubernetes.rdma`` therefore
+        applies only where it is meaningful instead of failing launches on the
+        rest of a mixed fleet. The mechanism itself -- an SR-IOV device plugin
+        plus Multus -- is not OCI-specific, so widening this is moving one
+        condition.
+
+        Ignoring the block elsewhere is silent by design, but says so out loud
+        when a mode was declared: a fleet-wide default landing on a cluster it
+        does not describe is the intended case, while a declaration that
+        resolves to nothing is usually a detection problem worth naming.
+        """
+        mode = skypilot_config.get_effective_region_config(
+            cloud=cls._REPR.lower(),
+            region=context,
+            keys=('rdma', 'mode'),
+            default_value=None)
+        if mode is None:
+            return None
+        if not oci_roce_enabled:
+            logger.info(
+                f'kubernetes.rdma.mode is set for context {context!r}, but it '
+                'was not detected as an RDMA cluster whose NIC delivery this '
+                'describes; ignoring it.')
+            return None
+        return kubernetes_enums.KubernetesRdmaMode(mode.lower())
 
     @staticmethod
     def _derive_rdma_nic_count(context: str, resource: str,
