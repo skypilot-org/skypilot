@@ -1,206 +1,152 @@
 ---
 name: skypilot
-description: "Use when launching cloud VMs, Kubernetes pods, or Slurm jobs for GPU/TPU/CPU workloads, training or fine-tuning models on cloud GPUs, deploying inference servers (vllm, TGI, etc.) with autoscaling, writing or debugging SkyPilot task YAML files, using spot/preemptible instances for cost savings, comparing GPU prices across clouds, managing compute across 25+ clouds, Kubernetes, Slurm, and on-prem clusters with failover between them, troubleshooting resource availability or SkyPilot errors, or optimizing cost and GPU availability."
+description: "Use when launching cloud VMs, Kubernetes pods, or Slurm jobs for GPU/TPU/CPU workloads; training, fine-tuning, or batch inference on cloud GPUs; deploying inference servers with SkyServe; writing or debugging SkyPilot task YAML; using spot/preemptible instances; optimizing GPU cost or availability; interpreting SkyPilot job status/logs; SSH-based remote diagnosis and repair; checkpoint/resume workflows; or troubleshooting SkyPilot API server, resource, or workload failures."
 ---
 
 # SkyPilot Skill
 
-SkyPilot is a unified framework to run AI workloads on any cloud, Slurm or Kubernetes. It provides a single interface to launch clusters, run jobs, and serve models across 25+ clouds (AWS, GCP, Azure, Coreweave, Nebius, Lambda, Together AI, RunPod, and more), Kubernetes clusters, and Slurm clusters.
+SkyPilot is a unified interface for running AI workloads on clouds, Kubernetes,
+Slurm, and SSH node pools. Treat it as the agent's primary control plane for
+provisioning, job execution, logs, status, and cleanup. Use SSH only when the
+SkyPilot CLI view is not enough to diagnose or repair the remote workload.
 
-## When to Use SkyPilot
+Keep this file loaded as the always-needed operating guide. The following files
+are bundled with this skill under its `references/` directory; load them relative
+to this `SKILL.md`, not relative to the user's current repository:
 
-**Use SkyPilot when you need to:**
-- Manage compute resources on any cloud, Slurm, or Kubernetes cluster
-- Launch CPU/GPU/TPU (GB300, GB200, B200, H200, H100, etc.) on any cloud, Kubernetes or Slurm
-- Run training, fine-tuning, or batch inference jobs
-- Serve models with autoscaling and multi-cloud replicas (SkyServe)
-- Run long-running jobs with automatic lifecycle management and recovery (managed jobs)
-- Find the cheapest or most available GPU across clouds
+- `references/cli-reference.md`: exact commands and flags
+- `references/yaml-spec.md`: full task schema
+- `references/python-sdk.md`: programmatic use
+- `references/advanced-patterns.md`: multi-cloud, distributed training,
+  production patterns
+- `references/troubleshooting.md`: installation, credentials, cloud/provider
+  errors
+- `references/examples.md`: copy-paste task YAML examples
 
-**Don't use SkyPilot for:**
-- Local-only workloads (use Docker/conda directly)
+## Must-Know Agent Rules
 
-## Capabilities: When to Use What
+These are the SkyPilot behaviors agents most often get wrong:
 
-SkyPilot has three core abstractions. Use the right one for each stage of your workflow:
+1. Start by checking the API server once with `sky api info -o json`. If it is
+   already connected, do not run setup checks unless the user's task needs them.
+2. Use structured output (`-o json`) for status and queue commands. Do not parse
+   human tables when JSON exists.
+3. Let SkyPilot choose cloud/region by default. Specify `infra:` only when the
+   user explicitly asks for a cloud, region, Kubernetes context, Slurm pool, or
+   SSH node pool.
+4. Use named resources. Always pass `-c NAME` for clusters and `-n NAME` or a
+   YAML `name:` for jobs/tasks so logs and queues are traceable.
+5. Prefer `sky exec` on existing clusters for fast iteration. Use
+   `sky exec CLUSTER task.yaml -d -n JOB_NAME --env KEY=VALUE --secret NAME`
+   for detached resubmission with parameter overrides and secrets. `sky exec`
+   does not accept `-y`.
+6. Treat `sky logs CLUSTER JOB_ID --status` exit codes semantically:
+   `0=succeeded`, `100=failed`, `101=not finished`, `102=not found`,
+   `103=cancelled`. Nonzero does not always mean failure.
+7. Combine scheduler state with remote process state.
+   `sky queue CLUSTER -o json --skip-finished` and `sky logs --status` show
+   SkyPilot's view; `ssh CLUSTER` with `ps` and `nvidia-smi` shows what is
+   actually running.
+8. `workdir:` syncs to `~/sky_workdir`. Always `cd ~/sky_workdir` before remote
+   project commands. Use `find ~/sky_workdir -maxdepth N -name NAME` instead of
+   assuming local paths exactly match remote paths.
+9. Local-path `workdir:` sync includes uncommitted local changes and uses rsync
+   without `--delete`. Deleted local files may remain on the remote. Verify
+   remote code/config when correctness depends on a specific revision.
+10. SkyPilot injects `envs:`/`--env` and `secrets:`/`--secret` into the
+    task setup/run environment, not into an arbitrary interactive SSH shell.
+    For manual commands requiring secrets, run through `sky exec --secret ...`
+    or source a deliberate remote env file.
+11. Current cluster job logs live under
+    `~/sky_logs/<job-id>-<job-name>/run.log`; if the directory is unclear, use
+    `sky logs`/`sky logs --sync-down` or inspect `sky queue` for the job ID.
+    Normalize carriage returns before grepping progress-bar logs:
+    tail -n 1000 ~/sky_logs/<job>/run.log | tr "\r" "\n" | grep -E "PATTERN"
+12. Use targeted log filters for long jobs. Prefer patterns like
+    `Traceback|ERROR|RuntimeError|CUDA out|checkpoint|eval|loss|step` and
+    `tail -n 50` over streaming full logs.
+13. A stale log file is not enough to declare a hang. Check GPU/process state:
+    `nvidia-smi --query-gpu=utilization.gpu,memory.used,memory.total --format=csv,noheader,nounits`
+    and `ps -eo pid,ppid,stat,pcpu,pmem,etime,args | grep python`. If several
+    Python processes exist, use `nvidia-smi pmon -c 1`.
+14. Cancel jobs at safe state boundaries. Wait for a checkpoint or durable
+    progress artifact before cancelling, then verify both files on disk and log
+    lines before relying on resume.
+15. Keep manual remote repairs narrow and use the project's own helpers where
+    possible, for example
+    `cd ~/sky_workdir && PYTHONPATH=src python3 -c "from pkg import repair; repair.fix()"`.
+16. If task YAML generates runtime config from env vars, inspect the generated
+    config on the cluster, not only the static local default.
+17. Progress bars often reset per phase, epoch, shard, or domain. Use phase
+    boundary logs and persisted progress files to estimate true progress.
+18. Preflight unfamiliar YAML or resource choices with
+    `sky launch --dryrun task.yaml` before provisioning.
+19. Respect an established persistent-cluster workflow. Otherwise set
+    autostop/autodown or clean up clusters when done; cost leaks are a
+    correctness issue for cloud agents.
 
-**1. SkyPilot Clusters** (`sky launch` / `sky exec`) — Interactive development and debugging
-- Use during initial development, debugging, and experimentation
-- Launch a cluster, SSH in or connect VSCode/Cursor (`code --remote ssh-remote+CLUSTER`), iterate quickly
-- Cluster stays up until you stop/down it or autostop triggers
-- Best for: prototyping, debugging, short experiments
+## Bootstrap
 
-**2. Managed Jobs** (`sky jobs launch`) — Long-running training and batch jobs
-- Use when submitting long-running jobs that should run unattended
-- Manages the full lifecycle: provisioning, execution, recovery, and teardown
-- Automatically recovers from spot preemptions, quota limits, and transient failures
-- Works across clouds, Kubernetes, and Slurm (handles preemptions and quota)
-- Best for: training runs, fine-tuning, hyperparameter sweeps, batch inference
-
-**3. SkyServe** (`sky serve up`) — Production model serving
-- Use when serving models at scale with autoscaling
-- Start with `sky launch` + open port to test your serving setup, then use `sky serve up` to scale
-- Provides load balancing, autoscaling, and multi-cloud replicas
-- Best for: model serving endpoints, API services
-
-## Before You Start (Agent Bootstrap)
-
-Bootstrap to confirm SkyPilot is installed, connected to an API server, and has cloud credentials. Once confirmed, skip straight to the user's task.
-
-**Step 1: Check installation and API server connectivity**
-
-```bash
-sky api info
-```
-| Output contains | Meaning | Next action |
-|-----------------|---------|-------------|
-| Server version and status | Server is running and connected | **Bootstrap done.** Skip to user's task. |
-| `No SkyPilot API server is connected` | No server connected | Go to "Start or connect a server" below. |
-| `Could not connect to SkyPilot API server` | Remote server unreachable or auth expired | Tell the user and suggest `sky api login --relogin -e <endpoint>` to reconnect. |
-| `command not found: sky` | SkyPilot not installed | Go to "Install SkyPilot" below. |
-
-**Install SkyPilot** (only if `sky` command not found):
-```bash
-pip install "skypilot[aws,gcp,kubernetes]"  # Pick clouds the user needs
-```
-Ask the user which clouds they need if unclear, then re-run `sky api info`.
-
-**Start or connect a server** (only if "not running"):
-
-Ask the user:
-> Do you have an existing SkyPilot API server to connect to, or should I start one locally?
-
-- **Connect to existing server:** `sky api login -e <API_SERVER_URL>` — get the URL from the user.
-- **Start locally:** `sky api start`
-
-After either path, re-run `sky api info` to confirm the server is reachable.
-
-**Step 2: Check cloud credentials** (only for fresh setups — skip if the server was already running)
-```bash
-sky check -o json
-```
-This shows which clouds are enabled or disabled. If the user's target cloud is not enabled, guide them through credential setup (see [Troubleshooting](references/troubleshooting.md#1-installation-and-credentials)).
-
-## Essential Commands
-
-Use `-o json` with status/query commands to get structured JSON output instead of tables.
-
-**Clusters** — interactive development and debugging:
-
-| Command | Description |
-|---------|-------------|
-| `sky launch -c NAME task.yaml` | Launch a cluster or run a task |
-| `sky exec NAME task.yaml` | Run task on existing cluster (skips provisioning); syncs workdir each time |
-| `sky exec NAME task.yaml -d` | Same, but detach immediately (don't stream logs) |
-| `sky status -o json` | Show all clusters |
-| `sky logs NAME` | Stream job logs from a cluster |
-| `sky logs NAME --no-follow` | Print existing logs and exit immediately |
-| `sky logs NAME --tail 50` | Print last 50 lines of logs and exit |
-| `sky logs NAME --status` | Exit with code 0=succeeded, 100=failed, 101=not finished, 102=not found, 103=cancelled |
-| `sky queue NAME -o json` | List jobs on a cluster with status (structured JSON) |
-| `sky stop NAME` / `sky start NAME` | Stop/restart to save costs (preserves disk) |
-| `sky down NAME` | Tear down a cluster completely |
-| `sky gpus list -o json` | List available GPU types across clouds |
-
-**Managed Jobs** — long-running unattended workloads:
-
-| Command | Description |
-|---------|-------------|
-| `sky jobs launch task.yaml` | Launch a managed job (auto lifecycle + recovery) |
-| `sky jobs queue -o json` | Show all managed jobs and their status |
-| `sky jobs logs JOB_ID` | Stream logs from a managed job |
-| `sky jobs cancel JOB_ID` | Cancel a managed job |
-
-**SkyServe** — model serving with autoscaling:
-
-| Command | Description |
-|---------|-------------|
-| `sky serve up serve.yaml -n NAME` | Start a model serving service |
-| `sky serve status NAME` | Show service status and endpoint URL |
-| `sky serve update NAME new.yaml` | Update a running service (rolling) |
-| `sky serve down NAME` | Tear down a service |
-
-For complete CLI reference, see [CLI Reference](references/cli-reference.md).
-
-## Quick Start
+Run:
 
 ```bash
-# Launch a GPU cluster
-sky launch -c mycluster --gpus H100 -- nvidia-smi
-
-# Run a task from YAML
-sky launch -c mycluster task.yaml
-
-# SSH into cluster
-ssh mycluster
-
-# Connect VSCode or Cursor to the cluster for interactive development
-code --remote ssh-remote+mycluster /home/user/sky_workdir
-# or: cursor --remote ssh-remote+mycluster /home/user/sky_workdir
-
-# Tear down
-sky down mycluster
+sky api info -o json
 ```
 
-## Task YAML Structure
+Interpret the result:
 
-The task YAML is SkyPilot's primary interface. All fields are optional.
+| Result | Meaning | Next action |
+|--------|---------|-------------|
+| JSON with `server.status`, version, URL, and user | Client is connected to a reachable API server | Proceed to the user's task |
+| `No SkyPilot API server is connected` | No local/default server is reachable | Start local server or connect to the endpoint the user provides |
+| `Could not connect to SkyPilot API server at ...` | Remote endpoint is unreachable or auth expired | Ask the user to confirm the endpoint/auth, or use `sky api login --relogin -e URL` if URL is known |
+| `command not found: sky` | SkyPilot is not installed | Install the needed extras, then re-run bootstrap |
 
-```yaml
-# task.yaml
-name: my-training-job
+If the user already provided a remote endpoint, do not ask for it again:
 
-# Local directory to sync to remote ~/sky_workdir
-workdir: .
-
-# Number of nodes (for distributed training)
-num_nodes: 1
-
-resources:
-  # GPU/TPU accelerators (SkyPilot auto-selects the cheapest cloud/region)
-  accelerators: H200:8
-  # Optional: pin to a specific cloud/region/infra
-  # infra: aws  # or aws/us-east-1, k8s, ssh/my-pool
-  # If infra is left out, SkyPilot automatically fails over across all
-  # enabled clouds/regions to find the cheapest available option.
-  # Use spot instances for cost savings
-  use_spot: false
-  # Disk size in GB
-  disk_size: 256
-  # Open ports for serving
-  ports: 8080
-
-# Environment variables (accessible in file_mounts, setup, and run)
-envs:
-  MODEL_NAME: my-model
-  BATCH_SIZE: 32
-
-# Setup: runs once on cluster creation, cached on reuse
-setup: |
-  pip install torch transformers
-
-# Run: the main command
-run: |
-  python train.py --model $MODEL_NAME --batch-size $BATCH_SIZE
+```bash
+sky api login -e https://example.company.internal
+sky api info -o json
 ```
 
-For complete YAML schema including file mounts, environment variables set by SkyPilot, and advanced fields, see [YAML Specification](references/yaml-spec.md).
+If the user has no remote server and wants a local one:
 
-## GPU and Cloud Selection
+```bash
+sky api start
+sky api info -o json
+```
 
-**IMPORTANT: Let SkyPilot choose the cloud and region.** Do NOT manually pick a cloud/region/instance by parsing `sky gpus list` output. SkyPilot's optimizer automatically selects the cheapest available option across all enabled clouds. Only specify `infra:` when the user explicitly requests a specific cloud or region.
+Run `sky check -o json` only for fresh setup, credential diagnosis, or when a
+target cloud/infra is not enabled. Skip it when the API server is already
+connected and the user is asking for ordinary launch/debug work.
 
-**Default behavior (recommended):** Just specify the GPU type. SkyPilot finds the cheapest cloud/region automatically:
+## Choose The Right Abstraction
+
+Use the highest-level SkyPilot abstraction that fits the task:
+
+| Need | Use | Notes |
+|------|-----|-------|
+| Interactive development, debugging, fast reruns | `sky launch` then `sky exec` | Cluster persists until stopped/downed or autostop triggers |
+| Long unattended training, fine-tuning, batch inference | `sky jobs launch` | Managed jobs handle provisioning, recovery, and teardown |
+| Production-ish inference endpoints with autoscaling | `sky serve up` | Test with `sky launch` first if the run command is unproven |
+
+Use `sky exec` rather than relaunching when only the run command, code, envs, or
+small configs changed. Use `sky launch` again when setup, image, file mounts,
+dependencies, resources, or cluster-level configuration changed.
+
+## Resource Selection
+
+Default to optimizer-friendly YAML:
 
 ```yaml
 resources:
-  accelerators: H200:8  # SkyPilot picks the cheapest cloud/region with H200:8
+  accelerators: H100:8
 ```
 
-If the user doesn't specify a GPU type, ask them what GPU they need (or what model/workload they're running so you can recommend one). Do NOT run `sky gpus list` and pick for them — present options and let the user decide, or use `any_of` to let SkyPilot maximize availability:
+When multiple GPU types are acceptable, use `any_of` so SkyPilot can maximize
+availability and minimize cost:
 
 ```yaml
-# Let SkyPilot choose from multiple acceptable GPU types (cheapest wins)
 resources:
   any_of:
     - accelerators: H100:8
@@ -208,241 +154,140 @@ resources:
     - accelerators: A100:8
 ```
 
-Use `ordered` only when the user has a strict preference:
-
-```yaml
-# Try H100 first on AWS, fall back to GCP, then A100
-resources:
-  ordered:
-    - infra: aws/us-east-1
-      accelerators: H100:8
-    - infra: gcp/us-central1
-      accelerators: H100:8
-    - infra: aws/us-west-2
-      accelerators: A100-80GB:8
-```
-
-Only set `infra:` when the user explicitly says something like "use AWS" or "run on GCP us-central1":
+Use `ordered` only when the user has a strict preference order. Pin `infra:`
+only when the user explicitly requests a provider/region/context/pool:
 
 ```yaml
 resources:
-  infra: aws             # User asked for AWS specifically
+  infra: aws/us-east-1
   accelerators: H100:8
 ```
 
-## Cluster Lifecycle
+If the user does not specify GPU requirements, ask for the workload/model or
+propose a small set of GPU choices. Do not scrape `sky gpus list` and silently
+choose a cloud/region yourself.
+
+## Core Commands
+
+Cluster iteration:
 
 ```bash
-# Launch and run a task
-sky launch -c mycluster task.yaml
-
-# Launch with autostop at launch time (preferred: saves cost, no follow-up command needed)
-sky launch -c mycluster task.yaml -i 30        # stop after 30 min idle
-sky launch -c mycluster task.yaml -i 30 --down # tear down after 30 min idle
-
-# Override or pass environment variables via CLI
-sky launch -c mycluster task.yaml --env MODEL_NAME=llama3 --env BATCH_SIZE=64
-
-# Re-run a different task on the same cluster (fast, skips provisioning)
-sky exec mycluster another_task.yaml
-
-# Run an inline command
-sky exec mycluster -- python train.py --epochs 10
-
-# Set autostop after launch (use if you forgot to set -i at launch time)
-sky autostop mycluster -i 30        # stop after 30 min idle, preserving disk (can restart with sky start)
-sky autostop mycluster -i 30 --down # tear down after 30 min idle (disk is deleted, cannot restart)
-
-# Stop to save costs, restart later
-sky stop mycluster
-sky start mycluster
-
-# Tear down completely
-sky down mycluster
+sky launch --dryrun task.yaml
+sky launch -c CLUSTER task.yaml -i 30 --down
+sky exec CLUSTER task.yaml -d -n JOB_NAME --env KEY=VALUE --secret SECRET_NAME
+sky queue CLUSTER -o json --skip-finished
+sky logs CLUSTER JOB_ID --status
+sky logs CLUSTER JOB_ID --no-follow --tail 100
+sky logs CLUSTER JOB_ID --sync-down
+ssh CLUSTER
+sky down CLUSTER
 ```
 
-## Workdir Sync Behavior
-
-`workdir:` is synced to `~/sky_workdir` on the remote via `rsync` before every `sky exec`. **rsync is additive — deleted local files are NOT removed from the remote.** This can cause experiments to run against stale build artifacts or old configs.
-
-To ensure a clean slate, SSH and wipe before `sky exec`:
-```bash
-ssh mycluster "rm -rf ~/sky_workdir"
-sky exec mycluster task.yaml
-```
-
-Or clean inside `run:` if only specific artifacts need removal:
-```yaml
-run: |
-  find ~/sky_workdir/build -name '*.o' -delete 2>/dev/null || true
-  cd ~/sky_workdir && make
-```
-
-## Managed Jobs
-
-Use `sky jobs launch` for long-running jobs that should run unattended. SkyPilot manages the full lifecycle — provisioning, execution, recovery from preemptions/quota/failures, and teardown:
-
-```yaml
-# managed-job.yaml
-name: training-job
-
-resources:
-  accelerators: A100:8
-
-run: |
-  python train.py --resume-from-checkpoint
-```
+Managed jobs:
 
 ```bash
-# Launch as managed job
-sky jobs launch managed-job.yaml
-
-# Check status
+sky jobs launch task.yaml -n JOB_NAME -d
 sky jobs queue -o json
-
-# Stream logs
-sky jobs logs <job_id>
-
-# Cancel
-sky jobs cancel <job_id>
+sky jobs logs JOB_ID --no-follow --tail 100
+sky jobs cancel JOB_ID
 ```
 
-**Checkpoint pattern**: Your training script should save checkpoints to persistent storage (cloud bucket or volume) and resume from the latest checkpoint on restart. SkyPilot handles the cluster recovery; your script handles the state recovery.
+For managed jobs, `-d` / `--detach-run` only suppresses CLI log streaming after
+submission; it does not change the managed-job lifecycle or recovery behavior.
 
-## SkyServe: Model Serving
+SkyServe:
+
+```bash
+sky serve up serve.yaml -n SERVICE
+sky serve status SERVICE
+sky serve status SERVICE --endpoint
+sky serve update SERVICE new-serve.yaml
+sky serve down SERVICE
+```
+
+## Monitoring And Diagnosis
+
+For short jobs, stream logs:
+
+```bash
+sky logs CLUSTER JOB_ID
+```
+
+For long jobs, avoid noisy loops. Use the scheduler status for state and sparse,
+targeted remote probes for evidence:
+
+```bash
+sky logs CLUSTER JOB_ID --status
+sky queue CLUSTER -o json --skip-finished
+ssh CLUSTER 'log_dir=$(ls -dt ~/sky_logs/JOB_ID-* 2>/dev/null | head -1) && tail -n 1000 "$log_dir/run.log" | tr "\r" "\n" | grep -E "Traceback|ERROR|checkpoint|eval|loss|step" | tail -n 50'
+ssh CLUSTER 'nvidia-smi --query-gpu=utilization.gpu,memory.used,memory.total --format=csv,noheader,nounits'
+ssh CLUSTER 'ps -eo pid,ppid,stat,pcpu,pmem,etime,args | grep [p]ython'
+```
+
+Use `sky logs CLUSTER JOB_ID --sync-down` when you need the complete log
+directory for post-mortem analysis or local artifact inspection.
+
+If scheduler status and process state disagree, report both and investigate
+before taking destructive action. A RUNNING job with no new logs may still be
+compute-bound; an active GPU process may belong to a different job than the one
+the scheduler reports.
+
+## Remote Repair Pattern
+
+Use this when a launched job is failing or partially complete:
+
+1. Identify the cluster and job ID from
+   `sky queue CLUSTER -o json --skip-finished`.
+2. Check `sky logs CLUSTER JOB_ID --status` and recent targeted logs.
+3. SSH in, `cd ~/sky_workdir`, and verify the actual remote code/config.
+4. Inspect generated config, checkpoints, progress files, process table, and
+   GPU state.
+5. Apply the narrowest repair using project code/helpers.
+6. Resume with `sky exec CLUSTER task.yaml -d -n DESCRIPTIVE_NAME ...` or the
+   appropriate managed-job command.
+
+Do not cancel, wipe, or relaunch blindly when checkpoint/progress consistency
+matters.
+
+## Task YAML Essentials
+
+Keep YAML simple and parameterized:
 
 ```yaml
-# serve.yaml
+name: train
+workdir: .
+
 resources:
-  accelerators: A100:1
-  ports: 8080
+  accelerators: H100:1
+  disk_size: 256
+
+envs:
+  MODEL_NAME: meta-llama/Llama-3.1-8B-Instruct
+
+setup: |
+  pip install -r requirements.txt
 
 run: |
-  python -m vllm.entrypoints.openai.api_server \
-    --model meta-llama/Llama-3.1-8B-Instruct \
-    --port 8080
-
-service:
-  readiness_probe: /v1/models
-  replica_policy:
-    min_replicas: 1
-    max_replicas: 3
-    target_qps_per_replica: 5
+  python train.py --model "$MODEL_NAME"
 ```
 
-```bash
-# Start service
-sky serve up serve.yaml -n my-llm
+Use `envs:` plus CLI `--env` for routine parameters. Use `--secret` or
+`secrets:` for credentials. See the bundled `references/yaml-spec.md` for file
+mounts, service blocks, volumes, multi-node fields, and advanced resource
+syntax.
 
-# Check status / get endpoint
-sky serve status my-llm
-sky serve status my-llm --endpoint
+## Common Mistakes
 
-# Update (rolling)
-sky serve update my-llm new-serve.yaml
-
-# Tear down
-sky serve down my-llm
-```
-
-## Common Workflows
-
-### Fine-Tuning Workflow
-1. Write task YAML with `setup` (install deps) and `run` (training command)
-2. Use `file_mounts` or `workdir` to sync code
-3. `sky launch -c train task.yaml` to launch
-4. `sky logs train` to monitor
-5. `sky exec train -- python eval.py` to evaluate on same cluster
-6. `sky down train` when done
-
-### Hyperparameter Sweep
-1. Create parameterized YAML with `envs`
-2. Launch multiple managed jobs:
-   ```bash
-   for lr in 1e-4 1e-5 1e-6; do
-     sky jobs launch sweep.yaml --env LR=$lr --name sweep-lr-$lr
-   done
-   ```
-3. Monitor with `sky jobs queue -o json`
-
-### Model Serving Deployment
-1. Write serve YAML with `service:` section
-2. `sky serve up serve.yaml -n my-service`
-3. Get endpoint: `sky serve status my-service --endpoint`
-4. Update model: `sky serve update my-service updated.yaml`
-
-### Parallel Experiment Submission
-
-Use `sky exec -d` to submit jobs to multiple VMs without blocking, then collect results:
-
-```bash
-# Submit all experiments (detached, returns after job is queued)
-for i in 1 2 3 4; do
-  sky exec exp-vm-0$i task.yaml --env LR=1e-$i -d
-done
-
-# Get the latest job ID from a cluster
-job_id=$(sky queue exp-vm-01 -o json \
-  | python3 -c "import sys, json; jobs = json.load(sys.stdin).get('exp-vm-01', []); print(max(j['job_id'] for j in jobs) if jobs else '')")
-
-# Wait for a specific job and fetch last 50 lines
-sky logs exp-vm-01 $job_id --status && sky logs exp-vm-01 $job_id --tail 50
-
-# Check all jobs across a cluster at once
-sky queue exp-vm-01 -o json
-```
-
-## Agent Feedback Loop
-
-When using SkyPilot programmatically, follow this loop:
-
-1. **Validate**: `sky launch --dryrun task.yaml` (check resource availability/cost)
-2. **Launch**: `sky launch -c mycluster task.yaml`
-3. **Monitor**: `sky status -o json` and `sky queue mycluster -o json`
-4. **Wait for completion**: `sky logs mycluster <JOB_ID>` (streams logs so you can observe progress and react to stalls; blocks until job finishes; get JOB_ID from `sky queue mycluster -o json`). For long-running jobs where you don't need intermediate output, use `sky logs mycluster <JOB_ID> --status` instead (blocks silently, exits 0 on success).
-5. **Inspect output**: `sky logs mycluster <JOB_ID> --no-follow` or `sky logs mycluster <JOB_ID> --tail 100`
-6. **Debug**: `ssh mycluster` (interactive)
-7. **Iterate**: `sky exec mycluster updated_task.yaml` (run on existing cluster)
-8. **Cleanup**: `sky down mycluster`
-
-> **Never poll with `sleep` + `sky queue`** — use `sky logs CLUSTER JOB_ID` to stream logs and block until done. Use `--status` if you only need the exit code, or `--tail N` to fetch recent output after completion.
-
-## Common Agent Mistakes
-
-| Mistake | Why it's wrong | Do this instead |
-|---------|---------------|-----------------|
-| Manually picking cloud/region from `sky gpus list` output | SkyPilot optimizer does this automatically and better | Just set `accelerators:` and let SkyPilot choose |
-| Using `sky launch` for long-running unattended jobs | No recovery if preempted or interrupted | Use `sky jobs launch` for unattended work |
-| Forgetting `sky down` or autostop after work is done | Wastes money on idle clusters | Always clean up, or use `-i <minutes> --down` at launch |
-| Hardcoding `infra: aws` without user asking | Limits availability and increases cost | Only set `infra:` when user explicitly requests a cloud |
-| Not using `envs:` for configurable values | Hard to reuse or override from CLI | Use `envs:` in YAML + `--env KEY=VAL` for parameterization |
-| Running `sky launch` without `-c <name>` | Creates randomly-named cluster, hard to reference | Always name clusters with `-c` |
-| Parsing table output from status commands | Table formatting is for humans, fragile to parse | Use `-o json` for structured output |
-| Using deprecated `cloud:`/`region:`/`zone:` fields | Deprecated in favor of `infra:` | Use `infra: aws/us-east-1` instead |
-| Polling job status with `sleep` + `sky queue` | Wastes tokens, introduces timing bugs, fragile | Use `sky logs CLUSTER JOB_ID --status` to block until done |
-| Assuming workdir sync removes remote files | rsync is additive; old remote files persist across `sky exec` calls | SSH and manually clean `~/sky_workdir`, or clean in `run:` script |
-| Not using `--tail` when only last output matters | Streaming full logs wastes tokens for long jobs | Use `sky logs CLUSTER JOB_ID --tail 50` for last N lines |
-
-## Common Issues Quick Reference
-
-| Issue | Solution |
-|-------|----------|
-| GPU not available | Use `any_of` for fallback, or try different regions/clouds |
-| Setup takes too long | SkyPilot caches setup; use `sky exec` to skip it on reruns |
-| Task fails silently | Check `sky logs <cluster>` or `ssh <cluster>` to debug |
-| Cluster stuck in INIT | `sky down <cluster>` and relaunch |
-| Preemption/quota | Use `sky jobs launch` for automatic recovery and lifecycle management |
-| Port not accessible | Ensure `ports:` is set in resources and security groups allow traffic |
-| File sync slow | Use cloud bucket mounts instead of `workdir` for large datasets |
-| Credentials error | Run `sky check -o json` and inspect which clouds are disabled |
-
-## References
-
-For detailed reference documentation:
-
-- [CLI Reference](references/cli-reference.md) — All commands and flags
-- [YAML Specification](references/yaml-spec.md) — Complete task YAML schema, file mounts, environment variables
-- [Python SDK](references/python-sdk.md) — Programmatic API and SDK usage
-- [Advanced Patterns](references/advanced-patterns.md) — Multi-cloud, distributed training, production patterns
-- [Troubleshooting](references/troubleshooting.md) — Error diagnosis and solutions
-- [Examples](references/examples.md) — Copy-paste task YAML examples
+| Mistake | Better behavior |
+|---------|-----------------|
+| Re-running `sky launch` for every code change | Use `sky exec` on the existing cluster |
+| Treating exit code 101 from `sky logs --status` as failure | Interpret it as "not finished" |
+| Polling with tight `sleep` + `sky queue` loops | Use `sky logs CLUSTER JOB_ID --status`, or sparse targeted probes for diagnosis |
+| Debugging only from logs | Combine logs, queue status, `ps`, and `nvidia-smi` |
+| Assuming SSH has task secrets | Use `sky exec --secret` or a deliberate remote env file |
+| Assuming local deleted files are gone remotely | Inspect or clean `~/sky_workdir` |
+| Parsing progress bars literally | Normalize `\r` and use phase/checkpoint evidence |
+| Cancelling before checkpoint durability is known | Wait for and verify durable state |
+| Hardcoding cloud/region without a user request | Let SkyPilot optimize with `accelerators:` or `any_of` |
+| Generating old `cloud:`/`region:`/`zone:` YAML fields | Use `resources.infra` instead, e.g. `infra: aws/us-east-1` |
+| Forgetting cost control for disposable clusters | Launch with `-i MINUTES --down`, clean up explicitly, or keep the cluster only when the user wants reuse |
