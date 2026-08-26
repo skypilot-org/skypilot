@@ -1,5 +1,6 @@
 """Task: a coarse-grained stage in an application."""
 import collections
+import copy
 import dataclasses
 import json
 import os
@@ -287,32 +288,97 @@ class ManagedSecretRef:
     scope_override: Optional[str] = None  # 'personal', 'workspace', or 'global'
 
 
-def redact_task_yaml_dict(task_yaml: Dict[str, Any]) -> None:
-    """Redact secrets and credentials from a parsed task YAML config dict.
+_REDACTED_VALUE = '<redacted>'
+_SENSITIVE_KEY_SUFFIXES = (
+    'password',
+    'passphrase',
+    'token',
+    'secret',
+    'api_key',
+    'access_key',
+    'private_key',
+    'client_secret',
+    'authorization',
+    'auth',
+    'authorization_header',
+    'auth_header',
+)
 
-    Modifies task_yaml in-place. Secret refs (secrets: prefix) in array
-    form are kept as-is; in dict form they are set to null so the YAML
-    remains launchable.
-    """
-    raw_secrets = task_yaml.get('secrets')
-    if raw_secrets is not None:
-        if isinstance(raw_secrets, list):
-            # Array form: all items are secret refs, keep as-is
-            pass
+
+def _normalize_sensitive_key(key: Any) -> Optional[str]:
+    if not isinstance(key, str):
+        return None
+    normalized = re.sub(r'[^a-z0-9]+', '_', key.lower()).strip('_')
+    return normalized or None
+
+
+def _is_sensitive_key(key: Any) -> bool:
+    normalized_key = _normalize_sensitive_key(key)
+    if normalized_key is None:
+        return False
+    return any(normalized_key == suffix or normalized_key.endswith(f'_{suffix}')
+               for suffix in _SENSITIVE_KEY_SUFFIXES)
+
+
+def _is_managed_secret_reference(value: Any) -> bool:
+    return isinstance(value, str) and value.startswith('secrets:')
+
+
+def _redact_sensitive_value(value: Any) -> Any:
+    if value is None or _is_managed_secret_reference(value):
+        return copy.deepcopy(value)
+    return _REDACTED_VALUE
+
+
+def _redact_secrets(value: Any) -> Any:
+    if isinstance(value, list):
+        return copy.deepcopy(value)
+    if not isinstance(value, dict):
+        return _redact_sensitive_value(value)
+    redacted_secrets: Dict[Any, Any] = {}
+    for secret_name, secret_value in value.items():
+        if secret_value is None:
+            redacted_secrets[secret_name] = None
         else:
-            task_yaml['secrets'] = {
-                # Managed secret refs (``secrets:`` prefix or null value) have
-                # no inline value to redact; keep them null so the YAML stays
-                # launchable. Inline secret values are redacted.
-                k: (None if
-                    (k.startswith('secrets:') or v is None) else '<redacted>')
-                for k, v in raw_secrets.items()
-            }
-    docker_config = task_yaml.get('resources', {}).get('_docker_login_config',
-                                                       {})
-    if isinstance(docker_config,
-                  dict) and docker_config.get('password') is not None:
-        docker_config['password'] = '<redacted>'
+            redacted_secrets[secret_name] = _REDACTED_VALUE
+    return redacted_secrets
+
+
+def _redact_task_yaml_value(value: Any) -> Any:
+    if isinstance(value, dict):
+        redacted_value = {}
+        for key, child_value in value.items():
+            normalized_key = _normalize_sensitive_key(key)
+            if normalized_key == 'managed_secrets':
+                # Managed references identify secrets but do not contain their
+                # values, so they remain usable in a redacted debug artifact.
+                redacted_value[key] = copy.deepcopy(child_value)
+            elif normalized_key == 'secrets':
+                redacted_value[key] = _redact_secrets(child_value)
+            elif _is_sensitive_key(key):
+                redacted_value[key] = _redact_sensitive_value(child_value)
+            else:
+                redacted_value[key] = _redact_task_yaml_value(child_value)
+        return redacted_value
+    if isinstance(value, list):
+        return [_redact_task_yaml_value(item) for item in value]
+    if isinstance(value, tuple):
+        return tuple(_redact_task_yaml_value(item) for item in value)
+    if isinstance(value, SecretStr):
+        return _REDACTED_VALUE
+    return copy.deepcopy(value)
+
+
+def redact_task_yaml_config(task_yaml: Any) -> Any:
+    """Return a recursively redacted copy of task or DAG YAML data."""
+    return _redact_task_yaml_value(task_yaml)
+
+
+def redact_task_yaml_dict(task_yaml: Dict[str, Any]) -> Dict[str, Any]:
+    """Return a recursively redacted copy of a parsed task YAML config."""
+    redacted_task_yaml = redact_task_yaml_config(task_yaml)
+    assert isinstance(redacted_task_yaml, dict)
+    return redacted_task_yaml
 
 
 class Task:
@@ -1984,8 +2050,7 @@ class Task:
             if self._user_specified_yaml is None:
                 return self._to_yaml_config(redact_secrets=True)
             config = yaml_utils.safe_load(self._user_specified_yaml)
-            redact_task_yaml_dict(config)
-            return config
+            return redact_task_yaml_dict(config)
         return self._to_yaml_config()
 
     def _to_yaml_config(self, redact_secrets: bool = False) -> Dict[str, Any]:

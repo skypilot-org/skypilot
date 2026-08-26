@@ -274,6 +274,25 @@ def _patch_launch_environment(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_launch_fails_terminally_for_unsupported_configuration(
+        monkeypatch):
+    """Unsupported launch configuration must not enter retry backoff."""
+    executor = _make_launch_executor()
+    patches = _patch_launch_environment(monkeypatch)
+    unsupported_error = exceptions.NotSupportedError(
+        'durable autodown is unavailable')
+    executor._await_launch_request = mock.AsyncMock(
+        side_effect=unsupported_error)
+
+    with pytest.raises(exceptions.ProvisionPrechecksError) as exception_info:
+        await executor._launch(max_retry=1, raise_on_failure=True)
+
+    assert exception_info.value.reasons == [unsupported_error]
+    assert patches.sdk_launch.call_count == 1
+    patches.set_backoff_pending.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_launch_parks_and_reattaches_without_teardown(monkeypatch):
     """A parked launch request releases the slot and re-attaches on resume."""
     executor = _make_launch_executor()

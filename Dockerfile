@@ -62,6 +62,10 @@ RUN --mount=type=cache,id=dashboard-next-cache,target=/skypilot/sky/dashboard/.n
 COPY . /skypilot
 
 RUN cd /skypilot && \
+    install -d -m 0755 /image-tools && \
+    install -m 0755 scripts/refresh-runpod-catalog.py /image-tools/refresh-runpod-catalog.py
+
+RUN cd /skypilot && \
     if [ "$INSTALL_FROM_SOURCE" != "true" ]; then \
         echo "Removing source code (wheel installation)" && \
         # Retain an /skypilot/dist dir to keep compatibility in stage 3.
@@ -95,7 +99,7 @@ ARG NEXT_BASE_PATH=/dashboard
 RUN apt-get update -y && \
     apt-get upgrade -y && \
     apt-get install --no-install-recommends -y \
-        git gcc rsync sudo patch openssh-server \
+        bash git gcc rsync sudo patch openssh-server \
         pciutils nano fuse socat netcat-openbsd curl tini autossh jq logrotate && \
     apt-get clean && rm -rf /var/lib/apt/lists/*
 
@@ -136,6 +140,7 @@ RUN curl -LsSf https://astral.sh/uv/install.sh | sh && \
 
 # Add source code
 COPY --from=process-source /skypilot /skypilot
+COPY --from=process-source /image-tools/ /usr/local/bin/
 
 # Install SkyPilot and set up dashboard based on installation method
 RUN cd /skypilot && \

@@ -164,11 +164,24 @@ class LazyDataFrame:
     def __init__(self, filename: str, update_if_stale_func: Callable[[], bool]):
         self._filename = filename
         self._df: Optional['pd.DataFrame'] = None
+        self._loaded_mtime_ns: Optional[int] = None
         self._update_if_stale_func = update_if_stale_func
 
     @annotations.lru_cache(scope='request')
     def _load_df(self) -> 'pd.DataFrame':
-        if self._update_if_stale_func() or self._df is None:
+        # A catalog may be refreshed by a separate process (for example the
+        # RunPod refresh daemon).  Track the file identity so an atomic
+        # replacement is picked up even when the catalog is deliberately
+        # marked as locally managed and therefore does not use the hosted
+        # catalog updater.
+        try:
+            loaded_mtime_ns = os.stat(self._filename).st_mtime_ns
+        except FileNotFoundError:
+            loaded_mtime_ns = None
+        externally_replaced = (self._df is not None and
+                               loaded_mtime_ns != self._loaded_mtime_ns)
+        if (self._update_if_stale_func() or self._df is None or
+                externally_replaced):
             try:
                 self._df = pd.read_csv(self._filename)
             except Exception as e:  # pylint: disable=broad-except
@@ -177,6 +190,7 @@ class LazyDataFrame:
                              'To fix: delete the csv file and try again.')
                 with ux_utils.print_exception_no_traceback():
                     raise e
+            self._loaded_mtime_ns = os.stat(self._filename).st_mtime_ns
         return self._df
 
     def __getattr__(self, name: str):
@@ -192,7 +206,7 @@ class LazyDataFrame:
 
 
 def read_catalog(filename: str,
-                 pull_frequency_hours: Optional[int] = None) -> LazyDataFrame:
+                 pull_frequency_hours: Optional[float] = None) -> LazyDataFrame:
     """Reads the catalog from a local CSV file.
 
     If the file does not exist, download the up-to-date catalog that matches

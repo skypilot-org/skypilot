@@ -14,6 +14,7 @@
 # limitations under the License.
 #
 """Unit tests for SkyPilot API server metrics."""
+import math
 import unittest
 from unittest import mock
 
@@ -115,6 +116,26 @@ class TestBurnRateCollector(unittest.TestCase):
 
         # Should compute twice total (first and third), not on the second
         self.assertEqual(mock_get_clusters.call_count, 2)
+
+    @mock.patch('sky.server.metrics.global_user_state.get_clusters')
+    def test_burn_rate_is_unknown_when_an_up_cluster_cannot_be_priced(
+            self, mock_get_clusters):
+        """Avoid reporting a partial total when an active cluster has no price.
+
+        A refreshed capacity catalog can omit the historical price of a live
+        cluster, so the metric must expose that the total is unknown.
+        """
+        priced = self._make_cluster('UP', cost=1.5)
+        unpriced = self._make_cluster('UP')
+        unpriced['handle'].launched_resources.get_cost.side_effect = ValueError(
+            'Instance type not found in zone')
+        mock_get_clusters.return_value = [priced, unpriced]
+
+        collector = metrics.BurnRateCollector()
+
+        collected = list(collector.collect())
+
+        self.assertTrue(math.isnan(collected[0].samples[0].value))
 
 
 if __name__ == '__main__':

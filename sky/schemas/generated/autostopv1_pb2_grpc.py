@@ -56,6 +56,11 @@ class AutostopServiceStub(object):
                 request_serializer=sky_dot_schemas_dot_generated_dot_autostopv1__pb2.SetAutostopRequest.SerializeToString,
                 response_deserializer=sky_dot_schemas_dot_generated_dot_autostopv1__pb2.SetAutostopResponse.FromString,
                 _registered_method=True)
+        self.ApplyAutodownIntent = channel.unary_unary(
+                '/autostop.v1.AutostopService/ApplyAutodownIntent',
+                request_serializer=sky_dot_schemas_dot_generated_dot_autostopv1__pb2.SetAutostopRequest.SerializeToString,
+                response_deserializer=sky_dot_schemas_dot_generated_dot_autostopv1__pb2.SetAutostopResponse.FromString,
+                _registered_method=True)
         self.IsAutostopping = channel.unary_unary(
                 '/autostop.v1.AutostopService/IsAutostopping',
                 request_serializer=sky_dot_schemas_dot_generated_dot_autostopv1__pb2.IsAutostoppingRequest.SerializeToString,
@@ -89,6 +94,14 @@ class AutostopServiceServicer(object):
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def ApplyAutodownIntent(self, request, context):
+        """Apply a strictly fenced durable autodown intent. Unlike SetAutostop,
+        this method rejects legacy requests before it can mutate skylet state.
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
     def IsAutostopping(self, request, context):
         """Check if the cluster is currently autostopping.
         """
@@ -101,6 +114,11 @@ def add_AutostopServiceServicer_to_server(servicer, server):
     rpc_method_handlers = {
             'SetAutostop': grpc.unary_unary_rpc_method_handler(
                     servicer.SetAutostop,
+                    request_deserializer=sky_dot_schemas_dot_generated_dot_autostopv1__pb2.SetAutostopRequest.FromString,
+                    response_serializer=sky_dot_schemas_dot_generated_dot_autostopv1__pb2.SetAutostopResponse.SerializeToString,
+            ),
+            'ApplyAutodownIntent': grpc.unary_unary_rpc_method_handler(
+                    servicer.ApplyAutodownIntent,
                     request_deserializer=sky_dot_schemas_dot_generated_dot_autostopv1__pb2.SetAutostopRequest.FromString,
                     response_serializer=sky_dot_schemas_dot_generated_dot_autostopv1__pb2.SetAutostopResponse.SerializeToString,
             ),
@@ -146,6 +164,33 @@ class AutostopService(object):
             request,
             target,
             '/autostop.v1.AutostopService/SetAutostop',
+            sky_dot_schemas_dot_generated_dot_autostopv1__pb2.SetAutostopRequest.SerializeToString,
+            sky_dot_schemas_dot_generated_dot_autostopv1__pb2.SetAutostopResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def ApplyAutodownIntent(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/autostop.v1.AutostopService/ApplyAutodownIntent',
             sky_dot_schemas_dot_generated_dot_autostopv1__pb2.SetAutostopRequest.SerializeToString,
             sky_dot_schemas_dot_generated_dot_autostopv1__pb2.SetAutostopResponse.FromString,
             options,

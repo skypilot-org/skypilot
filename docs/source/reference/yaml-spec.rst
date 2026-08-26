@@ -598,6 +598,14 @@ If ``'best'`` is specified, use the best network tier available on the specified
 - ``infra: aws``: Enable Elastic Fabric Adapter (EFA) for high-performance inter-node communication on EFA-supported instance types (e.g., p4d, p5, p5e, p5en, p6-b200, p6-b300, etc.).
 - ``infra: gcp``: Enable GPUDirect-TCPX/TCPXO/RDMA for high-performance node-to-node GPU communication on supported instance types (A3 High, A3 Edge, A3 Mega, A3 Ultra, A4).
 - ``infra: nebius``: Enable InfiniBand for high-performance GPU communication across Nebius VMs. Currently only supported for H100:8 and H200:8 nodes.
+- ``infra: runpod``: Require an offer that advertises at least ``1000 Mbps`` download and ``1000 Mbps`` upload bandwidth. This applies to both on-demand and spot pods.
+- ``infra: vast``: Require a live marketplace offer that advertises at least ``1000 Mbps`` download and ``1000 Mbps`` upload bandwidth.
+
+For RunPod and Vast, ``'best'`` filters on provider-advertised public internet
+bandwidth. It does not request RDMA, InfiniBand, EFA, or another accelerated
+private interconnect, and it is not an end-to-end throughput guarantee. If no
+matching offer is available, provisioning fails instead of falling back to
+``'standard'``.
 
 **Kubernetes-based:**
 

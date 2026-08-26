@@ -21,6 +21,7 @@ from sky import exceptions
 from sky import skypilot_config
 from sky.utils import log_utils
 from sky.utils import resources_utils
+from sky.utils import schemas
 from sky.utils import timeline
 from sky.utils import ux_utils
 
@@ -140,6 +141,14 @@ class OpenPortsVersion(enum.Enum):
         return versions.index(self) <= versions.index(other)
 
 
+class TeardownExecutionStrategy(enum.Enum):
+    """Where a cluster teardown should execute."""
+
+    SERVER_ONLY = 'server_only'
+    HEAD_WITH_SERVER_FALLBACK = 'head_with_server_fallback'
+    LEGACY_HEAD_CREDENTIALS = 'legacy_head_credentials'
+
+
 class Cloud:
     """A cloud provider."""
 
@@ -184,6 +193,23 @@ class Cloud:
         that has the necessary permissions to access the cloud resources.
         """
         return cls._SUPPORTS_SERVICE_ACCOUNT_ON_REMOTE
+
+    @classmethod
+    def get_teardown_execution_strategy(
+            cls, remote_identity: str) -> TeardownExecutionStrategy:
+        """Return the strategy for a validated remote identity.
+
+        Callers resolve and validate ``remote_identity`` during deployment.
+        The default keeps local credentials on the head for backwards
+        compatibility, and permits server fallback only when the identity is
+        available on the remote cluster without uploaded local credentials.
+        """
+        if remote_identity == schemas.RemoteIdentityOptions.NO_UPLOAD.value:
+            return TeardownExecutionStrategy.SERVER_ONLY
+        if (remote_identity ==
+                schemas.RemoteIdentityOptions.LOCAL_CREDENTIALS.value):
+            return TeardownExecutionStrategy.LEGACY_HEAD_CREDENTIALS
+        return TeardownExecutionStrategy.HEAD_WITH_SERVER_FALLBACK
 
     @classmethod
     def uses_ray(cls) -> bool:

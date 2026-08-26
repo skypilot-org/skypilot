@@ -21,6 +21,9 @@ service AutostopService {
   // ``hooks`` / ``clear_hooks`` fields on the request). This is a
   // wire-compat shim — see the comment on the service above.
   rpc SetAutostop(SetAutostopRequest) returns (SetAutostopResponse);
+  // Apply a strictly fenced durable autodown intent. Unlike SetAutostop,
+  // this method rejects legacy requests before it can mutate skylet state.
+  rpc ApplyAutodownIntent(SetAutostopRequest) returns (SetAutostopResponse);
   // Check if the cluster is currently autostopping.
   rpc IsAutostopping(IsAutostoppingRequest) returns (IsAutostoppingResponse);
 }
@@ -30,6 +33,24 @@ enum AutostopWaitFor {
   AUTOSTOP_WAIT_FOR_JOBS_AND_SSH = 1;
   AUTOSTOP_WAIT_FOR_JOBS = 2;
   AUTOSTOP_WAIT_FOR_NONE = 3;
+}
+
+// Where autodown teardown is allowed to execute. Unspecified is invalid for
+// a presence-aware new client; an absent field identifies an old client and
+// maps to legacy head credentials on the skylet.
+enum AutodownExecutionStrategy {
+  AUTODOWN_EXECUTION_STRATEGY_UNSPECIFIED = 0;
+  AUTODOWN_EXECUTION_STRATEGY_SERVER_ONLY = 1;
+  AUTODOWN_EXECUTION_STRATEGY_HEAD_WITH_SERVER_FALLBACK = 2;
+  AUTODOWN_EXECUTION_STRATEGY_LEGACY_HEAD_CREDENTIALS = 3;
+}
+
+// Durable progress observed by the server-side autodown reconciler.
+enum DurableAutodownState {
+  DURABLE_AUTODOWN_STATE_UNSPECIFIED = 0;
+  DURABLE_AUTODOWN_STATE_ARMED = 1;
+  DURABLE_AUTODOWN_STATE_HEAD_TEARDOWN_STARTED = 2;
+  DURABLE_AUTODOWN_STATE_SERVER_TEARDOWN_REQUIRED = 3;
 }
 
 // Lifecycle-hook event. Exactly one event claims any given teardown
@@ -71,12 +92,29 @@ message SetAutostopRequest {
   // hooks", and a re-launch that drops hooks would leave stale entries
   // in skylet sqlite firing forever.
   bool clear_hooks = 8;
+  // Presence-aware durable autodown identity. These fields start after the
+  // complete legacy request shape and must never be renumbered.
+  optional string cluster_hash = 9;
+  optional int64 generation = 10;
+  optional AutodownExecutionStrategy execution_strategy = 11;
 }
 
-message SetAutostopResponse {}
+message SetAutostopResponse {
+  // New clients probe this before arming a strict durable strategy. Old
+  // skylets omit the field, which proto3 reads as false.
+  bool supports_durable_autodown = 1;
+}
 
 message IsAutostoppingRequest {}
 
 message IsAutostoppingResponse {
   bool is_autostopping = 1;
+  // Capability probe; absent on old skylets and therefore naturally false.
+  bool supports_durable_autodown = 2;
+  optional string cluster_hash = 3;
+  optional int64 generation = 4;
+  DurableAutodownState durable_execution_state = 5;
+  // A bounded generic summary only. Never include credentials, provider
+  // response bodies, or raw provider exception details.
+  optional string error_summary = 6;
 }

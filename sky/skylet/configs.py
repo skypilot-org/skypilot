@@ -3,7 +3,7 @@ import functools
 import os
 import pathlib
 import threading
-from typing import Callable, Optional, Union
+from typing import Callable, Mapping, Optional, Union
 
 from sky.skylet import runtime_utils
 from sky.utils.db import db_utils
@@ -66,3 +66,14 @@ def set_config(key: str, value: Union[bytes, str]) -> None:
             """\
             INSERT OR REPLACE INTO config VALUES (?, ?)
             """, (key, value))
+
+
+@init_db
+def set_configs(values: Mapping[str, Union[bytes, str]]) -> None:
+    """Atomically store multiple skylet configuration values."""
+    assert _DB_PATH is not None
+    with db_utils.safe_cursor(_DB_PATH) as cursor:
+        cursor.executemany(
+            """\
+            INSERT OR REPLACE INTO config VALUES (?, ?)
+            """, values.items())

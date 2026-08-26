@@ -70,7 +70,7 @@ def _extract_region_from_ecr_server(server: str) -> str:
 class DockerLoginConfig:
     """Config for docker login. Used for pulling from private registries."""
     username: str
-    password: str
+    password: str = dataclasses.field(repr=False)
     server: str
 
     def format_image(self, image: str) -> str:

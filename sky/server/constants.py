@@ -97,6 +97,13 @@ API_SERVER_REQUEST_DB_PATH = runtime_utils.runtime_tilde_path(
 # background.
 CLUSTER_REFRESH_DAEMON_INTERVAL_SECONDS = 60
 
+AUTODOWN_RECONCILER_DAEMON_INTERVAL_SECONDS = 30
+AUTODOWN_RECONCILER_BATCH_SIZE = 50
+AUTODOWN_RECONCILER_PREPARING_GRACE_SECONDS = 120
+AUTODOWN_RECONCILER_LOCK_TIMEOUT_SECONDS = 1
+AUTODOWN_RECONCILER_RETRY_BASE_SECONDS = 30
+AUTODOWN_RECONCILER_RETRY_MAX_SECONDS = 60 * 60
+
 # The interval (seconds) for the volume status to be refreshed in the
 # background.
 VOLUME_REFRESH_DAEMON_INTERVAL_SECONDS = 60
@@ -178,3 +185,7 @@ SERVER_HEARTBEAT_INTERVAL_SECONDS = 600  # 10 minutes
 # that leak (e.g., due to controller crash mid-cleanup) are eventually
 # removed once their TTL has passed.
 EXPIRED_TOKEN_CLEANUP_DAEMON_INTERVAL_SECONDS = 3600  # 1 hour
+
+# RunPod marketplace stock changes frequently.  Keep the catalog metadata
+# current without making every launch fetch the full provider catalog.
+RUNPOD_CATALOG_REFRESH_DAEMON_INTERVAL_SECONDS = 20 * 60

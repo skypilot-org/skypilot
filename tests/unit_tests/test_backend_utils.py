@@ -2,20 +2,503 @@ import os
 import pathlib
 from unittest import mock
 
+import grpc
 import pytest
 
 from sky import backends
 from sky import check as sky_check
 from sky import clouds
+from sky import dag as dag_lib
 from sky import exceptions
+from sky import global_user_state
 from sky import skypilot_config
+from sky import task as task_lib
 from sky.backends import backend_utils
+from sky.clouds.cloud import TeardownExecutionStrategy
+from sky.data import storage as storage_lib
 from sky.exceptions import ClusterNotUpError
 from sky.resources import Resources
 from sky.utils import common
 from sky.utils import common_utils
+from sky.utils import controller_utils
+from sky.utils import registry
+from sky.utils import schemas
 from sky.utils import status_lib
 from sky.utils import yaml_utils
+
+
+class _DeadlineExceededRpcError(grpc.RpcError):
+    """Minimal deadline error used to verify retry classification."""
+
+    def code(self):
+        return grpc.StatusCode.DEADLINE_EXCEEDED
+
+    def details(self):
+        return 'Deadline Exceeded'
+
+
+def test_deadline_exceeded_is_not_converted_to_skylet_fallback():
+    """Keep ambiguous deadlines raw so state-changing RPCs are not replayed."""
+    error = _DeadlineExceededRpcError()
+
+    with pytest.raises(grpc.RpcError) as raised:
+        backend_utils._handle_grpc_error(error, current_backoff=0)
+
+    assert raised.value is error
+
+
+def _write_minimal_cluster_yaml(*args, **kwargs):
+    output_path = pathlib.Path(kwargs['output_path'])
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text('cluster_name: display\n', encoding='utf-8')
+
+
+def _mock_credential_file_mounts(monkeypatch):
+    credential_clouds = [
+        (clouds.AWS(), {
+            '~/.aws/credentials': '/credentials/aws'
+        }),
+        (clouds.GCP(), {
+            '~/.config/gcloud': '/credentials/gcp'
+        }),
+        (clouds.Vast(), {
+            '~/.config/vastai/vast_api_key': '/credentials/vast'
+        }),
+        (clouds.RunPod(), {
+            '~/.runpod/config.toml': '/credentials/runpod'
+        }),
+    ]
+    for cloud, file_mounts in credential_clouds:
+        monkeypatch.setattr(cloud,
+                            'get_credential_file_mounts',
+                            lambda mounts=file_mounts: mounts)
+    monkeypatch.setattr(registry.CLOUD_REGISTRY, 'values',
+                        lambda: [cloud for cloud, _ in credential_clouds])
+    monkeypatch.setattr(sky_check.cloudflare, 'check_storage_credentials',
+                        lambda: (False, ''))
+    monkeypatch.setattr(sky_check.coreweave, 'check_storage_credentials',
+                        lambda: (False, ''))
+    monkeypatch.setattr(sky_check.vastdata, 'check_storage_credentials', lambda:
+                        (False, ''))
+    monkeypatch.setattr(sky_check.huggingface, 'check_storage_credentials',
+                        lambda: (False, ''))
+    monkeypatch.setattr(sky_check.os.path, 'exists', lambda _: True)
+    monkeypatch.setattr(sky_check.os.path, 'expanduser', lambda path: path)
+    monkeypatch.setattr(sky_check.os.path, 'realpath', lambda path: path)
+    return {str(cloud).lower(): cloud for cloud, _ in credential_clouds}
+
+
+def test_runpod_no_upload_task_mounts_no_provider_credentials(monkeypatch):
+    credential_clouds = _mock_credential_file_mounts(monkeypatch)
+    task = task_lib.Task()
+
+    allowed_clouds = backend_utils._get_credential_provider_allowlist(
+        task=task,
+        compute_cloud=credential_clouds['runpod'],
+        remote_identity=schemas.RemoteIdentityOptions.NO_UPLOAD.value,
+        cluster_name='ordinary-cluster')
+    credentials = sky_check.get_cloud_credential_file_mounts(
+        excluded_clouds=None, allowed_clouds=allowed_clouds)
+
+    assert credentials == {}
+
+
+def test_persist_redacted_debug_yaml_is_private_and_removes_raw(tmp_path):
+    raw_yaml_path = tmp_path / 'cluster.yml.tmp'
+    debug_yaml_path = tmp_path / 'cluster.yml.debug'
+    raw_yaml_path.write_text(
+        'provider:\n'
+        '  registry:\n'
+        '    password: registry-password\n'
+        '    headers:\n'
+        '      Authorization: Bearer provider-token\n'
+        'secrets:\n'
+        '  secrets:workspace.REFERENCED_SECRET: null\n',
+        encoding='utf-8')
+    os.chmod(raw_yaml_path, 0o600)
+
+    backend_utils._persist_redacted_debug_yaml(str(raw_yaml_path),
+                                               str(debug_yaml_path))
+
+    assert not raw_yaml_path.exists()
+    assert (debug_yaml_path.stat().st_mode & 0o777) == 0o600
+    debug_yaml = debug_yaml_path.read_text(encoding='utf-8')
+    assert 'registry-password' not in debug_yaml
+    assert 'provider-token' not in debug_yaml
+    assert 'secrets:workspace.REFERENCED_SECRET' in debug_yaml
+
+
+def test_persist_redacted_debug_yaml_removes_stale_artifact_on_failure(
+        monkeypatch, tmp_path):
+    raw_yaml_path = tmp_path / 'cluster.yml.tmp'
+    debug_yaml_path = tmp_path / 'cluster.yml.debug'
+    raw_yaml_path.write_text('raw-secret', encoding='utf-8')
+    debug_yaml_path.write_text('stale-raw-secret', encoding='utf-8')
+    monkeypatch.setattr(backend_utils.debug_dump_helpers, 'redact_task_yaml',
+                        mock.Mock(side_effect=ValueError('redaction failed')))
+
+    with pytest.raises(ValueError, match='redaction failed'):
+        backend_utils._persist_redacted_debug_yaml(str(raw_yaml_path),
+                                                   str(debug_yaml_path))
+
+    assert not raw_yaml_path.exists()
+    assert not debug_yaml_path.exists()
+
+
+def test_persist_redacted_debug_yaml_keeps_completed_redacted_artifact(
+        monkeypatch, tmp_path):
+    raw_yaml_path = tmp_path / 'cluster.yml.tmp'
+    debug_yaml_path = tmp_path / 'cluster.yml.debug'
+    raw_yaml_path.write_text('password: raw-secret', encoding='utf-8')
+    original_remove = backend_utils.os.remove
+
+    def fail_removing_raw_yaml(path):
+        if path == str(raw_yaml_path):
+            raise PermissionError('cannot remove raw YAML')
+        original_remove(path)
+
+    monkeypatch.setattr(backend_utils.os, 'remove', fail_removing_raw_yaml)
+
+    with pytest.raises(PermissionError, match='cannot remove raw YAML'):
+        backend_utils._persist_redacted_debug_yaml(str(raw_yaml_path),
+                                                   str(debug_yaml_path))
+
+    assert debug_yaml_path.exists()
+    assert 'raw-secret' not in debug_yaml_path.read_text(encoding='utf-8')
+
+
+def test_write_cluster_config_removes_stale_debug_yaml_when_debug_disabled(
+        monkeypatch, tmp_path):
+    cloud = clouds.AWS()
+    resource = Resources(cloud=cloud, instance_type='fake-type')
+    monkeypatch.setattr(
+        resource, 'make_deploy_variables', lambda *args, **kwargs: {
+            'instance_type': 'fake-type',
+            'custom_resources': '{}',
+            'region': 'fake-region',
+            'zones': 'fake-zone',
+            'image_id': 'fake-image',
+            'security_group': 'fake-security-group',
+            'security_group_managed_by_skypilot': 'true',
+        })
+    monkeypatch.setattr(backend_utils.auth_utils, 'get_or_generate_keys',
+                        lambda: ('/tmp/fake-key', '/tmp/fake-key.pub'))
+    yaml_path = tmp_path / 'cluster.yml'
+    debug_yaml_path = pathlib.Path(str(yaml_path) + '.debug')
+    debug_yaml_path.write_text('raw-secret', encoding='utf-8')
+    monkeypatch.setattr(backend_utils, '_get_yaml_path_from_cluster_name',
+                        lambda _: str(yaml_path))
+    monkeypatch.setattr(backend_utils, '_add_auth_to_cluster_config',
+                        lambda *args: None)
+    monkeypatch.setattr(backend_utils, '_deterministic_cluster_yaml_hash',
+                        lambda _: 'fake-hash')
+    monkeypatch.setattr(backend_utils, '_optimize_file_mounts', lambda _: None)
+    monkeypatch.setattr(common_utils, 'fill_template',
+                        _write_minimal_cluster_yaml)
+    monkeypatch.setattr(sky_check, 'get_cloud_credential_file_mounts',
+                        lambda **kwargs: {})
+    monkeypatch.setattr(backend_utils.global_user_state, 'get_cluster_yaml_str',
+                        lambda _: None)
+    monkeypatch.setattr(backend_utils.global_user_state, 'set_cluster_yaml',
+                        lambda *args: None)
+    monkeypatch.setattr(backend_utils.usage_lib.messages.usage,
+                        'update_ray_yaml', lambda _: None)
+    monkeypatch.setattr(backend_utils.sky_logging, 'logging_enabled',
+                        lambda *args: False)
+
+    backend_utils.write_cluster_config(
+        to_provision=resource,
+        num_nodes=1,
+        cluster_config_template='aws-ray.yml.j2',
+        cluster_name='legacy-debug-cleanup',
+        local_wheel_path=pathlib.Path('/tmp/fake'),
+        wheel_hash='fake-hash',
+        region=clouds.Region(name='fake-region'),
+        zones=[clouds.Zone(name='fake-zone')],
+        dryrun=False)
+
+    assert not pathlib.Path(str(yaml_path) + '.tmp').exists()
+    assert not debug_yaml_path.exists()
+
+
+def test_runpod_no_upload_s3_file_mount_includes_only_aws_credentials(
+        monkeypatch):
+    credential_clouds = _mock_credential_file_mounts(monkeypatch)
+    task = task_lib.Task(file_mounts={'/dataset': 's3://datasets/train'})
+    original_file_mounts = dict(task.file_mounts)
+    original_storage_mounts = dict(task.storage_mounts)
+
+    allowed_clouds = backend_utils._get_credential_provider_allowlist(
+        task=task,
+        compute_cloud=credential_clouds['runpod'],
+        remote_identity=schemas.RemoteIdentityOptions.NO_UPLOAD.value,
+        cluster_name='ordinary-cluster')
+    credentials = sky_check.get_cloud_credential_file_mounts(
+        excluded_clouds=None, allowed_clouds=allowed_clouds)
+
+    assert credentials == {'~/.aws/credentials': '/credentials/aws'}
+    assert task.file_mounts == original_file_mounts
+    assert task.storage_mounts == original_storage_mounts
+
+
+def test_runpod_no_upload_gcs_file_mount_includes_only_gcp_credentials(
+        monkeypatch):
+    credential_clouds = _mock_credential_file_mounts(monkeypatch)
+    task = task_lib.Task(file_mounts={'/dataset': 'gs://datasets/train'})
+    original_file_mounts = dict(task.file_mounts)
+    original_storage_mounts = dict(task.storage_mounts)
+
+    allowed_clouds = backend_utils._get_credential_provider_allowlist(
+        task=task,
+        compute_cloud=credential_clouds['runpod'],
+        remote_identity=schemas.RemoteIdentityOptions.NO_UPLOAD.value,
+        cluster_name='ordinary-cluster')
+    credentials = sky_check.get_cloud_credential_file_mounts(
+        excluded_clouds=None, allowed_clouds=allowed_clouds)
+
+    assert credentials == {'~/.config/gcloud': '/credentials/gcp'}
+    assert task.file_mounts == original_file_mounts
+    assert task.storage_mounts == original_storage_mounts
+
+
+@pytest.mark.parametrize('source', [
+    'unknown://datasets/train',
+    '/local/datasets/train',
+])
+def test_runpod_no_upload_unknown_file_mount_url_mounts_no_credentials(
+        monkeypatch, source):
+    credential_clouds = _mock_credential_file_mounts(monkeypatch)
+    task = task_lib.Task(file_mounts={'/dataset': source})
+    original_file_mounts = dict(task.file_mounts)
+    original_storage_mounts = dict(task.storage_mounts)
+
+    allowed_clouds = backend_utils._get_credential_provider_allowlist(
+        task=task,
+        compute_cloud=credential_clouds['runpod'],
+        remote_identity=schemas.RemoteIdentityOptions.NO_UPLOAD.value,
+        cluster_name='ordinary-cluster')
+    credentials = sky_check.get_cloud_credential_file_mounts(
+        excluded_clouds=None, allowed_clouds=allowed_clouds)
+
+    assert credentials == {}
+    assert task.file_mounts == original_file_mounts
+    assert task.storage_mounts == original_storage_mounts
+
+
+def test_credential_allowlist_mounts_selected_compute_and_storage(monkeypatch):
+    credential_clouds = _mock_credential_file_mounts(monkeypatch)
+    task = task_lib.Task(
+        storage_mounts={
+            '/datasets': storage_lib.Storage(
+                name='datasets', stores=[storage_lib.StoreType.GCS]),
+        })
+
+    allowed_clouds = backend_utils._get_credential_provider_allowlist(
+        task=task,
+        compute_cloud=credential_clouds['aws'],
+        remote_identity=schemas.RemoteIdentityOptions.LOCAL_CREDENTIALS.value,
+        cluster_name='ordinary-cluster')
+    credentials = sky_check.get_cloud_credential_file_mounts(
+        excluded_clouds=None, allowed_clouds=allowed_clouds)
+
+    assert credentials == {
+        '~/.aws/credentials': '/credentials/aws',
+        '~/.config/gcloud': '/credentials/gcp',
+    }
+
+
+def test_credential_allowlist_infers_storage_provider_from_source_url():
+    task = task_lib.Task()
+    task.storage_mounts = {
+        '/datasets': mock.Mock(stores={}, source='gs://datasets/train'),
+    }
+
+    allowed_clouds = backend_utils._get_credential_provider_allowlist(
+        task=task,
+        compute_cloud=clouds.AWS(),
+        remote_identity=schemas.RemoteIdentityOptions.SERVICE_ACCOUNT.value,
+        cluster_name='ordinary-cluster')
+
+    assert clouds.cloud_in_iterable(clouds.GCP(), allowed_clouds)
+    assert not clouds.cloud_in_iterable(clouds.AWS(), allowed_clouds)
+
+
+@pytest.mark.parametrize('remote_identity', [
+    schemas.RemoteIdentityOptions.SERVICE_ACCOUNT.value,
+    'custom-service-account',
+])
+def test_nonlocal_compute_identity_does_not_regain_unrelated_credentials(
+        monkeypatch, remote_identity):
+    credential_clouds = _mock_credential_file_mounts(monkeypatch)
+    task = task_lib.Task(
+        storage_mounts={
+            '/datasets': storage_lib.Storage(
+                name='datasets', stores=[storage_lib.StoreType.GCS]),
+        })
+
+    allowed_clouds = backend_utils._get_credential_provider_allowlist(
+        task=task,
+        compute_cloud=credential_clouds['aws'],
+        remote_identity=remote_identity,
+        cluster_name='ordinary-cluster')
+    credentials = sky_check.get_cloud_credential_file_mounts(
+        excluded_clouds=None, allowed_clouds=allowed_clouds)
+
+    assert credentials == {'~/.config/gcloud': '/credentials/gcp'}
+
+
+def test_controller_task_mounts_workload_provider_credentials(monkeypatch):
+    credential_clouds = _mock_credential_file_mounts(monkeypatch)
+    controller_task = task_lib.Task()
+    workload_task = task_lib.Task(
+        resources=[Resources(cloud=credential_clouds['vast'])])
+    controller_task.managed_job_dag = dag_lib.Dag()
+    controller_task.managed_job_dag.add(workload_task)
+
+    allowed_clouds = backend_utils._get_credential_provider_allowlist(
+        task=controller_task,
+        compute_cloud=credential_clouds['runpod'],
+        remote_identity=schemas.RemoteIdentityOptions.LOCAL_CREDENTIALS.value,
+        cluster_name='ordinary-cluster')
+    credentials = sky_check.get_cloud_credential_file_mounts(
+        excluded_clouds=None, allowed_clouds=allowed_clouds)
+
+    assert credentials == {
+        '~/.config/vastai/vast_api_key': '/credentials/vast',
+        '~/.runpod/config.toml': '/credentials/runpod',
+    }
+
+
+def test_controller_task_mounts_optimized_workload_provider_credentials(
+        monkeypatch):
+    credential_clouds = _mock_credential_file_mounts(monkeypatch)
+    controller_task = task_lib.Task()
+    aws_workload_task = task_lib.Task()
+    aws_workload_task.best_resources = Resources(cloud=credential_clouds['aws'])
+    vast_workload_task = task_lib.Task()
+    vast_workload_task.best_resources = Resources(
+        cloud=credential_clouds['vast'])
+    controller_task.managed_job_dag = dag_lib.Dag()
+    controller_task.managed_job_dag.add(aws_workload_task)
+    controller_task.managed_job_dag.add(vast_workload_task)
+
+    allowed_clouds = backend_utils._get_credential_provider_allowlist(
+        task=controller_task,
+        compute_cloud=credential_clouds['runpod'],
+        remote_identity=schemas.RemoteIdentityOptions.NO_UPLOAD.value,
+        cluster_name='ordinary-cluster')
+    credentials = sky_check.get_cloud_credential_file_mounts(
+        excluded_clouds=None, allowed_clouds=allowed_clouds)
+
+    assert credentials == {
+        '~/.aws/credentials': '/credentials/aws',
+        '~/.config/vastai/vast_api_key': '/credentials/vast',
+    }
+
+
+def test_empty_credential_allowlist_fails_closed(monkeypatch):
+    _mock_credential_file_mounts(monkeypatch)
+
+    credentials = sky_check.get_cloud_credential_file_mounts(
+        excluded_clouds=None, allowed_clouds=())
+
+    assert credentials == {}
+
+
+def test_credential_mounts_keep_logging_agent_credentials(monkeypatch):
+    logging_agent = mock.Mock()
+    logging_agent.get_credential_file_mounts.return_value = {
+        '~/.logging-agent/config': '/credentials/logging-agent',
+    }
+    monkeypatch.setattr(
+        sky_check, 'get_cloud_credential_file_mounts',
+        lambda excluded_clouds, allowed_clouds: {
+            '~/.aws/credentials': '/credentials/aws',
+        })
+    monkeypatch.setattr(backend_utils.logs, 'get_logging_agent',
+                        lambda: logging_agent)
+
+    credentials = backend_utils._get_credential_file_mounts(
+        task=task_lib.Task(),
+        compute_cloud=clouds.AWS(),
+        remote_identity=schemas.RemoteIdentityOptions.LOCAL_CREDENTIALS.value,
+        cluster_name='ordinary-cluster',
+        region='us-east-1')
+
+    assert credentials == {
+        '~/.aws/credentials': '/credentials/aws',
+        '~/.logging-agent/config': '/credentials/logging-agent',
+    }
+
+
+@pytest.mark.parametrize('cluster_name, expected_kubeconfig_exclusion', [
+    (controller_utils.Controllers.JOBS_CONTROLLER.value.cluster_name, False),
+    ('ordinary-cluster', True),
+])
+def test_credential_mounts_scope_controller_discovery_and_kubeconfig(
+        monkeypatch, cluster_name, expected_kubeconfig_exclusion):
+    """Scope provider credentials while preserving controller kubeconfig access."""
+    captured_arguments = {}
+
+    def capture_credential_mounts(excluded_clouds, allowed_clouds):
+        captured_arguments['excluded_clouds'] = excluded_clouds
+        captured_arguments['allowed_clouds'] = allowed_clouds
+        return {}
+
+    monkeypatch.setattr(sky_check, 'get_cloud_credential_file_mounts',
+                        capture_credential_mounts)
+    monkeypatch.setattr(registry.CLOUD_REGISTRY, 'items', lambda: [
+        ('gcp', clouds.GCP()),
+    ])
+    monkeypatch.setattr(
+        skypilot_config, 'get_effective_workspace_region_config',
+        lambda cloud, **kwargs: (schemas.RemoteIdentityOptions.NO_UPLOAD.value
+                                 if cloud == 'gcp' else None))
+    monkeypatch.setattr(skypilot_config, 'get_workspace_cloud',
+                        lambda _: {'allowed_contexts': ['production']})
+    monkeypatch.setattr(backend_utils.logs, 'get_logging_agent', lambda: None)
+
+    backend_utils._get_credential_file_mounts(
+        task=task_lib.Task(),
+        compute_cloud=clouds.AWS(),
+        remote_identity=schemas.RemoteIdentityOptions.LOCAL_CREDENTIALS.value,
+        cluster_name=cluster_name,
+        region='us-east-1')
+
+    if expected_kubeconfig_exclusion:
+        assert captured_arguments['allowed_clouds'] is not None
+    else:
+        assert captured_arguments['allowed_clouds'] is None
+    assert clouds.cloud_in_iterable(clouds.GCP(),
+                                    captured_arguments['excluded_clouds'])
+    assert (clouds.cloud_in_iterable(
+        clouds.Kubernetes(),
+        captured_arguments['excluded_clouds']) == expected_kubeconfig_exclusion)
+    assert (clouds.cloud_in_iterable(
+        clouds.SSH(),
+        captured_arguments['excluded_clouds']) == expected_kubeconfig_exclusion)
+
+
+def test_controller_credential_excludelist_honors_profile_override(monkeypatch):
+    """Use cluster-specific remote-identity overrides for controller mounts."""
+    override_configs = {'remote_identity': 'override'}
+    controller_name = controller_utils.Controllers.JOBS_CONTROLLER.value.cluster_name
+    monkeypatch.setattr(registry.CLOUD_REGISTRY, 'items', lambda: [
+        ('gcp', clouds.GCP()),
+    ])
+    monkeypatch.setattr(
+        skypilot_config, 'get_effective_workspace_region_config',
+        lambda cloud, **kwargs: ([{
+            controller_name: schemas.RemoteIdentityOptions.NO_UPLOAD.value
+        }] if cloud == 'gcp' and kwargs['override_configs'] == override_configs
+                                 else None))
+    monkeypatch.setattr(skypilot_config, 'get_workspace_cloud',
+                        lambda _: {'allowed_contexts': ['production']})
+
+    excluded_clouds = backend_utils._get_credential_provider_excludelist(
+        controller_name, 'us-east-1', override_configs)
+
+    assert clouds.cloud_in_iterable(clouds.GCP(), excluded_clouds)
 
 
 # Set env var to test config file.
@@ -48,6 +531,7 @@ def test_write_cluster_config_w_remote_identity(mock_fill_template,
     resource = Resources(cloud=cloud, instance_type='fake-type: 3')
 
     cluster_config_template = 'aws-ray.yml.j2'
+    mock_fill_template.side_effect = _write_minimal_cluster_yaml
 
     # test default
     backend_utils.write_cluster_config(
@@ -135,6 +619,105 @@ def test_write_cluster_config_w_remote_identity(mock_fill_template,
 
 @mock.patch.object(skypilot_config, '_global_config_context',
                    skypilot_config.ConfigContext())
+def test_write_cluster_config_scopes_storage_credentials(monkeypatch, tmp_path):
+    monkeypatch.delenv(skypilot_config.ENV_VAR_SKYPILOT_CONFIG, raising=False)
+    skypilot_config.reload_config()
+
+    cloud = clouds.AWS()
+    resource = Resources(cloud=cloud, instance_type='fake-type')
+    task = task_lib.Task()
+    task.storage_mounts = {
+        '/datasets': mock.Mock(stores={storage_lib.StoreType.GCS: None},
+                               source=None),
+    }
+    monkeypatch.setattr(
+        resource, 'make_deploy_variables', lambda *args, **kwargs: {
+            'instance_type': 'fake-type',
+            'custom_resources': '{}',
+            'region': 'fake-region',
+            'zones': 'fake-zone',
+            'image_id': 'fake-image',
+            'security_group': 'fake-security-group',
+            'security_group_managed_by_skypilot': 'true',
+        })
+    monkeypatch.setattr(backend_utils.auth_utils, 'get_or_generate_keys',
+                        lambda: ('/tmp/fake-key', '/tmp/fake-key.pub'))
+    yaml_path = tmp_path / 'fake-path'
+    monkeypatch.setattr(backend_utils, '_get_yaml_path_from_cluster_name',
+                        lambda _: str(yaml_path))
+    monkeypatch.setattr(backend_utils, '_deterministic_cluster_yaml_hash',
+                        lambda _: 'fake-hash')
+    monkeypatch.setattr(common_utils, 'fill_template',
+                        _write_minimal_cluster_yaml)
+    credential_file_mounts = mock.Mock(return_value={})
+    monkeypatch.setattr(sky_check, 'get_cloud_credential_file_mounts',
+                        credential_file_mounts)
+
+    backend_utils.write_cluster_config(
+        to_provision=resource,
+        num_nodes=1,
+        cluster_config_template='aws-ray.yml.j2',
+        cluster_name='credential-scope',
+        local_wheel_path=pathlib.Path('/tmp/fake'),
+        wheel_hash='fake-hash',
+        region=clouds.Region(name='fake-region'),
+        zones=[clouds.Zone(name='fake-zone')],
+        dryrun=True,
+        task=task)
+
+    allowed_clouds = credential_file_mounts.call_args.kwargs['allowed_clouds']
+    assert clouds.cloud_in_iterable(clouds.AWS(), allowed_clouds)
+    assert clouds.cloud_in_iterable(clouds.GCP(), allowed_clouds)
+    assert len(allowed_clouds) == 2
+    assert ((yaml_path.with_name(yaml_path.name + '.tmp').stat().st_mode &
+             0o777) == 0o600)
+
+
+@mock.patch.object(skypilot_config, '_global_config_context',
+                   skypilot_config.ConfigContext())
+def test_write_cluster_config_defaults_runpod_to_server_backed_teardown(
+        monkeypatch, tmp_path):
+    cloud = clouds.RunPod()
+    resource = Resources(cloud=cloud, instance_type='fake-type')
+    monkeypatch.setattr(
+        resource, 'make_deploy_variables', lambda *args, **kwargs: {
+            'instance_type': 'fake-type',
+            'custom_resources': '{}',
+            'region': 'fake-region',
+            'zones': None,
+            'image_id': 'fake-image',
+        })
+    credential_file_mounts = mock.Mock(return_value={})
+    monkeypatch.setattr(backend_utils, '_get_credential_file_mounts',
+                        credential_file_mounts)
+    monkeypatch.setattr(backend_utils.auth_utils, 'get_or_generate_keys',
+                        lambda: ('/tmp/fake-key', '/tmp/fake-key.pub'))
+    yaml_path = tmp_path / 'fake-path'
+    monkeypatch.setattr(backend_utils, '_get_yaml_path_from_cluster_name',
+                        lambda _: str(yaml_path))
+    monkeypatch.setattr(backend_utils, '_deterministic_cluster_yaml_hash',
+                        lambda _: 'fake-hash')
+    monkeypatch.setattr(common_utils, 'fill_template',
+                        _write_minimal_cluster_yaml)
+
+    config = backend_utils.write_cluster_config(
+        to_provision=resource,
+        num_nodes=1,
+        cluster_config_template='runpod-ray.yml.j2',
+        cluster_name='strategy-capture',
+        local_wheel_path=pathlib.Path('/tmp/fake'),
+        wheel_hash='fake-hash',
+        region=clouds.Region(name='fake-region'),
+        dryrun=True)
+
+    assert config['teardown_execution_strategy'] == (
+        TeardownExecutionStrategy.HEAD_WITH_SERVER_FALLBACK.value)
+    assert credential_file_mounts.call_args.args[2] == (
+        schemas.RemoteIdentityOptions.NO_UPLOAD.value)
+
+
+@mock.patch.object(skypilot_config, '_global_config_context',
+                   skypilot_config.ConfigContext())
 @mock.patch('sky.catalog.instance_type_exists', return_value=True)
 @mock.patch('sky.catalog.get_accelerators_from_instance_type',
             return_value={'fake-acc': 2})
@@ -155,6 +738,7 @@ def test_write_cluster_config_w_post_provision_runcmd_aws(
     zones = [clouds.Zone(name='fake-zone')]
     resource = Resources(cloud=cloud, instance_type='fake-type: 3')
     cluster_config_template = 'aws-ray.yml.j2'
+    mock_fill_template.side_effect = _write_minimal_cluster_yaml
 
     backend_utils.write_cluster_config(
         to_provision=resource,
@@ -308,6 +892,48 @@ def test_get_clusters_launch_refresh(monkeypatch):
 
     assert len(
         backend_utils.get_clusters(refresh=common.StatusRefreshMode.FORCE)) == 2
+
+
+def test_update_records_with_autodown_intents_is_hash_fenced(monkeypatch):
+    intent = global_user_state.AutodownIntent(
+        cluster_name='current',
+        cluster_hash='current-hash',
+        generation=4,
+        state=global_user_state.AutodownIntentState.RETRY_WAIT,
+        idle_minutes=5,
+        to_down=True,
+        execution_strategy=(
+            TeardownExecutionStrategy.HEAD_WITH_SERVER_FALLBACK.value),
+        user_hash='user-hash',
+        workspace='default',
+        attempt_count=2,
+        next_retry_at=123,
+        last_error='Autodown reconciliation failed.',
+        created_at=1,
+        updated_at=2,
+    )
+    get_intents = mock.Mock(return_value={
+        'current': intent,
+        'replacement': intent,
+    })
+    monkeypatch.setattr(global_user_state, 'get_autodown_intents', get_intents)
+    records = [{
+        'name': 'current',
+        'cluster_hash': 'current-hash',
+    }, {
+        'name': 'replacement',
+        'cluster_hash': 'replacement-hash',
+    }]
+
+    backend_utils._update_records_with_autodown_intents(records)
+
+    get_intents.assert_called_once_with(['current', 'replacement'])
+    assert records[0]['autodown_recovery_state'] == 'RETRY_WAIT'
+    assert records[0]['autodown_execution_strategy'] == (
+        TeardownExecutionStrategy.HEAD_WITH_SERVER_FALLBACK.value)
+    assert records[0]['autodown_generation'] == 4
+    assert records[0]['autodown_attempt_count'] == 2
+    assert 'autodown_recovery_state' not in records[1]
 
 
 def test_kubeconfig_upload_with_kubernetes_exclusion():

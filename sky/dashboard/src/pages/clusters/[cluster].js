@@ -611,6 +611,26 @@ function ActiveTab({
                 </div>
               )}
 
+              {!isHistoricalCluster && clusterData.autodown_recovery_state && (
+                <div className="col-span-2">
+                  <div className="text-gray-600 font-medium text-base">
+                    Autodown recovery
+                  </div>
+                  <div className="text-base mt-1">
+                    {clusterData.autodown_recovery_state.replaceAll('_', ' ')}
+                    {' · '}
+                    {clusterData.autodown_execution_strategy?.replaceAll(
+                      '_',
+                      ' '
+                    ) || 'unknown strategy'}
+                    {' · generation '}
+                    {clusterData.autodown_generation}
+                    {' · attempts '}
+                    {clusterData.autodown_attempt_count}
+                  </div>
+                </div>
+              )}
+
               {/* External Links section: admin-configured url templates
                   resolved against cluster metadata, persisted DB links
                   (e.g., cloud instance console URLs from

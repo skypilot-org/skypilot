@@ -20,6 +20,11 @@ WORKER_NODE_TAGS = {
 # Magic error string indicating that no nodes were launched.
 ERROR_NO_NODES_LAUNCHED = 'SKYPILOT_ERROR_NO_NODES_LAUNCHED'
 
+# Minimum advertised public-internet bandwidth required for ``network_tier:
+# best`` on marketplace clouds that expose bandwidth constraints. This does
+# not request an accelerated private interconnect such as EFA or InfiniBand.
+MARKETPLACE_BEST_NETWORK_MIN_BANDWIDTH_MBPS = 1000
+
 # Clouds whose provisioner starts Ray asynchronously inside the provisioned
 # pod (via kubernetes-ray.yml.j2) and uses kubectl rather than SSH to run
 # commands on the pod. SSH node pools run on k3s under the hood, so they

@@ -11,6 +11,7 @@ provider:
   region: "{{region}}"
   disable_launch_config_check: true
   secure_only: {{secure_only}}
+  network_tier: {{network_tier}}
   {%- if create_instance_kwargs %}
   create_instance_kwargs: {{create_instance_kwargs | tojson}}
   {%- endif %}
