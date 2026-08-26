@@ -3213,8 +3213,22 @@ def _update_cluster_status(
                 # Own line: the remedy reads as a separate statement from the
                 # diagnosis, both in the terminal and in the dashboard event.
                 log_message += f'\n{hint}'
-        # Do not add event if the cluster is already in INIT status.
-        if status != status_lib.ClusterStatus.INIT:
+        # A node that stops heartbeating leaves its pods' status stale -- the
+        # pod still reads 'Running', so a refresh during the outage can only
+        # record a generic reason ('ray cluster is unhealthy'). Once the node
+        # is back, a later refresh names the real cause, but by then the
+        # cluster is INIT and the guard below would drop it, leaving the
+        # useless message as the last word forever. Let a refresh that finally
+        # identified the cause supersede it. add_cluster_event() drops an
+        # identical reason, so a stable cause is recorded once, not per poll.
+        identified_cause = False
+        if isinstance(launched_resources.cloud, clouds.Kubernetes):
+            identified_cause = any(
+                k8s_instance.pod_reason_identifies_cause(pod_reason)
+                for _, pod_reason in node_statuses.values())
+        # Do not add event if the cluster is already in INIT status, unless
+        # this refresh is the one that explained why.
+        if (status != status_lib.ClusterStatus.INIT or identified_cause):
             global_user_state.add_cluster_event(
                 cluster_name,
                 status_lib.ClusterStatus.INIT,

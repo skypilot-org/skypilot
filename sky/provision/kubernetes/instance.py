@@ -2973,6 +2973,40 @@ class NodeHealthInfo:
         self.pods = pods
 
 
+# Lead-ins that the reason builders below emit before they know *why* a pod is
+# unhealthy. `_get_pod_health_issues` always starts with the not-ready prefix
+# and appends container detail only if it found any;
+# `_get_pod_termination_reason` starts with the termination fallback and adds a
+# "Container errors:" section only if it found any.
+# pod_reason_identifies_cause() reads the formats these
+# two functions write, so it lives beside them and must stay in sync.
+_POD_NOT_READY_PREFIX = 'pod not ready ('
+_TERMINATION_FALLBACK = 'Terminated unexpectedly'
+_CONTAINER_ERRORS_MARKER = 'Container errors:'
+
+
+def pod_reason_identifies_cause(reason: Optional[str]) -> bool:
+    """Whether a per-pod reason names an actual cause, or only that it is sick.
+
+    A node that stops heartbeating leaves its pods' status stale -- kubelet
+    never gets to record the OOM kill -- so a refresh during the outage sees a
+    pod that still looks fine and can only report "not ready". Once the node is
+    back the very same code produces the real cause. Callers use this to tell
+    the two apart, and so to know when a later refresh is worth recording.
+    """
+    if not reason:
+        return False
+    if reason.startswith(_POD_NOT_READY_PREFIX):
+        # '<prefix>(<condition>)' alone; container detail is appended after
+        # '; ' when the container statuses explained anything.
+        return '; ' in reason
+    if reason.startswith(_TERMINATION_FALLBACK):
+        return _CONTAINER_ERRORS_MARKER in reason
+    # Anything else (Evicted, Preempted by Kueue, a kubelet pod-status reason)
+    # already names the cause.
+    return True
+
+
 def _get_pod_health_issues(pod: Any) -> Optional[str]:
     """Check a Running pod for health issues.
 
