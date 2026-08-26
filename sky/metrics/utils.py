@@ -1427,14 +1427,16 @@ def get_slurm_metrics_clusters() -> List[str]:
 
     A cluster participates when it is allowed by ``slurm.allowed_clusters``
     (the analog of ``kubernetes.allowed_contexts``; defaults to every cluster
-    in ``~/.slurm/config``) *and* ``slurm.cluster_configs.<name>.prometheus_url``
-    is set: the URL of a Prometheus reachable *from the cluster's login node*
-    (typically running inside the cluster) that scrapes the cluster's node/DCGM
-    exporters. No SSH probing happens here — enumeration reads only local config.
+    in ``~/.slurm/config``) *and*
+    ``slurm.cluster_configs.<name>.prometheus_url`` is set: the URL of a
+    Prometheus reachable *from the cluster's login node* (typically running
+    inside the cluster) that scrapes the cluster's node/DCGM exporters. No SSH
+    probing happens here — enumeration reads only local config.
     """
     try:
         # pylint: disable=import-outside-toplevel
         from sky import clouds
+
         # Scope federation to the same clusters the rest of SkyPilot uses,
         # honoring slurm.allowed_clusters (mirrors how the Kubernetes federation
         # respects allowed_contexts). Defaults to all clusters in
