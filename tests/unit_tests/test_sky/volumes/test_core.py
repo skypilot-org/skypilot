@@ -2280,25 +2280,25 @@ class TestVolumeListScopedToNames:
             self._volume('theirs', 'other'),
         ]
 
-        def fake_get_volumes(is_ephemeral=None, workspaces_filter=None):
-            """Stands in for the database, including its workspace filter."""
-            del is_ephemeral
-            if workspaces_filter is None:
-                return list(rows)
-            return [r for r in rows if r['workspace'] in workspaces_filter]
+        def fake_get_volumes(is_ephemeral=None,
+                             workspaces_filter=None,
+                             volume_names=None):
+            """Stands in for the database, applying every filter it is given.
 
-        def fake_get_volumes_from_names(volume_names, is_ephemeral=None):
-            """Faithful to the real one, which has no workspace filter.
-
-            Stubbed so that reaching for it as the *only* filter shows up as a
-            leak here rather than as an empty result from an empty test DB.
+            Faithful on the point that matters: the filters compose. Dropping
+            either one in volume_list therefore surfaces here as rows the
+            caller should not have seen, rather than as an empty result from an
+            empty test database.
             """
             del is_ephemeral
-            return [r for r in rows if r['name'] in set(volume_names)]
+            out = rows
+            if workspaces_filter is not None:
+                out = [r for r in out if r['workspace'] in workspaces_filter]
+            if volume_names is not None:
+                out = [r for r in out if r['name'] in volume_names]
+            return out
 
         monkeypatch.setattr(global_user_state, 'get_volumes', fake_get_volumes)
-        monkeypatch.setattr(global_user_state, 'get_volumes_from_names',
-                            fake_get_volumes_from_names)
         monkeypatch.setattr(global_user_state, 'get_all_users',
                             mock.MagicMock(return_value=[]))
         monkeypatch.setattr(

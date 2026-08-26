@@ -3002,24 +3002,49 @@ def _volume_record_from_row(row: Any) -> Dict[str, Any]:
 def get_volumes(
     is_ephemeral: Optional[bool] = None,
     workspaces_filter: Optional[Set[str]] = None,
+    volume_names: Optional[List[str]] = None,
 ) -> List[Dict[str, Any]]:
     """Get volumes from the database.
+
+    Every filter given is applied, so a caller narrowing by name cannot widen
+    what another filter allows -- naming a volume outside `workspaces_filter`
+    still returns nothing.
 
     Args:
         is_ephemeral: If specified, only include volumes with this
             ephemerality.
         workspaces_filter: If specified, only include volumes whose workspace
             is in this set. Use workspace names.
+        volume_names: If specified, only include volumes with these names.
+            An empty list therefore matches nothing, while None means "do not
+            filter by name". Names with no row are simply absent.
     """
     engine = _db_manager.get_engine()
-    with orm.Session(engine) as session:
+
+    def filtered(session: 'orm.Session') -> Any:
         query = session.query(volume_table)
         if is_ephemeral is not None:
             query = query.filter_by(is_ephemeral=int(is_ephemeral))
         if workspaces_filter is not None:
             query = query.filter(
                 volume_table.c.workspace.in_(workspaces_filter))
-        rows = query.all()
+        return query
+
+    rows = []
+    with orm.Session(engine) as session:
+        if volume_names is None:
+            rows = filtered(session).all()
+        else:
+            # Chunk the IN list for the same reason as
+            # get_volumes_from_names: SQLite caps bound parameters and
+            # PostgreSQL plans huge IN clauses badly.
+            for offset in range(0, len(volume_names),
+                                _CLUSTER_IN_QUERY_CHUNK_SIZE):
+                batch = volume_names[offset:offset +
+                                     _CLUSTER_IN_QUERY_CHUNK_SIZE]
+                rows.extend(
+                    filtered(session).filter(
+                        volume_table.c.name.in_(batch)).all())
     return [_volume_record_from_row(row) for row in rows]
 
 

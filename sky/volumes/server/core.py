@@ -294,7 +294,6 @@ def volume_list(
     # backend_utils for clusters.
     accessible_workspaces = workspaces_core.get_accessible_workspace_names(
         action=workspace_constants.WORKSPACE_ACTION_READ)
-    requested_names = None if volume_names is None else set(volume_names)
     if refresh:
         # Keep the reconcile proportional to what this caller can see: a user
         # who reads one workspace should not drive cloud API calls against
@@ -302,24 +301,19 @@ def volume_list(
         # calls by the (context, namespace) pairs of the volumes it is handed,
         # so narrowing the set narrows the calls. The daemon in
         # sky/server/daemons.py still refreshes the whole table.
-        # Requested names narrow this again, within the accessible set.
+        # Requested names narrow this again. get_volumes applies every filter
+        # it is given, so naming a volume outside the accessible workspaces
+        # reconciles nothing -- which would otherwise confirm it exists.
         volume_refresh(volume_names=[
-            volume['name']
-            for volume in global_user_state.get_volumes(
-                workspaces_filter=accessible_workspaces)
-            if requested_names is None or volume['name'] in requested_names
+            volume['name'] for volume in global_user_state.get_volumes(
+                workspaces_filter=accessible_workspaces,
+                volume_names=volume_names)
         ])
     with rich_utils.safe_status(ux_utils.spinner_message('Listing volumes')):
         volumes = global_user_state.get_volumes(
-            is_ephemeral=is_ephemeral, workspaces_filter=accessible_workspaces)
-        if requested_names is not None:
-            # Applied after the workspace filter and never instead of it, so
-            # naming a volume in a workspace the caller cannot read reveals
-            # nothing.
-            volumes = [
-                volume for volume in volumes
-                if volume['name'] in requested_names
-            ]
+            is_ephemeral=is_ephemeral,
+            workspaces_filter=accessible_workspaces,
+            volume_names=volume_names)
         all_users = global_user_state.get_all_users()
         user_map = {user.id: user.name for user in all_users}
 
