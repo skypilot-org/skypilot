@@ -310,7 +310,22 @@ _WAIT_UNTIL_JOB_STATUS_CONTAINS_MATCHING_JOB_ID = (
     'start_time=$SECONDS; '
     'while true; do '
     'if (( $SECONDS - $start_time > {timeout} )); then '
-    '  echo "Timeout after {timeout} seconds waiting for job status \'{job_status}\'"; exit 1; '
+    '  echo "Timeout after {timeout} seconds waiting for job status \'{job_status}\'"; '
+    # A cluster job whose (detached) setup fails ends up in FAILED_SETUP and
+    # never reaches the target status, so we only find out via this timeout.
+    # `sky logs <cluster> <job>` tails run.log, which is empty on setup
+    # failure, and the cluster is torn down afterwards -- so the actual setup
+    # error is otherwise lost. Sync the log dir down (works against a remote
+    # API server) and dump setup-*.log / run.log so CI captures the reason.
+    '  echo "=== Diagnostics: sky queue {cluster_name} ==="; '
+    '  sky queue {cluster_name} 2>&1 || true; '
+    '  echo "=== Diagnostics: syncing down logs for {cluster_name} ==="; '
+    '  timeout 120 sky logs {cluster_name} \'*\' --sync-down > /dev/null 2>&1 || true; '
+    '  for f in $(find ~/sky_logs/{cluster_name} -type f -name "setup-*.log" 2>/dev/null) '
+    '$(find ~/sky_logs/{cluster_name} -type f -name "run.log" 2>/dev/null); do '
+    '    echo "----- $f -----"; tail -n 200 "$f"; '
+    '  done; '
+    '  exit 1; '
     'fi; '
     'current_queue=$(sky queue {cluster_name}); '
     'current_status=$(echo "$current_queue" | '
