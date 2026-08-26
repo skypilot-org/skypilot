@@ -232,7 +232,13 @@ _WAIT_UNTIL_VOLUME_IS_NOT_FOUND = (
     'start_time=$SECONDS; '
     'while true; do '
     'vols=$(sky volumes ls); '
-    'if ! echo "$vols" | grep -q "{volume_name}"; then '
+    # Matched on the whole first field, as the readiness wait is, so that a
+    # longer name containing this one -- another test's, or the same test's in
+    # a concurrent run -- cannot hold the wait open. `{awk_match}` widens that
+    # to a prefix, for a caller waiting on every volume of one cluster.
+    'found=$(echo "$vols" | awk -v n="{volume_name}" '
+    '\'{awk_match} {{print $1; exit}}\'); '
+    'if [ -z "$found" ]; then '
     '  echo "Volume {volume_name} successfully removed."; break; '
     'fi; '
     'if (( $SECONDS - $start_time > {timeout} )); then '
@@ -246,9 +252,19 @@ _WAIT_UNTIL_VOLUME_IS_NOT_FOUND = (
 
 
 def get_cmd_wait_until_volume_is_not_found(volume_name: str,
-                                           timeout: int = 120):
+                                           timeout: int = 120,
+                                           match_prefix: bool = False):
+    """Blocks until no volume named `volume_name` is listed.
+
+    With `match_prefix`, until no volume whose name *starts with* it is: the
+    volumes a launch creates for a task's inline `volumes:` entries are named
+    after the cluster, one per mount path, so that is how a caller waits for
+    all of them.
+    """
+    awk_match = 'index($1, n) == 1' if match_prefix else '$1 == n'
     return _WAIT_UNTIL_VOLUME_IS_NOT_FOUND.format(volume_name=volume_name,
-                                                  timeout=timeout)
+                                                  timeout=timeout,
+                                                  awk_match=awk_match)
 
 
 _WAIT_UNTIL_VOLUME_IS_READY = (
