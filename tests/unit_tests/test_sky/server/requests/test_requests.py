@@ -1281,6 +1281,25 @@ def test_requests_filter():
     assert sql == expected_sql
     assert params == ['PENDING', 'RUNNING']
 
+    # Test request_ids with status and a partial SELECT list.
+    filter_request_ids = requests.RequestTaskFilter(
+        status=[RequestStatus.WAITING],
+        request_ids=['request-1', 'request-2'],
+        fields=['request_id', 'status'])
+    sql, params = filter_request_ids.build_query()
+    expected_sql = (f'SELECT request_id, status FROM {requests.REQUEST_TABLE} '
+                    'WHERE status IN (?) AND request_id IN (?,?)')
+    assert sql == expected_sql
+    assert params == ['WAITING', 'request-1', 'request-2']
+
+    # An empty request-id filter matches no rows without emitting invalid IN ().
+    filter_no_request_ids = requests.RequestTaskFilter(request_ids=[])
+    sql, params = filter_no_request_ids.build_query()
+    expected_sql = (f'SELECT {expected_columns} FROM {requests.REQUEST_TABLE} '
+                    'WHERE 1=0')
+    assert sql == expected_sql
+    assert params == []
+
     # Test cluster_names filter
     filter_clusters = requests.RequestTaskFilter(
         cluster_names=['cluster1', 'cluster2'], sort=True)
