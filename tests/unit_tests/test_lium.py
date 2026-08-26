@@ -26,19 +26,24 @@ def test_lium_rejects_zones():
 
 
 def test_instance_type_round_trip():
-    instance_type = lium_utils.make_instance_type('H100', 8)
-    assert instance_type == 'H100_8x'
-    assert lium_utils.parse_instance_type(instance_type) == ('H100', 8)
+    shape = lium_utils.InstanceTypeShape(accelerator_name='H100',
+                                         accelerator_count=8,
+                                         vcpus=192,
+                                         memory_gib=1007)
+    instance_type = lium_utils.make_instance_type(shape)
+    assert instance_type == 'H100_8x_192c_1007g'
+    assert lium_utils.parse_instance_type(instance_type) == shape
 
 
 def test_instance_type_keeps_the_dash_in_an_accelerator_name():
-    assert lium_utils.parse_instance_type('RTXPRO6000-WK_1x') == (
-        'RTXPRO6000-WK', 1)
+    shape = lium_utils.parse_instance_type('RTXPRO6000-WK_1x_32c_220g')
+    assert shape.accelerator_name == 'RTXPRO6000-WK'
+    assert shape.accelerator_count == 1
 
 
 def test_parse_instance_type_rejects_a_malformed_name():
     with pytest.raises(ValueError):
-        lium_utils.parse_instance_type('H100')
+        lium_utils.parse_instance_type('H100_8x')
 
 
 def test_accelerator_name_ignores_the_vendor_prefix():

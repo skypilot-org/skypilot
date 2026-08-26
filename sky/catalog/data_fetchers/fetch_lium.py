@@ -77,13 +77,16 @@ def _cheapest_offer_per_type_and_region(
             continue
         if node['tier'] != lium_utils.SECURE_TIER:
             continue
-        offer = _Offer(instance_type=lium_utils.make_instance_type(
-            acc_name, acc_count),
+        shape = lium_utils.InstanceTypeShape(accelerator_name=acc_name,
+                                             accelerator_count=acc_count,
+                                             vcpus=node['cpu_count'],
+                                             memory_gib=node['ram_gb'])
+        offer = _Offer(instance_type=lium_utils.make_instance_type(shape),
                        accelerator_name=acc_name,
                        accelerator_count=acc_count,
                        price_per_hour=node['price_per_node_hour'],
-                       vcpus=node['cpu_count'],
-                       memory_gib=node['ram_gb'],
+                       vcpus=shape.vcpus,
+                       memory_gib=shape.memory_gib,
                        gpu_memory_gib=node['gpu_memory_gb'],
                        region=node['country_code'])
         key = (offer.instance_type, offer.region)

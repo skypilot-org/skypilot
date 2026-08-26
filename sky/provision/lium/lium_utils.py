@@ -6,7 +6,7 @@ import os
 import re
 import time
 import typing
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 from sky import sky_logging
 from sky.adaptors import common as adaptors_common
@@ -23,6 +23,12 @@ DEFAULT_BASE_URL = 'https://lium.io/api'
 # The tier of a node that keeps running until the renter stops it. The other
 # tier, 'spot', is taken back when its provider wants the node.
 SECURE_TIER = 'secure'
+# A node reports its RAM and disk in KB.
+_KB_PER_GB = 1024**2
+_INSTANCE_TYPE_PATTERN = re.compile(r'(?P<accelerator_name>.+)'
+                                    r'_(?P<accelerator_count>\d+)x'
+                                    r'_(?P<vcpus>\d+)c'
+                                    r'_(?P<memory_gib>\d+)g')
 CREDENTIAL_PATH = '~/.lium/config.ini'
 API_KEY_ENV_VAR = 'LIUM_API_KEY'
 
@@ -85,6 +91,20 @@ class LiumError(Exception):
     """Raised when the Lium API rejects a request."""
 
 
+@dataclasses.dataclass(frozen=True)
+class InstanceTypeShape:
+    """What an instance type name says a node carries.
+
+    SkyPilot allows one vCPU and memory pair per instance type, and two Lium
+    hosts with the same GPU rarely carry the same CPU and RAM, so the host
+    shape is part of the name.
+    """
+    accelerator_name: str
+    accelerator_count: int
+    vcpus: int
+    memory_gib: int
+
+
 @dataclasses.dataclass
 class LiumNode:
     """A node that Lium offers for rent."""
@@ -96,6 +116,8 @@ class LiumNode:
     country_code: str
     tier: str
     is_whole_host_free: bool
+    vcpus: int
+    memory_gib: int
 
 
 @dataclasses.dataclass
@@ -155,17 +177,21 @@ def accelerator_name(gpu_model: str) -> Optional[str]:
     return GPU_NAME_MAP.get(name)
 
 
-def make_instance_type(acc_name: str, acc_count: int) -> str:
-    """Builds the instance type name for an accelerator and a GPU count."""
-    return f'{acc_name}_{acc_count}x'
+def make_instance_type(shape: InstanceTypeShape) -> str:
+    """Builds the instance type name that spells out a node shape."""
+    return (f'{shape.accelerator_name}_{shape.accelerator_count}x'
+            f'_{shape.vcpus}c_{shape.memory_gib}g')
 
 
-def parse_instance_type(instance_type: str) -> Tuple[str, int]:
-    """Splits an instance type back into accelerator name and GPU count."""
-    acc_name, _, count_part = instance_type.rpartition('_')
-    if not acc_name or not count_part.endswith('x'):
+def parse_instance_type(instance_type: str) -> InstanceTypeShape:
+    """Reads a node shape back out of an instance type name."""
+    match = _INSTANCE_TYPE_PATTERN.fullmatch(instance_type)
+    if match is None:
         raise ValueError(f'Malformed Lium instance type: {instance_type}')
-    return acc_name, int(count_part[:-1])
+    return InstanceTypeShape(accelerator_name=match['accelerator_name'],
+                             accelerator_count=int(match['accelerator_count']),
+                             vcpus=int(match['vcpus']),
+                             memory_gib=int(match['memory_gib']))
 
 
 def _parse_node(payload: Dict[str, Any]) -> Optional[LiumNode]:
@@ -175,6 +201,7 @@ def _parse_node(payload: Dict[str, Any]) -> Optional[LiumNode]:
     if not details:
         return None
     gpu_count = gpu.get('count', len(details))
+    specs = payload.get('specs', {})
     return LiumNode(
         id=payload['id'],
         gpu_model=details[0].get('name', ''),
@@ -183,30 +210,43 @@ def _parse_node(payload: Dict[str, Any]) -> Optional[LiumNode]:
         price_per_hour=(payload.get('price_per_gpu') or 0) * gpu_count,
         country_code=(payload.get('location') or {}).get('country_code', ''),
         tier=payload.get('tier', ''),
-        is_whole_host_free=bool(payload.get('is_whole_host_free')))
+        is_whole_host_free=bool(payload.get('is_whole_host_free')),
+        vcpus=specs.get('cpu', {}).get('count') or 0,
+        memory_gib=round((specs.get('ram', {}).get('total') or 0) / _KB_PER_GB))
+
+
+def node_shape(node: LiumNode) -> Optional[InstanceTypeShape]:
+    """Returns the shape of a node, or None if its GPU has no SkyPilot name."""
+    acc_name = accelerator_name(node.gpu_model)
+    if acc_name is None:
+        return None
+    return InstanceTypeShape(accelerator_name=acc_name,
+                             accelerator_count=node.gpu_count,
+                             vcpus=node.vcpus,
+                             memory_gib=node.memory_gib)
 
 
 def find_cheapest_free_node(instance_type: str,
                             region: str) -> Optional[LiumNode]:
     """Returns the cheapest free node that matches the instance type.
 
-    Lium rents a node whole, so the node must offer exactly the number of GPUs
-    that the instance type asks for.
+    Lium rents a node whole, so the node must carry exactly the shape the
+    instance type names.
     """
-    acc_name, acc_count = parse_instance_type(instance_type)
+    shape = parse_instance_type(instance_type)
     payloads = _request('GET',
                         '/executors',
                         params={
                             'size': 1000,
-                            'gpu_count_gte': acc_count,
-                            'gpu_count_lte': acc_count,
+                            'gpu_count_gte': shape.accelerator_count,
+                            'gpu_count_lte': shape.accelerator_count,
                         })
     candidates: List[LiumNode] = []
     for payload in payloads:
         node = _parse_node(payload)
         if node is None:
             continue
-        if accelerator_name(node.gpu_model) != acc_name:
+        if node_shape(node) != shape:
             continue
         if node.country_code != region:
             continue
@@ -248,14 +288,18 @@ def _default_template_id(node: LiumNode) -> str:
 
 def rent_node(node: LiumNode, pod_name: str, public_key: str) -> str:
     """Rents a node and returns the id of the pod that runs on it."""
-    pod = _request('POST',
-                   f'/executors/{node.id}/rent',
-                   json={
-                       'pod_name': pod_name,
-                       'template_id': _default_template_id(node),
-                       'user_public_key': [public_key],
-                   })
-    return pod['id']
+    response = _request('POST',
+                        f'/executors/{node.id}/rent',
+                        json={
+                            'pod_name': pod_name,
+                            'template_id': _default_template_id(node),
+                            'user_public_key': [public_key],
+                        })
+    pod_id = response.get('pod_id')
+    if pod_id is None:
+        raise LiumError(f'The rent of node {node.id} returned no pod: '
+                        f'{response}')
+    return pod_id
 
 
 def _parse_pod(payload: Dict[str, Any]) -> LiumPod:
