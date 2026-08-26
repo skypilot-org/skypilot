@@ -3015,6 +3015,7 @@ def _update_cluster_status(
         #   once the container is running again, so a snapshot that raced the
         #   restart misses it -> re-read the pods' current+previous states.
         # Bounded: only on an abnormal k8s cluster with no status reason.
+        recovered_cause = False
         if not status_reason and isinstance(launched_resources.cloud,
                                             clouds.Kubernetes):
             try:
@@ -3027,6 +3028,11 @@ def _update_cluster_status(
                             ray_config['provider'], pod_names) or
                         k8s_instance.get_cluster_failure_reason_from_pods(
                             ray_config['provider'], pod_names) or '')
+                    # These extractors only ever return a specific cause, and
+                    # the result lands in status_reason rather than in
+                    # node_statuses -- so the supersede check below cannot see
+                    # it unless we record it here.
+                    recovered_cause = bool(status_reason)
             except Exception as e:  # pylint: disable=broad-except
                 logger.debug('Failed to get pod failure reason for '
                              f'{cluster_name!r}: {e}')
@@ -3223,7 +3229,11 @@ def _update_cluster_status(
         # identical reason, so a stable cause is recorded once, not per poll.
         identified_cause = False
         if isinstance(launched_resources.cloud, clouds.Kubernetes):
-            identified_cause = any(
+            # A cause can arrive by either route: named in a pod's live status,
+            # or recovered from kubelet events / a container's previous state
+            # when the live status had nothing (the latter never reaches
+            # node_statuses, hence the separate flag).
+            identified_cause = recovered_cause or any(
                 k8s_instance.pod_reason_identifies_cause(pod_reason)
                 for _, pod_reason in node_statuses.values())
         # Do not add event if the cluster is already in INIT status, unless
