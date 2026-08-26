@@ -346,6 +346,51 @@ class TestGetManagedJobQueue:
         expected_duration = (current_time - 50) - (current_time - 200 - 50)
         assert job['job_duration'] == expected_duration
 
+    def test_job_duration_with_null_fields_does_not_break_listing(
+            self, monkeypatch):
+        """A row with SQL NULL last_recovered_at/job_duration must not raise.
+
+        Such rows should not normally exist (the schema has defaults), but
+        have been observed in the wild. One bad row must not take down the
+        entire jobs listing with a TypeError; it should degrade to the
+        "never started" sentinel (job_duration == 0).
+        """
+        jobs = [
+            # Healthy job, to make sure the whole listing survives.
+            self._make_test_job(1),
+            # Poisoned row: NULL in both columns.
+            self._make_test_job(2, last_recovered_at=None, job_duration=None),
+        ]
+        self._patch_managed_job_state(monkeypatch, jobs)
+        self._patch_global_user_state(monkeypatch)
+
+        result = jobs_utils.get_managed_job_queue()
+
+        assert len(result['jobs']) == 2
+        job = result['jobs'][1]
+        assert job['job_id'] == 2
+        # NULLs coalesce to the schema defaults (last_recovered_at=-1,
+        # job_duration=0), i.e. the job renders as never started.
+        assert job['job_duration'] == 0
+
+    def test_job_duration_with_null_fields_for_recovering_job(
+            self, monkeypatch):
+        """A RECOVERING row with NULL job_duration degrades to 0, not None."""
+        jobs = [
+            self._make_test_job(
+                1,
+                status=managed_job_state.ManagedJobStatus.RECOVERING,
+                last_recovered_at=None,
+                job_duration=None)
+        ]
+        self._patch_managed_job_state(monkeypatch, jobs)
+        self._patch_global_user_state(monkeypatch)
+
+        result = jobs_utils.get_managed_job_queue()
+
+        job = result['jobs'][0]
+        assert job['job_duration'] == 0
+
     def test_finished_job_falls_back_to_cached_infra(self, monkeypatch):
         """A finished job with no live handle shows last-cached infra/resources.
 
