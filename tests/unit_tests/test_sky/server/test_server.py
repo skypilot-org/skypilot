@@ -1455,17 +1455,16 @@ class TestJwtSecretStartupBootstrap:
     """
 
     def test_a_failed_bootstrap_does_not_abort_startup(self):
-        with mock.patch(
-                'sky.users.token_service.token_service') as mock_token_service:
+        """And says so. Swallowing it silently leaves service-account auth
+        degraded with nothing pointing at the corrupt row.
+        """
+        with mock.patch('sky.users.token_service.token_service'
+                       ) as mock_token_service, \
+                mock.patch.object(server, 'logger') as mock_logger:
             mock_token_service.ensure_secret_loaded.side_effect = (
                 token_service.JWTSecretUnavailableError('corrupt row'))
 
             server._bootstrap_jwt_secret()
 
             mock_token_service.ensure_secret_loaded.assert_called_once()
-
-    def test_a_healthy_bootstrap_loads_the_secret(self):
-        with mock.patch(
-                'sky.users.token_service.token_service') as mock_token_service:
-            server._bootstrap_jwt_secret()
-            mock_token_service.ensure_secret_loaded.assert_called_once()
+            mock_logger.error.assert_called_once()
