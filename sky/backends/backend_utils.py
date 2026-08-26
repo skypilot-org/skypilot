@@ -124,6 +124,14 @@ SSH_CONNECTION_ERROR_PATTERN = re.compile(
     r'^ssh:.*(timed out|connection refused)$', re.IGNORECASE)
 _SSH_CONNECTION_TIMED_OUT_PATTERN = re.compile(r'^ssh:.*timed out$',
                                                re.IGNORECASE)
+# Transient transport failures (e.g. an SSM ProxyCommand dropping for a
+# moment) that do not indicate an unhealthy ray cluster; retried by the ray
+# health check. Excludes 'timed out', which signals a changed IP on manually
+# restarted clusters (_SSH_CONNECTION_TIMED_OUT_PATTERN).
+_TRANSIENT_SSH_FAILURE_PATTERN = re.compile(
+    r'(TargetNotConnected|kex_exchange_identification|'
+    r'Connection reset by peer|Connection closed by remote host|Broken pipe)',
+    re.IGNORECASE)
 K8S_PODS_NOT_FOUND_PATTERN = re.compile(r'.*(NotFound|pods .* not found).*',
                                         re.IGNORECASE)
 _RAY_CLUSTER_NOT_FOUND_MESSAGE = 'Ray cluster is not found'
@@ -2752,7 +2760,16 @@ def _update_cluster_status(
                             # 'ray cluster is unhealthy (None)'.
                             ray_status_details = _summarize_probe_failure(e)
                             return False
-                        raise e
+                        # Proxied transports (e.g. SSH over SSM) can drop
+                        # momentarily while the instance and ray are fine;
+                        # retry instead of flagging the cluster abnormal.
+                        transient_ssh_failure = (
+                            e.returncode == 255 and
+                            _TRANSIENT_SSH_FAILURE_PATTERN.search(
+                                f'{e.error_msg or ""} '
+                                f'{e.detailed_reason or ""}') is not None)
+                        if not transient_ssh_failure:
+                            raise e
                     # We retry for kubernetes because coreweave can have a
                     # transient network issue.
                     time.sleep(1)
