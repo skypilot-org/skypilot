@@ -171,6 +171,12 @@ class KubernetesHighPerformanceNetworkType(enum.Enum):
             # only NCCL difference between Oracle's two reference manifests for
             # the same shape, and it fails silently: NCCL finds no matching
             # device and falls back to TCP rather than erroring.
+            #
+            # Widening hands NIC selection to the device plugin: the pod holds
+            # only the VFs its SriovNetworkNodePolicy chose to create, so the
+            # prefix cannot reach a PF the exact list was excluding. A policy
+            # that also exposes non-fabric NICs would need `NCCL_IB_HCA`
+            # narrowed again through task `envs:`.
             pf_names_visible = not pod_local_rdma
             if acc == 'GB200':
                 # GB200 NVL72 runs Quantum-2 InfiniBand plus rack-scale

@@ -2217,7 +2217,17 @@ Fields:
 
 ``resource`` and ``networks`` both name objects that whoever installed the
 device plugin chose, so SkyPilot cannot infer them and fails with an actionable
-error if ``mode: sriov`` is set without them.
+error if ``mode: sriov`` is set without them. The number of NICs is not
+configurable: SkyPilot reads the VF-to-GPU ratio off a node that is running and
+can host the request, then scales it to the GPUs requested. A context whose
+RDMA node pool is scaled to zero therefore has no node to read, and launches
+fail naming the resource rather than waiting for the autoscaler.
+
+SkyPilot also sets ``NCCL_IB_HCA`` to the ``mlx5`` family prefix under
+``mode: sriov``, rather than the exact device list it uses for host networking —
+a pod holding virtual functions never sees the host's physical function names.
+Narrow it through task ``envs:`` if your ``SriovNetworkNodePolicy`` also exposes
+NICs that are not part of the compute fabric.
 
 Example:
 

@@ -4843,6 +4843,27 @@ class TestKubernetesRdmaMode(unittest.TestCase):
         self.assertFalse(deploy_vars['k8s_host_network'])
         self.assertTrue(deploy_vars['k8s_rdma_host_device_access'])
 
+    def test_cpu_only_task_may_still_ask_for_host_network(self):
+        """The rejection is about virtual functions, so it needs some.
+
+        A CPU-only task requests no VFs, so nothing is unreachable and the
+        task may want host networking for unrelated reasons. Rejecting here
+        would break a launch that works today, and the admin-owned mode gives
+        the task author no way to fix it.
+        """
+        deploy_vars = self._deploy_vars(
+            rdma={
+                'mode': 'sriov',
+                'resource': 'nvidia.com/mlnxnics',
+                'networks': 'network-operator/sriov-net',
+            },
+            pod_config={'spec': {
+                'hostNetwork': True
+            }},
+            accelerators=None)
+        self.assertTrue(deploy_vars['k8s_host_network'])
+        self.assertIsNone(deploy_vars['k8s_rdma_nic_resource'])
+
     def test_sriov_widens_the_hca_list_to_the_vf_family(self):
         """A VF pod cannot see the host's physical functions.
 

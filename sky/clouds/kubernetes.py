@@ -1043,8 +1043,11 @@ class Kubernetes(clouds.Cloud):
         # the pod in the node's network namespace, where the VF attachments
         # resolve to nothing -- the pod would schedule, run, and quietly move
         # its traffic over TCP. Every other failure here is loud, so this one
-        # is too.
-        if pod_config_host_network and sriov_mode:
+        # is too. Gated on the accelerator request for the same reason the VF
+        # injection below is: with no VFs requested there is nothing to be
+        # unreachable, and a CPU-only task may want host networking for
+        # unrelated reasons (host ports) on a context an admin marked sriov.
+        if pod_config_host_network and sriov_mode and acc_count:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(
                     f'pod_config sets hostNetwork: true, but context '
@@ -1721,27 +1724,20 @@ class Kubernetes(clouds.Cloud):
         matching how every other per-cloud NIC injection is gated (AWS EFA,
         CoreWeave and Together). A tenant-wide ``kubernetes.rdma`` therefore
         applies only where it is meaningful instead of failing launches on the
-        rest of a mixed fleet. The mechanism itself -- an SR-IOV device plugin
-        plus Multus -- is not OCI-specific, so widening this is moving one
-        condition.
-
-        Ignoring the block elsewhere is silent by design, but says so out loud
-        when a mode was declared: a fleet-wide default landing on a cluster it
-        does not describe is the intended case, while a declaration that
-        resolves to nothing is usually a detection problem worth naming.
+        rest of a mixed fleet -- and silently, since a fleet-wide default
+        landing on a cluster it does not describe is the intended case, not a
+        problem to report on every launch. The mechanism itself -- an SR-IOV
+        device plugin plus Multus -- is not OCI-specific, so widening this is
+        moving the check below.
         """
+        if not oci_roce_enabled:
+            return None
         mode = skypilot_config.get_effective_region_config(
             cloud=cls._REPR.lower(),
             region=context,
             keys=('rdma', 'mode'),
             default_value=None)
         if mode is None:
-            return None
-        if not oci_roce_enabled:
-            logger.info(
-                f'kubernetes.rdma.mode is set for context {context!r}, but it '
-                'was not detected as an RDMA cluster whose NIC delivery this '
-                'describes; ignoring it.')
             return None
         return kubernetes_enums.KubernetesRdmaMode(mode.lower())
 
