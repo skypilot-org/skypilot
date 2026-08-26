@@ -625,6 +625,10 @@ export function ManagedJobsTable({
     [setView]
   );
   const [statusCounts, setStatusCounts] = useState({});
+  // Per-cluster failures from the external (Slurm) jobs sweep; non-empty
+  // means external rows may be incomplete or stale. Dismissible warning.
+  const [externalFetchErrors, setExternalFetchErrors] = useState([]);
+  const [externalErrorsDismissed, setExternalErrorsDismissed] = useState('');
   const [moreMenuOpen, setMoreMenuOpen] = useState(false);
   const moreMenuRef = useRef(null);
   const [controllerStopped, setControllerStopped] = useState(false);
@@ -812,6 +816,7 @@ export function ManagedJobsTable({
             setTotalCount(response.total || 0);
             setTotalNoFilter(response.totalNoFilter || response.total || 0);
             setStatusCounts(response.statusCounts || {});
+            setExternalFetchErrors(response.externalFetchErrors || []);
             // Controller is reachable: clear any stale banner state from a
             // previous fetch and skip the cluster-status lookup below.
             setControllerStopped(false);
@@ -2350,6 +2355,36 @@ export function ManagedJobsTable({
           </div>
         </div>
       </div>
+
+      {/* Slurm sweep failures: external rows may be incomplete or stale.
+          Dismiss is keyed on the message text so a NEW failure re-surfaces
+          the warning while the same one stays dismissed. */}
+      {externalFetchErrors.length > 0 &&
+        (() => {
+          const errorText = externalFetchErrors
+            .map((f) => `${f.cluster}: ${f.error}`)
+            .join(' · ');
+          if (errorText === externalErrorsDismissed) return null;
+          return (
+            <div className="mb-3 flex items-start justify-between rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+              <span>
+                Failed to fetch Slurm jobs from{' '}
+                {externalFetchErrors.length === 1
+                  ? 'cluster'
+                  : 'clusters'}{' '}
+                {externalFetchErrors.map((f) => f.cluster).join(', ')} — their
+                jobs may be missing or stale. ({errorText})
+              </span>
+              <button
+                onClick={() => setExternalErrorsDismissed(errorText)}
+                className="ml-3 flex-shrink-0 font-medium text-amber-800 hover:text-amber-900"
+                title="Dismiss"
+              >
+                ×
+              </button>
+            </div>
+          );
+        })()}
 
       {/* Mobile-specific controller stopped message outside table */}
       {isMobile &&
