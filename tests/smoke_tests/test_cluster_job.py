@@ -1645,8 +1645,10 @@ def test_volumes_on_kubernetes():
             smoke_tests_utils.get_cmd_wait_until_volume_is_ready(existing0),
             smoke_tests_utils.get_cmd_wait_until_volume_is_ready(vol_existing1),
             # Name filter and `-o json` end to end: exactly the named volume
-            # comes back, and stdout parses -- which it would not if a
-            # server-side log line were streamed onto it.
+            # comes back, and stdout is a parseable document. The streamed-log
+            # case that `-o json` also has to survive is not reachable here --
+            # without `-r` nothing refreshes, and the volume is READY by now so
+            # a refresh would log nothing either -- so it is a unit test.
             f'vols=$(sky volumes ls {pvc0} -o json) && echo "$vols" && '
             'echo "$vols" | python3 -c \''
             'import json, sys; '

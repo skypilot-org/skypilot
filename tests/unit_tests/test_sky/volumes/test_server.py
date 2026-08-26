@@ -1,5 +1,6 @@
 """Unit tests for volume server API."""
 
+import inspect
 from unittest import mock
 
 import fastapi
@@ -683,12 +684,8 @@ class TestVolumeListNamesReachTheRequestBody:
     def test_the_body_field_matches_the_core_signature(self):
         """to_kwargs() feeds the body straight into volume_list as kwargs, so a
         field renamed on either side would only fail at request time."""
-        import inspect
-
-        from sky.volumes.server import core
-
         kwargs = payloads.VolumeListBody(refresh=False,
                                          volume_names=['a']).to_kwargs()
-        parameters = inspect.signature(core.volume_list).parameters
+        parameters = inspect.signature(server.core.volume_list).parameters
         assert set(kwargs).issubset(set(parameters))
         assert kwargs['volume_names'] == ['a']
