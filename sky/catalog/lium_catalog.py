@@ -11,6 +11,7 @@ from sky import exceptions
 from sky import sky_logging
 from sky.adaptors import common as adaptors_common
 from sky.catalog import common
+from sky.catalog.data_fetchers import fetch_lium
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
@@ -24,35 +25,53 @@ else:
 
 logger = sky_logging.init_logger(__name__)
 
-_CATALOG_COLUMNS = [
-    'InstanceType', 'AcceleratorName', 'AcceleratorCount', 'vCPUs', 'MemoryGiB',
-    'Price', 'Region', 'GpuInfo', 'SpotPrice'
-]
-
 _catalog: Optional['pd.DataFrame'] = None
 
 
 def _get_df() -> 'pd.DataFrame':
-    """Returns the catalog, or an empty one while it is not published yet.
-
-    The cloud reaches a SkyPilot release before its file reaches the catalog
-    repository. Until then Lium offers nothing, rather than breaking every
-    command that walks the clouds.
-    """
+    """Returns the catalog, from the published file or from the live feed."""
     global _catalog
     if _catalog is None:
-        # Lium node inventory changes through the day, so the catalog is
-        # refreshed more often than the clouds with a fixed instance list.
-        catalog = common.read_catalog('lium/vms.csv', pull_frequency_hours=7)
-        try:
-            # The read is lazy, so the download runs on the first column read.
-            catalog.columns  # pylint: disable=pointless-statement
-            _catalog = catalog
-        except (exceptions.CloudError,
-                requests.exceptions.RequestException) as e:
-            logger.warning(f'The Lium catalog is not available: {e}')
-            _catalog = pd.DataFrame(columns=_CATALOG_COLUMNS)
+        catalog = _read_published_catalog()
+        if catalog is None:
+            catalog = _build_catalog_from_node_feed()
+        _catalog = catalog
     return _catalog
+
+
+def _read_published_catalog() -> Optional['pd.DataFrame']:
+    """Returns the catalog SkyPilot publishes, or None when it is missing.
+
+    A cloud reaches a SkyPilot release before its file reaches the catalog
+    repository, so the file is not there for every version that knows Lium.
+    """
+    # Lium node inventory changes through the day, so the catalog is refreshed
+    # more often than the clouds with a fixed instance list.
+    catalog = common.read_catalog('lium/vms.csv', pull_frequency_hours=7)
+    try:
+        # The read is lazy, so the download runs on this first column read.
+        catalog.columns  # pylint: disable=pointless-statement
+    except (exceptions.CloudError,
+            requests.exceptions.RequestException) as fetch_error:
+        logger.warning(
+            f'The published Lium catalog is not available: {fetch_error}')
+        return None
+    return catalog
+
+
+def _build_catalog_from_node_feed() -> 'pd.DataFrame':
+    """Builds the catalog out of the public Lium node feed.
+
+    The feed needs no API key and carries the offers the published catalog is
+    written from. An empty catalog is the last resort: Lium then offers
+    nothing, rather than breaking every command that walks the clouds.
+    """
+    try:
+        rows = fetch_lium.catalog_rows()
+    except requests.exceptions.RequestException as fetch_error:
+        logger.warning(f'The Lium node feed is not available: {fetch_error}')
+        rows = []
+    return pd.DataFrame(rows, columns=fetch_lium.CATALOG_COLUMNS)
 
 
 def instance_type_exists(instance_type: str) -> bool:
