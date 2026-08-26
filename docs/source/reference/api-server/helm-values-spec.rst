@@ -53,6 +53,7 @@ Below is the available helm value keys and the default value of each key:
 
       # echo "Installing admin policy"
       # pip install git+https://github.com/michaelvll/admin-policy-examples
+    :ref:`preStartHook <helm-values-apiService-preStartHook>`: null
     :ref:`config <helm-values-apiService-config>`: null
     :ref:`dbConnectionSecretName <helm-values-apiService-dbConnectionSecretName>`: null
     :ref:`dbConnectionString <helm-values-apiService-dbConnectionString>`: null
@@ -569,6 +570,30 @@ Default: see the yaml below.
       # Uncomment the following lines to install the admin policy
       # echo "Installing admin policy"
       # pip install git+https://github.com/michaelvll/admin-policy-examples
+
+.. _helm-values-apiService-preStartHook:
+
+``apiService.preStartHook``
+^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Shell commands to run after SkyPilot initializes configuration and credentials,
+but before the API server starts. Use this for an entrypoint-style custom setup
+script that must run in the API container. The hook must exit successfully and
+must not use ``exec``: the chart retains ``tini`` and its final ``sky api
+start`` command for signal handling, health checks, logging, and normal API
+startup. The hook is not run when dev mode is enabled because that mode does
+not start the API server.
+
+Use :ref:`apiService.preDeployHook <helm-values-apiService-preDeployHook>` for
+commands that must run before SkyPilot configuration initialization.
+
+Default: ``null``
+
+.. code-block:: yaml
+
+  apiService:
+    preStartHook: |-
+      /app/custom-startup.sh --custom-option
 
 .. _helm-values-apiService-config:
 

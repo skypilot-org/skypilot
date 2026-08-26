@@ -279,6 +279,9 @@ spec:
           # developer can drive `sky api start` / `sky api stop` via kubectl exec.
           exec tail -f /dev/null
           {{- else }}
+          {{- if .Values.apiService.preStartHook }}
+          {{ .Values.apiService.preStartHook | nindent 10 }}
+          {{- end }}
           # Optional log mirror: when $SKYPILOT_SERVER_LOG_MIRROR_DIR is set,
           # also write server stdout/stderr to a per-pod, per-boot file under
           # <dir>/<HOSTNAME>/server-<UTC_ISO>.log. Survives local logrotate
