@@ -1,5 +1,6 @@
 """Unit tests for CLI volumes commands."""
 from datetime import datetime
+import json
 from unittest import mock
 
 from click import testing as cli_testing
@@ -7,6 +8,7 @@ import pytest
 
 from sky.client.cli import command
 from sky.client.cli import table_utils
+from sky.schemas.api import responses
 from sky.utils import volume as volume_utils
 
 
@@ -1239,3 +1241,101 @@ class TestRunPodVolumeTable:
         assert 'Kubernetes PVCs:' in out
         assert 'RunPod Network Volumes:' in out
         assert '\n\n' in out
+
+
+class TestVolumesLsByName:
+    """`sky volumes ls NAME` narrows the listing, and the refresh with it."""
+
+    @staticmethod
+    def _record(name, status, error_message=None):
+        return responses.VolumeRecord(name=name,
+                                      type='k8s-pvc',
+                                      launched_at=0,
+                                      cloud='Kubernetes',
+                                      config={},
+                                      name_on_cloud=f'{name}-abc123',
+                                      user_hash='uhash',
+                                      user_name='alice',
+                                      workspace='default',
+                                      status=status,
+                                      usedby_pods=[],
+                                      usedby_clusters=[],
+                                      error_message=error_message)
+
+    @staticmethod
+    def _patch(monkeypatch, returned):
+        mock_ls = mock.MagicMock(return_value='request-id')
+        monkeypatch.setattr('sky.volumes.client.sdk.ls', mock_ls)
+        monkeypatch.setattr('sky.client.sdk.stream_and_get',
+                            mock.MagicMock(return_value=returned))
+        return mock_ls
+
+    def test_names_are_sent_to_the_server(self, monkeypatch):
+        mock_ls = self._patch(monkeypatch, [self._record('vol-a', 'READY')])
+
+        result = cli_testing.CliRunner().invoke(command.volumes_ls,
+                                                ['vol-a', '-r', '-o', 'json'])
+
+        assert not result.exit_code, result.output
+        # Sent so a current server can scope the refresh instead of re-probing
+        # every volume.
+        assert mock_ls.call_args.kwargs['names'] == ('vol-a',)
+        assert mock_ls.call_args.kwargs['refresh'] is True
+
+    def test_unfiltered_response_is_narrowed_by_the_client(self, monkeypatch):
+        """An API server older than the `names` parameter ignores it and
+        returns every volume. Narrowing again here is what keeps the output
+        correct against those servers -- and therefore what lets the parameter
+        ship without an API version gate. If this breaks, that reasoning does
+        too.
+        """
+        self._patch(monkeypatch, [
+            self._record('vol-a', 'NOT_READY', 'PVC is pending.'),
+            self._record('vol-a-longer', 'READY'),
+            self._record('unrelated', 'READY'),
+        ])
+
+        result = cli_testing.CliRunner().invoke(command.volumes_ls,
+                                                ['vol-a', '-o', 'json'])
+
+        assert not result.exit_code, result.output
+        listed = [volume['name'] for volume in json.loads(result.output)]
+        # Exactly the requested volume: not the one whose name merely starts
+        # with it, and not the rest of the table.
+        assert listed == ['vol-a']
+
+    def test_no_names_lists_everything(self, monkeypatch):
+        mock_ls = self._patch(monkeypatch, [
+            self._record('vol-a', 'READY'),
+            self._record('vol-b', 'READY'),
+        ])
+
+        result = cli_testing.CliRunner().invoke(command.volumes_ls,
+                                                ['-o', 'json'])
+
+        assert not result.exit_code, result.output
+        assert mock_ls.call_args.kwargs['names'] == ()
+        assert len(json.loads(result.output)) == 2
+
+
+class TestVolumesLsJsonOutput:
+    """`-o json` is the machine-readable path, so the fields callers poll on
+    have to be there."""
+
+    def test_json_carries_status_and_reason(self, monkeypatch):
+        record = TestVolumesLsByName._record('vol-a', 'NOT_READY',
+                                             'PVC is pending: still binding.')
+        monkeypatch.setattr('sky.volumes.client.sdk.ls',
+                            mock.MagicMock(return_value='request-id'))
+        monkeypatch.setattr('sky.client.sdk.stream_and_get',
+                            mock.MagicMock(return_value=[record]))
+
+        result = cli_testing.CliRunner().invoke(command.volumes_ls,
+                                                ['-o', 'json'])
+
+        assert not result.exit_code, result.output
+        payload = json.loads(result.output)
+        assert payload[0]['status'] == 'NOT_READY'
+        # The table only shows MESSAGE conditionally; JSON must always carry
+        # the reason, since that is the whole point of polling it.
+        assert payload[0]['error_message'] == 'PVC is pending: still binding.'

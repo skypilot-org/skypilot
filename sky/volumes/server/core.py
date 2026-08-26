@@ -202,12 +202,16 @@ def volume_refresh(volume_names: Optional[List[str]] = None) -> None:
 def volume_list(
     is_ephemeral: Optional[bool] = None,
     refresh: bool = False,
+    volume_names: Optional[List[str]] = None,
 ) -> List[responses.VolumeRecord]:
     """Gets volumes from the database.
 
     Args:
         is_ephemeral: Whether to include ephemeral volumes.
         refresh: If True, refresh volume state from cloud APIs before returning.
+        volume_names: If given, return only these volumes, and scope a
+            `refresh` to them rather than re-probing the whole table. Names
+            with no volume are ignored, the same as an empty listing.
 
     Returns:
         [
@@ -235,9 +239,13 @@ def volume_list(
         ]
     """
     if refresh:
-        volume_refresh()
+        volume_refresh(volume_names)
     with rich_utils.safe_status(ux_utils.spinner_message('Listing volumes')):
-        volumes = global_user_state.get_volumes(is_ephemeral=is_ephemeral)
+        if volume_names is None:
+            volumes = global_user_state.get_volumes(is_ephemeral=is_ephemeral)
+        else:
+            volumes = global_user_state.get_volumes_from_names(
+                volume_names, is_ephemeral=is_ephemeral)
         all_users = global_user_state.get_all_users()
         user_map = {user.id: user.name for user in all_users}
 
@@ -446,7 +454,19 @@ def volume_apply(
                 creation_yaml=creation_yaml,
                 error_message=initial_error,
             )
-        logger.info(f'Created volume {name} on cloud {cloud}')
+        # Report the status that was just recorded, not the fact that the API
+        # call returned. Creating the backing resource is not the same as it
+        # being mountable: an Immediate-binding storage class provisions the
+        # PersistentVolume asynchronously, so a launch against the volume right
+        # now would be refused with VolumeNotReadyError. Saying "Created" and
+        # nothing else sends the user straight into that.
+        if initial_status == status_lib.VolumeStatus.NOT_READY:
+            reason = f' {initial_error}' if initial_error else ''
+            logger.info(f'Created volume {name} on cloud {cloud}. It is not '
+                        f'ready to be mounted yet.{reason}\n'
+                        f'Check its status with: sky volumes ls {name} -r')
+        else:
+            logger.info(f'Created volume {name} on cloud {cloud}')
 
 
 def _same_backend_resource(a: models.VolumeConfig,

@@ -5616,6 +5616,11 @@ def _build_volume_override_config(
 
 @volumes.command('ls', cls=_DocumentedCodeCommand)
 @flags.config_option(expose_value=False)
+@click.argument('names',
+                required=False,
+                type=str,
+                nargs=-1,
+                **_get_shell_complete_args(_complete_volume_name))
 @click.option('--verbose',
               '-v',
               default=False,
@@ -5630,11 +5635,36 @@ def _build_volume_override_config(
               help='Refresh volume state from cloud APIs before listing. '
               'Without this flag, cached data is returned which is updated '
               'periodically by the background daemon.')
+@flags.output_format_option()
 @usage_lib.entrypoint
-def volumes_ls(verbose: bool, refresh: bool):
-    """List volumes managed by SkyPilot."""
-    request_id = volumes_sdk.ls(refresh=refresh)
+def volumes_ls(names: List[str],
+               verbose: bool,
+               refresh: bool,
+               output_format: str = 'table'):
+    """List volumes managed by SkyPilot.
+
+    Pass one or more volume names to show only those. Combined with --refresh,
+    only the named volumes are re-probed, which is much cheaper than refreshing
+    every volume when you are waiting on one you just created.
+    """
+    request_id = volumes_sdk.ls(refresh=refresh, names=names)
     all_volumes = sdk.stream_and_get(request_id)
+    if names:
+        # Filter here as well as on the server. An API server older than this
+        # change ignores the names and returns every volume; narrowing again
+        # keeps the output correct against those servers, which is what lets
+        # the names be sent without an API version gate. Against a current
+        # server the response is already narrowed and this is a no-op.
+        requested = set(names)
+        all_volumes = [
+            volume for volume in all_volumes if volume.name in requested
+        ]
+    if output_format == flags.OUTPUT_FORMAT_JSON:
+        click.echo(
+            json.dumps(
+                [volume.model_dump(mode='json') for volume in all_volumes],
+                indent=2))
+        return
     volume_table = table_utils.format_volume_table(all_volumes,
                                                    show_all=verbose)
     click.echo(volume_table)
