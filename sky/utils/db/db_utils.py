@@ -558,8 +558,14 @@ def _rewrite_hostport(uri: str, hostport: str) -> str:
     the params) matters because URI params take precedence over libpq
     environment variables such as ``PGSSLMODE``, making the pooled DSN
     deterministic regardless of process environment. All non-ssl query params
-    are preserved. A TLS-terminating or remote pooler must be configured via
-    ``ENV_VAR_DB_POOL_CONNECTION_URI`` instead, which is used verbatim.
+    are preserved byte-for-byte: the raw ``key=value`` pairs are filtered
+    without a decode/re-encode round trip, because that round trip is not
+    byte-preserving — ``urlencode`` writes spaces as ``+``, which libpq does
+    not interpret as a space in URI query values, and ``parse_qsl`` decodes a
+    literal ``+`` into a space — so a surviving value such as
+    ``options=-c%20search_path%3Dfoo`` would be mangled. A TLS-terminating or
+    remote pooler must be configured via ``ENV_VAR_DB_POOL_CONNECTION_URI``
+    instead, which is used verbatim.
     """
     parts = urllib.parse.urlsplit(uri)
     if not parts.scheme.startswith('postgres'):
@@ -567,13 +573,20 @@ def _rewrite_hostport(uri: str, hostport: str) -> str:
     at = parts.netloc.rfind('@')
     userinfo = parts.netloc[:at + 1] if at != -1 else ''
     # The pooler is a plaintext loopback sidecar: drop every ssl* libpq param
-    # and force sslmode=disable (see docstring).
-    query_params = [(key, value)
-                    for key, value in urllib.parse.parse_qsl(
-                        parts.query, keep_blank_values=True)
-                    if not key.lower().startswith('ssl')]
-    query_params.append(('sslmode', 'disable'))
-    query = urllib.parse.urlencode(query_params)
+    # and force sslmode=disable (see docstring). Surviving pairs are kept
+    # byte-for-byte; only the key is percent-decoded, and only for the ssl*
+    # prefix match (libpq percent-decodes keywords, so e.g. ``%73slmode`` is
+    # ``sslmode`` to libpq).
+    pairs = []
+    for pair in parts.query.split('&'):
+        if not pair:
+            continue
+        raw_key = pair.split('=', 1)[0]
+        if urllib.parse.unquote(raw_key).lower().startswith('ssl'):
+            continue
+        pairs.append(pair)
+    pairs.append('sslmode=disable')
+    query = '&'.join(pairs)
     return urllib.parse.urlunsplit(
         (parts.scheme, userinfo + hostport, parts.path, query, parts.fragment))
 
