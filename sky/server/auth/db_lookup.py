@@ -169,6 +169,24 @@ def role_seed_unavailable_response() -> fastapi.responses.JSONResponse:
         })
 
 
+def jwt_secret_unavailable_response() -> fastapi.responses.JSONResponse:
+    """503 for service-account auth that cannot load its signing secret.
+
+    Not a 401: the token is well-formed and the server simply cannot reach the
+    secret to check it. A 401 reads as "this credential is bad" and pushes
+    operators to rotate tokens over what is a transient database problem.
+    """
+    return fastapi.responses.JSONResponse(
+        status_code=503,
+        headers={'Retry-After': str(max(1, int(AUTH_DB_TIMEOUT_SECONDS)))},
+        content={
+            'detail': ('Service account authentication is temporarily '
+                       'unavailable: the token signing secret could not be '
+                       'read from the server database. Your token is still '
+                       'valid -- please try again.')
+        })
+
+
 def worker_exhausted_response() -> fastapi.responses.JSONResponse:
     """503 for auth-path work rejected by a saturated thread executor.
 

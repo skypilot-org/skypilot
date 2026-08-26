@@ -3573,6 +3573,14 @@ def get_all_service_account_tokens() -> List[Dict[str, Any]]:
 
 
 @metrics_lib.time_me
+def count_service_account_tokens() -> int:
+    """Number of service account token rows."""
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
+        return session.query(service_account_token_table).count()
+
+
+@metrics_lib.time_me
 def get_system_config(config_key: str) -> Optional[str]:
     """Get a system configuration value by key."""
     engine = _db_manager.get_engine()
@@ -3584,27 +3592,34 @@ def get_system_config(config_key: str) -> Optional[str]:
     return row.config_value
 
 
+def _system_config_insert(engine: sqlalchemy.engine.Engine, config_key: str,
+                          config_value: str, current_time: int):
+    """A dialect-appropriate INSERT for one system_config row.
+
+    The caller adds the ON CONFLICT clause that distinguishes overwriting from
+    insert-if-absent.
+    """
+    if engine.dialect.name == db_utils.SQLAlchemyDialect.SQLITE.value:
+        insert_func = sqlite.insert
+    elif engine.dialect.name == db_utils.SQLAlchemyDialect.POSTGRESQL.value:
+        insert_func = postgresql.insert
+    else:
+        raise ValueError('Unsupported database dialect')
+    return insert_func(system_config_table).values(config_key=config_key,
+                                                   config_value=config_value,
+                                                   created_at=current_time,
+                                                   updated_at=current_time)
+
+
 @metrics_lib.time_me
 def set_system_config(config_key: str, config_value: str) -> None:
-    """Set a system configuration value."""
+    """Set a system configuration value, overwriting any existing one."""
     engine = _db_manager.get_engine()
     current_time = int(time.time())
 
     with orm.Session(engine) as session:
-        if engine.dialect.name == db_utils.SQLAlchemyDialect.SQLITE.value:
-            insert_func = sqlite.insert
-        elif (engine.dialect.name == db_utils.SQLAlchemyDialect.POSTGRESQL.value
-             ):
-            insert_func = postgresql.insert
-        else:
-            raise ValueError('Unsupported database dialect')
-
-        insert_stmnt = insert_func(system_config_table).values(
-            config_key=config_key,
-            config_value=config_value,
-            created_at=current_time,
-            updated_at=current_time)
-
+        insert_stmnt = _system_config_insert(engine, config_key, config_value,
+                                             current_time)
         upsert_stmnt = insert_stmnt.on_conflict_do_update(
             index_elements=[system_config_table.c.config_key],
             set_={
@@ -3613,6 +3628,39 @@ def set_system_config(config_key: str, config_value: str) -> None:
             })
         session.execute(upsert_stmnt)
         session.commit()
+
+
+@metrics_lib.time_me
+def get_or_set_system_config(config_key: str, config_value: str) -> str:
+    """Read a system configuration value, inserting `config_value` if absent.
+
+    Returns the value that is live in the database after the call, which is
+    the pre-existing one whenever a row was already there -- callers must use
+    the return value rather than assume `config_value` won. Unlike
+    `set_system_config` this can never overwrite, so servers racing to
+    bootstrap the same key converge on a single value. Use it for keys others
+    already depend on, where losing the original is not recoverable.
+    """
+    engine = _db_manager.get_engine()
+    current_time = int(time.time())
+
+    with orm.Session(engine) as session:
+        insert_stmnt = _system_config_insert(engine, config_key, config_value,
+                                             current_time)
+        session.execute(
+            insert_stmnt.on_conflict_do_nothing(
+                index_elements=[system_config_table.c.config_key]))
+        session.commit()
+
+        # Read back rather than trusting `config_value`: on conflict the row
+        # kept whatever the winner wrote, and that is the value callers must
+        # use.
+        row = session.query(system_config_table).filter_by(
+            config_key=config_key).first()
+    if row is None:
+        raise RuntimeError(f'System config {config_key!r} is missing right '
+                           'after inserting it; it was concurrently deleted.')
+    return row.config_value
 
 
 def get_max_db_connections() -> Optional[int]:
