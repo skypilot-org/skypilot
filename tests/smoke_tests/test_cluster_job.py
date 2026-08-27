@@ -1649,7 +1649,11 @@ def test_volumes_on_kubernetes():
             # case that `-o json` also has to survive is not reachable here --
             # without `-r` nothing refreshes, and the volume is READY by now so
             # a refresh would log nothing either -- so it is a unit test.
-            f'vols=$(sky volumes ls {pvc0} -o json) && echo "$vols" && '
+            # SKYPILOT_DEBUG=0 because this suite sets it to 1 for every
+            # test (pyproject.toml) and SkyPilot logs to stdout by design, so
+            # the JSON would arrive behind a wall of debug lines.
+            f'vols=$(SKYPILOT_DEBUG=0 sky volumes ls {pvc0} -o json) && '
+            'echo "$vols" && '
             'echo "$vols" | python3 -c \''
             'import json, sys; '
             'sys.exit(0 if [v["name"] for v in json.load(sys.stdin)] == '
