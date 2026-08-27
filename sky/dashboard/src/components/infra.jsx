@@ -112,6 +112,13 @@ const INFRA_PAGE_SIZE_STORAGE_KEY = 'skypilot-infra-page-size';
 // before middle-ellipsis truncation kicks in (full name stays in the tooltip).
 const INFRA_NAME_TRUNCATE_LENGTH = 45;
 
+// Middle-ellipsis a long infra name so both the provider prefix and the
+// distinguishing suffix stay readable; the full name lives in the tooltip.
+const truncateInfraName = (name) =>
+  name.length > INFRA_NAME_TRUNCATE_LENGTH
+    ? `${name.substring(0, Math.floor((INFRA_NAME_TRUNCATE_LENGTH - 3) / 2))}...${name.substring(name.length - Math.ceil((INFRA_NAME_TRUNCATE_LENGTH - 3) / 2))}`
+    : name;
+
 // Non-filter state that belongs in a shared link. `all` is the default and
 // stays out of the URL. The selected context is already a route segment
 // (`/infra/[...context]`), so it needs nothing here.
@@ -359,10 +366,22 @@ export function InfrastructureSection({
   loadedContexts = new Set(), // Set of contexts that have had their GPU data loaded
   isInitialLoad = true, // Controls panel-level loading spinner (not cell spinners)
   statusByKey = null, // Map<`${kind}:${id}`, Status> from plugin data providers
+  inactiveContexts = [], // [{name, note?}] rows listed without capacity data
 }) {
   // Add defensive check for contexts (memoized so downstream useMemos don't
   // recompute on every render when `contexts` is nullish)
   const safeContexts = React.useMemo(() => contexts || [], [contexts]);
+
+  // Contexts registered with the server but not enabled for compute (e.g.
+  // Kubernetes contexts excluded by `kubernetes.allowed_contexts`),
+  // contributed by plugin data providers. Rendered as name-only rows: they
+  // are never probed, so every capacity cell is a dash rather than a
+  // skeleton, and they take no part in the section's loading / refreshing
+  // states (an unprobed context must not pin the table in its shimmer).
+  const safeInactive = React.useMemo(
+    () => inactiveContexts || [],
+    [inactiveContexts]
+  );
 
   const contextDisplayName = useCallback(
     (context) => (isSSH ? context.replace(/^ssh-/, '') : context),
@@ -370,6 +389,7 @@ export function InfrastructureSection({
   );
 
   const contextNoun = isSSH ? 'pool' : isSlurm ? 'cluster' : 'context';
+  const sectionRowKind = isSSH ? 'ssh' : isSlurm ? 'slurm' : 'k8s';
 
   // Slurm clusters with more than one partition start collapsed on their
   // cluster-wide totals; expanding swaps in the per-partition rows.
@@ -480,7 +500,7 @@ export function InfrastructureSection({
 
   // Only show "no data" message after data has been loaded and confirmed empty
   // Check this FIRST so that during refresh, we keep showing the message instead of a spinner
-  if (isDataLoaded && safeContexts.length === 0) {
+  if (isDataLoaded && safeContexts.length === 0 && safeInactive.length === 0) {
     return (
       <div className="rounded-lg border bg-card text-card-foreground shadow-sm mb-6">
         <div className="p-5">
@@ -527,8 +547,10 @@ export function InfrastructureSection({
         safeContexts.length > 0 &&
         !safeContexts.every((c) => loadedContexts.has(c))));
 
-  // Show table if we have contexts to display, even if some data is still loading
-  if (safeContexts.length > 0) {
+  // Show table if we have contexts to display, even if some data is still
+  // loading. Inactive rows count: a section whose only contexts are
+  // not-enabled ones still has something to show (and an action to offer).
+  if (safeContexts.length > 0 || safeInactive.length > 0) {
     return (
       <div className="rounded-lg border bg-card text-card-foreground shadow-sm mb-6">
         <div className="p-5">
@@ -539,6 +561,11 @@ export function InfrastructureSection({
                 {safeContexts.length}{' '}
                 {safeContexts.length === 1 ? contextNoun : `${contextNoun}s`}
               </span>
+              {safeInactive.length > 0 && (
+                <span className="ml-2 px-2 py-0.5 bg-gray-100 text-gray-600 rounded-full text-xs font-medium">
+                  {safeInactive.length} not enabled
+                </span>
+              )}
             </div>
             <div className="flex items-center gap-4">
               {actionButton}
@@ -822,9 +849,7 @@ export function InfrastructureSection({
                                 className="text-blue-600 hover:underline cursor-pointer font-medium"
                                 onClick={() => handleContextClick(context)}
                               >
-                                {displayName.length > INFRA_NAME_TRUNCATE_LENGTH
-                                  ? `${displayName.substring(0, Math.floor((INFRA_NAME_TRUNCATE_LENGTH - 3) / 2))}...${displayName.substring(displayName.length - Math.ceil((INFRA_NAME_TRUNCATE_LENGTH - 3) / 2))}`
-                                  : displayName}
+                                {truncateInfraName(displayName)}
                               </span>
                             </NonCapitalizedTooltip>
                             {/* allowed_nodes filter badge (#10092): lived
@@ -903,6 +928,65 @@ export function InfrastructureSection({
                     </React.Fragment>
                   );
                 })}
+                {/* Name-only rows for contexts the server knows about but
+                    has not enabled for compute. The namePrefix / actions
+                    slots stay live so plugins can attach a status dot and
+                    an enable action; the name is plain text — there is no
+                    capacity or detail data behind it to navigate to. */}
+                {safeInactive.map((row) => (
+                  <tr key={`inactive-${row.name}`}>
+                    <td className="w-0 px-0 py-3 align-top">
+                      <div className="flex h-5 items-center pl-3 empty:hidden">
+                        <PluginSlot
+                          name="infra.row.namePrefix"
+                          context={{
+                            id: row.name,
+                            kind: sectionRowKind,
+                            status: statusByKey?.get(
+                              `${sectionRowKind}:${row.name}`
+                            ),
+                          }}
+                        />
+                      </div>
+                    </td>
+                    <td className="p-3">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <NonCapitalizedTooltip
+                          content={row.name}
+                          className="text-sm text-muted-foreground"
+                        >
+                          <span className="font-medium text-gray-600 cursor-default">
+                            {truncateInfraName(row.name)}
+                          </span>
+                        </NonCapitalizedTooltip>
+                        <NonCapitalizedTooltip
+                          content={row.note || 'Not enabled for compute'}
+                          className="text-sm text-muted-foreground"
+                        >
+                          <span className="px-1.5 py-0.5 bg-gray-100 text-gray-500 rounded text-xs font-medium cursor-help">
+                            Not enabled
+                          </span>
+                        </NonCapitalizedTooltip>
+                      </div>
+                    </td>
+                    {/* Nodes + (Partition | CPU + Memory) + GPU Type + GPUs +
+                        Utilization: an unprobed context has no data for any
+                        of these, so a dash in each. */}
+                    {Array.from({ length: isSlurm ? 5 : 6 }).map(
+                      (_, cellIndex) => (
+                        <td key={cellIndex} className="p-3 text-gray-400">
+                          -
+                        </td>
+                      )
+                    )}
+                    <td className="w-0 p-0 whitespace-nowrap text-right align-top">
+                      <PluginSlot
+                        name="infra.row.actions"
+                        context={{ id: row.name, kind: sectionRowKind }}
+                      />
+                    </td>
+                  </tr>
+                ))}
               </tbody>
             </table>
           </div>
@@ -1037,6 +1121,42 @@ export function InfrastructureSection({
                 </div>
               );
             })}
+            {safeInactive.map((row) => (
+              <div
+                key={`inactive-${row.name}`}
+                className="rounded-lg border border-gray-200 bg-card shadow-sm p-3"
+              >
+                <div className="flex items-start justify-between gap-2">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <div className="flex h-5 items-center flex-shrink-0 empty:hidden">
+                      <PluginSlot
+                        name="infra.row.namePrefix"
+                        context={{
+                          id: row.name,
+                          kind: sectionRowKind,
+                          status: statusByKey?.get(
+                            `${sectionRowKind}:${row.name}`
+                          ),
+                        }}
+                      />
+                    </div>
+                    <span className="font-medium text-gray-600 truncate">
+                      {row.name}
+                    </span>
+                    <span className="px-1.5 py-0.5 bg-gray-100 text-gray-500 rounded text-xs font-medium flex-shrink-0">
+                      Not enabled
+                    </span>
+                  </div>
+                  <PluginSlot
+                    name="infra.row.actions"
+                    context={{ id: row.name, kind: sectionRowKind }}
+                  />
+                </div>
+                {row.note && (
+                  <div className="text-xs text-gray-500 mt-1.5">{row.note}</div>
+                )}
+              </div>
+            ))}
           </div>
         </div>
       </div>
@@ -3316,6 +3436,28 @@ export function GPUs() {
     return filterContextsByWorkspace(contexts);
   }, [allKubeContextNames, filterContextsByWorkspace]);
 
+  // Plugin-contributed Kubernetes contexts that exist on the server but are
+  // not enabled for compute — rows a data provider marked
+  // `notEnabled: true` (e.g. kubeconfig contexts excluded by
+  // `kubernetes.allowed_contexts`). Deduped against the full,
+  // workspace-UNfiltered context list: a context that is merely hidden by
+  // the current workspace filter is enabled, and must not be misreported
+  // as a disabled row.
+  const inactiveKubeContexts = React.useMemo(() => {
+    const enabled = new Set(allKubeContextNames || []);
+    const seen = new Set();
+    const rows = [];
+    for (const row of extraInfraRows) {
+      if (row.kind !== 'k8s' || row.notEnabled !== true) continue;
+      const name = row.id;
+      if (!name || enabled.has(name) || seen.has(name)) continue;
+      seen.add(name);
+      rows.push({ name, note: row.note });
+    }
+    rows.sort((a, b) => a.name.localeCompare(b.name));
+    return rows;
+  }, [extraInfraRows, allKubeContextNames]);
+
   // Filter GPUs by context type (SSH vs Kubernetes)
   const sshGPUs = React.useMemo(() => {
     if (!perContextGPUs || !allGPUs) return [];
@@ -3758,6 +3900,7 @@ export function GPUs() {
         loadedContexts={loadedContexts}
         isInitialLoad={isInitialLoad}
         statusByKey={extraStatusByKey}
+        inactiveContexts={inactiveKubeContexts}
       />
     );
   };
