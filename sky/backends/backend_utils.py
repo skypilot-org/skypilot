@@ -3216,8 +3216,10 @@ def _update_cluster_status(
             hint = kubernetes_utils.match_kubernetes_failure_hint_text(
                 log_message)
             if hint:
-                # Own line: the remedy reads as a separate statement from the
-                # diagnosis, both in the terminal and in the dashboard event.
+                # Own line, so the remedy reads as a separate statement from
+                # the diagnosis. Despite the variable name this string is not
+                # logged: it is only stored as the cluster event, which the
+                # dashboard renders. No CLI command reads it.
                 log_message += f'\n{hint}'
         # A node that stops heartbeating leaves its pods' status stale -- the
         # pod still reads 'Running', so a refresh during the outage can only
