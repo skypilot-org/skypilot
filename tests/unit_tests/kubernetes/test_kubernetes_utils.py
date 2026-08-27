@@ -5650,3 +5650,91 @@ class TestGetNodeAffinity:
             'requiredDuringSchedulingIgnoredDuringExecution',
             'preferredDuringSchedulingIgnoredDuringExecution',
         }
+
+
+def _make_pod_with_spec(*,
+                        container_name='c',
+                        memory_limit=None,
+                        container_statuses=None,
+                        phase='Failed'):
+    """A pod whose spec declares `container_name`, optionally with a limit."""
+    limits = {'memory': memory_limit} if memory_limit is not None else None
+    container = kubernetes.client.V1Container(
+        name=container_name,
+        resources=kubernetes.client.V1ResourceRequirements(
+            requests={'memory': '2Gi'}, limits=limits))
+    return kubernetes.client.V1Pod(
+        spec=kubernetes.client.V1PodSpec(containers=[container]),
+        status=kubernetes.client.V1PodStatus(
+            phase=phase, container_statuses=container_statuses))
+
+
+def test_is_unbounded_oom_only_when_limit_absent():
+    unbounded = _make_pod_with_spec()
+    bounded = _make_pod_with_spec(memory_limit='4Gi')
+    assert utils.is_unbounded_oom('OOMKilled', unbounded, 'c')
+    # A container that OOMed against its own limit is not a node-level OOM.
+    assert not utils.is_unbounded_oom('OOMKilled', bounded, 'c')
+    # Only OOM kills are classified.
+    assert not utils.is_unbounded_oom('Error', unbounded, 'c')
+
+
+def test_is_unbounded_oom_false_when_container_not_in_spec():
+    # We cannot confirm the container was unbounded, so we must not claim it
+    # was: a confidently wrong node-level hint is worse than the generic one.
+    pod = _make_pod_with_spec(container_name='other')
+    assert not utils.is_unbounded_oom('OOMKilled', pod, 'c')
+    assert utils.annotate_oom_reason('OOMKilled', pod, 'c') == 'OOMKilled'
+
+
+def test_annotate_oom_reason_tags_only_unbounded():
+    assert utils.annotate_oom_reason(
+        'OOMKilled', _make_pod_with_spec(),
+        'c') == f'OOMKilled ({utils.NO_MEMORY_LIMIT_MARKER})'
+    assert utils.annotate_oom_reason('OOMKilled',
+                                     _make_pod_with_spec(memory_limit='4Gi'),
+                                     'c') == 'OOMKilled'
+    assert utils.annotate_oom_reason('Evicted', _make_pod_with_spec(),
+                                     'c') == 'Evicted'
+
+
+def test_get_condensed_pod_reason_marks_unbounded_oom():
+    pod = _make_pod_with_spec(container_statuses=[
+        _make_container_status(terminated_reason='OOMKilled',
+                               terminated_exit_code=137)
+    ])
+    assert utils.get_condensed_pod_reason(pod) == (
+        f'OOMKilled (exit code 137, {utils.NO_MEMORY_LIMIT_MARKER})')
+
+
+def test_get_condensed_pod_reason_bounded_oom_unchanged():
+    # With a limit set the message must stay exactly as it was.
+    pod = _make_pod_with_spec(memory_limit='4Gi',
+                              container_statuses=[
+                                  _make_container_status(
+                                      terminated_reason='OOMKilled',
+                                      terminated_exit_code=137)
+                              ])
+    assert utils.get_condensed_pod_reason(pod) == 'OOMKilled (exit code 137)'
+
+
+def test_unbounded_oom_hint_recommends_set_pod_resource_limits():
+    hint = utils.match_kubernetes_failure_hint(
+        f'OOMKilled (exit code 137, {utils.NO_MEMORY_LIMIT_MARKER})')
+    assert hint is not None
+    assert 'set_pod_resource_limits' in hint
+    # The hint must link the docs section, not just name the config.
+    assert utils.SET_POD_RESOURCE_LIMITS_DOC_URL in hint
+    assert '#kubernetes-set-pod-resource-limits' in (
+        utils.SET_POD_RESOURCE_LIMITS_DOC_URL)
+
+
+def test_unbounded_oom_hint_precedes_plain_oomkilled():
+    # The unbounded reason contains 'OOMKilled' too, so ordering decides which
+    # hint wins; the node-level one is the specific (and correct) advice.
+    unbounded = utils.match_kubernetes_failure_hint(
+        f'OOMKilled (exit code 137, {utils.NO_MEMORY_LIMIT_MARKER})')
+    bounded = utils.match_kubernetes_failure_hint('OOMKilled (exit code 137)')
+    assert unbounded != bounded
+    assert 'no memory limit' in unbounded
+    assert bounded.startswith('The container ran out of memory.')
