@@ -1644,6 +1644,20 @@ def test_volumes_on_kubernetes():
             smoke_tests_utils.get_cmd_wait_until_volume_is_ready(pvc0),
             smoke_tests_utils.get_cmd_wait_until_volume_is_ready(existing0),
             smoke_tests_utils.get_cmd_wait_until_volume_is_ready(vol_existing1),
+            # Name filter and `-o json` end to end: exactly the named volume
+            # comes back, and stdout is a parseable document. The streamed-log
+            # case that `-o json` also has to survive is not reachable here --
+            # without `-r` nothing refreshes, and the volume is READY by now so
+            # a refresh would log nothing either -- so it is a unit test.
+            # SKYPILOT_DEBUG=0 because this suite sets it to 1 for every
+            # test (pyproject.toml) and SkyPilot logs to stdout by design, so
+            # the JSON would arrive behind a wall of debug lines.
+            f'vols=$(SKYPILOT_DEBUG=0 sky volumes ls {pvc0} -o json) && '
+            'echo "$vols" && '
+            'echo "$vols" | python3 -c \''
+            'import json, sys; '
+            'sys.exit(0 if [v["name"] for v in json.load(sys.stdin)] == '
+            f'["{pvc0}"] else 1)\'',
             # The volume names the task YAML mounts are prefixed with
             # ${VOL_PREFIX}, which `volumes:` substitutes from the task envs.
             f'sky launch -y -c {name} --infra kubernetes --env VOL_PREFIX={name} tests/test_yamls/pvc_volume.yaml',

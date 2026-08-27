@@ -2023,31 +2023,36 @@ class TestVolumeRefreshErrorFetchFailure:
             'status'] == status_lib.VolumeStatus.NOT_READY
 
 
+def _mock_volume_apply_deps(monkeypatch):
+    """Stubs everything volume_apply touches; returns the add_volume mock."""
+    mock_cloud = mock.MagicMock()
+    mock_cloud.max_cluster_name_length.return_value = 63
+    mock_cloud.is_volume_name_valid.return_value = (True, None)
+    mock_cloud.validate_region_zone.return_value = ('my-context', None)
+    mock_cloud_registry = mock.MagicMock()
+    mock_cloud_registry.from_str.return_value = mock_cloud
+    monkeypatch.setattr('sky.utils.registry.CLOUD_REGISTRY',
+                        mock_cloud_registry)
+    monkeypatch.setattr(
+        'sky.volumes.server.core.common_utils.make_cluster_name_on_cloud',
+        mock.MagicMock(return_value='test-vol'))
+    monkeypatch.setattr(global_user_state, 'get_volume_by_name',
+                        mock.MagicMock(return_value=None))
+    monkeypatch.setattr(provision, 'apply_volume',
+                        mock.MagicMock(side_effect=lambda cloud, c: c))
+    monkeypatch.setattr('sky.volumes.server.core.filelock.FileLock',
+                        mock.MagicMock())
+    mock_add_volume = mock.MagicMock()
+    monkeypatch.setattr(global_user_state, 'add_volume', mock_add_volume)
+    return mock_add_volume
+
+
 class TestVolumeApplyRecordsInitialStatus:
     """volume_apply must record what the volume actually looks like."""
 
     @staticmethod
     def _setup(monkeypatch):
-        mock_cloud = mock.MagicMock()
-        mock_cloud.max_cluster_name_length.return_value = 63
-        mock_cloud.is_volume_name_valid.return_value = (True, None)
-        mock_cloud.validate_region_zone.return_value = ('my-context', None)
-        mock_cloud_registry = mock.MagicMock()
-        mock_cloud_registry.from_str.return_value = mock_cloud
-        monkeypatch.setattr('sky.utils.registry.CLOUD_REGISTRY',
-                            mock_cloud_registry)
-        monkeypatch.setattr(
-            'sky.volumes.server.core.common_utils.make_cluster_name_on_cloud',
-            mock.MagicMock(return_value='test-vol'))
-        monkeypatch.setattr(global_user_state, 'get_volume_by_name',
-                            mock.MagicMock(return_value=None))
-        monkeypatch.setattr(provision, 'apply_volume',
-                            mock.MagicMock(side_effect=lambda cloud, c: c))
-        monkeypatch.setattr('sky.volumes.server.core.filelock.FileLock',
-                            mock.MagicMock())
-        mock_add_volume = mock.MagicMock()
-        monkeypatch.setattr(global_user_state, 'add_volume', mock_add_volume)
-        return mock_add_volume
+        return _mock_volume_apply_deps(monkeypatch)
 
     def test_unbound_volume_is_recorded_not_ready(self, monkeypatch):
         mock_add_volume = self._setup(monkeypatch)
@@ -2206,6 +2211,157 @@ class TestVolumeRefreshScopedToNames:
         assert sorted(c.args[0] for c in mock_update.call_args_list) == [
             'vol-a', 'vol-b'
         ]
+
+
+class TestVolumeApplyReportsInitialStatus:
+    """What `volume_apply` tells the user must match what it recorded.
+
+    Creating the backing resource is not the same as it being mountable: with
+    an Immediate-binding storage class the PersistentVolume is provisioned
+    asynchronously, and a launch against the volume in that window is refused
+    with VolumeNotReadyError. A bare "Created" sends the user straight into it.
+    """
+
+    @staticmethod
+    def _apply(monkeypatch, error_message):
+        _mock_volume_apply_deps(monkeypatch)
+        monkeypatch.setattr(
+            provision, 'get_all_volumes_state', lambda cloud, configs: ({
+                'test-vol': error_message
+            }, {}, set()))
+        mock_logger = mock.MagicMock()
+        monkeypatch.setattr('sky.volumes.server.core.logger', mock_logger)
+
+        core.volume_apply(name='test-vol',
+                          volume_type='k8s-pvc',
+                          cloud='kubernetes',
+                          region='my-context',
+                          zone=None,
+                          size='1000',
+                          config={})
+
+        return ' '.join(
+            str(call.args[0]) for call in mock_logger.info.call_args_list)
+
+    def test_not_ready_volume_is_not_announced_as_usable(self, monkeypatch):
+        reported = self._apply(monkeypatch, 'PVC is pending: still binding.')
+
+        assert 'not ready to be mounted yet' in reported
+        # The reason the status check produced, not a generic hint.
+        assert 'PVC is pending: still binding.' in reported
+        # And where to look next.
+        assert 'sky volumes ls test-vol' in reported
+
+    def test_ready_volume_is_announced_plainly(self, monkeypatch):
+        reported = self._apply(monkeypatch, None)
+
+        assert 'Created volume test-vol on cloud kubernetes' in reported
+        assert 'not ready' not in reported
+
+
+class TestVolumeListScopedToNames:
+    """`volume_list(volume_names=...)` narrows the refresh and the listing --
+    within the caller's accessible workspaces, never past them.
+    """
+
+    @staticmethod
+    def _volume(name, workspace):
+        return {
+            'name': name,
+            'launched_at': 1,
+            'user_hash': 'u',
+            'workspace': workspace,
+            'status': status_lib.VolumeStatus.READY,
+            'error_message': None,
+            'usedby_pods': [],
+            'usedby_clusters': [],
+            'handle': mock.MagicMock(type='k8s-pvc',
+                                     cloud='kubernetes',
+                                     region='ctx',
+                                     zone=None,
+                                     size='1',
+                                     config={},
+                                     name_on_cloud=f'{name}-abc',
+                                     spec=models.VolumeConfig),
+        }
+
+    def _patch(self, monkeypatch, accessible):
+        rows = [
+            self._volume('mine', 'default'),
+            self._volume('mine-longer', 'default'),
+            self._volume('theirs', 'other'),
+        ]
+
+        def fake_get_volumes(is_ephemeral=None,
+                             workspaces_filter=None,
+                             volume_names=None):
+            """Stands in for the database, applying every filter it is given.
+
+            Faithful on the point that matters: the filters compose. Dropping
+            either one in volume_list therefore surfaces here as rows the
+            caller should not have seen, rather than as an empty result from an
+            empty test database.
+            """
+            del is_ephemeral
+            out = rows
+            if workspaces_filter is not None:
+                out = [r for r in out if r['workspace'] in workspaces_filter]
+            if volume_names is not None:
+                out = [r for r in out if r['name'] in volume_names]
+            return out
+
+        monkeypatch.setattr(global_user_state, 'get_volumes', fake_get_volumes)
+        monkeypatch.setattr(global_user_state, 'get_all_users',
+                            mock.MagicMock(return_value=[]))
+        monkeypatch.setattr(
+            'sky.volumes.server.core.workspaces_core.'
+            'get_accessible_workspace_names',
+            mock.MagicMock(return_value=accessible))
+        mock_refresh = mock.MagicMock()
+        monkeypatch.setattr(core, 'volume_refresh', mock_refresh)
+        return mock_refresh
+
+    def test_names_narrow_the_listing(self, monkeypatch):
+        self._patch(monkeypatch, ['default', 'other'])
+
+        listed = core.volume_list(volume_names=['mine'])
+
+        # Not `mine-longer`: an exact name, not a prefix.
+        assert [volume.name for volume in listed] == ['mine']
+
+    def test_names_narrow_the_refresh(self, monkeypatch):
+        mock_refresh = self._patch(monkeypatch, ['default', 'other'])
+
+        core.volume_list(refresh=True, volume_names=['mine'])
+
+        # The point of the flag: waiting on one volume must not re-probe the
+        # rest of the table.
+        mock_refresh.assert_called_once_with(volume_names=['mine'])
+
+    def test_a_name_outside_the_accessible_workspaces_reveals_nothing(
+            self, monkeypatch):
+        """The name filter narrows within the workspace filter, never past it.
+
+        Volume listings are scoped to the workspaces the caller can read. A
+        name is a request to narrow that set, so naming a volume in a workspace
+        the caller holds no grant on must return nothing -- and must not
+        reconcile it either, which would confirm it exists.
+        """
+        mock_refresh = self._patch(monkeypatch, ['default'])
+
+        assert core.volume_list(refresh=True, volume_names=['theirs']) == []
+        mock_refresh.assert_called_once_with(volume_names=[])
+
+    def test_no_names_lists_everything_accessible(self, monkeypatch):
+        """The dashboard and a bare `sky volumes ls` pass no names."""
+        mock_refresh = self._patch(monkeypatch, ['default'])
+
+        listed = core.volume_list(refresh=True)
+
+        assert sorted(
+            volume.name for volume in listed) == ['mine', 'mine-longer']
+        mock_refresh.assert_called_once_with(
+            volume_names=['mine', 'mine-longer'])
 
 
 class TestVolumeListReportsWhetherTheErrorMayResolve:

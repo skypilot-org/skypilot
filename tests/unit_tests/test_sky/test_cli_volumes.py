@@ -1,5 +1,6 @@
 """Unit tests for CLI volumes commands."""
 from datetime import datetime
+import json
 from unittest import mock
 
 from click import testing as cli_testing
@@ -7,6 +8,7 @@ import pytest
 
 from sky.client.cli import command
 from sky.client.cli import table_utils
+from sky.schemas.api import responses
 from sky.utils import volume as volume_utils
 
 
@@ -1239,6 +1241,231 @@ class TestRunPodVolumeTable:
         assert 'Kubernetes PVCs:' in out
         assert 'RunPod Network Volumes:' in out
         assert '\n\n' in out
+
+
+class TestVolumesLsByName:
+    """`sky volumes ls NAME` narrows the listing, and the refresh with it."""
+
+    @staticmethod
+    def _record(name, status, error_message=None):
+        return responses.VolumeRecord(name=name,
+                                      type='k8s-pvc',
+                                      launched_at=0,
+                                      cloud='Kubernetes',
+                                      config={},
+                                      name_on_cloud=f'{name}-abc123',
+                                      user_hash='uhash',
+                                      user_name='alice',
+                                      workspace='default',
+                                      status=status,
+                                      usedby_pods=[],
+                                      usedby_clusters=[],
+                                      error_message=error_message)
+
+    @staticmethod
+    def _patch(monkeypatch, returned):
+        mock_ls = mock.MagicMock(return_value='request-id')
+        monkeypatch.setattr('sky.volumes.client.sdk.ls', mock_ls)
+        monkeypatch.setattr('sky.client.sdk.stream_and_get',
+                            mock.MagicMock(return_value=returned))
+        return mock_ls
+
+    def test_names_are_sent_to_the_server(self, monkeypatch):
+        mock_ls = self._patch(monkeypatch, [self._record('vol-a', 'READY')])
+
+        result = cli_testing.CliRunner().invoke(command.volumes_ls,
+                                                ['vol-a', '-r', '-o', 'json'])
+
+        assert not result.exit_code, result.output
+        # Sent so a current server can scope the refresh instead of re-probing
+        # every volume.
+        assert mock_ls.call_args.kwargs['names'] == ('vol-a',)
+        assert mock_ls.call_args.kwargs['refresh'] is True
+
+    def test_unfiltered_response_is_narrowed_by_the_client(self, monkeypatch):
+        """An API server older than the `names` parameter ignores it and
+        returns every volume. Narrowing again here is what keeps the output
+        correct against those servers -- and therefore what lets the parameter
+        ship without an API version gate. If this breaks, that reasoning does
+        too.
+        """
+        self._patch(monkeypatch, [
+            self._record('vol-a', 'NOT_READY', 'PVC is pending.'),
+            self._record('vol-a-longer', 'READY'),
+            self._record('unrelated', 'READY'),
+        ])
+
+        result = cli_testing.CliRunner().invoke(command.volumes_ls,
+                                                ['vol-a', '-o', 'json'])
+
+        assert not result.exit_code, result.output
+        listed = [volume['name'] for volume in json.loads(result.output)]
+        # Exactly the requested volume: not the one whose name merely starts
+        # with it, and not the rest of the table.
+        assert listed == ['vol-a']
+
+    def test_no_names_lists_everything(self, monkeypatch):
+        mock_ls = self._patch(monkeypatch, [
+            self._record('vol-a', 'READY'),
+            self._record('vol-b', 'READY'),
+        ])
+
+        result = cli_testing.CliRunner().invoke(command.volumes_ls,
+                                                ['-o', 'json'])
+
+        assert not result.exit_code, result.output
+        assert mock_ls.call_args.kwargs['names'] == ()
+        assert len(json.loads(result.output)) == 2
+
+
+class TestVolumesLsJsonOutput:
+    """`-o json` is the machine-readable path, so the fields callers poll on
+    have to be there."""
+
+    def test_json_carries_status_and_reason(self, monkeypatch):
+        record = TestVolumesLsByName._record('vol-a', 'NOT_READY',
+                                             'PVC is pending: still binding.')
+        monkeypatch.setattr('sky.volumes.client.sdk.ls',
+                            mock.MagicMock(return_value='request-id'))
+        monkeypatch.setattr('sky.client.sdk.stream_and_get',
+                            mock.MagicMock(return_value=[record]))
+
+        result = cli_testing.CliRunner().invoke(command.volumes_ls,
+                                                ['-o', 'json'])
+
+        assert not result.exit_code, result.output
+        payload = json.loads(result.output)
+        assert payload[0]['status'] == 'NOT_READY'
+        # The table only shows MESSAGE conditionally; JSON must always carry
+        # the reason, since that is the whole point of polling it.
+        assert payload[0]['error_message'] == 'PVC is pending: still binding.'
+
+
+class TestVolumesLsJsonStaysParseable:
+    """A request's server-side logs are streamed back to the client, so the
+    json path has to keep them off stdout.
+
+    volume_refresh logs a line exactly when a volume's status changes -- the
+    NOT_READY -> READY tick a poller is waiting on -- so the polluted iteration
+    would be the one the caller actually cares about.
+    """
+
+    @staticmethod
+    def _patch(monkeypatch):
+        monkeypatch.setattr('sky.volumes.client.sdk.ls',
+                            mock.MagicMock(return_value='request-id'))
+
+        def fake_stream_and_get(request_id, output_stream=None, **kwargs):
+            del request_id, kwargs
+            # What the real one does: replay the request's log to
+            # output_stream, where None means stdout.
+            print('Update volume vol-a status to READY',
+                  file=output_stream,
+                  flush=True)
+            return [TestVolumesLsByName._record('vol-a', 'READY')]
+
+        monkeypatch.setattr('sky.client.sdk.stream_and_get',
+                            fake_stream_and_get)
+
+    def test_a_streamed_log_line_does_not_break_the_json(self, monkeypatch):
+        self._patch(monkeypatch)
+
+        result = cli_testing.CliRunner().invoke(command.volumes_ls,
+                                                ['-r', '-o', 'json'])
+
+        assert not result.exit_code, result.output
+        assert [v['name'] for v in json.loads(result.output)] == ['vol-a']
+
+    def test_the_table_still_shows_the_line(self, monkeypatch):
+        """Only json suppresses the stream; a human reading the table wants
+        to see what the server is doing."""
+        self._patch(monkeypatch)
+        monkeypatch.setattr('sky.client.cli.table_utils.format_volume_table',
+                            lambda *args, **kwargs: 'TABLE')
+
+        result = cli_testing.CliRunner().invoke(command.volumes_ls, ['-r'])
+
+        assert not result.exit_code, result.output
+        assert 'Update volume vol-a status to READY' in result.output
+
+
+class TestVolumesLsReportsNamesThatMatchNothing:
+    """A typo must not read as "the volume is gone".
+
+    The message a not-ready volume points here with makes that an easy mistake,
+    and `sky volumes delete` already reports an unmatched name.
+    """
+
+    @staticmethod
+    def _patch(monkeypatch, stub_table=True):
+        monkeypatch.setattr('sky.volumes.client.sdk.ls',
+                            mock.MagicMock(return_value='request-id'))
+        monkeypatch.setattr(
+            'sky.client.sdk.stream_and_get',
+            mock.MagicMock(
+                return_value=[TestVolumesLsByName._record('vol-a', 'READY')]))
+        if stub_table:
+            monkeypatch.setattr(
+                'sky.client.cli.table_utils.format_volume_table',
+                lambda *args, **kwargs: 'TABLE')
+
+    def test_an_unmatched_name_is_reported(self, monkeypatch):
+        self._patch(monkeypatch)
+
+        result = cli_testing.CliRunner().invoke(command.volumes_ls,
+                                                ['vol-a', 'nope'])
+
+        assert not result.exit_code, result.output
+        assert 'Volume nope not found.' in result.output
+        # The one that does exist is still listed.
+        assert 'TABLE' in result.output
+
+    def test_json_says_it_with_an_empty_array_instead(self, monkeypatch):
+        """Stdout on the json path stays machine-readable."""
+        self._patch(monkeypatch)
+
+        result = cli_testing.CliRunner().invoke(command.volumes_ls,
+                                                ['nope', '-o', 'json'])
+
+        assert not result.exit_code, result.output
+        assert json.loads(result.output) == []
+        assert 'not found' not in result.output
+
+    def test_several_unmatched_names_are_reported_on_one_line(
+            self, monkeypatch):
+        self._patch(monkeypatch)
+
+        result = cli_testing.CliRunner().invoke(command.volumes_ls,
+                                                ['nope', 'alsonope'])
+
+        assert not result.exit_code, result.output
+        assert 'Volumes not found: alsonope, nope.' in result.output
+        # One line for the lot, not one per name.
+        assert result.output.count('not found') == 1
+
+    def test_matching_nothing_does_not_claim_the_table_is_empty(
+            self, monkeypatch):
+        """`format_volume_table` renders an empty list as "No existing
+        volumes.", which is a statement about the whole table -- untrue, and
+        confusing, when the caller filtered by name and simply missed.
+        """
+        self._patch(monkeypatch, stub_table=False)
+
+        result = cli_testing.CliRunner().invoke(command.volumes_ls, ['nope'])
+
+        assert not result.exit_code, result.output
+        assert 'Volume nope not found.' in result.output
+        assert 'No existing volumes.' not in result.output
+
+    def test_a_partial_match_still_lists_what_did_match(self, monkeypatch):
+        self._patch(monkeypatch, stub_table=False)
+
+        result = cli_testing.CliRunner().invoke(command.volumes_ls,
+                                                ['vol-a', 'nope'])
+
+        assert not result.exit_code, result.output
+        assert 'Volume nope not found.' in result.output
+        assert 'vol-a' in result.output
 
 
 class TestVolumeTableResize:

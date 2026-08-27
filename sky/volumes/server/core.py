@@ -264,6 +264,7 @@ def volume_refresh(volume_names: Optional[List[str]] = None) -> None:
 def volume_list(
     is_ephemeral: Optional[bool] = None,
     refresh: bool = False,
+    volume_names: Optional[List[str]] = None,
 ) -> List[responses.VolumeRecord]:
     """Gets volumes from the database.
 
@@ -273,6 +274,11 @@ def volume_list(
     Args:
         is_ephemeral: Whether to include ephemeral volumes.
         refresh: If True, refresh volume state from cloud APIs before returning.
+        volume_names: If given, return only these volumes, and scope a
+            `refresh` to them rather than re-probing the whole table. Narrows
+            within the caller's accessible workspaces and never past them, so
+            naming a volume the caller cannot read still returns nothing. Names
+            with no volume are ignored, the same as an empty listing.
 
     Returns:
         [
@@ -312,13 +318,19 @@ def volume_list(
         # calls by the (context, namespace) pairs of the volumes it is handed,
         # so narrowing the set narrows the calls. The daemon in
         # sky/server/daemons.py still refreshes the whole table.
+        # Requested names narrow this again. get_volumes applies every filter
+        # it is given, so naming a volume outside the accessible workspaces
+        # reconciles nothing -- which would otherwise confirm it exists.
         volume_refresh(volume_names=[
             volume['name'] for volume in global_user_state.get_volumes(
-                workspaces_filter=accessible_workspaces)
+                workspaces_filter=accessible_workspaces,
+                volume_names=volume_names)
         ])
     with rich_utils.safe_status(ux_utils.spinner_message('Listing volumes')):
         volumes = global_user_state.get_volumes(
-            is_ephemeral=is_ephemeral, workspaces_filter=accessible_workspaces)
+            is_ephemeral=is_ephemeral,
+            workspaces_filter=accessible_workspaces,
+            volume_names=volume_names)
         all_users = global_user_state.get_all_users()
         user_map = {user.id: user.name for user in all_users}
 
@@ -552,7 +564,19 @@ def volume_apply(
                 creation_yaml=creation_yaml,
                 error_message=initial_error,
             )
-        logger.info(f'Created volume {name} on cloud {cloud}')
+        # Report the status that was just recorded, not the fact that the API
+        # call returned. Creating the backing resource is not the same as it
+        # being mountable: an Immediate-binding storage class provisions the
+        # PersistentVolume asynchronously, so a launch against the volume right
+        # now would be refused with VolumeNotReadyError. Saying "Created" and
+        # nothing else sends the user straight into that.
+        if initial_status == status_lib.VolumeStatus.NOT_READY:
+            reason = f' {initial_error}' if initial_error else ''
+            logger.info(f'Created volume {name} on cloud {cloud}. It is not '
+                        f'ready to be mounted yet.{reason}\n'
+                        f'Check its status with: sky volumes ls {name} -r')
+        else:
+            logger.info(f'Created volume {name} on cloud {cloud}')
 
 
 def _same_backend_resource(a: models.VolumeConfig,
