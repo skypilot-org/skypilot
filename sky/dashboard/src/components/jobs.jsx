@@ -566,11 +566,14 @@ function ExternalJobId({ item, href }) {
 }
 
 function JobNameLink({ href, name }) {
+  // max-w (not fixed w): the box shrinks to the name so a trailing badge
+  // sits next to the text instead of parking at the 240px edge after a
+  // short name; long names still truncate at 240px.
   return (
     <NonCapitalizedTooltip content={name}>
       <Link
         href={href}
-        className="text-blue-600 block w-[240px] truncate"
+        className="text-blue-600 block max-w-[240px] truncate"
       >
         {name}
       </Link>
