@@ -72,6 +72,8 @@ COL_FILE_MOUNTS_BLOB_ID = 'file_mounts_blob_id'
 LEGACY_REQUEST_LOG_PATH_PREFIX = '~/sky_logs/api_server/requests'
 
 DEFAULT_REQUESTS_RETENTION_HOURS = 24  # 1 day
+# Interval between two runs of the requests GC daemon.
+_REQUESTS_GC_INTERVAL_SECONDS = 3600  # 1 hour
 
 # TODO(zhwu): For scalability, there are several TODOs:
 # [x] Have a way to queue requests.
@@ -1377,7 +1379,7 @@ async def requests_gc_daemon():
                          f'traceback: {traceback.format_exc()}')
         # Run the daemon at most once every hour to avoid too frequent
         # cleanup.
-        await asyncio.sleep(max(retention_seconds, 3600))
+        await asyncio.sleep(_REQUESTS_GC_INTERVAL_SECONDS)
 
 
 def _cleanup():
