@@ -261,12 +261,14 @@ SKY_APISERVER_PROCESS_PEAK_RSS = prom.Gauge(
     'sky_apiserver_process_peak_rss',
     'Peak RSS we saw in each process in last 30 seconds',
     ['pid', 'type'],
+    multiprocess_mode='liveall',
 )
 
 SKY_APISERVER_PROCESS_CPU_TOTAL = prom.Gauge(
     'sky_apiserver_process_cpu_total',
     'Total CPU times a worker process has been running',
     ['pid', 'type', 'mode'],
+    multiprocess_mode='liveall',
 )
 
 SKY_APISERVER_REQUEST_MEMORY_USAGE_BYTES = prom.Histogram(
@@ -291,11 +293,35 @@ SKY_APISERVER_WEBSOCKET_SSH_LATENCY_SECONDS = prom.Histogram(
 SKY_APISERVER_LONG_EXECUTORS = prom.Gauge(
     'sky_apiserver_long_executors',
     'Total number of long-running request executors in the API server',
+    multiprocess_mode='livesum',
 )
 
 SKY_APISERVER_SHORT_EXECUTORS = prom.Gauge(
     'sky_apiserver_short_executors',
     'Total number of short-running request executors in the API server',
+    multiprocess_mode='livesum',
+)
+
+# --- prometheus_client multiprocess compaction ---
+
+SKY_APISERVER_MULTIPROC_FILES_REMOVED_TOTAL = prom.Counter(
+    'sky_apiserver_multiproc_files_removed_total',
+    'Prometheus multiprocess files removed by compaction',
+    ['operation', 'type', 'mode'],
+)
+
+SKY_APISERVER_MULTIPROC_ACCUMULATOR_BYTES = prom.Gauge(
+    'sky_apiserver_multiproc_accumulator_bytes',
+    'Size of each Prometheus multiprocess accumulator file',
+    ['pid', 'type', 'mode'],
+    multiprocess_mode='liveall',
+)
+
+SKY_APISERVER_MULTIPROC_COMPACTION_DURATION_SECONDS = prom.Gauge(
+    'sky_apiserver_multiproc_compaction_duration_seconds',
+    'Wall time of the last Prometheus multiprocess compaction',
+    ['pid'],
+    multiprocess_mode='liveall',
 )
 
 # Active threads in on-demand thread executors. Each process has its own

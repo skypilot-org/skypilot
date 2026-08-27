@@ -3,6 +3,9 @@
 import base64
 import os
 import socket
+import subprocess
+import sys
+import tempfile
 import threading
 import time
 from unittest.mock import AsyncMock
@@ -15,6 +18,9 @@ from prometheus_client import CollectorRegistry
 from prometheus_client import CONTENT_TYPE_LATEST
 from prometheus_client import core as prom_core
 from prometheus_client import generate_latest
+from prometheus_client import mmap_dict as prom_mmap
+from prometheus_client import multiprocess
+from prometheus_client import parser as prom_parser
 import prometheus_client as prom
 import pytest
 
@@ -136,9 +142,6 @@ with open(os.environ['_PID_OUT'], 'w') as f:
 
 def _spawn_writer(multiproc_dir: str, with_fix: bool) -> int:
     """Run the writer subprocess; return its pid."""
-    import subprocess  # local — only the e2e tests need it
-    import sys
-    import tempfile
     env = os.environ.copy()
     env['PROMETHEUS_MULTIPROC_DIR'] = multiproc_dir
     pid_file = tempfile.NamedTemporaryFile(delete=False, suffix='.pid')
@@ -183,6 +186,101 @@ def _touch_live_gauge_files(directory, pid):
         path = os.path.join(directory, f'gauge_{mode}_{pid}.db')
         with open(path, 'wb'):
             pass
+
+
+def _write_multiproc_value(path,
+                           metric_name,
+                           sample_name,
+                           value,
+                           timestamp=0.0):
+    mmap = prom_mmap.MmapedDict(str(path))
+    try:
+        key = prom_mmap.mmap_key(metric_name, sample_name, [], [], 'test')
+        mmap.write_value(key, value, timestamp)
+    finally:
+        mmap.close()
+
+
+def _render_multiproc_samples(multiproc_dir):
+    registry = CollectorRegistry()
+    multiprocess.MultiProcessCollector(registry, path=str(multiproc_dir))
+    exposition = generate_latest(registry).decode('utf-8')
+    return {(sample.name, tuple(sorted(sample.labels.items()))): sample.value
+            for family in prom_parser.text_string_to_metric_families(exposition)
+            for sample in family.samples}
+
+
+_COMPACTION_WRITER_SCRIPT = """
+import os
+import time
+from prometheus_client import Counter, Gauge, Histogram
+
+value = float(os.environ['TEST_VALUE'])
+Counter('__test_compaction_counter', 'test').inc(value)
+histogram = Histogram(
+    '__test_compaction_histogram',
+    'test',
+    buckets=(1.0, 10.0, float('inf')),
+)
+histogram.observe(value)
+for mode in (
+    'all',
+    'liveall',
+    'sum',
+    'livesum',
+    'min',
+    'livemin',
+    'max',
+    'livemax',
+    'mostrecent',
+    'livemostrecent',
+):
+    Gauge(
+        f'__test_compaction_gauge_{mode}',
+        'test',
+        multiprocess_mode=mode,
+    ).set(value)
+with open(os.environ['READY_FILE'], 'w') as f:
+    f.write(str(os.getpid()))
+while True:
+    time.sleep(1)
+"""
+
+
+def _spawn_compaction_writer(multiproc_dir, ready_file, value):
+    env = os.environ.copy()
+    env['PROMETHEUS_MULTIPROC_DIR'] = str(multiproc_dir)
+    env['READY_FILE'] = str(ready_file)
+    env['TEST_VALUE'] = str(value)
+    process = subprocess.Popen(
+        [sys.executable, '-c', _COMPACTION_WRITER_SCRIPT],
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    deadline = time.time() + 10
+    while not ready_file.exists():
+        returncode = process.poll()
+        if returncode is not None:
+            stdout, stderr = process.communicate()
+            pytest.fail(f'metrics writer exited {returncode}: '
+                        f'stdout={stdout!r}, stderr={stderr!r}')
+        if time.time() >= deadline:
+            process.kill()
+            stdout, stderr = process.communicate()
+            pytest.fail('metrics writer did not become ready: '
+                        f'stdout={stdout!r}, stderr={stderr!r}')
+        time.sleep(0.01)
+    return process
+
+
+def _without_all_mode(samples):
+    return {
+        key: value
+        for key, value in samples.items()
+        if key[0] != '__test_compaction_gauge_all'
+    }
 
 
 def test_scan_multiproc_pids_only_returns_live_gauge_pids(tmp_path):
@@ -279,6 +377,173 @@ def test_reap_stale_multiproc_files_swallows_per_pid_errors(tmp_path):
     assert successes == [pid_b]
 
 
+# pylint: disable=protected-access
+def test_server_writer_gauges_have_explicit_live_modes():
+    assert (metrics_utils.SKY_APISERVER_PROCESS_PEAK_RSS._multiprocess_mode ==
+            'liveall')
+    assert (metrics_utils.SKY_APISERVER_PROCESS_CPU_TOTAL._multiprocess_mode ==
+            'liveall')
+    assert (metrics_utils.SKY_APISERVER_LONG_EXECUTORS._multiprocess_mode ==
+            'livesum')
+    assert (metrics_utils.SKY_APISERVER_SHORT_EXECUTORS._multiprocess_mode ==
+            'livesum')
+
+
+def test_compactor_runs_only_above_dead_file_threshold(tmp_path):
+    source = tmp_path / 'counter_991.db'
+    _write_multiproc_value(source, '__test_threshold', '__test_threshold_total',
+                           3.0)
+    metrics._dead_gauge_all_cycles.clear()
+    with patch.dict(os.environ,
+                    {'PROMETHEUS_MULTIPROC_DIR': str(tmp_path)}), \
+         patch('sky.server.metrics.psutil.pid_exists', return_value=False):
+        assert metrics._compact_dead_multiproc_files(
+            dead_file_threshold=1) == (0, 0)
+        assert source.exists()
+
+        assert metrics._compact_dead_multiproc_files(
+            dead_file_threshold=0) == (1, 0)
+
+    assert not source.exists()
+    assert (tmp_path / 'counter_0.db').exists()
+    assert _render_multiproc_samples(tmp_path)[('__test_threshold_total',
+                                                ())] == 3.0
+
+
+def test_compactor_deletes_dead_gauge_all_after_grace(tmp_path):
+    source = tmp_path / 'gauge_all_991.db'
+    _write_multiproc_value(source, '__test_gauge_all', '__test_gauge_all', 4.0)
+    metrics._dead_gauge_all_cycles.clear()
+    with patch.dict(os.environ,
+                    {'PROMETHEUS_MULTIPROC_DIR': str(tmp_path)}), \
+         patch('sky.server.metrics.psutil.pid_exists', return_value=False), \
+         patch.object(metrics.logger, 'warning') as mock_warning:
+        assert metrics._compact_dead_multiproc_files(
+            dead_file_threshold=50, gauge_all_grace_cycles=2) == (0, 0)
+        assert source.exists()
+
+        assert metrics._compact_dead_multiproc_files(
+            dead_file_threshold=50, gauge_all_grace_cycles=2) == (0, 1)
+
+    assert not source.exists()
+    assert '__test_gauge_all' in mock_warning.call_args.args[0]
+
+
+def test_compactor_overwrites_leftover_temporary_file(tmp_path):
+    source = tmp_path / 'counter_991.db'
+    temporary = tmp_path / 'counter_0.db.tmp'
+    _write_multiproc_value(source, '__test_current', '__test_current_total',
+                           5.0)
+    _write_multiproc_value(temporary, '__test_stale', '__test_stale_total',
+                           99.0)
+    metrics._dead_gauge_all_cycles.clear()
+    with patch.dict(os.environ,
+                    {'PROMETHEUS_MULTIPROC_DIR': str(tmp_path)}), \
+         patch('sky.server.metrics.psutil.pid_exists', return_value=False):
+        assert metrics._compact_dead_multiproc_files(
+            dead_file_threshold=0) == (1, 0)
+
+    samples = _render_multiproc_samples(tmp_path)
+    assert samples[('__test_current_total', ())] == 5.0
+    assert ('__test_stale_total', ()) not in samples
+    assert not temporary.exists()
+
+
+def test_compactor_preserves_multiprocess_exposition_across_cycles(tmp_path):
+    dead_ready = tmp_path / 'dead.ready'
+    live_ready = tmp_path / 'live.ready'
+    next_dead_ready = tmp_path / 'next-dead.ready'
+    dead_writer = _spawn_compaction_writer(tmp_path, dead_ready, 2.0)
+    live_writer = _spawn_compaction_writer(tmp_path, live_ready, 4.0)
+    try:
+        dead_writer.kill()
+        assert dead_writer.wait(timeout=5) != 0
+        metrics._dead_gauge_all_cycles.clear()
+        with patch.dict(os.environ,
+                        {'PROMETHEUS_MULTIPROC_DIR': str(tmp_path)}):
+            assert metrics._reap_stale_multiproc_files() == 1
+            before = _render_multiproc_samples(tmp_path)
+            assert metrics._compact_dead_multiproc_files(
+                dead_file_threshold=0, gauge_all_grace_cycles=2)[0] == 6
+            after_first = _render_multiproc_samples(tmp_path)
+
+            assert after_first == before
+
+            next_dead_writer = _spawn_compaction_writer(tmp_path,
+                                                        next_dead_ready, 9.0)
+            next_dead_writer.kill()
+            assert next_dead_writer.wait(timeout=5) != 0
+            assert metrics._reap_stale_multiproc_files() == 1
+            before_second = _render_multiproc_samples(tmp_path)
+            assert metrics._compact_dead_multiproc_files(
+                dead_file_threshold=0, gauge_all_grace_cycles=2)[0] == 6
+            after_second = _render_multiproc_samples(tmp_path)
+
+        assert _without_all_mode(after_second) == _without_all_mode(
+            before_second)
+        assert after_second[('__test_compaction_counter_total', ())] == 15.0
+        assert after_second[('__test_compaction_gauge_mostrecent', ())] == 9.0
+    finally:
+        live_writer.kill()
+        live_writer.wait(timeout=5)
+
+
+def test_scrape_does_not_observe_partial_compaction_swap(tmp_path, monkeypatch):
+    total = 0.0
+    for index, value in enumerate((1.0, 2.0, 4.0, 8.0), start=991):
+        _write_multiproc_value(tmp_path / f'counter_{index}.db',
+                               '__test_atomic', '__test_atomic_total', value)
+        total += value
+    metrics._dead_gauge_all_cycles.clear()
+    original_replace = metrics.os.replace
+
+    def delayed_replace(source, destination):
+        original_replace(source, destination)
+        time.sleep(0.05)
+
+    monkeypatch.setattr(metrics.os, 'replace', delayed_replace)
+    stop = threading.Event()
+    values = []
+    errors = []
+
+    def scrape_repeatedly():
+        while not stop.is_set():
+            try:
+                response = metrics.metrics()
+                samples = {
+                    sample.name: sample.value
+                    for family in prom_parser.text_string_to_metric_families(
+                        response.body.decode('utf-8'))
+                    for sample in family.samples
+                }
+                values.append(samples['__test_atomic_total'])
+            except Exception as e:  # pylint: disable=broad-except
+                errors.append(e)
+                return
+
+    with patch.dict(os.environ,
+                    {'PROMETHEUS_MULTIPROC_DIR': str(tmp_path)}), \
+         patch('sky.server.metrics.psutil.pid_exists', return_value=False):
+        thread = threading.Thread(target=scrape_repeatedly)
+        thread.start()
+        deadline = time.time() + 5
+        while not values and thread.is_alive() and time.time() < deadline:
+            time.sleep(0.01)
+        assert values, errors
+        assert metrics._compact_dead_multiproc_files(
+            dead_file_threshold=0) == (4, 0)
+        stop.set()
+        thread.join(timeout=5)
+
+    assert not thread.is_alive()
+    assert not errors
+    assert values
+    assert set(values) == {total}
+
+
+# pylint: enable=protected-access
+
+
 @pytest.mark.asyncio
 async def test_multiproc_reaper_daemon_returns_when_env_unset():
     """Daemon exits immediately if PROMETHEUS_MULTIPROC_DIR is unset."""
@@ -301,7 +566,9 @@ async def test_multiproc_reaper_daemon_loops_and_cancels(tmp_path):
     with patch.dict(os.environ,
                     {'PROMETHEUS_MULTIPROC_DIR': str(tmp_path)}), \
          patch('sky.server.metrics._reap_stale_multiproc_files',
-               side_effect=fake_reap):
+               side_effect=fake_reap), \
+         patch('sky.server.metrics._compact_dead_multiproc_files',
+               return_value=(0, 0)) as mock_compact:
         task = asyncio.create_task(
             metrics.multiproc_reaper_daemon(interval_seconds=0))
         # The daemon reaps on a worker thread (asyncio.to_thread), so
@@ -317,6 +584,7 @@ async def test_multiproc_reaper_daemon_loops_and_cancels(tmp_path):
             pass
 
     assert call_count['n'] >= 1
+    mock_compact.assert_called()
 
 
 @pytest.mark.asyncio

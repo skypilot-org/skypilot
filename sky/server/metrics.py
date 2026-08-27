@@ -2,17 +2,21 @@
 
 import asyncio
 import atexit
+import collections
+import contextlib
 import glob
+import json
 import multiprocessing
 import os
 import re
 import threading
 import time
-from typing import Dict, List, Optional, Set, Tuple
+from typing import DefaultDict, Dict, Iterator, List, Optional, Set, Tuple
 
 import fastapi
 from prometheus_client import core as prom_core
 from prometheus_client import generate_latest
+from prometheus_client import mmap_dict as prom_mmap
 from prometheus_client import multiprocess
 import prometheus_client as prom
 import psutil
@@ -70,6 +74,9 @@ def register_multiproc_cleanup_atexit() -> None:
 # files without measurable overhead: one directory glob + one pid_exists()
 # check per unique pid per tick.
 _REAPER_INTERVAL_SECONDS = 60
+_COMPACTION_DEAD_FILE_THRESHOLD = 50
+_GAUGE_ALL_GRACE_CYCLES = 2
+_AGGREGATING_GAUGE_MODES = frozenset(('sum', 'min', 'max', 'mostrecent'))
 # Matches the per-pid live-gauge file names written by
 # ``prometheus_client.multiprocess``: ``gauge_live{all,sum,max,min}_<pid>.db``.
 # These are the only files that ``mark_process_dead(pid)`` would remove; the
@@ -77,6 +84,252 @@ _REAPER_INTERVAL_SECONDS = 60
 # non-live gauges so their accumulated values keep contributing to aggregate
 # readings after the writer exits.
 _LIVE_GAUGE_FILE_PID_RE = re.compile(r'^gauge_live[a-z]+_([0-9]+)\.db$')
+_MULTIPROC_FILE_RE = re.compile(
+    r'^(?:(counter|histogram)_([0-9]+)|gauge_([a-z]+)_([0-9]+))\.db$')
+_MultiprocGroup = Tuple[str, str]
+
+
+class _ReadWriteLock:
+    """A writer-preferring read/write lock for scrapes and file swaps."""
+
+    def __init__(self) -> None:
+        self._condition = threading.Condition()
+        self._readers = 0
+        self._writer = False
+        self._waiting_writers = 0
+
+    @contextlib.contextmanager
+    def read(self) -> Iterator[None]:
+        with self._condition:
+            while self._writer or self._waiting_writers:
+                self._condition.wait()
+            self._readers += 1
+        try:
+            yield
+        finally:
+            with self._condition:
+                self._readers -= 1
+                if self._readers == 0:
+                    self._condition.notify_all()
+
+    @contextlib.contextmanager
+    def write(self) -> Iterator[None]:
+        with self._condition:
+            self._waiting_writers += 1
+            try:
+                while self._writer or self._readers:
+                    self._condition.wait()
+                self._writer = True
+            finally:
+                self._waiting_writers -= 1
+        try:
+            yield
+        finally:
+            with self._condition:
+                self._writer = False
+                self._condition.notify_all()
+
+
+_MULTIPROC_FILES_LOCK = _ReadWriteLock()
+# Full path -> number of consecutive maintenance ticks where the file's pid
+# was dead.
+_dead_gauge_all_cycles: Dict[str, int] = {}
+
+
+def _parse_multiproc_file(path: str) -> Optional[Tuple[str, str, int]]:
+    match = _MULTIPROC_FILE_RE.match(os.path.basename(path))
+    if match is None:
+        return None
+    typ, simple_pid, gauge_mode, gauge_pid = match.groups()
+    if typ is not None:
+        return typ, '', int(simple_pid)
+    assert gauge_mode is not None and gauge_pid is not None
+    return 'gauge', gauge_mode, int(gauge_pid)
+
+
+def _accumulator_path(multiproc_dir: str, typ: str, mode: str) -> str:
+    prefix = typ if typ != 'gauge' else f'gauge_{mode}'
+    return os.path.join(multiproc_dir, f'{prefix}_0.db')
+
+
+def _write_merged_multiproc_file(output_path: str, files: List[str],
+                                 mode: str) -> None:
+    """Write the merge of immutable ``files`` to ``output_path``."""
+    try:
+        os.unlink(output_path)
+    except FileNotFoundError:
+        pass
+
+    output = prom_mmap.MmapedDict(output_path)
+    try:
+        if mode == 'mostrecent':
+            # The upstream merge API uses timestamps to choose each winner but
+            # omits them from its returned Samples. Retain them because they
+            # must participate when this accumulator is merged again.
+            newest: Dict[str, Tuple[float, float]] = {}
+            for path in files:
+                for key, value, timestamp, _ in (
+                        prom_mmap.MmapedDict.read_all_values_from_file(path)):
+                    current = newest.get(key)
+                    if current is None or current[1] < timestamp:
+                        newest[key] = (value, timestamp)
+            for key, (value, timestamp) in newest.items():
+                output.write_value(key, value, timestamp)
+            return
+
+        merged = multiprocess.MultiProcessCollector.merge(files,
+                                                          accumulate=False)
+        for metric in merged:
+            for sample in metric.samples:
+                labelnames = list(sample.labels)
+                labelvalues = [sample.labels[name] for name in labelnames]
+                key = prom_mmap.mmap_key(metric.name, sample.name, labelnames,
+                                         labelvalues, metric.documentation)
+                output.write_value(key, sample.value, 0.0)
+    finally:
+        output.close()
+
+
+def _metric_names_in_multiproc_files(files: List[str]) -> Set[str]:
+    names: Set[str] = set()
+    for path in files:
+        try:
+            values = prom_mmap.MmapedDict.read_all_values_from_file(path)
+            for key, _, _, _ in values:
+                metric_name, _, _, _ = json.loads(key)
+                names.add(metric_name)
+        except Exception:  # pylint: disable=broad-except
+            logger.warning(
+                f'Failed to read metric names from dead gauge file {path}.',
+                exc_info=True)
+    return names
+
+
+def _record_multiproc_compaction_metrics(compacted_by_group: Dict[
+    _MultiprocGroup,
+    int], deleted: int, accumulator_sizes: Dict[_MultiprocGroup, int],
+                                         duration: float) -> None:
+    if not metrics_utils.METRICS_ENABLED:
+        return
+    pid = str(os.getpid())
+    for (typ, mode), count in compacted_by_group.items():
+        metrics_utils.SKY_APISERVER_MULTIPROC_FILES_REMOVED_TOTAL.labels(
+            operation='compacted', type=typ, mode=mode or 'none').inc(count)
+    if deleted:
+        metrics_utils.SKY_APISERVER_MULTIPROC_FILES_REMOVED_TOTAL.labels(
+            operation='deleted', type='gauge', mode='all').inc(deleted)
+    for (typ, mode), size in accumulator_sizes.items():
+        metrics_utils.SKY_APISERVER_MULTIPROC_ACCUMULATOR_BYTES.labels(
+            pid=pid, type=typ, mode=mode or 'none').set(size)
+    metrics_utils.SKY_APISERVER_MULTIPROC_COMPACTION_DURATION_SECONDS.labels(
+        pid=pid).set(duration)
+
+
+def _compact_dead_multiproc_files(
+    dead_file_threshold: int = _COMPACTION_DEAD_FILE_THRESHOLD,
+    gauge_all_grace_cycles: int = _GAUGE_ALL_GRACE_CYCLES,
+) -> Tuple[int, int]:
+    """Compact aggregating files and expire all-mode files from dead pids.
+
+    Returns ``(compacted_files, deleted_gauge_all_files)``.
+    """
+    multiproc_dir = os.environ.get('PROMETHEUS_MULTIPROC_DIR')
+    if not multiproc_dir:
+        return 0, 0
+
+    parsed_files: List[Tuple[str, str, str, int]] = []
+    for path in sorted(glob.glob(os.path.join(multiproc_dir, '*.db'))):
+        parsed = _parse_multiproc_file(path)
+        if parsed is not None:
+            typ, mode, pid = parsed
+            parsed_files.append((path, typ, mode, pid))
+
+    writer_pids = {pid for _, _, _, pid in parsed_files if pid != 0}
+    liveness = {pid: psutil.pid_exists(pid) for pid in writer_pids}
+    dead_files = [
+        item for item in parsed_files if item[3] != 0 and not liveness[item[3]]
+    ]
+    dead_gauge_all = {
+        path for path, typ, mode, _ in dead_files
+        if typ == 'gauge' and mode == 'all'
+    }
+    for path in list(_dead_gauge_all_cycles):
+        if path not in dead_gauge_all:
+            del _dead_gauge_all_cycles[path]
+    for path in dead_gauge_all:
+        _dead_gauge_all_cycles[path] = _dead_gauge_all_cycles.get(path, 0) + 1
+
+    gauge_all_to_delete = sorted(
+        path for path in dead_gauge_all
+        if _dead_gauge_all_cycles[path] >= gauge_all_grace_cycles)
+    should_compact = len(dead_files) > dead_file_threshold
+    if not should_compact and not gauge_all_to_delete:
+        return 0, 0
+
+    start_time = time.monotonic()
+    groups: DefaultDict[_MultiprocGroup,
+                        List[str]] = collections.defaultdict(list)
+    if should_compact:
+        for path, typ, mode, _ in dead_files:
+            if typ in ('counter', 'histogram'):
+                groups[(typ, '')].append(path)
+            elif typ == 'gauge' and mode in _AGGREGATING_GAUGE_MODES:
+                groups[(typ, mode)].append(path)
+
+    existing_paths = {path for path, _, _, _ in parsed_files}
+    prepared: Dict[_MultiprocGroup, Tuple[str, str, List[str]]] = {}
+    for group, source_files in groups.items():
+        typ, mode = group
+        accumulator = _accumulator_path(multiproc_dir, typ, mode)
+        merge_files = list(source_files)
+        if accumulator in existing_paths:
+            merge_files.insert(0, accumulator)
+        temporary = f'{accumulator}.tmp'
+        _write_merged_multiproc_file(temporary, merge_files, mode)
+        prepared[group] = (temporary, accumulator, source_files)
+
+    dropped_metric_names = _metric_names_in_multiproc_files(gauge_all_to_delete)
+
+    with _MULTIPROC_FILES_LOCK.write():
+        for temporary, accumulator, _ in prepared.values():
+            os.replace(temporary, accumulator)
+        for _, _, source_files in prepared.values():
+            for path in source_files:
+                try:
+                    os.unlink(path)
+                except FileNotFoundError:
+                    pass
+        for path in gauge_all_to_delete:
+            try:
+                os.unlink(path)
+            except FileNotFoundError:
+                pass
+
+    compacted_by_group = {
+        group: len(source_files)
+        for group, (_, _, source_files) in prepared.items()
+    }
+    accumulator_sizes = {
+        group: os.path.getsize(accumulator)
+        for group, (_, accumulator, _) in prepared.items()
+    }
+    compacted = sum(compacted_by_group.values())
+    deleted = len(gauge_all_to_delete)
+    for path in gauge_all_to_delete:
+        _dead_gauge_all_cycles.pop(path, None)
+    duration = time.monotonic() - start_time
+    _record_multiproc_compaction_metrics(compacted_by_group, deleted,
+                                         accumulator_sizes, duration)
+    if compacted:
+        logger.info(f'Compacted {compacted} dead prometheus multiproc file(s) '
+                    f'into {len(prepared)} accumulator(s).')
+    if deleted:
+        names = ', '.join(sorted(dropped_metric_names)) or '<unknown>'
+        logger.warning(
+            f'Deleted {deleted} dead prometheus gauge_all file(s) after '
+            f'{gauge_all_grace_cycles} maintenance ticks; dropped metrics: '
+            f'{names}')
+    return compacted, deleted
 
 
 def _scan_multiproc_pids(multiproc_dir: str) -> Set[int]:
@@ -124,7 +377,7 @@ def _reap_stale_multiproc_files() -> int:
 
 async def multiproc_reaper_daemon(
         interval_seconds: int = _REAPER_INTERVAL_SECONDS) -> None:
-    """Periodically reap multiproc prometheus files from dead workers.
+    """Periodically reap and compact files from dead metrics writers.
 
     Per the prometheus_client multiprocess docs, an exiting writer
     process should call ``multiprocess.mark_process_dead(pid)`` so its
@@ -164,6 +417,7 @@ async def multiproc_reaper_daemon(
     while True:
         try:
             reaped = await asyncio.to_thread(_reap_stale_multiproc_files)
+            await asyncio.to_thread(_compact_dead_multiproc_files)
             if reaped:
                 logger.info(
                     f'Reaped prometheus multiproc files for {reaped} dead '
@@ -979,21 +1233,23 @@ metrics_app = fastapi.FastAPI()
 def metrics() -> fastapi.Response:
     """Expose aggregated Prometheus metrics from all worker processes."""
     if os.environ.get('PROMETHEUS_MULTIPROC_DIR'):
-        # In multiprocess mode, we need to collect metrics from all processes.
-        registry = prom.CollectorRegistry()
-        multiprocess.MultiProcessCollector(registry)
-        registry.register(_BURN_RATE_COLLECTOR)
-        registry.register(_SQLITE_DB_SIZE_COLLECTOR)
-        registry.register(_WORKSPACE_USAGE_COLLECTOR)
-        registry.register(_COLLECTOR_HEALTH_COLLECTOR)
-        if _MANAGED_JOBS_COLLECTOR is not None:
-            registry.register(_MANAGED_JOBS_COLLECTOR)
-        for c in _plugin_collectors:
-            try:
-                registry.register(c)
-            except ValueError:
-                pass
-        data = generate_latest(registry)
+        with _MULTIPROC_FILES_LOCK.read():
+            # In multiprocess mode, we need to collect metrics from all
+            # processes.
+            registry = prom.CollectorRegistry()
+            multiprocess.MultiProcessCollector(registry)
+            registry.register(_BURN_RATE_COLLECTOR)
+            registry.register(_SQLITE_DB_SIZE_COLLECTOR)
+            registry.register(_WORKSPACE_USAGE_COLLECTOR)
+            registry.register(_COLLECTOR_HEALTH_COLLECTOR)
+            if _MANAGED_JOBS_COLLECTOR is not None:
+                registry.register(_MANAGED_JOBS_COLLECTOR)
+            for c in _plugin_collectors:
+                try:
+                    registry.register(c)
+                except ValueError:
+                    pass
+            data = generate_latest(registry)
     else:
         data = generate_latest()
     return fastapi.Response(content=data,
