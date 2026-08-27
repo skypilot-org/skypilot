@@ -3028,10 +3028,8 @@ def _update_cluster_status(
                             ray_config['provider'], pod_names) or
                         k8s_instance.get_cluster_failure_reason_from_pods(
                             ray_config['provider'], pod_names) or '')
-                    # These extractors only ever return a specific cause, and
-                    # the result lands in status_reason rather than in
-                    # node_statuses -- so the supersede check below cannot see
-                    # it unless we record it here.
+                    # Lands in status_reason, not node_statuses, so the
+                    # supersede check below cannot see it otherwise.
                     recovered_cause = bool(status_reason)
             except Exception as e:  # pylint: disable=broad-except
                 logger.debug('Failed to get pod failure reason for '
@@ -3216,30 +3214,17 @@ def _update_cluster_status(
             hint = kubernetes_utils.match_kubernetes_failure_hint_text(
                 log_message)
             if hint:
-                # Own line, so the remedy reads as a separate statement from
-                # the diagnosis. Despite the variable name this string is not
-                # logged: it is only stored as the cluster event, which the
-                # dashboard renders. No CLI command reads it.
+                # Own line so the remedy reads separately from the cause.
                 log_message += f'\n{hint}'
-        # A node that stops heartbeating leaves its pods' status stale -- the
-        # pod still reads 'Running', so a refresh during the outage can only
-        # record a generic reason ('ray cluster is unhealthy'). Once the node
-        # is back, a later refresh names the real cause, but by then the
-        # cluster is INIT and the guard below would drop it, leaving the
-        # useless message as the last word forever. Let a refresh that finally
-        # identified the cause supersede it. add_cluster_event() drops an
-        # identical reason, so a stable cause is recorded once, not per poll.
+        # A refresh during a node outage sees stale pod status and can only
+        # record a generic reason; the guard below would then freeze that in.
+        # add_cluster_event() dedups, so a stable cause is recorded once.
         identified_cause = False
         if isinstance(launched_resources.cloud, clouds.Kubernetes):
-            # A cause can arrive by either route: named in a pod's live status,
-            # or recovered from kubelet events / a container's previous state
-            # when the live status had nothing (the latter never reaches
-            # node_statuses, hence the separate flag).
             identified_cause = recovered_cause or any(
                 k8s_instance.pod_reason_identifies_cause(pod_reason)
                 for _, pod_reason in node_statuses.values())
-        # Do not add event if the cluster is already in INIT status, unless
-        # this refresh is the one that explained why.
+        # Skip if already INIT, unless this refresh explained why.
         if (status != status_lib.ClusterStatus.INIT or identified_cause):
             global_user_state.add_cluster_event(
                 cluster_name,
