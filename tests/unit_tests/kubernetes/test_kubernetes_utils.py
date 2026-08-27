@@ -5650,3 +5650,63 @@ class TestGetNodeAffinity:
             'requiredDuringSchedulingIgnoredDuringExecution',
             'preferredDuringSchedulingIgnoredDuringExecution',
         }
+
+
+class TestGetPodAffinity:
+    """Tests for utils.get_pod_affinity."""
+
+    def test_none_when_no_accelerator(self):
+        """A non-accelerator pod has nothing to bin-pack -> no podAffinity,
+        even when efa_same_az is set (EFA co-location is accelerator-only)."""
+        assert utils.get_pod_affinity(None, None, False, 'c') is None
+        assert utils.get_pod_affinity(None, None, True, 'c') is None
+
+    def test_none_when_key_without_values(self):
+        assert utils.get_pod_affinity('skypilot.co/accelerator', None, False,
+                                      'c') is None
+
+    def test_binpack_only(self):
+        affinity = utils.get_pod_affinity('skypilot.co/accelerator', ['H100'],
+                                          False, 'my-cluster')
+        assert affinity == {
+            'preferredDuringSchedulingIgnoredDuringExecution': [{
+                'weight': 1,
+                'podAffinityTerm': {
+                    'labelSelector': {
+                        'matchExpressions': [{
+                            'key': utils.GPU_BINPACK_LABEL_KEY,
+                            'operator': 'In',
+                            'values': [utils.GPU_BINPACK_LABEL_VALUE],
+                        }],
+                    },
+                    'topologyKey': 'kubernetes.io/hostname',
+                },
+            }],
+        }
+
+    def test_binpack_and_efa(self):
+        affinity = utils.get_pod_affinity('skypilot.co/accelerator', ['H100'],
+                                          True, 'my-cluster')
+        assert affinity == {
+            'preferredDuringSchedulingIgnoredDuringExecution': [{
+                'weight': 1,
+                'podAffinityTerm': {
+                    'labelSelector': {
+                        'matchExpressions': [{
+                            'key': utils.GPU_BINPACK_LABEL_KEY,
+                            'operator': 'In',
+                            'values': [utils.GPU_BINPACK_LABEL_VALUE],
+                        }],
+                    },
+                    'topologyKey': 'kubernetes.io/hostname',
+                },
+            }],
+            'requiredDuringSchedulingIgnoredDuringExecution': [{
+                'labelSelector': {
+                    'matchLabels': {
+                        'skypilot-cluster-name': 'my-cluster',
+                    },
+                },
+                'topologyKey': 'topology.kubernetes.io/zone',
+            }],
+        }

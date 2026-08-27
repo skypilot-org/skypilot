@@ -295,7 +295,7 @@ available_node_types:
             app: {{cluster_name_on_cloud}}
             {% endif %}
             {% if (k8s_acc_label_key is not none and k8s_acc_label_values is not none) %}
-            skypilot-binpack: "gpu"
+            {{k8s_binpack_label_key}}: {{k8s_binpack_label_value|tojson}}
             {% endif %}
             {% if k8s_kueue_local_queue_name %}
             kueue.x-k8s.io/queue-name: {{k8s_kueue_local_queue_name}}
@@ -430,38 +430,13 @@ available_node_types:
             cloud.google.com/gke-flex-start: "true"
             {% endif %}
         {% endif %}
-        {% if k8s_node_affinity or k8s_host_network %}
+        {% if k8s_node_affinity or k8s_pod_affinity or k8s_host_network %}
         affinity:
           {% if k8s_node_affinity %}
           nodeAffinity: {{k8s_node_affinity | tojson}}
-          {% if k8s_acc_label_key is not none and k8s_acc_label_values is not none %}
-          podAffinity:
-            preferredDuringSchedulingIgnoredDuringExecution:
-              - weight: 1
-                podAffinityTerm:
-                  labelSelector:
-                    matchExpressions:
-                      - key: "skypilot-binpack"
-                        operator: In
-                        values:
-                          - "gpu"
-                  topologyKey: kubernetes.io/hostname
-            {% if k8s_efa_same_az %}
-            # Multi-node EFA co-location: an AWS EFA placement group is
-            # single-AZ, so every replica of this job must schedule into one
-            # zone or the fabric cannot form. Attract each pod to the zone of
-            # the other pods of the same SkyPilot cluster -- the first pod fixes
-            # the AZ (Karpenter provisions an EFA node wherever it has
-            # capacity) and the rest follow; the user names no zone. required
-            # (not preferred): cross-AZ EFA is broken, so pend loudly rather
-            # than silently fall back to TCP.
-            requiredDuringSchedulingIgnoredDuringExecution:
-              - labelSelector:
-                  matchLabels:
-                    skypilot-cluster-name: {{cluster_name_on_cloud}}
-                topologyKey: topology.kubernetes.io/zone
-            {% endif %}
           {% endif %}
+          {% if k8s_pod_affinity %}
+          podAffinity: {{k8s_pod_affinity | tojson}}
           {% endif %}
           {% if k8s_host_network %}
           # Mode b: one cluster pod per K8s node. Under hostNetwork a pod
