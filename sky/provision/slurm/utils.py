@@ -1057,6 +1057,29 @@ def _get_slurm_inventory_client(slurm_cluster_name: str) -> 'slurm.SlurmClient':
     )
 
 
+def run_on_login_node(slurm_cluster_name: str,
+                      cmd: str,
+                      timeout: Optional[int] = None) -> Tuple[int, str, str]:
+    """Runs a shell command on a Slurm cluster's login node.
+
+    Public entry point for callers outside the provisioner (e.g. the
+    GPU-metrics federation in sky/metrics/utils.py) that need to execute
+    something over the cluster's SSH transport without reaching into the
+    inventory client. See SlurmClient.run_command for the framing and
+    timeout semantics.
+
+    Args:
+        slurm_cluster_name: A Host alias in the Slurm SSH config.
+        cmd: Shell command to run on the login node.
+        timeout: Optional bound in seconds on the whole remote invocation.
+
+    Returns:
+        (returncode, stdout, stderr) of ``cmd``.
+    """
+    client = _get_slurm_inventory_client(slurm_cluster_name)
+    return client.run_command(cmd, timeout=timeout)
+
+
 def _get_slurm_node_info_list(slurm_cluster_name: str) -> List[Dict[str, Any]]:
     """Gathers detailed information about each node in the Slurm cluster.
 

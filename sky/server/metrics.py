@@ -1091,8 +1091,8 @@ def _handle_federation_result(context: str, route: str, result: object,
         logger.error(
             f'Failed to get metrics for context {context} (route {route}): '
             f'timed out after {_PER_CONTEXT_TIMEOUT_SECONDS}s '
-            f'({stats.summary()}); kubectl port-forward + /federate exceeded '
-            f'the per-context budget; series for this cluster are omitted from '
+            f'({stats.summary()}); the federation attempt exceeded the '
+            f'per-context budget; series for this cluster are omitted from '
             f'this scrape')
         return
     if isinstance(result, Exception):
@@ -1151,10 +1151,36 @@ async def gpu_metrics() -> fastapi.Response:
             )) for context, stats in zip(remote_contexts, stats_list)
     ]
 
+    # Slurm clusters federate through their login node (see
+    # get_metrics_for_slurm_cluster); only clusters with a configured
+    # prometheus_url participate. Their series ride the same scrape,
+    # stamped cluster="slurm/<name>", under the same per-context budget:
+    # the budget is passed down so the SSH invocation is hard-killed at
+    # the same instant wait_for() gives up on it. There is no port-forward
+    # phase on this path, so its stats omit that phase.
+    slurm_clusters = metrics_utils.get_slurm_metrics_clusters()
+    slurm_contexts = [
+        metrics_utils.SLURM_CONTEXT_PREFIX + name for name in slurm_clusters
+    ]
+    slurm_stats = [
+        metrics_utils.FederationStats(has_port_forward=False)
+        for _ in slurm_clusters
+    ]
+    tasks += [
+        asyncio.create_task(
+            asyncio.wait_for(
+                metrics_utils.get_metrics_for_slurm_cluster(
+                    name, stats=stats, timeout=_PER_CONTEXT_TIMEOUT_SECONDS),
+                timeout=_PER_CONTEXT_TIMEOUT_SECONDS,
+            )) for name, stats in zip(slurm_clusters, slurm_stats)
+    ]
+    result_contexts = remote_contexts + slurm_contexts
+    stats_list = stats_list + slurm_stats
+
     results = await asyncio.gather(*tasks, return_exceptions=True)
 
     for i, result in enumerate(results):
-        _handle_federation_result(remote_contexts[i], 'gpu-metrics', result,
+        _handle_federation_result(result_contexts[i], 'gpu-metrics', result,
                                   stats_list[i], all_metrics)
 
     combined_metrics = '\n\n'.join(all_metrics)

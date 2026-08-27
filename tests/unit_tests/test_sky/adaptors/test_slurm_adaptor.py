@@ -135,6 +135,59 @@ class TestRunSlurmCmds:
 
         assert exc_info.value.returncode == 255
 
+    def test_parser_skips_login_shell_noise_before_header(self):
+        # A login shell may print profile.d banners or module-system notices
+        # (possibly non-ASCII) before the transport script runs; they land
+        # ahead of the header and must neither corrupt nor fail the frames.
+        client = self._client()
+        noise = 'Welcome to hpc-login \u2603\nLmod: loading site modules\n'
+        with mock.patch.object(client._runner, 'run') as mock_run:
+            mock_run.return_value = (0, noise + _batch_output(
+                (0, 'DCGM_FI_DEV_GPU_UTIL{gpu="0"} 5\n', '')), '')
+            results = client._run_slurm_cmds(['curl ...'])
+        assert results == [(0, 'DCGM_FI_DEV_GPU_UTIL{gpu="0"} 5\n', '')]
+
+    def test_missing_header_is_rejected(self):
+        client = self._client()
+        with mock.patch.object(client._runner, 'run') as mock_run:
+            mock_run.return_value = (0, 'no header here\n', '')
+            with pytest.raises(RuntimeError, match='missing header'):
+                client._run_slurm_cmds(['command'])
+
+    def test_timeout_forwarded_only_when_set(self):
+        client = self._client()
+        with mock.patch.object(client._runner, 'run') as mock_run:
+            mock_run.return_value = (0, _batch_output((0, '', '')), '')
+            client._run_slurm_cmds(['command'])
+            assert 'timeout' not in mock_run.call_args.kwargs
+            client._run_slurm_cmds(['command'], timeout=7)
+            assert mock_run.call_args.kwargs['timeout'] == 7
+
+
+class TestRunCommand:
+    """Tests for the public single-command entry point."""
+
+    @staticmethod
+    def _client():
+        return slurm.SlurmClient(ssh_host='localhost',
+                                 ssh_port=22,
+                                 ssh_user='root',
+                                 ssh_key=None)
+
+    def test_round_trip_returns_the_commands_own_streams(self):
+        client = self._client()
+        client._runner = command_runner_lib.LocalProcessCommandRunner()
+        assert client.run_command(
+            'printf \'a\\nb\\n\'; printf \'oops\' >&2; exit 3') == (3, 'a\nb\n',
+                                                                    'oops')
+
+    def test_forwards_timeout_to_the_transport(self):
+        client = self._client()
+        with mock.patch.object(client._runner, 'run') as mock_run:
+            mock_run.return_value = (0, _batch_output((0, 'ok\n', '')), '')
+            assert client.run_command('true', timeout=9) == (0, 'ok\n', '')
+        assert mock_run.call_args.kwargs['timeout'] == 9
+
 
 class TestGetPartitions:
     """Test SlurmClient.get_partitions()."""

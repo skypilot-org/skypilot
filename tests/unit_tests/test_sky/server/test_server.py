@@ -10,6 +10,7 @@ import time
 from unittest import mock
 
 import fastapi
+import prometheus_client as prom
 import pytest
 import uvicorn
 
@@ -1143,6 +1144,55 @@ def test_prune_sky_logs_removes_expired_file_upload_logs(
     assert removed == 1
     assert not old_log.exists()
     assert fresh_log.exists()
+
+
+def test_prune_sky_logs_records_metrics(tmp_path, monkeypatch,
+                                        _no_provision_log_paths):
+    """A sweep publishes the entry population, its duration and what it removed.
+
+    The entry gauge counts every top-level entry the scandir loop walks, not
+    just the expired ones, since that population is what the sweep costs.
+    """
+    monkeypatch.setattr(constants, 'SKY_LOGS_DIRECTORY', str(tmp_path))
+    monkeypatch.setattr(server.metrics_utils, 'METRICS_ENABLED', True)
+    now = 1_000_000.0
+    _touch_dir(tmp_path / 'sky-2020-01-01-00-00-00-000000', now - 10_000)
+    _touch_dir(tmp_path / 'sky-2020-01-02-00-00-00-000000', now - 100)
+    _touch_dir(tmp_path / 'api_server', now - 10_000)
+    pid = {'pid': str(os.getpid())}
+    pruned_before = prom.REGISTRY.get_sample_value(
+        'sky_apiserver_sky_logs_pruned_entries_total') or 0.0
+
+    removed = server._prune_sky_logs(cutoff=now - 5_000)
+
+    assert removed == 1
+    assert prom.REGISTRY.get_sample_value(
+        'sky_apiserver_sky_logs_top_level_entries', pid) == 3
+    assert prom.REGISTRY.get_sample_value(
+        'sky_apiserver_sky_logs_pruned_entries_total') - pruned_before == 1
+    assert prom.REGISTRY.get_sample_value(
+        'sky_apiserver_sky_logs_prune_duration_seconds', pid) >= 0
+    assert prom.REGISTRY.get_sample_value(
+        'sky_apiserver_sky_logs_fs_used_bytes', pid) > 0
+
+
+def test_prune_sky_logs_does_not_follow_symlinks(tmp_path, monkeypatch,
+                                                 _no_provision_log_paths):
+    """Symlinks are never traversed, so their targets are left untouched."""
+    monkeypatch.setattr(constants, 'SKY_LOGS_DIRECTORY', str(tmp_path))
+    now = 1_000_000.0
+    outside = _touch_dir(tmp_path / 'outside' / 'target', now - 10_000)
+    (tmp_path / 'sky-2020-01-01-00-00-00-000000').symlink_to(outside)
+    outside_file = _touch_file(tmp_path / 'outside' / 'target.log',
+                               now - 10_000)
+    (tmp_path / 'file_uploads').mkdir()
+    (tmp_path / 'file_uploads' / 'sky-link.log').symlink_to(outside_file)
+
+    removed = server._prune_sky_logs(cutoff=now - 5_000)
+
+    assert removed == 0
+    assert outside.exists()
+    assert outside_file.exists()
 
 
 def test_prune_sky_logs_missing_dir_is_noop(tmp_path, monkeypatch):

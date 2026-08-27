@@ -7,10 +7,12 @@ import queue
 import random
 import re
 import select
+import shlex
 import subprocess
 import threading
 import time
 from typing import Dict, List, Optional, Set, Tuple
+import urllib.parse
 
 import httpx
 import prometheus_client as prom
@@ -341,6 +343,46 @@ SKY_APISERVER_QUEUE_WAIT_SECONDS = prom.Histogram(
              120.0, 300.0, 600.0, float('inf')),
 )
 
+# --- ~/sky_logs retention ---
+#
+# Written once per hourly sweep by _prune_sky_logs() in the main API server
+# process. The gauges take a pid label + 'liveall' so only the process that
+# actually runs the sweep produces a series: the aggregating modes strip the
+# pid label and would merge in a phantom 0.0 from every worker process that
+# merely imports this module, and their non-live variants would keep serving
+# the last value after the writer exits.
+
+# Prune cost scales with this number, not with the number of dirs actually
+# expired, so it is the series to watch when the hourly sweep gets slow.
+SKY_APISERVER_SKY_LOGS_TOP_LEVEL_ENTRIES = prom.Gauge(
+    'sky_apiserver_sky_logs_top_level_entries',
+    'Top-level entries in ~/sky_logs at the last retention sweep',
+    ['pid'],
+    multiprocess_mode='liveall',
+)
+
+SKY_APISERVER_SKY_LOGS_PRUNE_DURATION_SECONDS = prom.Gauge(
+    'sky_apiserver_sky_logs_prune_duration_seconds',
+    'Wall time of the last ~/sky_logs retention sweep',
+    ['pid'],
+    multiprocess_mode='liveall',
+)
+
+# Measures the filesystem hosting ~/sky_logs, not the directory itself: exact
+# for deployments that give ~/sky_logs its own volume, an over-estimate for
+# those where it shares a filesystem with other data.
+SKY_APISERVER_SKY_LOGS_FS_USED_BYTES = prom.Gauge(
+    'sky_apiserver_sky_logs_fs_used_bytes',
+    'Used bytes on the filesystem hosting ~/sky_logs',
+    ['pid'],
+    multiprocess_mode='liveall',
+)
+
+SKY_APISERVER_SKY_LOGS_PRUNED_ENTRIES_TOTAL = prom.Counter(
+    'sky_apiserver_sky_logs_pruned_entries_total',
+    'Expired ~/sky_logs artifacts removed by the retention sweep',
+)
+
 # --- Managed Jobs Metrics ---
 
 # Per-controller-process gauges (consolidation mode only).
@@ -539,7 +581,8 @@ def _record_served_verdict(context: str, result: str) -> None:
 class FederationStats:
     """Mutable per-context timing/size record for one federation attempt.
 
-    send_metrics_request_with_port_forward() fills this in phase-by-phase. The
+    send_metrics_request_with_port_forward() fills this in phase-by-phase
+    (get_metrics_for_slurm_cluster() fills only the federate phase). The
     caller (the /gpu-metrics or /endpoints-metrics gather loop) holds a
     reference and reads it when logging the result — crucially, this still
     works when the attempt is cancelled by asyncio.wait_for(): the fields
@@ -547,7 +590,11 @@ class FederationStats:
     so the timeout log can show exactly how far the attempt got.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, has_port_forward: bool = True) -> None:
+        # False on transports with no port-forward phase (a Slurm cluster's
+        # login-node curl over SSH); summary() then omits that phase instead
+        # of reporting it as 'incomplete'.
+        self.has_port_forward = has_port_forward
         self.port_forward_seconds: Optional[float] = None
         self.federate_seconds: Optional[float] = None
         self.body_bytes: Optional[int] = None
@@ -576,6 +623,8 @@ class FederationStats:
                    f'wire={wire}, enc={self.content_encoding}')
         else:
             fed = 'incomplete'
+        if not self.has_port_forward:
+            return f'federate={fed}'
         return f'port_forward={pf}, federate={fed}'
 
 
@@ -1171,9 +1220,16 @@ _CLUSTER_LABEL_RE = re.compile(r'(?<![A-Za-z0-9_])cluster="')
 # this loop, while the (almost always false) substring test is a C-level
 # scan an order of magnitude cheaper.
 _CLUSTER_LABEL_LITERAL = 'cluster="'
+# The whole `cluster="..."` token, value included, for replace_existing.
+# Label values escape '"' and '\\' with a backslash, so the value is any run
+# of non-quote/non-backslash characters or backslash escapes.
+_CLUSTER_LABEL_TOKEN_RE = re.compile(
+    r'(?<![A-Za-z0-9_])cluster="(?:[^"\\]|\\.)*"')
 
 
-def _stamp_cluster_label(metrics_text: str, context: str) -> str:
+def _stamp_cluster_label(metrics_text: str,
+                         context: str,
+                         replace_existing: bool = False) -> str:
     """Body of add_cluster_name_label(); see it for semantics.
 
     Split out as a plain sync function so it can be handed to a worker
@@ -1185,6 +1241,7 @@ def _stamp_cluster_label(metrics_text: str, context: str) -> str:
     lines = metrics_text.strip().split('\n')
     modified_lines = []
     already_labeled = 0
+    replaced = 0
     prefix = f'cluster="{context}",'
     only_label = f'cluster="{context}"'
 
@@ -1205,10 +1262,21 @@ def _stamp_cluster_label(metrics_text: str, context: str) -> str:
 
             if (_CLUSTER_LABEL_LITERAL in existing_labels and
                     _CLUSTER_LABEL_RE.search(existing_labels)):
-                # Already attributed; re-stamping would duplicate the
-                # cluster label and invalidate the whole scrape body.
-                already_labeled += 1
-                modified_lines.append(line)
+                if not replace_existing:
+                    # Already attributed; re-stamping would duplicate the
+                    # cluster label and invalidate the whole scrape body.
+                    already_labeled += 1
+                    modified_lines.append(line)
+                    continue
+                # The source stamped its own identity (Prometheus /federate
+                # applies global.external_labels to every exported series);
+                # re-attribute the series to this context. A lambda keeps
+                # re.sub from interpreting backslashes in the context.
+                replaced += 1
+                new_labels = _CLUSTER_LABEL_TOKEN_RE.sub(
+                    lambda _: only_label, existing_labels)
+                modified_lines.append(
+                    f'{metric_name}{{{new_labels}}}{rest_of_line}')
                 continue
 
             if existing_labels:
@@ -1231,11 +1299,18 @@ def _stamp_cluster_label(metrics_text: str, context: str) -> str:
             f'{already_labeled}/{len(lines)} series federated from context '
             f'{context!r} already carried a cluster label and were left '
             f'unstamped.')
+    if replaced:
+        logger.debug(
+            f'{replaced}/{len(lines)} series federated from context '
+            f'{context!r} carried a source-side cluster label (e.g. the '
+            f'source Prometheus\'s external_labels) and were re-attributed.')
 
     return '\n'.join(modified_lines)
 
 
-async def add_cluster_name_label(metrics_text: str, context: str) -> str:
+async def add_cluster_name_label(metrics_text: str,
+                                 context: str,
+                                 replace_existing: bool = False) -> str:
     """Adds a cluster label to each metric line.
 
     Skips lines that already carry a `cluster` label (stamped by a
@@ -1249,6 +1324,14 @@ async def add_cluster_name_label(metrics_text: str, context: str) -> str:
     skipping keeps them byte-identical to the stored series so ingestion
     collapses them to a no-op instead of poisoning the scrape.
 
+    With ``replace_existing`` an existing label is overwritten instead.
+    That is only safe where the safety net above can never be needed,
+    i.e. the payload cannot be this server's own stamped series. Slurm
+    federation qualifies: there is no "local" Slurm context, while a
+    cluster's own Prometheus commonly sets a `cluster` external label
+    (which /federate applies to every exported series); left in place it
+    would hide the series from every `cluster="slurm/<name>"` query.
+
     Runs in a worker thread: the metrics server serves /metrics,
     /gpu-metrics and /endpoints-metrics from a single event loop, and a
     large fleet's federated payload takes tens of seconds of pure CPU to
@@ -1261,7 +1344,8 @@ async def add_cluster_name_label(metrics_text: str, context: str) -> str:
         metrics_text: The text containing the metrics
         context: The cluster name
     """
-    return await asyncio.to_thread(_stamp_cluster_label, metrics_text, context)
+    return await asyncio.to_thread(_stamp_cluster_label, metrics_text, context,
+                                   replace_existing)
 
 
 # Series federated from each context's Prometheus by /gpu-metrics: DCGM, host
@@ -1318,6 +1402,129 @@ async def get_metrics_for_context(context: str,
     metrics_text = await add_cluster_name_label(metrics_text, context)
 
     return metrics_text
+
+
+# Series federated from a Slurm cluster's Prometheus. Slurm clusters run no
+# kube-state-metrics or cAdvisor, so only node-exporter + DCGM series are
+# requested.
+SLURM_GPU_METRICS_MATCH_PATTERNS = [
+    '{__name__=~"node_memory_MemAvailable_bytes|node_memory_MemTotal_bytes|DCGM_.*"}',  # pylint: disable=line-too-long
+    'node_cpu_seconds_total{mode="idle"}',
+]
+
+# Context-string prefix under which Slurm series are stamped; matches the
+# GPU Manager's Slurm context vocabulary ('slurm/<cluster>').
+SLURM_CONTEXT_PREFIX = 'slurm/'
+
+# Headroom, in seconds, that curl's own limit leaves inside a Slurm cluster's
+# federation budget: the SSH connect before the request and the cluster-label
+# stamping after it have to fit in the same budget.
+_SLURM_FEDERATE_CURL_HEADROOM_SECONDS = 5
+
+
+def get_slurm_metrics_clusters() -> List[str]:
+    """Slurm clusters opted into GPU metrics federation.
+
+    A cluster participates when it is allowed by ``slurm.allowed_clusters``
+    (the analog of ``kubernetes.allowed_contexts``; defaults to every cluster
+    in ``~/.slurm/config``) *and*
+    ``slurm.cluster_configs.<name>.prometheus_url`` is set: the URL of a
+    Prometheus reachable *from the cluster's login node* (typically running
+    inside the cluster) that scrapes the cluster's node/DCGM exporters. No SSH
+    probing happens here — enumeration reads only local config.
+    """
+    try:
+        # pylint: disable=import-outside-toplevel
+        from sky import clouds
+
+        # Scope federation to the same clusters the rest of SkyPilot uses,
+        # honoring slurm.allowed_clusters (mirrors how the Kubernetes federation
+        # respects allowed_contexts). Defaults to all clusters in
+        # ~/.slurm/config when allowed_clusters is unset.
+        names = clouds.Slurm.existing_allowed_clusters(silent=True)
+    except Exception as e:  # pylint: disable=broad-except
+        logger.debug(f'Could not enumerate Slurm clusters: {e}')
+        return []
+    return [
+        name for name in names
+        if skypilot_config.get_nested(('slurm', 'cluster_configs', name,
+                                       'prometheus_url'), None)
+    ]
+
+
+async def get_metrics_for_slurm_cluster(cluster_name: str,
+                                        stats: Optional[FederationStats] = None,
+                                        timeout: float = 30.0) -> str:
+    """Federate GPU metrics from a Slurm cluster's own Prometheus.
+
+    The /federate request is executed *on* the login node (curl) through
+    the cluster's SSH transport, so it traverses outbound-only tunnel
+    agents unchanged and never requires network reachability from the API
+    server to the cluster's Prometheus. Series are stamped with
+    ``cluster="slurm/<name>"``, mirroring the Kubernetes federation path,
+    so every downstream consumer (central Prometheus, Grafana dashboards,
+    GPU Manager queries) treats the Slurm cluster like any other context.
+
+    Timeouts mirror the Kubernetes path's single per-context budget: the
+    SSH invocation is hard-killed at ``timeout`` (a hung login node cannot
+    leak the worker thread past the scrape — asyncio.wait_for() cancels
+    only the awaiting coroutine, never the thread), and curl's own limit
+    sits a few seconds inside it to leave room for the SSH connect.
+
+    Args:
+        cluster_name: Slurm cluster name (a Host alias in ~/.slurm/config).
+        stats: Optional FederationStats; only the federate timing/size are
+            populated (there is no port-forward phase on this path).
+        timeout: Budget in seconds for the whole fetch. Must fit within the
+            per-context timeout in sky/server/metrics.py
+            (_PER_CONTEXT_TIMEOUT_SECONDS).
+
+    Raises:
+        Exception: If the login-node curl or the federate request fails.
+    """
+    prometheus_url = skypilot_config.get_nested(
+        ('slurm', 'cluster_configs', cluster_name, 'prometheus_url'), None)
+    if not prometheus_url:
+        raise ValueError(
+            f'No prometheus_url configured for Slurm cluster {cluster_name!r}')
+
+    query = '&'.join('match[]=' + urllib.parse.quote(pattern)
+                     for pattern in SLURM_GPU_METRICS_MATCH_PATTERNS)
+    federate_url = prometheus_url.rstrip('/') + '/federate?' + query
+    curl_timeout = max(1, int(timeout) - _SLURM_FEDERATE_CURL_HEADROOM_SECONDS)
+    # -g (--globoff): curl otherwise parses the '[]' of 'match[]' as a URL
+    # glob; curl < 7.61 (e.g. CentOS 7 login nodes) rejects it outright.
+    curl_cmd = (f'curl -g -sS --fail -m {curl_timeout} '
+                f'{shlex.quote(federate_url)}')
+
+    def _fetch() -> str:
+        # pylint: disable=import-outside-toplevel
+        from sky.provision.slurm import utils as slurm_utils
+
+        # The framed transport keeps login-shell noise (profile.d banners,
+        # module notices) out of stdout: a stray line ahead of the
+        # exposition text would make Prometheus reject the *entire*
+        # /gpu-metrics body, every cluster included.
+        returncode, stdout, stderr = slurm_utils.run_on_login_node(
+            cluster_name, curl_cmd, timeout=int(timeout))
+        if returncode != 0:
+            raise RuntimeError(
+                f'Federate curl on Slurm cluster {cluster_name!r} exited '
+                f'{returncode}: {(stderr or stdout).strip()[:500]}')
+        return stdout
+
+    start = time.monotonic()
+    metrics_text = await asyncio.to_thread(_fetch)
+    if stats is not None:
+        stats.federate_seconds = time.monotonic() - start
+        stats.body_bytes = len(metrics_text.encode('utf-8'))
+
+    # replace_existing: the cluster's Prometheus may stamp its own
+    # `cluster` external label on every federated series; that must become
+    # the SkyPilot context or the series never match cluster="slurm/<name>".
+    return await add_cluster_name_label(metrics_text,
+                                        SLURM_CONTEXT_PREFIX + cluster_name,
+                                        replace_existing=True)
 
 
 # Series federated from each context's Prometheus by /endpoints-metrics: the
