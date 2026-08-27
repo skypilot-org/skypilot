@@ -937,6 +937,23 @@ def _get_recipe_yaml(entrypoint: str) -> Optional[str]:
     return None
 
 
+def _warn_if_max_duration_unsupported(
+        task_or_dag: Union['task_lib.Task', 'dag_lib.Dag']) -> None:
+    """Warn if max_duration is set on a non-managed (sky launch/sky exec) task.
+
+    max_duration is only enforced by the managed-jobs controller
+    (sky jobs launch). On a regular cluster launch or exec it is silently
+    ignored, so warn the user that it will have no effect.
+    """
+    tasks = ([task_or_dag]
+             if isinstance(task_or_dag, task_lib.Task) else task_or_dag.tasks)
+    if any(getattr(t, 'max_duration', None) is not None for t in tasks):
+        logger.warning(
+            f'{colorama.Fore.YELLOW}max_duration is only supported for '
+            'managed jobs (sky jobs launch), and will be ignored by '
+            'sky launch / sky exec.{colorama.Style.RESET_ALL}')
+
+
 # TODO(zhwu): All CLI command handlers should be wrapped with
 # @annotations.client_api so that is_on_api_server is False during
 # YAML parsing and schema validation. For now, we wrap this common
@@ -1437,6 +1454,8 @@ def launch(
             _DAG_NOT_SUPPORTED_MESSAGE.format(command='sky launch'))
     task = task_or_dag
 
+    _warn_if_max_duration_unsupported(task)
+
     backend: backends.Backend
     if backend_name == backends.LocalDockerBackend.NAME:
         backend = backends.LocalDockerBackend()
@@ -1702,6 +1721,8 @@ def exec(
         raise click.UsageError('YAML specifies a DAG, while `sky exec` '
                                'supports a single task only.')
     task = task_or_dag
+
+    _warn_if_max_duration_unsupported(task)
 
     click.secho('Submitting job to cluster: ', fg='cyan', nl=False)
     click.secho(cluster)

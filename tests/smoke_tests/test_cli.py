@@ -537,3 +537,42 @@ def test_debug_dump_nonexistent_resources(generic_cloud: str):
         timeout=2 * 60,
     )
     smoke_tests_utils.run_one_test(test)
+
+
+def test_managed_job_max_duration(generic_cloud: str):
+    """Test that a managed job is terminated after max_duration."""
+    name = smoke_tests_utils.get_cluster_name()
+    job_yaml = textwrap.dedent(f"""
+    name: {name}-job
+    resources:
+        cpus: 1
+        infra: {generic_cloud}
+    max_duration: 1m
+    run: |
+        sleep 3600
+    """)
+    with tempfile.NamedTemporaryFile(delete=True) as job_yaml_file:
+        job_yaml_file.write(job_yaml.encode('utf-8'))
+        job_yaml_file.flush()
+        test = smoke_tests_utils.Test(
+            'managed_job_max_duration',
+            [
+                f'sky jobs launch -y -d -n {name} {job_yaml_file.name}',
+                # Wait for the job to be terminated by max_duration. The
+                # controller polls job status every ~30s, so give it enough
+                # time to detect the timeout (1m limit + polling gap).
+                smoke_tests_utils.
+                get_cmd_wait_until_managed_job_status_contains_matching_job_name(
+                    job_name=name,
+                    job_status=[sky.ManagedJobStatus.FAILED],
+                    timeout=smoke_tests_utils.get_timeout(generic_cloud)),
+                # Verify the failure reason mentions max_duration. Use --all
+                # (the job is finished) and -v (to show the DETAILS column
+                # with the failure reason). Filter by name via grep since
+                # `sky jobs queue` has no -n/--name option.
+                f'sky jobs queue --all -v | grep "{name}" | grep "FAILED"',
+                f'sky jobs queue --all -v | grep "{name}" | grep "max_duration"',
+            ],
+            timeout=smoke_tests_utils.get_timeout(generic_cloud),
+            teardown=f'sky jobs cancel -y -n {name}')
+        smoke_tests_utils.run_one_test(test)

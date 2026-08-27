@@ -88,6 +88,16 @@ def launch(
     if name is not None:
         dag.name = name
 
+    # max_duration requires a server that understands the field. A newer
+    # client sending max_duration to an older server would otherwise get an
+    # opaque schema rejection instead of a clear message.
+    if (any(getattr(t, 'max_duration', None) is not None for t in dag.tasks) and
+        (remote_api_version is None or
+         remote_api_version < server_constants.MIN_MAX_DURATION_API_VERSION)):
+        raise click.UsageError(
+            'max_duration is not supported by your API server. '
+            'Please upgrade to a newer API server to use max_duration.')
+
     with admin_policy_utils.apply_and_use_config_in_current_request(
             dag,
             request_name=request_names.AdminPolicyRequestName.JOBS_LAUNCH,

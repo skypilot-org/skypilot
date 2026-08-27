@@ -23,6 +23,7 @@ from sky.skylet import constants
 from sky.utils import common_utils
 from sky.utils import git
 from sky.utils import registry
+from sky.utils import resources_utils
 from sky.utils import schemas
 from sky.utils import ux_utils
 from sky.utils import volume as volume_lib
@@ -334,6 +335,7 @@ class Task:
         resources: Optional[Union['resources_lib.Resources',
                                   List['resources_lib.Resources'],
                                   Set['resources_lib.Resources']]] = None,
+        max_duration: Optional[str] = None,
         # Advanced:
         docker_image: Optional[str] = None,
         event_callback: Optional[str] = None,
@@ -444,6 +446,7 @@ class Task:
         if secrets is not None:
             self._secrets = {k: SecretStr(v) for k, v in secrets.items()}
         self._volumes = volumes or {}
+        self._max_duration = max_duration
         self._managed_secret_refs: List[ManagedSecretRef] = []
         self._api_server_access = api_server_access
 
@@ -530,6 +533,7 @@ class Task:
         """
         self.validate_name()
         self.validate_run()
+        self.validate_max_duration()
         if not skip_workdir:
             self.expand_and_validate_workdir()
         if not skip_file_mounts:
@@ -580,6 +584,17 @@ class Task:
                             f'File mount source {source!r} does not exist '
                             'locally. To fix: check if it exists, and correct '
                             'the path.')
+
+    def validate_max_duration(self):
+        """Validates the max_duration field format."""
+        if self.max_duration is None:
+            return
+        try:
+            resources_utils.parse_time_seconds(self.max_duration)
+        except ValueError as e:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(f'Invalid max_duration {self.max_duration!r}. '
+                                 f'{e}') from None
 
     def _validate_mount_path(self, path: str, location: str):
         self._validate_path(path, location)
@@ -814,6 +829,7 @@ class Task:
             envs=config.pop('envs', None),
             secrets=inline_secrets or None,
             volumes=config.pop('volumes', None),
+            max_duration=config.pop('max_duration', None),
             event_callback=config.pop('event_callback', None),
             api_server_access=config.pop('api_server_access', True),
             _file_mounts_mapping=config.pop('file_mounts_mapping', None),
@@ -1205,6 +1221,10 @@ class Task:
     @property
     def volumes(self) -> Dict[str, Union[str, Dict[str, Any]]]:
         return self._volumes
+
+    @property
+    def max_duration(self) -> Optional[str]:
+        return self._max_duration
 
     def set_volumes(self, volumes: Dict[str, Union[str, Dict[str,
                                                              Any]]]) -> None:
@@ -2023,6 +2043,7 @@ class Task:
             add_if_not_none('service', self.service.to_yaml_config())
 
         add_if_not_none('num_nodes', self.num_nodes)
+        add_if_not_none('max_duration', self.max_duration)
 
         if self.inputs is not None:
             add_if_not_none('inputs',

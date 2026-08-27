@@ -193,6 +193,27 @@ A task can set this to a smaller value than the size of a cluster.
   num_nodes: 4
 
 
+.. _yaml-spec-max-duration:
+
+``max_duration``
+~~~~~~~~~~~~~~~~
+
+Maximum duration a managed job is allowed to run (optional). When set, the
+managed-jobs controller terminates the job once it has been running longer
+than this limit, bounding runtime for cost control and reliability.
+
+This field is **only supported for managed jobs** (``sky jobs launch``). It is
+ignored by ``sky launch`` and ``sky exec``.
+
+The value is a duration string with an optional unit suffix: ``s`` (seconds),
+``m`` (minutes), ``h`` (hours), ``d`` (days), ``w`` (weeks). A plain number is
+treated as seconds.
+
+.. code-block:: yaml
+
+  max_duration: 10h
+
+
 .. _yaml-spec-resources:
 
 ``resources``
