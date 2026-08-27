@@ -335,6 +335,26 @@ def _wrap_collector(collector) -> ResilientCollector:
     return wrapped
 
 
+_multiproc_collector: Optional[ResilientCollector] = None
+_multiproc_collector_lock = threading.Lock()
+
+
+def _get_multiproc_collector() -> ResilientCollector:
+    """Process-wide wrapper for the multiprocess merge.
+
+    The merge reads every per-pid file under ``PROMETHEUS_MULTIPROC_DIR``
+    and is CPU-bound under the GIL, so wrapping it keeps concurrent
+    scrapes from each running their own copy. Built lazily because
+    ``MultiProcessCollector()`` raises unless that directory is set.
+    """
+    global _multiproc_collector
+    with _multiproc_collector_lock:
+        if _multiproc_collector is None:
+            _multiproc_collector = _wrap_collector(
+                multiprocess.MultiProcessCollector(None))
+        return _multiproc_collector
+
+
 class BurnRateCollector:
     """Collector for SkyPilot cluster burn rate metrics.
     This collector calculates the total hourly burn rate (in USD) of all
@@ -981,7 +1001,7 @@ def metrics() -> fastapi.Response:
     if os.environ.get('PROMETHEUS_MULTIPROC_DIR'):
         # In multiprocess mode, we need to collect metrics from all processes.
         registry = prom.CollectorRegistry()
-        multiprocess.MultiProcessCollector(registry)
+        registry.register(_get_multiproc_collector())
         registry.register(_BURN_RATE_COLLECTOR)
         registry.register(_SQLITE_DB_SIZE_COLLECTOR)
         registry.register(_WORKSPACE_USAGE_COLLECTOR)
