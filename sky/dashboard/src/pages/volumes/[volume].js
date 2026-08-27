@@ -16,6 +16,7 @@ import {
   CustomTooltip as Tooltip,
   NonCapitalizedTooltip,
   formatFullTimestamp,
+  formatSize,
 } from '@/components/utils';
 import { useMobile } from '@/hooks/useMobile';
 import Head from 'next/head';
@@ -285,7 +286,25 @@ function VolumeDetailCard({ volumeData }) {
               </div>
               <div>
                 <div className="text-gray-600 font-medium text-base">Size</div>
-                <div className="text-base mt-1">{volumeData.size || 'N/A'}</div>
+                <div className="text-base mt-1">
+                  {volumeData.size != null
+                    ? formatSize(volumeData.size)
+                    : 'N/A'}
+                  {volumeData.resize_status &&
+                    volumeData.resize_target_size != null && (
+                      <span className="text-gray-500">
+                        {' '}
+                        &rarr; {formatSize(volumeData.resize_target_size)}
+                      </span>
+                    )}
+                </div>
+                {/* The size above is the capacity the volume has now; a
+                    resize only shows up there once it has landed. */}
+                {volumeData.resize_message && (
+                  <div className="text-sm mt-1 text-gray-500">
+                    {volumeData.resize_message}
+                  </div>
+                )}
               </div>
               <div>
                 <div className="text-gray-600 font-medium text-base">User</div>

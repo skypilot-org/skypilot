@@ -1239,3 +1239,81 @@ class TestRunPodVolumeTable:
         assert 'Kubernetes PVCs:' in out
         assert 'RunPod Network Volumes:' in out
         assert '\n\n' in out
+
+
+class TestVolumeTableResize:
+    """What `sky volumes ls` says about a resize that has not landed yet.
+
+    The size column is the capacity the volume has, so an expansion in flight
+    is invisible there, and the message column only appears when something has
+    something to say.
+    """
+
+    def _volume(self, **overrides):
+        volume = {
+            'name': 'test-volume',
+            'type': 'k8s-pvc',
+            'region': 'context-1',
+            'config': {},
+            'size': '10',
+            'user_hash': 'user123',
+            'workspace': 'default',
+            'launched_at': 1234567890,
+            'last_attached_at': None,
+            'status': 'READY',
+            'last_use': 'sky volumes apply',
+        }
+        volume.update(overrides)
+        return volume
+
+    def test_a_resize_in_flight_shows_where_the_size_is_heading(self):
+        table = table_utils.PVCVolumeTable([
+            self._volume(resize_status='pending_on_node',
+                         resize_target_size='25',
+                         resize_message='Waiting to be mounted.')
+        ])
+
+        result = table.format()
+
+        assert '10Gi -> 25Gi' in result
+        # The message column is the one that says what it is waiting for.
+        assert 'MESSAGE' in result
+        assert 'Waiting to be mounted.' in result
+
+    def test_a_volume_that_is_not_resizing_gets_neither(self):
+        table = table_utils.PVCVolumeTable([self._volume()])
+
+        result = table.format()
+
+        assert '10Gi' in result
+        assert '->' not in result
+        assert 'MESSAGE' not in result
+
+    def test_an_error_wins_the_one_message_cell(self):
+        """It is the one that says the volume cannot be used at all."""
+        table = table_utils.PVCVolumeTable([
+            self._volume(status='FAILED',
+                         error_message='PVC is pending.',
+                         resize_status='in_progress',
+                         resize_target_size='25',
+                         resize_message='Resizing.')
+        ])
+
+        result = table.format()
+
+        assert 'PVC is pending.' in result
+        assert 'Resizing.' not in result
+
+    def test_a_target_that_rounds_to_the_current_size_is_not_shown(self):
+        """Both are whole gibibytes, so such an arrow would point at itself."""
+        table = table_utils.PVCVolumeTable([
+            self._volume(resize_status='pending_on_node',
+                         resize_target_size='10',
+                         resize_message='Waiting to be mounted.')
+        ])
+
+        result = table.format()
+
+        assert '->' not in result
+        # The reason still reaches the user.
+        assert 'Waiting to be mounted.' in result

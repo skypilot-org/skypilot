@@ -191,6 +191,16 @@ def volume_refresh(volume_names: Optional[List[str]] = None) -> None:
             current_error = latest_volume.get('error_message')
             current_usedby_pods = latest_volume.get('usedby_pods', [])
             current_usedby_clusters = latest_volume.get('usedby_clusters', [])
+            current_resize_status = latest_volume.get('resize_status')
+            current_resize_target = latest_volume.get('resize_target_size')
+            current_resize_message = latest_volume.get('resize_message')
+            observed = cloud_to_observed.get(cloud, {}).get(volume_name)
+            new_resize_status = (observed.resize_status
+                                 if observed is not None else None)
+            new_resize_target = (observed.resize_target_size
+                                 if observed is not None else None)
+            new_resize_message = (observed.resize_message
+                                  if observed is not None else None)
 
             # Determine new status and error_message
             if volume_error:
@@ -209,8 +219,14 @@ def volume_refresh(volume_names: Optional[List[str]] = None) -> None:
             usedby_changed = (
                 set(current_usedby_pods) != set(usedby_pods) or
                 set(current_usedby_clusters) != set(usedby_clusters))
+            resize_changed = (
+                current_resize_status !=
+                (new_resize_status.value if new_resize_status else None) or
+                current_resize_target != new_resize_target or
+                current_resize_message != new_resize_message)
 
-            if status_changed or error_changed or usedby_changed:
+            if (status_changed or error_changed or usedby_changed or
+                    resize_changed):
                 logger.info(f'Update volume {volume_name} status to '
                             f'{new_status.value}'
                             f'{", error: " + new_error if new_error else ""}')
@@ -219,7 +235,10 @@ def volume_refresh(volume_names: Optional[List[str]] = None) -> None:
                     status=new_status,
                     error_message=new_error,
                     usedby_pods=usedby_pods,
-                    usedby_clusters=usedby_clusters)
+                    usedby_clusters=usedby_clusters,
+                    resize_status=new_resize_status,
+                    resize_target_size=new_resize_target,
+                    resize_message=new_resize_message)
             volume_config = latest_volume.get('handle')
             if volume_config is None:
                 continue
@@ -235,9 +254,7 @@ def volume_refresh(volume_names: Optional[List[str]] = None) -> None:
             # The observed state was read before the lock, so it is merged into
             # the handle just re-read under it, not into the copy it was fetched
             # with.
-            if _apply_observed_state(
-                    volume_config,
-                    cloud_to_observed.get(cloud, {}).get(volume_name)):
+            if _apply_observed_state(volume_config, observed):
                 need_refresh = True
             if need_refresh:
                 global_user_state.update_volume_config(volume_name,
@@ -336,6 +353,21 @@ def volume_list(
                 'error_may_resolve':
                     volume_utils.volume_error_may_resolve(error_message),
                 'creation_yaml': volume.get('creation_yaml'),
+                # Only set while a resize is in flight: the size above is the
+                # capacity the volume has now, which is not what was asked for
+                # until the resize lands.
+                'resize_status': volume.get('resize_status'),
+                'resize_target_size': volume.get('resize_target_size'),
+                # Built here, not stored, so every surface says the same thing.
+                'resize_message': volume_utils.resize_display_message(
+                    volume.get('resize_status'),
+                    volume.get('resize_message'),
+                    # Seeing a cluster on the volume means it is certainly
+                    # mounted, which is what decides the advice for a resize
+                    # waiting on the node.
+                    known_in_use=bool(
+                        volume.get('usedby_pods') or
+                        volume.get('usedby_clusters'))),
                 'type': config.type,
                 'cloud': config.cloud,
                 'region': config.region,

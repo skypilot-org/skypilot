@@ -117,12 +117,18 @@ class TestVolumeCore:
                       status=status_lib.VolumeStatus.READY,
                       error_message=None,
                       usedby_pods=[],
-                      usedby_clusters=[]),
+                      usedby_clusters=[],
+                      resize_status=None,
+                      resize_target_size=None,
+                      resize_message=None),
             mock.call('test-volume-2',
                       status=status_lib.VolumeStatus.READY,
                       error_message=None,
                       usedby_pods=[],
-                      usedby_clusters=[])
+                      usedby_clusters=[],
+                      resize_status=None,
+                      resize_target_size=None,
+                      resize_message=None)
         ]
         mock_update_status.assert_has_calls(expected_calls, any_order=True)
 
@@ -219,12 +225,18 @@ class TestVolumeCore:
                       status=status_lib.VolumeStatus.IN_USE,
                       error_message=None,
                       usedby_pods=['pod1', 'pod2'],
-                      usedby_clusters=['cluster1', 'cluster2']),
+                      usedby_clusters=['cluster1', 'cluster2'],
+                      resize_status=None,
+                      resize_target_size=None,
+                      resize_message=None),
             mock.call('test-volume-2',
                       status=status_lib.VolumeStatus.IN_USE,
                       error_message=None,
                       usedby_pods=['pod1', 'pod2'],
-                      usedby_clusters=['cluster1', 'cluster2'])
+                      usedby_clusters=['cluster1', 'cluster2'],
+                      resize_status=None,
+                      resize_target_size=None,
+                      resize_message=None)
         ]
         mock_update_status.assert_has_calls(expected_calls, any_order=True)
 
@@ -2395,3 +2407,152 @@ class TestVolumeRefreshObservedState:
 
         update_config.assert_not_called()
         assert handle.config['storage_class_name'] == 'standard-rwo'
+
+
+class TestVolumeRefreshResizeState:
+    """A resize that has not landed yet has to be visible while it lasts.
+
+    The recorded size is the capacity the volume has, so an expansion that is
+    still running -- or parked until the workload restarts -- otherwise looks
+    exactly like nothing happening.
+    """
+
+    def _config(self, size='1'):
+        return models.VolumeConfig(
+            _version=1,
+            name='checkpoints',
+            type='k8s-pvc',
+            cloud='kubernetes',
+            region='my-context',
+            zone=None,
+            name_on_cloud='checkpoints-abc123',
+            size=size,
+            config={'namespace': 'my-namespace'},
+        )
+
+    def _volume(self, handle, resize_status=None, resize_target_size=None):
+        return {
+            'name': 'checkpoints',
+            'launched_at': 1234567890,
+            'user_hash': 'user123',
+            'workspace': 'default',
+            'last_attached_at': None,
+            'last_use': None,
+            'handle': handle,
+            'status': status_lib.VolumeStatus.READY,
+            'is_ephemeral': False,
+            'usedby_pods': [],
+            'usedby_clusters': [],
+            'error_message': None,
+            'resize_status': resize_status,
+            'resize_target_size': resize_target_size,
+        }
+
+    def _refresh(self, monkeypatch, volume, observed):
+        monkeypatch.setattr(global_user_state, 'get_volumes',
+                            mock.MagicMock(return_value=[volume]))
+        monkeypatch.setattr(global_user_state, 'get_volume_by_name',
+                            mock.MagicMock(return_value=volume))
+        monkeypatch.setattr(
+            provision, 'get_all_volumes_state',
+            mock.MagicMock(return_value=({
+                'checkpoints': None
+            }, observed, set())))
+        monkeypatch.setattr(provision, 'get_all_volumes_usedby',
+                            mock.MagicMock(return_value=({}, {}, set())))
+        monkeypatch.setattr(provision, 'map_all_volumes_usedby',
+                            mock.MagicMock(return_value=([], [])))
+        monkeypatch.setattr(
+            provision, 'refresh_volume_config',
+            mock.MagicMock(side_effect=lambda cloud, c: (False, c)))
+        monkeypatch.setattr('sky.volumes.server.core.filelock.FileLock',
+                            mock.MagicMock())
+        monkeypatch.setattr(global_user_state, 'update_volume_config',
+                            mock.MagicMock())
+        update_status = mock.MagicMock()
+        monkeypatch.setattr(global_user_state, 'update_volume_status',
+                            update_status)
+
+        core.volume_refresh()
+        return update_status
+
+    def test_a_resize_in_flight_is_recorded(self, monkeypatch):
+        volume = self._volume(self._config(size='1'))
+
+        update_status = self._refresh(
+            monkeypatch, volume, {
+                'checkpoints': models.ObservedVolumeState(
+                    size='1',
+                    resize_status=models.VolumeResizeStatus.PENDING_ON_NODE,
+                    resize_target_size='2')
+            })
+
+        update_status.assert_called_once()
+        kwargs = update_status.call_args.kwargs
+        assert kwargs['resize_status'] == (
+            models.VolumeResizeStatus.PENDING_ON_NODE)
+        assert kwargs['resize_target_size'] == '2'
+
+    def test_a_finished_resize_clears_what_was_recorded(self, monkeypatch):
+        """The cloud stops reporting a resize once it lands; so must we."""
+        volume = self._volume(self._config(size='2'),
+                              resize_status='pending_on_node',
+                              resize_target_size='2')
+
+        update_status = self._refresh(
+            monkeypatch, volume,
+            {'checkpoints': models.ObservedVolumeState(size='2')})
+
+        update_status.assert_called_once()
+        kwargs = update_status.call_args.kwargs
+        assert kwargs['resize_status'] is None
+        assert kwargs['resize_target_size'] is None
+
+    def test_an_unchanged_resize_is_not_rewritten(self, monkeypatch):
+        """A resize can sit pending for hours; that must not cost a write a
+        minute."""
+        volume = self._volume(self._config(size='1'),
+                              resize_status='pending_on_node',
+                              resize_target_size='2')
+
+        update_status = self._refresh(
+            monkeypatch, volume, {
+                'checkpoints': models.ObservedVolumeState(
+                    size='1',
+                    resize_status=models.VolumeResizeStatus.PENDING_ON_NODE,
+                    resize_target_size='2')
+            })
+
+        update_status.assert_not_called()
+
+    def test_a_volume_in_use_gets_the_advice_for_one(self, monkeypatch):
+        """Whether anything holds the volume decides what the user is told,
+        and volume_list is where the two meet."""
+        volume = self._volume(self._config(size='1'),
+                              resize_status='pending_on_node',
+                              resize_target_size='2')
+        volume['usedby_clusters'] = ['some-cluster']
+        monkeypatch.setattr(global_user_state, 'get_volumes',
+                            mock.MagicMock(return_value=[volume]))
+        monkeypatch.setattr(global_user_state, 'get_all_users',
+                            mock.MagicMock(return_value=[]))
+
+        records = core.volume_list()
+
+        assert ('usually grows the filesystem without a restart'
+                in records[0]['resize_message'])
+
+    def test_the_fields_survive_the_response_model(self, monkeypatch):
+        """volume_list has to carry them through to the client."""
+        volume = self._volume(self._config(size='1'),
+                              resize_status='pending_on_node',
+                              resize_target_size='2')
+        monkeypatch.setattr(global_user_state, 'get_volumes',
+                            mock.MagicMock(return_value=[volume]))
+        monkeypatch.setattr(global_user_state, 'get_all_users',
+                            mock.MagicMock(return_value=[]))
+
+        records = core.volume_list()
+
+        assert records[0]['resize_status'] == 'pending_on_node'
+        assert records[0]['resize_target_size'] == '2'
