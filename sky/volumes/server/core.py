@@ -318,14 +318,16 @@ def volume_list(
         # calls by the (context, namespace) pairs of the volumes it is handed,
         # so narrowing the set narrows the calls. The daemon in
         # sky/server/daemons.py still refreshes the whole table.
-        # Requested names narrow this again. get_volumes applies every filter
+        # Requested names narrow this again. The lookup applies every filter
         # it is given, so naming a volume outside the accessible workspaces
         # reconciles nothing -- which would otherwise confirm it exists.
-        volume_refresh(volume_names=[
-            volume['name'] for volume in global_user_state.get_volumes(
-                workspaces_filter=accessible_workspaces,
-                volume_names=volume_names)
-        ])
+        # Ephemeral volumes are excluded here rather than inside
+        # volume_refresh, which drops them anyway: handing them over only
+        # lengthens the IN list.
+        volume_refresh(volume_names=global_user_state.get_volume_names(
+            is_ephemeral=False,
+            workspaces_filter=accessible_workspaces,
+            volume_names=volume_names))
     with rich_utils.safe_status(ux_utils.spinner_message('Listing volumes')):
         volumes = global_user_state.get_volumes(
             is_ephemeral=is_ephemeral,

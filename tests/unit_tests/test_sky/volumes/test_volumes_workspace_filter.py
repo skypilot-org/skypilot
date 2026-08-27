@@ -128,7 +128,25 @@ def test_refresh_is_scoped_to_the_accessible_workspaces(isolated_database):
                                'volume_refresh') as volume_refresh:
             volumes_core.volume_list(refresh=True)
 
-    volume_refresh.assert_called_once_with(volume_names=['vol-a'])
+    volume_refresh.assert_called_once()
+    # Sorted: the names come from a query with no ORDER BY.
+    assert sorted(volume_refresh.call_args.kwargs['volume_names']) == ['vol-a']
+
+
+def test_refresh_is_not_handed_ephemeral_volumes(isolated_database):
+    """volume_refresh reconciles persistent volumes only, so an ephemeral name
+    can only lengthen the IN list it looks up."""
+    _add('vol-a', workspace='ws-a')
+    _add('vol-a-ephemeral', workspace='ws-a', is_ephemeral=True)
+
+    with mock.patch.object(volumes_core.workspaces_core,
+                           'get_accessible_workspace_names',
+                           return_value={'ws-a'}):
+        with mock.patch.object(volumes_core,
+                               'volume_refresh') as volume_refresh:
+            volumes_core.volume_list(refresh=True)
+
+    assert sorted(volume_refresh.call_args.kwargs['volume_names']) == ['vol-a']
 
 
 def test_filters_to_the_given_names(isolated_database):
@@ -182,3 +200,18 @@ def test_names_are_chunked_but_all_are_returned(isolated_database, monkeypatch):
         volume_names=[f'vol-{i}' for i in range(5)])
 
     assert sorted(r['name'] for r in records) == [f'vol-{i}' for i in range(5)]
+
+
+def test_get_volume_names_applies_the_same_filters(isolated_database):
+    """The name-only lookup must not be a wider door than get_volumes."""
+    _add('vol-a', workspace='ws-a')
+    _add('vol-a-ephemeral', workspace='ws-a', is_ephemeral=True)
+    _add('vol-b', workspace='ws-b')
+
+    names = global_user_state.get_volume_names(
+        is_ephemeral=False,
+        workspaces_filter={'ws-a'},
+        volume_names=['vol-a', 'vol-a-ephemeral', 'vol-b'])
+
+    assert names == ['vol-a']
+    assert global_user_state.get_volume_names(workspaces_filter=set()) == []

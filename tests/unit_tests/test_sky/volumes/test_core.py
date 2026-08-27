@@ -2310,7 +2310,20 @@ class TestVolumeListScopedToNames:
                 out = [r for r in out if r['name'] in volume_names]
             return out
 
+        def fake_get_volume_names(is_ephemeral=None,
+                                  workspaces_filter=None,
+                                  volume_names=None):
+            """The name-only lookup, filtering as the record one does."""
+            return [
+                row['name']
+                for row in fake_get_volumes(is_ephemeral=is_ephemeral,
+                                            workspaces_filter=workspaces_filter,
+                                            volume_names=volume_names)
+            ]
+
         monkeypatch.setattr(global_user_state, 'get_volumes', fake_get_volumes)
+        monkeypatch.setattr(global_user_state, 'get_volume_names',
+                            fake_get_volume_names)
         monkeypatch.setattr(global_user_state, 'get_all_users',
                             mock.MagicMock(return_value=[]))
         monkeypatch.setattr(
