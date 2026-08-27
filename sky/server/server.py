@@ -99,6 +99,7 @@ from sky.users import rbac
 from sky.users import server as users_rest
 from sky.users import token_service
 from sky.utils import admin_policy_utils
+from sky.utils import asyncio_utils
 from sky.utils import command_runner
 from sky.utils import common as common_lib
 from sky.utils import common_utils
@@ -911,6 +912,7 @@ def _prune_sky_logs(cutoff: float) -> int:
 
 async def cleanup_sky_logs():
     """Hourly GC of expired per-operation ~/sky_logs artifacts."""
+    await asyncio_utils.sleep_startup_jitter('sky_logs cleanup daemon')
     while True:
         try:
             skypilot_config.reload_config()

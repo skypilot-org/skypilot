@@ -31,6 +31,7 @@ from sky import skypilot_config
 from sky.metrics import utils as metrics_lib
 from sky.skylet import constants
 from sky.utils import annotations
+from sky.utils import asyncio_utils
 from sky.utils import common_utils
 from sky.utils import context_utils
 from sky.utils import registry
@@ -54,7 +55,11 @@ _ALLOWED_CLOUDS_KEY_PREFIX = 'allowed_clouds_'
 DEFAULT_CLUSTER_EVENT_RETENTION_HOURS = 30 * 24.0
 DEBUG_CLUSTER_EVENT_RETENTION_HOURS = 30 * 24.0
 TERMINAL_CLUSTER_EVENT_RETENTION_HOURS = 30 * 24.0
-MIN_CLUSTER_EVENT_DAEMON_INTERVAL_SECONDS = 3600
+# How often the cluster-event retention daemon wakes up. Fixed, and
+# deliberately independent of the retention windows above: events become
+# eligible for deletion continuously, so the interval decides how much
+# work accumulates between passes, not how long events are kept.
+CLUSTER_EVENT_DAEMON_INTERVAL_SECONDS = 3600
 
 _UNIQUE_CONSTRAINT_FAILED_ERROR_MSGS = [
     # sqlite
@@ -1261,6 +1266,7 @@ def cleanup_cluster_events_with_retention(retention_hours: float,
 
 async def cluster_event_retention_daemon():
     """Garbage collect cluster events periodically."""
+    await asyncio_utils.sleep_startup_jitter('cluster event retention daemon')
     while True:
         logger.info('Running cluster event retention daemon...')
         # Use the latest config.
@@ -1302,11 +1308,7 @@ async def cluster_event_retention_daemon():
         except Exception as e:  # pylint: disable=broad-except
             logger.error(f'Error running cluster event retention daemon: {e}')
 
-        # Run daemon at most once every hour to avoid too frequent cleanup.
-        sleep_amount = max(
-            min(retention_hours * 3600, debug_retention_hours * 3600),
-            MIN_CLUSTER_EVENT_DAEMON_INTERVAL_SECONDS)
-        await asyncio.sleep(sleep_amount)
+        await asyncio.sleep(CLUSTER_EVENT_DAEMON_INTERVAL_SECONDS)
 
 
 @typing.overload
