@@ -1074,6 +1074,9 @@ class Kubernetes(clouds.Cloud):
             'tpu_requested': tpu_requested,
             'k8s_topology_label_key': k8s_topology_label_key,
             'k8s_topology_label_value': k8s_topology_label_value,
+            'k8s_node_selector': kubernetes_utils.get_node_selector(
+                k8s_topology_label_key, k8s_topology_label_value,
+                spot_label_key, spot_label_value, enable_flex_start),
             'k8s_resource_key': k8s_resource_key,
             'k8s_env_vars': k8s_env_vars,
             'image_id': image_id,
