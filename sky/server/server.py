@@ -2981,7 +2981,7 @@ async def api_cancel(
     )
 
 
-@app.get('/api/status')
+@app.get('/api/status', response_model_exclude_unset=True)
 async def api_status(
     request: fastapi.Request,
     request_ids: Optional[List[str]] = fastapi.Query(
@@ -3014,19 +3014,59 @@ async def api_status(
         statuses = None
         if not all_status:
             statuses = requests_lib.RequestStatus.active_statuses()
+        req_filter = requests_lib.RequestTaskFilter(
+            status=statuses,
+            cluster_names=[cluster_name] if cluster_name else None,
+            user_id=scope_user_id,
+            exclude_request_names=[
+                server_constants.REQUEST_NAME_PREFIX + d.value
+                for d in daemons.HIDDEN_REQUEST_NAMES
+            ],
+            limit=limit,
+            fields=fields,
+            sort=True,
+        )
+        # Fields-aware fast path (any client version): for a caller that requested
+        # a `fields` set the fast path faithfully mirrors on the wire
+        # (requests_lib.is_fast_path_eligible_fields -- only the display scalars;
+        # NOT the decode-dependent entrypoint/request_body, nor the columns
+        # encode_requests suppresses to placeholders: return_value/error/pid/
+        # file_mounts_blob_id), build the display payloads straight from the
+        # projected rows -- skipping the per-row Request.from_row decode +
+        # encode_requests re-validation, serializing with orjson as raw bytes so
+        # the per-row response_model dump is skipped too. This serves new AND old
+        # clients: new clients get the trimmed wire (only requested/derived fields
+        # -- they reconstruct the rest via the RequestPayload defaults); old
+        # clients (or no version header) get the full legacy wire with the same
+        # placeholder values (built faster, byte-for-byte equivalent) so their
+        # still-required RequestPayload fields reconstruct. The trim is gated on
+        # the client's advertised version (MIN_OMIT_UNREQUESTED_FIELDS_API_VERSION);
+        # the speed is not. Unprojected (fields=None) queries and callers wanting
+        # any excluded field use the legacy decode path below. Note:
+        # response_model_exclude_unset on the route above also trims the *legacy*
+        # path -- it drops file_mounts_blob_id (a defaulted Optional).
+        remote_api_version = versions.get_remote_api_version()
+        if requests_lib.is_fast_path_eligible_fields(fields):
+            omit_unrequested = (
+                remote_api_version is not None and remote_api_version >=
+                server_constants.MIN_OMIT_UNREQUESTED_FIELDS_API_VERSION)
+            result = await requests_lib.get_request_payloads_async(
+                req_filter=req_filter,
+                caller_user_id=caller_user_id,
+                omit_unrequested=omit_unrequested)
+            # The Sqlite fast override returns raw orjson bytes; the route wraps
+            # them in a fastapi.Response so FastAPI's per-row response_model
+            # serialization is skipped too. A backend without the fast override
+            # (e.g. an unshipped HA Postgres backend) returns the legacy
+            # List[RequestPayload], which we return for FastAPI to serialize
+            # (response_model_exclude_unset) -- no regression for that backend
+            # until it ships its own fast override.
+            if isinstance(result, (bytes, bytearray)):
+                return fastapi.Response(content=result,
+                                        media_type='application/json')
+            return result
         request_tasks = await requests_lib.get_request_tasks_async(
-            req_filter=requests_lib.RequestTaskFilter(
-                status=statuses,
-                cluster_names=[cluster_name] if cluster_name else None,
-                user_id=scope_user_id,
-                exclude_request_names=[
-                    server_constants.REQUEST_NAME_PREFIX + d.value
-                    for d in daemons.HIDDEN_REQUEST_NAMES
-                ],
-                limit=limit,
-                fields=fields,
-                sort=True,
-            ))
+            req_filter=req_filter)
         return requests_lib.encode_requests(request_tasks,
                                             caller_user_id=caller_user_id)
     else:
