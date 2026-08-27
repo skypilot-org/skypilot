@@ -1,12 +1,13 @@
 """Kubernetes instance provisioning."""
 import copy
 import datetime
+import functools
 import json
 import re
 import sys
 import time
-from typing import (Any, Callable, Dict, List, Mapping, NamedTuple, Optional,
-                    Set, Tuple, TYPE_CHECKING, Union)
+from typing import (Any, Callable, Dict, List, Mapping, NamedTuple, NoReturn,
+                    Optional, Set, Tuple, TYPE_CHECKING, Union)
 
 from sky import exceptions
 from sky import global_user_state
@@ -166,6 +167,24 @@ _STALL_EXEMPT_PENDING_REASONS = frozenset(
 # not going to resolve. Without this deadline such a pod hangs the launch
 # forever behind a 'Launching' spinner, with no error, ever.
 _POD_RUN_STALL_TIMEOUT_SECONDS = 600
+# How long a launch waits for its pods to run before parking the request (see
+# _park_for_slow_pods). Far longer than an ordinary container start: parking
+# ends the launch's rich status, so a launch that would have finished on its
+# own shortly should not pay for it.
+_POD_RUN_PARK_GRACE_SECONDS = 300
+# Poll policy for PodsProgressedCondition.wait(): jittered backoff between
+# these bounds.
+_PARK_POLL_INITIAL_SECONDS = 2
+_PARK_POLL_MAX_FACTOR = 15  # max poll interval = 2 * 15 = 30s
+# Consecutive poll errors tolerated before handing the launch back rather than
+# probing blind.
+_PARK_MAX_CONSECUTIVE_ERRORS = 5
+# Safety cap before handing the launch back to re-derive the pods' state. Not a
+# deadline: it re-runs and parks again if nothing has changed.
+_PARK_MAX_WAIT_SECONDS = 60 * 60
+# How often a parked request's status message is refreshed. Much slower than
+# the poll: the message only has to not go stale.
+_PARK_REASON_REFRESH_SECONDS = 60
 
 # How long to wait before first probing the volumes of a pod that is not up
 # yet, and how long between probes after that. A probe costs one GET per claim,
@@ -1339,6 +1358,196 @@ def _wait_for_pods_to_schedule(namespace, context, new_nodes, timeout: int,
             f'Error: {common_utils.format_exception(e)}') from None
 
 
+def _check_init_containers(pod) -> Optional[_InitContainerProgress]:
+    """Check init containers for errors and return the one holding up pod
+    initialization.
+
+    Returns the first init container that is running, else the first one
+    the kubelet is still creating (pulling its image), else None -- no
+    init container accounts for the pod being uninitialized.
+    Raises KubernetesError if any init container failed.
+    """
+    init_statuses = pod.status.init_container_statuses
+    total = len(init_statuses)
+    running_info: Optional[_InitContainerProgress] = None
+    starting_info: Optional[_InitContainerProgress] = None
+    for idx, init_status in enumerate(init_statuses):
+        init_terminated = init_status.state.terminated
+        if init_terminated:
+            if init_terminated.exit_code != 0:
+                msg = init_terminated.message if (
+                    init_terminated.message) else str(init_terminated)
+                raise config_lib.KubernetesError(
+                    'Failed to run init container for pod '
+                    f'{pod.metadata.name}. Error details: {msg}.')
+            continue
+        if (init_status.state.running is not None and running_info is None):
+            running_info = _InitContainerProgress(init_status.name, idx + 1,
+                                                  total, True)
+        init_waiting = init_status.state.waiting
+        if init_waiting is not None:
+            if init_waiting.reason in ('ContainerCreating', 'PodInitializing'):
+                # The kubelet is creating it -- most often pulling its
+                # image, which is legitimately slow. Recorded so the
+                # no-progress deadline does not mistake it for a stall.
+                if starting_info is None:
+                    starting_info = _InitContainerProgress(
+                        init_status.name, idx + 1, total, False)
+            else:
+                # TODO(romilb): There may be more states to check for. Add
+                #  them as needed.
+                msg = init_waiting.message if (
+                    init_waiting.message) else str(init_waiting)
+                unmasked = _unmask_crashloopbackoff_reason(init_status)
+                reason_text = (unmasked if unmasked is not None else
+                               (init_waiting.reason or 'Unknown'))
+                raise config_lib.KubernetesError(
+                    f'Failed to create init container for pod '
+                    f'{pod.metadata.name}. Error details: '
+                    f'{reason_text}: {msg}.')
+    return running_info if running_info is not None else starting_info
+
+
+def _inspect_pod_status(pod, context: Optional[str], namespace: str,
+                        cluster_name: str) -> Tuple[bool, Optional[str]]:
+    """Whether ``pod`` is fully running, and the single reason it is not.
+
+    ``pending_reason`` is None when none could be derived. Raises
+    ``config_lib.KubernetesError`` for a pod that has failed outright, which
+    callers let propagate.
+
+    Module-level so the parked-launch continue condition classifies pods
+    exactly the way the wait loop does; the two must not drift.
+    """
+    # Check if pod is terminated/preempted/failed (unchanged).
+    if (pod.metadata.deletion_timestamp is not None or
+            pod.status.phase == 'Failed'):
+        # Get the reason and write to cluster events before
+        # the pod gets completely deleted from the API.
+        termination_reason = _get_pod_termination_reason(pod, cluster_name)
+        logger.warning(
+            f'Pod {pod.metadata.name} terminated: {termination_reason}')
+        condensed = _condensed_pod_reason(pod)
+        raise config_lib.KubernetesError(
+            f'Pod {pod.metadata.name} failed: {condensed}')
+
+    container_statuses = pod.status.container_statuses
+    # Happy path: pod Running and every container Running (unchanged).
+    if (pod.status.phase == 'Running' and container_statuses is not None and
+            all(container.state.running for container in container_statuses)):
+        return True, None
+
+    # Tier 1: container-status sweep. Computed once, consumed in both
+    # branches below.
+    container_reason = _get_pod_pending_reason_from_container_status(pod)
+
+    if pod.status.phase == 'Pending':
+        # Today's raise block -- control flow preserved, message enriched
+        # via _unmask_crashloopbackoff_reason when the waiting state is
+        # CrashLoopBackOff. msg body (waiting.message) is always preserved.
+        init_reason: Optional[str] = None
+        # Whether init_reason is an assumption about what the kubelet is
+        # doing rather than something it reported -- see below.
+        init_reason_is_assumed = False
+        if container_statuses is not None:
+            for container_status in container_statuses:
+                if not container_status.state:
+                    continue
+                waiting = container_status.state.waiting
+                if waiting is not None:
+                    if waiting.reason == 'PodInitializing':
+                        init_progress = _check_init_containers(pod)
+                        if init_progress is not None:
+                            verb = ('running'
+                                    if init_progress.running else 'starting')
+                            init_reason = (f'{_INIT_CONTAINER_REASON_PREFIX}'
+                                           f'{init_progress.name!r} {verb} '
+                                           f'({init_progress.position}/'
+                                           f'{init_progress.total})')
+                            init_reason_is_assumed = (not init_progress.running)
+                        else:
+                            # PodInitializing, yet no init container is
+                            # running or being created -- they have all
+                            # terminated successfully and the kubelet has
+                            # simply not moved on to the main containers.
+                            # Nothing here is legitimately slow, so unlike
+                            # the two branches above this reason is not
+                            # exempt from the no-progress deadline.
+                            init_reason = _POD_INITIALIZATION_REASON
+                    elif waiting.reason != 'ContainerCreating':
+                        msg = waiting.message if (
+                            waiting.message) else str(waiting)
+                        unmasked = _unmask_crashloopbackoff_reason(
+                            container_status)
+                        reason_text = (unmasked if unmasked is not None else
+                                       (waiting.reason or 'Unknown'))
+                        raise config_lib.KubernetesError(
+                            f'{reason_text}: {msg}')
+                terminated = container_status.state.terminated
+                if terminated is not None and terminated.exit_code != 0:
+                    reason_str = (terminated.reason if terminated.reason else
+                                  f'exit({terminated.exit_code})')
+                    raise config_lib.KubernetesError(
+                        f'Container in pod {pod.metadata.name} '
+                        f'terminated with error while pod is still '
+                        f'pending: {reason_str}. Run '
+                        f'`sky logs --provision {cluster_name}` '
+                        'for more details.')
+
+        # Init container reason wins over all event-based reasons,
+        # since events can retain stale "Pulling image" entries long
+        # after the pull completed.  Otherwise, Tier 1 (container
+        # status) wins; fall back to Tier 2/3 events.
+        reason: Optional[str] = init_reason or container_reason
+        event_message: Optional[str] = None
+        if reason is None:
+            pending_reason = _get_pod_pending_reason(context, namespace,
+                                                     pod.metadata.name)
+            if pending_reason is not None:
+                reason, event_message = pending_reason
+        elif init_reason_is_assumed:
+            # 'init container ... starting' says only that the kubelet has
+            # not started the container yet; that this is legitimately slow
+            # work (an image pull of its own) is an assumption, and it is
+            # the assumption that makes the reason stall-exempt. The same
+            # state is what a pod shows when the kubelet cannot get as far
+            # as starting the container at all -- a sandbox it cannot
+            # create, a volume it cannot mount -- which is reported only
+            # through events. So let a live Warning, one the pod has not
+            # already moved past, replace the assumption: it is both the
+            # truer reason and, unlike the init label, bounded by the
+            # no-progress deadline. An allow-listed Normal is not consulted
+            # -- it is exempt either way, and the init label names which
+            # container the pod is waiting on.
+            pending_reason = _get_pod_pending_reason(context,
+                                                     namespace,
+                                                     pod.metadata.name,
+                                                     warnings_only=True)
+            if pending_reason is not None:
+                reason, event_message = pending_reason
+        if reason is None and _pod_is_scheduled(pod):
+            # A freshly-bound pod that the kubelet has not picked up yet
+            # (and the uninformative 'ContainerCreating' state) has no
+            # container-status reason and no event yet. Default to
+            # 'container creation' so the launch spinner shows useful
+            # detail (e.g. 'Launching (1 pod(s) pending due to container
+            # creation)') instead of a bare 'Launching'. Gate on
+            # _pod_is_scheduled so an unbound pod still waiting for
+            # capacity is not mislabeled as creating a container.
+            reason = _CONTAINER_CREATION_REASON
+        if reason is not None:
+            log_msg = f'Pod {pod.metadata.name} is pending: {reason}'
+            if event_message:
+                log_msg += f': {event_message}'
+            logger.debug(log_msg)
+        return False, reason
+
+    # phase == 'Running' but not all containers running (e.g. one is in
+    # CrashLoopBackOff). Surface tier-1's pending reason -- previously this
+    # returned (False, None) silently, masking OOMKilled etc.
+    return False, container_reason
+
+
 def _reason_is_exempt_from_stall(reason: Optional[str]) -> bool:
     """Whether a pending reason is allowed to persist indefinitely.
 
@@ -1365,6 +1574,222 @@ def _stall_timeout_seconds(reason: Optional[str]) -> int:
     return _POD_RUN_STALL_TIMEOUT_SECONDS
 
 
+def _pending_pod_wait_is_open_ended(
+        pod: Any, reason: Optional[str], context: Optional[str],
+        cluster_name: str) -> Tuple[bool, Optional[str]]:
+    """Whether a pod that has not started may be waited on without a deadline.
+
+    Returns ``(open_ended, fail_message)``. A registered ``PodStartPolicy``
+    decides first: ``WAIT`` makes the wait open-ended whatever the reason says
+    (suppressing the no-progress deadline), ``FAIL`` gives the message
+    provisioning must fail with. Absent an opinion, the built-in exemption
+    decides.
+
+    An open-ended wait is what the park exists for: nothing to do but wait it
+    out, so the request should not spend a worker on it.
+    """
+    verdict = plugin_extensions.PodStartPolicy.get(pod, reason, context,
+                                                   cluster_name)
+    if verdict is not None:
+        decision, message = verdict
+        if decision is plugin_extensions.PodStartVerdict.FAIL:
+            return False, (message or
+                           f'Pod {pod.metadata.name} will not start.')
+        return True, None
+    return _reason_is_exempt_from_stall(reason), None
+
+
+def _pending_reasons_summary(reasons: List[Optional[str]]) -> Optional[str]:
+    """E.g. ``'2 pod(s) pending due to Pulling, 1 pod(s) pending due to X'``.
+
+    None when no pod reported a reason. Shared by the launch spinner and by a
+    parked request's status message, so the two cannot drift.
+    """
+    counts: Dict[str, int] = {}
+    for reason in reasons:
+        if reason is not None:
+            counts[reason] = counts.get(reason, 0) + 1
+    if not counts:
+        return None
+    return ', '.join(f'{count} pod(s) pending due to {reason}'
+                     for reason, count in sorted(counts.items()))
+
+
+class PodsProgressedCondition:
+    """Resume a parked launch once its pods stop being merely slow to start.
+
+    Implements the ``wait()`` continue-condition contract for
+    ``exceptions.ExecutionPausedError`` (duck-typed via its
+    ``continue_condition`` field, like ``locks.LockAcquirableCondition``).
+    Instances are pickled onto the exception, so state stays picklable.
+
+    Resumes when the pods' wait stops being open-ended -- not when they run,
+    and not on any change to the reason. Two invariants rest on that:
+
+    * The park/resume cycle stays finite with no wall-clock deadline, because
+      every resume follows a real exit from the open-ended class. Resuming on
+      any change would not: a pod still pulling an image reads as 'Pulling'
+      until that event ages out of the event window and as 'container
+      creation' after, which is not progress. Progress within the class goes
+      to the status message instead.
+    * The no-progress deadline survives. A pod that goes from pulling an image
+      to failing to mount a volume hands the launch back and is timed as
+      usual; waiting here for it to *run* would suspend that deadline for the
+      length of the park, and it would never fail.
+    """
+
+    def __init__(self, namespace: str, context: Optional[str],
+                 cluster_name: str, cluster_name_on_cloud: str,
+                 pod_names: List[str], reason: Optional[str]) -> None:
+        self.namespace = namespace
+        self.context = context
+        self.cluster_name = cluster_name
+        self.cluster_name_on_cloud = cluster_name_on_cloud
+        self.pod_names = pod_names
+        # The reason the request parked with; refreshes report against it, so
+        # the first one only pushes if there is something new to say.
+        self.reason = reason
+
+    def _poll(self) -> Tuple[bool, Optional[str]]:
+        """Whether to resume, and the reason to report if not.
+
+        Resumes on anything the launch has to act on: a pod gone, a pod
+        failed, a pod whose wait has stopped being open-ended, or all pods
+        running. Goes through the same two functions the wait loop uses
+        (``_inspect_pod_status`` and ``_pending_pod_wait_is_open_ended``), so
+        the two cannot disagree about what a pod is doing.
+        """
+        pods = kubernetes.core_api(self.context).list_namespaced_pod(
+            self.namespace,
+            label_selector=(f'{constants.TAG_SKYPILOT_CLUSTER_NAME}='
+                            f'{self.cluster_name_on_cloud}'),
+            _request_timeout=_POD_POLL_REQUEST_TIMEOUT).items
+        by_name = {pod.metadata.name: pod for pod in pods}
+        if any(name not in by_name for name in self.pod_names):
+            # The set the launch was waiting on no longer exists. Let it
+            # re-run: its own missing-pod handling reports why.
+            return True, None
+        pending: List[Optional[str]] = []
+        for name in self.pod_names:
+            pod = by_name[name]
+            # A terminated pod is the launch's business. Checked before
+            # _inspect_pod_status, which would write the termination cluster
+            # event from the scheduler's monitor thread, and again on re-run.
+            if (pod.metadata.deletion_timestamp is not None or
+                    pod.status.phase == 'Failed'):
+                return True, None
+            try:
+                is_running, reason = _inspect_pod_status(
+                    pod, self.context, self.namespace, self.cluster_name)
+            except config_lib.KubernetesError:
+                # The pod cannot start at all. Same reasoning: let the launch
+                # raise it.
+                return True, None
+            if is_running:
+                continue
+            open_ended, fail_message = _pending_pod_wait_is_open_ended(
+                pod, reason, self.context, self.cluster_name)
+            if fail_message is not None:
+                # The policy's verdict turned while parked. Hand the launch
+                # back rather than raise in the monitor thread: it consults
+                # the same policy and reports through its own error path.
+                return True, None
+            if not open_ended:
+                return True, None
+            pending.append(reason)
+        if not pending:
+            return True, None
+        return False, _pending_reasons_summary(pending)
+
+    def wait(self,
+             *,
+             is_cancelled: Callable[[], bool],
+             fallback_wait_seconds: float,
+             update_status_msg: Optional[Callable[[str], None]] = None) -> bool:
+        """Poll until the pods progress, the cap elapses, or cancelled."""
+        deadline = time.time() + _PARK_MAX_WAIT_SECONDS
+        backoff = common_utils.Backoff(
+            initial_backoff=_PARK_POLL_INITIAL_SECONDS,
+            max_backoff_factor=_PARK_POLL_MAX_FACTOR)
+        consecutive_errors = 0
+        last_message = self.reason
+        last_refresh = time.monotonic()
+        while True:
+            if is_cancelled():
+                logger.info('Request cancelled while paused for pods '
+                            f'{self.pod_names} to start; not rescheduling.')
+                return False
+            try:
+                progressed, reason = self._poll()
+                consecutive_errors = 0
+            except Exception as e:  # pylint: disable=broad-except
+                consecutive_errors += 1
+                logger.warning(f'Error polling pods {self.pod_names} while '
+                               f'paused ({consecutive_errors}/'
+                               f'{_PARK_MAX_CONSECUTIVE_ERRORS}): {e}')
+                if consecutive_errors >= _PARK_MAX_CONSECUTIVE_ERRORS:
+                    # Hand the launch back rather than probe blind: it derives
+                    # the same state itself, and parks again if nothing moved.
+                    time.sleep(fallback_wait_seconds)
+                    return True
+                progressed, reason = False, None
+            if progressed:
+                logger.info(f'Pods {self.pod_names} are no longer waiting on a '
+                            'slow-but-expected step; resuming launch.')
+                return True
+            if time.time() >= deadline:
+                logger.info(f'Pods {self.pod_names} still starting after '
+                            f'{_PARK_MAX_WAIT_SECONDS}s; rescheduling to '
+                            're-evaluate.')
+                return True
+            now = time.monotonic()
+            if now - last_refresh >= _PARK_REASON_REFRESH_SECONDS:
+                last_refresh = now
+                if (reason is not None and reason != last_message and
+                        update_status_msg is not None):
+                    last_message = reason
+                    try:
+                        update_status_msg(reason)
+                    except Exception as e:  # pylint: disable=broad-except
+                        logger.debug(f'Failed to update status message: {e}')
+            time.sleep(backoff.current_backoff())
+
+
+def _park_for_slow_pods(*, namespace: str, context: Optional[str],
+                        cluster_name: str, cluster_name_on_cloud: str,
+                        pod_names: List[str],
+                        pending_reasons: List[Optional[str]]) -> NoReturn:
+    """Raise ExecutionPausedError to free the worker while pods start slowly.
+
+    Called once every pod the launch is still waiting on has an open-ended
+    wait ahead of it. Parking hands that wait to the scheduler, which frees
+    the worker and re-enqueues the request when ``PodsProgressedCondition``
+    says the pods have moved on.
+
+    The pods are kept: the pause is handled without teardown or failover (see
+    ``provisioner.bulk_provision`` and the failover loop in
+    ``cloud_vm_ray_backend``), and the resumed launch adopts them, since pod
+    creation skips pods that already exist. Unwinding this far also releases
+    the cluster status lock, so another operation on the cluster can proceed.
+    """
+    summary = _pending_reasons_summary(pending_reasons)
+    detail = f': {summary}' if summary is not None else ''
+    raise exceptions.ExecutionPausedError(
+        f'Waiting for pod(s) to start{detail}.',
+        hint=('Request will resume once the pods start running or report a '
+              'different reason; follow the wait with `sky api logs`, or drop '
+              'it with `sky api cancel`.'),
+        # Fallback wait used only if the condition's own wait() bails out.
+        retry_wait_seconds=30,
+        continue_condition=PodsProgressedCondition(
+            namespace=namespace,
+            context=context,
+            cluster_name=cluster_name,
+            cluster_name_on_cloud=cluster_name_on_cloud,
+            pod_names=pod_names,
+            reason=summary))
+
+
 @timeline.event
 def _wait_for_pods_to_run(namespace, context, cluster_name, new_pods):
     """Wait for pods and their containers to be ready.
@@ -1377,188 +1802,6 @@ def _wait_for_pods_to_run(namespace, context, cluster_name, new_pods):
 
     # Create a set of pod names we're waiting for
     expected_pod_names = {pod.metadata.name for pod in new_pods}
-
-    def _check_init_containers(pod) -> Optional[_InitContainerProgress]:
-        """Check init containers for errors and return the one holding up pod
-        initialization.
-
-        Returns the first init container that is running, else the first one
-        the kubelet is still creating (pulling its image), else None -- no
-        init container accounts for the pod being uninitialized.
-        Raises KubernetesError if any init container failed.
-        """
-        init_statuses = pod.status.init_container_statuses
-        total = len(init_statuses)
-        running_info: Optional[_InitContainerProgress] = None
-        starting_info: Optional[_InitContainerProgress] = None
-        for idx, init_status in enumerate(init_statuses):
-            init_terminated = init_status.state.terminated
-            if init_terminated:
-                if init_terminated.exit_code != 0:
-                    msg = init_terminated.message if (
-                        init_terminated.message) else str(init_terminated)
-                    raise config_lib.KubernetesError(
-                        'Failed to run init container for pod '
-                        f'{pod.metadata.name}. Error details: {msg}.')
-                continue
-            if (init_status.state.running is not None and running_info is None):
-                running_info = _InitContainerProgress(init_status.name, idx + 1,
-                                                      total, True)
-            init_waiting = init_status.state.waiting
-            if init_waiting is not None:
-                if init_waiting.reason in ('ContainerCreating',
-                                           'PodInitializing'):
-                    # The kubelet is creating it -- most often pulling its
-                    # image, which is legitimately slow. Recorded so the
-                    # no-progress deadline does not mistake it for a stall.
-                    if starting_info is None:
-                        starting_info = _InitContainerProgress(
-                            init_status.name, idx + 1, total, False)
-                else:
-                    # TODO(romilb): There may be more states to check for. Add
-                    #  them as needed.
-                    msg = init_waiting.message if (
-                        init_waiting.message) else str(init_waiting)
-                    unmasked = _unmask_crashloopbackoff_reason(init_status)
-                    reason_text = (unmasked if unmasked is not None else
-                                   (init_waiting.reason or 'Unknown'))
-                    raise config_lib.KubernetesError(
-                        f'Failed to create init container for pod '
-                        f'{pod.metadata.name}. Error details: '
-                        f'{reason_text}: {msg}.')
-        return running_info if running_info is not None else starting_info
-
-    def _inspect_pod_status(pod):
-        # Check if pod is terminated/preempted/failed (unchanged).
-        if (pod.metadata.deletion_timestamp is not None or
-                pod.status.phase == 'Failed'):
-            # Get the reason and write to cluster events before
-            # the pod gets completely deleted from the API.
-            termination_reason = _get_pod_termination_reason(pod, cluster_name)
-            logger.warning(
-                f'Pod {pod.metadata.name} terminated: {termination_reason}')
-            condensed = _condensed_pod_reason(pod)
-            raise config_lib.KubernetesError(
-                f'Pod {pod.metadata.name} failed: {condensed}')
-
-        container_statuses = pod.status.container_statuses
-        # Happy path: pod Running and every container Running (unchanged).
-        if (pod.status.phase == 'Running' and container_statuses is not None and
-                all(container.state.running
-                    for container in container_statuses)):
-            return True, None
-
-        # Tier 1: container-status sweep. Computed once, consumed in both
-        # branches below.
-        container_reason = _get_pod_pending_reason_from_container_status(pod)
-
-        if pod.status.phase == 'Pending':
-            # Today's raise block -- control flow preserved, message enriched
-            # via _unmask_crashloopbackoff_reason when the waiting state is
-            # CrashLoopBackOff. msg body (waiting.message) is always preserved.
-            init_reason: Optional[str] = None
-            # Whether init_reason is an assumption about what the kubelet is
-            # doing rather than something it reported -- see below.
-            init_reason_is_assumed = False
-            if container_statuses is not None:
-                for container_status in container_statuses:
-                    if not container_status.state:
-                        continue
-                    waiting = container_status.state.waiting
-                    if waiting is not None:
-                        if waiting.reason == 'PodInitializing':
-                            init_progress = _check_init_containers(pod)
-                            if init_progress is not None:
-                                verb = ('running' if init_progress.running else
-                                        'starting')
-                                init_reason = (
-                                    f'{_INIT_CONTAINER_REASON_PREFIX}'
-                                    f'{init_progress.name!r} {verb} '
-                                    f'({init_progress.position}/'
-                                    f'{init_progress.total})')
-                                init_reason_is_assumed = (
-                                    not init_progress.running)
-                            else:
-                                # PodInitializing, yet no init container is
-                                # running or being created -- they have all
-                                # terminated successfully and the kubelet has
-                                # simply not moved on to the main containers.
-                                # Nothing here is legitimately slow, so unlike
-                                # the two branches above this reason is not
-                                # exempt from the no-progress deadline.
-                                init_reason = _POD_INITIALIZATION_REASON
-                        elif waiting.reason != 'ContainerCreating':
-                            msg = waiting.message if (
-                                waiting.message) else str(waiting)
-                            unmasked = _unmask_crashloopbackoff_reason(
-                                container_status)
-                            reason_text = (unmasked if unmasked is not None else
-                                           (waiting.reason or 'Unknown'))
-                            raise config_lib.KubernetesError(
-                                f'{reason_text}: {msg}')
-                    terminated = container_status.state.terminated
-                    if terminated is not None and terminated.exit_code != 0:
-                        reason_str = (terminated.reason if terminated.reason
-                                      else f'exit({terminated.exit_code})')
-                        raise config_lib.KubernetesError(
-                            f'Container in pod {pod.metadata.name} '
-                            f'terminated with error while pod is still '
-                            f'pending: {reason_str}. Run '
-                            f'`sky logs --provision {cluster_name}` '
-                            'for more details.')
-
-            # Init container reason wins over all event-based reasons,
-            # since events can retain stale "Pulling image" entries long
-            # after the pull completed.  Otherwise, Tier 1 (container
-            # status) wins; fall back to Tier 2/3 events.
-            reason: Optional[str] = init_reason or container_reason
-            event_message: Optional[str] = None
-            if reason is None:
-                pending_reason = _get_pod_pending_reason(
-                    context, namespace, pod.metadata.name)
-                if pending_reason is not None:
-                    reason, event_message = pending_reason
-            elif init_reason_is_assumed:
-                # 'init container ... starting' says only that the kubelet has
-                # not started the container yet; that this is legitimately slow
-                # work (an image pull of its own) is an assumption, and it is
-                # the assumption that makes the reason stall-exempt. The same
-                # state is what a pod shows when the kubelet cannot get as far
-                # as starting the container at all -- a sandbox it cannot
-                # create, a volume it cannot mount -- which is reported only
-                # through events. So let a live Warning, one the pod has not
-                # already moved past, replace the assumption: it is both the
-                # truer reason and, unlike the init label, bounded by the
-                # no-progress deadline. An allow-listed Normal is not consulted
-                # -- it is exempt either way, and the init label names which
-                # container the pod is waiting on.
-                pending_reason = _get_pod_pending_reason(context,
-                                                         namespace,
-                                                         pod.metadata.name,
-                                                         warnings_only=True)
-                if pending_reason is not None:
-                    reason, event_message = pending_reason
-            if reason is None and _pod_is_scheduled(pod):
-                # A freshly-bound pod that the kubelet has not picked up yet
-                # (and the uninformative 'ContainerCreating' state) has no
-                # container-status reason and no event yet. Default to
-                # 'container creation' so the launch spinner shows useful
-                # detail (e.g. 'Launching (1 pod(s) pending due to container
-                # creation)') instead of a bare 'Launching'. Gate on
-                # _pod_is_scheduled so an unbound pod still waiting for
-                # capacity is not mislabeled as creating a container.
-                reason = _CONTAINER_CREATION_REASON
-            if reason is not None:
-                log_msg = f'Pod {pod.metadata.name} is pending: {reason}'
-                if event_message:
-                    log_msg += f': {event_message}'
-                logger.debug(log_msg)
-            return False, reason
-
-        # phase == 'Running' but not all containers running (e.g. one is in
-        # CrashLoopBackOff). Surface tier-1's pending reason -- previously this
-        # returned (False, None) silently, masking OOMKilled etc.
-        return False, container_reason
 
     # The pending reason each pod is currently being timed against, and when
     # that reason was first seen, keyed by pod name. Reset whenever the reason
@@ -1592,6 +1835,11 @@ def _wait_for_pods_to_run(namespace, context, cluster_name, new_pods):
     missing_pods_retry = 0
     transport_error_since: Optional[float] = None
     last_status_msg: Optional[str] = None
+    # When this attempt first saw a pod that was not running yet; measures the
+    # park grace window. Attempt-scoped on purpose: a resumed launch only gets
+    # here after its pods left the open-ended state, so it is timing a new wait
+    # that deserves its own grace.
+    run_wait_started: Optional[float] = None
     while True:
         # Get all pods in a single API call
         cluster_name_on_cloud = new_pods[0].metadata.labels[
@@ -1669,20 +1917,37 @@ def _wait_for_pods_to_run(namespace, context, cluster_name, new_pods):
             pod for pod in all_pods if pod.metadata.name in expected_pod_names
         ]
         num_threads = max(1, min(_NUM_THREADS, len(pods_to_check)))
-        pod_statuses = subprocess_utils.run_in_parallel(_inspect_pod_status,
-                                                        pods_to_check,
-                                                        num_threads)
+        pod_statuses = subprocess_utils.run_in_parallel(
+            functools.partial(_inspect_pod_status,
+                              context=context,
+                              namespace=namespace,
+                              cluster_name=cluster_name), pods_to_check,
+            num_threads)
 
         all_pods_running = True
-        pending_reasons_count: Dict[str, int] = {}
+        # Reasons of the pods not running yet; a running pod never reports
+        # one, so this is every reason there is to report.
+        pending_reasons: List[Optional[str]] = []
+        # Not-running pods, and how many of those have an open-ended wait; the
+        # park below needs every one of them to.
+        not_running = 0
+        open_ended_pending = 0
         now = time.time()
         for pod, (is_running, pending_reason) in zip(pods_to_check,
                                                      pod_statuses):
-            if not is_running:
-                all_pods_running = False
-            if pending_reason is not None:
-                pending_reasons_count[pending_reason] = (
-                    pending_reasons_count.get(pending_reason, 0) + 1)
+            pod_name = pod.metadata.name
+            if is_running:
+                stalled_since.pop(pod_name, None)
+                continue
+            all_pods_running = False
+            not_running += 1
+            pending_reasons.append(pending_reason)
+            open_ended, fail_message = _pending_pod_wait_is_open_ended(
+                pod, pending_reason, context, cluster_name)
+            if fail_message is not None:
+                # The policy knows this pod will never start: fail now rather
+                # than wait out a deadline, or a reason that has none.
+                raise config_lib.KubernetesError(fail_message)
             # Escalate a pod that keeps reporting the same condition to a
             # provisioning error. Some kubelet-level failures raise from
             # _inspect_pod_status as soon as they are seen, but the ones that
@@ -1695,8 +1960,8 @@ def _wait_for_pods_to_run(namespace, context, cluster_name, new_pods):
             # progress", which holds only because _get_pod_pending_reason will
             # not keep reporting a Warning the pod has already moved past; see
             # its docstring.
-            pod_name = pod.metadata.name
-            if is_running or _reason_is_exempt_from_stall(pending_reason):
+            if open_ended:
+                open_ended_pending += 1
                 stalled_since.pop(pod_name, None)
             else:
                 previous = stalled_since.get(pod_name)
@@ -1709,19 +1974,45 @@ def _wait_for_pods_to_run(namespace, context, cluster_name, new_pods):
         if all_pods_running:
             break
 
-        if pending_reasons_count:
-            msg = ', '.join([
-                f'{count} pod(s) pending due to {reason}'
-                for reason, count in sorted(pending_reasons_count.items())
-            ])
-            status_text = f'Launching ({msg})'
+        if run_wait_started is None:
+            run_wait_started = now
+
+        # Nothing left to do but wait the pods out: park instead of spending
+        # an executor worker on it (see _park_for_slow_pods).
+        #
+        # *Every* not-running pod must be open-ended. Parking while one is
+        # being timed against the no-progress deadline would suspend it --
+        # that deadline is measured within a single attempt -- and the pod
+        # would stop being on its way to failing.
+        #
+        # is_in_request_context() is the sole gate, as for the cluster-lock
+        # park in cloud_vm_ray_backend: an in-process caller has no scheduler
+        # to hand the pause to, and keeps blocking here.
+        if (open_ended_pending == not_running and
+                now - run_wait_started >= _POD_RUN_PARK_GRACE_SECONDS and
+                common_utils.is_in_request_context()):
+            logger.info(
+                f'Pods {sorted(expected_pod_names)} have not started after '
+                f'{now - run_wait_started:.0f}s and are only waiting on '
+                'slow-but-expected steps; releasing the executor worker until '
+                'they progress.')
+            _park_for_slow_pods(namespace=namespace,
+                                context=context,
+                                cluster_name=cluster_name,
+                                cluster_name_on_cloud=cluster_name_on_cloud,
+                                pod_names=sorted(expected_pod_names),
+                                pending_reasons=pending_reasons)
+
+        reasons_summary = _pending_reasons_summary(pending_reasons)
+        if reasons_summary is not None:
+            status_text = f'Launching ({reasons_summary})'
         else:
             status_text = 'Launching'
         new_status_msg = ux_utils.spinner_message(status_text,
                                                   cluster_name=cluster_name)
         if new_status_msg != last_status_msg:
             rich_utils.force_update_status(new_status_msg)
-            if pending_reasons_count:
+            if reasons_summary is not None:
                 # Skip the bare 'Launching' status_text — it duplicates
                 # the badge label and would produce a useless tooltip.
                 # The cluster row is written by add_or_update_cluster
