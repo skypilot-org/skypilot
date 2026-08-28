@@ -67,9 +67,13 @@ GPU_NAME_MAP = {
     'RTXA6000': 'NVIDIA RTX A6000',
 
     # NVIDIA RTX PRO (Blackwell)
+    'RTXPRO4000': 'NVIDIA RTX PRO 4000 Blackwell',
     'RTXPRO4500': 'NVIDIA RTX PRO 4500 Blackwell',
+    'RTXPRO5000': 'NVIDIA RTX PRO 5000 Blackwell',
     'RTXPRO6000': 'NVIDIA RTX PRO 6000 Blackwell Server Edition',
     'RTXPRO6000-WK': 'NVIDIA RTX PRO 6000 Blackwell Workstation Edition',
+    'PRO-6000-MIG-24GB': 'NVIDIA RTX PRO 6000 Blackwell Server Edition MIG 1g.24gb',
+    'PRO-6000-MIG-48GB': 'NVIDIA RTX PRO 6000 Blackwell Server Edition MIG 2g.48gb',
 
     # Tesla V100 variants
     'V100-16GB-FHHL': 'Tesla V100-FHHL-16GB',
