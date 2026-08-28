@@ -1462,6 +1462,8 @@ available_node_types:
                 # `pip install skypilot` resolved to -- an unrelated release,
                 # whose patches target an unrelated Ray version. Reading them
                 # from there corrupts Ray whenever the two disagree.
+                # ray_patches_cmd self-guards on the Ray version it was
+                # generated for, and says so when it skips.
                 # Best-effort: apply_patches falls back to the Python `patch`
                 # library when the system `patch` binary is absent, but on a
                 # fully offline/minimal image that too can be unavailable. Warn

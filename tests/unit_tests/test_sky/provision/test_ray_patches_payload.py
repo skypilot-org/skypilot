@@ -112,6 +112,28 @@ def test_cmd_guards_on_the_version_it_patches_for():
     assert '--ray-version 9.9.9' in cmd
 
 
+def test_cmd_says_so_when_it_skips(tmp_path):
+    """A silent skip leaves "why are my Ray patches missing" unanswerable.
+
+    Realistic trigger: an image with a baked Ray at another version, which
+    RAY_INSTALLATION_COMMANDS' idempotency guard leaves in place.
+    """
+    target = tmp_path / 'patches'
+    cmd = instance_setup.ray_patches_cmd('9.9.9').replace(
+        instance_setup._RAY_PATCHES_TARGET_DIR, str(target))  # pylint: disable=protected-access
+    # A node running some other Ray.
+    cmd = cmd.replace(f'{constants.SKY_UV_PIP_CMD} list', 'echo "ray 1.2.3"')
+
+    result = subprocess.run(['bash', '-c', cmd],
+                            check=False,
+                            capture_output=True,
+                            text=True)
+    assert result.returncode == 0, 'a version mismatch must not fail the launch'
+    assert not target.exists(), 'nothing should have been unpacked'
+    assert 'skipping' in result.stdout.lower(), (
+        f'the skip produced no diagnostic: {result.stdout!r}')
+
+
 def test_cmd_does_not_read_the_installed_sky():
     """The whole point: the payload, not `from sky.skylet.ray_patches`."""
     cmd = instance_setup.ray_patches_cmd('9.9.9')

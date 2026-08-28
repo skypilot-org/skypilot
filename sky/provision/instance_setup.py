@@ -158,8 +158,10 @@ def ray_patches_cmd(ray_version: str) -> str:
     The version check is part of this command rather than a separate guard in
     the template, so the version the patches are applied *against* and the
     version they were *generated for* cannot drift apart. A node running some
-    other Ray is skipped, quietly and successfully -- patching it with files
-    generated for a different Ray is what corrupts it.
+    other Ray is skipped without failing -- patching it with files generated
+    for a different Ray is what corrupts it -- but it says so: an image with a
+    baked Ray at another version gets no patches, and silence there leaves
+    "why are my Ray patches missing" with nothing to go on.
     """
     apply = (f'mkdir -p {_RAY_PATCHES_TARGET_DIR} && '
              f'echo \'{_ray_patches_b64()}\' | base64 -d | '
@@ -167,8 +169,11 @@ def ray_patches_cmd(ray_version: str) -> str:
              f'{constants.SKY_PYTHON_CMD} '
              f'{_RAY_PATCHES_TARGET_DIR}/apply_patches.py '
              f'--ray-version {ray_version}')
+    skipped = (f'echo "Ray {ray_version} is not what is installed; skipping '
+               'SkyPilot\'s Ray patches."')
     return (f'if {constants.SKY_UV_PIP_CMD} list | grep "ray " | '
-            f'grep {ray_version} > /dev/null 2>&1; then {apply}; fi')
+            f'grep {ray_version} > /dev/null 2>&1; then {apply}; '
+            f'else {skipped}; fi')
 
 
 @functools.lru_cache(maxsize=1)
