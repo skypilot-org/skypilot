@@ -95,9 +95,6 @@ the two bases on the same Ubuntu release.
 ./skypilot-k8s-image.sh -p -r ${REGION} -b ubuntu:26.04
 ./skypilot-k8s-image.sh -p -g -r ${REGION} -b nvidia/cuda:12.8.1-runtime-ubuntu26.04
 ```
-Add `-l` to publish the shared `latest` tag instead of a dated one. `latest` is
-what the GPU labeler job and `sky local up` pull, so it is left unsuffixed; the
-Catalog pins dated tags, so shipping an image does not need it.
 
 ## Test Images
 1. Minimal GPU test: `sky launch --image ${IMAGE_ID} --gpus=L4:1 --cloud ${CLOUD}` then run `nvidia-smi` in the launched instance.
@@ -130,4 +127,3 @@ python aws_utils/image_delete.py --tag ${TAG}
 ### Kubernetes
 1. Add rows for the new tag to Catalog's `kubernetes/images.csv`, then point
 `Kubernetes.IMAGE_CPU` / `IMAGE_GPU` in `sky/clouds/kubernetes.py` at them.
-2. Delete the superseded tags in the [GCP Artifact Registry](https://console.cloud.google.com/artifacts/docker/sky-dev-465/us/skypilotk8s?project=sky-dev-465).

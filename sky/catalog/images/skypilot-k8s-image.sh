@@ -102,8 +102,7 @@ else
   VERSION_TAG=$(date +%Y%m%d%H%M)
 fi
 
-# `latest` is a shared tag that consumers pull by name (the GPU labeler job,
-# `sky local up`), so it stays unsuffixed unless -s says otherwise.
+# `latest` is a shared tag so it stays unsuffixed unless -s says otherwise.
 if [[ $suffix_set == "false" && $latest == "false" ]]; then
   if [[ $effective_base =~ ubuntu[:-]?([0-9]{2})\.?([0-9]{2}) ]]; then
     suffix="ubuntu${BASH_REMATCH[1]}${BASH_REMATCH[2]}"
