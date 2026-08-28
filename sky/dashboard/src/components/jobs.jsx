@@ -571,10 +571,7 @@ function JobNameLink({ href, name }) {
   // short name; long names still truncate at 240px.
   return (
     <NonCapitalizedTooltip content={name}>
-      <Link
-        href={href}
-        className="text-blue-600 block max-w-[240px] truncate"
-      >
+      <Link href={href} className="text-blue-600 block max-w-[240px] truncate">
         {name}
       </Link>
     </NonCapitalizedTooltip>
@@ -2405,11 +2402,9 @@ export function ManagedJobsTable({
               <div>
                 <div>
                   Failed to fetch Slurm jobs from{' '}
-                  {externalFetchErrors.length === 1
-                    ? 'cluster'
-                    : 'clusters'}{' '}
-                  {externalFetchErrors.map((f) => f.cluster).join(', ')} —
-                  their jobs may be missing or stale.
+                  {externalFetchErrors.length === 1 ? 'cluster' : 'clusters'}{' '}
+                  {externalFetchErrors.map((f) => f.cluster).join(', ')} — their
+                  jobs may be missing or stale.
                 </div>
                 {externalFetchErrors.map((f) => (
                   <div
