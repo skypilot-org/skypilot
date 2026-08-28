@@ -214,10 +214,12 @@ def test_the_applier_patches_every_registered_file(monkeypatch):
     """
     seen = []
 
-    def _fake_run_patch(target, patch_file, version):
+    def _fake_run_patch(target, patch_file, version, use_system_patch):
+        del use_system_patch
         seen.append((target, os.path.basename(patch_file), version))
 
     monkeypatch.setattr(apply_patches, '_run_patch', _fake_run_patch)
+    monkeypatch.setattr(apply_patches, '_ensure_patch_tooling', lambda: True)
     monkeypatch.setattr(
         apply_patches, 'importlib',
         type(
@@ -236,12 +238,13 @@ def test_the_applier_patches_every_registered_file(monkeypatch):
 def test_the_applier_propagates_a_failure(monkeypatch):
     """A patch that fails must not be swallowed by the thread pool."""
 
-    def _fake_run_patch(target, patch_file, version):
-        del target, version
+    def _fake_run_patch(target, patch_file, version, use_system_patch):
+        del target, version, use_system_patch
         if 'worker' in patch_file:
             raise RuntimeError('boom')
 
     monkeypatch.setattr(apply_patches, '_run_patch', _fake_run_patch)
+    monkeypatch.setattr(apply_patches, '_ensure_patch_tooling', lambda: True)
     monkeypatch.setattr(
         apply_patches, 'importlib',
         type(
@@ -264,11 +267,63 @@ def test_the_applier_runs_the_patches_concurrently():
     count = len(apply_patches._PATCHES)  # pylint: disable=protected-access
     barrier = threading.Barrier(count, timeout=10)
 
-    def _fake_run_patch(target, patch_file, version):
-        del target, patch_file, version
+    def _fake_run_patch(target, patch_file, version, use_system_patch):
+        del target, patch_file, version, use_system_patch
         barrier.wait()
 
     with mock.patch.object(apply_patches, '_run_patch', _fake_run_patch), \
+         mock.patch.object(apply_patches, '_ensure_patch_tooling',
+                           lambda: True), \
          mock.patch.object(apply_patches.importlib, 'import_module',
                            lambda name: mock.Mock(__file__=f'/fake/{name}.py')):
         apply_patches.apply_patches('9.9.9')
+
+
+def test_the_patch_tooling_is_installed_once_not_per_target(monkeypatch):
+    """Every thread racing the same `yum`/`pip install` is how this breaks.
+
+    yum's global lock makes the losers fail, so a thread can take the
+    pure-python fallback while another is still installing `patch` -- applying
+    .diff and .patch within one bootstrap -- and concurrent `pip install`s of a
+    single distribution can leave it half-written.
+    """
+    calls = []
+
+    def _fake_ensure():
+        calls.append(1)
+        return True
+
+    monkeypatch.setattr(apply_patches, '_ensure_patch_tooling', _fake_ensure)
+    monkeypatch.setattr(apply_patches, '_run_patch',
+                        lambda *args, **kwargs: None)
+    monkeypatch.setattr(apply_patches.importlib, 'import_module',
+                        lambda name: mock.Mock(__file__=f'/fake/{name}.py'))
+
+    apply_patches.apply_patches('9.9.9')
+
+    assert len(calls) == 1, (
+        f'installed the patch tooling {len(calls)} times for '
+        f'{len(apply_patches._PATCHES)} patches')  # pylint: disable=protected-access
+
+
+def test_a_failed_patch_carries_the_tool_output(tmp_path):
+    """Six threads share one stdout, so a failure has to travel with the error.
+
+    Otherwise the only record of why `patch` refused is interleaved with five
+    other targets' output in the pod log.
+    """
+    if not apply_patches._have_patch_binary():  # pylint: disable=protected-access
+        pytest.skip('no system `patch` binary on this machine')
+    target = tmp_path / 'worker.py'
+    target.write_text('print(1)\n', encoding='utf-8')
+
+    with pytest.raises(RuntimeError) as err:
+        apply_patches._run_patch(  # pylint: disable=protected-access
+            str(target),
+            str(tmp_path / 'missing.py.patch'),
+            '9.9.9',
+            use_system_patch=True)
+
+    message = str(err.value)
+    assert 'worker.py' in message
+    assert 'missing.py.patch' in message, message

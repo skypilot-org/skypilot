@@ -16,8 +16,10 @@ import concurrent.futures
 import importlib
 import os
 import shlex
+import shutil
 import subprocess
 import sys
+import threading
 
 # (module to import, patch file in this directory). The module is imported to
 # locate the installed file; the whole thing runs in a throwaway process
@@ -38,46 +40,88 @@ def _to_absolute(pwd_file: str) -> str:
     return os.path.join(os.path.dirname(os.path.abspath(__file__)), pwd_file)
 
 
-def _run_patch(target_file: str, patch_file: str, version: str) -> None:
-    """Applies a patch if it has not been applied already."""
+# Serializes the per-target log writes: the pool has every patch shelling out
+# at once, and the pod log is the only diagnostic this step has.
+_LOG_LOCK = threading.Lock()
+
+
+def _have_patch_binary() -> bool:
+    # shutil.which rather than a shell `which`: minimal non-Debian images
+    # (RHEL/UBI/Rocky) ship no `which` binary at all, and a failed lookup there
+    # used to send us down the fallback with `patch` actually installed.
+    return shutil.which('patch') is not None
+
+
+def _ensure_patch_tooling() -> bool:
+    """Installs what the patch step needs, once, before the pool starts.
+
+    Returns whether the system `patch` binary is usable; when it is not, the
+    pure-python fallback has been installed instead.
+
+    Deciding this per target would have every thread race the same install:
+    yum holds a global lock, so the losers fail and a thread can take the
+    fallback while another is still installing `patch` -- applying .diff and
+    .patch within one bootstrap -- and concurrent `pip install`s of a single
+    distribution can leave it half-written.
+    """
+    if _have_patch_binary():
+        return True
+    # Quiet on the happy path -- an image with no yum says so on every launch --
+    # but repeated below if we end up on the fallback, where it is the only clue
+    # to why.
+    proc = subprocess.run('sudo yum install -y patch',
+                          shell=True,
+                          check=False,
+                          capture_output=True,
+                          text=True)
+    if _have_patch_binary():
+        return True
+    print(
+        'No system `patch`, using the Python patch library instead. '
+        f'`sudo yum install -y patch` said: {proc.stdout}{proc.stderr}'.strip())
+    # Best-effort: a failure here surfaces at the `-m patch` call in
+    # _run_patch, which is where it surfaced before this was hoisted.
+    subprocess.run(f'{shlex.quote(sys.executable)} -m pip install patch',
+                   shell=True,
+                   check=False)
+    return False
+
+
+def _run_patch(target_file: str, patch_file: str, version: str,
+               use_system_patch: bool) -> None:
+    """Applies one patch, from the pristine .orig so it is safe to repeat."""
     # .orig is the original file that is not patched.
     orig_file = os.path.abspath(f'{target_file}-v{version}.orig')
-    # Get diff filename by replacing .patch with .diff
-    diff_file = patch_file.replace('.patch', '.diff')
-
-    # Detect `patch` with `command -v` (a POSIX shell builtin) rather than
-    # `which` (a separate binary that minimal non-Debian images -- RHEL/UBI/
-    # Rocky -- do not ship). With `which`, `which patch` fails on those images
-    # even when `patch` IS installed, so we silently took the Python fallback
-    # below and lost the Ray patches.
-    #
-    # Invoke the fallback through sys.executable rather than a bare `python`:
-    # the environment that owns the `ray` being patched is a venv that may only
-    # expose `python3` (or expose neither on PATH), and sys.executable is by
-    # definition the interpreter whose site-packages we are patching.
-    py = shlex.quote(sys.executable)
+    if use_system_patch:
+        apply_cmd = f'patch {orig_file} -i {patch_file} -o {target_file}'
+    else:
+        # Invoke the fallback through sys.executable rather than a bare
+        # `python`: the environment that owns the `ray` being patched is a venv
+        # that may only expose `python3`, and sys.executable is by definition
+        # the interpreter whose site-packages we are patching.
+        diff_file = patch_file.replace('.patch', '.diff')
+        apply_cmd = (f'{shlex.quote(sys.executable)} -m patch '
+                     f'-d "$(dirname {target_file})" "{diff_file}"')
     script = f"""\
-    command -v patch >/dev/null 2>&1 || sudo yum install -y patch || true
     if [ ! -f {orig_file} ]; then
-        echo Create backup file {orig_file}
+        echo "Create backup file {orig_file}"
         cp {target_file} {orig_file}
     fi
-    if command -v patch >/dev/null 2>&1; then
-        # System patch command is available, use it
-        # It is ok to patch again from the original file.
-        patch {orig_file} -i {patch_file} -o {target_file}
-    else
-        # System patch command not available, use Python patch library
-        echo "System patch command not available, using Python patch library..."
-        {py} -m pip install patch
-        # Get target directory
-        target_dir="$(dirname {target_file})"
-        # Execute python patch command
-        echo "Executing {py} -m patch -d $target_dir {diff_file}"
-        {py} -m patch -d "$target_dir" "{diff_file}"
-    fi
+    {apply_cmd}
     """
-    subprocess.run(script, shell=True, check=True)
+    proc = subprocess.run(script,
+                          shell=True,
+                          check=False,
+                          capture_output=True,
+                          text=True)
+    name = os.path.basename(target_file)
+    output = (proc.stdout + proc.stderr).strip()
+    if output:
+        with _LOG_LOCK:
+            print(f'--- {name} ---\n{output}')
+    if proc.returncode != 0:
+        raise RuntimeError(f'Failed to patch {name} (exit {proc.returncode}): '
+                           f'{output}')
 
 
 def apply_patches(version: str) -> None:
@@ -101,6 +145,10 @@ def apply_patches(version: str) -> None:
                 'Ray source to patch.')
         targets.append((target, _to_absolute(patch_file)))
 
+    # Install the `patch` tooling once, not once per target -- see
+    # _ensure_patch_tooling.
+    use_system_patch = _ensure_patch_tooling()
+
     # Each patch shells out, and they touch disjoint files, so run them
     # concurrently -- this is on the critical path of every Kubernetes pod
     # bootstrap. Iterating the futures re-raises the first failure; the `with`
@@ -109,8 +157,8 @@ def apply_patches(version: str) -> None:
     with concurrent.futures.ThreadPoolExecutor(
             max_workers=len(targets)) as pool:
         futures = [
-            pool.submit(_run_patch, target, patch_file, version)
-            for target, patch_file in targets
+            pool.submit(_run_patch, target, patch_file, version,
+                        use_system_patch) for target, patch_file in targets
         ]
         for future in futures:
             future.result()
