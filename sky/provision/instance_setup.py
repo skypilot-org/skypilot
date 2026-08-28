@@ -4,9 +4,11 @@ from concurrent import futures
 import functools
 import gzip
 import hashlib
+import io
 import json
 import os
 import shlex
+import tarfile
 import time
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
@@ -104,6 +106,61 @@ DUMP_RAY_PORTS = (f'{constants.SKY_PYTHON_CMD} -c \'import json, os; '
 
 _HOST_NETWORK_ENV_FILE = '/tmp/sky_host_network_ports.env'
 _HOST_NETWORK_PROBE_TARGET = '/tmp/sky_host_network_probe.py'
+
+_RAY_PATCHES_TARGET_DIR = '/tmp/sky_ray_patches'
+
+
+@functools.lru_cache(maxsize=1)
+def _ray_patches_b64() -> str:
+    """The ray_patches directory as a base64 gzipped tar.
+
+    Cached rather than module-level for the same reason as the host-network
+    probe: it is only needed when building a launch command.
+
+    Every timestamp is pinned to 0 so the payload is byte-identical across
+    renders -- it lands in the cluster YAML, and a payload that changed per
+    launch would change the config hash and force needless re-provisioning.
+    """
+    src_dir = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'skylet',
+        'ray_patches')
+    names = sorted(
+        n for n in os.listdir(src_dir)
+        if n == 'apply_patches.py' or n.endswith(('.patch', '.diff')))
+    buf = io.BytesIO()
+    # mtime=0 on the GzipFile, a fixed TarInfo per member, and an explicit tar
+    # format, so nothing in the archive varies with the filesystem or with the
+    # Python version rendering it (tarfile.DEFAULT_FORMAT has changed before).
+    with gzip.GzipFile(fileobj=buf, mode='wb', mtime=0) as gz:
+        with tarfile.open(fileobj=gz, mode='w',
+                          format=tarfile.GNU_FORMAT) as tar:
+            for name in names:
+                with open(os.path.join(src_dir, name), 'rb') as f:
+                    data = f.read()
+                info = tarfile.TarInfo(name)
+                info.size = len(data)
+                info.mtime = 0
+                info.mode = 0o644
+                info.uid = info.gid = 0
+                info.uname = info.gname = ''
+                tar.addfile(info, io.BytesIO(data))
+    return base64.b64encode(buf.getvalue()).decode('ascii')
+
+
+def ray_patches_cmd(ray_version: str) -> str:
+    """Shell snippet that patches Ray from a payload carried in the pod spec.
+
+    Kubernetes patches Ray from the pod's own args, which run before the
+    SkyPilot wheel is uploaded. Reading the patches out of whatever
+    `pip install skypilot` resolved to would take them from an unrelated
+    release, whose patches target an unrelated Ray version.
+    """
+    return (f'mkdir -p {_RAY_PATCHES_TARGET_DIR} && '
+            f'echo \'{_ray_patches_b64()}\' | base64 -d | '
+            f'tar xzf - -C {_RAY_PATCHES_TARGET_DIR} && '
+            f'{constants.SKY_PYTHON_CMD} '
+            f'{_RAY_PATCHES_TARGET_DIR}/apply_patches.py '
+            f'--ray-version {ray_version}')
 
 
 @functools.lru_cache(maxsize=1)

@@ -1456,30 +1456,19 @@ available_node_types:
                   fi
                 done
                 # Apply Ray patches (quality-of-life fixes: progress bar, log
-                # streaming). Best-effort: ray_patches.patch() already falls back
-                # to the Python `patch` library when the system `patch` binary is
-                # absent, but on a fully offline/minimal image that too can be
-                # unavailable. Warn and continue rather than abort the launch --
-                # the cluster comes up and runs without these patches.
-                # python_path is seeded by uv_installation_commands
-                VIRTUAL_ENV=${SKY_RUNTIME_DIR:-$HOME}/skypilot-runtime UV_LINK_MODE=copy UV_SYSTEM_PYTHON=false {{sky_unset_pythonpath_and_set_cwd}} ~/.local/bin/uv pip list | grep "ray " | grep 2.9.3 2>&1 > /dev/null && {
-                  # Fall back to `command -v python3` (POSIX builtin, no external
-                  # `which` dependency) if python_path is missing OR empty
-                  # ([ -s ]: a bare $(cat) of an empty file would render `... -c`
-                  # with no interpreter and abort under set -e).
-                  # Trailing `|| true`: without it `set -e` aborts on the
-                  # ASSIGNMENT when neither python_path nor python3 resolves,
-                  # so the non-empty guard below never runs and the "skip the
-                  # patches, don't abort" intent is dead code.
-                  _py_bin=$([ -s "${SKY_RUNTIME_DIR:-$HOME}/.sky/python_path" ] && cat "${SKY_RUNTIME_DIR:-$HOME}/.sky/python_path" 2>/dev/null || command -v python3 || true);
-                  # Guard on a non-empty interpreter (else `env ... -c ...` would
-                  # eat `-c` as its own flag) and quote it (paths may contain
-                  # spaces). Missing interpreter -> skip the patches, don't abort.
-                  if [ -n "$_py_bin" ]; then
-                    {{sky_unset_pythonpath_and_set_cwd}} "$_py_bin" -c "from sky.skylet.ray_patches import patch; patch()" || echo "WARNING: could not apply Ray patches; continuing without them.";
-                  else
-                    echo "WARNING: no python interpreter found; skipping Ray patches.";
-                  fi
+                # streaming). The patch payload is carried in this pod spec, not
+                # read out of the installed `sky`: this runs before the SkyPilot
+                # wheel is uploaded, so the only `sky` on the node is whatever
+                # `pip install skypilot` resolved to -- an unrelated release,
+                # whose patches target an unrelated Ray version. Reading them
+                # from there corrupts Ray whenever the two disagree.
+                # Best-effort: apply_patches falls back to the Python `patch`
+                # library when the system `patch` binary is absent, but on a
+                # fully offline/minimal image that too can be unavailable. Warn
+                # and continue rather than abort the launch -- the cluster comes
+                # up and runs without these patches.
+                VIRTUAL_ENV=${SKY_RUNTIME_DIR:-$HOME}/skypilot-runtime UV_LINK_MODE=copy UV_SYSTEM_PYTHON=false {{sky_unset_pythonpath_and_set_cwd}} ~/.local/bin/uv pip list | grep "ray " | grep {{ray_version}} 2>&1 > /dev/null && {
+                  {{ ray_patches_cmd }} || echo "WARNING: could not apply Ray patches; continuing without them.";
                 }
                 touch /tmp/ray_skypilot_installation_complete
                 echo "=== Ray and skypilot installation completed ==="
