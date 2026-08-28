@@ -3573,10 +3573,15 @@ export function GPUs() {
       return false; // Still loading, don't show hint
     }
 
-    // Check all infrastructure types
+    // Check all infrastructure types. Not-enabled contexts count as
+    // Kubernetes presence: a server whose ONLY context is one that
+    // `allowed_contexts` excludes must render the Kubernetes section (that
+    // row and its enable action are the way out of the empty state), not
+    // just the setup hint.
     const noCloud = filteredEnabledCloudsCount === 0;
     const noSSH = sshContexts.length === 0;
-    const noKubernetes = kubeContexts.length === 0;
+    const noKubernetes =
+      kubeContexts.length === 0 && inactiveKubeContexts.length === 0;
     const noSlurm = slurmClusters.length === 0;
 
     return noCloud && noSSH && noKubernetes && noSlurm;
