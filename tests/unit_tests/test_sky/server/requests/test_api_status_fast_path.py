@@ -225,7 +225,7 @@ async def test_sqlite_fast_override_returns_orjson_bytes_and_trims(
         sort=True,
     )
     raw = await requests.SqliteRequestBackend().query_request_payloads_async(
-        req_filter)
+        req_filter, omit_unrequested=True)
     assert isinstance(raw, bytes)
     data = json.loads(raw)
     assert len(data) == 3
@@ -250,7 +250,7 @@ async def test_fast_path_equivalent_to_legacy_display_values(
     # Fast path
     fast = json.loads(
         await requests.SqliteRequestBackend().query_request_payloads_async(
-            req_filter))
+            req_filter, omit_unrequested=True))
     # Legacy path (decode + encode)
     decoded = await requests.get_request_tasks_async(req_filter)
     legacy = requests.encode_requests(decoded)
@@ -287,7 +287,7 @@ async def test_fast_path_equivalent_with_extra_eligible_fields(
     req_filter = requests.RequestTaskFilter(fields=fields, sort=True)
     fast = json.loads(
         await requests.SqliteRequestBackend().query_request_payloads_async(
-            req_filter))
+            req_filter, omit_unrequested=True))
     decoded = await requests.get_request_tasks_async(req_filter)
     legacy = requests.encode_requests(decoded)
     fast_by_id = {p['request_id']: payloads.RequestPayload(**p) for p in fast}

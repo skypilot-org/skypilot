@@ -113,24 +113,25 @@ class RequestBackend(abc.ABC):
         raise NotImplementedError
 
     async def query_request_payloads_async(
-        self,
-        req_filter: 'RequestTaskFilter',
-        caller_user_id: Optional[str] = None,
-        omit_unrequested: bool = False,
+            self,
+            req_filter: 'RequestTaskFilter',
+            caller_user_id: Optional[str] = None,
+            omit_unrequested: bool = False,  # pylint: disable=unused-argument
     ) -> List['RequestPayload']:
         """Fields-aware fast path for ``/api/status`` display listings.
 
-        Backends that want the fast path -- building display ``RequestPayload``\\
-        s straight from projected rows, skipping the per-row
-        ``Request.from_row`` decode + ``encode_requests`` re-validation -- override
-        this, honoring ``omit_unrequested`` (trim the wire for new clients vs the
-        full legacy wire for older ones). The default ignores ``omit_unrequested``
-        and falls back to the legacy decode path (``query_requests_async`` +
-        ``encode_requests``), which always emits the full wire, so a backend that
-        does not override it (e.g. an unshipped HA Postgres backend) keeps the
-        current behavior with no regression. This is a concrete, non-abstract
-        method precisely so a backend is not forced to implement it in lockstep
-        with the OSS change.
+        Backends that want the fast path -- building display
+        ``RequestPayload``\\ s straight from projected rows, skipping the
+        per-row ``Request.from_row`` decode + ``encode_requests``
+        re-validation -- override this, honoring ``omit_unrequested`` (trim
+        the wire for new clients vs the full legacy wire for older ones).
+        The default ignores ``omit_unrequested`` and falls back to the legacy
+        decode path (``query_requests_async`` + ``encode_requests``), which
+        always emits the full wire, so a backend that does not override it
+        (e.g. an unshipped HA Postgres backend) keeps the current behavior
+        with no regression. This is a concrete, non-abstract method precisely
+        so a backend is not forced to implement it in lockstep with the OSS
+        change.
         """
         # Lazy import: sky.server.requests.requests imports this module for the
         # RequestBackend ABC, so importing it at module top would cycle.

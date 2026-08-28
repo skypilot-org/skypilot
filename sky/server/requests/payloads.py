@@ -1051,7 +1051,8 @@ class RequestPayload(BasePayload):
     status: str
     created_at: float
     user_id: str
-    # encode_requests always emits orjson(None) == 'null' for these on a listing.
+    # encode_requests always emits orjson(None) == 'null' for these on a
+    # listing.
     return_value: str = 'null'
     error: str = 'null'
     pid: Optional[int] = None

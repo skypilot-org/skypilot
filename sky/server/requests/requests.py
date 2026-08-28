@@ -193,8 +193,9 @@ _FAST_PATH_ELIGIBLE_FIELDS = frozenset(_FAST_PATH_CORE_FIELDS + [
     'schedule_type',
 ])
 
-# The wire values the legacy encode_requests path emits for a caller-UNrequested
-# field on a fields-restricted display listing (the placeholder _decode_entrypoint
+# The wire values the legacy encode_requests path emits for a
+# caller-UNrequested field on a fields-restricted display listing (the
+# placeholder _decode_entrypoint
 # -> '' / decode_and_unpickle -> None -> orjson(null)='null' / the
 # _update_request_row_fields pad -> ScheduleType.SHORT.value='short' / None /
 # False / None). The fast path emits these same placeholders for the unrequested
@@ -1226,35 +1227,36 @@ def request_payload_dict_from_row(
     per-row ``Request.from_row`` (a full ``RequestPayload(**content)`` pydantic
     construction + the base64/pickle decode of ``entrypoint``/``request_body``)
     and the second pydantic construction in ``encode_requests``: it returns a
-    plain dict (no pydantic overhead) for the requested/derived fields, which the
-    route serializes with orjson and returns as a raw ``Response`` so FastAPI's
-    response_model serialization (the per-row pydantic dump) is skipped too -- the
-    dict build + orjson dump is ~50x cheaper than the model round-trip for a
-    164k-row listing.
+    plain dict (no pydantic overhead) for the requested/derived fields, which
+    the route serializes with orjson and returns as a raw ``Response`` so
+    FastAPI's response_model serialization (the per-row pydantic dump) is
+    skipped too -- the dict build + orjson dump is ~50x cheaper than the model
+    round-trip for a 164k-row listing.
 
-    When ``omit_unrequested`` is True the dict carries only the columns present in
-    ``fields`` plus the derived ``user_name``; the remaining fields are omitted and
-    a client whose ``RequestPayload`` model defaults them reconstructs them via
-    ``RequestPayload(**dict)`` (sdk.api_status). This is the trimmed wire for
-    clients that advertised a version >= ``MIN_OMIT_UNREQUESTED_FIELDS_API_VERSION``.
-    When False (older clients, or no version header), the dict is filled out to
-    the *full legacy display wire* by emitting the same placeholders for the
-    caller-unrequested fields that the legacy ``encode_requests`` path emitted --
-    so the wire is equivalent to the legacy path (just built faster) and an older
-    client, whose ``RequestPayload`` still *requires* those fields, reconstructs
+    When ``omit_unrequested`` is True the dict carries only the columns
+    present in ``fields`` plus the derived ``user_name``; the remaining fields
+    are omitted and a client whose ``RequestPayload`` model defaults them
+    reconstructs them via ``RequestPayload(**dict)`` (sdk.api_status). This is
+    the trimmed wire for clients that advertised a version >=
+    ``MIN_OMIT_UNREQUESTED_FIELDS_API_VERSION``. When False (older clients, or
+    no version header), the dict is filled out to the *full legacy display
+    wire* by emitting the same placeholders for the caller-unrequested fields
+    that the legacy ``encode_requests`` path emitted -- so the wire is
+    equivalent to the legacy path (just built faster) and an older client,
+    whose ``RequestPayload`` still *requires* those fields, reconstructs
     without crashing. See ``_LEGACY_UNREQUESTED_PLACEHOLDERS``.
 
-    Only columns whose fast-path wire value faithfully mirrors the legacy path may
-    flow through here. The caller (the route, via ``is_fast_path_eligible_fields``)
-    must ensure ``fields`` is a subset of ``_FAST_PATH_ELIGIBLE_FIELDS``: it
-    excludes the decode-dependent columns (``entrypoint``/``request_body``, whose
-    pickled blob needs decoding to be useful) and the columns ``encode_requests``
-    deliberately suppresses to placeholders on a display listing
-    (``return_value``/``error``/``pid``) or omits entirely
-    (``file_mounts_blob_id``) -- emitting the raw DB cell for any of those would
-    diverge from the legacy wire (and, for ``error``, leak the owner's exception).
-    The legacy ``get_request_tasks_async`` + ``encode_requests`` path serves
-    callers that request those.
+    Only columns whose fast-path wire value faithfully mirrors the legacy path
+    may flow through here. The caller (the route, via
+    ``is_fast_path_eligible_fields``) must ensure ``fields`` is a subset of
+    ``_FAST_PATH_ELIGIBLE_FIELDS``: it excludes the decode-dependent columns
+    (``entrypoint``/``request_body``, whose pickled blob needs decoding to be
+    useful) and the columns ``encode_requests`` deliberately suppresses to
+    placeholders on a display listing (``return_value``/``error``/``pid``) or
+    omits entirely (``file_mounts_blob_id``) -- emitting the raw DB cell for
+    any of those would diverge from the legacy wire (and, for ``error``, leak
+    the owner's exception). The legacy ``get_request_tasks_async`` +
+    ``encode_requests`` path serves callers that request those.
     """
     out: Dict[str, Any] = {}
     for field_name, value in zip(fields, row):
@@ -1273,11 +1275,12 @@ def request_payload_dict_from_row(
     if 'user_id' in out:
         out['user_name'] = all_users_map.get(out['user_id'])
     if not omit_unrequested:
-        # Older / unknown clients whose RequestPayload still *requires* these get
-        # the full legacy display wire -- emit the same placeholders the legacy
-        # encode_requests path did for caller-unrequested fields, so the wire is
-        # equivalent to the legacy path (just built faster). file_mounts_blob_id is
-        # intentionally not added, matching encode_requests (16-, not 17-field).
+        # Older / unknown clients whose RequestPayload still *requires* these
+        # get the full legacy display wire -- emit the same placeholders the
+        # legacy encode_requests path did for caller-unrequested fields, so
+        # the wire is equivalent to the legacy path (just built faster).
+        # file_mounts_blob_id is intentionally not added, matching
+        # encode_requests (16-, not 17-field).
         for field_name, value in _LEGACY_UNREQUESTED_PLACEHOLDERS.items():
             if field_name not in out:
                 out[field_name] = value
@@ -1292,21 +1295,22 @@ async def get_request_payloads_async(
 ) -> Union[bytes, List[payloads.RequestPayload]]:
     """Fields-aware fast path for ``/api/status`` display listings.
 
-    Serves callers that requested a specific ``fields`` set (any client version;
-    eligibility is just ``is_fast_path_eligible_fields``) by building the display
-    payloads straight from the projected DB rows, skipping the per-row
-    ``Request.from_row`` decode + ``encode_requests`` re-validation and
-    serializing with orjson as raw JSON bytes (the route wraps them in a
+    Serves callers that requested a specific ``fields`` set (any client
+    version; eligibility is just ``is_fast_path_eligible_fields``) by building
+    the display payloads straight from the projected DB rows, skipping the
+    per-row ``Request.from_row`` decode + ``encode_requests`` re-validation
+    and serializing with orjson as raw JSON bytes (the route wraps them in a
     ``fastapi.Response`` so FastAPI's response_model serialization is skipped
     too). When ``omit_unrequested`` is True (new clients >=
-    ``MIN_OMIT_UNREQUESTED_FIELDS_API_VERSION``) only the requested/derived fields
-    are put on the wire; when False (older clients, or no version header) the dict
-    is filled out to the full legacy display wire (equivalent values, built
-    faster) so an older client whose RequestPayload still requires those fields
-    reconstructs without crashing. Either way the listing is sub-second vs the
-    legacy multi-second decode+serialize. Backends that do not override
-    ``query_request_payloads_async`` inherit the legacy decode path
-    (``query_requests_async`` + ``encode_requests``) with no regression.
+    ``MIN_OMIT_UNREQUESTED_FIELDS_API_VERSION``) only the requested/derived
+    fields are put on the wire; when False (older clients, or no version
+    header) the dict is filled out to the full legacy display wire (equivalent
+    values, built faster) so an older client whose RequestPayload still
+    requires those fields reconstructs without crashing. Either way the
+    listing is sub-second vs the legacy multi-second decode+serialize.
+    Backends that do not override ``query_request_payloads_async`` inherit the
+    legacy decode path (``query_requests_async`` + ``encode_requests``) with
+    no regression.
 
     Callers that did not request ``fields``, or that requested the
     decode-dependent ``entrypoint``/``request_body`` columns, must use the
@@ -1715,17 +1719,17 @@ class SqliteRequestBackend(request_storage.RequestBackend):
     ) -> bytes:
         """Fields-aware fast path: build display payloads from projected rows.
 
-        Reuses the identical row fetch as ``query_requests_async`` but maps each
-        row through ``request_payload_dict_from_row`` (a plain dict, no
-        ``Request.from_row`` decode + no ``encode_requests`` re-validation), and
-        force-includes the ``_FAST_PATH_CORE_FIELDS`` so the client always gets the
-        request identity. ``omit_unrequested`` controls the wire: True -> only the
-        requested/derived fields (a new client reconstructs the rest via the
-        ``RequestPayload`` defaults); False -> the full legacy display wire
-        (equivalent values, just built faster) for older clients. Serialized with
-        orjson and returned as raw JSON bytes (the route wraps them in a
-        ``fastapi.Response`` so the per-row pydantic response_model dump is
-        skipped too).
+        Reuses the identical row fetch as ``query_requests_async`` but maps
+        each row through ``request_payload_dict_from_row`` (a plain dict, no
+        ``Request.from_row`` decode + no ``encode_requests`` re-validation),
+        and force-includes the ``_FAST_PATH_CORE_FIELDS`` so the client always
+        gets the request identity. ``omit_unrequested`` controls the wire:
+        True -> only the requested/derived fields (a new client reconstructs
+        the rest via the ``RequestPayload`` defaults); False -> the full
+        legacy display wire (equivalent values, just built faster) for older
+        clients. Serialized with orjson and returned as raw JSON bytes (the
+        route wraps them in a ``fastapi.Response`` so the per-row pydantic
+        response_model dump is skipped too).
         """
         assert _DB is not None
         select_fields = list(
@@ -1739,10 +1743,10 @@ class SqliteRequestBackend(request_storage.RequestBackend):
         all_users_map = {
             user.id: user.name for user in global_user_state.get_all_users()
         }
-        # Match the legacy _status_value_for_client: downgrade WAITING to RUNNING
-        # for clients that predate the WAITING status (<
-        # MIN_WAITING_STATUS_API_VERSION). The fast path serves those clients too
-        # now, so this is not dead code.
+        # Match the legacy _status_value_for_client: downgrade WAITING to
+        # RUNNING for clients that predate the WAITING status (<
+        # MIN_WAITING_STATUS_API_VERSION). The fast path serves those clients
+        # too now, so this is not dead code.
         remote = versions.get_remote_api_version()
         downgrade_waiting = (
             remote is not None and
@@ -1754,7 +1758,6 @@ class SqliteRequestBackend(request_storage.RequestBackend):
         ]
         return orjson.dumps(payload_dicts)
 
-    @init_db_async
     @init_db_async
     async def delete_requests(self, request_ids: List[str]) -> None:
         if not request_ids:

@@ -3026,25 +3026,27 @@ async def api_status(
             fields=fields,
             sort=True,
         )
-        # Fields-aware fast path (any client version): for a caller that requested
-        # a `fields` set the fast path faithfully mirrors on the wire
-        # (requests_lib.is_fast_path_eligible_fields -- only the display scalars;
-        # NOT the decode-dependent entrypoint/request_body, nor the columns
-        # encode_requests suppresses to placeholders: return_value/error/pid/
-        # file_mounts_blob_id), build the display payloads straight from the
-        # projected rows -- skipping the per-row Request.from_row decode +
-        # encode_requests re-validation, serializing with orjson as raw bytes so
-        # the per-row response_model dump is skipped too. This serves new AND old
-        # clients: new clients get the trimmed wire (only requested/derived fields
-        # -- they reconstruct the rest via the RequestPayload defaults); old
-        # clients (or no version header) get the full legacy wire with the same
-        # placeholder values (built faster, byte-for-byte equivalent) so their
-        # still-required RequestPayload fields reconstruct. The trim is gated on
-        # the client's advertised version (MIN_OMIT_UNREQUESTED_FIELDS_API_VERSION);
-        # the speed is not. Unprojected (fields=None) queries and callers wanting
+        # Fields-aware fast path (any client version): for a caller that
+        # requested a `fields` set the fast path faithfully mirrors on the
+        # wire (requests_lib.is_fast_path_eligible_fields -- only the display
+        # scalars; NOT the decode-dependent entrypoint/request_body, nor the
+        # columns encode_requests suppresses to placeholders:
+        # return_value/error/pid/file_mounts_blob_id), build the display
+        # payloads straight from the projected rows -- skipping the per-row
+        # Request.from_row decode + encode_requests re-validation, serializing
+        # with orjson as raw bytes so the per-row response_model dump is
+        # skipped too. This serves new AND old clients: new clients get the
+        # trimmed wire (only requested/derived fields -- they reconstruct the
+        # rest via the RequestPayload defaults); old clients (or no version
+        # header) get the full legacy wire with the same placeholder values
+        # (built faster, byte-for-byte equivalent) so their still-required
+        # RequestPayload fields reconstruct. The trim is gated on the client's
+        # advertised version (MIN_OMIT_UNREQUESTED_FIELDS_API_VERSION); the
+        # speed is not. Unprojected (fields=None) queries and callers wanting
         # any excluded field use the legacy decode path below. Note:
-        # response_model_exclude_unset on the route above also trims the *legacy*
-        # path -- it drops file_mounts_blob_id (a defaulted Optional).
+        # response_model_exclude_unset on the route above also trims the
+        # *legacy* path -- it drops file_mounts_blob_id (a defaulted
+        # Optional).
         remote_api_version = versions.get_remote_api_version()
         if requests_lib.is_fast_path_eligible_fields(fields):
             omit_unrequested = (
