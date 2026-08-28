@@ -127,14 +127,13 @@ def _is_rbac_permission_error(e: Exception) -> bool:
     return getattr(e, 'status', None) in (401, 403)
 
 
-def _resolve_default_context() -> Optional[str]:
-    """The context to use for a volume whose config names no context.
+def _resolve_context_for_new_volume() -> Optional[str]:
+    """The context to create a volume on when its config names none.
 
     A Kubernetes volume's `region` is its kubeconfig context. When the user
     leaves it unset (e.g. `sky volumes apply --infra k8s`), the context has to
-    be inferred -- and the inference has to agree with where workloads
-    actually run, or the PVC is created on a cluster no pod can ever mount it
-    from.
+    be chosen -- and the choice has to agree with where workloads actually
+    run, or the PVC is created on a cluster no pod can ever mount it from.
 
     The kubeconfig's `current-context` alone is not that answer on a server
     with several contexts: `allowed_contexts` may exclude it entirely, in
@@ -143,6 +142,9 @@ def _resolve_default_context() -> Optional[str]:
     path uses, and keep `current-context` only when it is actually allowed --
     which preserves the existing behavior for the ordinary single-cluster
     case.
+
+    Only for volumes being created. Looking up a volume that already exists
+    is a different question -- see `_get_context_namespace`.
     """
     current_context = kubernetes_utils.get_current_kube_config_context_name()
     allowed_contexts = clouds.Kubernetes.existing_allowed_contexts(silent=True)
@@ -162,16 +164,27 @@ def _resolve_default_context() -> Optional[str]:
     return context
 
 
-def _get_context_namespace(
-        config: models.VolumeConfig) -> Tuple[Optional[str], str]:
+def _get_context_namespace(config: models.VolumeConfig,
+                           creating: bool = False) -> Tuple[Optional[str], str]:
     """Gets the context and namespace of a volume.
+
+    `creating` separates the two questions this answers for a config with no
+    `region`. Creating a volume *chooses* a context, and the choice has to
+    agree with where workloads run. Every other caller is *looking up* a
+    volume that already exists somewhere -- and for a volume predating the
+    region pinning below (`refresh_volume_config` repairs those only under
+    in-cluster auth, so elsewhere they stay region-less), the only honest
+    guess is the one its own creation made: the kubeconfig's current context.
+    Re-deciding that on a lookup would point at a different cluster and
+    report a perfectly healthy volume as deleted.
 
     The context is None only when no context could be resolved at all (no
     kubeconfig and no in-cluster auth); the K8s adaptor treats that as "use
     whatever config loading finds", which is the pre-existing behavior.
     """
     if config.region is None:
-        context = _resolve_default_context()
+        context = (_resolve_context_for_new_volume() if creating else
+                   kubernetes_utils.get_current_kube_config_context_name())
         config.region = context
     else:
         context = config.region
@@ -282,7 +295,7 @@ def _validate_explicit_storage_class(context: Optional[str],
 
 def _apply_pvc_volume(config: models.VolumeConfig) -> models.VolumeConfig:
     """Creates or registers a PVC volume."""
-    context, namespace = _get_context_namespace(config)
+    context, namespace = _get_context_namespace(config, creating=True)
     pvc_spec = _get_pvc_spec(namespace, config)
     # use_existing volumes look up an existing PVC; no new provisioning
     # happens. Storage-class validation (either the explicit-name check
