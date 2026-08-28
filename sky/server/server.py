@@ -1750,6 +1750,44 @@ async def _prepare_client_mount_dir(user_hash: str,
     return client_file_mounts_dir
 
 
+def _publish_chunk(zip_file_path: pathlib.Path, final_path: pathlib.Path,
+                   chunk_dir: Optional[pathlib.Path],
+                   total_chunks: int) -> Set[str]:
+    """Publishes a received chunk and reports which chunks are still missing.
+
+    Call this in a worker thread: the rename and the directory listing are
+    both synchronous, and the upload directory can live on a shared
+    filesystem (NFS/EFS) where a single operation costs milliseconds to
+    seconds. On the event loop that blocks every other request served by the
+    same worker for as long as the filesystem takes.
+
+    Args:
+        zip_file_path: The writer-unique temporary file holding the chunk.
+        final_path: The name to publish the chunk under.
+        chunk_dir: Directory holding the parts of a multi-chunk upload, or
+            None for a single-chunk upload, which has nothing to wait for.
+        total_chunks: The total number of chunks of this upload.
+
+    Returns:
+        The names of the chunks that have not been published yet, empty if
+        the upload is complete.
+    """
+    os.rename(str(zip_file_path), str(final_path))
+    if chunk_dir is None:
+        return set()
+    # A single directory read gives the state of the whole upload. Skip tmp
+    # files (e.g. ``part0.tmp.<hex>``) that may belong to in-flight
+    # concurrent writers: only published ``part{N}`` names count toward
+    # completion.
+    existing = set()
+    with os.scandir(chunk_dir) as entries:
+        for entry in entries:
+            name = entry.name
+            if name.startswith('part') and name[len('part'):].isdigit():
+                existing.add(name)
+    return set(f'part{i}' for i in range(total_chunks)) - existing
+
+
 async def _receive_and_assemble_chunks(
     base_dir: pathlib.Path,
     zip_name: str,
@@ -1790,6 +1828,8 @@ async def _receive_and_assemble_chunks(
     # a same blob does not interleave with each other.
     if total_chunks == 1:
         await anyio.Path(base_dir).mkdir(parents=True, exist_ok=True)
+        # No parts directory: a single-chunk upload has nothing to wait for.
+        chunk_dir = None
         final_path = base_dir / f'{zip_name}.zip'
         zip_file_path = base_dir / f'{zip_name}.tmp.{uuid.uuid4().hex}.zip'
     else:
@@ -1804,41 +1844,30 @@ async def _receive_and_assemble_chunks(
                 await f.write(chunk)
     except starlette.requests.ClientDisconnect as e:
         # Client disconnected, remove the zip file.
-        zip_file_path.unlink(missing_ok=True)
+        await asyncio.to_thread(zip_file_path.unlink, missing_ok=True)
         raise fastapi.HTTPException(
             status_code=400,
             detail='Client disconnected, please try again.') from e
     except Exception as e:
         logger.error(f'Error uploading zip file: {zip_file_path}')
         # Client disconnected, remove the zip file.
-        zip_file_path.unlink(missing_ok=True)
+        await asyncio.to_thread(zip_file_path.unlink, missing_ok=True)
         raise fastapi.HTTPException(
             status_code=500,
             detail=('Error uploading zip file: '
                     f'{common_utils.format_exception(e)}'))
 
-    def get_missing_chunks(total_chunks: int) -> Set[str]:
-        existing = set()
-        for p in chunk_dir.glob('part*'):
-            # Filter out tmp files (e.g. ``part0.tmp.<hex>``) that may
-            # belong to in-flight concurrent writers.  Only renamed
-            # final names ``part{N}`` count toward completion.
-            name = p.name
-            suffix = name[len('part'):] if name.startswith('part') else ''
-            if suffix.isdigit():
-                existing.add(name)
-        return set(f'part{i}' for i in range(total_chunks)) - existing
-
-    # Rename the writer-unique tmp file to its final name.
-    os.rename(str(zip_file_path), str(final_path))
+    # Rename the writer-unique tmp file to its final name and find out
+    # whether that completed the upload.
+    missing_chunks = await asyncio.to_thread(_publish_chunk, zip_file_path,
+                                             final_path, chunk_dir,
+                                             total_chunks)
     zip_file_path = final_path
 
-    if total_chunks > 1:
-        missing_chunks = get_missing_chunks(total_chunks)
-        if missing_chunks:
-            return payloads.UploadZipFileResponse(
-                status=responses.UploadStatus.UPLOADING.value,
-                missing_chunks=missing_chunks)
+    if missing_chunks:
+        return payloads.UploadZipFileResponse(
+            status=responses.UploadStatus.UPLOADING.value,
+            missing_chunks=missing_chunks)
     logger.info(f'Uploaded chunk: {zip_file_path}')
     if assemble:
         await _finalize_chunked_upload(base_dir=base_dir,
