@@ -1,4 +1,4 @@
-"""Tests for the AWS catalog region source lists."""
+"""Tests for São Paulo in the AWS service-catalog source."""
 
 from pathlib import Path
 import runpy
