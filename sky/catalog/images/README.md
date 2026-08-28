@@ -82,9 +82,9 @@ packer build  --var vm_generation=2 --var client_secret=${SECRET} --var use_grid
 ### Kubernetes
 1. Build the image
 ```bash
-export REGION=europe  # Update this: us, europe, asia
-./skypilot-k8s-image.sh -p -l -r ${REGION}
-./skypilot-k8s-image.sh -p -l -g -r ${REGION}
+export REGION=us  # Update this: us, europe, asia
+./skypilot-k8s-image.sh -p -r ${REGION}
+./skypilot-k8s-image.sh -p -g -r ${REGION}
 ```
 2. To rebuild the same recipe on a different base, e.g. Ubuntu 24.04 for a newer
 glibc, pass `-b` for the base and `-s` for a tag suffix. Without `-b` the build
