@@ -1,4 +1,4 @@
-"""Tests for the AWS service-catalog fetcher."""
+"""Tests for Zurich in the AWS service-catalog source."""
 
 from sky.catalog.data_fetchers import fetch_aws
 
