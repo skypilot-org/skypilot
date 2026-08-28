@@ -108,6 +108,10 @@ _AUTH_THREADS_LIMIT = 32
 # reason comes from the exception message, so truncate to keep it readable.
 _RETRY_STATUS_MSG_REASON_MAX_LEN = 200
 
+_CANCELLATION_WATCH_INTERVAL_SECONDS = 10
+_CANCELLATION_QUERY_BATCH_SIZE = 500
+_CANCELLATION_WARNING_INTERVAL_SECONDS = 60
+
 _REQUEST_THREAD_EXECUTOR_LOCK = threading.Lock()
 # A dedicated thread pool executor for synced requests execution in coroutine to
 # avoid:
@@ -228,14 +232,99 @@ def executor_initializer(proc_group: str,
                      daemon=True).start()
 
 
-def _request_is_gone_or_cancelled(request_id: str) -> bool:
-    """Cancellation check passed to ``ContinueCondition.wait()``.
+class CancellationWatcher:
+    """Batches cancellation checks for requests waiting to resume."""
 
-    A request cancelled (or gone) while paused must not be re-queued.
-    """
-    request = api_requests.get_request(request_id, fields=['status'])
-    return (request is None or
-            request.status == api_requests.RequestStatus.CANCELLED)
+    def __init__(
+        self,
+        watch_interval_seconds: float = _CANCELLATION_WATCH_INTERVAL_SECONDS
+    ) -> None:
+        self._watch_interval_seconds = watch_interval_seconds
+        self._lock = threading.Lock()
+        self._condition = threading.Condition(self._lock)
+        self._verdicts: Dict[str, bool] = {}
+        self._thread: Optional[threading.Thread] = None
+        self._last_warning_time: Optional[float] = None
+
+    def register(self, request_id: str) -> None:
+        """Start watching a request, with a fail-open initial verdict."""
+        with self._condition:
+            was_empty = not self._verdicts
+            self._verdicts[request_id] = False
+            if self._thread is None:
+                self._thread = threading.Thread(
+                    target=self._run,
+                    name='request-cancellation-watcher',
+                    daemon=True)
+                self._thread.start()
+            if was_empty:
+                self._condition.notify()
+
+    def deregister(self, request_id: str) -> None:
+        """Stop watching a request."""
+        with self._condition:
+            self._verdicts.pop(request_id, None)
+            if not self._verdicts:
+                self._condition.notify()
+
+    def is_cancelled(self, request_id: str) -> bool:
+        """Return the cached cancellation verdict without querying storage."""
+        with self._lock:
+            return self._verdicts.get(request_id, False)
+
+    def _log_query_failure(self, error: Exception) -> None:
+        now = time.monotonic()
+        with self._lock:
+            if (self._last_warning_time is not None and
+                    now - self._last_warning_time <
+                    _CANCELLATION_WARNING_INTERVAL_SECONDS):
+                return
+            self._last_warning_time = now
+        logger.warning(
+            'Request cancellation watch query failed; keeping cached '
+            f'verdicts: {common_utils.format_exception(error)}')
+
+    def _poll_once(self) -> None:
+        with self._lock:
+            request_ids = list(self._verdicts)
+        for batch_start in range(0, len(request_ids),
+                                 _CANCELLATION_QUERY_BATCH_SIZE):
+            request_id_chunk = request_ids[batch_start:batch_start +
+                                           _CANCELLATION_QUERY_BATCH_SIZE]
+            try:
+                requests = api_requests.get_request_tasks(
+                    api_requests.RequestTaskFilter(
+                        request_ids=request_id_chunk,
+                        fields=['request_id', 'status']))
+            except Exception as e:  # pylint: disable=broad-except
+                self._log_query_failure(e)
+                continue
+
+            returned_ids = {request.request_id for request in requests}
+            cancelled_ids = {
+                request.request_id
+                for request in requests
+                if request.status == api_requests.RequestStatus.CANCELLED
+            }
+            with self._lock:
+                for request_id in request_id_chunk:
+                    if request_id in self._verdicts:
+                        self._verdicts[request_id] = (
+                            request_id not in returned_ids or
+                            request_id in cancelled_ids)
+
+    def _run(self) -> None:
+        while True:
+            with self._condition:
+                while not self._verdicts:
+                    self._condition.wait()
+                self._condition.wait(timeout=self._watch_interval_seconds)
+                if not self._verdicts:
+                    continue
+            self._poll_once()
+
+
+_CANCELLATION_WATCHER = CancellationWatcher()
 
 
 def _waiting_status_msg(reason: str, retry_suffix: str) -> str:
@@ -451,14 +540,18 @@ class RequestWorker:
                 request_task.status_msg = status_msg
             try:
                 if condition is not None:
-                    should_reschedule = _wait_for_continue_condition(
-                        condition,
-                        is_cancelled=lambda: _request_is_gone_or_cancelled(
-                            request_id),
-                        fallback_wait_seconds=retry_wait_seconds,
-                        update_status_msg=functools.partial(
-                            _refresh_waiting_status_msg, request_id,
-                            retry_suffix))
+                    _CANCELLATION_WATCHER.register(request_id)
+                    try:
+                        should_reschedule = _wait_for_continue_condition(
+                            condition,
+                            is_cancelled=lambda: _CANCELLATION_WATCHER.
+                            is_cancelled(request_id),
+                            fallback_wait_seconds=retry_wait_seconds,
+                            update_status_msg=functools.partial(
+                                _refresh_waiting_status_msg, request_id,
+                                retry_suffix))
+                    finally:
+                        _CANCELLATION_WATCHER.deregister(request_id)
                 else:
                     time.sleep(retry_wait_seconds)
                     should_reschedule = True

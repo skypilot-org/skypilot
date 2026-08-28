@@ -1030,6 +1030,7 @@ class RequestTaskFilter:
 
     Args:
         status: a list of statuses of the requests to filter on.
+        request_ids: a list of request IDs to filter requests on.
         cluster_names: a list of cluster names to filter requests on.
         exclude_request_names: a list of request names to exclude from results.
             Mutually exclusive with include_request_names.
@@ -1049,6 +1050,7 @@ class RequestTaskFilter:
             provided.
     """
     status: Optional[List[RequestStatus]] = None
+    request_ids: Optional[List[str]] = None
     cluster_names: Optional[List[str]] = None
     user_id: Optional[str] = None
     exclude_request_names: Optional[List[str]] = None
@@ -1082,6 +1084,16 @@ class RequestTaskFilter:
             status_placeholders = ','.join(['?'] * len(self.status))
             filters.append(f'status IN ({status_placeholders})')
             filter_params.extend(status.value for status in self.status)
+        if self.request_ids is not None:
+            if len(self.request_ids) == 0:
+                # Empty IN () is invalid SQL in PostgreSQL.
+                # An empty list means "match nothing".
+                filters.append('1=0')
+            else:
+                request_id_placeholders = ','.join(['?'] *
+                                                   len(self.request_ids))
+                filters.append(f'request_id IN ({request_id_placeholders})')
+                filter_params.extend(self.request_ids)
         if self.include_request_names is not None:
             name_placeholders = ','.join(['?'] *
                                          len(self.include_request_names))

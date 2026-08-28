@@ -713,14 +713,185 @@ async def test_request_worker_retry_execution_retryable_error(
     )
 
 
+def _watcher_request(request_id, status):
+    return requests_lib.Request(request_id=request_id,
+                                name='test-request',
+                                entrypoint=_dummy_entrypoint_for_retry_test,
+                                request_body=payloads.RequestBody(),
+                                status=status,
+                                created_at=0,
+                                user_id='test-user')
+
+
+@pytest.fixture()
+def manual_cancellation_watcher():
+    watcher = executor.CancellationWatcher()
+    watcher._thread = mock.Mock()
+    return watcher
+
+
+def test_cancellation_watcher_updates_cancelled_and_gone_verdicts(
+        manual_cancellation_watcher, monkeypatch):
+    watcher = manual_cancellation_watcher
+    watcher.register('cancelled-request')
+    watcher.register('gone-request')
+    watcher.register('running-request')
+
+    observed_filters = []
+
+    def get_request_tasks(req_filter):
+        observed_filters.append(req_filter)
+        return [
+            _watcher_request('cancelled-request',
+                             requests_lib.RequestStatus.CANCELLED),
+            _watcher_request('running-request',
+                             requests_lib.RequestStatus.RUNNING),
+        ]
+
+    monkeypatch.setattr(executor.api_requests, 'get_request_tasks',
+                        get_request_tasks)
+
+    # A registered request fails open until its first storage poll.
+    assert watcher.is_cancelled('cancelled-request') is False
+    watcher._poll_once()
+
+    assert watcher.is_cancelled('cancelled-request') is True
+    assert watcher.is_cancelled('gone-request') is True
+    assert watcher.is_cancelled('running-request') is False
+    assert len(observed_filters) == 1
+    assert observed_filters[0].request_ids == [
+        'cancelled-request', 'gone-request', 'running-request'
+    ]
+    assert observed_filters[0].fields == ['request_id', 'status']
+
+
+def test_cancellation_watcher_query_failure_preserves_cached_verdicts(
+        manual_cancellation_watcher, monkeypatch):
+    watcher = manual_cancellation_watcher
+    watcher.register('cancelled-request')
+    watcher.register('running-request')
+
+    monkeypatch.setattr(
+        executor.api_requests, 'get_request_tasks', lambda req_filter: [
+            _watcher_request('cancelled-request', requests_lib.RequestStatus.
+                             CANCELLED),
+            _watcher_request('running-request', requests_lib.RequestStatus.
+                             RUNNING),
+        ])
+    watcher._poll_once()
+
+    query_error = RuntimeError('storage unavailable')
+    monkeypatch.setattr(executor.api_requests, 'get_request_tasks',
+                        mock.Mock(side_effect=query_error))
+    warning = mock.Mock()
+    monkeypatch.setattr(executor.logger, 'warning', warning)
+    watcher._poll_once()
+    watcher._poll_once()
+
+    assert watcher.is_cancelled('cancelled-request') is True
+    assert watcher.is_cancelled('running-request') is False
+    warning.assert_called_once()
+
+
+def test_cancellation_watcher_deregistered_and_empty_registry_do_not_query(
+        manual_cancellation_watcher, monkeypatch):
+    watcher = manual_cancellation_watcher
+    watcher.register('request-1')
+    watcher.deregister('request-1')
+    get_request_tasks = mock.Mock()
+    monkeypatch.setattr(executor.api_requests, 'get_request_tasks',
+                        get_request_tasks)
+
+    watcher._poll_once()
+
+    assert watcher.is_cancelled('request-1') is False
+    get_request_tasks.assert_not_called()
+
+
+def test_cancellation_watcher_starts_one_thread_lazily(monkeypatch):
+    thread_class = mock.Mock()
+    monkeypatch.setattr(executor.threading, 'Thread', thread_class)
+    watcher = executor.CancellationWatcher()
+
+    thread_class.assert_not_called()
+    watcher.register('request-1')
+    watcher.register('request-2')
+
+    thread_class.assert_called_once_with(target=watcher._run,
+                                         name='request-cancellation-watcher',
+                                         daemon=True)
+    thread_class.return_value.start.assert_called_once_with()
+
+
+def test_cancellation_watcher_thread_polls_and_idles(monkeypatch):
+    watcher = executor.CancellationWatcher(watch_interval_seconds=0.01)
+    poll_completed = threading.Event()
+    query_count = []
+
+    def get_request_tasks(req_filter):
+        query_count.append(1)
+        return [
+            _watcher_request(req_filter.request_ids[0],
+                             requests_lib.RequestStatus.CANCELLED)
+        ]
+
+    monkeypatch.setattr(executor.api_requests, 'get_request_tasks',
+                        get_request_tasks)
+    poll_once = watcher._poll_once
+
+    def recording_poll_once():
+        poll_once()
+        poll_completed.set()
+
+    monkeypatch.setattr(watcher, '_poll_once', recording_poll_once)
+
+    watcher.register('request-1')
+    assert poll_completed.wait(timeout=1)
+    assert watcher.is_cancelled('request-1') is True
+
+    watcher.deregister('request-1')
+    poll_completed.clear()
+    query_count_after_deregister = len(query_count)
+    assert not poll_completed.wait(timeout=0.05)
+    assert len(query_count) == query_count_after_deregister
+
+
+def test_cancellation_watcher_chunks_queries(manual_cancellation_watcher,
+                                             monkeypatch):
+    watcher = manual_cancellation_watcher
+    request_ids = [
+        f'request-{i}' for i in range(executor._CANCELLATION_QUERY_BATCH_SIZE +
+                                      1)
+    ]
+    for request_id in request_ids:
+        watcher.register(request_id)
+    observed_chunks = []
+
+    def get_request_tasks(req_filter):
+        observed_chunks.append(req_filter.request_ids)
+        return [
+            _watcher_request(request_id, requests_lib.RequestStatus.RUNNING)
+            for request_id in req_filter.request_ids
+        ]
+
+    monkeypatch.setattr(executor.api_requests, 'get_request_tasks',
+                        get_request_tasks)
+
+    watcher._poll_once()
+
+    assert [len(chunk) for chunk in observed_chunks
+           ] == [executor._CANCELLATION_QUERY_BATCH_SIZE, 1]
+
+
 class _PauseHarness:
     """Bundles the worker, queue, and request id for pause/watch tests."""
 
-    def __init__(self, worker, request_id, queue_items, sleep_calls):
+    def __init__(self, worker, request_id, queue_items, sleep_calls, watcher):
         self.worker = worker
         self.request_id = request_id
         self.queue_items = queue_items
         self.sleep_calls = sleep_calls
+        self.watcher = watcher
 
     def run(self, condition, retry_wait_seconds=30):
         """Drive handle_task_result with an ExecutionPausedError."""
@@ -778,12 +949,18 @@ def pause_harness(isolated_database, monkeypatch):
 
     monkeypatch.setattr('time.sleep', mock_sleep)
 
+    watcher = executor.CancellationWatcher()
+    # These tests drive watcher ticks explicitly and must not leave one daemon
+    # thread per fixture waiting for the rest of the pytest process.
+    watcher._thread = mock.Mock()
+    monkeypatch.setattr(executor, '_CANCELLATION_WATCHER', watcher)
+
     worker = executor.RequestWorker(
         schedule_type=requests_lib.ScheduleType.LONG,
         config=server_config.WorkerConfig(garanteed_parallelism=1,
                                           burstable_parallelism=0,
                                           num_db_connections_per_worker=0))
-    return _PauseHarness(worker, request_id, queue_items, sleep_calls)
+    return _PauseHarness(worker, request_id, queue_items, sleep_calls, watcher)
 
 
 class _RecordingCondition(continue_condition_lib.ContinueCondition):
@@ -826,6 +1003,7 @@ def test_pause_reschedules_when_wait_returns_true(pause_harness):
         'is_cancelled': False,
         'fallback_wait_seconds': 30
     }]
+    assert pause_harness.request_id not in pause_harness.watcher._verdicts
     # During the pause the request is WAITING with a "waiting to resume" msg.
     updated = requests_lib.get_request(pause_harness.request_id,
                                        fields=['status', 'status_msg'])
@@ -840,6 +1018,26 @@ def test_pause_dropped_when_wait_returns_false(pause_harness):
     pause_harness.run(condition)
 
     assert pause_harness.queue_items == []
+
+
+def test_pause_wait_exception_deregisters_cancellation_watch(pause_harness):
+    """A failed condition wait cannot leave a stale watched request."""
+
+    class _FailingCondition(continue_condition_lib.ContinueCondition):
+
+        def wait(self,
+                 *,
+                 is_cancelled,
+                 fallback_wait_seconds,
+                 update_status_msg=None):
+            del is_cancelled, fallback_wait_seconds, update_status_msg
+            raise RuntimeError('condition failed')
+
+    request_element = pause_harness.run(_FailingCondition())
+
+    assert pause_harness.request_id not in pause_harness.watcher._verdicts
+    assert pause_harness.sleep_calls == [30]
+    assert pause_harness.queue_items == [request_element]
 
 
 def test_pause_base_condition_does_fixed_fallback_wait(pause_harness):
@@ -867,6 +1065,7 @@ def test_pause_base_condition_dropped_if_cancelled_during_wait(
         pause_harness.sleep_calls.append(seconds)
         with requests_lib.update_request(pause_harness.request_id) as r:
             r.status = requests_lib.RequestStatus.CANCELLED
+        pause_harness.watcher._poll_once()
 
     monkeypatch.setattr('time.sleep', cancel_on_sleep)
 
