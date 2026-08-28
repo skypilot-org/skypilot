@@ -531,13 +531,47 @@ function BatchProgressBar({ completed, total }) {
   );
 }
 
+// External (non-managed) rows merged in by the server carry
+// is_external + external_cluster/external_job_id; their detail pages
+// live under /slurm-jobs instead of /jobs.
+function externalJobHref(item) {
+  return `/slurm-jobs/${encodeURIComponent(item.external_cluster)}/${encodeURIComponent(item.external_job_id)}`;
+}
+
+function ExternalPill() {
+  return (
+    <span
+      className="inline-flex items-center flex-shrink-0 ml-2 px-2 rounded-full border border-gray-200 bg-gray-100 text-gray-600 text-xs font-medium"
+      style={{ paddingTop: 1, paddingBottom: 1, lineHeight: 1.4 }}
+      title="This workload is launched and managed outside of SkyPilot"
+    >
+      External
+    </span>
+  );
+}
+
+// A Slurm job id lives in the CLUSTER's id space, not SkyPilot's — the raw
+// number can collide with a managed job id in the same column. Muted so the
+// two id spaces cannot be conflated; the tooltip names the owner.
+function ExternalJobId({ item, href }) {
+  return (
+    <NonCapitalizedTooltip
+      content={`External ID managed by Slurm cluster ${item.external_cluster}`}
+    >
+      <Link href={href} className="text-gray-400 underline decoration-dotted">
+        {item.external_job_id}
+      </Link>
+    </NonCapitalizedTooltip>
+  );
+}
+
 function JobNameLink({ href, name }) {
+  // max-w (not fixed w): the box shrinks to the name so a trailing badge
+  // sits next to the text instead of parking at the 240px edge after a
+  // short name; long names still truncate at 240px.
   return (
     <NonCapitalizedTooltip content={name}>
-      <Link
-        href={href}
-        className="text-blue-600 block min-w-[200px] max-w-[240px] truncate"
-      >
+      <Link href={href} className="text-blue-600 block max-w-[240px] truncate">
         {name}
       </Link>
     </NonCapitalizedTooltip>
@@ -606,6 +640,10 @@ export function ManagedJobsTable({
     [setView]
   );
   const [statusCounts, setStatusCounts] = useState({});
+  // Per-cluster failures from the external (Slurm) jobs sweep; non-empty
+  // means external rows may be incomplete or stale. Dismissible warning.
+  const [externalFetchErrors, setExternalFetchErrors] = useState([]);
+  const [externalErrorsDismissed, setExternalErrorsDismissed] = useState('');
   const [moreMenuOpen, setMoreMenuOpen] = useState(false);
   const moreMenuRef = useRef(null);
   const [controllerStopped, setControllerStopped] = useState(false);
@@ -787,12 +825,16 @@ export function ManagedJobsTable({
             setTotalCount(0);
             setTotalNoFilter(0);
             setStatusCounts({});
+            // No rows are shown, so a Slurm-sweep failure banner from a
+            // previous fetch would hang over an empty table.
+            setExternalFetchErrors([]);
           } else {
             setHookControllerStopped(false);
             setData(response.jobs || []);
             setTotalCount(response.total || 0);
             setTotalNoFilter(response.totalNoFilter || response.total || 0);
             setStatusCounts(response.statusCounts || {});
+            setExternalFetchErrors(response.externalFetchErrors || []);
             // Controller is reachable: clear any stale banner state from a
             // previous fetch and skip the cluster-status lookup below.
             setControllerStopped(false);
@@ -857,6 +899,7 @@ export function ManagedJobsTable({
           setTotalNoFilter(0);
           setStatusCounts({});
           setControllerStopped(false);
+          setExternalFetchErrors([]);
           setIsInitialLoad(false);
         }
       } finally {
@@ -1214,7 +1257,15 @@ export function ManagedJobsTable({
   const groupedJobs = React.useMemo(() => {
     const groups = new Map();
     paginatedData.forEach((job) => {
-      const jobId = job.id;
+      // External rows never form job groups; key them by their globally
+      // unique task_job_id so equal Slurm ids across clusters (or a
+      // Slurm id matching a managed id) can't collapse into one group.
+      // Fall back to a prefixed id if a producer ever omits task_job_id,
+      // so such rows degrade to per-id groups instead of one undefined
+      // group rendering as a bogus JobGroup.
+      const jobId = job.is_external
+        ? (job.task_job_id ?? `external:${job.id}`)
+        : job.id;
       if (!groups.has(jobId)) {
         groups.set(jobId, []);
       }
@@ -1496,23 +1547,28 @@ export function ManagedJobsTable({
             );
           }
 
-          // Single task. A row may carry its own detail link (e.g. rows
-          // sourced from outside the managed-jobs table); otherwise link to
-          // the managed-job detail page.
-          const detailHref = item.detail_href || `/jobs/${item.id}`;
+          // Single task. A row may carry its own detail link; external
+          // rows without one derive it from their identity fields, and
+          // everything else links to the managed-job detail page.
+          const detailHref =
+            item.detail_href ||
+            (item.is_external ? externalJobHref(item) : `/jobs/${item.id}`);
+          const idLink = item.is_external ? (
+            <ExternalJobId item={item} href={detailHref} />
+          ) : (
+            <Link href={detailHref} className="text-blue-600">
+              {item.id}
+            </Link>
+          );
           return (
             <TableCell>
               {hasAnyJobGroups ? (
                 <div className="flex items-center">
                   <span className="w-6 mr-1" aria-hidden="true" />
-                  <Link href={detailHref} className="text-blue-600">
-                    {item.id}
-                  </Link>
+                  {idLink}
                 </div>
               ) : (
-                <Link href={detailHref} className="text-blue-600">
-                  {item.id}
-                </Link>
+                idLink
               )}
             </TableCell>
           );
@@ -1576,13 +1632,16 @@ export function ManagedJobsTable({
             );
           }
 
-          // Single task. Honor a row-provided detail link (see the ID
-          // column) so externally-sourced rows point at their own page.
-          const detailHref = item.detail_href || `/jobs/${item.id}`;
+          // Single task. Same link resolution as the ID column: a
+          // row-provided detail link wins, external rows derive theirs.
+          const detailHref =
+            item.detail_href ||
+            (item.is_external ? externalJobHref(item) : `/jobs/${item.id}`);
           return (
             <TableCell className="whitespace-nowrap">
               <div className="flex items-center">
                 <JobNameLink href={detailHref} name={item.name} />
+                {item.is_external && <ExternalPill />}
                 {isBatch && <BatchBadge className="ml-2" />}
               </div>
             </TableCell>
@@ -1626,12 +1685,16 @@ export function ManagedJobsTable({
         renderCell: (item) =>
           shouldShowWorkspace ? (
             <TableCell>
-              <Link
-                href="/workspaces"
-                className="text-gray-700 hover:text-blue-600 hover:underline"
-              >
-                {item.workspace || 'default'}
-              </Link>
+              {item.is_external ? (
+                <span className="text-gray-400">—</span>
+              ) : (
+                <Link
+                  href="/workspaces"
+                  className="text-gray-700 hover:text-blue-600 hover:underline"
+                >
+                  {item.workspace || 'default'}
+                </Link>
+              )}
             </TableCell>
           ) : null,
       },
@@ -1909,9 +1972,14 @@ export function ManagedJobsTable({
             return <TableCell>-</TableCell>;
           }
 
-          // Use task_job_id for group children to avoid conflicts
+          // Use task_job_id for group children to avoid conflicts, and for
+          // external rows always: their raw id is the Slurm cluster's id
+          // space, so equal ids across clusters (or against a managed id)
+          // would co-expand on plain item.id.
           const rowId =
-            ctx?.renderMode === 'groupChild' ? item.task_job_id : item.id;
+            ctx?.renderMode === 'groupChild' || item.is_external
+              ? item.task_job_id
+              : item.id;
 
           return (
             <TableCell>
@@ -1935,6 +2003,23 @@ export function ManagedJobsTable({
         renderHeader: () => <TableHead>Logs</TableHead>,
         renderCell: (item, ctx) => {
           const { renderMode, jobId } = ctx || {};
+
+          if (item.is_external) {
+            // External Slurm rows: logs live on their detail page.
+            return (
+              <TableCell>
+                <div className="flex items-center space-x-2">
+                  <Link
+                    href={externalJobHref(item)}
+                    title="View logs"
+                    className="text-sky-blue hover:text-sky-blue-bright font-medium inline-flex items-center h-8"
+                  >
+                    <FileSearchIcon className="w-4 h-4" />
+                  </Link>
+                </div>
+              </TableCell>
+            );
+          }
 
           // For group parent, use jobId; otherwise use item.id
           const logJobId = renderMode === 'groupParent' ? jobId : item.id;
@@ -2302,6 +2387,44 @@ export function ManagedJobsTable({
           </div>
         </div>
       </div>
+
+      {/* Slurm sweep failures: external rows may be incomplete or stale.
+          Dismiss is keyed on the message text so a NEW failure re-surfaces
+          the warning while the same one stays dismissed. */}
+      {externalFetchErrors.length > 0 &&
+        (() => {
+          const errorText = externalFetchErrors
+            .map((f) => `${f.cluster}: ${f.error}`)
+            .join(' · ');
+          if (errorText === externalErrorsDismissed) return null;
+          return (
+            <div className="mb-3 flex items-start justify-between rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+              <div>
+                <div>
+                  Failed to fetch Slurm jobs from{' '}
+                  {externalFetchErrors.length === 1 ? 'cluster' : 'clusters'}{' '}
+                  {externalFetchErrors.map((f) => f.cluster).join(', ')} — their
+                  jobs may be missing or stale.
+                </div>
+                {externalFetchErrors.map((f) => (
+                  <div
+                    key={f.cluster}
+                    className="mt-1 font-mono text-xs text-amber-700"
+                  >
+                    {f.cluster}: {f.error}
+                  </div>
+                ))}
+              </div>
+              <button
+                onClick={() => setExternalErrorsDismissed(errorText)}
+                className="ml-3 flex-shrink-0 font-medium text-amber-800 hover:text-amber-900"
+                title="Dismiss"
+              >
+                ×
+              </button>
+            </div>
+          );
+        })()}
 
       {/* Mobile-specific controller stopped message outside table */}
       {isMobile &&
