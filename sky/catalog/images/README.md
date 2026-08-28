@@ -80,21 +80,24 @@ packer build  --var vm_generation=2 --var client_secret=${SECRET} --var use_grid
 ```
 
 ### Kubernetes
-1. Build and push the CPU and GPU images. Both build on the `BASE_IMAGE` pinned
-in `Dockerfile_k8s{,_gpu}` (currently Ubuntu 24.04) and are tagged
-`<date>-ubuntu2404`.
+1. Build the image
 ```bash
-export REGION=us  # Update this: us, europe, asia
-./skypilot-k8s-image.sh -p -r ${REGION}
-./skypilot-k8s-image.sh -p -g -r ${REGION}
+export REGION=europe  # Update this: us, europe, asia
+./skypilot-k8s-image.sh -p -l -r ${REGION}
+./skypilot-k8s-image.sh -p -l -g -r ${REGION}
 ```
-To rebuild the same recipe on a newer distro, pass `-b` on both; the tag suffix
-follows the base, so the variant does not collide with the default build. Keep
-the two bases on the same Ubuntu release.
+2. To rebuild the same recipe on a different base, e.g. Ubuntu 24.04 for a newer
+glibc, pass `-b` for the base and `-s` for a tag suffix. Without `-b` the build
+uses the `BASE_IMAGE` pinned in `Dockerfile_k8s{,_gpu}`, which is what the
+default images ship on.
 ```bash
-./skypilot-k8s-image.sh -p -r ${REGION} -b ubuntu:26.04
-./skypilot-k8s-image.sh -p -g -r ${REGION} -b nvidia/cuda:12.8.1-runtime-ubuntu26.04
+./skypilot-k8s-image.sh -p -r ${REGION} -b ubuntu:24.04 -s ubuntu2404
+./skypilot-k8s-image.sh -p -g -r ${REGION} \
+    -b nvidia/cuda:12.8.1-runtime-ubuntu24.04 -s ubuntu2404
 ```
+Pass both: `-s` is what keeps the variant off the default build's tag, giving
+`<date>-ubuntu2404` above. Keep the CPU and GPU bases on the same Ubuntu
+release, since the GPU base is layered on the CPU one.
 
 ## Test Images
 1. Minimal GPU test: `sky launch --image ${IMAGE_ID} --gpus=L4:1 --cloud ${CLOUD}` then run `nvidia-smi` in the launched instance.

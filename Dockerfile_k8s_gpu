@@ -1,7 +1,7 @@
 # We use the cuda runtime image instead of devel image to reduce size (1.3GB vs 3.6GB)
-# Overridable so the same recipe can be rebuilt on another base; keep the
-# Ubuntu release in sync with Dockerfile_k8s.
-ARG BASE_IMAGE=nvidia/cuda:12.8.1-runtime-ubuntu24.04
+# Overridable so the same recipe can be rebuilt on another base (e.g.
+# nvidia/cuda:*-runtime-ubuntu24.04 for a newer glibc).
+ARG BASE_IMAGE=nvidia/cuda:12.1.1-runtime-ubuntu22.04
 FROM ${BASE_IMAGE}
 
 # Detect architecture using ARG with default value
