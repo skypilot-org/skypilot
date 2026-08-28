@@ -32,13 +32,14 @@ parser.add_argument('--output-csv',
                     help='The output CSV file name')
 args = parser.parse_args()
 
-# 25 regions
+# 26 regions
 ALL_REGIONS = [
     # 'us-east-1',  # Source AMI is already in this region
     'us-east-2',
     'us-west-1',
     'us-west-2',
     'ca-central-1',
+    'sa-east-1',
     'eu-central-1',  # need for smoke test
     'eu-central-2',
     'eu-west-1',
