@@ -399,3 +399,78 @@ def test_apply_pvc_empty_string_storage_class_skips_both_checks():
         mock_k8s.storage_api.return_value.read_storage_class.assert_not_called()
         mock_k8s.storage_api.return_value.list_storage_class.assert_not_called()
         mock_create.assert_called_once()
+
+
+# ── default-context resolution: a volume with no context of its own ───────
+
+
+def _patch_context_resolution(current_context, allowed_contexts):
+    """Patch the two inputs `_resolve_default_context` reads."""
+    return (mock.patch.object(volume_provision.kubernetes_utils,
+                              'get_current_kube_config_context_name',
+                              return_value=current_context),
+            mock.patch.object(volume_provision.clouds.Kubernetes,
+                              'existing_allowed_contexts',
+                              return_value=allowed_contexts))
+
+
+def test_resolve_default_context_prefers_allowed_current_context():
+    """The ordinary single-cluster case is unchanged: current-context wins."""
+    patch_current, patch_allowed = _patch_context_resolution(
+        'my-context', ['my-context', 'other-context'])
+    with patch_current, patch_allowed:
+        assert volume_provision._resolve_default_context() == 'my-context'
+
+
+def test_resolve_default_context_skips_disallowed_current_context():
+    """current-context excluded by allowed_contexts → first allowed instead.
+
+    Otherwise the PVC is created on a cluster that `allowed_contexts` keeps
+    every pod off of, so nothing can ever mount it.
+    """
+    patch_current, patch_allowed = _patch_context_resolution(
+        'not-allowed', ['first-allowed', 'second-allowed'])
+    with patch_current, patch_allowed:
+        assert volume_provision._resolve_default_context() == 'first-allowed'
+
+
+def test_resolve_default_context_falls_back_when_no_allowed_contexts():
+    """No allowed contexts to cross-check against → previous behavior."""
+    patch_current, patch_allowed = _patch_context_resolution('my-context', [])
+    with patch_current, patch_allowed:
+        assert volume_provision._resolve_default_context() == 'my-context'
+
+
+def test_get_context_namespace_uses_resolved_context_and_pins_region():
+    """A region-less volume resolves a context and records it on the config.
+
+    Pinning `region` matters beyond this call: every later operation on the
+    volume (mount, delete) reads it back instead of re-resolving.
+    """
+    config = models.VolumeConfig(
+        name='test-vol',
+        type='k8s-pvc',
+        cloud='kubernetes',
+        region=None,
+        zone=None,
+        name_on_cloud='real-pvc',
+        size='5',
+        config={'namespace': 'default'},
+    )
+    patch_current, patch_allowed = _patch_context_resolution(
+        'not-allowed', ['first-allowed'])
+    with patch_current, patch_allowed:
+        context, namespace = volume_provision._get_context_namespace(config)
+    assert context == 'first-allowed'
+    assert config.region == 'first-allowed'
+    assert namespace == 'default'
+
+
+def test_get_context_namespace_keeps_explicit_region():
+    """An explicit context is honored as-is: no resolution, no override."""
+    config = _make_pvc_config(use_existing=False)
+    with mock.patch.object(volume_provision,
+                           '_resolve_default_context') as mock_resolve:
+        context, _ = volume_provision._get_context_namespace(config)
+    mock_resolve.assert_not_called()
+    assert context == 'my-context'
