@@ -12,6 +12,7 @@ Run standalone as:
     python apply_patches.py --ray-version 2.9.3
 """
 import argparse
+import concurrent.futures
 import importlib
 import os
 import shlex
@@ -87,6 +88,10 @@ def apply_patches(version: str) -> None:
             used to name the .orig backups, so a later version bump does not
             reuse a backup taken from a different Ray.
     """
+    # Resolve every target before patching any of them: importing Ray
+    # submodules is the one shared-state step here, and a failure to locate a
+    # file should not leave Ray half-patched.
+    targets = []
     for module_name, patch_file in _PATCHES:
         module = importlib.import_module(module_name)
         target = getattr(module, '__file__', None)
@@ -94,7 +99,21 @@ def apply_patches(version: str) -> None:
             raise RuntimeError(
                 f'{module_name} has no __file__; cannot locate the installed '
                 'Ray source to patch.')
-        _run_patch(target, _to_absolute(patch_file), version)
+        targets.append((target, _to_absolute(patch_file)))
+
+    # Each patch shells out, and they touch disjoint files, so run them
+    # concurrently -- this is on the critical path of every Kubernetes pod
+    # bootstrap. Iterating the futures re-raises the first failure; the `with`
+    # block then lets the rest finish before propagating, which is harmless
+    # since _run_patch is idempotent.
+    with concurrent.futures.ThreadPoolExecutor(
+            max_workers=len(targets)) as pool:
+        futures = [
+            pool.submit(_run_patch, target, patch_file, version)
+            for target, patch_file in targets
+        ]
+        for future in futures:
+            future.result()
 
 
 def main() -> None:

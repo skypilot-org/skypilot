@@ -12,6 +12,10 @@ import os
 import subprocess
 import tarfile
 import textwrap
+import threading
+from unittest import mock
+
+import pytest
 
 from sky.provision import instance_setup
 from sky.skylet import constants
@@ -198,3 +202,73 @@ def test_template_uses_the_payload_command():
 # ray_patches_cmd deploy variable -- is asserted in
 # tests/unit_tests/test_sky/clouds/test_kubernetes.py, which already has the
 # fixture for calling make_deploy_resources_variables.
+
+# --------------------------------------------------------------- the applier
+
+
+def test_the_applier_patches_every_registered_file(monkeypatch):
+    """All of _PATCHES, resolved before any of them is applied.
+
+    A patch missing from the loop is a Ray file left unpatched, with nothing
+    else to notice.
+    """
+    seen = []
+
+    def _fake_run_patch(target, patch_file, version):
+        seen.append((target, os.path.basename(patch_file), version))
+
+    monkeypatch.setattr(apply_patches, '_run_patch', _fake_run_patch)
+    monkeypatch.setattr(
+        apply_patches, 'importlib',
+        type(
+            '_M', (), {
+                'import_module': staticmethod(lambda name: type(
+                    '_Mod', (), {'__file__': f'/fake/{name}.py'}))
+            }))
+
+    apply_patches.apply_patches('9.9.9')
+
+    assert sorted(name for _, name, _ in seen) == sorted(
+        patch_file for _, patch_file in apply_patches._PATCHES)  # pylint: disable=protected-access
+    assert {version for _, _, version in seen} == {'9.9.9'}
+
+
+def test_the_applier_propagates_a_failure(monkeypatch):
+    """A patch that fails must not be swallowed by the thread pool."""
+
+    def _fake_run_patch(target, patch_file, version):
+        del target, version
+        if 'worker' in patch_file:
+            raise RuntimeError('boom')
+
+    monkeypatch.setattr(apply_patches, '_run_patch', _fake_run_patch)
+    monkeypatch.setattr(
+        apply_patches, 'importlib',
+        type(
+            '_M', (), {
+                'import_module': staticmethod(lambda name: type(
+                    '_Mod', (), {'__file__': f'/fake/{name}.py'}))
+            }))
+
+    with pytest.raises(RuntimeError, match='boom'):
+        apply_patches.apply_patches('9.9.9')
+
+
+def test_the_applier_runs_the_patches_concurrently():
+    """The barrier only clears if every patch is in flight at once.
+
+    A sequential loop leaves the first one waiting alone, so it breaks the
+    barrier on the timeout rather than passing -- which is what makes this an
+    assertion about concurrency and not just about coverage.
+    """
+    count = len(apply_patches._PATCHES)  # pylint: disable=protected-access
+    barrier = threading.Barrier(count, timeout=10)
+
+    def _fake_run_patch(target, patch_file, version):
+        del target, patch_file, version
+        barrier.wait()
+
+    with mock.patch.object(apply_patches, '_run_patch', _fake_run_patch), \
+         mock.patch.object(apply_patches.importlib, 'import_module',
+                           lambda name: mock.Mock(__file__=f'/fake/{name}.py')):
+        apply_patches.apply_patches('9.9.9')
