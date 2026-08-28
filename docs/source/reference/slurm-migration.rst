@@ -44,6 +44,9 @@ Most Slurm concepts map directly to SkyPilot concepts.
    * - ``sbatch script.sh``
      - ``sky jobs launch task.yaml``
      - Submit a batch job
+   * - ``sbatch --array=0-9 script.sh``
+     - ``sky jobs launch --num-jobs 10 task.yaml``
+     - Submit a :ref:`job array <num-jobs>`
    * - ``scancel <jobid>``
      - ``sky jobs cancel <job_id>``
      - Cancel a job
@@ -113,6 +116,12 @@ SkyPilot exposes environment variables similar to Slurm for distributed jobs. Se
    * - ``$SLURM_JOB_ID``
      - ``$SKYPILOT_TASK_ID``
      - Unique job identifier
+   * - ``$SLURM_ARRAY_TASK_ID``
+     - ``$SKYPILOT_JOB_RANK``
+     - Index of this job within a :ref:`job array <num-jobs>`. Always 0-based in SkyPilot
+   * - ``$SLURM_ARRAY_TASK_COUNT``
+     - ``$SKYPILOT_NUM_JOBS``
+     - Total number of jobs in the array
 
 Example usage in a distributed training script:
 
@@ -289,29 +298,33 @@ The :ref:`SkyPilot dashboard <dashboard>` provides a web UI to view all logs acr
 Job arrays and parameter sweeps
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Slurm job arrays (``sbatch --array=1-100``) allow running many similar jobs with different parameters.
+Slurm job arrays (``sbatch --array=0-99``) allow running many similar jobs with different parameters.
 
-In SkyPilot, use :ref:`managed jobs <managed-jobs>` with environment variables:
+The direct equivalent is :code:`sky jobs launch --num-jobs`, which submits N
+:ref:`managed jobs <managed-jobs>` from a single YAML:
 
 .. code-block:: bash
 
-   # Launch 100 jobs with different TASK_ID values
-   for i in $(seq 1 100); do
-     sky jobs launch --env TASK_ID=$i -y -d task.yaml
-   done
+   # Equivalent to: sbatch --array=0-99 script.sh
+   sky jobs launch --num-jobs 100 task.yaml
 
-Your task YAML can use ``TASK_ID`` to vary behavior:
+Each job gets a ``$SKYPILOT_JOB_RANK`` (0 to N-1, the analogue of
+``$SLURM_ARRAY_TASK_ID``) and ``$SKYPILOT_NUM_JOBS``, which the task uses to pick
+its slice of the work:
 
 .. code-block:: yaml
 
-   envs:
-     TASK_ID: null  # Required, passed via --env
-
    run: |
-     echo "Running task $TASK_ID"
-     python train.py --seed $TASK_ID
+     echo "Running task $SKYPILOT_JOB_RANK of $SKYPILOT_NUM_JOBS"
+     python train.py --seed $SKYPILOT_JOB_RANK
 
-For hyperparameter sweeps, you can also pass multiple environment variables:
+As with a Slurm array, all 100 jobs are submitted at once and run as capacity
+allows; the rest stay ``PENDING``. Unlike a Slurm array, each job is scheduled
+independently and is automatically recovered if its instance is preempted.
+
+For sweeps where the jobs differ by more than an index — different
+hyperparameters, resources, or environment variables — launch them separately
+and pass the values with ``--env``:
 
 .. code-block:: bash
 
@@ -320,6 +333,17 @@ For hyperparameter sweeps, you can also pass multiple environment variables:
        sky jobs launch --env LR=$lr --env BATCH=$batch -y -d task.yaml
      done
    done
+
+.. code-block:: yaml
+
+   envs:
+     LR: null     # Required, passed via --env
+     BATCH: null  # Required, passed via --env
+
+   run: |
+     python train.py --learning-rate $LR --batch-size $BATCH
+
+See :ref:`many-jobs` for the full workflow of running large sweeps this way.
 
 Module system alternative
 ~~~~~~~~~~~~~~~~~~~~~~~~~

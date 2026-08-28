@@ -128,4 +128,90 @@ def test_refresh_is_scoped_to_the_accessible_workspaces(isolated_database):
                                'volume_refresh') as volume_refresh:
             volumes_core.volume_list(refresh=True)
 
-    volume_refresh.assert_called_once_with(volume_names=['vol-a'])
+    volume_refresh.assert_called_once()
+    # Sorted: the names come from a query with no ORDER BY.
+    assert sorted(volume_refresh.call_args.kwargs['volume_names']) == ['vol-a']
+
+
+def test_refresh_is_not_handed_ephemeral_volumes(isolated_database):
+    """volume_refresh reconciles persistent volumes only, so an ephemeral name
+    can only lengthen the IN list it looks up."""
+    _add('vol-a', workspace='ws-a')
+    _add('vol-a-ephemeral', workspace='ws-a', is_ephemeral=True)
+
+    with mock.patch.object(volumes_core.workspaces_core,
+                           'get_accessible_workspace_names',
+                           return_value={'ws-a'}):
+        with mock.patch.object(volumes_core,
+                               'volume_refresh') as volume_refresh:
+            volumes_core.volume_list(refresh=True)
+
+    assert sorted(volume_refresh.call_args.kwargs['volume_names']) == ['vol-a']
+
+
+def test_filters_to_the_given_names(isolated_database):
+    _seed_two_workspaces()
+
+    records = global_user_state.get_volumes(volume_names=['vol-a'])
+
+    assert [r['name'] for r in records] == ['vol-a']
+
+
+def test_a_name_outside_the_workspace_filter_returns_nothing(isolated_database):
+    """The filters compose, so a name cannot widen what the workspace filter
+    allows. Doing the name filter in a query of its own -- the shape
+    get_volumes_from_names has, which takes no workspaces_filter -- would
+    return the volume instead."""
+    _seed_two_workspaces()
+
+    records = global_user_state.get_volumes(workspaces_filter={'ws-a'},
+                                            volume_names=['vol-b'])
+
+    assert records == []
+
+
+def test_no_name_filter_returns_every_name(isolated_database):
+    """None means "do not filter by name"; the daemon and a bare listing rely
+    on it."""
+    _seed_two_workspaces()
+
+    records = global_user_state.get_volumes(volume_names=None)
+
+    assert sorted(r['name'] for r in records) == ['vol-a', 'vol-b']
+
+
+def test_an_empty_name_list_matches_nothing(isolated_database):
+    """[] is "these zero volumes", not "all of them" -- the same contract
+    get_volumes_from_names has, and what volume_refresh relies on to reconcile
+    nothing when the caller can see nothing."""
+    _seed_two_workspaces()
+
+    assert global_user_state.get_volumes(volume_names=[]) == []
+
+
+def test_names_are_chunked_but_all_are_returned(isolated_database, monkeypatch):
+    """A long name list is split across queries; every match must still come
+    back exactly once."""
+    monkeypatch.setattr(global_user_state, '_CLUSTER_IN_QUERY_CHUNK_SIZE', 2)
+    for i in range(5):
+        _add(f'vol-{i}', workspace='ws-a')
+
+    records = global_user_state.get_volumes(
+        volume_names=[f'vol-{i}' for i in range(5)])
+
+    assert sorted(r['name'] for r in records) == [f'vol-{i}' for i in range(5)]
+
+
+def test_get_volume_names_applies_the_same_filters(isolated_database):
+    """The name-only lookup must not be a wider door than get_volumes."""
+    _add('vol-a', workspace='ws-a')
+    _add('vol-a-ephemeral', workspace='ws-a', is_ephemeral=True)
+    _add('vol-b', workspace='ws-b')
+
+    names = global_user_state.get_volume_names(
+        is_ephemeral=False,
+        workspaces_filter={'ws-a'},
+        volume_names=['vol-a', 'vol-a-ephemeral', 'vol-b'])
+
+    assert names == ['vol-a']
+    assert global_user_state.get_volume_names(workspaces_filter=set()) == []

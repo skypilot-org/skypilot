@@ -499,6 +499,11 @@ export function ManagedJobs() {
           refreshDataRef={poolsRefreshRef}
         />
       </div>
+
+      {/* Extension point for jobs not managed by SkyPilot (e.g. foreign
+          Slurm jobs surfaced by the GPU Manager plugin). Renders nothing
+          when no plugin fills it. */}
+      <PluginSlot name="jobs.page.external-section" />
     </>
   );
 }
@@ -1491,18 +1496,21 @@ export function ManagedJobsTable({
             );
           }
 
-          // Single task
+          // Single task. A row may carry its own detail link (e.g. rows
+          // sourced from outside the managed-jobs table); otherwise link to
+          // the managed-job detail page.
+          const detailHref = item.detail_href || `/jobs/${item.id}`;
           return (
             <TableCell>
               {hasAnyJobGroups ? (
                 <div className="flex items-center">
                   <span className="w-6 mr-1" aria-hidden="true" />
-                  <Link href={`/jobs/${item.id}`} className="text-blue-600">
+                  <Link href={detailHref} className="text-blue-600">
                     {item.id}
                   </Link>
                 </div>
               ) : (
-                <Link href={`/jobs/${item.id}`} className="text-blue-600">
+                <Link href={detailHref} className="text-blue-600">
                   {item.id}
                 </Link>
               )}
@@ -1568,11 +1576,13 @@ export function ManagedJobsTable({
             );
           }
 
-          // Single task
+          // Single task. Honor a row-provided detail link (see the ID
+          // column) so externally-sourced rows point at their own page.
+          const detailHref = item.detail_href || `/jobs/${item.id}`;
           return (
             <TableCell className="whitespace-nowrap">
               <div className="flex items-center">
-                <JobNameLink href={`/jobs/${item.id}`} name={item.name} />
+                <JobNameLink href={detailHref} name={item.name} />
                 {isBatch && <BatchBadge className="ml-2" />}
               </div>
             </TableCell>

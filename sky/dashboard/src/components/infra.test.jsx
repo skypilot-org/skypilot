@@ -16,6 +16,7 @@ import { fireEvent, render, screen } from '@testing-library/react';
 import {
   InfrastructureSection,
   slurmRequestableCounts,
+  countUpSlurmNodes,
 } from '@/components/infra';
 
 // The infrastructure table renders one sub-row per GPU type. A Slurm cluster
@@ -248,6 +249,68 @@ describe('slurmRequestableCounts', () => {
 
   it('returns nothing for a CPU-only node', () => {
     expect(slurmRequestableCounts(0)).toEqual([]);
+  });
+});
+
+describe('countUpSlurmNodes', () => {
+  const n = (state) => ({ node_name: 'x', node_state: state });
+
+  it('excludes powered-down (~) nodes from the up count', () => {
+    const nodes = [n('alloc'), n('idle'), n('idle~'), n('idle~'), n('mix')];
+    expect(countUpSlurmNodes(nodes)).toEqual({ up: 3, poweredDown: 2 });
+  });
+
+  it('treats every node as up when none are powered down', () => {
+    expect(countUpSlurmNodes([n('alloc'), n('idle')])).toEqual({
+      up: 2,
+      poweredDown: 0,
+    });
+  });
+
+  it('tolerates missing/blank state and empty input', () => {
+    expect(countUpSlurmNodes([{ node_name: 'x' }, n('')])).toEqual({
+      up: 2,
+      poweredDown: 0,
+    });
+    expect(countUpSlurmNodes([])).toEqual({ up: 0, poweredDown: 0 });
+    expect(countUpSlurmNodes(undefined)).toEqual({ up: 0, poweredDown: 0 });
+  });
+});
+
+describe('InfrastructureSection Slurm node count', () => {
+  const nodeWithState = (nodeName, state) => ({
+    node_name: nodeName,
+    partition: 'all*',
+    gpu_name: 'H100',
+    gpu_total: 8,
+    gpu_free: 0,
+    cluster: 'prod-gpu',
+    node_state: state,
+  });
+
+  it('shows the up-node count, folding out powered-down cloud nodes', () => {
+    const { container } = renderSection({
+      isSlurm: true,
+      contexts: ['prod-gpu'],
+      gpus: [{ gpu_name: 'H100', gpu_total: 24, gpu_free: 0 }],
+      groupedPerContextGPUs: {
+        'prod-gpu': [{ gpu_name: 'H100', gpu_total: 24, gpu_free: 0 }],
+      },
+      groupedPerNodeGPUs: {
+        'prod-gpu': [
+          nodeWithState('n1', 'alloc'),
+          nodeWithState('n2', 'mix'),
+          nodeWithState('n3', 'idle~'),
+          nodeWithState('n4', 'idle~'),
+          nodeWithState('n5', 'idle~'),
+        ],
+      },
+    });
+    const rows = tableRows(container);
+    // 2 up + 3 power-saved: the Nodes cell shows 2, never the raw 5.
+    expect(normalize(rows[0])).toMatch(/prod-gpu\s*2/);
+    // The power-saved hint is informational, not a warning.
+    expect(rows[0].querySelector('svg.lucide-info')).not.toBeNull();
   });
 });
 

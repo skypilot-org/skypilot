@@ -598,3 +598,41 @@ class TestGetClusterFailureReasonFromPods:
         result = k8s_instance.get_cluster_failure_reason_from_pods(
             {}, ['pod-0', 'pod-1'])
         assert result == 'pod-1 is not ready (OOMKilled)'
+
+
+class TestPodReasonIdentifiesCause:
+    """A per-pod reason either names the cause, or only says "it is sick".
+
+    The distinction matters because a node that stops heartbeating leaves its
+    pods' status stale: a refresh during the outage can only say "not ready",
+    while a refresh after recovery names the real failure. Only the latter is
+    worth superseding an already-recorded reason with.
+    """
+
+    def test_bare_not_ready_does_not_identify_a_cause(self):
+        # kubelet never updated the pod, so the containers explain nothing.
+        assert not k8s_instance.pod_reason_identifies_cause(
+            'pod not ready (Unknown)')
+
+    def test_not_ready_with_container_detail_identifies_a_cause(self):
+        assert k8s_instance.pod_reason_identifies_cause(
+            'pod not ready (PodFailed); OOMKilled (exit code 137)')
+
+    def test_bare_termination_fallback_does_not_identify_a_cause(self):
+        assert not k8s_instance.pod_reason_identifies_cause(
+            'Terminated unexpectedly.\nLast known state: PodFailed.')
+
+    def test_termination_with_container_errors_identifies_a_cause(self):
+        # The fallback is only a *prefix* here -- the cause follows it, so a
+        # naive substring test on the fallback would get this backwards.
+        assert k8s_instance.pod_reason_identifies_cause(
+            'Terminated unexpectedly.\nLast known state: PodFailed.\n'
+            'Container errors: OOMKilled (no memory limit set)')
+
+    def test_kubelet_pod_status_reason_identifies_a_cause(self):
+        assert k8s_instance.pod_reason_identifies_cause(
+            'Evicted: The node was low on resource: memory')
+
+    def test_absent_reason_identifies_nothing(self):
+        assert not k8s_instance.pod_reason_identifies_cause(None)
+        assert not k8s_instance.pod_reason_identifies_cause('')

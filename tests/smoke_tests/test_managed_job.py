@@ -4373,7 +4373,11 @@ def test_managed_job_volume_refused_after_it_breaks(attach_via):
         pytest.skip('Needs consolidation mode: with a separate controller the '
                     'volume table is not readable from where the job cluster '
                     'is provisioned, so the volume cannot be judged there.')
-    name = smoke_tests_utils.get_cluster_name()
+    # Both cases would otherwise share this name -- get_cluster_name() keys off
+    # the test function -- and with it the volume and the cluster-scoped storage
+    # class, whenever the run does not serialize its Kubernetes tests.
+    attach_id = attach_via.split('_')[0]
+    name = f'{smoke_tests_utils.get_cluster_name()}-{attach_id}'
     create_sc_cmd = smoke_tests_utils.create_rejecting_storage_class_cmd(name)
     if create_sc_cmd is None:
         pytest.skip('No CSI driver on this cluster with a known way to refuse '

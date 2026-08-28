@@ -649,8 +649,10 @@ List volumes managed by SkyPilot.
 **Options:**
 
 - `--config` — Path to a config file or a single key-value pair. To add multiple key-value pairs add multiple flags (e.g. --config nested.key1=val1 --config nested.key2=val2).
+- `NAMES` — text
 - `--verbose`, `-v` — Show all information in full.
 - `--refresh`, `-r` — Refresh volume state from cloud APIs before listing. Without this flag, cached data is returned which is updated periodically by the background daemon.
+- `--output`, `-o` (default: `table`) — Output format. Choices: table, json. Default: table.
 
 ## API Server Commands
 

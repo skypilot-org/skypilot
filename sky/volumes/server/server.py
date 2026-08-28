@@ -1,7 +1,7 @@
 """REST API for storage management."""
 
 import contextlib
-from typing import Iterator
+from typing import Iterator, List, Optional
 
 import fastapi
 
@@ -25,8 +25,10 @@ router = fastapi.APIRouter()
 
 @router.get('')
 async def volume_list(
-    request: fastapi.Request,
-    refresh: bool = fastapi.Depends(role_filter.force_viewer_volume_refresh),
+        request: fastapi.Request,
+        refresh: bool = fastapi.Depends(
+            role_filter.force_viewer_volume_refresh),
+        names: Optional[List[str]] = fastapi.Query(None),
 ) -> None:
     """Gets the volumes.
 
@@ -35,8 +37,11 @@ async def volume_list(
             If False (default), return cached data from the database.
             For viewer-role callers this is forced to False by
             `role_filter.force_viewer_volume_refresh`.
+        names: If given, return only these volumes, and narrow a `refresh` to
+            them. Optional so that a client older than this parameter, which
+            never sends it, keeps getting every volume.
     """
-    request_body = payloads.VolumeListBody(refresh=refresh)
+    request_body = payloads.VolumeListBody(refresh=refresh, volume_names=names)
     await executor.schedule_request_async(
         request_id=request.state.request_id,
         request_name=request_names.RequestName.VOLUME_LIST,

@@ -2973,6 +2973,32 @@ class NodeHealthInfo:
         self.pods = pods
 
 
+# Lead-ins the reason builders below emit before they know *why* a pod is
+# unhealthy. pod_reason_identifies_cause() parses what those two functions
+# write, so it lives beside them and must stay in sync.
+_POD_NOT_READY_PREFIX = 'pod not ready ('
+_TERMINATION_FALLBACK = 'Terminated unexpectedly'
+_CONTAINER_ERRORS_MARKER = 'Container errors:'
+
+
+def pod_reason_identifies_cause(reason: Optional[str]) -> bool:
+    """Whether a per-pod reason names an actual cause, or only that it is sick.
+
+    A node that stops heartbeating leaves its pod status stale, so a refresh
+    during the outage can only report "not ready"; once it is back the same
+    code names the real cause. Callers use this to tell the two apart.
+    """
+    if not reason:
+        return False
+    if reason.startswith(_POD_NOT_READY_PREFIX):
+        # Container detail, when found, is appended after '; '.
+        return '; ' in reason
+    if reason.startswith(_TERMINATION_FALLBACK):
+        return _CONTAINER_ERRORS_MARKER in reason
+    # Evicted, Preempted by Kueue, etc. already name the cause.
+    return True
+
+
 def _get_pod_health_issues(pod: Any) -> Optional[str]:
     """Check a Running pod for health issues.
 
@@ -3292,7 +3318,11 @@ def _get_pod_termination_reason(pod: Any, cluster_name: str) -> str:
                 if reason is None:
                     # just in-case reason is None, have default for debugging
                     reason = f'exit({exit_code})'
-                container_reasons.append(reason)
+                # An OOM with no memory limit is a node-level OOM, not the
+                # container overrunning its own cap; the hints differ.
+                container_reasons.append(
+                    kubernetes_utils.annotate_oom_reason(
+                        reason, pod, container_status.name))
                 if terminated.finished_at is not None:
                     latest_timestamp = max(latest_timestamp,
                                            terminated.finished_at)
