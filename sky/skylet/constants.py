@@ -355,13 +355,13 @@ RAY_INSTALLATION_COMMANDS = (
     # that has ray cluster on the default port 6379 will be upgraded and
     # restarted.
     f'{SKY_UV_PIP_CMD} list | grep "ray " | '
-    f'grep {SKY_REMOTE_RAY_VERSION} 2>&1 > /dev/null '
+    'grep {ray_version} 2>&1 > /dev/null '
     f'|| {RAY_STATUS} || '
     # The pydantic-core==2.41.3 for arm seems corrupted
     # so we need to avoid that specific version.
     # Pin click<8.3.0: click 8.3.0+ breaks Ray CLI due to deepcopy issues
     # with Sentinel values. See https://github.com/ray-project/ray/issues/56747.
-    f'{SKY_UV_PIP_CMD} install -U "ray[default]=={SKY_REMOTE_RAY_VERSION}" "pydantic-core==2.41.1" "click<8.3.0"; '  # pylint: disable=line-too-long
+    f'{SKY_UV_PIP_CMD} install -U "ray[default]=={{ray_version}}" "pydantic-core==2.41.1" "click<8.3.0"; '  # pylint: disable=line-too-long
     # In some envs, e.g. pip does not have permission to write under /opt/conda
     # ray package will be installed under ~/.local/bin. If the user's PATH does
     # not include ~/.local/bin (the pip install will have the output: `WARNING:
@@ -428,10 +428,12 @@ SKYPILOT_WHEEL_INSTALLATION_COMMANDS = (
 RAY_SKYPILOT_INSTALLATION_COMMANDS = (
     f'{RAY_INSTALLATION_COMMANDS} '
     f'{SKYPILOT_WHEEL_INSTALLATION_COMMANDS} '
-    # Only patch ray when the ray version is the same as the expected version.
-    # The ray installation above can be skipped due to the existing ray cluster
-    # for backward compatibility. In this case, we should not patch the ray
-    # files.
+    # Only patch ray when the installed ray is the one our patch files were
+    # generated against -- SKY_REMOTE_RAY_VERSION, not the cluster's pinned
+    # {ray_version}. The two differ on a cluster that predates a version bump:
+    # it keeps its old ray (and the patches applied when it was first set up),
+    # while the wheel now carries patches for the new one. Applying those to
+    # the old ray corrupts it.
     f'{SKY_UV_PIP_CMD} list | grep "ray " | '
     f'grep {SKY_REMOTE_RAY_VERSION} 2>&1 > /dev/null && '
     f'{{ {SKY_PYTHON_CMD} -c '

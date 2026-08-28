@@ -1184,9 +1184,9 @@ class Kubernetes(clouds.Cloud):
             'k8s_resource_key': k8s_resource_key,
             'k8s_env_vars': k8s_env_vars,
             'image_id': image_id,
-            'ray_installation_commands': constants.RAY_INSTALLATION_COMMANDS,
-            'ray_patches_cmd': instance_setup.ray_patches_cmd(
-                constants.SKY_REMOTE_RAY_VERSION),
+            # 'ray_installation_commands' and 'ray_patches_cmd' are filled in by
+            # backend_utils.write_cluster_config: both depend on the Ray version
+            # this particular cluster is pinned to, which is not known here.
             'ray_head_start_command': instance_setup.ray_head_start_command(
                 custom_resources, custom_ray_options),
             'skypilot_ray_port': constants.SKY_REMOTE_RAY_PORT,
