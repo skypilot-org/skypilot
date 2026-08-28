@@ -3,8 +3,13 @@ repos:
 -   repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v5.0.0
     hooks:
+    # The Ray patch files are diffs: a blank context line is a line holding a
+    # single space, and stripping it makes the hunk disagree with its own @@
+    # header. Same for the trailing newline these hooks would add.
     -   id: trailing-whitespace
+        exclude: ^sky/skylet/ray_patches/.*\.(patch|diff)$
     -   id: end-of-file-fixer
+        exclude: ^sky/skylet/ray_patches/.*\.(patch|diff)$
     -   id: check-yaml
         args: ['--allow-multiple-documents']
         exclude: ^charts/
