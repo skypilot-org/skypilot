@@ -1,7 +1,7 @@
-# Ubuntu 22.04 to match the GPU image's base (nvidia/cuda:*-ubuntu22.04 is
-# layered on top of ubuntu:22.04). Overridable so the same recipe can be
-# rebuilt on another base (e.g. ubuntu:24.04 for a newer glibc).
-ARG BASE_IMAGE=ubuntu:22.04
+# Ubuntu 24.04 to match the GPU image's base (nvidia/cuda:*-ubuntu24.04 is
+# layered on top of ubuntu:24.04). Overridable so the same recipe can be
+# rebuilt on another base; keep the two bases on the same Ubuntu release.
+ARG BASE_IMAGE=ubuntu:24.04
 FROM ${BASE_IMAGE}
 
 # Detect architecture using ARG with default value
