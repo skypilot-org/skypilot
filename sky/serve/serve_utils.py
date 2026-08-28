@@ -6,6 +6,7 @@ import contextvars
 import dataclasses
 import datetime
 import enum
+import math
 import os
 import pathlib
 import pickle
@@ -30,6 +31,7 @@ from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import common as adaptors_common
 from sky.jobs import state as managed_job_state
+from sky.resources import _parse_value
 from sky.serve import constants
 from sky.serve import serve_state
 from sky.serve import spot_placer
@@ -1054,12 +1056,25 @@ def _task_fits(task_resources: 'resources_lib.Resources',
                                               check_cloud=False):
         return False
     if task_resources.cpus is not None:
-        if (free_resources.cpus is None or
-                task_resources.cpus > free_resources.cpus):
+        task_cpus = _parse_value(task_resources.cpus)
+        free_cpus = _parse_value(free_resources.cpus)
+        if (task_cpus is None or free_cpus is None or
+                not math.isfinite(task_cpus) or not math.isfinite(free_cpus) or
+                task_cpus > free_cpus):
             return False
     if task_resources.memory is not None:
-        if (free_resources.memory is None or
-                task_resources.memory > free_resources.memory):
+        if task_resources.memory.endswith('x'):
+            task_cpus = _parse_value(task_resources.cpus)
+            memory_multiplier = _parse_value(task_resources.memory[:-1])
+            task_memory = (None if task_cpus is None or
+                           memory_multiplier is None else task_cpus *
+                           memory_multiplier)
+        else:
+            task_memory = _parse_value(task_resources.memory)
+        free_memory = _parse_value(free_resources.memory)
+        if (task_memory is None or free_memory is None or
+                not math.isfinite(task_memory) or
+                not math.isfinite(free_memory) or task_memory > free_memory):
             return False
     return True
 
