@@ -1418,6 +1418,12 @@ class TestCreatePersistentVolumeClaim:
                                                       config)
         assert 'does not exist' in str(exc_info.value)
         assert 'use_existing' in str(exc_info.value)
+        # The PVC may well exist -- just on a context this lookup never
+        # searched, e.g. when the volume named none and one was resolved
+        # for it. Say which cluster came up empty, and how to pin another.
+        assert 'my-context' in str(exc_info.value)
+        assert 'my-namespace' in str(exc_info.value)
+        assert '--infra k8s/<context>' in str(exc_info.value)
 
     @patch('sky.provision.kubernetes.volume.kubernetes')
     def test_create_pvc_success(self, mock_k8s):

@@ -1233,9 +1233,16 @@ def create_persistent_volume_claim(
             logger.debug(f'Found existing PVC {pvc.metadata.name} for volume '
                          f'{volume_name}')
             return
+        # Name the context and namespace searched. When the volume config
+        # carried no context of its own, `_resolve_context_for_new_volume`
+        # chose one, and "does not exist" on its own reads as "your PVC is
+        # gone" when the truth may be that it lives on a context
+        # `allowed_contexts` excludes.
         raise ValueError(
             f'PVC with name or label skypilot-name={volume_name} does not '
-            f'exist while use_existing is True.')
+            f'exist in namespace {namespace!r} on context {context!r} while '
+            f'use_existing is True. If the PVC lives on another cluster, '
+            f'name it explicitly with `--infra k8s/<context>`.')
 
     # Try to read PVC by name_on_cloud (for non-use_existing case)
     try:
