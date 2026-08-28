@@ -153,5 +153,92 @@ class TestSelectNonterminalReplicasToScaleDown(unittest.TestCase):
         self.assertEqual(result, [1])
 
 
+class TestAutoscalerLatestVersionRestore(unittest.TestCase):
+    """Tests for latest_version restoration on controller restart (issue #8562).
+
+    On restart, Autoscaler.__init__ must read the persisted version from the DB
+    rather than resetting to INITIAL_VERSION, which would cause scale-churn and
+    version-guard failures.
+    """
+
+    def _make_spec(self, min_replicas: int = 1):
+        spec = mock.MagicMock()
+        spec.min_replicas = min_replicas
+        spec.max_replicas = min_replicas
+        spec.num_overprovision = None
+        spec.upscale_delay_seconds = None
+        spec.downscale_delay_seconds = None
+        spec.qps_upper_threshold = None
+        spec.qps_lower_threshold = None
+        return spec
+
+    @mock.patch('sky.serve.autoscalers.serve_state.get_latest_version')
+    def test_init_restores_version_from_db(self, mock_get_version):
+        """Autoscaler.__init__ must use the DB version, not INITIAL_VERSION."""
+        mock_get_version.return_value = 5
+
+        from sky.serve import constants as serve_constants
+        from sky.serve.autoscalers import RequestRateAutoscaler
+        autoscaler = RequestRateAutoscaler('svc', self._make_spec())
+
+        mock_get_version.assert_called_once_with('svc')
+        self.assertEqual(autoscaler.latest_version, 5)
+        # latest_version_ever_ready should track latest_version - 1
+        self.assertEqual(autoscaler.latest_version_ever_ready, 4)
+
+    @mock.patch('sky.serve.autoscalers.serve_state.get_latest_version')
+    def test_init_falls_back_to_initial_version_when_db_empty(
+            self, mock_get_version):
+        """When the DB has no version yet, fall back to INITIAL_VERSION."""
+        mock_get_version.return_value = None
+
+        from sky.serve import constants as serve_constants
+        from sky.serve.autoscalers import RequestRateAutoscaler
+        autoscaler = RequestRateAutoscaler('svc', self._make_spec())
+
+        self.assertEqual(autoscaler.latest_version,
+                         serve_constants.INITIAL_VERSION)
+
+    @mock.patch('sky.serve.autoscalers.serve_state.get_latest_version')
+    def test_dump_and_load_dynamic_states_roundtrip(self, mock_get_version):
+        """dump/load_dynamic_states must preserve latest_version."""
+        mock_get_version.return_value = 3
+
+        from sky.serve.autoscalers import RequestRateAutoscaler
+        autoscaler = RequestRateAutoscaler('svc', self._make_spec())
+        autoscaler.latest_version_ever_ready = 3
+
+        states = autoscaler.dump_dynamic_states()
+        self.assertIn('latest_version', states)
+        self.assertEqual(states['latest_version'], 3)
+
+        # Simulate type-change: new autoscaler inherits state via load
+        mock_get_version.return_value = None
+        new_autoscaler = RequestRateAutoscaler('svc', self._make_spec())
+        new_autoscaler.load_dynamic_states(states)
+
+        self.assertEqual(new_autoscaler.latest_version, 3)
+        self.assertEqual(new_autoscaler.latest_version_ever_ready, 3)
+
+    @mock.patch('sky.serve.autoscalers.serve_state.get_latest_version')
+    def test_load_dynamic_states_backwards_compat_no_latest_version_key(
+            self, mock_get_version):
+        """load_dynamic_states must not crash on old dumps lacking the key."""
+        mock_get_version.return_value = 7
+
+        from sky.serve.autoscalers import RequestRateAutoscaler
+        autoscaler = RequestRateAutoscaler('svc', self._make_spec())
+
+        # Simulate an old dump that only has latest_version_ever_ready
+        old_states = autoscaler._dump_dynamic_states()
+        old_states['latest_version_ever_ready'] = 6
+        # No 'latest_version' key — old format
+
+        autoscaler.load_dynamic_states(old_states)
+        # Falls back to DB-restored value (7) set in __init__
+        self.assertEqual(autoscaler.latest_version, 7)
+        self.assertEqual(autoscaler.latest_version_ever_ready, 6)
+
+
 if __name__ == '__main__':
     unittest.main()
