@@ -828,6 +828,9 @@ export function ManagedJobsTable({
             setTotalCount(0);
             setTotalNoFilter(0);
             setStatusCounts({});
+            // No rows are shown, so a Slurm-sweep failure banner from a
+            // previous fetch would hang over an empty table.
+            setExternalFetchErrors([]);
           } else {
             setHookControllerStopped(false);
             setData(response.jobs || []);
@@ -899,6 +902,7 @@ export function ManagedJobsTable({
           setTotalNoFilter(0);
           setStatusCounts({});
           setControllerStopped(false);
+          setExternalFetchErrors([]);
           setIsInitialLoad(false);
         }
       } finally {
@@ -1259,7 +1263,12 @@ export function ManagedJobsTable({
       // External rows never form job groups; key them by their globally
       // unique task_job_id so equal Slurm ids across clusters (or a
       // Slurm id matching a managed id) can't collapse into one group.
-      const jobId = job.is_external ? job.task_job_id : job.id;
+      // Fall back to a prefixed id if a producer ever omits task_job_id,
+      // so such rows degrade to per-id groups instead of one undefined
+      // group rendering as a bogus JobGroup.
+      const jobId = job.is_external
+        ? (job.task_job_id ?? `external:${job.id}`)
+        : job.id;
       if (!groups.has(jobId)) {
         groups.set(jobId, []);
       }
