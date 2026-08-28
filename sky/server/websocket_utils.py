@@ -3,6 +3,7 @@
 import asyncio
 from enum import IntEnum
 import struct
+import time
 from typing import Awaitable, Callable, Optional
 
 import fastapi
@@ -11,6 +12,12 @@ from sky import sky_logging
 from sky.metrics import utils as metrics_utils
 
 logger = sky_logging.init_logger(__name__)
+
+# How the session reached the SSH backend, for the `path` metric label. A
+# plugin that redirects a session elsewhere reports its own value.
+SSH_PATH_PORT_FORWARD = 'portforward'
+SSH_PATH_SLURM = 'slurm'
+SSH_PATH_REDIRECTED = 'redirected'
 
 # Hook for plugins to inject SSH redirect logic. When set, it is called after
 # WebSocket accept for clients that support the redirect protocol.
@@ -42,12 +49,99 @@ class SSHMessageType(IntEnum):
     REDIRECT = 3
 
 
+class _BackendTurnaroundSampler:
+    """Times the backend round trip by pairing a small write with a read.
+
+    The SSH stream is opaque and must stay byte-exact, so we cannot inject a
+    probe into it. But an interactive session is a request/response
+    conversation: a keystroke goes out as one small frame and its echo comes
+    back. Pairing on that shape measures everything past this process -- the
+    port-forward tunnel, both sshd hops, the pty, the shell -- for the cost of
+    two clock reads on a loop that already unpacks a header per frame.
+
+    This is a distribution, not a per-keystroke truth. Backend traffic that
+    answers no write (window adjusts, server keepalives, program output) can
+    attach a read to the wrong write, so a sample is only taken when both of
+    these hold:
+
+    * the write is keystroke-sized (``_MAX_WRITE_BYTES``) -- a paste, an scp
+      or a terminal resize burst is not a request/response exchange, and a
+      large write also *clears* any outstanding stamp, because the next read
+      is then far more likely to be its echo than the keystroke's;
+    * the reply arrives within ``_MAX_PENDING_SECONDS`` -- past that it is
+      far more likely to be unrelated output than a very slow echo, and
+      including it would corrupt the tail we are trying to measure.
+
+    Only the *first* read after a stamped write is paired; a long echo split
+    across several reads contributes one sample, timed to first byte, which is
+    what the user perceives.
+
+    When typing pipelines -- a second keystroke sent before the first is
+    answered -- the *oldest* outstanding stamp is kept rather than discarded.
+    The stream is ordered, so the first read back is the first write's echo,
+    which makes the oldest stamp the correct attribution. An earlier version
+    dropped the sample instead, on the theory that pipelined frames are
+    ambiguous; e2e testing showed that throws away precisely the samples
+    worth having, because a stalled backend is exactly when a user keeps
+    typing into the lag.
+
+    Not thread-safe and does not need to be: both callers are coroutines on
+    one event loop.
+    """
+
+    # Keystroke-sized. One keypress on a doubly-encrypted SSH stream is
+    # ~60-120 bytes; 512 leaves room for escape sequences and small control
+    # frames without admitting a paste.
+    _MAX_WRITE_BYTES = 512
+    _MAX_PENDING_SECONDS = 2.0
+
+    def __init__(self, path: str) -> None:
+        self._enabled = metrics_utils.METRICS_ENABLED
+        self._histogram = None
+        if self._enabled:
+            self._histogram = (
+                metrics_utils.SKY_APISERVER_SSH_BACKEND_TURNAROUND_SECONDS.
+                labels(path=path))
+        self._pending_at: Optional[float] = None
+
+    def on_write(self, size: int) -> None:
+        """Called just before handing ``size`` bytes to the backend."""
+        if not self._enabled:
+            return
+        if size == 0 or size > self._MAX_WRITE_BYTES:
+            # Not a request/response exchange. Drop any outstanding stamp too:
+            # the next read is more likely to answer this bulk write than the
+            # keystroke before it.
+            self._pending_at = None
+            return
+        if self._pending_at is not None:
+            # Pipelined typing. Keep the older stamp: the stream is ordered,
+            # so the next read answers the earlier write.
+            return
+        self._pending_at = time.monotonic()
+
+    def on_read(self) -> None:
+        """Called as soon as bytes come back from the backend."""
+        if not self._enabled:
+            return
+        pending_at = self._pending_at
+        self._pending_at = None
+        if pending_at is None:
+            return
+        elapsed = time.monotonic() - pending_at
+        if elapsed > self._MAX_PENDING_SECONDS:
+            return
+        assert self._histogram is not None
+        self._histogram.observe(elapsed)
+
+
 async def run_websocket_proxy(
     websocket: fastapi.WebSocket,
     read_from_backend: Callable[[], Awaitable[bytes]],
     write_to_backend: Callable[[bytes], Awaitable[None]],
     close_backend: Callable[[], Awaitable[None]],
     timestamps_supported: bool,
+    path: str = SSH_PATH_PORT_FORWARD,
 ) -> bool:
     """Run bidirectional WebSocket-to-backend proxy.
 
@@ -57,12 +151,18 @@ async def run_websocket_proxy(
         write_to_backend: Async callable to write bytes to backend
         close_backend: Async callable to close backend connection
         timestamps_supported: Whether to use message type framing
+        path: How this session reaches the backend, used as the `path` label
+            on sky_apiserver_ssh_backend_turnaround_seconds. Callers that
+            reach the pod some other way (a plugin connecting in-cluster,
+            say) should pass their own value so the two are not averaged
+            together.
 
     Returns:
         True if SSH failed, False otherwise
     """
     ssh_failed = False
     websocket_closed = False
+    turnaround = _BackendTurnaroundSampler(path)
 
     async def websocket_to_backend():
         try:
@@ -100,6 +200,7 @@ async def run_websocket_proxy(
                             f'Unknown message type: {message_type}')
 
                 try:
+                    turnaround.on_write(len(message))
                     await write_to_backend(message)
                 except Exception as e:  # pylint: disable=broad-except
                     # Typically we will not reach here, if the conn to backend
@@ -120,6 +221,8 @@ async def run_websocket_proxy(
         try:
             while True:
                 data = await read_from_backend()
+                if data:
+                    turnaround.on_read()
                 if not data:
                     if not websocket_closed:
                         logger.warning(

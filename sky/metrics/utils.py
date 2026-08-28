@@ -155,6 +155,14 @@ _anchor_read_failed = False
 _LATENCY_BUCKETS = (0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30,
                     60, 120, 300, 600, 1000, float('inf'))
 
+# Interactive-SSH scale, for the round trips a keystroke takes. _LATENCY_BUCKETS
+# starts at 5ms and runs to 1000s because it is sized for request durations; a
+# healthy API-server-to-pod round trip inside one cluster is sub-millisecond to
+# a few ms, so every good value would land in that ladder's first bucket. Top
+# out at 10s: an SSH echo that slow is a dead session, not a slow one.
+_SSH_ROUND_TRIP_BUCKETS = (0.001, 0.002, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25,
+                           0.5, 1, 2.5, 5, 10, float('inf'))
+
 # Time spent processing a piece of code, refer to time_it().
 SKY_APISERVER_CODE_DURATION_SECONDS = prom.Histogram(
     'sky_apiserver_code_duration_seconds',
@@ -281,11 +289,52 @@ SKY_APISERVER_REQUEST_RSS_INCR_BYTES = prom.Histogram(
 
 SKY_APISERVER_WEBSOCKET_SSH_LATENCY_SECONDS = prom.Histogram(
     'sky_apiserver_websocket_ssh_latency_seconds',
-    ('Time taken for ssh message to go from client to API server and back'
-     'to the client. This does not include: latency to reach the pod, '
-     'overhead from sending through the k8s port-forward tunnel, or '
-     'ssh server lag on the destination pod.'),
+    # NOT keystroke latency. Read the whole string before alerting on it.
+    ('SSH websocket heartbeat round trip, client to API server and back. '
+     'This is a synthetic PING the client sends every 10s while a session is '
+     'open -- NOT keystroke latency, and not tied to any user input. The '
+     'server echoes the PING without forwarding it, so the k8s port-forward '
+     'tunnel and the destination pod sshd are excluded by construction; see '
+     'sky_apiserver_ssh_backend_turnaround_seconds for those. Because the '
+     'PONG cannot be sent until the websocket read loop is free, this is '
+     'also an indirect event-loop responsiveness probe. Empty -- not zero -- '
+     'when clients are older than API version 21, when '
+     'SKYPILOT_SSH_DISABLE_LATENCY_MEASUREMENT=1, or when a plugin redirected '
+     'the session away from this API server.'),
     buckets=_LATENCY_BUCKETS,
+)
+
+# The leg the heartbeat above cannot see: API server -> (k8s API server ->
+# kubelet -> pod sshd, or a plugin's direct in-cluster connection) -> shell
+# echo -> back. Measured by pairing a small write to the backend with the next
+# read from it, so it costs two clock reads on a path that already inspects
+# every frame -- no injected bytes, no added latency, and no client support
+# needed. See sky.server.websocket_utils._BackendTurnaroundSampler for the
+# pairing rules and what makes a sample get dropped.
+#
+# `path` distinguishes how the session reached the pod: 'portforward' for this
+# server's kubectl port-forward, or a plugin-supplied value when a hook routes
+# the connection elsewhere. Two or three values in practice, so no cardinality
+# concern.
+SKY_APISERVER_SSH_BACKEND_TURNAROUND_SECONDS = prom.Histogram(
+    'sky_apiserver_ssh_backend_turnaround_seconds',
+    ('Round trip from the API server to the SSH backend and back, measured by '
+     'pairing a keystroke-sized write with the next read. Covers everything '
+     'the websocket heartbeat excludes: the port-forward tunnel, both sshd '
+     'hops and the shell echo. A distribution, not a per-keystroke truth -- '
+     'unpaired backend traffic can attach a read to the wrong write.'),
+    ['path'],
+    buckets=_SSH_ROUND_TRIP_BUCKETS,
+)
+
+# Denominator for the histograms above. Without it an empty
+# sky_apiserver_ssh_backend_turnaround_seconds is ambiguous: nobody is SSHing,
+# or every session was redirected away, or the pairing never fires. An alert on
+# the histogram alone is a rule that can go silently dead.
+SKY_APISERVER_SSH_SESSIONS_TOTAL = prom.Counter(
+    'sky_apiserver_ssh_sessions_total',
+    'SSH proxy sessions accepted, by how the session was served',
+    ['path'],
 )
 
 SKY_APISERVER_LONG_EXECUTORS = prom.Gauge(
