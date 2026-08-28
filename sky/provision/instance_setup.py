@@ -169,8 +169,11 @@ def ray_patches_cmd(ray_version: str) -> str:
              f'{constants.SKY_PYTHON_CMD} '
              f'{_RAY_PATCHES_TARGET_DIR}/apply_patches.py '
              f'--ray-version {ray_version}')
-    skipped = (f'echo "Ray {ray_version} is not what is installed; skipping '
-               'SkyPilot\'s Ray patches."')
+    # "not found" rather than "is not installed": the guard also comes out
+    # false when uv itself fails, and that must not read as a claim about
+    # which Ray is installed.
+    skipped = (f'echo "Ray {ray_version} not found in the SkyPilot runtime '
+               'env; skipping SkyPilot\'s Ray patches."')
     return (f'if {constants.SKY_UV_PIP_CMD} list | grep "ray " | '
             f'grep {ray_version} > /dev/null 2>&1; then {apply}; '
             f'else {skipped}; fi')
