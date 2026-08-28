@@ -1467,9 +1467,7 @@ available_node_types:
                 # fully offline/minimal image that too can be unavailable. Warn
                 # and continue rather than abort the launch -- the cluster comes
                 # up and runs without these patches.
-                VIRTUAL_ENV=${SKY_RUNTIME_DIR:-$HOME}/skypilot-runtime UV_LINK_MODE=copy UV_SYSTEM_PYTHON=false {{sky_unset_pythonpath_and_set_cwd}} ~/.local/bin/uv pip list | grep "ray " | grep {{ray_version}} 2>&1 > /dev/null && {
-                  {{ ray_patches_cmd }} || echo "WARNING: could not apply Ray patches; continuing without them.";
-                }
+                {{ ray_patches_cmd }} || echo "WARNING: could not apply Ray patches; continuing without them.";
                 touch /tmp/ray_skypilot_installation_complete
                 echo "=== Ray and skypilot installation completed ==="
 

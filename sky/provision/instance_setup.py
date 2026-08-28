@@ -154,13 +154,21 @@ def ray_patches_cmd(ray_version: str) -> str:
     SkyPilot wheel is uploaded. Reading the patches out of whatever
     `pip install skypilot` resolved to would take them from an unrelated
     release, whose patches target an unrelated Ray version.
+
+    The version check is part of this command rather than a separate guard in
+    the template, so the version the patches are applied *against* and the
+    version they were *generated for* cannot drift apart. A node running some
+    other Ray is skipped, quietly and successfully -- patching it with files
+    generated for a different Ray is what corrupts it.
     """
-    return (f'mkdir -p {_RAY_PATCHES_TARGET_DIR} && '
-            f'echo \'{_ray_patches_b64()}\' | base64 -d | '
-            f'tar xzf - -C {_RAY_PATCHES_TARGET_DIR} && '
-            f'{constants.SKY_PYTHON_CMD} '
-            f'{_RAY_PATCHES_TARGET_DIR}/apply_patches.py '
-            f'--ray-version {ray_version}')
+    apply = (f'mkdir -p {_RAY_PATCHES_TARGET_DIR} && '
+             f'echo \'{_ray_patches_b64()}\' | base64 -d | '
+             f'tar xzf - -C {_RAY_PATCHES_TARGET_DIR} && '
+             f'{constants.SKY_PYTHON_CMD} '
+             f'{_RAY_PATCHES_TARGET_DIR}/apply_patches.py '
+             f'--ray-version {ray_version}')
+    return (f'if {constants.SKY_UV_PIP_CMD} list | grep "ray " | '
+            f'grep {ray_version} > /dev/null 2>&1; then {apply}; fi')
 
 
 @functools.lru_cache(maxsize=1)
