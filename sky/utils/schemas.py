@@ -47,6 +47,8 @@ _extra_jobs_properties: Dict[str, Any] = {}
 
 _extra_kubernetes_properties: Dict[str, Any] = {}
 
+_extra_slurm_properties: Dict[str, Any] = {}
+
 # Registry for plugin-provided properties under the top-level
 # `plugins:` config section. Keyed by plugin name.
 _extra_plugin_properties: Dict[str, Any] = {}
@@ -106,6 +108,23 @@ def register_kubernetes_property(name: str, schema: Dict[str, Any]) -> None:
             (e.g., {'type': 'string'}).
     """
     _extra_kubernetes_properties[name] = schema
+
+
+def register_slurm_property(name: str, schema: Dict[str, Any]) -> None:
+    """Register an additional property for the slurm schema.
+
+    This allows plugins to extend the slurm dict schema with slurm-specific
+    configuration fields. The property is merged into the schema's properties
+    dict (both at the top level and under each per-cluster ``cluster_configs``
+    entry), so it passes JSON schema validation even with
+    additionalProperties: False.
+
+    Args:
+        name: The property name.
+        schema: The JSON Schema for the property
+            (e.g., {'type': 'string'}).
+    """
+    _extra_slurm_properties[name] = schema
 
 
 def _check_not_both_fields_present(field1: str, field2: str):
@@ -2127,7 +2146,11 @@ def get_config_schema():
         'slurm': {
             'type': 'object',
             'required': [],
-            'additionalProperties': False,
+            # On the server, plugins have registered their properties via
+            # register_slurm_property(), so we can be strict. On the client we
+            # allow unknown properties to pass through for server-side
+            # validation.
+            'additionalProperties': _allow_additional_properties(),
             'properties': {
                 'allowed_clusters': {
                     'oneOf': [{
@@ -2160,7 +2183,10 @@ def get_config_schema():
                     'additionalProperties': {
                         'type': 'object',
                         'required': [],
-                        'additionalProperties': False,
+                        # Strict on the server (plugins have registered their
+                        # per-cluster properties via register_slurm_property);
+                        # permissive on the client for server-side validation.
+                        'additionalProperties': _allow_additional_properties(),
                         'properties': {
                             'workdir': {
                                 'type': 'string',
@@ -2199,9 +2225,15 @@ def get_config_schema():
                                     },
                                 },
                             },
+                            # Plugin-registered per-cluster slurm properties
+                            # via register_slurm_property().
+                            **_extra_slurm_properties,
                         },
                     },
                 },
+                # Plugin-registered top-level slurm properties via
+                # register_slurm_property().
+                **_extra_slurm_properties,
             }
         },
         'oci': {
