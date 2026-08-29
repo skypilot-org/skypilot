@@ -4922,8 +4922,8 @@ class S3Store(S3CompatibleStore):
     _DEFAULT_REGION = 'us-east-1'
     _CUSTOM_ENDPOINT_REGIONS = [
         'ap-east-1', 'me-south-1', 'af-south-1', 'eu-south-1', 'eu-south-2',
-        'ap-south-2', 'ap-southeast-3', 'ap-southeast-4', 'me-central-1',
-        'il-central-1'
+        'eu-central-2', 'ap-south-2', 'ap-southeast-3', 'ap-southeast-4',
+        'me-central-1', 'il-central-1'
     ]
 
     def __init__(self,
