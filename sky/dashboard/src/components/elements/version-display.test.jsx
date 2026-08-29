@@ -1,10 +1,15 @@
 /**
- * Tests for version-display component plugin filtering
+ * Tests for version-display plugin filtering.
+ *
+ * These assert on `VersionTooltipContent` -- what the tooltip shows once open --
+ * rather than on `VersionTooltip`, whose NextUI host renders nothing until it is
+ * hovered. Asserting on the closed tooltip is what made every case here fail
+ * from the day they were written.
  */
 
 import React from 'react';
 import { render, screen } from '@testing-library/react';
-import { VersionTooltip } from './version-display';
+import { VersionTooltipContent } from './version-display';
 
 describe('VersionDisplay - Plugin Filtering', () => {
   describe('VersionTooltip filters hidden plugins', () => {
@@ -25,14 +30,12 @@ describe('VersionDisplay - Plugin Filtering', () => {
       ];
 
       const { container } = render(
-        <VersionTooltip
+        <VersionTooltipContent
           version="1.0.0"
           commit="core123"
           plugins={plugins}
           showCommit={true}
-        >
-          <div>Version</div>
-        </VersionTooltip>
+        />
       );
 
       // Check that both visible plugins are rendered
@@ -59,14 +62,12 @@ describe('VersionDisplay - Plugin Filtering', () => {
       ];
 
       const { container } = render(
-        <VersionTooltip
+        <VersionTooltipContent
           version="1.0.0"
           commit="core123"
           plugins={plugins}
           showCommit={true}
-        >
-          <div>Version</div>
-        </VersionTooltip>
+        />
       );
 
       // Check that visible plugin is rendered
@@ -89,14 +90,12 @@ describe('VersionDisplay - Plugin Filtering', () => {
       ];
 
       const { container } = render(
-        <VersionTooltip
+        <VersionTooltipContent
           version="1.0.0"
           commit="core123"
           plugins={plugins}
           showCommit={true}
-        >
-          <div>Version</div>
-        </VersionTooltip>
+        />
       );
 
       // Plugin without the flag should still be displayed (defensive filtering)
@@ -133,14 +132,12 @@ describe('VersionDisplay - Plugin Filtering', () => {
       ];
 
       const { container } = render(
-        <VersionTooltip
+        <VersionTooltipContent
           version="1.0.0"
           commit="core123"
           plugins={plugins}
           showCommit={true}
-        >
-          <div>Version</div>
-        </VersionTooltip>
+        />
       );
 
       // Check that visible plugins are rendered
@@ -156,19 +153,18 @@ describe('VersionDisplay - Plugin Filtering', () => {
       const plugins = [];
 
       const { container } = render(
-        <VersionTooltip
+        <VersionTooltipContent
           version="1.0.0"
           commit="core123"
           plugins={plugins}
           showCommit={true}
-        >
-          <div>Version</div>
-        </VersionTooltip>
+        />
       );
 
-      // Should still show commit info
-      expect(container.textContent).toContain('Core commit');
-      expect(container.textContent).toContain('core123');
+      // Still shows the commit, and labels it plainly: "Core commit" only
+      // earns its qualifier when plugin commits are listed beside it.
+      expect(container.textContent).toContain('Commit: core123');
+      expect(container.textContent).not.toContain('Core commit');
     });
 
     test('should handle all plugins being hidden', () => {
@@ -188,23 +184,23 @@ describe('VersionDisplay - Plugin Filtering', () => {
       ];
 
       const { container } = render(
-        <VersionTooltip
+        <VersionTooltipContent
           version="1.0.0"
           commit="core123"
           plugins={plugins}
           showCommit={true}
-        >
-          <div>Version</div>
-        </VersionTooltip>
+        />
       );
 
       // Should not show any plugin names
       expect(container.textContent).not.toContain('HiddenPlugin1');
       expect(container.textContent).not.toContain('HiddenPlugin2');
 
-      // Should still show commit info
-      expect(container.textContent).toContain('Core commit');
-      expect(container.textContent).toContain('core123');
+      // Still shows the commit, and labels it the same way as the no-plugins
+      // case: with nothing listed beside it, there is nothing for "Core" to
+      // distinguish it from.
+      expect(container.textContent).toContain('Commit: core123');
+      expect(container.textContent).not.toContain('Core commit');
     });
   });
 });

@@ -4059,8 +4059,10 @@ def check(infra_list: Tuple[str],
         api_server_url = server_common.get_server_url()
         click.echo()
         click.echo(
-            click.style(f'Using SkyPilot API server: {api_server_url}',
-                        fg='green'))
+            click.style(
+                'Using SkyPilot API server: '
+                f'{server_common.redact_url_password(api_server_url)}',
+                fg='green'))
 
 
 @cli.command()
@@ -5614,6 +5616,11 @@ def _build_volume_override_config(
 
 @volumes.command('ls', cls=_DocumentedCodeCommand)
 @flags.config_option(expose_value=False)
+@click.argument('names',
+                required=False,
+                type=str,
+                nargs=-1,
+                **_get_shell_complete_args(_complete_volume_name))
 @click.option('--verbose',
               '-v',
               default=False,
@@ -5628,11 +5635,79 @@ def _build_volume_override_config(
               help='Refresh volume state from cloud APIs before listing. '
               'Without this flag, cached data is returned which is updated '
               'periodically by the background daemon.')
+@flags.output_format_option()
 @usage_lib.entrypoint
-def volumes_ls(verbose: bool, refresh: bool):
-    """List volumes managed by SkyPilot."""
-    request_id = volumes_sdk.ls(refresh=refresh)
-    all_volumes = sdk.stream_and_get(request_id)
+def volumes_ls(names: List[str],
+               verbose: bool,
+               refresh: bool,
+               output_format: str = 'table'):
+    """List volumes managed by SkyPilot.
+
+    Pass one or more volume names to show only those. Combined with --refresh,
+    only the named volumes are re-probed, which is much cheaper than refreshing
+    every volume when you are waiting on one you just created. Names are exact;
+    unlike sky volumes delete, this does not take glob patterns.
+
+    Examples:
+
+    .. code-block:: bash
+
+        # Show every volume.
+        sky volumes ls
+        \b
+        # Show one volume, re-probing just that one.
+        sky volumes ls my-vol -r
+        \b
+        # Read a volume's status from a script.
+        sky volumes ls my-vol -o json
+    """
+    request_id = volumes_sdk.ls(refresh=refresh, names=names)
+    json_output = output_format == flags.OUTPUT_FORMAT_JSON
+    if json_output:
+        # Keep stdout parseable. A request's server-side logs are streamed back
+        # here, and volume_refresh logs a line exactly when a volume's status
+        # changes -- the NOT_READY -> READY tick a poller is waiting for. Ahead
+        # of the JSON that is the one iteration a parser cannot read, so send
+        # the stream to a sink, as `sky check -o json` does.
+        all_volumes = sdk.stream_and_get(request_id,
+                                         output_stream=io.StringIO())
+    else:
+        all_volumes = sdk.stream_and_get(request_id)
+    if names:
+        # Filter here as well as on the server. An API server older than this
+        # change ignores the names and returns every volume; narrowing again
+        # keeps the output correct against those servers, which is what lets
+        # the names be sent without an API version gate. Against a current
+        # server the response is already narrowed and this is a no-op.
+        requested = set(names)
+        all_volumes = [
+            volume for volume in all_volumes if volume.name in requested
+        ]
+        if not json_output:
+            # Report what matched nothing, rather than showing an empty table
+            # and letting a typo read as "the volume is gone" -- the message a
+            # not-ready volume points here with makes that an easy mistake.
+            # Not on the json path, where an empty array already says it and a
+            # stray line would break parsing.
+            missing = sorted(requested - {v.name for v in all_volumes})
+            if len(missing) == 1:
+                # Worded as `sky volumes delete` words it.
+                click.echo(f'Volume {missing[0]} not found.')
+            elif missing:
+                # One line rather than one per name: here a miss is the whole
+                # answer for that name, so a list reads better than a stack.
+                click.echo(f'Volumes not found: {", ".join(missing)}.')
+            if not all_volumes:
+                # Nothing left to tabulate. The empty table renders as "No
+                # existing volumes.", which is a claim about the whole table --
+                # and a filtered listing never looked at the whole table.
+                return
+    if json_output:
+        click.echo(
+            json.dumps(
+                [volume.model_dump(mode='json') for volume in all_volumes],
+                indent=2))
+        return
     volume_table = table_utils.format_volume_table(all_volumes,
                                                    show_all=verbose)
     click.echo(volume_table)
@@ -8207,7 +8282,10 @@ def api_info(output_format: str):
                        'server: sky api start')
         else:
             click.echo(
-                f'Could not connect to SkyPilot API server at {url}\n'
+                'Could not connect to SkyPilot API server at '
+                f'{server_common.redact_url_password(url)}\n'
+                # The hint below is meant to be copy-pasted, so it keeps the
+                # real URL -- redacting it would hand the user a broken command.
                 f'{ux_utils.INDENT_SYMBOL}To re-login to the API server: '
                 f'sky api login --relogin -e {url}\n'
                 f'{ux_utils.INDENT_LAST_SYMBOL}To logout the server: '
@@ -8256,7 +8334,8 @@ def api_info(output_format: str):
             location = f'Endpoint set via {config_path}'
     else:
         location = 'Endpoint set to default local API server.'
-    click.echo(f'Using SkyPilot API server and dashboard: {url}\n'
+    click.echo(f'Using SkyPilot API server and dashboard: '
+               f'{server_common.redact_url_password(url)}\n'
                f'{ux_utils.INDENT_SYMBOL}Status: {api_server_info.status}, '
                f'commit: {api_server_info.commit}, '
                f'version: {api_server_info.version}\n'

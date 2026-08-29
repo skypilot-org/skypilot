@@ -20,20 +20,78 @@ from sky.utils import locks
 from sky.utils import status_lib
 
 
-def test_command_length_accounts_for_slurm_user_quoting():
+def test_command_length_local_shell_limit():
+    # The local-shell check, still used by generated code that runs on the
+    # cluster. Per-transport limits live on CommandRunner instead; see
+    # tests/unit_tests/test_sky/utils/test_command_runner.py.
     command = "a'b" * 5000
     assert not backend_utils.is_command_length_over_limit(command)
     assert backend_utils.is_command_length_over_limit(command, quote_levels=4)
 
-    handle = MagicMock()
-    handle.launched_resources.cloud = clouds.Slurm()
-    handle.cached_cluster_info.provider_config = {'slurm_user': 'alice'}
-    assert cloud_vm_ray_backend.CloudVmRayBackend._inline_command_quote_levels(
-        handle) == 4
 
-    handle.cached_cluster_info.provider_config = {}
-    assert cloud_vm_ray_backend.CloudVmRayBackend._inline_command_quote_levels(
-        handle) == 3
+def test_non_slurm_cpu_demand_uses_ray_default():
+    handle = MagicMock()
+    handle.launched_resources = resources.Resources(cloud=clouds.Kubernetes())
+    test_task = task.Task(resources=resources.Resources(cpus=1.5))
+
+    demands = (cloud_vm_ray_backend.CloudVmRayBackend._get_task_demands_dict(
+        handle, test_task))
+
+    assert demands['CPU'] == backend_utils.DEFAULT_TASK_CPU_DEMAND
+
+
+def test_slurm_controller_cpu_demand_uses_controller_default():
+    handle = MagicMock()
+    handle.launched_resources = resources.Resources(cloud=clouds.Slurm())
+    test_task = task.Task(resources=resources.Resources(cpus=4))
+    test_task.service_name = 'service'
+
+    demands = (cloud_vm_ray_backend.CloudVmRayBackend._get_task_demands_dict(
+        handle, test_task))
+
+    assert (
+        demands['CPU'] == backend_utils.constants.CONTROLLER_PROCESS_CPU_DEMAND)
+
+
+def test_slurm_cpu_demand_uses_allocated_cpus():
+    allocated = resources.Resources(cloud=clouds.Slurm(),
+                                    instance_type='2CPU--2GB')
+    handle = MagicMock()
+    handle.launched_resources = allocated
+    test_task = task.Task(resources=resources.Resources(cpus=0.25))
+    test_task.best_resources = allocated
+
+    demands = (cloud_vm_ray_backend.CloudVmRayBackend._get_task_demands_dict(
+        handle, test_task))
+
+    assert demands['CPU'] == 2.0
+
+
+def test_slurm_gpu_cpu_demand_uses_allocated_cpus():
+    allocated = resources.Resources(cloud=clouds.Slurm(),
+                                    instance_type='4CPU--16GB--H200:1')
+    handle = MagicMock()
+    handle.launched_resources = allocated
+    test_task = task.Task(resources=resources.Resources(
+        accelerators={'H200': 1}))
+    test_task.best_resources = allocated
+
+    demands = (cloud_vm_ray_backend.CloudVmRayBackend._get_task_demands_dict(
+        handle, test_task))
+
+    assert demands['CPU'] == 4.0
+
+
+def test_slurm_exec_cpu_demand_uses_cluster_allocation():
+    handle = MagicMock()
+    handle.launched_resources = resources.Resources(cloud=clouds.Slurm(),
+                                                    instance_type='8CPU--32GB')
+    test_task = task.Task(resources=resources.Resources())
+
+    demands = (cloud_vm_ray_backend.CloudVmRayBackend._get_task_demands_dict(
+        handle, test_task))
+
+    assert demands['CPU'] == 8.0
 
 
 class TestCloudVmRayBackendTaskRedaction:
@@ -491,6 +549,13 @@ class TestIsMessageTooLong:
             (1,
              'error: unable to upgrade connection: <html><body><h1>400 Bad request</h1>',
              True),
+            # Signatures are matched as bare substrings against the whole
+            # setup log, which is user output, so generic network-failure text
+            # must not be in the table: a user script printing it and exiting 1
+            # would have its setup re-run from the top.
+            (1, 'read tcp 10.0.0.1:443: connection reset by peer', False),
+            (1, 'gzip: unexpected EOF', False),
+            (1, 'Error from server: ', False),
             # Case insensitivity
             (255, 'TOO LONG', True),
             (1, 'REQUEST HEADER FIELDS TOO LARGE', True),

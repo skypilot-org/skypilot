@@ -2,9 +2,51 @@
 
 import asyncio
 import functools
+import random
 from typing import Set
 
+from sky import sky_logging
+
+logger = sky_logging.init_logger(__name__)
+
 _background_tasks: Set[asyncio.Task] = set()
+
+# Upper bound on the random delay applied before a periodic housekeeping
+# daemon runs its first pass. See sleep_startup_jitter().
+DEFAULT_STARTUP_JITTER_SECONDS = 1800
+
+
+async def sleep_startup_jitter(
+        name: str, max_seconds: float = DEFAULT_STARTUP_JITTER_SECONDS) -> None:
+    """Sleep a random offset before a periodic daemon's first pass.
+
+    Periodic housekeeping daemons are written as::
+
+        while True:
+            do_the_pass()
+            await asyncio.sleep(interval)
+
+    so the first pass runs at t=0 of the process. That is fine for a single
+    server, but it means every API server that boots at the same moment also
+    starts its housekeeping at the same moment, and the passes stay aligned
+    from then on: a fleet that is restarted together (a rolling upgrade, a
+    node drain, an eviction) has its daily retention sweeps permanently
+    phase-locked, so they all land on the shared database at once.
+
+    Sleeping a random offset in [0, max_seconds) before entering the loop
+    spreads those first passes out, and because the interval is unchanged the
+    offset persists for the lifetime of the process.
+
+    Only safe for work that is pure housekeeping -- nothing whose result is
+    needed for the server to start serving correctly.
+    """
+    if max_seconds <= 0:
+        return
+    delay = random.uniform(0, max_seconds)
+    logger.debug(
+        '%s: delaying first pass by %.0fs to avoid a synchronized '
+        'startup burst across servers', name, delay)
+    await asyncio.sleep(delay)
 
 
 def shield(func):

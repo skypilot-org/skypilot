@@ -9,6 +9,7 @@ import { CircularProgress } from '@mui/material';
 import { ClusterJobs } from '@/components/jobs';
 import { useRouter } from 'next/router';
 import { Layout } from '@/components/elements/layout';
+import { LinkifiedText } from '@/components/elements/LinkifiedText';
 import Link from 'next/link';
 import { Status2Actions } from '@/components/clusters';
 import { StatusBadge } from '@/components/elements/StatusBadge';
@@ -574,7 +575,7 @@ function ActiveTab({
                         content={clusterData.last_event || '-'}
                         className="text-sm text-muted-foreground"
                       >
-                        <span>{clusterData.last_event || '-'}</span>
+                        <LinkifiedText text={clusterData.last_event || '-'} />
                       </NonCapitalizedTooltip>
                     }
                   />

@@ -49,6 +49,19 @@ if typing.TYPE_CHECKING:
 
 logger = sky_logging.init_logger(__name__)
 
+# Launch failures that retrying cannot fix: the launch never got as far as
+# asking for resources, and trying again does not change the answer. These fail
+# the job with FAILED_PRECHECKS instead of entering the retry loop, so a job
+# does not sit there re-attempting something only an operator can resolve.
+PRECHECK_FAILURES = (
+    exceptions.InvalidClusterNameError,
+    exceptions.NoCloudAccessError,
+    exceptions.ResourcesMismatchError,
+    exceptions.StorageSpecError,
+    exceptions.StorageError,
+    exceptions.VolumeNotReadyError,
+)
+
 # Waiting time for job from INIT/PENDING to RUNNING
 # 10 * JOB_STARTED_STATUS_CHECK_GAP_SECONDS = 10 * 5 = 50 seconds
 MAX_JOB_CHECKING_RETRY = 10
@@ -1098,11 +1111,7 @@ class StrategyExecutor:
                         logger.error('The pool no longer exists: '
                                      f'{common_utils.format_exception(e)}')
                         raise
-                    except (exceptions.InvalidClusterNameError,
-                            exceptions.NoCloudAccessError,
-                            exceptions.ResourcesMismatchError,
-                            exceptions.StorageSpecError,
-                            exceptions.StorageError) as e:
+                    except PRECHECK_FAILURES as e:
                         logger.error('Failure happened before provisioning. '
                                      f'{common_utils.format_exception(e)}')
                         if raise_on_failure:

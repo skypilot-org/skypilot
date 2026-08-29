@@ -30,6 +30,7 @@ import unittest.mock as mock
 import fastapi
 import pytest
 
+from sky import exceptions
 from sky import models
 from sky.server import server
 from sky.server.auth import db_lookup
@@ -238,6 +239,127 @@ class TestAuthProxyDeadline:
         assert not call_next_sentinel.reached
 
 
+async def _seed_times_out(func, *args):
+    """Time out the seed. Kept separate from `call_with_deadline`, which the
+    user upsert still uses: failing every call answered 503 before the seed was
+    ever reached, which is how this test first passed for the wrong reason."""
+    del func, args
+    raise asyncio.TimeoutError()
+
+
+class TestAuthProxyRoleRepair:
+    """The login path repairs a role that was never seeded.
+
+    The endpoint gate queues a repair too, but only after refusing the request.
+    Doing it here means a returning user whose seed failed is fixed before they
+    are ever denied.
+    """
+
+    def _middleware(self):
+        proxy_config = mock.Mock()
+        proxy_config.enabled = True
+        with mock.patch.object(server.server_config,
+                               'load_external_proxy_config',
+                               return_value=proxy_config):
+            return server.AuthProxyMiddleware(app=mock.Mock())
+
+    @pytest.mark.asyncio
+    async def test_a_returning_user_with_no_known_role_is_queued(
+            self, mock_request, call_next_sentinel):
+        """Queued, not awaited: the repair wants the lock that stranded them."""
+        middleware = self._middleware()
+        with mock.patch.object(
+                server, '_extract_user_from_header',
+                return_value=models.User(id='u-1', name='tester')), \
+                mock.patch('sky.global_user_state.add_or_update_user',
+                           return_value=False), \
+                mock.patch('sky.users.permission.permission_service'
+                          ) as perm_service:
+            perm_service.probably_has_role.return_value = False
+            await middleware.dispatch(mock_request, call_next_sentinel)
+        perm_service.queue_role_repair.assert_called_once_with('u-1')
+
+    @pytest.mark.asyncio
+    async def test_the_repair_never_blocks_the_login(self, mock_request,
+                                                     call_next_sentinel):
+        """A login must not wait on the policy lock. Nothing here may await.
+
+        The whole point of queueing: the seed takes a lock held for up to
+        POLICY_UPDATE_LOCK_TIMEOUT_SECONDS, and a login that waits for it hangs
+        for that long under exactly the contention that caused the strand.
+        """
+        middleware = self._middleware()
+        with mock.patch.object(
+                server, '_extract_user_from_header',
+                return_value=models.User(id='u-1', name='tester')), \
+                mock.patch('sky.global_user_state.add_or_update_user',
+                           return_value=False), \
+                mock.patch('sky.users.permission.permission_service'
+                          ) as perm_service, \
+                mock.patch('asyncio.to_thread') as to_thread:
+            perm_service.probably_has_role.return_value = False
+            await middleware.dispatch(mock_request, call_next_sentinel)
+        to_thread.assert_not_called()
+        perm_service.queue_role_repair.assert_called_once_with('u-1')
+
+    @pytest.mark.asyncio
+    async def test_no_repair_when_a_role_is_known(self, mock_request,
+                                                  call_next_sentinel):
+        """The guard is what keeps this off the queue on every request."""
+        middleware = self._middleware()
+        with mock.patch.object(
+                server, '_extract_user_from_header',
+                return_value=models.User(id='u-1', name='tester')), \
+                mock.patch('sky.global_user_state.add_or_update_user',
+                           return_value=False), \
+                mock.patch('sky.users.permission.permission_service'
+                          ) as perm_service:
+            perm_service.probably_has_role.return_value = True
+            await middleware.dispatch(mock_request, call_next_sentinel)
+        perm_service.queue_role_repair.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_a_new_user_is_seeded_not_queued(self, mock_request,
+                                                   call_next_sentinel):
+        middleware = self._middleware()
+        with mock.patch.object(
+                server, '_extract_user_from_header',
+                return_value=models.User(id='u-1', name='tester')), \
+                mock.patch('sky.global_user_state.add_or_update_user',
+                           return_value=True), \
+                mock.patch('sky.users.permission.seed_new_user_role') as seed, \
+                mock.patch('sky.users.permission.permission_service'
+                          ) as perm_service:
+            await middleware.dispatch(mock_request, call_next_sentinel)
+        seed.assert_called_once_with('u-1')
+        perm_service.queue_role_repair.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_a_seed_that_times_out_answers_503_and_queues(
+            self, mock_request, call_next_sentinel):
+        """Never proceed without a role, and never strand them either.
+
+        Proceeding would hand the RBAC gate a role-less principal and 403 the
+        brand-new user's first request; dropping the seed would leave the
+        account broken until something else noticed.
+        """
+        middleware = self._middleware()
+        with mock.patch.object(
+                server, '_extract_user_from_header',
+                return_value=models.User(id='u-1', name='tester')), \
+                mock.patch('sky.global_user_state.add_or_update_user',
+                           return_value=True), \
+                mock.patch('sky.users.permission.permission_service'
+                          ) as perm_service, \
+                mock.patch.object(db_lookup,
+                                  '_call_on_request_pool',
+                                  side_effect=_seed_times_out):
+            response = await middleware.dispatch(mock_request,
+                                                 call_next_sentinel)
+        assert response.status_code == 503
+        perm_service.queue_role_repair.assert_called_once_with('u-1')
+
+
 @pytest.mark.asyncio
 async def test_call_with_deadline_returns_fast_results(monkeypatch):
     """The healthy path is unperturbed: fast lookups return their value."""
@@ -250,3 +372,109 @@ async def test_call_with_deadline_returns_fast_results(monkeypatch):
 async def test_call_with_deadline_raises_timeout():
     with pytest.raises(asyncio.TimeoutError):
         await db_lookup.call_with_deadline(_slow(None))
+
+
+class TestEnsureRoleForAuthenticatedUser:
+    """The decision both auth front-ends share.
+
+    Tested here rather than through either middleware: the oauth2-proxy class is
+    wrapped by `middleware_utils.websocket_aware`, so its real methods are not
+    reachable from the exported name and its copy of this branch had no
+    coverage at all while it was duplicated.
+    """
+
+    @pytest.mark.asyncio
+    async def test_a_new_user_is_seeded_before_the_request_proceeds(self):
+        with mock.patch.object(db_lookup,
+                               '_call_on_request_pool',
+                               new=mock.AsyncMock()) as bounded, \
+             mock.patch('sky.users.permission.permission_service') as perm:
+            assert await db_lookup.ensure_role_for_authenticated_user(
+                'u-new', True) is None
+        assert bounded.await_count == 1
+        assert bounded.await_args[0][1] == 'u-new'
+        perm.queue_role_repair.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_a_seed_that_times_out_answers_503_and_queues(self):
+        """Never proceed without a role, and never strand them either."""
+        with mock.patch.object(db_lookup,
+                               '_call_on_request_pool',
+                               side_effect=asyncio.TimeoutError), \
+             mock.patch('sky.users.permission.permission_service') as perm:
+            response = await db_lookup.ensure_role_for_authenticated_user(
+                'u-slow', True)
+        assert response is not None and response.status_code == 503
+        perm.queue_role_repair.assert_called_once_with('u-slow')
+
+    @pytest.mark.asyncio
+    async def test_a_saturated_executor_answers_503_and_queues(self):
+        with mock.patch.object(
+                db_lookup,
+                '_call_on_request_pool',
+                side_effect=exceptions.ConcurrentWorkerExhaustedError('busy')
+        ), mock.patch('sky.users.permission.permission_service') as perm:
+            response = await db_lookup.ensure_role_for_authenticated_user(
+                'u-busy', True)
+        assert response is not None and response.status_code == 503
+        perm.queue_role_repair.assert_called_once_with('u-busy')
+
+    @pytest.mark.asyncio
+    async def test_a_returning_user_with_no_known_role_is_only_queued(self):
+        """Queued, not awaited: the repair wants the lock that stranded them."""
+        with mock.patch('sky.users.permission.permission_service') as perm, \
+             mock.patch.object(db_lookup,
+                               '_call_on_request_pool',
+                               new=mock.AsyncMock()) as bounded:
+            perm.probably_has_role.return_value = False
+            assert await db_lookup.ensure_role_for_authenticated_user(
+                'u-old', False) is None
+        perm.queue_role_repair.assert_called_once_with('u-old')
+        bounded.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_a_returning_user_with_a_role_does_nothing(self):
+        with mock.patch('sky.users.permission.permission_service') as perm:
+            perm.probably_has_role.return_value = True
+            assert await db_lookup.ensure_role_for_authenticated_user(
+                'u-fine', False) is None
+        perm.queue_role_repair.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_the_seed_stays_off_the_auth_pool(self):
+        """32 auth threads, and a seed can hold one for the policy lock's 20s.
+
+        `wait_for` releases the caller, never the thread, so a burst of first
+        logins under lock contention would exhaust the pool every request
+        authenticates through -- which the auth executor's own docstring says
+        belongs on the request executor instead.
+        """
+        with mock.patch('sky.users.permission.permission_service'), \
+             mock.patch('sky.users.permission.seed_new_user_role'), \
+             mock.patch.object(db_lookup.executor,
+                               'get_auth_thread_executor') as auth_pool, \
+             mock.patch.object(db_lookup.executor,
+                               'get_request_thread_executor') as request_pool:
+            await db_lookup.ensure_role_for_authenticated_user('u-new', True)
+        auth_pool.assert_not_called()
+        request_pool.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_any_seed_failure_answers_503_rather_than_500(self):
+        """A middleware exception is a bare 500, and clients do not retry those.
+
+        Only the timeout was converted before, so a DB error inside the seed
+        escaped as a 500 on a brand-new user's first request.
+        """
+        with mock.patch.object(db_lookup,
+                               '_call_on_request_pool',
+                               side_effect=RuntimeError('db is unhappy')), \
+             mock.patch('sky.users.permission.permission_service') as perm:
+            response = await db_lookup.ensure_role_for_authenticated_user(
+                'u-broken', True)
+        assert response is not None and response.status_code == 503
+        # And it says why it gave up. `db_timeout_response`'s text blames a slow
+        # database, which is wrong for the reason this path usually fails:
+        # contention on the policy lock, a healthy database doing its job.
+        assert b'assigning roles' in response.body
+        perm.queue_role_repair.assert_called_once_with('u-broken')
