@@ -235,8 +235,18 @@ def estimate_platforms(
         List[PresetInfo]: A list of PresetInfo objects containing details and
         estimated prices for each preset.
     """
-    return asyncio.run(
-        _estimate_platforms_async(platforms, parent_id, region, offer_types))
+    try:
+        return asyncio.run(
+            _estimate_platforms_async(platforms, parent_id, region,
+                                      offer_types))
+    finally:
+        # This runs once per region, each time in its own event loop. The
+        # cached SDK holds channels bound to the loop asyncio.run() just
+        # closed; after a failed request on one of them every request in the
+        # next region's loop fails with "Event loop is closed", and those
+        # failures are then silently swallowed by return_exceptions=True.
+        # Reset the client so each region starts from a clean one.
+        nebius.clear_sdk_cache()
 
 
 async def _estimate_platforms_async(
@@ -305,6 +315,17 @@ async def _estimate_platforms_async(
         except ValueError as e:
             logger.warning('Skipping preset %s_%s in %s: %s', platform_name,
                            preset.name, region, e)
+            continue
+        # A resource with no SKU can come back as a successful estimate of 0
+        # rather than an error: gpu-gb300 in eu-north1 fails the spot estimate
+        # with "unresolved sku" but returns cost '0' for the on-demand one.
+        # Writing that through advertises the instance as free and makes the
+        # optimizer always prefer it, so treat it as unpriceable.
+        if price_hourly <= 0:
+            logger.warning(
+                'Skipping preset %s_%s in %s: the on-demand estimate returned '
+                '%s, so the resource has no price.', platform_name, preset.name,
+                region, price_hourly)
             continue
         # Keep presets that have an on-demand price but no spot price; the
         # catalog writes an empty SpotPrice column for those.
