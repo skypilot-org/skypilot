@@ -2197,10 +2197,35 @@ def get_config_schema():
                             'submit_as_user': {
                                 'type': 'boolean',
                             },
-                            # URL of a Prometheus reachable from the
-                            # cluster's login node that scrapes the
-                            # cluster's node/DCGM exporters; opts the
-                            # cluster into /gpu-metrics federation.
+                            # The Prometheus this cluster's GPU metrics are
+                            # federated from.
+                            'prometheus': {
+                                'type': 'object',
+                                'required': [],
+                                'additionalProperties': False,
+                                'properties': {
+                                    # Reachable from the cluster's login
+                                    # node, scraping the cluster's node/DCGM
+                                    # exporters; opts the cluster into
+                                    # /gpu-metrics federation.
+                                    'url': {
+                                        'type': 'string',
+                                    },
+                                    # Label matchers scoping this cluster's
+                                    # slice of `url`, for a Prometheus that
+                                    # aggregates several fleets. Without them
+                                    # an unscoped DCGM_.* pull attributes
+                                    # every fleet's series to this cluster.
+                                    'filter': {
+                                        'type': 'object',
+                                        'additionalProperties': {
+                                            'type': 'string',
+                                        },
+                                    },
+                                },
+                            },
+                            # Deprecated: superseded by `prometheus.url`,
+                            # kept so deployed configs keep federating.
                             'prometheus_url': {
                                 'type': 'string',
                             },
