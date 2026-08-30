@@ -165,6 +165,10 @@ Below is the configuration syntax and some example values. See detailed explanat
         gpu_partition_map:
           H100: h100-custom
         cpu_partition: cpu-only
+        prometheus:
+          url: http://prometheus.internal:9090
+          filter:
+            cluster: mycluster1-fleet
 
   :ref:`aws <config-yaml-aws>`:
     :ref:`labels <config-yaml-aws-labels>`:
@@ -2528,6 +2532,52 @@ Supported fields:
   the cluster level. Entries are merged per container path, with per-cluster
   values overriding global values.
 
+- ``prometheus``: Opts the cluster into GPU metrics federation, surfacing its
+  DCGM and node-exporter metrics in the SkyPilot dashboard. Sub-fields:
+
+  - ``url``: URL of a Prometheus that scrapes the cluster's DCGM and
+    node exporters, reachable from a login node (the cluster's own, or the
+    ``via`` cluster's). SkyPilot runs ``GET /federate`` against it from the
+    login node, so the API server never needs direct network access to it.
+  - ``filter``: Label matchers (label name to exact value) scoping this
+    cluster's slice of ``url``, for a central Prometheus that aggregates
+    metrics from several clusters. Without a filter, all series returned by
+    ``url`` are attributed to this cluster. Clusters sharing a ``url``
+    automatically exclude each other's filtered slices, so a fleet is never
+    counted twice.
+  - ``via``: Name of another Slurm cluster whose login node runs the
+    ``/federate`` request instead of this cluster's own, for a central
+    Prometheus reachable from only some login nodes. The fetched series are
+    still attributed to this cluster.
+
+  The flat ``prometheus_url`` field is a deprecated spelling of
+  ``prometheus.url`` and is still honored; ``prometheus.url`` wins when both
+  are set.
+
+  ``url`` and ``via`` can also be set once at the cloud level under
+  ``slurm.prometheus`` as shared defaults, inherited by any cluster that does
+  not override them. This suits the common case of one central Prometheus,
+  reachable through a single fleet's login node, serving every cluster: set
+  ``url`` (and ``via``) once and give each cluster only its own ``filter``.
+
+  .. code-block:: yaml
+
+    slurm:
+      # Shared defaults: one central Prometheus, reachable only through
+      # hub's login node, serving every cluster.
+      prometheus:
+        url: http://prometheus.internal:9090
+        via: hub
+      cluster_configs:
+        hub:
+          prometheus:
+            filter:
+              cluster: hub-fleet
+        edge:
+          prometheus:
+            filter:
+              cluster: edge-fleet
+
 Example:
 
 .. code-block:: yaml
@@ -2553,6 +2603,14 @@ Example:
           cpu: 0.06
           accelerators:
             A100: 4.00   # Override A100; V100 inherited
+        # Surface this cluster's GPU metrics in the SkyPilot dashboard,
+        # federated from a Prometheus reachable from the login node.
+        prometheus:
+          url: http://prometheus.internal:9090
+          # Only needed when the Prometheus aggregates several clusters:
+          # collect only the series carrying these labels.
+          filter:
+            cluster: mycluster1-fleet
 
       mycluster2:
         workdir: /home/$USER
@@ -2572,6 +2630,15 @@ Example:
             pricing:
               accelerators:
                 H100: 5.00
+        # GPU metrics federation from a central Prometheus that aggregates
+        # both clusters but is reachable only from mycluster1's login node.
+        prometheus:
+          url: http://prometheus.internal:9090
+          # Run the /federate request on mycluster1's login node.
+          via: mycluster1
+          # Collect only this cluster's slice of the shared Prometheus.
+          filter:
+            cluster: mycluster2-fleet
 
 .. _config-yaml-oci:
 
