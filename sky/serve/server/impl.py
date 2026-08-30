@@ -261,7 +261,12 @@ def up(
         # service._allocate_load_balancer_port, which runs on the controller:
         # a mismatch lets a load balancer bind a port we never opened here.
         if not pool:
-            start, end = serve_utils.get_load_balancer_port_range()
+            # Read the range from the same config the controller is launched
+            # with (mutated_user_config, uploaded above), not the ambient
+            # pre-policy one: an admin policy that rewrites this key would
+            # otherwise open one range here and allocate from another there.
+            start, end = serve_utils.get_load_balancer_port_range(
+                mutated_user_config)
             controller_resources = {
                 r.copy(ports=[f'{start}-{end}']) for r in controller_resources
             }

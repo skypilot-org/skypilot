@@ -22,6 +22,7 @@ import pytest
 from sky.serve import constants as serve_constants
 from sky.serve import serve_utils
 from sky.serve import service
+from sky.utils import config_utils
 
 
 def _bind_socket_async(host, port, delay):
@@ -597,6 +598,32 @@ class TestLoadBalancerPortRange:
                            match='serve.controller.load_balancer_port_range'):
             serve_utils.get_load_balancer_port_range()
 
+    def test_explicit_config_wins_over_ambient(self, monkeypatch):
+        """impl.up must read the range an admin policy actually produced.
+
+        The controller is launched with the policy's mutated config, so
+        opening ports from the ambient pre-policy config would open one
+        range and allocate from another.
+        """
+        self._set_config(monkeypatch, '31000-31009')
+        mutated = config_utils.Config({
+            'serve': {
+                'controller': {
+                    'load_balancer_port_range': '32000-32005'
+                }
+            }
+        })
+
+        assert serve_utils.get_load_balancer_port_range(mutated) == (32000,
+                                                                     32005)
+
+    def test_explicit_config_falls_back_to_default(self, monkeypatch):
+        """A policy that does not set the key leaves the default in place."""
+        self._set_config(monkeypatch, '31000-31009')
+        start, end = serve_utils.get_load_balancer_port_range(
+            config_utils.Config())
+        assert f'{start}-{end}' == serve_constants.LOAD_BALANCER_PORT_RANGE
+
 
 class TestAllocateLoadBalancerPort:
 
@@ -620,3 +647,20 @@ class TestAllocateLoadBalancerPort:
         with pytest.raises(RuntimeError,
                            match='serve.controller.load_balancer_port_range'):
             service._allocate_load_balancer_port()
+
+    def test_pool_search_is_not_bounded(self, monkeypatch):
+        """A pool needs no load balancer, so the range must not gate it.
+
+        impl.up does not open the range for pools, so an exhausted range is
+        not a reason to refuse a pool launch: the port is only a placeholder
+        the service row requires.
+        """
+        monkeypatch.setattr(
+            'sky.serve.service.serve_utils.get_load_balancer_port_range',
+            lambda: (30001, 30020))
+        find_free_port = mock.Mock(return_value=40000)
+        monkeypatch.setattr('sky.serve.service.common_utils.find_free_port',
+                            find_free_port)
+
+        assert service._allocate_load_balancer_port(pool=True) == 40000
+        find_free_port.assert_called_once_with(30001)

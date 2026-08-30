@@ -53,6 +53,7 @@ if typing.TYPE_CHECKING:
 
     import sky
     from sky.serve import replica_managers
+    from sky.utils import config_utils
 else:
     psutil = adaptors_common.LazyImport('psutil')
     requests = adaptors_common.LazyImport('requests')
@@ -372,7 +373,8 @@ LOAD_BALANCER_PORT_RANGE_CONFIG_KEY = ('serve', 'controller',
                                        'load_balancer_port_range')
 
 
-def get_load_balancer_port_range() -> Tuple[int, int]:
+def get_load_balancer_port_range(
+        config: Optional['config_utils.Config'] = None) -> Tuple[int, int]:
     """Returns the inclusive load balancer port range, as (start, end).
 
     Reads ``serve.controller.load_balancer_port_range`` (default
@@ -380,12 +382,23 @@ def get_load_balancer_port_range() -> Tuple[int, int]:
     per-service port search on the controller must stay inside it, otherwise
     a load balancer binds a port that was never exposed. See
     ``sky.serve.service._allocate_load_balancer_port``.
+
+    ``config`` reads the range from an explicit config instead of the ambient
+    one. Callers that run before an admin policy has been applied must pass
+    the policy's mutated config, since that is what the controller is
+    launched with: reading the pre-policy value here would open one range and
+    allocate from another.
     """
     key = '.'.join(LOAD_BALANCER_PORT_RANGE_CONFIG_KEY)
-    range_str = str(
-        skypilot_config.get_nested(
+    if config is None:
+        configured = skypilot_config.get_nested(
             LOAD_BALANCER_PORT_RANGE_CONFIG_KEY,
-            default_value=constants.LOAD_BALANCER_PORT_RANGE))
+            default_value=constants.LOAD_BALANCER_PORT_RANGE)
+    else:
+        configured = config.get_nested(
+            LOAD_BALANCER_PORT_RANGE_CONFIG_KEY,
+            default_value=constants.LOAD_BALANCER_PORT_RANGE)
+    range_str = str(configured)
     match = re.fullmatch(r'(\d{1,5})-(\d{1,5})', range_str)
     if match is None:
         with ux_utils.print_exception_no_traceback():
