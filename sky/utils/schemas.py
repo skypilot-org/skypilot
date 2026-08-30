@@ -1678,6 +1678,22 @@ _CONTEXT_CONFIG_SCHEMA_KUBERNETES = {
             type.value for type in kubernetes_enums.KubernetesPortMode
         ],
     },
+    'ingress': {
+        'type': 'object',
+        'required': [],
+        'additionalProperties': False,
+        'properties': {
+            'class_name': {
+                'type': 'string',
+            },
+            'controller_service': {
+                'type': 'string',
+            },
+            'controller_namespace': {
+                'type': 'string',
+            },
+        },
+    },
     **_CONTEXT_CONFIG_SCHEMA_MINIMAL,
     'namespace': {
         'type': 'string',

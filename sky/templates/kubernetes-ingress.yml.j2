@@ -15,7 +15,7 @@ ingress_spec:
     name: {{ ingress_name }}
     namespace: {{ namespace }}
   spec:
-    ingressClassName: nginx
+    ingressClassName: {{ ingress_class_name }}
     rules:
     - http:
         paths:
