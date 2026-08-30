@@ -1236,3 +1236,52 @@ def test_slurm_nested_prometheus_url_wins_over_flat(monkeypatch):
     cmd = run.call_args.args[1]
     assert 'http://new.internal:9091/federate?' in cmd
     assert 'old.internal' not in cmd
+
+
+def test_slurm_via_routes_curl_to_other_login_node(monkeypatch):
+    # A central Prometheus reachable only from 'hub': 'edge' collects its own
+    # slice through hub's login node, and the series are still attributed to
+    # 'edge' — transport and attribution are independent.
+    def _cfg(keys, default_value=None, **_):
+        keys = tuple(keys)
+        if keys == ('slurm', 'cluster_configs'):
+            return {'hub': {}, 'edge': {}}
+        if keys[-2:] == ('prometheus', 'url') and keys[2] in ('hub', 'edge'):
+            return _SHARED_PROM_URL
+        if keys == ('slurm', 'cluster_configs', 'edge', 'prometheus', 'via'):
+            return 'hub'
+        if keys == ('slurm', 'cluster_configs', 'edge', 'prometheus', 'filter'):
+            return {'cluster': 'site-edge'}
+        return default_value
+
+    monkeypatch.setattr(utils.skypilot_config, 'get_nested', _cfg)
+    body = 'DCGM_FI_DEV_GPU_UTIL{cluster="site-edge",gpu="0"} 5\n'
+    with mock.patch('sky.clouds.Slurm.existing_allowed_clusters',
+                    return_value=['hub', 'edge']):
+        with mock.patch('sky.provision.slurm.utils.run_on_login_node',
+                        return_value=(0, body, '')) as run:
+            out = asyncio.run(utils.get_metrics_for_slurm_cluster('edge'))
+    # curl ran on hub's login node...
+    assert run.call_args.args[0] == 'hub'
+    # ...scoped to edge's slice...
+    assert 'cluster%3D%22site-edge%22' in run.call_args.args[1]
+    # ...and the series are stamped as edge, not hub.
+    assert out == 'DCGM_FI_DEV_GPU_UTIL{cluster="slurm/edge",gpu="0"} 5'
+
+
+def test_slurm_via_failure_names_both_clusters(monkeypatch):
+
+    def _cfg(keys, default_value=None, **_):
+        keys = tuple(keys)
+        if keys == ('slurm', 'cluster_configs', 'edge', 'prometheus', 'url'):
+            return _SHARED_PROM_URL
+        if keys == ('slurm', 'cluster_configs', 'edge', 'prometheus', 'via'):
+            return 'hub'
+        return default_value
+
+    monkeypatch.setattr(utils.skypilot_config, 'get_nested', _cfg)
+    with mock.patch('sky.provision.slurm.utils.run_on_login_node',
+                    return_value=(7, '', 'curl: (7) Failed to connect')):
+        with pytest.raises(RuntimeError,
+                           match=r"'edge' \(via 'hub'\) exited 7"):
+            asyncio.run(utils.get_metrics_for_slurm_cluster('edge'))

@@ -1557,9 +1557,10 @@ def get_slurm_metrics_clusters() -> List[str]:
     (the analog of ``kubernetes.allowed_contexts``; defaults to every cluster
     in ``~/.slurm/config``) *and*
     ``slurm.cluster_configs.<name>.prometheus.url`` is set: the URL of a
-    Prometheus reachable *from the cluster's login node* (typically running
-    inside the cluster) that scrapes the cluster's node/DCGM exporters. No SSH
-    probing happens here — enumeration reads only local config.
+    Prometheus reachable *from a login node* — the cluster's own, or the
+    ``prometheus.via`` cluster's — that scrapes the cluster's node/DCGM
+    exporters. No SSH probing happens here — enumeration reads only local
+    config.
     """
     try:
         # pylint: disable=import-outside-toplevel
@@ -1581,13 +1582,18 @@ async def get_metrics_for_slurm_cluster(cluster_name: str,
                                         timeout: float = 30.0) -> str:
     """Federate GPU metrics from a Slurm cluster's own Prometheus.
 
-    The /federate request is executed *on* the login node (curl) through
-    the cluster's SSH transport, so it traverses outbound-only tunnel
+    The /federate request is executed *on* a login node (curl) through
+    that cluster's SSH transport, so it traverses outbound-only tunnel
     agents unchanged and never requires network reachability from the API
-    server to the cluster's Prometheus. Series are stamped with
-    ``cluster="slurm/<name>"``, mirroring the Kubernetes federation path,
-    so every downstream consumer (central Prometheus, Grafana dashboards,
-    GPU Manager queries) treats the Slurm cluster like any other context.
+    server to the cluster's Prometheus. By default that is this cluster's
+    own login node; ``prometheus.via`` names a different Slurm cluster to
+    run the curl on, for a central Prometheus reachable from only some
+    login nodes — every cluster it aggregates can then still be collected,
+    each through the login node that can reach it. Series are stamped with
+    ``cluster="slurm/<name>"`` regardless of which login node fetched
+    them, mirroring the Kubernetes federation path, so every downstream
+    consumer (central Prometheus, Grafana dashboards, GPU Manager queries)
+    treats the Slurm cluster like any other context.
 
     Timeouts mirror the Kubernetes path's single per-context budget: the
     SSH invocation is hard-killed at ``timeout`` (a hung login node cannot
@@ -1610,6 +1616,9 @@ async def get_metrics_for_slurm_cluster(cluster_name: str,
     if not prometheus_url:
         raise ValueError(
             f'No prometheus.url configured for Slurm cluster {cluster_name!r}')
+    login_cluster = skypilot_config.get_nested(
+        ('slurm', 'cluster_configs', cluster_name, 'prometheus', 'via'),
+        None) or cluster_name
 
     # Scope the pull when the source Prometheus aggregates several fleets;
     # without this every fleet's series would be stamped with this cluster's
@@ -1634,11 +1643,13 @@ async def get_metrics_for_slurm_cluster(cluster_name: str,
         # exposition text would make Prometheus reject the *entire*
         # /gpu-metrics body, every cluster included.
         returncode, stdout, stderr = slurm_utils.run_on_login_node(
-            cluster_name, curl_cmd, timeout=int(timeout))
+            login_cluster, curl_cmd, timeout=int(timeout))
         if returncode != 0:
+            via = ('' if login_cluster == cluster_name else
+                   f' (via {login_cluster!r})')
             raise RuntimeError(
-                f'Federate curl on Slurm cluster {cluster_name!r} exited '
-                f'{returncode}: {(stderr or stdout).strip()[:500]}')
+                f'Federate curl on Slurm cluster {cluster_name!r}{via} '
+                f'exited {returncode}: {(stderr or stdout).strip()[:500]}')
         return stdout
 
     start = time.monotonic()

@@ -2222,6 +2222,13 @@ def get_config_schema():
                                             'type': 'string',
                                         },
                                     },
+                                    # Slurm cluster whose login node runs the
+                                    # /federate curl instead of this
+                                    # cluster's own, for a central Prometheus
+                                    # reachable from only some login nodes.
+                                    'via': {
+                                        'type': 'string',
+                                    },
                                 },
                             },
                             # Deprecated: superseded by `prometheus.url`,
