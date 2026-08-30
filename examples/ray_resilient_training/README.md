@@ -5,8 +5,8 @@ single-GPU workers. Dynamic Node Sets replace a failed head or worker while
 the healthy workers keep running.
 
 > [!NOTE]
-> Dynamic Node Sets are available with SkyPilot Platform on Kubernetes.
-> Contact the SkyPilot team to enable them for your deployment.
+> This example uses **Frontier Trainer** for Dynamic Node Set recovery, which
+> is available on the **[SkyPilot Platform](https://docs.skypilot.ai/en/latest/skypilot-platform.html)**.
 
 ## Requirements
 
