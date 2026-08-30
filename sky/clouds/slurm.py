@@ -885,7 +885,16 @@ class Slurm(clouds.Cloud):
                     ssh_proxy_jump=ssh_config_dict.get('proxyjump', None),
                     identities_only=slurm_utils.get_identities_only(
                         ssh_config_dict),
-                    slurm_user=slurm_utils.get_submit_user(cluster),
+                    # The check's probes (sinfo, env, a stat of the workdir)
+                    # are read-only: run them as the SSH user rather than the
+                    # submit user. With submit_as_user, acting as the submit
+                    # user goes through su/sudo, and clusters commonly grant
+                    # passwordless sudo only for the submission commands
+                    # (sbatch/srun/scancel/squeue) — wrapping sinfo would fail
+                    # the whole credential check and silently disable Slurm,
+                    # taking down every consumer of the enabled-clouds cache
+                    # (e.g. GPU availability on the infra page).
+                    slurm_user=None,
                 )
                 info = client.info()
                 logger.debug(f'Slurm cluster {cluster} sinfo: {info}')
