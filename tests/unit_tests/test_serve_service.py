@@ -663,4 +663,22 @@ class TestAllocateLoadBalancerPort:
                             find_free_port)
 
         assert service._allocate_load_balancer_port(pool=True) == 40000
-        find_free_port.assert_called_once_with(30001)
+        find_free_port.assert_called_once_with(30001, end_port=65535)
+
+    def test_pool_search_spans_the_top_of_the_port_space(self, monkeypatch):
+        """A range starting at 65535 must still leave a pool a port to take.
+
+        find_free_port stops at 65534 by default, so inheriting that cap here
+        would search an empty span and fail the launch on the one path that
+        is supposed to be exempt from the range.
+        """
+        monkeypatch.setattr(
+            'sky.serve.service.serve_utils.get_load_balancer_port_range',
+            lambda: (65535, 65535))
+        find_free_port = mock.Mock(return_value=65535)
+        monkeypatch.setattr('sky.serve.service.common_utils.find_free_port',
+                            find_free_port)
+
+        assert service._allocate_load_balancer_port(pool=True) == 65535
+        # Without the explicit end_port the search span would be empty.
+        find_free_port.assert_called_once_with(65535, end_port=65535)

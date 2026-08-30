@@ -84,7 +84,11 @@ def _allocate_load_balancer_port(pool: bool = False) -> int:
     """
     start, end = serve_utils.get_load_balancer_port_range()
     if pool:
-        return common_utils.find_free_port(start)
+        # 65535 is a valid port, but find_free_port stops at 65534 by default
+        # to preserve its behavior for every other caller. Leaving that cap in
+        # place here would search an empty span for a range starting at 65535,
+        # failing the pool launch this branch exists to let through.
+        return common_utils.find_free_port(start, end_port=65535)
     try:
         return common_utils.find_free_port(start, end_port=end)
     except OSError as e:
