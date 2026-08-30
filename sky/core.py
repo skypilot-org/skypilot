@@ -818,7 +818,16 @@ def _graceful_job_cancel(handle: backends.ResourceHandle,
     if timeout:
         flush_script = f'timeout {timeout} bash -c {shlex.quote(flush_script)}'
 
-    runners = handle.get_command_runners()
+    try:
+        runners = handle.get_command_runners()
+    except Exception as e:  # pylint: disable=broad-except
+        # Not every provisioner can produce command runners (e.g. a runtime
+        # that offers no exec access into the instances). Skip the flush
+        # instead of propagating, so the caller can still tear the cluster
+        # down; otherwise its resources would be leaked.
+        logger.warning('Skipping MOUNT_CACHED upload flush on '
+                       f'{cluster_name!r}: failed to get command runners: {e}')
+        return
     node_args = [(i, runner) for i, runner in enumerate(runners)]
     errors = []
     logger.debug(f'Waiting for uploads on {len(runners)} node(s)...')
