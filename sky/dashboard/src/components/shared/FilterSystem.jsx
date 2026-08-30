@@ -19,38 +19,47 @@ const normalizeCloud = (cloud) => {
 
 // An SSH node pool is stored under an `ssh-` prefixed context name but is
 // written -- and rendered -- without it, so both sides drop the prefix before
-// they are compared.
-const normalizeRegion = (region) =>
-  (region || '').trim().toLowerCase().replace(/^ssh-/, '');
+// they are compared. A row that names no place reads as empty rather than as
+// the `-` the table renders for one.
+const normalizeRegion = (region) => {
+  const value = (region || '').trim().toLowerCase().replace(/^ssh-/, '');
+  return value === '-' ? '' : value;
+};
 
-// A row's infra as the `--infra` spec sees it: the cloud, plus every name that
-// identifies a place within it. The rendered cell is `Cloud (region-or-zone)`,
-// optionally followed by an accelerator group, and is the only source a row is
-// guaranteed to have -- `region`/`zone` are used when the row carries them,
-// since the cell shows just one of the two.
+// A row's infra as the `--infra` spec sees it. The rendered cell is
+// `Cloud (region-or-zone)`, optionally followed by an accelerator group, and
+// is the only place a row that carries neither field separately still names
+// its location -- so it backs up `region`/`zone` rather than replacing them.
 const rowInfra = (item) => {
   const display = item.full_infra || item.infra || '';
   const rendered = /^([^(]*)\(([^)]*)\)/.exec(display);
-  const cloud = normalizeCloud(
-    item.cloud || (rendered ? rendered[1] : display)
-  );
-  const regions = [item.region, item.zone, rendered ? rendered[2] : null]
-    .map(normalizeRegion)
-    .filter((region) => region && region !== '-');
-  return { cloud, regions };
+  return {
+    cloud: normalizeCloud(item.cloud || (rendered ? rendered[1] : display)),
+    region: normalizeRegion(item.region),
+    zone: normalizeRegion(item.zone),
+    rendered: normalizeRegion(rendered ? rendered[2] : ''),
+  };
 };
+
+// One component of a spec against the row values it may name. `*` is the
+// wildcard `InfraInfo.from_str` accepts for any field; anything else matches by
+// prefix, so a half-typed name still narrows the table.
+const componentMatches = (component, ...candidates) =>
+  component === '*' ||
+  candidates.some((candidate) => candidate && candidate.startsWith(component));
 
 // Whether a row's infra matches an infra query.
 //
 // Two forms are accepted, so both what the Infra column shows and what the CLI
 // takes will narrow the table:
 //   - a substring of the rendered cell, e.g. `prod-gpu` or `Slurm (prod-gpu)`;
-//   - an `--infra` spec -- `cloud`, `cloud/region`, or `cloud/context` -- as
-//     parsed by `InfraInfo.from_str`, so `k8s` stands for `kubernetes` and a
-//     Kubernetes context may itself contain `/`.
+//   - an `--infra` spec, as parsed by `InfraInfo.from_str`: `cloud`,
+//     `cloud/region`, or `cloud/region/zone`, with `k8s` standing for
+//     `kubernetes`, `*` for any component, and everything after a Kubernetes
+//     or SSH cloud read as one context name that may itself contain `/`.
 //
-// A spec's cloud must match exactly; its region matches by prefix, so a
-// half-typed name still narrows while `slurm/gpu` does not match `prod-gpu`.
+// A spec's cloud must match exactly; the rest matches by prefix, so
+// `slurm/gpu` does not match `prod-gpu`.
 export const matchesInfraQuery = (item, query) => {
   const value = (query || '').trim().toLowerCase();
   if (!value) return true;
@@ -60,16 +69,31 @@ export const matchesInfraQuery = (item, query) => {
     .toLowerCase();
   if (display.includes(value)) return true;
 
-  const { cloud, regions } = rowInfra(item);
-  const separator = value.indexOf('/');
-  // No `/`: a bare cloud, which reaches here only when it is spelled
-  // differently from the rendered cell (`k8s` for `Kubernetes`).
-  if (separator === -1) {
-    return normalizeCloud(value) === cloud;
+  // `from_str` ignores leading and trailing slashes and rejects empty parts,
+  // so `aws//us-east-1` names no infra rather than every one.
+  const segments = value.replace(/^\/+|\/+$/g, '').split('/');
+  if (segments.some((segment) => !segment)) return false;
+
+  const row = rowInfra(item);
+  const cloud = normalizeCloud(segments[0]);
+  if (cloud !== '*' && cloud !== row.cloud) return false;
+  if (segments.length === 1) return true;
+
+  // Kubernetes and SSH take everything after the cloud as a single context
+  // name. The row's cloud decides, since a `*` spec does not say.
+  if (row.cloud === 'kubernetes' || row.cloud === 'ssh') {
+    const context = normalizeRegion(segments.slice(1).join('/'));
+    return componentMatches(context, row.region, row.zone, row.rendered);
   }
-  if (normalizeCloud(value.slice(0, separator)) !== cloud) return false;
-  const region = normalizeRegion(value.slice(separator + 1));
-  return !region || regions.some((candidate) => candidate.startsWith(region));
+
+  // Every other cloud is `cloud/region/zone`, and no deeper.
+  if (segments.length > 3) return false;
+  const [, region, zone] = segments;
+  // Either field can be the one the cell renders, so both fall back to it.
+  if (!componentMatches(region, row.region, row.zone, row.rendered)) {
+    return false;
+  }
+  return zone === undefined || componentMatches(zone, row.zone, row.rendered);
 };
 
 // Utility: checks a condition based on operator

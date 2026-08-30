@@ -163,6 +163,20 @@ describe('evaluateCondition on infra', () => {
     infra: 'AWS (us-east-1a)',
     full_infra: 'AWS (us-east-1a)',
   };
+  // A cluster row carries no `zone` of its own: the zone survives only as the
+  // region-or-zone the Infra column renders.
+  const awsCluster = {
+    cloud: 'AWS',
+    region: 'us-east-1',
+    infra: 'AWS (us-east-1a)',
+    full_infra: 'AWS (us-east-1a)',
+  };
+  const nestedContextJob = {
+    cloud: 'Kubernetes',
+    region: 'team/ctx',
+    infra: 'Kubernetes (team/ctx)',
+    full_infra: 'Kubernetes (team/ctx)',
+  };
 
   it('matches a bare cloud', () => {
     expect(evaluateCondition(slurmJob, infraFilter('slurm'))).toBe(true);
@@ -207,6 +221,64 @@ describe('evaluateCondition on infra', () => {
     expect(evaluateCondition(slurmJob, infraFilter('slurm/other'))).toBe(false);
     // A region substring is not a region prefix: `gpu` names no cluster here.
     expect(evaluateCondition(slurmJob, infraFilter('slurm/gpu'))).toBe(false);
+  });
+
+  // `from_str` reads a non-Kubernetes spec as `cloud/region/zone`, so the zone
+  // is its own component rather than more of the region.
+  it('matches a zone-qualified spec', () => {
+    expect(
+      evaluateCondition(awsJob, infraFilter('aws/us-east-1/us-east-1a'))
+    ).toBe(true);
+  });
+
+  it('falls back to the rendered cell for a zone the row does not carry', () => {
+    expect(
+      evaluateCondition(awsCluster, infraFilter('aws/us-east-1/us-east-1a'))
+    ).toBe(true);
+  });
+
+  it('does not match a zone on the right cloud and region', () => {
+    expect(
+      evaluateCondition(awsJob, infraFilter('aws/us-east-1/us-west-2b'))
+    ).toBe(false);
+  });
+
+  it('treats * as a wildcard in any component, as from_str does', () => {
+    expect(evaluateCondition(awsJob, infraFilter('aws/*'))).toBe(true);
+    expect(evaluateCondition(awsJob, infraFilter('aws/us-east-1/*'))).toBe(
+      true
+    );
+    expect(evaluateCondition(awsJob, infraFilter('aws/*/us-east-1a'))).toBe(
+      true
+    );
+    expect(evaluateCondition(slurmJob, infraFilter('*/prod-gpu'))).toBe(true);
+    expect(evaluateCondition(slurmJob, infraFilter('*'))).toBe(true);
+    // A wildcard widens a component, it does not widen the whole spec.
+    expect(evaluateCondition(slurmJob, infraFilter('aws/*'))).toBe(false);
+  });
+
+  it('keeps a Kubernetes context that contains a slash in one piece', () => {
+    expect(
+      evaluateCondition(nestedContextJob, infraFilter('k8s/team/ctx'))
+    ).toBe(true);
+    expect(
+      evaluateCondition(nestedContextJob, infraFilter('kubernetes/team'))
+    ).toBe(true);
+    expect(
+      evaluateCondition(nestedContextJob, infraFilter('k8s/other/ctx'))
+    ).toBe(false);
+  });
+
+  it('names no infra when a spec has an empty component', () => {
+    expect(evaluateCondition(awsJob, infraFilter('aws//us-east-1a'))).toBe(
+      false
+    );
+  });
+
+  it('rejects a spec deeper than cloud/region/zone', () => {
+    expect(
+      evaluateCondition(awsJob, infraFilter('aws/us-east-1/us-east-1a/extra'))
+    ).toBe(false);
   });
 });
 
