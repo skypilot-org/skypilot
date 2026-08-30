@@ -1,8 +1,10 @@
 # Resilient Ray training on SkyPilot
 
-This example runs an RL-style Ray workload with a CPU-only head and two
-single-GPU workers. Dynamic Node Sets replace a failed head or worker while
-the healthy workers keep running.
+This example keeps a multi-node Ray training job alive through head and worker
+failures. Dynamic Node Sets provide fast failover to warm standby capacity:
+only the failed pod is replaced, healthy workers keep running, and training
+resumes without a full-cluster restart. This minimizes training downtime
+during failures.
 
 > [!NOTE]
 > This example uses **Frontier Trainer** for Dynamic Node Set recovery, which
