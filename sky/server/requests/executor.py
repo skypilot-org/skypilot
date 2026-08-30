@@ -35,6 +35,15 @@ from typing import Any, Callable, Dict, Generator, List, Optional, TextIO, Tuple
 import psutil
 import setproctitle
 
+# Cap native thread pools before any import below can pull numpy in (sky ->
+# sky.optimizer imports it at module scope): a spawned worker re-imports this
+# module to resolve executor_initializer, so this runs first in that process.
+for _numeric_threads_env_var in ('OPENBLAS_NUM_THREADS', 'OMP_NUM_THREADS',
+                                 'MKL_NUM_THREADS', 'NUMEXPR_NUM_THREADS',
+                                 'NUMEXPR_MAX_THREADS'):
+    os.environ.setdefault(_numeric_threads_env_var, '1')
+
+# pylint: disable=wrong-import-position
 from sky import exceptions
 from sky import global_user_state
 from sky import models
