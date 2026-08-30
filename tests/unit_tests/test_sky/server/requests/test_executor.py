@@ -1646,3 +1646,13 @@ def test_executor_import_does_not_override_explicit_thread_env():
         {'OPENBLAS_NUM_THREADS': '8'})
     assert envs['OPENBLAS_NUM_THREADS'] == '8'
     assert envs['OMP_NUM_THREADS'] == '1'
+
+
+def test_executor_import_derives_numexpr_max_threads_from_num_threads():
+    """NUMEXPR_MAX_THREADS must track an operator-set NUMEXPR_NUM_THREADS,
+    not default to 1 independently: numexpr raises at import time if
+    NUM_THREADS ends up greater than MAX_THREADS."""
+    envs = _numeric_thread_envs_after_importing_executor(
+        {'NUMEXPR_NUM_THREADS': '4'})
+    assert envs['NUMEXPR_NUM_THREADS'] == '4'
+    assert envs['NUMEXPR_MAX_THREADS'] == '4'
