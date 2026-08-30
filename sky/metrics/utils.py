@@ -1440,17 +1440,22 @@ def _escape_prom_label_value(value: str) -> str:
 def _slurm_prometheus_url(cluster_name: str) -> Optional[str]:
     """Configured /federate base URL for a Slurm cluster, if any.
 
-    ``slurm.cluster_configs.<name>.prometheus.url`` is the current spelling.
-    The flat ``prometheus_url`` it replaced is still honored as a fallback:
-    it is live in deployed configs, and dropping it would silently stop a
-    cluster's federation on upgrade.
+    Resolution order: the per-cluster
+    ``slurm.cluster_configs.<name>.prometheus.url``; the flat
+    ``prometheus_url`` it replaced (still honored — live in deployed configs,
+    and dropping it would silently stop a cluster's federation on upgrade);
+    then the shared ``slurm.prometheus.url`` default, so a single central
+    Prometheus serving every fleet need not be repeated on each cluster.
     """
     url = skypilot_config.get_nested(
         ('slurm', 'cluster_configs', cluster_name, 'prometheus', 'url'), None)
     if url:
         return url
-    return skypilot_config.get_nested(
+    flat = skypilot_config.get_nested(
         ('slurm', 'cluster_configs', cluster_name, 'prometheus_url'), None)
+    if flat:
+        return flat
+    return skypilot_config.get_nested(('slurm', 'prometheus', 'url'), None)
 
 
 def get_slurm_prometheus_filters(cluster_name: str) -> Dict[str, str]:
@@ -1642,7 +1647,8 @@ async def get_metrics_for_slurm_cluster(cluster_name: str,
             f'No prometheus.url configured for Slurm cluster {cluster_name!r}')
     login_cluster = skypilot_config.get_nested(
         ('slurm', 'cluster_configs', cluster_name, 'prometheus', 'via'),
-        None) or cluster_name
+        None) or skypilot_config.get_nested(
+            ('slurm', 'prometheus', 'via'), None) or cluster_name
 
     # Scope the pull when the source Prometheus aggregates several fleets;
     # without this every fleet's series would be stamped with this cluster's

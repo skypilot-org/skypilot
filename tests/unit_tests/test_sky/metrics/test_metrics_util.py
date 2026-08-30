@@ -1290,6 +1290,82 @@ def test_slurm_via_failure_names_both_clusters(monkeypatch):
             asyncio.run(utils.get_metrics_for_slurm_cluster('edge'))
 
 
+def test_slurm_top_level_prometheus_url_default(monkeypatch):
+    # One central Prometheus for every fleet: set slurm.prometheus.url once,
+    # and a cluster with no per-cluster url inherits it.
+    def _cfg(keys, default_value=None, **_):
+        if tuple(keys) == ('slurm', 'prometheus', 'url'):
+            return _SHARED_PROM_URL
+        return default_value
+
+    monkeypatch.setattr(utils.skypilot_config, 'get_nested', _cfg)
+    with mock.patch('sky.clouds.Slurm.existing_allowed_clusters',
+                    return_value=['hpc']):
+        assert utils.get_slurm_metrics_clusters() == ['hpc']
+        with mock.patch('sky.provision.slurm.utils.run_on_login_node',
+                        return_value=(0, '', '')) as run:
+            asyncio.run(utils.get_metrics_for_slurm_cluster('hpc'))
+    assert _SHARED_PROM_URL.rstrip('/') + '/federate?' in run.call_args.args[1]
+
+
+def test_slurm_per_cluster_url_wins_over_top_level_default(monkeypatch):
+
+    def _cfg(keys, default_value=None, **_):
+        keys = tuple(keys)
+        if keys == ('slurm', 'cluster_configs', 'hpc', 'prometheus', 'url'):
+            return 'http://per-cluster:9091'
+        if keys == ('slurm', 'prometheus', 'url'):
+            return 'http://shared:9090'
+        return default_value
+
+    monkeypatch.setattr(utils.skypilot_config, 'get_nested', _cfg)
+    with mock.patch('sky.provision.slurm.utils.run_on_login_node',
+                    return_value=(0, '', '')) as run:
+        asyncio.run(utils.get_metrics_for_slurm_cluster('hpc'))
+    cmd = run.call_args.args[1]
+    assert 'http://per-cluster:9091/federate?' in cmd
+    assert 'shared' not in cmd
+
+
+def test_slurm_flat_url_wins_over_top_level_default(monkeypatch):
+    # The deprecated flat per-cluster spelling is more specific than the
+    # shared default and must not be overridden by it on upgrade.
+    def _cfg(keys, default_value=None, **_):
+        keys = tuple(keys)
+        if keys == ('slurm', 'cluster_configs', 'hpc', 'prometheus_url'):
+            return 'http://flat:9090'
+        if keys == ('slurm', 'prometheus', 'url'):
+            return 'http://shared:9091'
+        return default_value
+
+    monkeypatch.setattr(utils.skypilot_config, 'get_nested', _cfg)
+    with mock.patch('sky.provision.slurm.utils.run_on_login_node',
+                    return_value=(0, '', '')) as run:
+        asyncio.run(utils.get_metrics_for_slurm_cluster('hpc'))
+    cmd = run.call_args.args[1]
+    assert 'http://flat:9090/federate?' in cmd
+    assert 'shared' not in cmd
+
+
+def test_slurm_top_level_via_default(monkeypatch):
+    # Central Prometheus reachable only through one fleet's login node: set
+    # slurm.prometheus.{url,via} once, and a cluster with no per-cluster via
+    # routes its curl through that login node.
+    def _cfg(keys, default_value=None, **_):
+        keys = tuple(keys)
+        if keys == ('slurm', 'prometheus', 'url'):
+            return _SHARED_PROM_URL
+        if keys == ('slurm', 'prometheus', 'via'):
+            return 'hub'
+        return default_value
+
+    monkeypatch.setattr(utils.skypilot_config, 'get_nested', _cfg)
+    with mock.patch('sky.provision.slurm.utils.run_on_login_node',
+                    return_value=(0, '', '')) as run:
+        asyncio.run(utils.get_metrics_for_slurm_cluster('edge'))
+    assert run.call_args.args[0] == 'hub'
+
+
 def test_slurm_filter_newline_is_escaped(monkeypatch):
     # A literal newline in a matcher ends the selector mid-string and fails
     # the whole federate request; it must ride as the \n escape instead.

@@ -2554,6 +2554,30 @@ Supported fields:
   ``prometheus.url`` and is still honored; ``prometheus.url`` wins when both
   are set.
 
+  ``url`` and ``via`` can also be set once at the cloud level under
+  ``slurm.prometheus`` as shared defaults, inherited by any cluster that does
+  not override them. This suits the common case of one central Prometheus,
+  reachable through a single fleet's login node, serving every cluster: set
+  ``url`` (and ``via``) once and give each cluster only its own ``filter``.
+
+  .. code-block:: yaml
+
+    slurm:
+      # Shared defaults: one central Prometheus, reachable only through
+      # hub's login node, serving every cluster.
+      prometheus:
+        url: http://prometheus.internal:9090
+        via: hub
+      cluster_configs:
+        hub:
+          prometheus:
+            filter:
+              cluster: hub-fleet
+        edge:
+          prometheus:
+            filter:
+              cluster: edge-fleet
+
 Example:
 
 .. code-block:: yaml

@@ -2176,6 +2176,25 @@ def get_config_schema():
                     'type': 'string',
                 },
                 'container_mounts': _CONTAINER_MOUNTS_SCHEMA,
+                # Shared GPU-metrics federation defaults, applied to any
+                # cluster that does not override them under cluster_configs.
+                # The common case: one central Prometheus, reachable through a
+                # single fleet's login node, serving every cluster — set `url`
+                # (and `via`) once here rather than on each cluster, and give
+                # each cluster only its own `prometheus.filter`.
+                'prometheus': {
+                    'type': 'object',
+                    'required': [],
+                    'additionalProperties': False,
+                    'properties': {
+                        'url': {
+                            'type': 'string',
+                        },
+                        'via': {
+                            'type': 'string',
+                        },
+                    },
+                },
                 'cluster_configs': {
                     'type': 'object',
                     'required': [],
