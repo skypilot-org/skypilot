@@ -852,15 +852,15 @@ def open_browser(url: str) -> bool:
     return webbrowser.open(url)
 
 
-def find_free_port(start_port: int) -> int:
-    """Finds first free local port starting with 'start_port'.
+def find_free_port(start_port: int, end_port: int = 65534) -> int:
+    """Finds first free local port in ``[start_port, end_port]``.
 
     Returns: a free local port.
 
     Raises:
-      OSError: If no free ports are available.
+      OSError: If no free ports are available in the range.
     """
-    for port in range(start_port, 65535):
+    for port in range(start_port, end_port + 1):
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
             try:
                 s.bind(('', port))

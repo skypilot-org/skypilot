@@ -19,6 +19,8 @@ from unittest import mock
 
 import pytest
 
+from sky.serve import constants as serve_constants
+from sky.serve import serve_utils
 from sky.serve import service
 
 
@@ -564,3 +566,57 @@ class TestCleanupStorageStaleBucket:
         assert '/persist' in mock_task.storage_mounts
         mock_backend.teardown_ephemeral_storage.assert_called_once_with(
             mock_task)
+
+
+class TestLoadBalancerPortRange:
+    """The in-pod port search must stay inside the declared controller range."""
+
+    @staticmethod
+    def _set_config(monkeypatch, value):
+        monkeypatch.setattr(
+            'sky.serve.serve_utils.skypilot_config.get_nested',
+            lambda keys, default_value=None, **kwargs: default_value
+            if value is None else value)
+
+    def test_default_matches_controller_declaration(self, monkeypatch):
+        """The default must be the range impl.up opens on the controller."""
+        self._set_config(monkeypatch, None)
+        start, end = serve_utils.get_load_balancer_port_range()
+        assert f'{start}-{end}' == serve_constants.LOAD_BALANCER_PORT_RANGE
+
+    def test_custom_range(self, monkeypatch):
+        self._set_config(monkeypatch, '31000-31009')
+        assert serve_utils.get_load_balancer_port_range() == (31000, 31009)
+
+    @pytest.mark.parametrize(
+        'value',
+        ['30001', '30001-', 'a-b', '30001-30000', '0-30000', '30001-70000'])
+    def test_rejects_invalid_range(self, monkeypatch, value):
+        self._set_config(monkeypatch, value)
+        with pytest.raises(ValueError,
+                           match='serve.controller.load_balancer_port_range'):
+            serve_utils.get_load_balancer_port_range()
+
+
+class TestAllocateLoadBalancerPort:
+
+    def test_search_is_bounded_by_the_range(self, monkeypatch):
+        monkeypatch.setattr(
+            'sky.serve.service.serve_utils.get_load_balancer_port_range',
+            lambda: (30001, 30020))
+        find_free_port = mock.Mock(return_value=30005)
+        monkeypatch.setattr('sky.serve.service.common_utils.find_free_port',
+                            find_free_port)
+        assert service._allocate_load_balancer_port() == 30005
+        find_free_port.assert_called_once_with(30001, end_port=30020)
+
+    def test_raises_naming_config_key_when_range_exhausted(self, monkeypatch):
+        monkeypatch.setattr(
+            'sky.serve.service.serve_utils.get_load_balancer_port_range',
+            lambda: (30001, 30020))
+        monkeypatch.setattr(
+            'sky.serve.service.common_utils.find_free_port',
+            mock.Mock(side_effect=OSError('No free ports available.')))
+        with pytest.raises(RuntimeError,
+                           match='serve.controller.load_balancer_port_range'):
+            service._allocate_load_balancer_port()

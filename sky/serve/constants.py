@@ -97,10 +97,12 @@ CONTROLLER_AUTOSTOP = {
 DEFAULT_INITIAL_DELAY_SECONDS = 1200
 DEFAULT_MIN_REPLICAS = 1
 
-# Default port range start for controller and load balancer. Ports will be
-# automatically generated from this start port.
+# Controller ports are automatically generated from this start port.
 CONTROLLER_PORT_START = 20001
-LOAD_BALANCER_PORT_START = 30001
+# Default value of serve.controller.load_balancer_port_range: the ports the
+# controller task opens for service load balancers, and the range each
+# service's port search is bounded to. See
+# serve_utils.get_load_balancer_port_range.
 LOAD_BALANCER_PORT_RANGE = '30001-30020'
 
 # Initial version of service.

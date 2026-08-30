@@ -1856,33 +1856,37 @@ def get_config_schema():
     }
     resources_schema['properties'].pop('ports')
 
-    def _get_controller_schema(extra_properties: Optional[Dict[str,
-                                                               Any]] = None,):
+    def _get_controller_schema(
+            extra_properties: Optional[Dict[str, Any]] = None,
+            controller_extra_properties: Optional[Dict[str, Any]] = None):
+        controller_properties: Dict[str, Any] = {
+            'resources': resources_schema,
+            'high_availability': {
+                'type': 'boolean',
+                'default': False,
+            },
+            'autostop': _AUTOSTOP_SCHEMA,
+            'consolidation_mode': {
+                'type': 'boolean',
+                # When unset, automatically enabled for deploy-mode
+                # servers (--deploy) if no existing controller
+                # clusters are found.
+            },
+            'controller_logs_gc_retention_hours': {
+                'type': 'integer',
+            },
+            'task_logs_gc_retention_hours': {
+                'type': 'integer',
+            },
+        }
+        if controller_extra_properties:
+            controller_properties.update(controller_extra_properties)
         props: Dict[str, Any] = {
             'controller': {
                 'type': 'object',
                 'required': [],
                 'additionalProperties': False,
-                'properties': {
-                    'resources': resources_schema,
-                    'high_availability': {
-                        'type': 'boolean',
-                        'default': False,
-                    },
-                    'autostop': _AUTOSTOP_SCHEMA,
-                    'consolidation_mode': {
-                        'type': 'boolean',
-                        # When unset, automatically enabled for deploy-mode
-                        # servers (--deploy) if no existing controller
-                        # clusters are found.
-                    },
-                    'controller_logs_gc_retention_hours': {
-                        'type': 'integer',
-                    },
-                    'task_logs_gc_retention_hours': {
-                        'type': 'integer',
-                    },
-                },
+                'properties': controller_properties,
             },
             'bucket': {
                 'type': 'string',
@@ -3008,7 +3012,13 @@ def get_config_schema():
                 'status_check': jobs_status_check_schema,
                 **_extra_jobs_properties,
             },),
-            'serve': _get_controller_schema(),
+            'serve': _get_controller_schema(
+                controller_extra_properties={
+                    'load_balancer_port_range': {
+                        'type': 'string',
+                        'pattern': r'^[0-9]{1,5}-[0-9]{1,5}$',
+                    },
+                }),
             'allowed_clouds': allowed_clouds,
             'admin_policy': admin_policy_schema,
             'docker': docker_configs,

@@ -69,6 +69,26 @@ def _handle_signal(service_name: str) -> None:
     raise error_type(f'User signal received: {user_signal.value}')
 
 
+def _allocate_load_balancer_port() -> int:
+    """Picks a free port inside the declared load balancer port range.
+
+    The controller task opens ``serve.controller.load_balancer_port_range``
+    (default 30001-30020) once, at launch. Searching past that range binds a
+    port the cloud or Kubernetes never exposed: the service reports READY but
+    its endpoint is unreachable.
+    """
+    start, end = serve_utils.get_load_balancer_port_range()
+    try:
+        return common_utils.find_free_port(start, end_port=end)
+    except OSError as e:
+        key = '.'.join(serve_utils.LOAD_BALANCER_PORT_RANGE_CONFIG_KEY)
+        with ux_utils.print_exception_no_traceback():
+            raise RuntimeError(
+                f'No free load balancer port in {start}-{end}. Widen {key} '
+                'and relaunch the controller; the new range only applies to '
+                'a newly launched controller.') from e
+
+
 def cleanup_storage(yaml_content: str) -> bool:
     """Clean up the storage for the service.
 
@@ -578,10 +598,11 @@ def _start(service_name: str, tmp_task_yaml: str, job_id: int, entrypoint: str):
 
             controller_addr = f'http://{controller_host}:{controller_port}'
 
-            # Start the load balancer.
+            # Start the load balancer. The port must come from the same
+            # range that sky.serve.server.impl.up declared as the controller
+            # task's ports=; anything outside it is not exposed.
             load_balancer_port = (
-                common_utils.find_free_port(constants.LOAD_BALANCER_PORT_START)
-                if not is_recovery else
+                _allocate_load_balancer_port() if not is_recovery else
                 serve_state.get_service_load_balancer_port(service_name))
             load_balancer_log_file = os.path.expanduser(
                 serve_utils.generate_remote_load_balancer_log_file_name(
