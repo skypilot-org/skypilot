@@ -1,0 +1,98 @@
+# Resilient Ray training on SkyPilot
+
+This example runs an RL-style Ray workload with a CPU-only head and two
+single-GPU workers. Dynamic Node Sets replace a failed head or worker while
+the healthy workers keep running.
+
+> [!NOTE]
+> Dynamic Node Sets are available with SkyPilot Platform on Kubernetes.
+> Contact the SkyPilot team to enable them for your deployment.
+
+## Requirements
+
+- A Kubernetes cluster with two available GPUs.
+- A CSI storage class that supports `ReadWriteOncePod` volumes and can reattach
+  a volume to a replacement head pod. Set `storage_class_name` in
+  `gcs-volume.yaml` if the cluster's default class is unsuitable.
+
+## Architecture
+
+The workload is a SkyPilot Job Group with two resource shapes:
+
+- **`ray-head`** is the primary task. It runs the Ray GCS and driver on CPU,
+  with zero logical Ray CPUs and GPUs so actors are scheduled only on workers.
+- **`ray-workers`** runs two GPU replicas. Each replica joins the head and
+  contributes one GPU to the Ray cluster.
+
+The driver creates one named, detached Ray actor per GPU. Actors use
+`max_restarts=-1` and `max_task_retries=-1`, so Ray reconstructs the actor
+whose worker disappeared and retries its synthetic rollout. The other actor
+continues on its original worker.
+
+The head stores GCS metadata in Ray's embedded RocksDB backend on a persistent
+SkyPilot volume. It also checkpoints the last completed application step to
+the same volume. A replacement head reopens that state, reattaches to the
+detached actors, and resumes the driver.
+
+## Run it
+
+From the SkyPilot repository root, create the GCS volume once:
+
+```bash
+sky volumes apply examples/ray_resilient_training/gcs-volume.yaml
+```
+
+Launch the Job Group:
+
+```bash
+sky jobs launch examples/ray_resilient_training/ray-resilient-training.yaml
+```
+
+Use the returned job ID to follow the driver:
+
+```bash
+sky jobs logs <job-id> ray-head
+```
+
+Each completed step prints both actors' worker hostname, process ID, Ray node
+ID, and random `incarnation` value.
+
+## Exercise recovery
+
+Delete one `ray-workers` pod while a step is running:
+
+```bash
+kubectl delete pod <ray-worker-pod>
+```
+
+SkyPilot creates a replacement worker, its raylet joins the existing cluster,
+and Ray reconstructs the lost actor. The next completed step shows a new
+`incarnation` for that actor and the original value for the healthy actor.
+
+Delete the `ray-head` pod to exercise GCS recovery:
+
+```bash
+kubectl delete pod <ray-head-pod>
+```
+
+The replacement head mounts the same volume and restarts Ray against the
+job-specific RocksDB directory. Worker raylets wait up to 600 seconds for the
+GCS endpoint to return, and the driver resumes after its last completed step.
+
+## Configuration
+
+`NUM_GPU_WORKERS` on `ray-head` must equal `ray-workers.num_nodes`. The example
+uses two `L4:1` workers. Change both values together to scale the worker fleet,
+and change `resources.accelerators` to use another GPU type.
+
+The published Ray GPU image does not include PyTorch, so the worker `setup`
+installs it. For shorter replacement times, build an image containing both Ray
+and PyTorch and use it for `ray-workers`.
+
+Ray marks the embedded RocksDB backend as alpha. RocksDB stores Ray cluster
+metadata, not model weights or mutable actor state. Real training code should
+checkpoint application state to its own durable volume or object store and
+make retried work idempotent.
+
+See Ray's [GCS fault-tolerance documentation](https://docs.ray.io/en/latest/ray-core/fault_tolerance/gcs.html#fault-tolerance-gcs-rocksdb)
+for details about the embedded RocksDB backend.

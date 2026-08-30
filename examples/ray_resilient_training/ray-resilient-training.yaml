@@ -1,0 +1,113 @@
+# A CPU-only Ray head and two single-GPU workers run as one Job Group.
+#
+# Prerequisite:
+#   sky volumes apply examples/ray_resilient_training/gcs-volume.yaml
+#
+# Launch:
+#   sky jobs launch examples/ray_resilient_training/ray-resilient-training.yaml
+---
+name: ray-resilient-training
+execution: parallel
+inter_connection: true
+primary_tasks: [ray-head]
+termination_delay: 20s
+
+---
+name: ray-head
+
+resources:
+  infra: kubernetes
+  cpus: 4+
+  memory: 16+
+  image_id: docker:rayproject/ray:2.58.0-py311
+  job_recovery:
+    strategy: DYNAMIC_NODE_SET
+
+volumes:
+  /ray-gcs: ray-gcs-rocksdb
+
+config:
+  kubernetes:
+    pod_config:
+      spec:
+        securityContext:
+          fsGroup: 100
+          fsGroupChangePolicy: OnRootMismatch
+
+envs:
+  NUM_GPU_WORKERS: 2
+  TOTAL_STEPS: 1000
+  STEP_SECONDS: 10
+  MATRIX_SIZE: 2048
+  RECOVERY_TIMEOUT_SECONDS: 900
+
+workdir: examples/ray_resilient_training
+
+run: |
+  set -euo pipefail
+  ulimit -n 65536
+
+  RAY_HEAD_HOST="ray-head-0.${SKYPILOT_JOBGROUP_NAME}"
+  RAY_GCS_ROOT="/ray-gcs/job-${SKYPILOT_MANAGED_JOB_ID}"
+  mkdir -p "${RAY_GCS_ROOT}"
+
+  export RAY_gcs_storage=rocksdb
+  export RAY_gcs_storage_path="${RAY_GCS_ROOT}/rocksdb"
+
+  ray start \
+    --head \
+    --port=6379 \
+    --dashboard-host=0.0.0.0 \
+    --num-cpus=0 \
+    --num-gpus=0 \
+    --disable-usage-stats
+
+  python train.py \
+    --address "${RAY_HEAD_HOST}:6379" \
+    --num-workers "${NUM_GPU_WORKERS}" \
+    --steps "${TOTAL_STEPS}" \
+    --step-seconds "${STEP_SECONDS}" \
+    --matrix-size "${MATRIX_SIZE}" \
+    --recovery-timeout "${RECOVERY_TIMEOUT_SECONDS}" \
+    --state-path "${RAY_GCS_ROOT}/driver-state.json"
+
+---
+name: ray-workers
+
+num_nodes: 2
+
+resources:
+  infra: kubernetes
+  cpus: 4+
+  memory: 32+
+  accelerators: L4:1
+  image_id: docker:rayproject/ray:2.58.0-py311-cu128
+  job_recovery:
+    strategy: DYNAMIC_NODE_SET
+
+envs:
+  RAY_gcs_rpc_server_reconnect_timeout_s: 600
+
+workdir: examples/ray_resilient_training
+
+setup: |
+  python -m pip install --no-cache-dir \
+    "torch==2.9.0+cu128" \
+    --extra-index-url https://download.pytorch.org/whl/cu128
+
+run: |
+  set -euo pipefail
+  ulimit -n 65536
+
+  RAY_HEAD_HOST="ray-head-0.${SKYPILOT_JOBGROUP_NAME}"
+  python wait_for_head.py \
+    --host "${RAY_HEAD_HOST}" \
+    --port 6379 \
+    --timeout 900
+
+  ray start \
+    --address="${RAY_HEAD_HOST}:6379" \
+    --num-cpus=4 \
+    --num-gpus=1 \
+    --disable-usage-stats \
+    --block
