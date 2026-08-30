@@ -69,9 +69,14 @@ export const matchesInfraQuery = (item, query) => {
     .toLowerCase();
   if (display.includes(value)) return true;
 
-  // `from_str` ignores leading and trailing slashes and rejects empty parts,
-  // so `aws//us-east-1` names no infra rather than every one.
-  const segments = value.replace(/^\/+|\/+$/g, '').split('/');
+  // `from_str` ignores leading and trailing slashes and strips each component
+  // before checking it, then rejects empty parts -- so `aws / us-east-1` is
+  // spelled the same as `aws/us-east-1`, while `aws//us-east-1` and
+  // `aws/ /us-east-1` name no infra rather than every one.
+  const segments = value
+    .replace(/^\/+|\/+$/g, '')
+    .split('/')
+    .map((segment) => segment.trim());
   if (segments.some((segment) => !segment)) return false;
 
   const row = rowInfra(item);

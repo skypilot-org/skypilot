@@ -275,6 +275,26 @@ describe('evaluateCondition on infra', () => {
     );
   });
 
+  // `from_str` strips every component before using it, so a spec typed with
+  // spaces around the slashes is the same spec.
+  it('ignores whitespace around the components of a spec', () => {
+    expect(evaluateCondition(awsJob, infraFilter('aws / us-east-1'))).toBe(
+      true
+    );
+    expect(
+      evaluateCondition(awsJob, infraFilter('aws / us-east-1 / us-east-1a'))
+    ).toBe(true);
+    expect(
+      evaluateCondition(nestedContextJob, infraFilter('k8s / team / ctx'))
+    ).toBe(true);
+  });
+
+  it('treats a whitespace-only component as an empty one', () => {
+    expect(evaluateCondition(awsJob, infraFilter('aws/ /us-east-1a'))).toBe(
+      false
+    );
+  });
+
   it('rejects a spec deeper than cloud/region/zone', () => {
     expect(
       evaluateCondition(awsJob, infraFilter('aws/us-east-1/us-east-1a/extra'))
