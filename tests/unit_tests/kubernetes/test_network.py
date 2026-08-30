@@ -224,6 +224,30 @@ class TestQueryPortsForIngress:
         warning = mock_logger.warning.call_args[0][0]
         assert 'ingress-nginx/ingress-nginx-controller' in warning
 
+    @patch('sky.provision.kubernetes.network.network_utils'
+           '.get_ingress_external_ip_and_ports')
+    def test_overrides_are_passed_through(self, mock_get_ip):
+        """The endpoint lookup must see the overrides open_ports used.
+
+        Otherwise a cluster launched with a per-launch ingress override has
+        its Ingress created against one controller and its endpoints
+        resolved from another.
+        """
+        mock_get_ip.return_value = ('1.2.3.4', (80, 443))
+        overrides = {'kubernetes': {'ingress': {'controller_service': 'other'}}}
+
+        network._query_ports_for_ingress(  # pylint: disable=protected-access
+            cluster_name_on_cloud='cluster0',
+            ports=[8080],
+            provider_config={
+                'context': 'ctx',
+                'namespace': 'default',
+                'cluster_config_overrides': overrides,
+            },
+        )
+
+        assert mock_get_ip.call_args.args[1] == overrides
+
 
 def _fake_region_config(ingress=None):
     """Stub for skypilot_config.get_effective_region_config."""
@@ -312,24 +336,22 @@ class TestGetIngressExternalIpAndPorts:
             'controller_service': 'traefik',
             'controller_namespace': 'traefik-system',
         }
-        list_services = mock_api.return_value.list_namespaced_service
-        list_services.return_value = types.SimpleNamespace(items=[
-            _service('ingress-nginx-controller', '10.0.0.1'),
-            _service('traefik', '10.0.0.2'),
-        ])
+        read_service = mock_api.return_value.read_namespaced_service
+        read_service.return_value = _service('traefik', '10.0.0.2')
 
         ip, ports = network_utils.get_ingress_external_ip_and_ports('ctx')
 
         assert (ip, ports) == ('10.0.0.2', None)
-        assert list_services.call_args.args[0] == 'traefik-system'
+        # Read by name, so the call names both the Service and its namespace.
+        assert read_service.call_args.args[:2] == ('traefik', 'traefik-system')
 
     @patch('sky.provision.kubernetes.network_utils.kubernetes.core_api')
     @patch('sky.provision.kubernetes.network_utils.get_ingress_settings')
     def test_missing_namespace_is_not_an_error(self, mock_settings, mock_api):
-        """A 404 on the namespace means "not installed", not a crash."""
+        """A 404 means "not installed", not a crash."""
         mock_settings.return_value = _DEFAULT_SETTINGS
         api_exception = kubernetes.kubernetes.client.ApiException(status=404)
-        mock_api.return_value.list_namespaced_service.side_effect = (
+        mock_api.return_value.read_namespaced_service.side_effect = (
             api_exception)
 
         assert network_utils.get_ingress_controller_service('ctx') is None
@@ -339,7 +361,7 @@ class TestGetIngressExternalIpAndPorts:
     def test_other_api_errors_propagate(self, mock_settings, mock_api):
         mock_settings.return_value = _DEFAULT_SETTINGS
         api_exception = kubernetes.kubernetes.client.ApiException(status=403)
-        mock_api.return_value.list_namespaced_service.side_effect = (
+        mock_api.return_value.read_namespaced_service.side_effect = (
             api_exception)
 
         with pytest.raises(kubernetes.kubernetes.client.ApiException):
@@ -349,8 +371,21 @@ class TestGetIngressExternalIpAndPorts:
     @patch('sky.provision.kubernetes.network_utils.get_ingress_settings')
     def test_missing_service(self, mock_settings, mock_api):
         mock_settings.return_value = _DEFAULT_SETTINGS
-        mock_api.return_value.list_namespaced_service.return_value = (
-            types.SimpleNamespace(items=[]))
+        mock_api.return_value.read_namespaced_service.side_effect = (
+            kubernetes.kubernetes.client.ApiException(status=404))
 
         assert network_utils.get_ingress_external_ip_and_ports('ctx') == (None,
                                                                           None)
+
+    @patch('sky.provision.kubernetes.network_utils.kubernetes.core_api')
+    @patch('sky.provision.kubernetes.network_utils.get_ingress_settings')
+    def test_overrides_reach_the_service_lookup(self, mock_settings, mock_api):
+        """Per-launch overrides must select the Service endpoints come from."""
+        mock_settings.return_value = _DEFAULT_SETTINGS
+        mock_api.return_value.read_namespaced_service.return_value = _service(
+            'ingress-nginx-controller', '10.0.0.1')
+        overrides = {'kubernetes': {'ingress': {'controller_service': 'other'}}}
+
+        network_utils.get_ingress_external_ip_and_ports('ctx', overrides)
+
+        assert mock_settings.call_args.args[1] == overrides

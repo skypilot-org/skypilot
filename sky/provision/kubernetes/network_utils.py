@@ -288,24 +288,27 @@ def get_ingress_controller_service(
     settings = get_ingress_settings(context, cluster_config_overrides)
     core_api = kubernetes.core_api(context)
     try:
-        services = core_api.list_namespaced_service(
+        # Read the Service by name rather than listing the namespace: it only
+        # needs `get` on that one Service instead of `list` on all of them.
+        return core_api.read_namespaced_service(
+            settings['controller_service'],
             settings['controller_namespace'],
-            _request_timeout=kubernetes.API_TIMEOUT).items
+            _request_timeout=kubernetes.API_TIMEOUT)
     except kubernetes.kubernetes.client.ApiException as e:
         if e.status == 404:
-            # The namespace itself does not exist.
+            # Either the namespace or the Service is absent; both mean the
+            # controller is not where SkyPilot is looking for it.
             return None
         raise
-    for service in services:
-        if service.metadata.name == settings['controller_service']:
-            return service
-    return None
 
 
 def get_ingress_external_ip_and_ports(
-    context: Optional[str],) -> Tuple[Optional[str], Optional[Tuple[int, int]]]:
+    context: Optional[str],
+    cluster_config_overrides: Optional[Dict[str, Any]] = None
+) -> Tuple[Optional[str], Optional[Tuple[int, int]]]:
     """Returns external ip and ports for the ingress controller."""
-    ingress_service = get_ingress_controller_service(context)
+    ingress_service = get_ingress_controller_service(context,
+                                                     cluster_config_overrides)
     if ingress_service is None:
         return (None, None)
 

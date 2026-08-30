@@ -15,7 +15,7 @@ ingress_spec:
     name: {{ ingress_name }}
     namespace: {{ namespace }}
   spec:
-    ingressClassName: {{ ingress_class_name }}
+    ingressClassName: {{ ingress_class_name|tojson }}
     rules:
     - http:
         paths:

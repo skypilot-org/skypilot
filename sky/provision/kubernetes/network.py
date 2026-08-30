@@ -309,13 +309,18 @@ def _query_ports_for_ingress(
 ) -> Dict[int, List[common.Endpoint]]:
     context = provider_config.get(
         'context', kubernetes_utils.get_current_kube_config_context_name())
-    ingress_details = network_utils.get_ingress_external_ip_and_ports(context)
+    # Must match what _open_ports_using_ingress resolved: a per-launch
+    # override selects the controller Service that endpoints come from, so
+    # dropping it here would query the default controller and find nothing.
+    overrides = provider_config.get('cluster_config_overrides')
+    ingress_details = network_utils.get_ingress_external_ip_and_ports(
+        context, overrides)
     external_ip, external_ports = ingress_details
     if external_ip is None:
         # Do not raise: this runs on every status refresh, and returning no
         # endpoints keeps polling alive. The warning is the only signal the
         # user gets that the ingress controller is not where we look for it.
-        settings = network_utils.get_ingress_settings(context)
+        settings = network_utils.get_ingress_settings(context, overrides)
         logger.warning('Cannot resolve ingress endpoints: Service '
                        f'{settings["controller_namespace"]}/'
                        f'{settings["controller_service"]} not found. See '

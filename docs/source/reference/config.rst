@@ -1663,7 +1663,7 @@ Default: ``loadbalancer``.
 
 Settings for the Ingress objects SkyPilot generates when :ref:`kubernetes.ports <config-yaml-kubernetes-ports>` is ``ingress`` (optional).
 
-The defaults match a stock `ingress-nginx <https://github.com/kubernetes/ingress-nginx/blob/main/docs/deploy/index.md>`_ install; set these if you run a different controller, or nginx under a different class or namespace.
+The defaults match a stock `ingress-nginx <https://github.com/kubernetes/ingress-nginx/blob/main/docs/deploy/index.md>`_ install; set these if you run nginx under a different class or namespace.
 
 - ``class_name``: ``ingressClassName`` written on the generated Ingresses. Default: ``nginx``.
 - ``controller_service``: name of the ingress controller's Service, which SkyPilot reads to resolve endpoints. Default: ``ingress-nginx-controller``.
@@ -1674,9 +1674,18 @@ The defaults match a stock `ingress-nginx <https://github.com/kubernetes/ingress
   kubernetes:
     ports: ingress
     ingress:
-      class_name: traefik
-      controller_service: traefik
-      controller_namespace: traefik
+      class_name: internal-nginx
+      controller_service: internal-nginx-controller
+      controller_namespace: platform-ingress
+
+.. note::
+
+  The generated Ingresses carry ingress-nginx-specific routing annotations
+  (``use-regex`` and ``rewrite-target``) to strip the
+  ``/skypilot/<namespace>/<cluster>/<port>`` prefix before traffic reaches the
+  workload. A controller that does not honor those annotations will resolve
+  endpoints correctly but will not strip the prefix, so these settings are
+  only expected to work with ingress-nginx today.
 
 .. _config-yaml-kubernetes-remote-identity:
 
