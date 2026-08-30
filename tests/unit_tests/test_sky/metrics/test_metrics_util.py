@@ -1100,10 +1100,12 @@ def test_slurm_sibling_not_federated_is_not_subtracted(monkeypatch):
         assert utils.slurm_federate_matchers('prod') == []
 
 
-def test_slurm_multi_label_sibling_filter_not_negated(monkeypatch, caplog):
+def test_slurm_multi_label_sibling_filter_not_negated(monkeypatch):
     # Negating an AND of matchers is a disjunction, which a Prometheus
     # selector cannot express; leave it rather than over-exclude — but warn,
     # since the unfiltered cluster will double-count the sibling's slice.
+    # (sky loggers set propagate=False, so pytest's caplog — a root-logger
+    # handler — never sees their records; assert on the logger call instead.)
     monkeypatch.setattr(
         utils.skypilot_config, 'get_nested',
         _shared_prom_config({
@@ -1115,9 +1117,9 @@ def test_slurm_multi_label_sibling_filter_not_negated(monkeypatch, caplog):
         }))
     with mock.patch('sky.clouds.Slurm.existing_allowed_clusters',
                     return_value=['prod', 'lab']):
-        with caplog.at_level('WARNING', logger=utils.logger.name):
+        with mock.patch.object(utils.logger, 'warning') as warn:
             assert utils.slurm_federate_matchers('prod') == []
-    assert 'double-counted' in caplog.text
+    assert any('double-counted' in str(call) for call in warn.call_args_list)
 
 
 def test_slurm_distinct_prometheus_urls_do_not_interact(monkeypatch):
