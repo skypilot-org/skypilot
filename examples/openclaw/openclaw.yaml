@@ -13,7 +13,7 @@
 #
 # Usage:
 #   # Launch the gateway:
-#   sky launch -c openclaw openclaw.yaml --env ANTHROPIC_API_KEY
+#   sky launch -c openclaw openclaw.yaml --secret ANTHROPIC_API_KEY
 #
 #   # Open an SSH tunnel to access WebChat securely:
 #   ssh -L 18789:localhost:18789 openclaw
@@ -36,7 +36,7 @@ resources:
   memory: 4+
 
 secrets:
-  # Anthropic API key (pass via --env ANTHROPIC_API_KEY=sk-ant-...)
+  # Anthropic API key (pass via --secret ANTHROPIC_API_KEY)
   ANTHROPIC_API_KEY:
 
 setup: |
