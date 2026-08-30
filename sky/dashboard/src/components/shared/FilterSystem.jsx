@@ -7,6 +7,71 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 
+// The `k8s` spelling the CLI accepts for Kubernetes. `InfraInfo.from_str` in
+// sky/utils/infra_utils.py normalises it before anything else looks at it, so
+// the dashboard accepts it too.
+const CLOUD_ALIASES = { k8s: 'kubernetes' };
+
+const normalizeCloud = (cloud) => {
+  const lowered = (cloud || '').trim().toLowerCase();
+  return CLOUD_ALIASES[lowered] || lowered;
+};
+
+// An SSH node pool is stored under an `ssh-` prefixed context name but is
+// written -- and rendered -- without it, so both sides drop the prefix before
+// they are compared.
+const normalizeRegion = (region) =>
+  (region || '').trim().toLowerCase().replace(/^ssh-/, '');
+
+// A row's infra as the `--infra` spec sees it: the cloud, plus every name that
+// identifies a place within it. The rendered cell is `Cloud (region-or-zone)`,
+// optionally followed by an accelerator group, and is the only source a row is
+// guaranteed to have -- `region`/`zone` are used when the row carries them,
+// since the cell shows just one of the two.
+const rowInfra = (item) => {
+  const display = item.full_infra || item.infra || '';
+  const rendered = /^([^(]*)\(([^)]*)\)/.exec(display);
+  const cloud = normalizeCloud(
+    item.cloud || (rendered ? rendered[1] : display)
+  );
+  const regions = [item.region, item.zone, rendered ? rendered[2] : null]
+    .map(normalizeRegion)
+    .filter((region) => region && region !== '-');
+  return { cloud, regions };
+};
+
+// Whether a row's infra matches an infra query.
+//
+// Two forms are accepted, so both what the Infra column shows and what the CLI
+// takes will narrow the table:
+//   - a substring of the rendered cell, e.g. `prod-gpu` or `Slurm (prod-gpu)`;
+//   - an `--infra` spec -- `cloud`, `cloud/region`, or `cloud/context` -- as
+//     parsed by `InfraInfo.from_str`, so `k8s` stands for `kubernetes` and a
+//     Kubernetes context may itself contain `/`.
+//
+// A spec's cloud must match exactly; its region matches by prefix, so a
+// half-typed name still narrows while `slurm/gpu` does not match `prod-gpu`.
+export const matchesInfraQuery = (item, query) => {
+  const value = (query || '').trim().toLowerCase();
+  if (!value) return true;
+
+  const display = (item.full_infra || item.infra || '')
+    .toString()
+    .toLowerCase();
+  if (display.includes(value)) return true;
+
+  const { cloud, regions } = rowInfra(item);
+  const separator = value.indexOf('/');
+  // No `/`: a bare cloud, which reaches here only when it is spelled
+  // differently from the rendered cell (`k8s` for `Kubernetes`).
+  if (separator === -1) {
+    return normalizeCloud(value) === cloud;
+  }
+  if (normalizeCloud(value.slice(0, separator)) !== cloud) return false;
+  const region = normalizeRegion(value.slice(separator + 1));
+  return !region || regions.some((candidate) => candidate.startsWith(region));
+};
+
 // Utility: checks a condition based on operator
 export const evaluateCondition = (item, filter) => {
   const { property, operator, value } = filter;
@@ -21,7 +86,8 @@ export const evaluateCondition = (item, filter) => {
   const propertyLower = property.toLowerCase();
 
   // Special handling for infra filtering - use full_infra for comparison
-  // since the filter dropdown shows full values but item.infra is truncated
+  // since the filter dropdown shows full values but item.infra is truncated,
+  // and accept the `--infra` spec syntax on top of it (see matchesInfraQuery)
   if (propertyLower === 'infra') {
     const itemValue = (item.full_infra || item.infra)?.toString().toLowerCase();
     const filterValue = value.toString().toLowerCase();
@@ -30,7 +96,7 @@ export const evaluateCondition = (item, filter) => {
       case '=':
         return itemValue === filterValue;
       case ':':
-        return itemValue?.includes(filterValue);
+        return matchesInfraQuery(item, filterValue);
       default:
         return true;
     }

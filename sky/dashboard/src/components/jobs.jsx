@@ -211,6 +211,7 @@ export const JOB_FILTER_SCHEMA = [
   { key: 'user', label: 'User', kind: 'text' },
   { key: 'workspace', label: 'Workspace', kind: 'text' },
   { key: 'pool', label: 'Pool', kind: 'text' },
+  { key: 'infra', label: 'Infra', kind: 'text' },
   { key: 'labels', label: 'Labels', kind: 'kv', multi: 'repeat' },
 ];
 
@@ -356,6 +357,7 @@ export function ManagedJobs() {
     user: [],
     workspace: [],
     pool: [],
+    infra: [],
     labels: [],
   });
   const [preloadingComplete, setPreloadingComplete] = useState(false);
@@ -1078,6 +1080,7 @@ export function ManagedJobsTable({
     const users = new Set();
     const workspaces = new Set();
     const pools = new Set();
+    const infras = new Set();
     const labels = new Set();
 
     data.forEach((job) => {
@@ -1085,6 +1088,10 @@ export function ManagedJobsTable({
       if (job.user) users.add(job.user);
       if (job.workspace) workspaces.add(job.workspace);
       if (job.pool) pools.add(job.pool);
+      // Offer the same string the Infra column renders, so a suggestion the
+      // user picks is one the filter below can match.
+      const jobInfra = job.full_infra || job.infra;
+      if (jobInfra && jobInfra !== '-') infras.add(jobInfra);
 
       // Extract labels - add only key:value pairs
       const jobLabels = job.labels || {};
@@ -1127,6 +1134,7 @@ export function ManagedJobsTable({
       user: Array.from(users).sort(),
       workspace: Array.from(workspaces).sort(),
       pool: Array.from(pools).sort(),
+      infra: Array.from(infras).sort(),
       labels: Array.from(labels).sort(),
     });
 
@@ -1215,7 +1223,7 @@ export function ManagedJobsTable({
   };
 
   // Server already applied some filters (name, user, workspace, pool, status)
-  // But we need to apply client-side filtering for labels
+  // But we need to apply client-side filtering for labels and infra
   const filteredData = React.useMemo(() => {
     let filtered = data;
 
@@ -1227,6 +1235,20 @@ export function ManagedJobsTable({
     if (labelFilter && labelFilter.value) {
       filtered = filtered.filter((item) => {
         return evaluateCondition(item, labelFilter);
+      });
+    }
+
+    // Infra is not a server-side filter either. `evaluateCondition` matches it
+    // against the same string the Infra column shows, so what the user reads
+    // in the table is what they can type, and additionally against the
+    // `--infra` spec syntax (`slurm`, `k8s/my-ctx`, `aws/us-east-1`).
+    const infraFilter = filters?.find(
+      (f) => (f.property || '').toLowerCase() === 'infra'
+    );
+
+    if (infraFilter && infraFilter.value) {
+      filtered = filtered.filter((item) => {
+        return evaluateCondition(item, infraFilter);
       });
     }
 
