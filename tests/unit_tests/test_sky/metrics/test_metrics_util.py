@@ -1100,9 +1100,10 @@ def test_slurm_sibling_not_federated_is_not_subtracted(monkeypatch):
         assert utils.slurm_federate_matchers('prod') == []
 
 
-def test_slurm_multi_label_sibling_filter_not_negated(monkeypatch):
+def test_slurm_multi_label_sibling_filter_not_negated(monkeypatch, caplog):
     # Negating an AND of matchers is a disjunction, which a Prometheus
-    # selector cannot express; leave it rather than over-exclude.
+    # selector cannot express; leave it rather than over-exclude — but warn,
+    # since the unfiltered cluster will double-count the sibling's slice.
     monkeypatch.setattr(
         utils.skypilot_config, 'get_nested',
         _shared_prom_config({
@@ -1114,7 +1115,9 @@ def test_slurm_multi_label_sibling_filter_not_negated(monkeypatch):
         }))
     with mock.patch('sky.clouds.Slurm.existing_allowed_clusters',
                     return_value=['prod', 'lab']):
-        assert utils.slurm_federate_matchers('prod') == []
+        with caplog.at_level('WARNING', logger=utils.logger.name):
+            assert utils.slurm_federate_matchers('prod') == []
+    assert 'double-counted' in caplog.text
 
 
 def test_slurm_distinct_prometheus_urls_do_not_interact(monkeypatch):
@@ -1285,3 +1288,37 @@ def test_slurm_via_failure_names_both_clusters(monkeypatch):
         with pytest.raises(RuntimeError,
                            match=r"'edge' \(via 'hub'\) exited 7"):
             asyncio.run(utils.get_metrics_for_slurm_cluster('edge'))
+
+
+def test_slurm_filter_newline_is_escaped(monkeypatch):
+    # A literal newline in a matcher ends the selector mid-string and fails
+    # the whole federate request; it must ride as the \n escape instead.
+    monkeypatch.setattr(utils.skypilot_config, 'get_nested',
+                        _shared_prom_config({'prod': {
+                            'cluster': 'a\nb'
+                        }}))
+    with mock.patch('sky.clouds.Slurm.existing_allowed_clusters',
+                    return_value=['prod']):
+        assert utils.slurm_federate_matchers('prod') == ['cluster="a\\nb"']
+
+
+def test_slurm_trailing_slash_urls_count_as_shared(monkeypatch):
+    # http://vm:9091 and http://vm:9091/ are the same service (federate_url
+    # is built with the same rstrip); the sibling exclusion must agree, or an
+    # unfiltered cluster re-imports its sibling's slice.
+    def _cfg(keys, default_value=None, **_):
+        keys = tuple(keys)
+        if keys == ('slurm', 'cluster_configs'):
+            return {'prod': {}, 'lab': {}}
+        if keys == ('slurm', 'cluster_configs', 'prod', 'prometheus', 'url'):
+            return _SHARED_PROM_URL
+        if keys == ('slurm', 'cluster_configs', 'lab', 'prometheus', 'url'):
+            return _SHARED_PROM_URL + '/'
+        if keys == ('slurm', 'cluster_configs', 'lab', 'prometheus', 'filter'):
+            return {'cluster': 'site-lab'}
+        return default_value
+
+    monkeypatch.setattr(utils.skypilot_config, 'get_nested', _cfg)
+    with mock.patch('sky.clouds.Slurm.existing_allowed_clusters',
+                    return_value=['prod', 'lab']):
+        assert utils.slurm_federate_matchers('prod') == ['cluster!="site-lab"']

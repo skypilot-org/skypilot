@@ -1428,8 +1428,13 @@ _PROM_LABEL_NAME_RE = re.compile(r'^[a-zA-Z_][a-zA-Z0-9_]*$')
 
 
 def _escape_prom_label_value(value: str) -> str:
-    """Escapes a string for use inside a double-quoted label matcher."""
-    return value.replace('\\', '\\\\').replace('"', '\\"')
+    """Escapes a string for use inside a double-quoted label matcher.
+
+    Prometheus string literals take backslash escapes; a literal newline,
+    by contrast, ends the selector mid-string and fails the whole request.
+    """
+    return (value.replace('\\', '\\\\').replace('"',
+                                                '\\"').replace('\n', '\\n'))
 
 
 def _slurm_prometheus_url(cluster_name: str) -> Optional[str]:
@@ -1492,7 +1497,9 @@ def slurm_federate_matchers(cluster_name: str) -> List[str]:
        declare a filter: whatever a sibling has positively claimed is
        excluded here. Only single-label sibling filters are usable — a
        multi-label filter negates to a disjunction, which a Prometheus
-       selector (an AND of matchers) cannot express — and a label this
+       selector (an AND of matchers) cannot express; when that leaves an
+       unfiltered cluster unable to carve out a sibling's slice, a warning
+       is logged instead of silently double-counting. A label this
        cluster already constrains is left alone, since its own filter is
        the more specific statement.
     """
@@ -1505,6 +1512,10 @@ def slurm_federate_matchers(cluster_name: str) -> List[str]:
     url = _slurm_prometheus_url(cluster_name)
     if url is None:
         return matchers
+    # Trailing-slash variants are the same service — the federate URL is
+    # built with the same rstrip — and must count as sharing a Prometheus,
+    # or an unfiltered cluster silently re-imports its sibling's slice.
+    url = url.rstrip('/')
 
     # Candidates come from the config mapping first: it is a plain dict read,
     # where get_slurm_metrics_clusters() enumerates ~/.slurm/config. The
@@ -1513,8 +1524,8 @@ def slurm_federate_matchers(cluster_name: str) -> List[str]:
     configs = skypilot_config.get_nested(
         ('slurm', 'cluster_configs'), None) or {}
     candidates = [
-        name for name in configs
-        if name != cluster_name and _slurm_prometheus_url(name) == url
+        name for name in configs if name != cluster_name and
+        (_slurm_prometheus_url(name) or '').rstrip('/') == url
     ]
     if not candidates:
         return matchers
@@ -1528,6 +1539,19 @@ def slurm_federate_matchers(cluster_name: str) -> List[str]:
             continue
         sibling_filters = get_slurm_prometheus_filters(sibling)
         if len(sibling_filters) != 1:
+            if sibling_filters and not own:
+                # This cluster pulls the whole endpoint and cannot carve
+                # out the sibling's compound slice, so that fleet will be
+                # collected twice. Surfaced rather than silent: the fix is
+                # a filter on this cluster (or a single-label one on the
+                # sibling).
+                logger.warning(
+                    f'Slurm cluster {cluster_name!r} has no '
+                    f'prometheus.filter and shares its Prometheus with '
+                    f'{sibling!r}, whose multi-label filter cannot be '
+                    f'excluded from an unscoped pull; {sibling!r} series '
+                    f'may be double-counted. Configure a filter for '
+                    f'{cluster_name!r} to scope its slice.')
             continue
         label, value = next(iter(sibling_filters.items()))
         if label in own:
