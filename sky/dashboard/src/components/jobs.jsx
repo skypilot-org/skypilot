@@ -1869,7 +1869,7 @@ export function ManagedJobsTable({
             className="sortable whitespace-nowrap"
             onClick={() => requestSort('cluster')}
           >
-            Requested{getSortDirection('cluster')}
+            Resources{getSortDirection('cluster')}
           </TableHead>
         ),
         renderCell: (item, ctx) => {
