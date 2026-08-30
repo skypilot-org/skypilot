@@ -5481,6 +5481,27 @@ class TestOCINetworkEnvVars:
         assert env['NCCL_IB_HCA'] == 'mlx5_0,mlx5_1,mlx5_3,mlx5_4'
         assert env['NCCL_SOCKET_IFNAME'] == 'eth0'
 
+    def test_pod_local_rdma_widens_both_grace_profiles(self):
+        """A VF pod cannot see the PF names these two profiles enumerate.
+
+        The deploy-var tests cover GB300 only, so this is where the GB200
+        branch's widening is pinned. NCCL answers a list matching no device by
+        falling back to TCP, so getting this wrong costs bandwidth silently.
+        """
+        for acc in ('GB200', 'GB300'):
+            env = self._NET.get_network_env_vars(acc, pod_local_rdma=True)
+            assert env['NCCL_IB_HCA'] == 'mlx5', acc
+            # Everything else about the profile is unrelated to delivery.
+            assert env['NCCL_MNNVL_ENABLE'] == '1', acc
+
+    def test_pod_local_rdma_leaves_the_roce_profile_alone(self):
+        # The RoCEv2 shapes already match the family prefix, so the VF model
+        # changes nothing for them.
+        for acc in ('H100', 'H200', 'B200'):
+            assert self._NET.get_network_env_vars(
+                acc,
+                pod_local_rdma=True) == self._NET.get_network_env_vars(acc), acc
+
     def test_gb200_is_replacement_not_union(self):
         """GB200 must drop the RoCEv2-only knobs, not merge them in.
 
