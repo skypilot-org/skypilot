@@ -193,6 +193,14 @@ def set_user_preferred_workspace(
     if auth_user is None:
         raise fastapi.HTTPException(status_code=401,
                                     detail='Not authenticated.')
+    # Sync FastAPI handler — same hazard as the GET below: without a refresh,
+    # `set_user_preferred_workspace()` validates against the workspace config
+    # this process loaded at boot (and the request-scoped `_load_workspaces()`
+    # memo, which nothing clears in the HTTP process). A workspace created via
+    # `/workspaces/create` after startup — that runs on an executor worker — is
+    # then invisible here and gets a spurious 404 "does not exist" until some
+    # other call happens to reload this process.
+    server_common.refresh_workspace_state_for_sync_handler()
     try:
         workspaces_core.set_user_preferred_workspace(auth_user, body.preferred)
     except exceptions.PermissionDeniedError as e:

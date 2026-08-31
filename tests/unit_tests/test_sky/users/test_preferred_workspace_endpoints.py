@@ -86,6 +86,37 @@ class TestSetUsersMeWorkspace(unittest.TestCase):
                 _fake_request(auth_user=None), self._body('team-a'))
         self.assertEqual(cm.exception.status_code, 401)
 
+    def test_refreshes_workspace_state_before_validating(self):
+        """The handler is a sync route in the HTTP process, so it must
+        reload the process-cached workspace config (and clear the
+        request-scoped `_load_workspaces()` memo) before validating the
+        target — exactly like its GET sibling. Otherwise a workspace created
+        via `/workspaces/create` after the server booted (an executor-side
+        write) is invisible here and the POST 404s indefinitely."""
+        order = mock.Mock()
+        with mock.patch.object(users_server.server_common,
+                               'refresh_workspace_state_for_sync_handler',
+                               order.refresh), \
+                mock.patch.object(workspaces_core,
+                                  'set_user_preferred_workspace',
+                                  order.set_pref):
+            users_server.set_user_preferred_workspace(_fake_request(self.user),
+                                                      self._body('team-new'))
+        self.assertEqual(order.mock_calls, [
+            mock.call.refresh(),
+            mock.call.set_pref(self.user, 'team-new'),
+        ])
+
+    def test_unauth_post_does_not_refresh(self):
+        """401 short-circuits before the (lock-taking) config reload."""
+        with mock.patch.object(
+                users_server.server_common,
+                'refresh_workspace_state_for_sync_handler') as refresh:
+            with self.assertRaises(fastapi.HTTPException):
+                users_server.set_user_preferred_workspace(
+                    _fake_request(auth_user=None), self._body('team-a'))
+        refresh.assert_not_called()
+
 
 # GET /users/me/workspace --------------------------------------------
 
