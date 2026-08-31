@@ -1870,15 +1870,22 @@ def _resolve_accessible_job_id_for_logs(
                                         name_match=name,
                                         fields=['job_id', 'job_name'])
         candidates = [r for r in records if r.job_name == name]
-        name_str = f'under the name {name}. '
+        name_str = f'Multiple jobs IDs found under the name {name}. '
     else:
         # No selector: take the latest job whatever its status. `skip_finished`
         # is deliberately not applied -- it mirrors the *name* lookup only
         # (`get_nonterminal_job_ids_by_name`), while the bare path mirrors
         # `get_latest_job_id`, which has no status filter.
+        #
+        # Ask for a single job rather than the whole table: this replaces a
+        # `LIMIT 1` query, and pagination here is by unique job, not by task.
+        # No `sort_by` is needed -- the query already defaults to job_id
+        # descending, which is the order we want.
         records, _, _, _ = queue_v2_api(refresh=False,
                                         all_users=True,
-                                        fields=['job_id'])
+                                        fields=['job_id'],
+                                        page=1,
+                                        limit=1)
         candidates = list(records)
         name_str = ''
 
@@ -1913,9 +1920,12 @@ def _resolve_accessible_job_id_for_logs(
             raise ValueError(err)
     if len(job_ids) > 1 and not for_tail:
         # Sync-down only: the tail path picks the latest silently, as before.
+        # The whole "Multiple jobs IDs found ..." clause is conditional on a
+        # name, otherwise the sentence reads "Multiple jobs IDs found
+        # Downloading the latest job logs."
         controller_str = ' (controller)' if controller else ''
         logger.info(f'{colorama.Fore.YELLOW}'
-                    f'Multiple jobs IDs found {name_str}'
+                    f'{name_str}'
                     f'Downloading the latest job logs{controller_str}.'
                     f'{colorama.Style.RESET_ALL}')
     return job_ids[0]

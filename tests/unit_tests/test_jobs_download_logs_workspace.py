@@ -204,6 +204,52 @@ def test_not_found_message_matches_master(runner):
     assert "No running managed job found with name 'nope'." in msg
 
 
+def test_bare_lookup_asks_for_one_job_not_the_whole_table(runner):
+    """It replaces a `LIMIT 1` query; an unbounded fetch is a real regression.
+
+    Pagination here is by unique job, and the query already defaults to job_id
+    descending, so page/limit alone give the newest job.
+    """
+    with mock.patch.object(core,
+                           'queue_v2_api',
+                           return_value=([_record(7)], 1, {}, 1)) as queue:
+        _tail()
+    kwargs = queue.call_args.kwargs
+    assert kwargs['limit'] == 1 and kwargs['page'] == 1
+    # The name path must stay unbounded: `--controller` ambiguity has to list
+    # every matching id, so a limit there would truncate the message.
+    with mock.patch.object(core,
+                           'queue_v2_api',
+                           return_value=([_record(7, 'n')], 1, {}, 1)) as queue:
+        _tail(name='n')
+    assert 'limit' not in queue.call_args.kwargs
+
+
+def test_sync_down_multiple_notice_reads_as_a_sentence(backend):
+    """Without a name the "Multiple jobs IDs found" clause must not appear."""
+    with mock.patch.object(core, 'queue_v2_api',
+                           return_value=([_record(9), _record(4)], 2, {}, 2)), \
+         mock.patch.object(core.logger, 'info') as log_info:
+        core.download_logs(name=None,
+                           job_id=None,
+                           refresh=False,
+                           controller=False)
+    msg = ' '.join(str(c.args[0]) for c in log_info.call_args_list)
+    assert 'Multiple jobs IDs found Downloading' not in msg
+    assert 'Downloading the latest job logs.' in msg
+
+    with mock.patch.object(core, 'queue_v2_api',
+                           return_value=([_record(9, 'n'), _record(4, 'n')], 2,
+                                         {}, 2)), \
+         mock.patch.object(core.logger, 'info') as log_info:
+        core.download_logs(name='n',
+                           job_id=None,
+                           refresh=False,
+                           controller=False)
+    msg = ' '.join(str(c.args[0]) for c in log_info.call_args_list)
+    assert 'Multiple jobs IDs found under the name n. Downloading' in msg
+
+
 def test_multi_task_job_is_one_job_not_an_ambiguity(runner):
     """The queue returns a record per task, so one job can repeat its id.
 
