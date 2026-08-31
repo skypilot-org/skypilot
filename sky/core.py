@@ -868,6 +868,21 @@ def _graceful_job_cancel(handle: backends.ResourceHandle,
         logger.debug(f'All MOUNT_CACHED uploads completed on {cluster_name!r}')
 
 
+def _user_action_event_reason(action: str) -> str:
+    """The cluster-event reason for a user-requested lifecycle action.
+
+    Names the requesting user and the API request that carried the action
+    when they are known, so the cluster's event log records who stopped or
+    terminated a cluster -- the attribution the managed-job event log keeps
+    for a cancellation. Falls back to the plain text when there is no request
+    context to name (an in-process caller).
+    """
+    actor = common_utils.get_current_request_actor()
+    if actor is None:
+        return f'Cluster was {action} by user.'
+    return f'Cluster was {action} by user {actor}.'
+
+
 def user_initiated_down(cluster_name: str,
                         purge: bool = False,
                         graceful: bool = False,
@@ -918,7 +933,7 @@ def down(cluster_name: str,
         # so its hash can be resolved (teardown deletes the row). There is no
         # TERMINATED cluster status, so new_status is None.
         global_user_state.add_cluster_event(
-            cluster_name, None, 'Cluster was terminated by user.',
+            cluster_name, None, _user_action_event_reason('terminated'),
             global_user_state.ClusterEventType.STATUS_CHANGE)
 
     backend = backend_utils.get_backend_from_handle(handle)
@@ -1060,7 +1075,7 @@ def stop(cluster_name: str,
 
     global_user_state.add_cluster_event(
         cluster_name, status_lib.ClusterStatus.STOPPED,
-        'Cluster was stopped by user.',
+        _user_action_event_reason('stopped'),
         global_user_state.ClusterEventType.STATUS_CHANGE)
 
     backend = backend_utils.get_backend_from_handle(handle)
