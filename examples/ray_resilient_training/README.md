@@ -29,12 +29,17 @@ The workload is a SkyPilot Job Group with two resource shapes:
 The driver creates one named, detached Ray actor per GPU. Actors use
 `max_restarts=-1` and `max_task_retries=-1`, so Ray reconstructs the actor
 whose worker disappeared and retries its synthetic rollout. The other actor
-continues on its original worker.
+continues on its original worker. Each rollout runs a fixed number of GPU
+batches and waits for every batch to finish, making retried computation
+deterministic and preventing asynchronous GPU work from accumulating past the
+configured batch count.
 
 The head stores GCS metadata in Ray's embedded RocksDB backend on a persistent
 SkyPilot volume. It also checkpoints the last completed application step to
 the same volume. A replacement head reopens that state, reattaches to the
-detached actors, and resumes the driver.
+detached actors, and resumes the driver. When resuming from a completed step,
+the driver requires every named actor to exist so failed reattachment cannot
+silently create a new training topology.
 
 ## Run it
 

@@ -42,7 +42,7 @@ class GPUWorker:
             flush=True,
         )
 
-    def rollout(self, step: int, duration_seconds: float) -> Dict[str, Any]:
+    def rollout(self, step: int, num_batches: int) -> Dict[str, Any]:
         """Run an idempotent synthetic rollout for one policy step."""
         generator = self.torch.Generator(device=self.device)
         generator.manual_seed(step * 10_000 + self.rank)
@@ -52,18 +52,18 @@ class GPUWorker:
             device=self.device,
         )
 
-        deadline = time.monotonic() + duration_seconds
-        batches = 0
-        while time.monotonic() < deadline:
+        started_at = time.monotonic()
+        for _ in range(num_batches):
             activations = self.torch.tanh(activations @ self.weight)
-            batches += 1
-        self.torch.cuda.synchronize()
+            self.torch.cuda.synchronize()
+        elapsed_seconds = time.monotonic() - started_at
 
         return {
             'rank': self.rank,
             'step': step,
             'reward': float(activations.square().mean().item()),
-            'batches': batches,
+            'batches': num_batches,
+            'elapsed_seconds': elapsed_seconds,
             'incarnation': self.incarnation,
             'host': socket.gethostname(),
             'pid': os.getpid(),
@@ -114,15 +114,19 @@ def wait_for_cluster_gpus(num_workers: int, timeout: int) -> None:
         f'Ray did not register {num_workers} GPUs within {timeout}s')
 
 
-def get_or_create_workers(num_workers: int,
-                          matrix_size: int) -> List[ray.actor.ActorHandle]:
+def get_or_create_workers(num_workers: int, matrix_size: int,
+                          allow_create: bool) -> List[ray.actor.ActorHandle]:
     workers = []
     for rank in range(num_workers):
         name = f'gpu-worker-{rank}'
         try:
             worker = ray.get_actor(name)
             print(f'Reattached to detached actor {name}', flush=True)
-        except ValueError:
+        except ValueError as error:
+            if not allow_create:
+                raise RuntimeError(
+                    f'Detached actor {name} is missing while resuming from '
+                    'a completed step') from error
             worker = GPUWorker.options(name=name, lifetime='detached').remote(
                 rank, matrix_size)
             print(f'Created detached actor {name}', flush=True)
@@ -164,7 +168,7 @@ def main() -> None:
     parser.add_argument('--address', required=True)
     parser.add_argument('--num-workers', required=True, type=int)
     parser.add_argument('--steps', default=1000, type=int)
-    parser.add_argument('--step-seconds', default=10, type=float)
+    parser.add_argument('--batches-per-step', default=5000, type=int)
     parser.add_argument('--matrix-size', default=2048, type=int)
     parser.add_argument('--recovery-timeout', default=900, type=int)
     parser.add_argument('--state-path', required=True)
@@ -174,15 +178,20 @@ def main() -> None:
     namespace = f'ray-resilient-training-{managed_job_id}'
     ray.init(address=args.address, namespace=namespace)
 
-    wait_for_cluster_gpus(args.num_workers, args.recovery_timeout)
-    workers = get_or_create_workers(args.num_workers, args.matrix_size)
     state = load_state(args.state_path)
+    wait_for_cluster_gpus(args.num_workers, args.recovery_timeout)
+    workers = get_or_create_workers(
+        args.num_workers,
+        args.matrix_size,
+        allow_create=int(state['last_completed_step']) == -1,
+    )
     first_step = int(state['last_completed_step']) + 1
     print(f'Starting at step {first_step}; state={state}', flush=True)
 
     for step in range(first_step, args.steps):
         refs = [
-            worker.rollout.remote(step, args.step_seconds) for worker in workers
+            worker.rollout.remote(step, args.batches_per_step)
+            for worker in workers
         ]
         results = get_with_recovery_timeout(refs, args.recovery_timeout)
         results.sort(key=lambda result: result['rank'])

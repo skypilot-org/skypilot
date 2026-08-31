@@ -37,7 +37,7 @@ config:
 envs:
   NUM_GPU_WORKERS: 2
   TOTAL_STEPS: 1000
-  STEP_SECONDS: 10
+  BATCHES_PER_STEP: 5000
   MATRIX_SIZE: 2048
   RECOVERY_TIMEOUT_SECONDS: 900
 
@@ -66,7 +66,7 @@ run: |
     --address "${RAY_HEAD_HOST}:6379" \
     --num-workers "${NUM_GPU_WORKERS}" \
     --steps "${TOTAL_STEPS}" \
-    --step-seconds "${STEP_SECONDS}" \
+    --batches-per-step "${BATCHES_PER_STEP}" \
     --matrix-size "${MATRIX_SIZE}" \
     --recovery-timeout "${RECOVERY_TIMEOUT_SECONDS}" \
     --state-path "${RAY_GCS_ROOT}/driver-state.json"
