@@ -440,18 +440,31 @@ class DatabaseManager:
         self._post_init_fn = post_init_fn
         self._lock = threading.Lock()
         self._engine: Optional[sqlalchemy.engine.Engine] = None
-        self._engine_generation = -1
+        # The engine this manager built for itself, and the cache generation
+        # it came from. Together they answer "is self._engine still the one
+        # get_engine() would hand out?" without taking the creation lock on
+        # every call. An engine assigned to self._engine from outside (tests
+        # substitute one) is never ours, so it is always returned as-is.
+        self._own_engine: Optional[sqlalchemy.engine.Engine] = None
+        self._own_engine_generation = -1
         self._initialized = False
         self._engine_async: Optional[sqlalchemy_async.AsyncEngine] = None
 
+    def _engine_is_current(self) -> bool:
+        if self._engine is None:
+            return False
+        if self._engine is not self._own_engine:
+            return True
+        return self._own_engine_generation == get_engine_generation()
+
     def get_engine(self) -> sqlalchemy.engine.Engine:
         """Lazy sync engine init with double-checked locking."""
-        if (self._engine is not None and
-                self._engine_generation == get_engine_generation()):
+        if self._engine_is_current():
+            assert self._engine is not None
             return self._engine
         with self._lock:
-            if (self._engine is not None and
-                    self._engine_generation == get_engine_generation()):
+            if self._engine_is_current():
+                assert self._engine is not None
                 return self._engine
             generation = get_engine_generation()
             engine = get_engine(self._db_name)
@@ -460,8 +473,8 @@ class DatabaseManager:
                 # set_max_connections). Only the engine is replaced: the
                 # schema and any post-init side effects belong to the
                 # database, not to the engine, and must not be redone.
-                self._engine = engine
-                self._engine_generation = generation
+                self._engine = self._own_engine = engine
+                self._own_engine_generation = generation
                 return self._engine
             # Run schema creation / migrations on a direct (unpooled)
             # connection: Alembic's autocommit_block DDL relies on
@@ -474,8 +487,8 @@ class DatabaseManager:
             self._create_table_fn(get_engine(self._db_name, direct=True))
             # Set _engine before post_init_fn so that post_init_fn
             # can access self.engine (e.g. _sqlite_supports_returning).
-            self._engine = engine
-            self._engine_generation = generation
+            self._engine = self._own_engine = engine
+            self._own_engine_generation = generation
             if self._post_init_fn is not None:
                 self._post_init_fn(engine)
             self._initialized = True

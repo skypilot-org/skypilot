@@ -634,6 +634,21 @@ class TestSetMaxConnectionsRebuild:
         assert db_utils.get_engine(None, async_engine=True) is async_engine
         assert db_utils.get_engine(None, direct=True, no_pool=True) is no_pool
 
+    def test_database_manager_keeps_an_externally_assigned_engine(self):
+        # Substituting DatabaseManager._engine is how tests point a component
+        # at a scratch database. Only engines the manager built for itself may
+        # be replaced by a rebuild, whatever the cache generation is.
+        manager = db_utils.DatabaseManager('state', mock.MagicMock())
+        db_utils.set_max_connections(1)
+        substitute = sqlalchemy.create_engine('sqlite://')
+        manager._engine = substitute
+
+        assert manager.get_engine() is substitute
+
+        db_utils.set_max_connections(2)
+
+        assert manager.get_engine() is substitute
+
     def test_database_manager_picks_up_the_rebuilt_engine(self):
         create_table = mock.MagicMock()
         post_init = mock.MagicMock()
