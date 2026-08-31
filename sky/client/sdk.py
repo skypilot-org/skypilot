@@ -3121,6 +3121,11 @@ def _resolve_login_endpoint(endpoint: Optional[str]) -> Tuple[str, bool]:
     return _validate_endpoint(env_endpoint), True
 
 
+# Kept short: all the probe needs to learn is whether the edge redirects, and
+# a server too slow to say so is the regular health check's story to tell.
+_REDIRECT_PROBE_TIMEOUT_SECONDS = 2.5
+
+
 def _detect_https_redirect(endpoint: str) -> Optional[str]:
     """Returns the HTTPS endpoint an ``http://`` one redirects to, if any.
 
@@ -3142,15 +3147,30 @@ def _detect_https_redirect(endpoint: str) -> Optional[str]:
     parsed = urlparse.urlparse(endpoint)
     if parsed.scheme != 'http':
         return None
+    # Probe with a bare request rather than `make_authenticated_request` /
+    # `get_api_server_status_response`, on both counts deliberately:
+    #   * Unauthenticated. This runs before `api_login` has settled which
+    #     credential the login uses, so an authenticated probe would send
+    #     whatever token is left over in the config -- one issued for whatever
+    #     server was configured before -- to this endpoint, in cleartext. The
+    #     OAuth path hides that residual token from its own requests for
+    #     exactly this reason; the probe must not undo that. Credentials
+    #     embedded in the endpoint are dropped for the same reason.
+    #   * Uncached. `get_api_server_status_response` memoizes on the endpoint
+    #     for 5s, so priming it here would hand that pre-authentication
+    #     response straight to the health check that is meant to validate a
+    #     newly supplied service-account token.
+    # Only the redirect chain is read; the status code is never consulted, so
+    # the 401 an unauthenticated probe collects is fine.
+    probe_url = urlparse.urlunparse(('http', parsed.netloc.rsplit('@', 1)[-1],
+                                     f'{parsed.path}/api/health', '', '', ''))
     try:
-        # Cached (5s TTL) and keyed on the endpoint, so the check_server_healthy
-        # call that follows reuses this response when there is no redirect.
-        response = server_common.get_api_server_status_response(endpoint)
+        response = requests.get(probe_url,
+                                timeout=_REDIRECT_PROBE_TIMEOUT_SECONDS,
+                                allow_redirects=True)
     except Exception as e:  # pylint: disable=broad-except
         logger.debug(f'Endpoint redirect probe failed, using {endpoint} '
                      f'as configured: {e}')
-        return None
-    if response is None:
         return None
     # Walk the redirect chain and take the first hop that is the same host and
     # path over HTTPS. Requiring all three to match keeps us off an SSO proxy's
@@ -3163,9 +3183,8 @@ def _detect_https_redirect(endpoint: str) -> Optional[str]:
                 hop_parsed.hostname != parsed.hostname or
                 hop_parsed.path != request_path):
             continue
-        # Rebuild from the redirect target so a port change is picked up, but
-        # carry over any credentials embedded in the configured endpoint --
-        # requests strips those from the URL it reports back.
+        # Rebuild from the redirect target so a port change is picked up,
+        # then put back any credentials the probe URL deliberately dropped.
         netloc = hop_parsed.netloc
         if parsed.username is not None:
             netloc = f'{parsed.netloc.rsplit("@", 1)[0]}@{netloc}'
@@ -3357,7 +3376,8 @@ def api_login(endpoint: Optional[str] = None,
             # nothing after it. Say what to change instead.
             click.secho(
                 f'{server_common.redact_url_password(endpoint)} redirects to '
-                f'{shown}. Set {constants.SKY_API_SERVER_URL_ENV_VAR} to {shown}.',
+                f'{shown}. Set {constants.SKY_API_SERVER_URL_ENV_VAR} to '
+                f'{shown}.',
                 fg='yellow')
         else:
             click.secho(
