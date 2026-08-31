@@ -41,11 +41,19 @@ def _mock_managed_jobs_db_conn(tmp_path, monkeypatch):
 
 @pytest.fixture
 def _signal_dir(tmp_path, monkeypatch):
-    """Keep the cancel signal file out of the real ~/.sky directory."""
+    """Keep the cancel signal file out of the real ~/.sky directory.
+
+    Also stubs out the status reconciliation that cancel_jobs_by_id runs
+    before signalling: it inspects whether the seeded controller PID is alive
+    on this machine, which has nothing to do with the attribution under test
+    and would make the outcome depend on the host's process table.
+    """
     signal_dir = tmp_path / 'signals'
     signal_dir.mkdir()
     monkeypatch.setattr(managed_job_constants, 'CONSOLIDATED_SIGNAL_PATH',
                         str(signal_dir))
+    monkeypatch.setattr(utils, 'update_managed_jobs_statuses',
+                        lambda *args, **kwargs: None)
     yield signal_dir
 
 
@@ -60,6 +68,7 @@ def _seed_running_job(engine, job_id: int, workspace: str = 'default') -> None:
             # signal-file path rather than the legacy one.
             controller_pid=12345,
             controller_pid_started_at=time.time(),
+            schedule_state=state.ManagedJobScheduleState.ALIVE.value,
         ))
         conn.execute(state.spot_table.insert().values(
             job_name=f'job-{job_id}',
