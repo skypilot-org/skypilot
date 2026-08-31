@@ -4141,6 +4141,10 @@ if __name__ == '__main__':
         logger.error(f'Port {cmd_args.port} is not available, exiting.')
         raise RuntimeError(f'Port {cmd_args.port} is not available')
 
+    # Must precede plugin install: a plugin that keeps the engine it gets
+    # during install() would otherwise hold one built for the wrong budget.
+    db_utils.set_max_connections(1)
+
     # Always load plugin in main process, an edge case is that the main process
     # will also run uvicorn server when num_worker=1 and then the plugins will
     # be installed twice in main process (second time with the uvicorn app).
@@ -4153,7 +4157,6 @@ if __name__ == '__main__':
     usage_lib.maybe_show_privacy_policy()
 
     # Initialize global user state db
-    db_utils.set_max_connections(1)
     logger.info('Initializing database engine')
     global_user_state.initialize_and_get_db()
     logger.info('Database engine initialized')
