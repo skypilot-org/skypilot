@@ -3121,6 +3121,58 @@ def _resolve_login_endpoint(endpoint: Optional[str]) -> Tuple[str, bool]:
     return _validate_endpoint(env_endpoint), True
 
 
+def _detect_https_redirect(endpoint: str) -> Optional[str]:
+    """Returns the HTTPS endpoint an ``http://`` one redirects to, if any.
+
+    An API server behind an ingress that force-redirects HTTP to HTTPS is a
+    silent trap. ``/api/health`` is a GET, so it follows the redirect intact
+    and ``sky api info`` reports the server as HEALTHY -- but every POST-based
+    command is turned into a GET by that same redirect (dropping the method and
+    body on a 301/302 is what every mainstream HTTP client does) and comes back
+    as an opaque ``405 Method Not Allowed``. Secure session cookies are
+    withheld from a plain-HTTP request too, so SSO auth silently does not apply
+    either. The result is a server that looks healthy while nothing works.
+
+    Login is the cheap place to catch this: the endpoint has not been persisted
+    yet and nothing has been authenticated against it.
+
+    Best-effort -- returns None on any failure and leaves the regular health
+    check to report an unreachable or unhealthy server.
+    """
+    parsed = urlparse.urlparse(endpoint)
+    if parsed.scheme != 'http':
+        return None
+    try:
+        # Cached (5s TTL) and keyed on the endpoint, so the check_server_healthy
+        # call that follows reuses this response when there is no redirect.
+        response = server_common.get_api_server_status_response(endpoint)
+    except Exception as e:  # pylint: disable=broad-except
+        logger.debug(f'Endpoint redirect probe failed, using {endpoint} '
+                     f'as configured: {e}')
+        return None
+    if response is None:
+        return None
+    # Walk the redirect chain and take the first hop that is the same host and
+    # path over HTTPS. Requiring all three to match keeps us off an SSO proxy's
+    # login page, which is a legitimate redirect out of /api/health to somewhere
+    # that is emphatically not the API server endpoint.
+    request_path = f'{parsed.path}/api/health'
+    for hop in list(response.history) + [response]:
+        hop_parsed = urlparse.urlparse(hop.url)
+        if (hop_parsed.scheme != 'https' or
+                hop_parsed.hostname != parsed.hostname or
+                hop_parsed.path != request_path):
+            continue
+        # Rebuild from the redirect target so a port change is picked up, but
+        # carry over any credentials embedded in the configured endpoint --
+        # requests strips those from the URL it reports back.
+        netloc = hop_parsed.netloc
+        if parsed.username is not None:
+            netloc = f'{parsed.netloc.rsplit("@", 1)[0]}@{netloc}'
+        return urlparse.urlunparse(('https', netloc, parsed.path, '', '', ''))
+    return None
+
+
 def _check_endpoint_in_env_var() -> None:
     """Rejects logout when the endpoint is set in the environment variable."""
     # Logging out clears the endpoint and credentials from the config file, but
@@ -3293,6 +3345,30 @@ def api_login(endpoint: Optional[str] = None,
     # endpoint came from the environment variable, which already takes
     # precedence over the config file, so the config file must be left alone.
     endpoint, from_env = _resolve_login_endpoint(endpoint)
+    # Resolve the scheme before anything else reads the endpoint: it decides
+    # what gets written to the config file, and whether the cookies minted
+    # below are marked Secure.
+    redirected = _detect_https_redirect(endpoint)
+    if redirected is not None:
+        why = ('Over plain HTTP that redirect rewrites every non-GET request '
+               'as a GET, which the server rejects with "Method Not Allowed", '
+               'and Secure session cookies are not sent at all.')
+        shown = server_common.redact_url_password(redirected)
+        if from_env:
+            # The environment variable outranks the config file for every
+            # command, so correcting the endpoint here would fix this login and
+            # nothing after it. Say what to change instead.
+            click.secho(
+                f'{server_common.redact_url_password(endpoint)} redirects to '
+                f'{shown}. {why}\nSet '
+                f'{constants.SKY_API_SERVER_URL_ENV_VAR} to {shown}.',
+                fg='yellow')
+        else:
+            click.secho(
+                f'{server_common.redact_url_password(endpoint)} redirects to '
+                f'{shown}; using the https endpoint.\n{why}',
+                fg='yellow')
+            endpoint = redirected
 
     def _show_logged_in_message(
             endpoint: str, dashboard_url: str, user: Optional[Dict[str, Any]],
