@@ -6,9 +6,9 @@ import * as ReactDOMAll from 'react-dom';
 import createCache from '@emotion/cache';
 import { CacheProvider } from '@emotion/react';
 import dynamic from 'next/dynamic';
+import Head from 'next/head';
 import PropTypes from 'prop-types';
 import '@/app/globals.css';
-import { useEffect } from 'react';
 import { BASE_PATH } from '@/data/connectors/constants';
 import { TourProvider } from '@/hooks/useTour';
 import { PluginProvider } from '@/plugins/PluginProvider';
@@ -35,15 +35,11 @@ const nonce = getNonce();
 const emotionCache = createCache({ key: 'css', nonce: nonce || undefined });
 
 function App({ Component, pageProps }) {
-  useEffect(() => {
-    const link = document.createElement('link');
-    link.rel = 'icon';
-    link.href = `${BASE_PATH}/favicon.ico`;
-    document.head.appendChild(link);
-  }, []);
-
   return (
     <CacheProvider value={emotionCache}>
+      <Head>
+        <link rel="icon" href={`${BASE_PATH}/favicon.ico`} />
+      </Head>
       <PluginProvider>
         <PluginWrapperSlot name="app.providers">
           <VersionProvider>

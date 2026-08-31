@@ -794,6 +794,34 @@ async def test_serve_dashboard_client_route_falls_back_to_index(tmp_path):
     assert response.status_code == 200
 
 
+# --- Tests for the root /favicon.ico route ---
+
+
+@pytest.mark.asyncio
+async def test_root_favicon_serves_dashboard_icon(tmp_path):
+    """Browsers request /favicon.ico at the origin root, not under /dashboard."""
+    d = tmp_path / 'out'
+    d.mkdir()
+    (d / 'favicon.ico').write_bytes(b'icon-bytes')
+
+    with mock.patch.object(server_constants, 'DASHBOARD_DIR', str(d)):
+        response = await server.favicon()
+
+    assert response.status_code == 200
+    assert response.path == str(d / 'favicon.ico')
+
+
+@pytest.mark.asyncio
+async def test_root_favicon_404s_when_dashboard_not_built(tmp_path):
+    """A missing icon 404s instead of raising a 500 from FileResponse."""
+    with mock.patch.object(server_constants, 'DASHBOARD_DIR',
+                           str(tmp_path / 'missing')):
+        with pytest.raises(fastapi.HTTPException) as exc_info:
+            await server.favicon()
+
+    assert exc_info.value.status_code == 404
+
+
 def _api_get_dummy_entrypoint():
     """Module-level entrypoint so Request.encode() can pickle it."""
     pass
