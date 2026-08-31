@@ -259,6 +259,7 @@ Below is the configuration syntax and some example values. See detailed explanat
         fabric: fabric-5
     :ref:`use_internal_ips <config-yaml-nebius-use-internal-ips>`: true
     :ref:`use_static_ip_address <config-yaml-nebius-use-static-ip-address>`: true
+    :ref:`disk_encrypted <config-yaml-nebius-disk-encrypted>`: true
     :ref:`ssh_proxy_command <config-yaml-nebius-ssh-proxy-command>`: ssh -W %h:%p user@host
     :ref:`tenant_id <config-yaml-nebius-tenant-id>`: tenant-1234567890
     :ref:`domain <config-yaml-nebius-domain>`: api.nebius.cloud:443
@@ -2877,6 +2878,19 @@ Set to ``false`` to use only publicly available pricing information.
 Pricing tiers and free quotas are ignored in this estimate, and the final cost could be lower or higher.
 
 Default: ``true``.
+
+.. _config-yaml-nebius-disk-encrypted:
+
+``nebius.disk_encrypted``
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Encrypted boot disk (optional).
+
+Set to ``true`` to enable Nebius-managed encryption for Network SSD
+Non-replicated and Network SSD IO M3 boot disks launched by SkyPilot. Network
+SSD boot disks are encrypted by default.
+
+Default: ``false``.
 
 .. _config-yaml-nebius-ssh-proxy-command:
 
