@@ -1214,6 +1214,32 @@ async def set_request_failed_async(request_id: str, e: BaseException) -> None:
         request_task.set_error(e)
 
 
+@metrics_lib.time_me_async
+@asyncio_utils.shield
+async def set_request_failed_if_executable_async(request_id: str,
+                                                 e: BaseException) -> bool:
+    """Set a not-yet-claimed request to failed.
+
+    The transition only happens while the request is still in an executable
+    status -- the same guard the worker applies at dequeue. Once a worker
+    claimed the request (RUNNING) or it reached a terminal status, the row is
+    left untouched and the owner's outcome stands.
+
+    Returns:
+        True if the request was transitioned to FAILED.
+    """
+    set_exception_stacktrace(e)
+    storage = request_storage.get_request_backend()
+    async with storage.update_request_async(request_id) as request_task:
+        assert request_task is not None, request_id
+        if request_task.status not in RequestStatus.executable_statuses():
+            return False
+        request_task.status = RequestStatus.FAILED
+        request_task.finished_at = time.time()
+        request_task.set_error(e)
+        return True
+
+
 def set_request_succeeded(request_id: str, result: Optional[Any]) -> None:
     """Set a request to succeeded and populate the result."""
     with update_request(request_id) as request_task:

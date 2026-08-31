@@ -208,6 +208,53 @@ async def test_enqueue_failure_marks_request_failed(isolated_database):
     assert 'put failed' in str(error['object'])
 
 
+@pytest.mark.asyncio
+async def test_enqueue_cancellation_marks_request_failed(isolated_database):
+    """A cancelled queue put must not strand the request in PENDING."""
+    req = _make_pending_request('enqueue-cancelled')
+    assert await requests_lib.create_if_not_exists_async(req) is True
+
+    queue = mock.Mock()
+    queue.put_async = mock.AsyncMock(side_effect=asyncio.CancelledError())
+    with mock.patch.object(executor, '_get_queue', return_value=queue):
+        with pytest.raises(asyncio.CancelledError):
+            await executor.schedule_prepared_request(req)
+
+    updated = requests_lib.get_request('enqueue-cancelled')
+    assert updated is not None
+    assert updated.status == requests_lib.RequestStatus.FAILED
+
+
+@pytest.mark.asyncio
+async def test_enqueue_failure_does_not_clobber_claimed_request(
+        isolated_database):
+    """A row claimed by a worker before the failure mark is left untouched.
+
+    The queue put may commit and still raise (e.g. a timeout racing the
+    commit); a worker can then dequeue and claim the request before the
+    failure path runs. The failure mark must not overwrite the claimed run.
+    """
+    req = _make_pending_request('enqueue-claimed')
+    assert await requests_lib.create_if_not_exists_async(req) is True
+
+    async def claim_then_fail(input_tuple):
+        del input_tuple
+        with requests_lib.update_request('enqueue-claimed') as claimed:
+            assert claimed is not None
+            claimed.status = requests_lib.RequestStatus.RUNNING
+        raise RuntimeError('put failed after commit')
+
+    queue = mock.Mock()
+    queue.put_async = mock.AsyncMock(side_effect=claim_then_fail)
+    with mock.patch.object(executor, '_get_queue', return_value=queue):
+        with pytest.raises(RuntimeError, match='put failed after commit'):
+            await executor.schedule_prepared_request(req)
+
+    updated = requests_lib.get_request('enqueue-claimed')
+    assert updated is not None
+    assert updated.status == requests_lib.RequestStatus.RUNNING
+
+
 class _AlwaysMetPrecondition(preconditions.Precondition):
 
     async def check(self):
