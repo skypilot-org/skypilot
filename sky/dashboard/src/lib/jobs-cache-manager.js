@@ -334,6 +334,7 @@ class JobsCacheManager {
     const hasNext = result.hasNext || result.has_next || page < totalPages;
     const hasPrev = result.hasPrev || result.has_prev || page > 1;
     const statusCounts = result.statusCounts || {};
+    const externalFetchErrors = result.externalFetchErrors || [];
 
     // Cache this specific page
     this.pageCache.set(cacheKey, {
@@ -345,6 +346,7 @@ class JobsCacheManager {
       hasPrev,
       controllerStopped: false,
       statusCounts,
+      externalFetchErrors,
       timestamp: Date.now(),
     });
 
@@ -357,6 +359,7 @@ class JobsCacheManager {
       hasPrev,
       controllerStopped: false,
       statusCounts,
+      externalFetchErrors,
       fromCache: false,
       cacheStatus: 'plugin_path_fetched',
     };
@@ -424,6 +427,7 @@ class JobsCacheManager {
           hasPrev: cachedPage.hasPrev,
           controllerStopped: cachedPage.controllerStopped,
           statusCounts: cachedPage.statusCounts,
+          externalFetchErrors: cachedPage.externalFetchErrors || [],
           fromCache: true,
           cacheStatus: 'cache_hit',
         };

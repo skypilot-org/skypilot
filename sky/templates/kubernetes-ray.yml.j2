@@ -302,6 +302,11 @@ available_node_types:
             kueue.x-k8s.io/pod-group-name: {{cluster_name_on_cloud}}
             {% endif %}
         annotations:
+          {% if k8s_rdma_networks is defined and k8s_rdma_networks is not none %}
+          # Multus attaches one SR-IOV VF per entry, so the list length must
+          # match the VF resource count requested below.
+          k8s.v1.cni.cncf.io/networks: {{k8s_rdma_networks}}
+          {% endif %}
           # The skypilot-user *label* (above) sanitizes characters that are
           # invalid in Kubernetes label values (e.g. '@' and '.'), so a
           # username like alice@example.com is recorded as aliceexamplecom.
@@ -397,24 +402,18 @@ available_node_types:
         {% if preemption_hook_timeout is defined and preemption_hook_timeout %}
         terminationGracePeriodSeconds: {{ preemption_hook_timeout }}
         {% endif %}
-        {% if k8s_enable_oci_roce %}
-        # OCI OKE bare-metal GPU shapes expose RoCE NICs only on the host
-        # network namespace; pods must share host networking to reach the
-        # RDMA fabric. This is the only path that sets hostNetwork from the
-        # template — the pod_config path injects it via
-        # combine_pod_config_fields(). k8s_enable_oci_roce also implies
-        # k8s_host_network on the Python side, so the dnsPolicy below and the
-        # Ray-port probe machinery apply here too.
+        {% if k8s_host_network %}
+        # k8s_host_network is the single source of truth for "this pod runs on
+        # the host network": true when pod_config asks for it, and true by
+        # default on OCI OKE bare-metal GPU shapes, which expose RoCE NICs
+        # only in the host network namespace. An explicit pod_config
+        # `hostNetwork` overrides the OCI default either way, so a cluster
+        # whose RDMA arrives through a device plugin can opt out.
         # Refer to https://github.com/oracle-quickstart/oci-hpc-oke/blob/main/docs/running-pytorch-jobs-on-oke-using-hostnetwork-with-rdma.md for more details.
         hostNetwork: true
-        {% endif %}
-        {% if k8s_host_network %}
         # Under hostNetwork the default dnsPolicy silently falls back to
         # the host's resolv.conf — Service DNS like ${head}.svc.cluster.local
         # won't resolve, and the worker probe gets stuck dialing the head.
-        # k8s_host_network is the single source of truth for "this pod runs
-        # on the host network" (set for both the pod_config and OCI RoCE
-        # paths), so this covers OCI RoCE too.
         dnsPolicy: ClusterFirstWithHostNet
         {% endif %}
         {% if volume_mounts %}
@@ -505,7 +504,7 @@ available_node_types:
         - name: dshm
           emptyDir:
             medium: Memory
-        {% if k8s_enable_oci_roce %}
+        {% if k8s_rdma_host_device_access %}
         - name: devinf
           hostPath:
             path: /dev/infiniband
@@ -1749,7 +1748,7 @@ available_node_types:
           volumeMounts:
           - mountPath: /dev/shm
             name: dshm
-          {% if k8s_enable_oci_roce %}
+          {% if k8s_rdma_host_device_access %}
           - mountPath: /dev/infiniband
             name: devinf
           {% endif %}
@@ -1819,6 +1818,9 @@ available_node_types:
               {% if k8s_efa_count is not none %}
               vpc.amazonaws.com/efa: {{k8s_efa_count}}
               {% endif %}
+              {% if k8s_rdma_nic_resource is defined and k8s_rdma_nic_resource is not none %}
+              {{k8s_rdma_nic_resource}}: {{k8s_rdma_nic_count}}
+              {% endif %}
             {% if k8s_resource_key is not none or k8s_cpu_limit is defined or k8s_ephemeral_storage_limit is defined %}
             limits:
               {% if k8s_cpu_limit is defined %}
@@ -1842,13 +1844,16 @@ available_node_types:
               {% if k8s_efa_count is not none %}
               vpc.amazonaws.com/efa: {{k8s_efa_count}}
               {% endif %}
+              {% if k8s_rdma_nic_resource is defined and k8s_rdma_nic_resource is not none %}
+              {{k8s_rdma_nic_resource}}: {{k8s_rdma_nic_count}}
+              {% endif %}
             {% endif %}
-          {% if k8s_ipc_lock_capability or k8s_enable_oci_roce %}
+          {% if k8s_ipc_lock_capability or k8s_rdma_host_device_access %}
           securityContext:
-            {% if k8s_enable_oci_roce %}
-            # OCI OKE bare-metal GPU shapes have no RDMA device plugin;
-            # pods must mount /dev/infiniband from the host and run
-            # privileged to access the RoCE NICs.
+            {% if k8s_rdma_host_device_access %}
+            # Bare-metal RDMA access: no device plugin hands the pod its NICs,
+            # so it mounts /dev/infiniband from the host and needs privileged
+            # to use them. An SR-IOV device plugin makes both unnecessary.
             privileged: true
             {% endif %}
             capabilities:

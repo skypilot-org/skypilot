@@ -12,8 +12,10 @@ import {
   PlayIcon,
   ChevronRightIcon,
   ChevronDownIcon,
+  InfoIcon,
 } from 'lucide-react';
 import { useMobile } from '@/hooks/useMobile';
+import { useUrlFilterState } from '@/hooks/useUrlFilterState';
 import {
   checkGrafanaAvailability,
   getGrafanaUrl,
@@ -39,17 +41,17 @@ import {
   getContextClusters,
   getSlurmInfrastructure,
 } from '@/data/connectors/infra';
-import { CLOUDS_LIST } from '@/data/connectors/constants';
+import {
+  CLOUDS_LIST,
+  MANAGED_JOBS_SUMMARY_ARGS,
+} from '@/data/connectors/constants';
 import {
   runSkyCheck,
   getWorkspaces,
   getEnabledCloudsBatch,
 } from '@/data/connectors/workspaces';
 import { getClusters } from '@/data/connectors/clusters';
-import {
-  getManagedJobs,
-  MANAGED_JOBS_SUMMARY_ARGS,
-} from '@/data/connectors/jobs';
+import { getManagedJobs } from '@/data/connectors/jobs';
 import { apiClient } from '@/data/connectors/client';
 import { getDashboardConfig } from '@/data/connectors/dashboard_config';
 import {
@@ -110,6 +112,11 @@ const INFRA_PAGE_SIZE_STORAGE_KEY = 'skypilot-infra-page-size';
 // The unified infra table's Name column is wide; allow much longer names
 // before middle-ellipsis truncation kicks in (full name stays in the tooltip).
 const INFRA_NAME_TRUNCATE_LENGTH = 45;
+
+// Non-filter state that belongs in a shared link. `all` is the default and
+// stays out of the URL. The selected context is already a route segment
+// (`/infra/[...context]`), so it needs nothing here.
+const INFRA_VIEW_SCHEMA = [{ key: 'workspace', default: 'all' }];
 
 // Skeleton badge for loading cells - replaces CircularProgress size={12}
 const SkeletonBadge = () => (
@@ -329,6 +336,52 @@ const aggregateSlurmPartitions = (nodes) => {
       };
     });
 };
+
+// A Slurm node whose sinfo state carries a '~' suffix is a powered-down cloud
+// node (POWER_SAVE) with no backing instance — Slurm's dynamic capacity that
+// only materializes when a job needs it (the scheduler still places jobs on
+// such nodes and powers them up on demand). Count only "up" nodes so the infra
+// total reflects the nodes that exist right now, and report the powered-down
+// tally for a tooltip.
+export function countUpSlurmNodes(nodes) {
+  let poweredDown = 0;
+  for (const node of nodes || []) {
+    const state = node?.node_state;
+    if (typeof state === 'string' && state.includes('~')) {
+      poweredDown += 1;
+    }
+  }
+  return { up: (nodes?.length || 0) - poweredDown, poweredDown };
+}
+
+// Info icon whose tooltip explains the power-saved nodes folded out of a
+// Slurm node count. Shared by the infra table cell and the context detail
+// page so both surfaces tell the same story.
+function PowerSavedNodesHint({ poweredDown }) {
+  return (
+    <NonCapitalizedTooltip
+      content={`${poweredDown.toLocaleString()} power-saved`}
+      className="text-sm text-muted-foreground"
+    >
+      <InfoIcon className="w-3.5 h-3.5 text-gray-400 flex-shrink-0 cursor-help" />
+    </NonCapitalizedTooltip>
+  );
+}
+
+// The "Nodes" cell for a Slurm cluster: the up-node count, plus an info icon
+// whose tooltip explains the power-saved nodes folded out of it.
+function SlurmNodesCell({ nodes }) {
+  const { up, poweredDown } = countUpSlurmNodes(nodes);
+  if (poweredDown === 0) {
+    return up;
+  }
+  return (
+    <span className="inline-flex items-center gap-1">
+      {up}
+      <PowerSavedNodesHint poweredDown={poweredDown} />
+    </span>
+  );
+}
 
 // Reusable component for infrastructure sections (SSH Node Pool or Kubernetes)
 export function InfrastructureSection({
@@ -623,9 +676,16 @@ export function InfrastructureSection({
                     isExpandable && expandedContexts.has(context);
                   // Expanding appends the partition breakdown under the
                   // cluster's own totals, so the aggregate stays on screen and
-                  // the toggle keeps its place.
+                  // the toggle keeps its place. When the cluster has no GPU
+                  // type rows (e.g. its availability sweep failed), a null
+                  // summary row stands in — otherwise every expanded row would
+                  // be a partition row, and the toggle cell (the only way to
+                  // collapse) would never render again.
                   const subRows = isExpanded
-                    ? [...typeRows, ...partitionRows]
+                    ? [
+                        ...(typeRows.length ? typeRows : [null]),
+                        ...partitionRows,
+                      ]
                     : typeRows;
                   const summaryRowCount = Math.max(1, typeRows.length);
 
@@ -849,7 +909,13 @@ export function InfrastructureSection({
                           className={`${sharedCellClass} text-gray-500 tabular-nums whitespace-nowrap`}
                           rowSpan={subRowCount}
                         >
-                          {!hasNodeData ? <SkeletonBadge /> : nodes.length}
+                          {!hasNodeData ? (
+                            <SkeletonBadge />
+                          ) : isSlurm ? (
+                            <SlurmNodesCell nodes={nodes} />
+                          ) : (
+                            nodes.length
+                          )}
                         </td>
                         {!isSlurm && (
                           <td
@@ -932,7 +998,11 @@ export function InfrastructureSection({
                   loading: isJobsDataLoading,
                   value: jobsData[contextStatsKey]?.jobs || 0,
                 },
-                { label: 'Nodes', loading: !hasNodeData, value: nodes.length },
+                {
+                  label: 'Nodes',
+                  loading: !hasNodeData,
+                  value: isSlurm ? countUpSlurmNodes(nodes).up : nodes.length,
+                },
                 ...(!isSlurm
                   ? [
                       {
@@ -1052,6 +1122,21 @@ export function ContextDetails({
   const isSSHContext = contextName.startsWith('ssh-');
   const displayTitle = isSSHContext ? 'Node Pool' : 'Context';
 
+  // Slurm exposes power-saved (POWER_SAVE, `~`-state) cloud nodes with no
+  // backing instance; fold them out of the node table so it lists only nodes
+  // that are actually up, and surface the hidden tally in a badge next to the
+  // total. `visibleNodes` stays === nodesInContext for every other case.
+  const slurmPoweredDown = isSlurm
+    ? countUpSlurmNodes(nodesInContext).poweredDown
+    : 0;
+  const visibleNodes =
+    slurmPoweredDown > 0
+      ? nodesInContext.filter(
+          (n) =>
+            !(typeof n?.node_state === 'string' && n.node_state.includes('~'))
+        )
+      : nodesInContext;
+
   // Pagination for the node table — contexts can have hundreds of nodes.
   const [nodesCurrentPage, setNodesCurrentPage] = useState(1);
   const [nodesPageSize, setNodesPageSize] = useState(() =>
@@ -1061,13 +1146,13 @@ export function ContextDetails({
       10
     )
   );
-  const nodesTotalPages = Math.ceil(nodesInContext.length / nodesPageSize);
+  const nodesTotalPages = Math.ceil(visibleNodes.length / nodesPageSize);
   const nodesStartIndex = (nodesCurrentPage - 1) * nodesPageSize;
   const nodesEndIndex = Math.min(
     nodesStartIndex + nodesPageSize,
-    nodesInContext.length
+    visibleNodes.length
   );
-  const paginatedNodes = nodesInContext.slice(nodesStartIndex, nodesEndIndex);
+  const paginatedNodes = visibleNodes.slice(nodesStartIndex, nodesEndIndex);
 
   // Reset to the first page when switching contexts; clamp when the node
   // list shrinks under the current page (e.g. on a data refresh).
@@ -1273,17 +1358,21 @@ export function ContextDetails({
             </div>
           )}
 
-          {nodesInContext.length === 0 && (
+          {visibleNodes.length === 0 && (
             <div className="rounded-md border border-gray-200 shadow-sm">
               <EmptyState
                 icon={<ServerIcon className="w-5 h-5" />}
                 title="No nodes found"
-                description="No nodes are available in this context"
+                description={
+                  slurmPoweredDown > 0
+                    ? `No nodes are up in this context (${slurmPoweredDown.toLocaleString()} power-saved)`
+                    : 'No nodes are available in this context'
+                }
               />
             </div>
           )}
 
-          {nodesInContext.length > 0 && (
+          {visibleNodes.length > 0 && (
             <div className="rounded-md border border-gray-200 shadow-sm">
               <div className="overflow-x-auto">
                 <table className="min-w-full text-sm">
@@ -1470,11 +1559,11 @@ export function ContextDetails({
                   </tbody>
                 </table>
               </div>
-              {nodesInContext.length > nodesPageSize && (
+              {visibleNodes.length > nodesPageSize && (
                 <PaginationControls
                   currentPage={nodesCurrentPage}
                   totalPages={nodesTotalPages}
-                  totalCount={nodesInContext.length}
+                  totalCount={visibleNodes.length}
                   startIndex={nodesStartIndex}
                   endIndex={nodesEndIndex}
                   onPageChange={setNodesCurrentPage}
@@ -2559,7 +2648,14 @@ export function GPUs() {
 
   // Workspace-aware infrastructure state
   const [workspaceInfrastructure, setWorkspaceInfrastructure] = useState({});
-  const [selectedWorkspace, setSelectedWorkspace] = useState('all');
+  // The workspace scope belongs in the link: it decides which contexts and
+  // clouds the page shows, so a URL without it points somewhere else.
+  const { view, setView } = useUrlFilterState([], INFRA_VIEW_SCHEMA);
+  const selectedWorkspace = view.workspace;
+  const setSelectedWorkspace = useCallback(
+    (next) => setView('workspace', next),
+    [setView]
+  );
   const [availableWorkspaces, setAvailableWorkspaces] = useState([]);
 
   // SSH Node Pool state

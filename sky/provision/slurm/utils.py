@@ -15,6 +15,7 @@ from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import slurm
 from sky.skylet import constants
+from sky.skylet import runtime_utils
 from sky.utils import annotations
 from sky.utils import common_utils
 from sky.utils import gpu_names
@@ -1056,6 +1057,29 @@ def _get_slurm_inventory_client(slurm_cluster_name: str) -> 'slurm.SlurmClient':
     )
 
 
+def run_on_login_node(slurm_cluster_name: str,
+                      cmd: str,
+                      timeout: Optional[int] = None) -> Tuple[int, str, str]:
+    """Runs a shell command on a Slurm cluster's login node.
+
+    Public entry point for callers outside the provisioner (e.g. the
+    GPU-metrics federation in sky/metrics/utils.py) that need to execute
+    something over the cluster's SSH transport without reaching into the
+    inventory client. See SlurmClient.run_command for the framing and
+    timeout semantics.
+
+    Args:
+        slurm_cluster_name: A Host alias in the Slurm SSH config.
+        cmd: Shell command to run on the login node.
+        timeout: Optional bound in seconds on the whole remote invocation.
+
+    Returns:
+        (returncode, stdout, stderr) of ``cmd``.
+    """
+    client = _get_slurm_inventory_client(slurm_cluster_name)
+    return client.run_command(cmd, timeout=timeout)
+
+
 def _get_slurm_node_info_list(slurm_cluster_name: str) -> List[Dict[str, Any]]:
     """Gathers detailed information about each node in the Slurm cluster.
 
@@ -1318,9 +1342,13 @@ def slurm_node_info(
 
 
 def is_inside_slurm_cluster() -> bool:
-    # Check for the marker file in the current home directory. When run by
-    # the skylet on a compute node, the HOME environment variable is set to
-    # the cluster's sky home directory by the SlurmCommandRunner.
+    # New allocations write the marker under the runtime dir's .sky/.
+    # That path resolves in both the host and container shapes.
+    # Older allocations only wrote it to $HOME, so keep that as a fallback.
+    if os.path.exists(
+            runtime_utils.get_runtime_dir_path(
+                os.path.join('.sky', SLURM_MARKER_FILE))):
+        return True
     marker_file = os.path.join(os.path.expanduser('~'), SLURM_MARKER_FILE)
     return os.path.exists(marker_file)
 

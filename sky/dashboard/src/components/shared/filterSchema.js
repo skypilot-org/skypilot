@@ -5,6 +5,9 @@
  *
  *   [{ key: 'status', label: 'Status', kind: 'enum', multi: true }, ...]
  *
+ * An entry may also carry `legacyKeys: ['old spelling']` for a property whose
+ * old `property=` value was neither its key nor its lowercased label.
+ *
  * and that one declaration drives the dropdown, the URL, and the chip bar, so
  * the key a page writes is by construction the key it can read back.
  *
@@ -112,12 +115,17 @@ export const legacyFiltersToQuery = (schema, query) => {
 
   const filters = [];
   properties.forEach((property, i) => {
-    // Legacy URLs carry the lowercased label, which for every page except the
-    // users GPU filter equals the schema key. Match either, so both survive.
+    // Legacy URLs carry the lowercased label, which for most pages equals the
+    // schema key. Where it does not -- the users page wrote `gpu type` for a
+    // property now keyed `gpu` -- the entry declares the old spelling in
+    // `legacyKeys`. Match all three so links already pasted somewhere survive.
     const lower = String(property ?? '').toLowerCase();
     const entry =
       entryByKey(schema, lower) ||
-      schema.find((e) => e.label.toLowerCase() === lower);
+      schema.find((e) => e.label.toLowerCase() === lower) ||
+      schema.find((e) =>
+        (e.legacyKeys || []).some((k) => k.toLowerCase() === lower)
+      );
     const value = properties.length === 1 ? values[0] : values[i];
     if (!entry || value === undefined || value === null || value === '') {
       return;
@@ -158,6 +166,40 @@ export const buildQueryString = (query) => {
     }
   }
   return parts.length ? `?${parts.join('&')}` : '';
+};
+
+/**
+ * Parse a `location.search` string into the `{ key: value }` shape the helpers
+ * above use, collapsing a repeated key into an array.
+ */
+export const parseSearch = (search) => {
+  const params = new URLSearchParams(search);
+  const query = {};
+  for (const key of new Set(params.keys())) {
+    const all = params.getAll(key);
+    query[key] = all.length > 1 ? all : all[0];
+  }
+  return query;
+};
+
+/**
+ * Build an href for a same-page navigation that changes one query key, keeping
+ * every other key the address bar already carries.
+ *
+ * Pages whose filters live in the URL write them straight to history, so
+ * `router.query` can lag behind and rebuilding the query from it drops them.
+ * Reading `location.search` avoids that, and going back out through
+ * `buildQueryString` keeps a comma list readable rather than percent-encoding
+ * it the way `URLSearchParams.toString()` would.
+ */
+export const hrefWithQueryKey = (pathname, search, key, value) => {
+  const query = parseSearch(search);
+  if (value === undefined || value === null || value === '') {
+    delete query[key];
+  } else {
+    query[key] = value;
+  }
+  return `${pathname}${buildQueryString(query)}`;
 };
 
 /** Strip the legacy triple keys from a query object. */

@@ -1,5 +1,6 @@
 import {
   buildQueryString,
+  hrefWithQueryKey,
   filtersToQuery,
   hasLegacyFilters,
   legacyFiltersToQuery,
@@ -12,6 +13,13 @@ const SCHEMA = [
   { key: 'cluster', label: 'Cluster', kind: 'text' },
   { key: 'user', label: 'User', kind: 'text' },
   { key: 'labels', label: 'Labels', kind: 'kv', multi: 'repeat' },
+];
+
+// Properties whose URL key was renamed, so the old `property=` value is
+// neither the new key nor the lowercased label.
+const RENAMED_SCHEMA = [
+  { key: 'gpu', label: 'GPU', kind: 'text', legacyKeys: ['gpu type'] },
+  { key: 'userId', label: 'User ID', kind: 'text', legacyKeys: ['user id'] },
 ];
 
 const chip = (property, value) => ({ property, operator: ':', value });
@@ -121,6 +129,30 @@ describe('legacy triple links', () => {
     ).toEqual({ user: 'alice' });
   });
 
+  it('matches the lowercased label when it differs from the key', () => {
+    // Legacy links carried `filter.property` lowercased, which is the label,
+    // not the key.
+    expect(
+      legacyFiltersToQuery(RENAMED_SCHEMA, {
+        property: 'user id',
+        operator: ':',
+        value: 'hash-alice',
+      })
+    ).toEqual({ userId: 'hash-alice' });
+  });
+
+  it('matches a declared legacy spelling that is neither key nor label', () => {
+    // The users page wrote `gpu type` for a property whose label is `GPU` and
+    // whose key is now `gpu`; without `legacyKeys` such a link is dropped.
+    expect(
+      legacyFiltersToQuery(RENAMED_SCHEMA, {
+        property: 'gpu type',
+        operator: ':',
+        value: 'A100',
+      })
+    ).toEqual({ gpu: 'A100' });
+  });
+
   it('translates several triples, pairing arrays by index', () => {
     expect(
       legacyFiltersToQuery(SCHEMA, {
@@ -193,5 +225,50 @@ describe('buildQueryString', () => {
   it('returns an empty string when nothing is set', () => {
     expect(buildQueryString({})).toBe('');
     expect(buildQueryString({ user: '' })).toBe('');
+  });
+});
+
+// Switching a tab is a same-page navigation that changes one query key. It must
+// not drop the filter params the hook wrote straight to history, and must not
+// percent-encode a comma list on the way through.
+describe('hrefWithQueryKey', () => {
+  it('keeps the other keys when setting one', () => {
+    expect(
+      hrefWithQueryKey(
+        '/users',
+        '?gpu=A100&role=admin',
+        'tab',
+        'service-accounts'
+      )
+    ).toBe('/users?gpu=A100&role=admin&tab=service-accounts');
+  });
+
+  it('keeps a comma list readable', () => {
+    expect(
+      hrefWithQueryKey('/volumes', '?status=READY,IN_USE', 'tab', 'buckets')
+    ).toBe('/volumes?status=READY,IN_USE&tab=buckets');
+  });
+
+  it('removes the key when the value is dropped', () => {
+    expect(
+      hrefWithQueryKey(
+        '/users',
+        '?gpu=A100&tab=service-accounts',
+        'tab',
+        undefined
+      )
+    ).toBe('/users?gpu=A100');
+  });
+
+  it('returns a bare path when nothing is left', () => {
+    expect(
+      hrefWithQueryKey('/users', '?tab=service-accounts', 'tab', undefined)
+    ).toBe('/users');
+  });
+
+  it('preserves a repeated key', () => {
+    expect(
+      hrefWithQueryKey('/clusters', '?labels=a%3D1&labels=b%3D2', 'tab', 'x')
+    ).toBe('/clusters?labels=a%3D1&labels=b%3D2&tab=x');
   });
 });

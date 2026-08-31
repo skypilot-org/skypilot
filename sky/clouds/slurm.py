@@ -895,9 +895,16 @@ class Slurm(clouds.Cloud):
             # Retrieve the config options for a given SlurmctldHost name alias.
             ssh_config_dict = ssh_config.lookup(cluster)
             try:
-                # Run the reachability check as the SSH user so connection
-                # failures can be distinguished from submit-user access
-                # failures.
+                # Run the reachability check as the SSH user
+                # (slurm_user=None) so connection failures can be
+                # distinguished from submit-user access failures. This probe
+                # carries no identity requirement, and with submit_as_user,
+                # acting as the submit user goes through su/sudo: clusters
+                # commonly grant passwordless sudo only for the submission
+                # commands (sbatch/srun/scancel/squeue), so wrapping sinfo
+                # would fail the whole credential check and silently disable
+                # Slurm, taking down every consumer of the enabled-clouds
+                # cache (e.g. GPU availability on the infra page).
                 client = _make_slurm_client(ssh_config_dict, slurm_user=None)
                 info = client.info()
                 logger.debug(f'Slurm cluster {cluster} sinfo: {info}')

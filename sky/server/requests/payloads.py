@@ -581,6 +581,9 @@ class VolumeDeleteBody(RequestBody):
 class VolumeListBody(RequestBody):
     """The request body for the volume list endpoint."""
     refresh: bool = False
+    # None means every volume, so a client that predates this field and never
+    # sends it keeps getting the whole listing.
+    volume_names: Optional[List[str]] = None
 
 
 class VolumeValidateBody(RequestBody):

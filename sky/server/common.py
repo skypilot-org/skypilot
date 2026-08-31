@@ -774,6 +774,39 @@ def handle_request_error(response: 'requests.Response') -> None:
                 f'{response.text}')
 
 
+def raise_if_rejected_synchronously(response: 'requests.Response') -> None:
+    """Raises the server's error for a synchronous 400.
+
+    An endpoint that validates before enqueuing replies 400 with a serialized
+    exception instead of a request id; without this the SDK would surface a raw
+    HTTPError. Endpoints opt in by calling this before `get_request_id`.
+
+    Always raises on a 400. A body this cannot decode -- a proxy's HTML error
+    page -- falls back to `handle_request_error`, because a caller with nothing
+    after this call would otherwise read the 400 as success.
+    """
+    if response.status_code != 400:
+        return
+    detail = None
+    try:
+        payload = response.json()
+        if isinstance(payload, dict):
+            detail = payload.get('detail')
+    except Exception as e:  # pylint: disable=broad-except
+        logger.debug(f'Could not parse the body of a 400 from '
+                     f'{response.url}: {e}')
+    if detail is None:
+        logger.debug(f'A 400 from {response.url} carried no error detail; '
+                     f'falling back to the generic error. '
+                     f'Body: {response.text[:200]}')
+        # No `return`: this raises today, but falling through keeps the
+        # always-raises promise from depending on that. deserialize_exception
+        # turns a None detail into a generic RuntimeError.
+        handle_request_error(response)
+    with ux_utils.print_exception_no_traceback():
+        raise exceptions.deserialize_exception(detail)
+
+
 def get_request_id(response: 'requests.Response') -> RequestId[T]:
     handle_request_error(response)
     request_id = response.headers.get('X-Skypilot-Request-ID')

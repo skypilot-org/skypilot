@@ -47,6 +47,8 @@ _extra_jobs_properties: Dict[str, Any] = {}
 
 _extra_kubernetes_properties: Dict[str, Any] = {}
 
+_extra_slurm_properties: Dict[str, Any] = {}
+
 # Registry for plugin-provided properties under the top-level
 # `plugins:` config section. Keyed by plugin name.
 _extra_plugin_properties: Dict[str, Any] = {}
@@ -106,6 +108,23 @@ def register_kubernetes_property(name: str, schema: Dict[str, Any]) -> None:
             (e.g., {'type': 'string'}).
     """
     _extra_kubernetes_properties[name] = schema
+
+
+def register_slurm_property(name: str, schema: Dict[str, Any]) -> None:
+    """Register an additional property for the slurm schema.
+
+    This allows plugins to extend the slurm dict schema with slurm-specific
+    configuration fields. The property is merged into the schema's properties
+    dict (both at the top level and under each per-cluster ``cluster_configs``
+    entry), so it passes JSON schema validation even with
+    additionalProperties: False.
+
+    Args:
+        name: The property name.
+        schema: The JSON Schema for the property
+            (e.g., {'type': 'string'}).
+    """
+    _extra_slurm_properties[name] = schema
 
 
 def _check_not_both_fields_present(field1: str, field2: str):
@@ -1619,6 +1638,33 @@ _CONTEXT_CONFIG_SCHEMA_KUBERNETES = {
             },
         },
     },
+    'rdma': {
+        # How RDMA NICs reach pods on this context. Unset preserves the
+        # historical behavior (RDMA-capable clusters imply host networking).
+        'type': 'object',
+        'required': [],
+        'additionalProperties': False,
+        'properties': {
+            'mode': {
+                'type': 'string',
+                'case_insensitive_enum': [
+                    mode.value for mode in kubernetes_enums.KubernetesRdmaMode
+                ],
+            },
+            # Extended resource advertised by the RDMA device plugin, e.g.
+            # nvidia.com/rdma-vf. Site-specific: the device plugin's config
+            # composes it from an operator-chosen prefix and name.
+            'resource': {
+                'type': 'string',
+            },
+            # Value for the Multus k8s.v1.cni.cncf.io/networks annotation --
+            # the NetworkAttachmentDefinition to attach, repeated once per
+            # requested VF.
+            'networks': {
+                'type': 'string',
+            },
+        },
+    },
     # TODO(kevin): Remove 'networking' in v0.13.0.
     'networking': {
         'type': 'string',
@@ -2127,7 +2173,11 @@ def get_config_schema():
         'slurm': {
             'type': 'object',
             'required': [],
-            'additionalProperties': False,
+            # On the server, plugins have registered their properties via
+            # register_slurm_property(), so we can be strict. On the client we
+            # allow unknown properties to pass through for server-side
+            # validation.
+            'additionalProperties': _allow_additional_properties(),
             'properties': {
                 'allowed_clusters': {
                     'oneOf': [{
@@ -2153,6 +2203,25 @@ def get_config_schema():
                     'type': 'string',
                 },
                 'container_mounts': _CONTAINER_MOUNTS_SCHEMA,
+                # Shared GPU-metrics federation defaults, applied to any
+                # cluster that does not override them under cluster_configs.
+                # The common case: one central Prometheus, reachable through a
+                # single fleet's login node, serving every cluster — set `url`
+                # (and `via`) once here rather than on each cluster, and give
+                # each cluster only its own `prometheus.filter`.
+                'prometheus': {
+                    'type': 'object',
+                    'required': [],
+                    'additionalProperties': False,
+                    'properties': {
+                        'url': {
+                            'type': 'string',
+                        },
+                        'via': {
+                            'type': 'string',
+                        },
+                    },
+                },
                 'cluster_configs': {
                     'type': 'object',
                     'required': [],
@@ -2160,7 +2229,10 @@ def get_config_schema():
                     'additionalProperties': {
                         'type': 'object',
                         'required': [],
-                        'additionalProperties': False,
+                        # Strict on the server (plugins have registered their
+                        # per-cluster properties via register_slurm_property);
+                        # permissive on the client for server-side validation.
+                        'additionalProperties': _allow_additional_properties(),
                         'properties': {
                             'workdir': {
                                 'type': 'string',
@@ -2170,6 +2242,45 @@ def get_config_schema():
                             },
                             'submit_as_user': {
                                 'type': 'boolean',
+                            },
+                            # The Prometheus this cluster's GPU metrics are
+                            # federated from.
+                            'prometheus': {
+                                'type': 'object',
+                                'required': [],
+                                'additionalProperties': False,
+                                'properties': {
+                                    # Reachable from the cluster's login
+                                    # node, scraping the cluster's node/DCGM
+                                    # exporters; opts the cluster into
+                                    # /gpu-metrics federation.
+                                    'url': {
+                                        'type': 'string',
+                                    },
+                                    # Label matchers scoping this cluster's
+                                    # slice of `url`, for a Prometheus that
+                                    # aggregates several fleets. Without them
+                                    # an unscoped DCGM_.* pull attributes
+                                    # every fleet's series to this cluster.
+                                    'filter': {
+                                        'type': 'object',
+                                        'additionalProperties': {
+                                            'type': 'string',
+                                        },
+                                    },
+                                    # Slurm cluster whose login node runs the
+                                    # /federate curl instead of this
+                                    # cluster's own, for a central Prometheus
+                                    # reachable from only some login nodes.
+                                    'via': {
+                                        'type': 'string',
+                                    },
+                                },
+                            },
+                            # Deprecated: superseded by `prometheus.url`,
+                            # kept so deployed configs keep federating.
+                            'prometheus_url': {
+                                'type': 'string',
                             },
                             'pricing': _PRICING_SCHEMA,
                             'sbatch_options': _SBATCH_OPTIONS_SCHEMA,
@@ -2192,9 +2303,15 @@ def get_config_schema():
                                     },
                                 },
                             },
+                            # Plugin-registered per-cluster slurm properties
+                            # via register_slurm_property().
+                            **_extra_slurm_properties,
                         },
                     },
                 },
+                # Plugin-registered top-level slurm properties via
+                # register_slurm_property().
+                **_extra_slurm_properties,
             }
         },
         'oci': {

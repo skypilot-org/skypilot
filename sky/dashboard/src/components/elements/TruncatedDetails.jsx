@@ -2,6 +2,7 @@
 
 import React, { useRef } from 'react';
 import { TableRow, TableCell } from '@/components/ui/table';
+import { LinkifiedText } from '@/components/elements/LinkifiedText';
 
 const TOGGLE_SELECTOR = '[data-button-type="show-more-less"]';
 
@@ -27,7 +28,9 @@ export function ExpandedDetailsRow({ text, colSpan, innerRef }) {
                 className="mt-1 text-sm text-gray-700"
                 style={{ whiteSpace: 'pre-wrap' }}
               >
-                {text}
+                {/* Details can carry a remediation hint with a docs URL; make
+                    it followable now that the full text is on screen. */}
+                <LinkifiedText text={text} />
               </p>
             </div>
           </div>

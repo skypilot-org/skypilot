@@ -42,7 +42,12 @@ import {
 import { ErrorDisplay } from '@/components/elements/ErrorDisplay';
 import Link from 'next/link';
 import { useRouter } from 'next/router';
-import { TimestampWithTooltip, LastUpdatedTimestamp } from '@/components/utils';
+import {
+  TimestampWithTooltip,
+  LastUpdatedTimestamp,
+  NonCapitalizedTooltip as Tooltip,
+  formatSize,
+} from '@/components/utils';
 import { StatusBadge } from '@/components/elements/StatusBadge';
 import {
   TruncatedDetails,
@@ -54,6 +59,8 @@ import {
   Filters,
   filterData,
 } from '@/components/shared/FilterSystem';
+import { useUrlFilterState } from '@/hooks/useUrlFilterState';
+import { hrefWithQueryKey } from '@/components/shared/filterSchema';
 import { PluginSlot } from '@/plugins/PluginSlot';
 import { usePluginComponents, useTableColumns } from '@/plugins/PluginProvider';
 import dashboardCache from '@/lib/cache';
@@ -65,19 +72,36 @@ const REFRESH_INTERVAL = REFRESH_INTERVALS.REFRESH_INTERVAL;
 const VOLUMES_PAGE_SIZE_OPTIONS = [10, 30, 50, 100, 200];
 const VOLUMES_PAGE_SIZE_STORAGE_KEY = 'skypilot-volumes-page-size';
 
-// Properties offered by the filter dropdown. `value` keys into `valueList` for
-// the typeahead; `label` is what lands in `filter.property`, which
-// `evaluateCondition` lowercases to look up the field on each volume.
-const PROPERTY_OPTIONS = [
-  { label: 'Name', value: 'name' },
-  { label: 'Status', value: 'status' },
-  { label: 'Infra', value: 'infra' },
-  { label: 'Type', value: 'type' },
-  { label: 'User', value: 'user' },
+// The filterable properties, declared once. `key` is the URL parameter and the
+// `valueList` key for the typeahead; `label` is what lands in
+// `filter.property`, which `evaluateCondition` lowercases to look up the field
+// on each volume.
+const VOLUME_FILTER_SCHEMA = [
+  { key: 'name', label: 'Name', kind: 'text' },
+  { key: 'status', label: 'Status', kind: 'enum', multi: true },
+  { key: 'infra', label: 'Infra', kind: 'text' },
+  { key: 'type', label: 'Type', kind: 'enum', multi: true },
+  { key: 'user', label: 'User', kind: 'text' },
 ];
 
-// Filters are kept in local state only, so there is nothing to sync to the URL.
-const noopUpdateURLParams = () => {};
+const PROPERTY_OPTIONS = VOLUME_FILTER_SCHEMA.map(({ key, label }) => ({
+  label,
+  value: key,
+}));
+
+// Properties whose values are alternatives rather than extra conditions: two
+// Status chips mean "either", every other property replaces.
+const OR_PROPERTIES = VOLUME_FILTER_SCHEMA.filter((e) => e.multi === true).map(
+  (e) => e.label
+);
+const MULTI_VALUE_LABELS = new Set(OR_PROPERTIES);
+
+const addFilter = (prevFilters, property, value) => {
+  const base = MULTI_VALUE_LABELS.has(property)
+    ? prevFilters.filter((f) => !(f.property === property && f.value === value))
+    : prevFilters.filter((f) => f.property !== property);
+  return [...base, { property, operator: ':', value }];
+};
 
 export function Volumes() {
   const router = useRouter();
@@ -100,10 +124,19 @@ export function Volumes() {
   const handleTabChange = useCallback(
     (tab) => {
       setActiveTab(tab);
-      const query = tab === 'volumes' ? {} : { tab };
-      router.replace({ pathname: router.pathname, query }, undefined, {
-        shallow: true,
-      });
+      // Keep whatever else the address bar carries -- the filter params are
+      // written straight to history, so `router.query` may not have caught up
+      // and rebuilding the query from it would drop them.
+      router.replace(
+        hrefWithQueryKey(
+          router.pathname,
+          window.location.search,
+          'tab',
+          tab === 'volumes' ? undefined : tab
+        ),
+        undefined,
+        { shallow: true }
+      );
     },
     [router]
   );
@@ -495,7 +528,8 @@ export function VolumesTable({
   preloadingComplete,
 }) {
   const [data, setData] = useState([]);
-  const [filters, setFilters] = useState([]);
+  // Filters live in the URL, keyed by name, so a filtered view is shareable.
+  const { filters, setFilters } = useUrlFilterState(VOLUME_FILTER_SCHEMA);
   const [sortConfig, setSortConfig] = useState({
     key: null,
     direction: 'ascending',
@@ -577,7 +611,8 @@ export function VolumesTable({
     // resolve the property name to a field.
     return filterData(
       data.map((volume) => ({ ...volume, user: volume.user_name })),
-      filters
+      filters,
+      { orProperties: OR_PROPERTIES }
     );
   }, [data, filters]);
 
@@ -661,10 +696,33 @@ export function VolumesTable({
     setCurrentPage(1); // Reset to first page when changing page size
   };
 
-  const formatSize = (size) => {
-    if (size == null) return '-';
-    if (size >= 1024) return `${+(size / 1024).toFixed(1)}Ti`;
-    return `${size}Gi`;
+  // A volume reports the capacity it actually has, so a resize that has not
+  // landed yet is invisible in the size alone. Show where it is heading, with
+  // the server's explanation of what it is waiting for -- the same text the
+  // details column shows, when that one is free.
+  const renderSize = (volume) => {
+    const size = formatSize(volume.size);
+    if (!volume.resize_status || volume.resize_target_size == null) {
+      return size;
+    }
+    // Both sizes are whole GiB, so a resize smaller than that -- or one whose
+    // new space has landed while the state has not cleared -- would render an
+    // arrow pointing at the size it already shows. The reason still reaches
+    // the user through the details column.
+    if (Number(volume.resize_target_size) <= Number(volume.size)) {
+      return size;
+    }
+    const target = formatSize(volume.resize_target_size);
+    return (
+      <Tooltip content={volume.resize_message}>
+        {/* nowrap: the column is narrow, and a size broken across three lines
+            reads worse than a wider column. */}
+        <span className="whitespace-nowrap">
+          {size}
+          <span className="text-gray-500"> &rarr; {target}</span>
+        </span>
+      </Tooltip>
+    );
   };
 
   const formatTimestamp = (timestamp) => {
@@ -682,8 +740,15 @@ export function VolumesTable({
   // Volumes are usable most of the time, so a column of dashes would be noise.
   // Judge over the whole dataset, not the current page or filter, so the column
   // does not come and go while paging.
+  //
+  // One cell, so a volume with both an error and a resize shows the error: it
+  // is the one that says the volume is unusable. The volume's own page has
+  // room and shows both -- deliberately, not by oversight.
+  const volumeDetails = (volume) =>
+    volume.error_message || volume.resize_message || null;
+
   const anyVolumeHasDetails = useMemo(
-    () => data.some((volume) => volume.error_message),
+    () => data.some((volume) => volumeDetails(volume)),
     [data]
   );
 
@@ -736,7 +801,7 @@ export function VolumesTable({
       id: 'size',
       order: 30,
       renderHeader: () => sortableHeader('Size', 'size'),
-      renderCell: (volume) => <TableCell>{formatSize(volume.size)}</TableCell>,
+      renderCell: (volume) => <TableCell>{renderSize(volume)}</TableCell>,
     },
     {
       id: 'user_name',
@@ -785,9 +850,9 @@ export function VolumesTable({
             renderHeader: () => <TableHead>Details</TableHead>,
             renderCell: (volume) => (
               <TableCell>
-                {volume.error_message ? (
+                {volumeDetails(volume) ? (
                   <TruncatedDetails
-                    text={volume.error_message}
+                    text={volumeDetails(volume)}
                     rowId={volume.name}
                     expandedRowId={expandedRowId}
                     setExpandedRowId={setExpandedRowId}
@@ -866,18 +931,14 @@ export function VolumesTable({
             propertyList={PROPERTY_OPTIONS}
             valueList={valueList}
             setFilters={setFilters}
-            updateURLParams={noopUpdateURLParams}
+            addFilter={addFilter}
             placeholder="Filter volumes"
           />
         </div>
       </div>
       {filters.length > 0 && (
         <div className="mb-2">
-          <Filters
-            filters={filters}
-            setFilters={setFilters}
-            updateURLParams={noopUpdateURLParams}
-          />
+          <Filters filters={filters} setFilters={setFilters} />
         </div>
       )}
 
@@ -916,9 +977,9 @@ export function VolumesTable({
                     </TableRow>
                     {/* A volume can become ready while its reason is
                         expanded, taking the column with it. */}
-                    {expandedRowId === volume.name && volume.error_message && (
+                    {expandedRowId === volume.name && volumeDetails(volume) && (
                       <ExpandedDetailsRow
-                        text={volume.error_message}
+                        text={volumeDetails(volume)}
                         colSpan={totalColSpan}
                         innerRef={expandedRowRef}
                       />

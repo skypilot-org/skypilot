@@ -119,12 +119,17 @@ class KubernetesHighPerformanceNetworkType(enum.Enum):
     NONE = 'none'
 
     def get_network_env_vars(self,
-                             acc_type: Optional[str] = None) -> Dict[str, str]:
+                             acc_type: Optional[str] = None,
+                             pod_local_rdma: bool = False) -> Dict[str, str]:
         """Get network environment variables for this cluster type.
 
         Args:
             acc_type: The canonical accelerator type requested (e.g. 'GB200').
                 Used by OCI to pick a shape-specific NCCL profile.
+            pod_local_rdma: The pod receives its own RDMA devices (SR-IOV
+                virtual functions) instead of sharing the node's. Profiles that
+                name the host's physical functions have to widen their HCA
+                list, since those names do not exist in such a pod.
         """
         if self == KubernetesHighPerformanceNetworkType.NEBIUS:
             # Nebius cluster with InfiniBand - use InfiniBand optimizations
@@ -160,6 +165,19 @@ class KubernetesHighPerformanceNetworkType(enum.Enum):
             # any of these via task `envs:`.
             # Refer to the examples https://github.com/oracle-quickstart/oci-hpc-oke/tree/main/manifests/nccl-tests/kueue for more details. # pylint: disable=line-too-long
             acc = (acc_type or '').upper()
+            # The Grace profiles below name the host's physical functions
+            # exactly. A pod holding SR-IOV virtual functions never sees those
+            # names, so the list has to widen to the family prefix. This is the
+            # only NCCL difference between Oracle's two reference manifests for
+            # the same shape, and it fails silently: NCCL finds no matching
+            # device and falls back to TCP rather than erroring.
+            #
+            # Widening hands NIC selection to the device plugin: the pod holds
+            # only the VFs its SriovNetworkNodePolicy chose to create, so the
+            # prefix cannot reach a PF the exact list was excluding. A policy
+            # that also exposes non-fabric NICs would need `NCCL_IB_HCA`
+            # narrowed again through task `envs:`.
+            pf_names_visible = not pod_local_rdma
             if acc == 'GB200':
                 # GB200 NVL72 runs Quantum-2 InfiniBand plus rack-scale
                 # multi-node NVLink (MNNVL) and NVLink SHARP (NVLS) -- a
@@ -175,7 +193,8 @@ class KubernetesHighPerformanceNetworkType(enum.Enum):
                     # Required for MNNVL to work.
                     'NCCL_CUMEM_ENABLE': '1',
                     'NCCL_NET_PLUGIN': 'sys',
-                    'NCCL_IB_HCA': 'mlx5_0,mlx5_1,mlx5_3,mlx5_4',
+                    'NCCL_IB_HCA': ('mlx5_0,mlx5_1,mlx5_3,mlx5_4'
+                                    if pf_names_visible else 'mlx5'),
                     # NVLink SHARP in-network reductions.
                     'NCCL_NVLS_ENABLE': '1',
                     'NCCL_SOCKET_IFNAME': 'eth0',
@@ -194,11 +213,17 @@ class KubernetesHighPerformanceNetworkType(enum.Enum):
                     'NCCL_CUMEM_ENABLE': '1',
                     'NCCL_NET_PLUGIN': 'none',
                     'NCCL_IB_HCA': ('=mlx5_0,mlx5_1,mlx5_2,mlx5_3,'
-                                    'mlx5_5,mlx5_6,mlx5_7,mlx5_8'),
+                                    'mlx5_5,mlx5_6,mlx5_7,mlx5_8'
+                                    if pf_names_visible else 'mlx5'),
                     'NCCL_NVLS_ENABLE': '1',
                     'NCCL_SOCKET_IFNAME': 'eth0',
                     # GPU-to-CPU (C2C) GPUDirect over the Grace link.
                     'NCCL_NET_GDR_C2C': '1',
+                    # With NET_GDR_C2C on, NCCL's GDR cutoff is PATH_P2C, and
+                    # a GPU whose NIC sits one PCIe host bridge away falls
+                    # outside it -- GDR silently off. PHB widens the cutoff by
+                    # exactly that one level; nothing else changes.
+                    'NCCL_NET_GDR_LEVEL': 'PHB',
                     'NCCL_IB_GID_INDEX': '3',
                     'NCCL_IB_TC': '41',
                     'NCCL_IB_SL': '0',
@@ -2048,6 +2073,73 @@ def _iter_terminated_states(cs):
             yield term
 
 
+# Docs section for the config that caps a pod's memory at its request.
+SET_POD_RESOURCE_LIMITS_DOC_URL = (
+    'https://docs.skypilot.co/en/latest/reference/config.html'
+    '#kubernetes-set-pod-resource-limits')
+
+# Appended to an OOMKilled reason when the killed container declared no memory
+# limit. Produced by the reason builders here and in
+# sky/provision/kubernetes/instance.py, and matched by KUBERNETES_FAILURE_HINTS
+# below. The marker is the only channel those two ends share: the hint lookup
+# only ever sees a reason string, never the pod (e.g. the managed-jobs details
+# column formats a reason read back from the jobs database), so the
+# distinction has to travel in the text.
+NO_MEMORY_LIMIT_MARKER = 'no memory limit set'
+
+
+def _find_container(pod: 'kubernetes_models.V1Pod',
+                    container_name: Optional[str]) -> Optional[Any]:
+    """The named container from the pod *spec*, or None if it is not there."""
+    spec = getattr(pod, 'spec', None)
+    for container in (getattr(spec, 'containers', None) or []):
+        if getattr(container, 'name', None) == container_name:
+            return container
+    return None
+
+
+def _container_memory_limit(container: Any) -> Optional[str]:
+    """The memory limit `container` declares, or None if it declares none.
+
+    Reads the pod *spec*, not its status: a container with no
+    ``resources.limits.memory`` is unbounded, so its own cgroup can never
+    OOM-kill it.
+    """
+    resources = getattr(container, 'resources', None)
+    limits = getattr(resources, 'limits', None) or {}
+    return limits.get('memory')
+
+
+def is_unbounded_oom(reason: Optional[str], pod: 'kubernetes_models.V1Pod',
+                     container_name: Optional[str]) -> bool:
+    """Whether an OOM kill hit a container that had no memory limit.
+
+    A container that OOMs *with* a limit exceeded a cap it asked for, and the
+    fix is to ask for more. One that OOMs *without* a limit was never capped:
+    it grew until the node ran out of memory and the kernel reclaimed it, which
+    can take other pods on that node down too. Same `OOMKilled` reason, two
+    different failures, two different fixes -- hence the distinction.
+
+    False when the container is not in the pod spec: we cannot confirm it was
+    unbounded, and a confidently wrong node-level hint is worse than the
+    generic OOM one.
+    """
+    if reason != 'OOMKilled':
+        return False
+    container = _find_container(pod, container_name)
+    if container is None:
+        return False
+    return _container_memory_limit(container) is None
+
+
+def annotate_oom_reason(reason: Optional[str], pod: 'kubernetes_models.V1Pod',
+                        container_name: Optional[str]) -> str:
+    """Tag `reason` with NO_MEMORY_LIMIT_MARKER if it is an unbounded OOM."""
+    if not is_unbounded_oom(reason, pod, container_name):
+        return reason or ''
+    return f'{reason} ({NO_MEMORY_LIMIT_MARKER})'
+
+
 def get_condensed_pod_reason(pod: 'kubernetes_models.V1Pod') -> str:
     """Condense a pod failure into a single-line user-facing summary.
 
@@ -2100,7 +2192,10 @@ def get_condensed_pod_reason(pod: 'kubernetes_models.V1Pod') -> str:
             for term in _iter_terminated_states(cs):
                 if term.exit_code != 0:
                     if term.reason:
-                        return f'{term.reason} (exit code {term.exit_code})'
+                        detail = f'exit code {term.exit_code}'
+                        if is_unbounded_oom(term.reason, pod, cs.name):
+                            detail += f', {NO_MEMORY_LIMIT_MARKER}'
+                        return f'{term.reason} ({detail})'
                     return f'Terminated with exit code {term.exit_code}'
 
     return 'Terminated unexpectedly'
@@ -2137,6 +2232,12 @@ KUBERNETES_FAILURE_HINTS: List[Tuple[List[str], str]] = [
     (['ImagePullBackOff', 'ErrImagePull'],
      'To fix: Verify the image tag exists and registry credentials are configured.'
     ),
+    # NO_MEMORY_LIMIT_MARKER must precede 'OOMKilled': an unbounded-OOM reason
+    # contains both, and the first match wins.
+    ([NO_MEMORY_LIMIT_MARKER],
+     'The container had no memory limit and the node ran out of memory. '
+     'To fix: set `kubernetes.set_pod_resource_limits`: '
+     f'{SET_POD_RESOURCE_LIMITS_DOC_URL}'),
     (['OOMKilled'],
      'The container ran out of memory. To fix: Increase the memory request with '
      '`resources.memory` in your task YAML; if `kubernetes.'

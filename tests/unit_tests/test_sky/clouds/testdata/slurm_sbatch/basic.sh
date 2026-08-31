@@ -14,8 +14,8 @@
 # Cleanup function to remove cluster dirs on job termination.
 cleanup() {
     saved_exit=$?
-    # The Skylet is daemonized, so it is not automatically terminated when
-    # the Slurm job is terminated, we need to kill it manually.
+    # Prevent the keeper from restarting Skylet during cleanup.
+    rm -f "/tmp/test-cluster-no-container/.sky/skylet_start"
     echo "Terminating Skylet..."
     if [ -f "/tmp/test-cluster-no-container/.sky/skylet_pid" ]; then
         kill $(cat "/tmp/test-cluster-no-container/.sky/skylet_pid") 2>/dev/null || true
@@ -25,13 +25,13 @@ cleanup() {
     # This is only needed when container_scope=global.
     # When container_scope=job, named containers are removed automatically
     # at the end of the Slurm job, see: https://github.com/NVIDIA/pyxis/wiki/Setup#slurm-epilog
-    srun --nodes=1 --ntasks-per-node=1 enroot remove -f pyxis_test-cluster-no-container 2>/dev/null || true
+    srun --overlap --nodes=1 --ntasks-per-node=1 enroot remove -f pyxis_test-cluster-no-container 2>/dev/null || true
     # Clean up sky runtime directory on each node.
     # NOTE: We can do this because --nodes for both this srun and the
     # sbatch is the same number. Otherwise, there are no guarantees
     # that this srun will run on the same subset of nodes as the srun
     # that created the sky directories.
-    srun --nodes=1 rm -rf /tmp/test-cluster-no-container
+    srun --overlap --nodes=1 rm -rf /tmp/test-cluster-no-container
     rm -rf /home/testuser/.sky_clusters/test-cluster-no-container
     exit $saved_exit
 }
@@ -44,13 +44,16 @@ trap 'exit 0' TERM
 # Create sky home directory and subdirectories for the cluster.
 mkdir -p /home/testuser/.sky_clusters/test-cluster-no-container/sky_logs /home/testuser/.sky_clusters/test-cluster-no-container/sky_workdir /home/testuser/.sky_clusters/test-cluster-no-container/.sky
 # Create sky runtime directory on each node.
-srun --nodes=1 mkdir -p /tmp/test-cluster-no-container
+srun --nodes=1 mkdir -p /tmp/test-cluster-no-container/.sky
 # Marker file to indicate we're in a Slurm cluster.
-touch /home/testuser/.sky_clusters/test-cluster-no-container/.sky_slurm_cluster
+srun --nodes=1 touch /tmp/test-cluster-no-container/.sky/.sky_slurm_cluster
 # Store proctrack type for task executor to read.
 echo 'cgroup' > /home/testuser/.sky_clusters/test-cluster-no-container/.sky_proctrack_type
 # Suppress login messages.
 touch /home/testuser/.sky_clusters/test-cluster-no-container/.hushlogin
 
 touch /home/testuser/.sky_clusters/test-cluster-no-container/.sky_sbatch_ready
+# Host-side keeper step that starts skylet and restarts it if it dies.
+SKY_HEAD_NODE=$(scontrol show hostnames "$SLURM_JOB_NODELIST" | head -n1)
+( while true; do srun --overlap --jobid=$SLURM_JOB_ID --nodes=1 --ntasks=1 --nodelist=$SKY_HEAD_NODE bash -c 'while true; do if [ -f /tmp/test-cluster-no-container/.sky/skylet_start ]; then HOME=/home/testuser/.sky_clusters/test-cluster-no-container bash /tmp/test-cluster-no-container/.sky/skylet_start; fi; sleep 5; done'; sleep 5; done ) &
 sleep infinity

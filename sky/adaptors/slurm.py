@@ -284,15 +284,32 @@ class SlurmClient:
                 slurm_user=slurm_user,
             )
 
-    def _run_slurm_cmd(self, cmd: str) -> Tuple[int, str, str]:
+    def _run_slurm_cmd(self,
+                       cmd: str,
+                       timeout: Optional[int] = None) -> Tuple[int, str, str]:
+        # Forward `timeout` only when set so the existing callers keep the
+        # runner's default (unbounded) invocation unchanged.
+        if timeout is None:
+            return self._runner.run(cmd,
+                                    require_outputs=True,
+                                    separate_stderr=True,
+                                    stream_logs=False)
         return self._runner.run(cmd,
                                 require_outputs=True,
                                 separate_stderr=True,
-                                stream_logs=False)
+                                stream_logs=False,
+                                timeout=timeout)
 
-    def _run_slurm_cmds(self,
-                        commands: Sequence[str]) -> List[Tuple[int, str, str]]:
-        """Run independent commands concurrently in one remote invocation."""
+    def _run_slurm_cmds(
+            self,
+            commands: Sequence[str],
+            timeout: Optional[int] = None) -> List[Tuple[int, str, str]]:
+        """Run independent commands concurrently in one remote invocation.
+
+        ``timeout`` bounds the whole remote invocation in seconds (SSH
+        connect included); on expiry the SSH process is killed and
+        subprocess.TimeoutExpired is raised.
+        """
         if not commands:
             return []
 
@@ -334,7 +351,7 @@ class SlurmClient:
             ])
 
         script = '\n'.join(script_lines)
-        rc, stdout, stderr = self._run_slurm_cmd(script)
+        rc, stdout, stderr = self._run_slurm_cmd(script, timeout=timeout)
         subprocess_utils.handle_returncode(
             rc,
             'concurrent Slurm inventory commands',
@@ -342,16 +359,21 @@ class SlurmClient:
             stderr=f'{stdout}\n{stderr}',
             stream_logs=False)
 
+        # The login shell may print before the script runs (profile.d
+        # banners, module-system notices, MOTD-style greetings); that noise
+        # lands ahead of the header. Skip to the header so it can neither
+        # corrupt the frames nor, if it is non-ASCII, fail the transport.
+        header_index = stdout.find(_BATCH_OUTPUT_HEADER)
+        if header_index == -1:
+            raise RuntimeError('Unexpected output from concurrent Slurm '
+                               'inventory commands: missing header.')
         try:
-            output_bytes = stdout.encode('ascii')
+            output_bytes = stdout[header_index:].encode('ascii')
         except UnicodeEncodeError as e:
             raise RuntimeError('Unexpected output from concurrent Slurm '
                                'inventory commands: non-ASCII transport '
                                'output.') from e
         header_bytes = _BATCH_OUTPUT_HEADER.encode('ascii')
-        if not output_bytes.startswith(header_bytes):
-            raise RuntimeError('Unexpected output from concurrent Slurm '
-                               'inventory commands: missing header.')
         offset = len(header_bytes)
         results = []
         for _ in commands:
@@ -403,6 +425,34 @@ class SlurmClient:
             raise RuntimeError('Unexpected output from concurrent Slurm '
                                'inventory commands: trailing data.')
         return results
+
+    def run_command(self,
+                    cmd: str,
+                    timeout: Optional[int] = None) -> Tuple[int, str, str]:
+        """Runs one shell command on the login node.
+
+        The public entry point for callers outside this client (e.g.
+        GPU-metrics federation) that need a command's output byte-exact. It
+        rides the framed batch transport, so whatever the login shell prints
+        before the command runs (profile.d banners, module-system notices)
+        cannot leak into the returned stdout — a plain SSH invocation would
+        prepend that noise.
+
+        Args:
+            cmd: Shell command to run on the login node.
+            timeout: Optional bound in seconds on the whole remote
+                invocation (SSH connect included); on expiry the SSH process
+                is killed and subprocess.TimeoutExpired is raised.
+
+        Returns:
+            (returncode, stdout, stderr) of ``cmd`` itself.
+
+        Raises:
+            exceptions.CommandError: If the transport itself fails (e.g. the
+                login node is unreachable).
+            subprocess.TimeoutExpired: If ``timeout`` expires.
+        """
+        return self._run_slurm_cmds([cmd], timeout=timeout)[0]
 
     def query_jobs(
         self,
