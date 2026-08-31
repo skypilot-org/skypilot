@@ -542,6 +542,14 @@ To achieve the above, you can specify custom configs in :code:`~/.sky/config.yam
       # Default: false.
       high_availability: true
 
+      # Port range opened on the controller for service load balancers.
+      # Each service's load balancer picks a free port from this range, so
+      # the range also caps how many services one controller can serve.
+      # A change only takes effect for a newly launched controller.
+      #
+      # Default: 30001-30020.
+      load_balancer_port_range: 30001-30020
+
       resources:
         # All configs below are optional.
         # Specify the location of the SkyServe controller.

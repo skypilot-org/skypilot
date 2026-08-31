@@ -16,7 +16,7 @@ import time
 import traceback
 import typing
 from typing import (Any, Callable, DefaultDict, Deque, Dict, Iterator, List,
-                    Optional, Set, TextIO, Type, Union)
+                    Optional, Set, TextIO, Tuple, Type, Union)
 import uuid
 
 import colorama
@@ -53,6 +53,7 @@ if typing.TYPE_CHECKING:
 
     import sky
     from sky.serve import replica_managers
+    from sky.utils import config_utils
 else:
     psutil = adaptors_common.LazyImport('psutil')
     requests = adaptors_common.LazyImport('requests')
@@ -366,6 +367,49 @@ def is_consolidation_mode(pool: bool = False) -> bool:
     if os.environ.get(skylet_constants.ENV_VAR_IS_SKYPILOT_SERVER) is not None:
         _validate_consolidation_mode_config(consolidation_mode, pool)
     return consolidation_mode
+
+
+LOAD_BALANCER_PORT_RANGE_CONFIG_KEY = ('serve', 'controller',
+                                       'load_balancer_port_range')
+
+
+def get_load_balancer_port_range(
+        config: Optional['config_utils.Config'] = None) -> Tuple[int, int]:
+    """Returns the inclusive load balancer port range, as (start, end).
+
+    Reads ``serve.controller.load_balancer_port_range`` (default
+    ``30001-30020``). The controller task opens exactly this range, and the
+    per-service port search on the controller must stay inside it, otherwise
+    a load balancer binds a port that was never exposed. See
+    ``sky.serve.service._allocate_load_balancer_port``.
+
+    ``config`` reads the range from an explicit config instead of the ambient
+    one. Callers that run before an admin policy has been applied must pass
+    the policy's mutated config, since that is what the controller is
+    launched with: reading the pre-policy value here would open one range and
+    allocate from another.
+    """
+    key = '.'.join(LOAD_BALANCER_PORT_RANGE_CONFIG_KEY)
+    if config is None:
+        configured = skypilot_config.get_nested(
+            LOAD_BALANCER_PORT_RANGE_CONFIG_KEY,
+            default_value=constants.LOAD_BALANCER_PORT_RANGE)
+    else:
+        configured = config.get_nested(
+            LOAD_BALANCER_PORT_RANGE_CONFIG_KEY,
+            default_value=constants.LOAD_BALANCER_PORT_RANGE)
+    range_str = str(configured)
+    match = re.fullmatch(r'(\d{1,5})-(\d{1,5})', range_str)
+    if match is None:
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(
+                f'{key} must be "<start>-<end>", got {range_str!r}.')
+    start, end = int(match.group(1)), int(match.group(2))
+    if not 1 <= start <= end <= 65535:
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(f'{key} must satisfy 1 <= start <= end <= 65535, '
+                             f'got {range_str!r}.')
+    return start, end
 
 
 def ha_recovery_for_consolidation_mode(pool: bool):

@@ -1,6 +1,7 @@
 import asyncio
 import contextvars
 import os
+import socket
 import tempfile
 from unittest import mock
 
@@ -802,3 +803,25 @@ class TestAtomicWriteText:
         assert not target.exists()
         # Crucially: no hidden .tmp file left behind in the directory.
         assert list(tmp_path.iterdir()) == []
+
+
+class TestFindFreePort:
+
+    def test_respects_end_port(self):
+        holder = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        holder.bind(('', 0))
+        port = holder.getsockname()[1]
+        try:
+            with pytest.raises(OSError, match='No free ports available'):
+                common_utils.find_free_port(port, end_port=port)
+        finally:
+            holder.close()
+
+    def test_default_end_port_excludes_65535(self):
+        """The default cap is 65534, so a search from 65535 spans nothing.
+
+        Callers that need the top of the port space have to ask for it. This
+        pins the default, which exists to preserve the pre-end_port behavior.
+        """
+        with pytest.raises(OSError, match='No free ports available'):
+            common_utils.find_free_port(65535)

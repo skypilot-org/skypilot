@@ -257,10 +257,18 @@ def up(
         # balancer port from the controller? So we don't need to open so many
         # ports here. Or, we should have a nginx traffic control to refuse
         # any connection to the unregistered ports.
+        # Keep this range in lockstep with the port search in
+        # service._allocate_load_balancer_port, which runs on the controller:
+        # a mismatch lets a load balancer bind a port we never opened here.
         if not pool:
+            # Read the range from the same config the controller is launched
+            # with (mutated_user_config, uploaded above), not the ambient
+            # pre-policy one: an admin policy that rewrites this key would
+            # otherwise open one range here and allocate from another there.
+            start, end = serve_utils.get_load_balancer_port_range(
+                mutated_user_config)
             controller_resources = {
-                r.copy(ports=[serve_constants.LOAD_BALANCER_PORT_RANGE])
-                for r in controller_resources
+                r.copy(ports=[f'{start}-{end}']) for r in controller_resources
             }
         controller_task.set_resources(controller_resources)
 
