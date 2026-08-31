@@ -257,16 +257,21 @@ SKY_APISERVER_PROCESS_EXECUTION_START_TOTAL = prom.Counter(
     ['request', 'pid'],
 )
 
+# 'liveall' for the same reason as sky_apiserver_threads_active below: keep
+# the per-pid series, but only for processes that still exist. The default
+# ('all') would keep emitting each dead worker's last value forever.
 SKY_APISERVER_PROCESS_PEAK_RSS = prom.Gauge(
     'sky_apiserver_process_peak_rss',
     'Peak RSS we saw in each process in last 30 seconds',
     ['pid', 'type'],
+    multiprocess_mode='liveall',
 )
 
 SKY_APISERVER_PROCESS_CPU_TOTAL = prom.Gauge(
     'sky_apiserver_process_cpu_total',
     'Total CPU times a worker process has been running',
     ['pid', 'type', 'mode'],
+    multiprocess_mode='liveall',
 )
 
 SKY_APISERVER_REQUEST_MEMORY_USAGE_BYTES = prom.Histogram(
@@ -288,14 +293,19 @@ SKY_APISERVER_WEBSOCKET_SSH_LATENCY_SECONDS = prom.Histogram(
     buckets=_LATENCY_BUCKETS,
 )
 
+# Fleet-wide free-executor counts, so 'livesum'. The default ('all') emits
+# one series per pid and never drops dead ones, so the count kept including
+# workers that had exited.
 SKY_APISERVER_LONG_EXECUTORS = prom.Gauge(
     'sky_apiserver_long_executors',
     'Total number of long-running request executors in the API server',
+    multiprocess_mode='livesum',
 )
 
 SKY_APISERVER_SHORT_EXECUTORS = prom.Gauge(
     'sky_apiserver_short_executors',
     'Total number of short-running request executors in the API server',
+    multiprocess_mode='livesum',
 )
 
 # Active threads in on-demand thread executors. Each process has its own

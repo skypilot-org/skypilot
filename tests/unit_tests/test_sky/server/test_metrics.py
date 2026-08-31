@@ -1395,3 +1395,21 @@ def test_metrics_server_reports_a_bind_failure(monkeypatch):
             assert mock_logger.error.called, 'bind failure was not reported'
     finally:
         blocker.close()
+
+
+# ── multiprocess gauge modes ────────────────────────────────────────
+
+
+def test_no_gauge_defaults_to_all_multiprocess_mode():
+    """'all' keeps serving a dead process's last value forever.
+
+    It also writes gauge_all_<pid>.db, which mark_process_dead() does not
+    reclaim, so the directory /metrics merges grows with every process the
+    server has ever spawned. Fleet-wide totals want 'livesum'; per-pid
+    series want 'liveall'.
+    """
+    offenders = sorted(name for name, obj in vars(metrics_utils).items()
+                       if isinstance(obj, prom.Gauge) and
+                       getattr(obj, '_multiprocess_mode', None) == 'all')
+    assert not offenders, (
+        f'Gauges left on the default multiprocess_mode="all": {offenders}')
