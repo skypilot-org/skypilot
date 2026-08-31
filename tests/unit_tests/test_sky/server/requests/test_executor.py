@@ -716,11 +716,13 @@ async def test_request_worker_retry_execution_retryable_error(
 class _PauseHarness:
     """Bundles the worker, queue, and request id for pause/watch tests."""
 
-    def __init__(self, worker, request_id, queue_items, sleep_calls):
+    def __init__(self, worker, request_id, queue_items, sleep_calls, queued):
         self.worker = worker
         self.request_id = request_id
         self.queue_items = queue_items
         self.sleep_calls = sleep_calls
+        # Set on every requeue; the async-path tests wait on it.
+        self.queued = queued
 
     def run(self, condition, retry_wait_seconds=30):
         """Drive handle_task_result with an ExecutionPausedError."""
@@ -754,6 +756,8 @@ def pause_harness(isolated_database, monkeypatch):
     queue_items = []
     backing = queue_lib.Queue()
 
+    queued = threading.Event()
+
     class MockRequestQueue:
 
         def get(self):
@@ -765,6 +769,9 @@ def pause_harness(isolated_database, monkeypatch):
         def put(self, item):
             queue_items.append(item)
             backing.put(item)
+            # Signals the async-path tests, whose requeue happens on the
+            # shared request event loop after handle_task_result returned.
+            queued.set()
 
     request_queue = MockRequestQueue()
     monkeypatch.setattr(executor, '_get_queue',
@@ -783,7 +790,7 @@ def pause_harness(isolated_database, monkeypatch):
         config=server_config.WorkerConfig(garanteed_parallelism=1,
                                           burstable_parallelism=0,
                                           num_db_connections_per_worker=0))
-    return _PauseHarness(worker, request_id, queue_items, sleep_calls)
+    return _PauseHarness(worker, request_id, queue_items, sleep_calls, queued)
 
 
 class _RecordingCondition(continue_condition_lib.ContinueCondition):
@@ -999,6 +1006,182 @@ def test_pause_passes_the_new_kwarg_to_a_kwargs_absorbing_wait(pause_harness):
     pause_harness.run(condition, retry_wait_seconds=30)
 
     assert condition.kwargs == [['update_status_msg']]
+
+
+class _AsyncRecordingCondition(continue_condition_lib.ContinueCondition):
+    """A condition whose wait_async() returns a fixed verdict.
+
+    Records what the executor drives it with, so tests can assert the async
+    contract: awaitable callbacks, and the coroutine running off the monitor
+    thread on the shared request event loop.
+    """
+
+    def __init__(self, verdict: bool, reasons=()):
+        self._verdict = verdict
+        self._reasons = reasons
+        self.calls = []
+        self.done = threading.Event()
+
+    def wait(self, **kwargs) -> bool:
+        raise AssertionError(
+            'sync wait() must not run for an async-capable condition')
+
+    async def wait_async(self,
+                         *,
+                         is_cancelled,
+                         fallback_wait_seconds,
+                         update_status_msg=None) -> bool:
+        self.calls.append({
+            'is_cancelled': await is_cancelled(),
+            'fallback_wait_seconds': fallback_wait_seconds,
+            'thread': threading.current_thread(),
+        })
+        for reason in self._reasons:
+            assert update_status_msg is not None
+            await update_status_msg(reason)
+        self.done.set()
+        return self._verdict
+
+
+def test_pause_async_condition_reschedules(pause_harness):
+    """An async condition's True verdict requeues the request.
+
+    Also pins down the contract: the coroutine runs off the monitor thread,
+    and is_cancelled is awaitable there.
+    """
+    condition = _AsyncRecordingCondition(verdict=True)
+
+    request_element = pause_harness.run(condition, retry_wait_seconds=30)
+
+    assert pause_harness.queued.wait(timeout=10)
+    assert pause_harness.queue_items == [request_element]
+    assert condition.calls == [{
+        'is_cancelled': False,
+        'fallback_wait_seconds': 30,
+        'thread': mock.ANY,
+    }]
+    assert condition.calls[0]['thread'] is not threading.current_thread()
+    updated = requests_lib.get_request(pause_harness.request_id,
+                                       fields=['status'])
+    assert updated.status == requests_lib.RequestStatus.WAITING
+
+
+def test_pause_async_condition_dropped_when_wait_returns_false(pause_harness):
+    """An async condition's False verdict drops the request (no reschedule)."""
+    condition = _AsyncRecordingCondition(verdict=False)
+
+    pause_harness.run(condition)
+
+    assert condition.done.wait(timeout=10)
+    # The requeue (if any, wrongly) would follow right after the verdict on
+    # the same coroutine; give it a beat before asserting it never happened.
+    assert not pause_harness.queued.wait(timeout=0.2)
+    assert pause_harness.queue_items == []
+
+
+def test_pause_async_status_msg_refreshed_while_parked(pause_harness):
+    """A reason pushed through the awaitable updater lands on the request."""
+    condition = _AsyncRecordingCondition(
+        verdict=True, reasons=['Pending (Queue: q, Position: 4)'])
+
+    pause_harness.run(condition, retry_wait_seconds=30)
+
+    assert pause_harness.queued.wait(timeout=10)
+    updated = requests_lib.get_request(pause_harness.request_id,
+                                       fields=['status_msg'])
+    assert updated.status_msg == (
+        'Pending (Queue: q, Position: 4) (waiting to resume)')
+
+
+class _GatedAsyncCondition(continue_condition_lib.ContinueCondition):
+    """A wait_async() that stays parked until the test releases it."""
+
+    def __init__(self):
+        self.release = threading.Event()
+
+    async def wait_async(self,
+                         *,
+                         is_cancelled,
+                         fallback_wait_seconds,
+                         update_status_msg=None) -> bool:
+        del is_cancelled, fallback_wait_seconds, update_status_msg
+        await asyncio.get_running_loop().run_in_executor(
+            None, self.release.wait)
+        return True
+
+
+def test_pause_async_wait_does_not_hold_the_monitor_thread(pause_harness):
+    """handle_task_result returns while the async wait is still parked.
+
+    This is the point of wait_async: parked requests can outnumber executor
+    workers by orders of magnitude, so the wait must not keep the per-request
+    monitor thread alive for its duration.
+    """
+    condition = _GatedAsyncCondition()
+
+    # Returns immediately; on a thread-blocking wait this would deadlock
+    # until the (never-released) gate.
+    request_element = pause_harness.run(condition, retry_wait_seconds=30)
+
+    assert pause_harness.queue_items == []
+    condition.release.set()
+    assert pause_harness.queued.wait(timeout=10)
+    assert pause_harness.queue_items == [request_element]
+
+
+class _FailingAsyncCondition(continue_condition_lib.ContinueCondition):
+    """A wait_async() that dies mid-wait."""
+
+    async def wait_async(self, **kwargs) -> bool:
+        del kwargs
+        raise RuntimeError('probe exploded')
+
+
+def test_pause_async_wait_failure_falls_back_to_fixed_wait(pause_harness):
+    """A failing wait_async degrades to one fixed backoff, then reschedules.
+
+    Same policy as the sync path: a broken probe must not drop the request.
+    """
+    condition = _FailingAsyncCondition()
+
+    request_element = pause_harness.run(condition, retry_wait_seconds=0)
+
+    assert pause_harness.queued.wait(timeout=10)
+    assert pause_harness.queue_items == [request_element]
+
+
+class _NonCoroutineWaitAsyncCondition(continue_condition_lib.ContinueCondition):
+    """A condition whose wait_async attribute is not a coroutine function."""
+
+    def __init__(self):
+        self.sync_calls = 0
+
+    def wait_async(self, **kwargs) -> bool:
+        raise AssertionError('a non-coroutine wait_async must be ignored')
+
+    def wait(self,
+             *,
+             is_cancelled,
+             fallback_wait_seconds,
+             update_status_msg=None) -> bool:
+        del is_cancelled, fallback_wait_seconds, update_status_msg
+        self.sync_calls += 1
+        return True
+
+
+def test_pause_non_coroutine_wait_async_uses_sync_path(pause_harness):
+    """Only a real coroutine function opts into the waiter loop.
+
+    A plain callable named wait_async cannot be awaited; degrading it to the
+    fallback wait would silently discard the condition's wait() policy, so
+    the executor must keep the thread-based path instead.
+    """
+    condition = _NonCoroutineWaitAsyncCondition()
+
+    request_element = pause_harness.run(condition, retry_wait_seconds=30)
+
+    assert condition.sync_calls == 1
+    assert pause_harness.queue_items == [request_element]
 
 
 @pytest.mark.parametrize(('reason', 'suffix', 'expected'), [
