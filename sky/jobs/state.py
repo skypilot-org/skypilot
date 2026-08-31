@@ -28,6 +28,7 @@ from sky.dag import DagExecution
 from sky.skylet import constants
 from sky.utils import asyncio_utils
 from sky.utils import common_utils
+from sky.utils import infra_utils
 from sky.utils.db import db_utils
 from sky.utils.db import migration_utils
 from sky.utils.db import retries as db_retries
@@ -1582,6 +1583,7 @@ def build_managed_jobs_with_filters_no_status_query(
     workspace_match: Optional[str] = None,
     name_match: Optional[str] = None,
     pool_match: Optional[str] = None,
+    infra_match: Optional[str] = None,
     user_hashes: Optional[List[Optional[str]]] = None,
     skip_finished: bool = False,
     submitted_after: Optional[float] = None,
@@ -1673,6 +1675,32 @@ def build_managed_jobs_with_filters_no_status_query(
         query = query.where(job_info_table.c.name.like(f'%{name_match}%'))
     if pool_match is not None:
         query = query.where(job_info_table.c.pool.like(f'%{pool_match}%'))
+    if infra_match is not None:
+        # `infra_match` is an `--infra` spec -- `cloud`, `cloud/region` or
+        # `cloud/region/zone`, with `*` for any component -- parsed by the same
+        # `InfraInfo.from_str` the CLI launches with, so the queue is filtered
+        # on exactly what a user would name to run there. A component that
+        # parses to None (absent, or `*`) constrains nothing.
+        #
+        # The cloud is matched whole: it names one of a closed set, and a
+        # prefix over that set is ambiguous (`s` is Slurm and SSH). Region and
+        # zone match by prefix, so a half-typed name still narrows the queue as
+        # the dashboard filter box is typed into. `autoescape` keeps a literal
+        # `_` in a Kubernetes context name (`gke_proj_zone_cluster`) from
+        # standing in as a LIKE wildcard.
+        infra = infra_utils.InfraInfo.from_str(infra_match)
+        if infra.cloud is not None:
+            query = query.where(
+                sqlalchemy.func.lower(job_info_table.c.cloud) ==
+                infra.cloud.lower())
+        if infra.region is not None:
+            query = query.where(
+                sqlalchemy.func.lower(job_info_table.c.region).startswith(
+                    infra.region.lower(), autoescape=True))
+        if infra.zone is not None:
+            query = query.where(
+                sqlalchemy.func.lower(job_info_table.c.zone).startswith(
+                    infra.zone.lower(), autoescape=True))
     if user_hashes is not None:
         query = query.where(job_info_table.c.user_hash.in_(user_hashes))
     if submitted_after is not None or submitted_before is not None:
@@ -1705,6 +1733,7 @@ def build_managed_jobs_with_filters_query(
     workspace_match: Optional[str] = None,
     name_match: Optional[str] = None,
     pool_match: Optional[str] = None,
+    infra_match: Optional[str] = None,
     user_hashes: Optional[List[Optional[str]]] = None,
     statuses: Optional[List[str]] = None,
     skip_finished: bool = False,
@@ -1727,6 +1756,7 @@ def build_managed_jobs_with_filters_query(
         workspace_match=workspace_match,
         name_match=name_match,
         pool_match=pool_match,
+        infra_match=infra_match,
         user_hashes=user_hashes,
         skip_finished=skip_finished,
         submitted_after=submitted_after,
@@ -1749,6 +1779,7 @@ def get_status_count_with_filters(
     workspace_match: Optional[str] = None,
     name_match: Optional[str] = None,
     pool_match: Optional[str] = None,
+    infra_match: Optional[str] = None,
     user_hashes: Optional[List[Optional[str]]] = None,
     skip_finished: bool = False,
     submitted_after: Optional[float] = None,
@@ -1767,6 +1798,7 @@ def get_status_count_with_filters(
         workspace_match=workspace_match,
         name_match=name_match,
         pool_match=pool_match,
+        infra_match=infra_match,
         user_hashes=user_hashes,
         skip_finished=skip_finished,
         submitted_after=submitted_after,
@@ -1947,6 +1979,7 @@ def get_managed_jobs_with_filters(
     workspace_match: Optional[str] = None,
     name_match: Optional[str] = None,
     pool_match: Optional[str] = None,
+    infra_match: Optional[str] = None,
     user_hashes: Optional[List[Optional[str]]] = None,
     statuses: Optional[List[str]] = None,
     skip_finished: bool = False,
@@ -2013,6 +2046,7 @@ def get_managed_jobs_with_filters(
         workspace_match=workspace_match,
         name_match=name_match,
         pool_match=pool_match,
+        infra_match=infra_match,
         user_hashes=user_hashes,
         statuses=statuses,
         skip_finished=skip_finished,
@@ -2038,6 +2072,7 @@ def get_managed_jobs_with_filters(
             workspace_match=workspace_match,
             name_match=name_match,
             pool_match=pool_match,
+            infra_match=infra_match,
             user_hashes=user_hashes,
             statuses=statuses,
             skip_finished=skip_finished,
@@ -2083,6 +2118,7 @@ def get_managed_jobs_with_filters(
             workspace_match=workspace_match,
             name_match=name_match,
             pool_match=pool_match,
+            infra_match=infra_match,
             user_hashes=user_hashes,
             statuses=statuses,
             skip_finished=skip_finished,
@@ -2097,6 +2133,7 @@ def get_managed_jobs_with_filters(
             workspace_match=workspace_match,
             name_match=name_match,
             pool_match=pool_match,
+            infra_match=infra_match,
             user_hashes=user_hashes,
             statuses=statuses,
             skip_finished=skip_finished,
