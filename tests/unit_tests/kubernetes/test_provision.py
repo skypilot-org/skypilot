@@ -19,6 +19,7 @@ from sky.provision.kubernetes import instance
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.provision.kubernetes.instance import logger
 from sky.utils import subprocess_utils
+from sky.utils import volume as volume_utils
 
 
 def _remove_colorama_escape_codes(error_output):
@@ -128,6 +129,60 @@ def test_create_pods_raises_on_more_pods_than_requested(monkeypatch):
     config = _make_provision_config(count=2)
     with pytest.raises(RuntimeError, match='resource leak'):
         instance._create_pods('us', cluster_on_cloud, cluster_on_cloud, config)
+
+
+def test_inject_ephemeral_volumes():
+    pod_spec = {
+        'spec': {
+            'containers': [{
+                'name': 'ray-node',
+                'volumeMounts': [{
+                    'name': 'config',
+                    'mountPath': '/etc/config',
+                }],
+            }],
+            'volumes': [{
+                'name': 'config',
+                'configMap': {
+                    'name': 'config',
+                },
+            }],
+        },
+    }
+    volume_info = volume_utils.VolumeInfo(
+        name='scratch',
+        path='/scratch',
+        volume_name_on_cloud='scratch-pvc',
+        volume_id_on_cloud='pvc-id',
+    )
+
+    instance.inject_ephemeral_volumes(pod_spec, [volume_info])
+    instance.inject_ephemeral_volumes(pod_spec, [volume_info])
+
+    assert pod_spec['spec']['volumes'] == [
+        {
+            'name': 'config',
+            'configMap': {
+                'name': 'config',
+            },
+        },
+        {
+            'name': 'scratch',
+            'persistentVolumeClaim': {
+                'claimName': 'scratch-pvc',
+            },
+        },
+    ]
+    assert pod_spec['spec']['containers'][0]['volumeMounts'] == [
+        {
+            'name': 'config',
+            'mountPath': '/etc/config',
+        },
+        {
+            'name': 'scratch',
+            'mountPath': '/scratch',
+        },
+    ]
 
 
 def test_out_of_cpus(monkeypatch):

@@ -31,6 +31,7 @@ from sky.utils import status_lib
 from sky.utils import subprocess_utils
 from sky.utils import timeline
 from sky.utils import ux_utils
+from sky.utils import volume as volume_utils
 from sky.utils.db import db_utils
 
 if TYPE_CHECKING:
@@ -2132,6 +2133,32 @@ def _configure_runtime_class(pod_spec: Dict[str,
         spec['runtimeClassName'] = 'nvidia'
 
 
+def inject_ephemeral_volumes(
+        pod_spec: Dict[str, Any],
+        ephemeral_volumes: List[volume_utils.VolumeInfo]) -> None:
+    """Add provisioned ephemeral volumes to a Kubernetes pod spec."""
+    containers = pod_spec['spec']['containers']
+    if not containers:
+        raise ValueError('Cannot mount ephemeral volumes without a container.')
+    volumes = pod_spec['spec'].setdefault('volumes', [])
+    volume_mounts = containers[0].setdefault('volumeMounts', [])
+    for ephemeral_volume in ephemeral_volumes:
+        volume_entry = {
+            'name': ephemeral_volume.name,
+            'persistentVolumeClaim': {
+                'claimName': ephemeral_volume.volume_name_on_cloud,
+            },
+        }
+        if volume_entry not in volumes:
+            volumes.append(volume_entry)
+        volume_mount = {
+            'name': ephemeral_volume.name,
+            'mountPath': ephemeral_volume.path,
+        }
+        if volume_mount not in volume_mounts:
+            volume_mounts.append(volume_mount)
+
+
 @timeline.event
 def _create_pods(region: str, cluster_name: str, cluster_name_on_cloud: str,
                  config: common.ProvisionConfig) -> common.ProvisionRecord:
@@ -2167,22 +2194,7 @@ def _create_pods(region: str, cluster_name: str, cluster_name_on_cloud: str,
 
     ephemeral_volumes = provider_config.get('ephemeral_volume_infos')
     if ephemeral_volumes:
-        for ephemeral_volume in ephemeral_volumes:
-            # Update the volumes and volume mounts in the pod spec
-            if 'volumes' not in pod_spec['spec']:
-                pod_spec['spec']['volumes'] = []
-            pod_spec['spec']['volumes'].append({
-                'name': ephemeral_volume.name,
-                'persistentVolumeClaim': {
-                    'claimName': ephemeral_volume.volume_name_on_cloud,
-                },
-            })
-            if 'volumeMounts' not in pod_spec['spec']['containers'][0]:
-                pod_spec['spec']['containers'][0]['volumeMounts'] = []
-            pod_spec['spec']['containers'][0]['volumeMounts'].append({
-                'name': ephemeral_volume.name,
-                'mountPath': ephemeral_volume.path,
-            })
+        inject_ephemeral_volumes(pod_spec, ephemeral_volumes)
 
     # Docker sidecar cache volume injection: if a SkyPilot volume was
     # specified for the enable_docker cache, look up the PVC name. The actual
