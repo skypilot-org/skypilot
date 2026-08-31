@@ -50,6 +50,7 @@ from sky.utils import common
 from sky.utils import common_utils
 from sky.utils import controller_utils
 from sky.utils import dag_utils
+from sky.utils import infra_utils
 from sky.utils import rich_utils
 from sky.utils import status_lib
 from sky.utils import subprocess_utils
@@ -238,6 +239,7 @@ class _DefaultManagedJobRunner:
         workspace_match: Optional[str],
         name_match: Optional[str],
         pool_match: Optional[str],
+        infra_match: Optional[str],
         page: Optional[int],
         limit: Optional[int],
         user_hashes: Optional[List[Optional[str]]],
@@ -264,10 +266,25 @@ class _DefaultManagedJobRunner:
                   matching the filters.
         """
         with metrics_lib.time_it('jobs.queue.generate_code', group='jobs'):
+            # By name: the parameter list is long enough that inserting one
+            # in the middle would silently shift every argument after it.
             code = managed_job_utils.ManagedJobCodeGen.get_job_table(
-                skip_finished, accessible_workspaces, job_ids, workspace_match,
-                name_match, pool_match, page, limit, user_hashes, statuses,
-                fields, sort_by, sort_order, submitted_after, submitted_before)
+                skip_finished=skip_finished,
+                accessible_workspaces=accessible_workspaces,
+                job_ids=job_ids,
+                workspace_match=workspace_match,
+                name_match=name_match,
+                pool_match=pool_match,
+                infra_match=infra_match,
+                page=page,
+                limit=limit,
+                user_hashes=user_hashes,
+                statuses=statuses,
+                fields=fields,
+                sort_by=sort_by,
+                sort_order=sort_order,
+                submitted_after=submitted_after,
+                submitted_before=submitted_before)
         with metrics_lib.time_it('jobs.queue.run_on_head', group='jobs'):
             returncode, job_table_payload, stderr = backend.run_on_head(
                 handle,
@@ -277,9 +294,21 @@ class _DefaultManagedJobRunner:
                 separate_stderr=True)
 
         if returncode != 0:
-            logger.error(job_table_payload + stderr)
+            output = job_table_payload + stderr
+            marker = managed_job_utils.INFRA_FILTER_UNSUPPORTED_MARKER
+            if marker in output:
+                # The controller refused the infra filter rather than answering
+                # without it. Its message names the version it actually runs,
+                # so surface that line on its own instead of a traceback.
+                detail = output.partition(f'{marker}: ')[2].splitlines()
+                with ux_utils.print_exception_no_traceback():
+                    raise exceptions.NotSupportedError(
+                        detail[0].strip() if detail else
+                        'The jobs controller does not support filtering '
+                        'managed jobs by infra.')
+            logger.error(output)
             raise RuntimeError('Failed to fetch managed jobs with returncode: '
-                               f'{returncode}.\n{job_table_payload + stderr}')
+                               f'{returncode}.\n{output}')
 
         with metrics_lib.time_it('jobs.queue.load_job_queue', group='jobs'):
             (jobs, total, result_type, total_no_filter, status_counts
@@ -1257,6 +1286,7 @@ def queue_v2_api(
     workspace_match: Optional[str] = None,
     name_match: Optional[str] = None,
     pool_match: Optional[str] = None,
+    infra_match: Optional[str] = None,
     page: Optional[int] = None,
     limit: Optional[int] = None,
     statuses: Optional[List[str]] = None,
@@ -1269,9 +1299,23 @@ def queue_v2_api(
     """Gets statuses of managed jobs and parse the
     jobs to responses.ManagedJobRecord."""
     jobs, total, status_counts, total_no_filter = queue_v2(
-        refresh, skip_finished, all_users, job_ids, user_match, workspace_match,
-        name_match, pool_match, page, limit, statuses, fields, sort_by,
-        sort_order, submitted_after, submitted_before)
+        refresh=refresh,
+        skip_finished=skip_finished,
+        all_users=all_users,
+        job_ids=job_ids,
+        user_match=user_match,
+        workspace_match=workspace_match,
+        name_match=name_match,
+        pool_match=pool_match,
+        infra_match=infra_match,
+        page=page,
+        limit=limit,
+        statuses=statuses,
+        fields=fields,
+        sort_by=sort_by,
+        sort_order=sort_order,
+        submitted_after=submitted_after,
+        submitted_before=submitted_before)
     if fields:
         # The queue records carry every known column (None for the ones the
         # query didn't select). Callers that pass ``fields`` have declared
@@ -1298,6 +1342,7 @@ def queue_v2(
     workspace_match: Optional[str] = None,
     name_match: Optional[str] = None,
     pool_match: Optional[str] = None,
+    infra_match: Optional[str] = None,
     page: Optional[int] = None,
     limit: Optional[int] = None,
     statuses: Optional[List[str]] = None,
@@ -1340,6 +1385,12 @@ def queue_v2(
             does not exist.
         RuntimeError: if failed to get the managed jobs with ssh.
     """
+    if infra_match is not None:
+        # Parse here so a malformed spec is rejected against the input the
+        # caller typed, rather than surfacing from the controller wrapped in a
+        # remote traceback. The parsed value is discarded: the controller
+        # filters on the spec itself.
+        infra_utils.InfraInfo.from_str(infra_match)
     if limit is not None:
         if limit < 1:
             raise ValueError(f'Limit must be at least 1, got {limit}')
@@ -1391,6 +1442,7 @@ def queue_v2(
                 workspace_match=workspace_match,
                 name_match=name_match,
                 pool_match=pool_match,
+                infra_match=infra_match,
                 page=page,
                 limit=limit,
                 # Remove None from user_hashes, as the gRPC server uses the
@@ -1412,6 +1464,15 @@ def queue_v2(
             response = backend_utils.invoke_skylet_with_retries(
                 lambda: cloud_vm_ray_backend.SkyletClient(
                     handle.get_grpc_channel()).get_managed_job_table(request))
+            if infra_match is not None and not response.infra_match_applied:
+                # A field an old server does not know is dropped silently, and
+                # the rows it returns are on every infra. Refuse the answer
+                # rather than pass it off as filtered.
+                with ux_utils.print_exception_no_traceback():
+                    raise exceptions.NotSupportedError(
+                        'The jobs controller does not support filtering '
+                        'managed jobs by infra. Upgrade the jobs controller '
+                        'to use this filter.')
             jobs = managed_job_utils.decode_managed_job_protos(response.jobs)
             return jobs, response.total, dict(
                 response.status_counts), response.total_no_filter
@@ -1428,6 +1489,7 @@ def queue_v2(
          workspace_match=workspace_match,
          name_match=name_match,
          pool_match=pool_match,
+         infra_match=infra_match,
          page=page,
          limit=limit,
          user_hashes=user_hashes,
