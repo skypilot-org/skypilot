@@ -46,6 +46,8 @@ class JobsCacheManager {
       jobIdMatch,
       nameMatch,
       userMatch,
+      accountMatch,
+      qosMatch,
       workspaceMatch,
       poolMatch,
       statuses,
@@ -61,6 +63,8 @@ class JobsCacheManager {
       jobIdMatch: jobIdMatch || null,
       nameMatch: nameMatch || null,
       userMatch: userMatch || null,
+      accountMatch: accountMatch || null,
+      qosMatch: qosMatch || null,
       workspaceMatch: workspaceMatch || null,
       poolMatch: poolMatch || null,
       statuses: statuses && statuses.length > 0 ? [...statuses].sort() : null,
@@ -79,6 +83,8 @@ class JobsCacheManager {
       jobIdMatch,
       nameMatch,
       userMatch,
+      accountMatch,
+      qosMatch,
       workspaceMatch,
       poolMatch,
       statuses,
@@ -89,6 +95,8 @@ class JobsCacheManager {
       jobIdMatch: jobIdMatch || null,
       nameMatch: nameMatch || null,
       userMatch: userMatch || null,
+      accountMatch: accountMatch || null,
+      qosMatch: qosMatch || null,
       workspaceMatch: workspaceMatch || null,
       poolMatch: poolMatch || null,
       statuses: statuses && statuses.length > 0 ? [...statuses].sort() : null,
@@ -379,6 +387,12 @@ class JobsCacheManager {
     }
     if (filterOptions.userMatch) {
       filters.push({ property: 'user', value: filterOptions.userMatch });
+    }
+    if (filterOptions.accountMatch) {
+      filters.push({ property: 'account', value: filterOptions.accountMatch });
+    }
+    if (filterOptions.qosMatch) {
+      filters.push({ property: 'qos', value: filterOptions.qosMatch });
     }
     if (filterOptions.workspaceMatch) {
       filters.push({

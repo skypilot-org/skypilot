@@ -209,10 +209,18 @@ export const JOB_FILTER_SCHEMA = [
   { key: 'name', label: 'Name', kind: 'text' },
   { key: 'id', label: 'ID', kind: 'text' },
   { key: 'user', label: 'User', kind: 'text' },
+  // Slurm accounting fields, populated only on external rows. They stay in
+  // the schema unconditionally so a shared URL always decodes, but the
+  // dropdown only offers them once external rows have been seen.
+  { key: 'account', label: 'Account', kind: 'text' },
+  { key: 'qos', label: 'QOS', kind: 'text' },
   { key: 'workspace', label: 'Workspace', kind: 'text' },
   { key: 'pool', label: 'Pool', kind: 'text' },
   { key: 'labels', label: 'Labels', kind: 'kv', multi: 'repeat' },
 ];
+
+// Filter properties that can only ever match external rows.
+const EXTERNAL_ONLY_FILTER_KEYS = new Set(['account', 'qos']);
 
 // Non-filter state that belongs in a shared link too.
 //
@@ -360,6 +368,9 @@ export function ManagedJobs() {
   });
   const [preloadingComplete, setPreloadingComplete] = useState(false);
   const [lastFetchedTime, setLastFetchedTime] = useState(null);
+  // Latched once any fetched page contains an external row, so the
+  // Account/QOS filter options and column don't flicker across pages.
+  const [hasExternalRows, setHasExternalRows] = useState(false);
 
   const fetchData = React.useCallback(
     async (isRefreshButton = false) => {
@@ -463,7 +474,13 @@ export function ManagedJobs() {
         />
         <div className="w-full sm:w-auto max-w-xl">
           <FilterDropdown
-            propertyList={PROPERTY_OPTIONS}
+            propertyList={
+              hasExternalRows
+                ? PROPERTY_OPTIONS
+                : PROPERTY_OPTIONS.filter(
+                    (o) => !EXTERNAL_ONLY_FILTER_KEYS.has(o.value)
+                  )
+            }
             valueList={valueList}
             setFilters={setFilters}
             addFilter={addFilter}
@@ -489,6 +506,8 @@ export function ManagedJobs() {
         setValueList={setValueList}
         preloadingComplete={preloadingComplete}
         lastFetchedTime={lastFetchedTime}
+        hasExternalRows={hasExternalRows}
+        setHasExternalRows={setHasExternalRows}
       />
 
       {/* Pools table - always visible */}
@@ -592,6 +611,8 @@ export function ManagedJobsTable({
   setValueList,
   preloadingComplete,
   lastFetchedTime,
+  hasExternalRows,
+  setHasExternalRows,
 }) {
   const [sortConfig, setSortConfig] = useState({
     key: 'id',
@@ -723,6 +744,18 @@ export function ManagedJobsTable({
     return 'desc';
   }, [sortConfig.key, sortConfig.direction]);
 
+  // Latch external-row presence up to the page component (never unlatches),
+  // which gates the Account/QOS column and filter options.
+  React.useEffect(() => {
+    if (
+      !hasExternalRows &&
+      setHasExternalRows &&
+      (data || []).some((job) => job.is_external)
+    ) {
+      setHasExternalRows(true);
+    }
+  }, [data, hasExternalRows, setHasExternalRows]);
+
   // Determine if we should show the Workspace column
   // Only show if there are multiple workspaces or a workspace other than 'default'
   const shouldShowWorkspace = React.useMemo(() => {
@@ -802,6 +835,8 @@ export function ManagedJobsTable({
           jobIdMatch: jobIdFilter,
           nameMatch: getFilterValue('name'),
           userMatch: effectiveUserMatch,
+          accountMatch: getFilterValue('account'),
+          qosMatch: getFilterValue('qos'),
           workspaceMatch: getFilterValue('workspace'),
           poolMatch: getFilterValue('pool'),
           statuses: computedStatuses.length > 0 ? computedStatuses : undefined,
@@ -1699,6 +1734,33 @@ export function ManagedJobsTable({
           ) : null,
       },
       {
+        id: 'account',
+        order: 2.7,
+        conditional: true,
+        renderHeader: () =>
+          hasExternalRows ? (
+            <TableHead
+              className="sortable whitespace-nowrap"
+              onClick={() => requestSort('account')}
+            >
+              Account / QOS{getSortDirection('account')}
+            </TableHead>
+          ) : null,
+        renderCell: (item) =>
+          hasExternalRows ? (
+            <TableCell>
+              {item.account ? (
+                <span className="whitespace-nowrap">
+                  {item.account}
+                  {item.qos ? ` / ${item.qos}` : ''}
+                </span>
+              ) : (
+                <span className="text-gray-400">—</span>
+              )}
+            </TableCell>
+          ) : null,
+      },
+      {
         id: 'submitted',
         order: 3,
         renderHeader: () => (
@@ -2042,6 +2104,7 @@ export function ManagedJobsTable({
       getSortDirection,
       shouldShowWorkspace,
       shouldShowPool,
+      hasExternalRows,
       expandedRowId,
       poolsLoading,
       poolsData,
@@ -2116,6 +2179,7 @@ export function ManagedJobsTable({
         // Handle conditional columns
         if (columnId === 'workspace') return shouldShowWorkspace;
         if (columnId === 'pool') return shouldShowPool;
+        if (columnId === 'account') return hasExternalRows;
         return true;
       },
     },
