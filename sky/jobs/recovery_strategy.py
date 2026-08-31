@@ -942,8 +942,28 @@ class StrategyExecutor:
                                                      f'{env_var}')
                                     logger.debug('Env vars for api_start: '
                                                  f'{os.environ}')
-                                    await asyncio.to_thread(sdk.api_start)
-                                    logger.info('API server started.')
+                                    if server_common.is_running_in_api_server():
+                                        # Running inside the API server
+                                        # (consolidation mode): the server is
+                                        # this process's parent, so there is
+                                        # nothing to start. Calling api_start
+                                        # here is at best redundant and, if a
+                                        # transient healthz probe fails under
+                                        # load, actively destructive --
+                                        # check_server_healthy_or_start_fn
+                                        # would route into _start_api_server,
+                                        # whose _set_metrics_env_var rmtrees
+                                        # the prometheus multiproc dir. The
+                                        # env-clearing above is a harmless
+                                        # no-op without a fresh server to
+                                        # inherit it; it is restored below.
+                                        logger.debug(
+                                            'Skipping local API server start; '
+                                            'already running inside the API '
+                                            'server.')
+                                    else:
+                                        await asyncio.to_thread(sdk.api_start)
+                                        logger.info('API server started.')
                                 finally:
                                     for env_var, value in (
                                             vars_to_restore.items()):
