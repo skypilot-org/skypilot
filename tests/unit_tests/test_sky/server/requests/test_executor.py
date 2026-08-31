@@ -20,6 +20,7 @@ from sky.server import daemons as server_daemons
 from sky.server.requests import continue_condition as continue_condition_lib
 from sky.server.requests import executor
 from sky.server.requests import payloads
+from sky.server.requests import preconditions
 from sky.server.requests import process
 from sky.server.requests import requests as requests_lib
 from sky.skylet import constants
@@ -175,6 +176,65 @@ async def test_api_cancel_race_condition(isolated_database):
     updated = requests_lib.get_request('race-cancel-before')
     assert updated is not None
     assert updated.status == requests_lib.RequestStatus.CANCELLED
+
+
+def _make_pending_request(request_id: str) -> requests_lib.Request:
+    return requests_lib.Request(request_id=request_id,
+                                name='test-request',
+                                entrypoint=dummy_entrypoint,
+                                request_body=payloads.RequestBody(),
+                                status=requests_lib.RequestStatus.PENDING,
+                                created_at=0.0,
+                                user_id='test-user')
+
+
+@pytest.mark.asyncio
+async def test_enqueue_failure_marks_request_failed(isolated_database):
+    """A failed queue put must leave the request FAILED, not PENDING."""
+    req = _make_pending_request('enqueue-fails')
+    assert await requests_lib.create_if_not_exists_async(req) is True
+
+    queue = mock.Mock()
+    queue.put_async = mock.AsyncMock(side_effect=RuntimeError('put failed'))
+    with mock.patch.object(executor, '_get_queue', return_value=queue):
+        with pytest.raises(RuntimeError, match='put failed'):
+            await executor.schedule_prepared_request(req)
+
+    updated = requests_lib.get_request('enqueue-fails')
+    assert updated is not None
+    assert updated.status == requests_lib.RequestStatus.FAILED
+    error = updated.get_error()
+    assert error is not None
+    assert 'put failed' in str(error['object'])
+
+
+class _AlwaysMetPrecondition(preconditions.Precondition):
+
+    async def check(self):
+        return True, None
+
+
+@pytest.mark.asyncio
+async def test_enqueue_failure_with_precondition_marks_request_failed(
+        isolated_database):
+    """The terminal-state guard must also cover the precondition path."""
+    req = _make_pending_request('enqueue-fails-precondition')
+    assert await requests_lib.create_if_not_exists_async(req) is True
+
+    queue = mock.Mock()
+    queue.put_async = mock.AsyncMock(side_effect=RuntimeError('put failed'))
+    with mock.patch.object(executor, '_get_queue', return_value=queue):
+        before = set(preconditions.background_tasks)
+        await executor.schedule_prepared_request(
+            req, precondition=_AlwaysMetPrecondition(req.request_id))
+        new_tasks = preconditions.background_tasks - before
+        assert len(new_tasks) == 1
+        with pytest.raises(RuntimeError, match='put failed'):
+            await next(iter(new_tasks))
+
+    updated = requests_lib.get_request('enqueue-fails-precondition')
+    assert updated is not None
+    assert updated.status == requests_lib.RequestStatus.FAILED
 
 
 @pytest.mark.asyncio
