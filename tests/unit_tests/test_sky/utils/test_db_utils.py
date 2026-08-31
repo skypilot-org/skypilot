@@ -580,6 +580,83 @@ class TestGetEngine:
                 sqlalchemy.pool.QueuePool)
 
 
+class TestSetMaxConnectionsRebuild:
+    """set_max_connections must re-decide the pool of an existing engine.
+
+    Every server process reads the server config from the state DB while
+    importing skypilot_config, i.e. before it knows its connection budget. The
+    engine that read is served by is cached, so without a rebuild the whole
+    process stays on the NullPool chosen at import time.
+    """
+
+    @pytest.fixture(autouse=True)
+    def server_postgres(self, monkeypatch):
+        db_utils._postgres_engine_cache.clear()
+        db_utils._sqlite_engine_cache.clear()
+        db_utils.set_max_connections(0)
+        monkeypatch.setenv('IS_SKYPILOT_SERVER', 'true')
+        monkeypatch.setenv('SKYPILOT_DB_CONNECTION_URI',
+                           'postgresql://user:pass@10.0.0.5:5432/db')
+        monkeypatch.delenv('SKYPILOT_DB_POOL_HOSTPORT', raising=False)
+        monkeypatch.delenv('SKYPILOT_DB_POOL_CONNECTION_URI', raising=False)
+
+    def test_import_time_nullpool_is_rebuilt_as_queuepool(self):
+        before = db_utils.get_engine(None)
+        assert isinstance(before.pool, sqlalchemy.NullPool)
+        generation = db_utils.get_engine_generation()
+
+        db_utils.set_max_connections(1)
+
+        after = db_utils.get_engine(None)
+        assert after is not before
+        assert isinstance(after.pool, sqlalchemy.pool.QueuePool)
+        assert after.pool.size() == 1
+        assert db_utils.get_engine_generation() != generation
+
+    def test_same_budget_keeps_the_engine(self):
+        db_utils.set_max_connections(1)
+        engine = db_utils.get_engine(None)
+        generation = db_utils.get_engine_generation()
+
+        db_utils.set_max_connections(1)
+
+        assert db_utils.get_engine(None) is engine
+        assert db_utils.get_engine_generation() == generation
+
+    def test_async_and_no_pool_engines_are_not_rebuilt(self):
+        # Both are unconditionally NullPool, so the budget cannot change them
+        # and discarding them would only churn connections.
+        async_engine = db_utils.get_engine(None, async_engine=True)
+        no_pool = db_utils.get_engine(None, direct=True, no_pool=True)
+
+        db_utils.set_max_connections(1)
+
+        assert db_utils.get_engine(None, async_engine=True) is async_engine
+        assert db_utils.get_engine(None, direct=True, no_pool=True) is no_pool
+
+    def test_database_manager_picks_up_the_rebuilt_engine(self):
+        create_table = mock.MagicMock()
+        post_init = mock.MagicMock()
+        manager = db_utils.DatabaseManager('state', create_table, post_init)
+
+        before = manager.get_engine()
+        assert isinstance(before.pool, sqlalchemy.NullPool)
+        assert create_table.call_count == 1
+        assert post_init.call_count == 1
+
+        db_utils.set_max_connections(1)
+
+        after = manager.get_engine()
+        assert after is not before
+        assert isinstance(after.pool, sqlalchemy.pool.QueuePool)
+        # The schema and the post-init side effects belong to the database,
+        # not to the engine: swapping the engine must not redo them.
+        assert create_table.call_count == 1
+        assert post_init.call_count == 1
+        # Stable once the generation matches again.
+        assert manager.get_engine() is after
+
+
 class TestConnStringResolution:
     """Tests for _rewrite_hostport and _resolve_conn_string."""
 

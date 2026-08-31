@@ -206,9 +206,13 @@ _queue_factory: Optional[queue_base.QueueBackendFactory] = None
 
 
 def executor_initializer(proc_group: str,
-                         clean_env: Optional[Dict[str, str]] = None):
+                         clean_env: Optional[Dict[str, str]] = None,
+                         num_db_connections_per_worker: int = 0):
     setproctitle.setproctitle(f'SkyPilot:executor:{proc_group}:'
                               f'{multiprocessing.current_process().pid}')
+    # Before anything that touches the state DB, so that plugin install and
+    # every request afterwards share one engine built for this budget.
+    db_utils.set_max_connections(num_db_connections_per_worker)
     # Load plugins for executor process.
     plugins.load_plugins(
         plugins.ExtensionContext(context=plugins.PluginContext.EXECUTOR))
@@ -361,9 +365,8 @@ class RequestWorker:
             # multiple requests can share the same process pid, which may cause
             # issues with SkyPilot core functions if they rely on the exit of
             # the process, such as subprocess_daemon.py.
-            fut = executor.submit_until_success(
-                _request_execution_wrapper, request_id, ignore_return_value,
-                self.num_db_connections_per_worker)
+            fut = executor.submit_until_success(_request_execution_wrapper,
+                                                request_id, ignore_return_value)
             # Decrement the free executor count when a request starts
             if metrics_utils.METRICS_ENABLED:
                 if self.schedule_type == api_requests.ScheduleType.LONG:
@@ -496,7 +499,8 @@ class RequestWorker:
                 garanteed_workers=self.garanteed_parallelism,
                 burst_workers=self.burstable_parallelism,
                 initializer=executor_initializer,
-                initargs=(proc_group, clean_env_module.get_clean_server_env()))
+                initargs=(proc_group, clean_env_module.get_clean_server_env(),
+                          self.num_db_connections_per_worker))
             # Initialize the appropriate gauge for the number of free executors
             total_executors = (self.garanteed_parallelism +
                                self.burstable_parallelism)
@@ -782,8 +786,7 @@ def _gated_sigterm_handler(signum: int,
 
 
 def _request_execution_wrapper(request_id: str,
-                               ignore_return_value: bool,
-                               num_db_connections_per_worker: int = 0) -> None:
+                               ignore_return_value: bool) -> None:
     """Wrapper for a request execution.
 
     It wraps the execution of a request to:
@@ -797,7 +800,6 @@ def _request_execution_wrapper(request_id: str,
     pid = multiprocessing.current_process().pid
     proc = psutil.Process(pid)
     rss_begin = proc.memory_info().rss
-    db_utils.set_max_connections(num_db_connections_per_worker)
     # Handle the SIGTERM signal to abort the request processing gracefully.
     # Only set up signal handlers in the main thread, as signal.signal() raises
     # ValueError if called from a non-main thread (e.g., in tests).
