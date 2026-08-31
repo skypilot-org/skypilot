@@ -676,9 +676,16 @@ export function InfrastructureSection({
                     isExpandable && expandedContexts.has(context);
                   // Expanding appends the partition breakdown under the
                   // cluster's own totals, so the aggregate stays on screen and
-                  // the toggle keeps its place.
+                  // the toggle keeps its place. When the cluster has no GPU
+                  // type rows (e.g. its availability sweep failed), a null
+                  // summary row stands in — otherwise every expanded row would
+                  // be a partition row, and the toggle cell (the only way to
+                  // collapse) would never render again.
                   const subRows = isExpanded
-                    ? [...typeRows, ...partitionRows]
+                    ? [
+                        ...(typeRows.length ? typeRows : [null]),
+                        ...partitionRows,
+                      ]
                     : typeRows;
                   const summaryRowCount = Math.max(1, typeRows.length);
 
