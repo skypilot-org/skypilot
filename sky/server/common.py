@@ -187,6 +187,14 @@ class ApiServerStatus(enum.Enum):
 
 @dataclasses.dataclass
 class ApiServerInfo:
+    """What `GET /api/health` told us about the server, for this caller.
+
+    Some fields describe the deployment (versions, which auth modes are on)
+    and some are resolved per caller (`user`,
+    `restrict_all_users_mutations`). Every field must have a default that
+    means "an older server did not send this", since the client talks to
+    servers that predate any field added here.
+    """
     status: ApiServerStatus
     api_version: ApiVersion = None
     version: Optional[str] = None

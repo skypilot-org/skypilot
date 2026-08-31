@@ -3181,7 +3181,7 @@ setting restricts what a user may *do*, not what they may see.
   so the restriction also holds for SDK callers. ``sky down``/``stop``/
   ``autostop`` expand ``-u`` into one request per cluster in the client, so
   for those three the check is client-side and a caller driving the Python SDK
-  directly is not stopped by it. Use :ref:`workspaces <config-yaml-workspaces>`
+  directly is not stopped by it. Use :ref:`Workspaces <workspaces>`
   if you need a hard isolation boundary between users' clusters.
 
 Like the rest of RBAC, this is only functional when
