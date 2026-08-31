@@ -9,6 +9,7 @@ import base64
 import gzip
 import io
 import os
+import re
 import subprocess
 import tarfile
 import textwrap
@@ -327,3 +328,90 @@ def test_a_failed_patch_carries_the_tool_output(tmp_path):
     message = str(err.value)
     assert 'worker.py' in message
     assert 'missing.py.patch' in message, message
+
+
+# ------------------------------------------- the two representations agree
+
+
+def _hunks(diff_path):
+    """(old_start, [(tag, text), ...]) for each hunk of a unified diff."""
+    with open(diff_path, 'r', encoding='utf-8') as f:
+        lines = f.read().split('\n')
+    hunks, i = [], 0
+    while i < len(lines):
+        header = re.match(r'^@@ -(\d+)(?:,\d+)? \+\d+(?:,\d+)? @@', lines[i])
+        i += 1
+        if header is None:
+            continue
+        body = []
+        while i < len(lines) and not lines[i].startswith('@@'):
+            line = lines[i]
+            i += 1
+            if line.startswith(('---', '+++', '\\')):
+                continue
+            if not line and i == len(lines):  # trailing newline
+                continue
+            body.append((line[0] if line else ' ', line[1:] if line else ''))
+        hunks.append((int(header.group(1)), body))
+    return hunks
+
+
+def _before_and_after(hunks):
+    """Rebuild a file the diff applies to, and what it should become.
+
+    Only the hunks' own lines are known, so the gaps between them are filled
+    with numbered placeholders. `after` is built by splicing each hunk into
+    `before`, back to front, so the placeholders travel across unchanged and
+    the comparison is about the edit rather than the filler.
+    """
+    before = {}
+    for old_start, body in hunks:
+        lineno = old_start
+        for tag, text in body:
+            if tag in ' -':
+                before[lineno] = text
+                lineno += 1
+    lines = [before.get(n, f'# filler-{n}') for n in range(1, max(before) + 1)]
+    after = list(lines)
+    for old_start, body in sorted(hunks, reverse=True):
+        old_len = sum(1 for tag, _ in body if tag in ' -')
+        after[old_start - 1:old_start - 1 +
+              old_len] = [text for tag, text in body if tag in ' +']
+    return lines, after
+
+
+@pytest.mark.parametrize('patch_name',
+                         [name for _, name in apply_patches._PATCHES])  # pylint: disable=protected-access
+def test_the_patch_and_the_diff_encode_the_same_change(patch_name, tmp_path):
+    """Images with and without `patch` must not run different Ray code.
+
+    Each target ships twice -- a normal diff for the system `patch` binary and
+    a unified diff for the pure-python fallback -- and regenerating them is a
+    manual, two-command step (see ray_patches/__init__.py), so they can drift
+    without anything noticing. Reconstruct a file from the unified diff, apply
+    the *normal* one to it, and require the same result.
+    """
+    if not apply_patches._have_patch_binary():  # pylint: disable=protected-access
+        pytest.skip('no system `patch` binary on this machine')
+    diff_path = os.path.join(RAY_PATCHES_DIR,
+                             patch_name.replace('.patch', '.diff'))
+    before, after = _before_and_after(_hunks(diff_path))
+
+    source = tmp_path / patch_name.replace('.py.patch', '.py')
+    source.write_text('\n'.join(before) + '\n', encoding='utf-8')
+    result = tmp_path / 'out.py'
+    completed = subprocess.run([
+        'patch', '--fuzz=0',
+        str(source), '-i',
+        os.path.join(RAY_PATCHES_DIR, patch_name), '-o',
+        str(result)
+    ],
+                               check=False,
+                               capture_output=True,
+                               text=True)
+    assert completed.returncode == 0, (
+        f'{patch_name} does not apply to the file its .diff describes: '
+        f'{completed.stdout}{completed.stderr}')
+    assert result.read_text(encoding='utf-8').split('\n')[:-1] == after, (
+        f'{patch_name} and its .diff encode different changes; regenerate '
+        'both together')

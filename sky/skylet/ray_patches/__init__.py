@@ -7,15 +7,14 @@ docstring there for why the Kubernetes bootstrap needs that.
 Each patched file has two representations that must stay in sync: a *.patch
 (normal diff, for the system `patch` binary) and a *.diff (unified diff, for
 the pure-python fallback). Regenerate both together, or images with and
-without `patch` installed end up running different Ray code.
+without `patch` installed end up running different Ray code -- pinned by
+test_the_patch_and_the_diff_encode_the_same_change.
 
-To get original versions, go to the Ray branch with version:
+Example workflow, against the Ray this SkyPilot pins:
 
-  sky.constants.SKY_REMOTE_RAY_VERSION
-
-Example workflow:
-
-  >> RAY_RAW=https://raw.githubusercontent.com/ray-project/ray/releases/2.4.0
+  >> RAY_VERSION=$(python -c 'from sky.skylet import constants;
+  ..                          print(constants.SKY_REMOTE_RAY_VERSION)')
+  >> RAY_RAW=https://raw.githubusercontent.com/ray-project/ray/ray-$RAY_VERSION
   >> wget $RAY_RAW/python/ray/autoscaler/_private/command_runner.py
   >> cp command_runner.py command_runner.py.1
 
