@@ -2369,6 +2369,9 @@ def get_config_schema():
                 **_NETWORK_CONFIG_SCHEMA, 'use_static_ip_address': {
                     'type': 'boolean',
                 },
+                'disk_encrypted': {
+                    'type': 'boolean',
+                },
                 'tenant_id': {
                     'type': 'string',
                 },
@@ -2397,6 +2400,9 @@ def get_config_schema():
                             },
                             'fabric': {
                                 'type': 'string',
+                            },
+                            'disk_encrypted': {
+                                'type': 'boolean',
                             },
                             'filesystems': {
                                 'type': 'array',
