@@ -7,7 +7,7 @@ import pathlib
 import sqlite3
 import threading
 import typing
-from typing import Any, Callable, Dict, Iterable, Literal, Optional, Union
+from typing import Any, Callable, Dict, Iterable, Literal, Optional, Set, Union
 import urllib.parse
 
 import aiosqlite
@@ -440,58 +440,52 @@ class DatabaseManager:
         self._post_init_fn = post_init_fn
         self._lock = threading.Lock()
         self._engine: Optional[sqlalchemy.engine.Engine] = None
-        # The engine this manager built for itself, and the cache generation
-        # it came from. Together they answer "is self._engine still the one
-        # get_engine() would hand out?" without taking the creation lock on
-        # every call. An engine assigned to self._engine from outside (tests
-        # substitute one) is never ours, so it is always returned as-is.
+        # The engine this manager built for itself. An engine assigned to
+        # _engine from outside is never replaced by a rebuild.
         self._own_engine: Optional[sqlalchemy.engine.Engine] = None
-        self._own_engine_generation = -1
-        self._initialized = False
+        self._own_engine_generation = 0
         self._engine_async: Optional[sqlalchemy_async.AsyncEngine] = None
 
-    def _engine_is_current(self) -> bool:
+    def _current_engine(self) -> Optional[sqlalchemy.engine.Engine]:
+        """The cached engine, or None when it must be re-fetched."""
         if self._engine is None:
-            return False
+            return None
         if self._engine is not self._own_engine:
-            return True
-        return self._own_engine_generation == get_engine_generation()
+            return self._engine
+        if self._own_engine_generation != _engine_generation:
+            return None
+        return self._engine
 
     def get_engine(self) -> sqlalchemy.engine.Engine:
         """Lazy sync engine init with double-checked locking."""
-        if self._engine_is_current():
-            assert self._engine is not None
-            return self._engine
+        engine = self._current_engine()
+        if engine is not None:
+            return engine
         with self._lock:
-            if self._engine_is_current():
-                assert self._engine is not None
-                return self._engine
-            generation = get_engine_generation()
+            engine = self._current_engine()
+            if engine is not None:
+                return engine
+            generation = _engine_generation
             engine = get_engine(self._db_name)
-            if self._initialized:
-                # A previously built engine was discarded (see
-                # set_max_connections). Only the engine is replaced: the
-                # schema and any post-init side effects belong to the
-                # database, not to the engine, and must not be redone.
-                self._engine = self._own_engine = engine
-                self._own_engine_generation = generation
-                return self._engine
-            # Run schema creation / migrations on a direct (unpooled)
-            # connection: Alembic's autocommit_block DDL relies on
-            # session-scoped COMMIT/BEGIN control that a transaction-mode
-            # pooler does not preserve, whereas the runtime engine returned to
-            # callers may be pooled. Tables live in the same physical database
-            # either way, so the pooled runtime engine sees them. When no
-            # pooler is configured, direct == pooled (same cached engine), so
-            # this is a no-op.
-            self._create_table_fn(get_engine(self._db_name, direct=True))
+            first_init = self._own_engine is None
+            if first_init:
+                # Run schema creation / migrations on a direct (unpooled)
+                # connection: Alembic's autocommit_block DDL relies on
+                # session-scoped COMMIT/BEGIN control that a transaction-mode
+                # pooler does not preserve, whereas the runtime engine returned
+                # to callers may be pooled. Tables live in the same physical
+                # database either way, so the pooled runtime engine sees them.
+                # When no pooler is configured, direct == pooled (same cached
+                # engine), so this is a no-op.
+                self._create_table_fn(get_engine(self._db_name, direct=True))
             # Set _engine before post_init_fn so that post_init_fn
             # can access self.engine (e.g. _sqlite_supports_returning).
             self._engine = self._own_engine = engine
             self._own_engine_generation = generation
-            if self._post_init_fn is not None:
+            # Schema and post-init side effects belong to the database, not to
+            # the engine, and must not be redone when only the engine changes.
+            if first_init and self._post_init_fn is not None:
                 self._post_init_fn(engine)
-            self._initialized = True
             return self._engine
 
     async def get_async_engine(self) -> sqlalchemy_async.AsyncEngine:
@@ -520,9 +514,12 @@ _sqlite_engine_cache: Dict[str, sqlalchemy.engine.Engine] = {}
 
 _db_creation_lock = threading.Lock()
 
-# Bumped whenever a cached engine is discarded, so that holders of a cached
-# engine (DatabaseManager) know to re-fetch instead of using a stale one.
+# Bumped when a cached engine is discarded, so holders know to re-fetch.
 _engine_generation = 0
+# Cache keys whose pool was chosen from _max_connections, recorded by
+# get_engine() where that choice is made. Every other engine is
+# unconditionally NullPool and a new budget cannot change it.
+_budget_scoped_keys: Set[str] = set()
 
 
 def get_engine_generation() -> int:
@@ -535,28 +532,21 @@ def set_max_connections(max_connections: int):
 
     Discards any sync Postgres engine already built under the previous
     budget, so the next ``get_engine()`` rebuilds it with the right pool.
-    This matters because ``skypilot_config`` reads the server config from the
-    state DB while being imported, which happens in every server process long
-    before that process knows its budget: without the rebuild, every process
-    would keep the ``NullPool`` engine chosen at import time and open a fresh
-    connection for every query for the rest of its life.
+    ``skypilot_config`` reads the state DB while being imported, i.e. before
+    any process knows its budget, so an engine already exists by this point.
     """
     global _max_connections, _engine_generation
     if max_connections == _max_connections:
         return
     _max_connections = max_connections
     with _db_creation_lock:
-        # Only the plain sync engines take their pool from _max_connections.
-        # Async engines and no_pool engines are unconditionally NullPool.
-        stale = [
-            key for key in _postgres_engine_cache
-            if not key.startswith('async:') and not key.startswith('nopool:')
-        ]
+        stale = _budget_scoped_keys & set(_postgres_engine_cache)
         for key in stale:
             engine = _postgres_engine_cache.pop(key)
+            _budget_scoped_keys.discard(key)
             logger.info(
-                f'Rebuilding the {type(engine.pool).__name__} sync state '
-                f'engine for a budget of {max_connections} connections.')
+                f'Rebuilding the {type(engine.pool).__name__} state engine '
+                f'for a budget of {max_connections} connections.')
             engine.dispose()
         if stale:
             _engine_generation += 1
@@ -777,6 +767,8 @@ def get_engine(
                 elif _max_connections == 0 or (direct and _pooler_configured()):
                     if direct and _pooler_configured():
                         role = sql_metrics.DB_STATE_DIRECT
+                    else:
+                        _budget_scoped_keys.add(cache_key)
                     # NullPool: no persistent connections. Used when no pool
                     # size is configured, and — crucially — for the direct
                     # engine when a pooler IS configured. The direct engine
@@ -791,6 +783,7 @@ def get_engine(
                         sqlalchemy.create_engine(conn_string,
                                                  poolclass=sqlalchemy.NullPool))
                 else:
+                    _budget_scoped_keys.add(cache_key)
                     # Sync engines can safely use QueuePool for connection reuse
                     _postgres_engine_cache[cache_key] = (
                         sqlalchemy.create_engine(

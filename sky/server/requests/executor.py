@@ -210,8 +210,8 @@ def executor_initializer(proc_group: str,
                          num_db_connections_per_worker: int = 0):
     setproctitle.setproctitle(f'SkyPilot:executor:{proc_group}:'
                               f'{multiprocessing.current_process().pid}')
-    # Before anything that touches the state DB, so that plugin install and
-    # every request afterwards share one engine built for this budget.
+    # Must precede plugin install: a plugin that keeps the engine it gets
+    # during install() would otherwise hold one built for the wrong budget.
     db_utils.set_max_connections(num_db_connections_per_worker)
     # Load plugins for executor process.
     plugins.load_plugins(

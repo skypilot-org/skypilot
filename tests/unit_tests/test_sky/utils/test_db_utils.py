@@ -104,6 +104,7 @@ class TestGetEngine:
         # Clear the module-level caches
         db_utils._postgres_engine_cache.clear()
         db_utils._sqlite_engine_cache.clear()
+        db_utils._budget_scoped_keys.clear()
         # Reset max_connections to default
         db_utils.set_max_connections(0)
         # Ensure we're not in server mode by default
@@ -593,6 +594,7 @@ class TestSetMaxConnectionsRebuild:
     def server_postgres(self, monkeypatch):
         db_utils._postgres_engine_cache.clear()
         db_utils._sqlite_engine_cache.clear()
+        db_utils._budget_scoped_keys.clear()
         db_utils.set_max_connections(0)
         monkeypatch.setenv('IS_SKYPILOT_SERVER', 'true')
         monkeypatch.setenv('SKYPILOT_DB_CONNECTION_URI',
@@ -633,6 +635,20 @@ class TestSetMaxConnectionsRebuild:
 
         assert db_utils.get_engine(None, async_engine=True) is async_engine
         assert db_utils.get_engine(None, direct=True, no_pool=True) is no_pool
+
+    def test_direct_engine_behind_a_pooler_is_not_rebuilt(self, monkeypatch):
+        # With a pooler configured the direct engine is unconditionally
+        # NullPool, so the budget cannot change it and discarding it would
+        # only churn connections.
+        monkeypatch.setenv('SKYPILOT_DB_POOL_HOSTPORT', '127.0.0.1:6432')
+        pooled = db_utils.get_engine(None)
+        direct = db_utils.get_engine(None, direct=True)
+        assert direct is not pooled
+
+        db_utils.set_max_connections(1)
+
+        assert db_utils.get_engine(None, direct=True) is direct
+        assert db_utils.get_engine(None) is not pooled
 
     def test_database_manager_keeps_an_externally_assigned_engine(self):
         # Substituting DatabaseManager._engine is how tests point a component
