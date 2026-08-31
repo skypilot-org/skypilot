@@ -48,6 +48,7 @@ class JobsCacheManager {
       userMatch,
       workspaceMatch,
       poolMatch,
+      infraMatch,
       statuses,
     } = options;
 
@@ -63,6 +64,7 @@ class JobsCacheManager {
       userMatch: userMatch || null,
       workspaceMatch: workspaceMatch || null,
       poolMatch: poolMatch || null,
+      infraMatch: infraMatch || null,
       statuses: statuses && statuses.length > 0 ? [...statuses].sort() : null,
     };
 
@@ -81,6 +83,7 @@ class JobsCacheManager {
       userMatch,
       workspaceMatch,
       poolMatch,
+      infraMatch,
       statuses,
     } = options;
 
@@ -91,6 +94,7 @@ class JobsCacheManager {
       userMatch: userMatch || null,
       workspaceMatch: workspaceMatch || null,
       poolMatch: poolMatch || null,
+      infraMatch: infraMatch || null,
       statuses: statuses && statuses.length > 0 ? [...statuses].sort() : null,
     };
 
@@ -389,6 +393,9 @@ class JobsCacheManager {
     if (filterOptions.poolMatch) {
       filters.push({ property: 'pool', value: filterOptions.poolMatch });
     }
+    if (filterOptions.infraMatch) {
+      filters.push({ property: 'infra', value: filterOptions.infraMatch });
+    }
 
     return filters;
   }
@@ -601,6 +608,7 @@ class JobsCacheManager {
           userMatch: keyObj.userMatch,
           workspaceMatch: keyObj.workspaceMatch,
           poolMatch: keyObj.poolMatch,
+          infraMatch: keyObj.infraMatch,
           statuses: keyObj.statuses,
         };
         if (JSON.stringify(keyFilterObj) === filterKey) {

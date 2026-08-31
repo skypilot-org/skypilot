@@ -211,6 +211,7 @@ export const JOB_FILTER_SCHEMA = [
   { key: 'user', label: 'User', kind: 'text' },
   { key: 'workspace', label: 'Workspace', kind: 'text' },
   { key: 'pool', label: 'Pool', kind: 'text' },
+  { key: 'infra', label: 'Infra', kind: 'text' },
   { key: 'labels', label: 'Labels', kind: 'kv', multi: 'repeat' },
 ];
 
@@ -356,6 +357,7 @@ export function ManagedJobs() {
     user: [],
     workspace: [],
     pool: [],
+    infra: [],
     labels: [],
   });
   const [preloadingComplete, setPreloadingComplete] = useState(false);
@@ -700,6 +702,10 @@ export function ManagedJobsTable({
 
   // Local state for jobs data (replacing useJobsData hook)
   const [data, setData] = useState([]);
+  // Set when the jobs controller refused the infra filter because it is too
+  // old to apply it. The server errors rather than answering unfiltered, so
+  // there are no rows to show and the page has to say why.
+  const [infraFilterUnsupported, setInfraFilterUnsupported] = useState(null);
   const [totalCount, setTotalCount] = useState(0);
   const [totalNoFilter, setTotalNoFilter] = useState(0);
   const [hookControllerStopped, setHookControllerStopped] = useState(false);
@@ -804,6 +810,10 @@ export function ManagedJobsTable({
           userMatch: effectiveUserMatch,
           workspaceMatch: getFilterValue('workspace'),
           poolMatch: getFilterValue('pool'),
+          // Matched server-side, against the cloud/region/zone columns on the
+          // job table, so `total`, the page count and the status counts all
+          // describe the filtered set.
+          infraMatch: getFilterValue('infra'),
           statuses: computedStatuses.length > 0 ? computedStatuses : undefined,
           page: currentPage,
           limit: pageSize,
@@ -830,6 +840,7 @@ export function ManagedJobsTable({
             setExternalFetchErrors([]);
           } else {
             setHookControllerStopped(false);
+            setInfraFilterUnsupported(null);
             setData(response.jobs || []);
             setTotalCount(response.total || 0);
             setTotalNoFilter(response.totalNoFilter || response.total || 0);
@@ -900,6 +911,9 @@ export function ManagedJobsTable({
           setStatusCounts({});
           setControllerStopped(false);
           setExternalFetchErrors([]);
+          setInfraFilterUnsupported(
+            err?.infraFilterUnsupported ? err.message : null
+          );
           setIsInitialLoad(false);
         }
       } finally {
@@ -1078,6 +1092,7 @@ export function ManagedJobsTable({
     const users = new Set();
     const workspaces = new Set();
     const pools = new Set();
+    const infras = new Set();
     const labels = new Set();
 
     data.forEach((job) => {
@@ -1085,6 +1100,11 @@ export function ManagedJobsTable({
       if (job.user) users.add(job.user);
       if (job.workspace) workspaces.add(job.workspace);
       if (job.pool) pools.add(job.pool);
+      // The string the Infra column renders, not `full_infra`: that one is
+      // the tooltip, and on a job it carries an accelerator group too
+      // (`Slurm (prod-gpu) (8xB300)`), which would list one infra once per
+      // accelerator shape.
+      if (job.infra && job.infra !== '-') infras.add(job.infra);
 
       // Extract labels - add only key:value pairs
       const jobLabels = job.labels || {};
@@ -1127,6 +1147,7 @@ export function ManagedJobsTable({
       user: Array.from(users).sort(),
       workspace: Array.from(workspaces).sort(),
       pool: Array.from(pools).sort(),
+      infra: Array.from(infras).sort(),
       labels: Array.from(labels).sort(),
     });
 
@@ -2462,6 +2483,12 @@ export function ManagedJobsTable({
           </div>
         )}
 
+      {infraFilterUnsupported && (
+        <div className="mb-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+          {infraFilterUnsupported}
+        </div>
+      )}
+
       <Card className="overflow-hidden">
         <div className="overflow-x-auto relative">
           {showSlowSpinner && (
@@ -2624,10 +2651,19 @@ export function ManagedJobsTable({
                       )}
                       {!controllerStopped &&
                         !controllerLaunching &&
-                        (userScope === 'mine' &&
-                        currentUser &&
-                        activeTab === 'all' &&
-                        everyoneTotal > 0 ? (
+                        (infraFilterUnsupported ? (
+                          <div className="flex flex-col items-center space-y-2 max-w-md text-center">
+                            <p className="text-gray-700">
+                              Cannot filter these jobs by infra.
+                            </p>
+                            <p className="text-sm text-gray-500">
+                              {infraFilterUnsupported}
+                            </p>
+                          </div>
+                        ) : userScope === 'mine' &&
+                          currentUser &&
+                          activeTab === 'all' &&
+                          everyoneTotal > 0 ? (
                           <div className="flex flex-col items-center space-y-2 max-w-md">
                             <p className="text-gray-700">
                               You haven&apos;t submitted any managed jobs yet.
