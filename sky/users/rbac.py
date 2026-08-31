@@ -544,6 +544,24 @@ def restrict_config_to_admins() -> bool:
                                    default_value=True))
 
 
+def restrict_all_users_mutations() -> bool:
+    """Whether the ``--all-users`` flag on mutating commands is admin-only.
+
+    ``--all-users``/``-u`` on a *mutating* command (``sky down``, ``sky stop``,
+    ``sky autostop``, ``sky cancel``, ``sky jobs cancel``) fans the operation
+    out over every user's clusters/jobs, not just the caller's. Operators who
+    do not want one user tearing down a teammate's work opt in with
+    ``rbac.restrict_all_users_mutations: true``; admins keep the flag.
+
+    Off by default, so an upgrade does not change behaviour. Read-only uses of
+    ``-u`` (``sky status``, ``sky queue``, ``sky jobs queue``) are never
+    affected -- this restricts what a user may *do*, not what they may see.
+    """
+    return bool(
+        skypilot_config.get_nested(('rbac', 'restrict_all_users_mutations'),
+                                   default_value=False))
+
+
 def get_role_permissions(
     plugin_rules: Optional[Dict[str, List[Dict[str, str]]]] = None
 ) -> Dict[str, Dict[str, Dict[str, List[Dict[str, str]]]]]:

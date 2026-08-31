@@ -16,6 +16,14 @@ For viewers, these fields are forced to their read-only / no-side-
 effect values *before* the handler runs.  Non-viewer callers see no
 behaviour change.
 
+A second, related family of shims lives here: gates that *reject* a
+body field the caller is not entitled to set, rather than rewriting it.
+`force_caller_scope_cancel_body` (own requests only) and
+`reject_all_users_{cancel,jobs_cancel}_body` (the ``--all-users`` flag on
+mutating endpoints, see `rbac.restrict_all_users_mutations`) are of that
+kind. They belong here for the same reason: the decision needs the
+caller's role, which only the dispatch context has.
+
 The shim is wired into FastAPI as a `Depends()` dependency rather
 than a middleware so it can mutate the parsed pydantic body
 in-place; standard Starlette middlewares run before body parsing.
@@ -76,6 +84,60 @@ def force_caller_scope_cancel_body(
     if scope is not None:
         request_cancel_body.user_id = scope
     return request_cancel_body
+
+
+def all_users_mutations_restricted(request: fastapi.Request) -> bool:
+    """Whether this caller is barred from `--all-users` on mutating endpoints.
+
+    True only when the operator has set ``rbac.restrict_all_users_mutations``
+    *and* the caller is a restricted principal. "Restricted" reuses
+    `request_owner_scope`, which returns None for exactly the two callers the
+    rest of RBAC exempts: an admin, and a server with no per-user identity for
+    the caller (single-user/local, or auth terminated upstream).
+
+    Also surfaced to clients on ``GET /api/health`` so the CLI can reject
+    ``-u`` up front for the down/stop/autostop commands, which expand
+    ``--all-users`` into per-cluster requests client-side and so never send the
+    flag to the server.
+    """
+    if not rbac.restrict_all_users_mutations():
+        return False
+    return request_owner_scope(request) is not None
+
+
+def _reject_all_users(request: fastapi.Request, all_users: bool,
+                      operation: str) -> None:
+    """Raises 403 if `all_users` is set and this caller may not use it."""
+    if not all_users:
+        return
+    if not all_users_mutations_restricted(request):
+        return
+    raise fastapi.HTTPException(
+        status_code=403,
+        detail=(f'--all-users/-u is not allowed for {operation}: this API '
+                'server restricts all-users operations to admins '
+                '(rbac.restrict_all_users_mutations). Target your own '
+                'resources instead, or ask an administrator.'))
+
+
+def reject_all_users_cancel_body(
+    request: fastapi.Request,
+    cancel_body: payloads.CancelBody,
+) -> payloads.CancelBody:
+    """Gate `POST /cancel` (`sky cancel -u`) on the all-users restriction."""
+    _reject_all_users(request, cancel_body.all_users,
+                      'cancelling jobs on a cluster')
+    return cancel_body
+
+
+def reject_all_users_jobs_cancel_body(
+    request: fastapi.Request,
+    jobs_cancel_body: payloads.JobsCancelBody,
+) -> payloads.JobsCancelBody:
+    """Gate `POST /jobs/cancel` (`sky jobs cancel -u`) on the restriction."""
+    _reject_all_users(request, jobs_cancel_body.all_users,
+                      'cancelling managed jobs')
+    return jobs_cancel_body
 
 
 def _is_viewer(request: fastapi.Request) -> bool:

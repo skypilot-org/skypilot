@@ -2986,6 +2986,11 @@ def cancel(
     Job IDs can be looked up by ``sky queue cluster_name``.
     Cluster names support glob patterns (e.g., px* matches px1, px2).
     """
+    if all_users:
+        # The server rejects this too; checking here keeps the confirmation
+        # prompt from asking about an operation that cannot go through.
+        _reject_all_users_if_restricted('sky cancel')
+
     # Handle glob patterns in cluster names
     matching_clusters = []
     if '*' in cluster or '?' in cluster or '[' in cluster:
@@ -3699,6 +3704,29 @@ def _controller_to_hint_or_raise(
     return _hint_or_raise_for_down_sky_serve_controller
 
 
+def _reject_all_users_if_restricted(command: str) -> None:
+    """Rejects ``-u``/``--all-users`` if the server reserves it for admins.
+
+    Mirrors the server-side gate (``rbac.restrict_all_users_mutations``,
+    surfaced per caller on ``GET /api/health``). For ``sky cancel`` and
+    ``sky jobs cancel`` the server is the real enforcement and this only moves
+    the error ahead of the confirmation prompt. For ``sky down``/``stop``/
+    ``autostop`` it is the *only* gate: those expand ``--all-users`` into one
+    request per cluster here on the client, so the server never sees the flag
+    and cannot reject it.
+
+    An unreachable or older server reports False, so the command proceeds and
+    fails (or succeeds) on its own terms rather than on a misleading
+    permission error.
+    """
+    if server_common.get_api_server_status().restrict_all_users_mutations:
+        raise click.UsageError(
+            f'`{command} -u/--all-users` is not allowed: this API server '
+            'restricts all-users operations to admins '
+            '(rbac.restrict_all_users_mutations). Target your own resources '
+            'instead, or ask an administrator.')
+
+
 def _down_or_stop_clusters(
         names: List[str],
         apply_to_all: bool = False,
@@ -3746,6 +3774,8 @@ def _down_or_stop_clusters(
             '(see `sky status`), or the -a/--all flag for all your '
             'clusters, or the -u/--all-users flag for all clusters in '
             'your team.')
+    if all_users:
+        _reject_all_users_if_restricted(f'sky {command}')
 
     operation = 'Terminating' if down else 'Stopping'
     if idle_minutes_to_autostop is not None:
@@ -6465,6 +6495,11 @@ def jobs_cancel(
         raise click.UsageError(
             'Can only specify one of JOB_IDS, --name, --pool, or '
             f'--all/--all-users. Provided {" ".join(arguments)!r}.')
+
+    if all_users:
+        # The server rejects this too; checking here keeps the confirmation
+        # prompt from asking about an operation that cannot go through.
+        _reject_all_users_if_restricted('sky jobs cancel')
 
     if not yes:
         plural = 's' if len(job_ids) > 1 else ''

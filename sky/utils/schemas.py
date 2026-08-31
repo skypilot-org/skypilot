@@ -2570,6 +2570,14 @@ def get_config_schema():
             'restrict_config_to_admins': {
                 'type': 'boolean',
             },
+            # When true, the `--all-users` (`-u`) flag on *mutating* commands
+            # (sky down/stop/autostop/cancel, sky jobs cancel) is reserved for
+            # admins, so a regular user cannot tear down or cancel another
+            # user's resources in bulk. Read-only `-u` (sky status, sky queue,
+            # sky jobs queue) is unaffected. Defaults to false.
+            'restrict_all_users_mutations': {
+                'type': 'boolean',
+            },
             # Per-role permission overrides. Schema is intentionally
             # permissive (additionalProperties: True on
             # `permissions`) because admin/user use `blocklist`
