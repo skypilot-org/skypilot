@@ -1882,7 +1882,10 @@ def _resolve_accessible_job_id_for_logs(
         candidates = list(records)
         name_str = ''
 
-    job_ids = sorted((r.job_id for r in candidates if r.job_id is not None),
+    # De-duplicate: the queue returns one record per *task*, so a multi-task
+    # job repeats its id and would otherwise look like several jobs. The
+    # lookups this replaces select `spot_job_id` DISTINCT for the same reason.
+    job_ids = sorted({r.job_id for r in candidates if r.job_id is not None},
                      reverse=True)
     if not job_ids:
         if not for_tail:

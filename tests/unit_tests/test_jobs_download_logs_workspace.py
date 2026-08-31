@@ -204,6 +204,36 @@ def test_not_found_message_matches_master(runner):
     assert "No running managed job found with name 'nope'." in msg
 
 
+def test_multi_task_job_is_one_job_not_an_ambiguity(runner):
+    """The queue returns a record per task, so one job can repeat its id.
+
+    Without de-duplication a multi-task job looks like several jobs and log
+    streaming raises a spurious ambiguity error. The lookups this replaces
+    select `spot_job_id` DISTINCT.
+    """
+    two_tasks = [_record(7, 'multi'), _record(7, 'multi')]
+    with mock.patch.object(core,
+                           'queue_v2_api',
+                           return_value=(two_tasks, 2, {}, 2)):
+        _tail(name='multi')
+    assert runner.tail_managed_job_logs.call_args.kwargs['job_id'] == 7
+
+
+def test_multi_task_job_does_not_announce_multiple_on_sync_down(backend):
+    """Same de-duplication on the sync-down path: one job, no 'Multiple' notice."""
+    two_tasks = [_record(7, 'multi'), _record(7, 'multi')]
+    with mock.patch.object(core, 'queue_v2_api',
+                           return_value=(two_tasks, 2, {}, 2)), \
+         mock.patch.object(core.logger, 'info') as log_info:
+        core.download_logs(name='multi',
+                           job_id=None,
+                           refresh=False,
+                           controller=False)
+    msg = ' '.join(str(c.args[0]) for c in log_info.call_args_list)
+    assert 'Multiple' not in msg
+    assert backend.sync_down_managed_job_logs.call_args.kwargs['job_id'] == 7
+
+
 def test_tail_name_matches_exactly(runner):
     """`name_match` is fuzzy, so 'train-v2' must not satisfy `-n train`."""
     records = [_record(9, 'train-v2'), _record(5, 'train')]
