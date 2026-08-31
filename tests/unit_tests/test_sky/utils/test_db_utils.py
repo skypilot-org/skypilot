@@ -636,6 +636,25 @@ class TestSetMaxConnectionsRebuild:
         assert db_utils.get_engine(None, async_engine=True) is async_engine
         assert db_utils.get_engine(None, direct=True, no_pool=True) is no_pool
 
+    def test_only_budget_dependent_engines_are_registered(self, monkeypatch):
+        # An engine is rebuilt iff it was registered when its pool was chosen.
+        # A budget-dependent engine that forgets to register would silently
+        # keep the pool it was first built with -- the original bug.
+        monkeypatch.setenv('SKYPILOT_DB_POOL_HOSTPORT', '127.0.0.1:6432')
+        db_utils.set_max_connections(1)
+        pooled = db_utils.get_engine(None)
+        assert isinstance(pooled.pool, sqlalchemy.pool.QueuePool)
+        assert db_utils._budget_scoped_keys == set(
+            db_utils._postgres_engine_cache)
+
+        db_utils.get_engine(None, async_engine=True)
+        db_utils.get_engine(None, direct=True, no_pool=True)
+        db_utils.get_engine(None, direct=True)
+
+        registered = db_utils._budget_scoped_keys
+        assert len(registered) == 1
+        assert registered < set(db_utils._postgres_engine_cache)
+
     def test_direct_engine_behind_a_pooler_is_not_rebuilt(self, monkeypatch):
         # With a pooler configured the direct engine is unconditionally
         # NullPool, so the budget cannot change it and discarding it would
