@@ -3350,9 +3350,6 @@ def api_login(endpoint: Optional[str] = None,
     # below are marked Secure.
     redirected = _detect_https_redirect(endpoint)
     if redirected is not None:
-        why = ('Over plain HTTP that redirect rewrites every non-GET request '
-               'as a GET, which the server rejects with "Method Not Allowed", '
-               'and Secure session cookies are not sent at all.')
         shown = server_common.redact_url_password(redirected)
         if from_env:
             # The environment variable outranks the config file for every
@@ -3360,13 +3357,12 @@ def api_login(endpoint: Optional[str] = None,
             # nothing after it. Say what to change instead.
             click.secho(
                 f'{server_common.redact_url_password(endpoint)} redirects to '
-                f'{shown}. {why}\nSet '
-                f'{constants.SKY_API_SERVER_URL_ENV_VAR} to {shown}.',
+                f'{shown}. Set {constants.SKY_API_SERVER_URL_ENV_VAR} to {shown}.',
                 fg='yellow')
         else:
             click.secho(
                 f'{server_common.redact_url_password(endpoint)} redirects to '
-                f'{shown}; using the https endpoint.\n{why}',
+                f'{shown}; using the https endpoint.',
                 fg='yellow')
             endpoint = redirected
 
