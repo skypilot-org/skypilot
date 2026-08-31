@@ -495,6 +495,8 @@ class ManagedJobsServiceImpl(managed_jobsv1_pb2_grpc.ManagedJobsServiceServicer
                 if request.HasField('name_match') else None,
                 pool_match=request.pool_match
                 if request.HasField('pool_match') else None,
+                infra_match=request.infra_match
+                if request.HasField('infra_match') else None,
                 page=request.page if request.HasField('page') else None,
                 limit=request.limit if request.HasField('limit') else None,
                 user_hashes=user_hashes,
@@ -580,7 +582,11 @@ class ManagedJobsServiceImpl(managed_jobsv1_pb2_grpc.ManagedJobsServiceServicer
                 jobs=jobs_info,
                 total=total,
                 total_no_filter=total_no_filter,
-                status_counts=status_counts)
+                status_counts=status_counts,
+                # Tell the caller the infra filter was honoured. A server that
+                # predates the field leaves it false, which is how the caller
+                # tells an empty result apart from an unfiltered one.
+                infra_match_applied=True)
         except Exception as e:  # pylint: disable=broad-except
             logger.error(e, exc_info=True)
             context.abort(grpc.StatusCode.INTERNAL, str(e))
