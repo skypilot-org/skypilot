@@ -1358,7 +1358,23 @@ async def schedule_prepared_request(request_task: api_requests.Request,
     async def enqueue():
         input_tuple = (request_task.request_id, ignore_return_value, retryable)
         logger.info(f'Queuing request: {request_task.request_id}')
-        await _get_queue(request_task.schedule_type).put_async(input_tuple)
+        try:
+            await _get_queue(request_task.schedule_type).put_async(input_tuple)
+        except (Exception, asyncio.CancelledError) as e:  # pylint: disable=broad-except
+            # A PENDING request that never made it onto the queue is
+            # stranded: no worker will pick it up and nothing else moves it to
+            # a terminal state, and a queue backend that recovers stale PENDING
+            # rows would resurrect and execute it long after the caller saw
+            # this error. If the put actually committed despite the error, the
+            # request is either still unclaimed (the FAILED mark lands and the
+            # row is discarded at dequeue) or already claimed by a worker (the
+            # mark is skipped and the claimed run's outcome stands).
+            logger.error(
+                f'Failed to enqueue request {request_task.request_id}: '
+                f'{common_utils.format_exception(e)}')
+            await api_requests.set_request_failed_if_pending_async(
+                request_task.request_id, e)
+            raise
 
     if precondition is not None:
         # Schedule precondition wait as a background task so the caller

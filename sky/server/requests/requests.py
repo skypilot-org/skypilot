@@ -1214,6 +1214,32 @@ async def set_request_failed_async(request_id: str, e: BaseException) -> None:
         request_task.set_error(e)
 
 
+@metrics_lib.time_me_async
+@asyncio_utils.shield
+async def set_request_failed_if_pending_async(request_id: str,
+                                              e: BaseException) -> bool:
+    """Set a request to failed only while it is still PENDING.
+
+    PENDING is the only status a request can be in while its initial enqueue
+    is in flight: any other status means a worker already claimed the request
+    (the put actually committed) and the owner's outcome stands -- including
+    WAITING, which is only ever set after a claimed run parks for a retry.
+
+    Returns:
+        True if the request was transitioned to FAILED.
+    """
+    set_exception_stacktrace(e)
+    storage = request_storage.get_request_backend()
+    async with storage.update_request_async(request_id) as request_task:
+        assert request_task is not None, request_id
+        if request_task.status != RequestStatus.PENDING:
+            return False
+        request_task.status = RequestStatus.FAILED
+        request_task.finished_at = time.time()
+        request_task.set_error(e)
+        return True
+
+
 def set_request_succeeded(request_id: str, result: Optional[Any]) -> None:
     """Set a request to succeeded and populate the result."""
     with update_request(request_id) as request_task:
