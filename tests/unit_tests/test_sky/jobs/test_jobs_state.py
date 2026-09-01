@@ -3,6 +3,8 @@
 import asyncio
 import contextlib
 import datetime
+import shlex
+import textwrap
 import time
 from unittest import mock
 
@@ -12,6 +14,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.ext.asyncio import create_async_engine
 
 from sky.jobs import state
+from sky.jobs import utils as jobs_utils
 from sky.skylet import constants
 
 
@@ -1700,3 +1703,60 @@ class TestInfraOptions:
     def test_an_inaccessible_workspace_hides_its_infra(self, _seed_infra_jobs):
         assert state.get_infra_options_with_filters(
             accessible_workspaces=['other-ws']) == []
+
+
+class TestInfraFilterCodegenCompatibility:
+    """The generated queue code against a controller that predates `infra_match`.
+
+    The kwarg cannot be passed to a controller whose `dump_managed_job_queue`
+    has no such parameter -- it raises TypeError there and breaks the queue for
+    every caller, not just the ones filtering. So the branch that passes it has
+    to be keyed on the same version the guard is.
+    """
+
+    def _run_branch(self, built: str, version: int):
+        """Execute the version branch of the generated code with a stub.
+
+        `built` is the shell command the codegen returns, so the Python source
+        is its last token. Returns the kwargs the generated code would hand
+        the controller.
+        """
+        code = shlex.split(built)[-1]
+        start = code.index('_infra_match = ')
+        end = code.index('print(job_table')
+        branch = textwrap.dedent(code[start:end])
+        captured = {}
+
+        class _Utils:
+
+            @staticmethod
+            def dump_managed_job_queue(**kwargs):
+                captured.update(kwargs)
+                return '{}'
+
+        exec(  # pylint: disable=exec-used
+            branch, {
+                'utils': _Utils,
+                'managed_job_version': version
+            })
+        return captured
+
+    def test_old_controller_is_not_handed_the_kwarg(self):
+        code = jobs_utils.ManagedJobCodeGen.get_job_table()
+        one_older = jobs_utils.INFRA_FILTER_MANAGED_JOBS_VERSION - 1
+        kwargs = self._run_branch(code, one_older)
+        assert 'infra_match' not in kwargs, (
+            f'a v{one_older} controller would get a kwarg it does not accept')
+
+    def test_new_controller_is_handed_the_kwarg(self):
+        code = jobs_utils.ManagedJobCodeGen.get_job_table(infra_match='aws')
+        kwargs = self._run_branch(code,
+                                  jobs_utils.INFRA_FILTER_MANAGED_JOBS_VERSION)
+        assert kwargs['infra_match'] == 'aws'
+
+    def test_old_controller_refuses_an_infra_filter(self):
+        code = jobs_utils.ManagedJobCodeGen.get_job_table(infra_match='aws')
+        one_older = jobs_utils.INFRA_FILTER_MANAGED_JOBS_VERSION - 1
+        with pytest.raises(RuntimeError,
+                           match=jobs_utils.INFRA_FILTER_UNSUPPORTED_MARKER):
+            self._run_branch(code, one_older)
