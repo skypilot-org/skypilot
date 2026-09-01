@@ -4,6 +4,7 @@ import math
 import os
 import re
 import shlex
+import subprocess
 import time
 from typing import Any, Callable, Dict, List, NamedTuple, Optional, Tuple, Union
 
@@ -1311,7 +1312,7 @@ def slurm_node_info(
         try:
             return _get_slurm_node_info_list(
                 slurm_cluster_name=slurm_cluster_name)
-        except (FileNotFoundError, RuntimeError,
+        except (FileNotFoundError, RuntimeError, subprocess.TimeoutExpired,
                 exceptions.NotSupportedError) as e:
             logger.debug(f'Could not retrieve Slurm node info: {e}')
             return []

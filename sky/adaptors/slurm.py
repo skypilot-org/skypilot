@@ -27,6 +27,14 @@ _ALL_JOBS_INFO_CMD = (f'squeue -h --states=running,completing '
 _PARTITIONS_INFO_CMD = 'scontrol show partitions -o'
 _BATCH_OUTPUT_HEADER = 'SKYPILOT_SLURM_BATCH\n'
 
+# Wall-clock bound for the batched inventory invocations (SSH connect
+# included). The inventory endpoints fan out over every configured cluster,
+# and a login node that accepts the TCP connect but never answers (e.g. a
+# broken tunnel data path) would otherwise hang the aggregate forever. On
+# expiry the SSH process is killed and subprocess.TimeoutExpired is raised,
+# which the aggregation callers degrade to an empty per-cluster result.
+_INVENTORY_TIMEOUT_SECONDS = 60
+
 # Regex pattern to extract partition names from scontrol output
 # Matches PartitionName=<name> and captures until the next field
 _PARTITION_NAME_REGEX = re.compile(r'PartitionName=(.+?)(?:\s+\w+=|$)')
@@ -551,7 +559,8 @@ class SlurmClient:
     def get_node_inventory(
             self) -> Tuple[List[NodeInfo], Dict[str, Dict[str, str]]]:
         """Get node information and details in one remote invocation."""
-        outputs = self._run_slurm_cmds([_INFO_NODES_CMD, _ALL_NODE_DETAILS_CMD])
+        outputs = self._run_slurm_cmds([_INFO_NODES_CMD, _ALL_NODE_DETAILS_CMD],
+                                       timeout=_INVENTORY_TIMEOUT_SECONDS)
         node_returncode, node_stdout, node_stderr = outputs[0]
         details_returncode, details_stdout, details_stderr = outputs[1]
         subprocess_utils.handle_returncode(
@@ -587,7 +596,8 @@ class SlurmClient:
             _ALL_NODE_DETAILS_CMD,
             _ALL_JOBS_INFO_CMD,
             _PARTITIONS_INFO_CMD,
-        ])
+        ],
+                                       timeout=_INVENTORY_TIMEOUT_SECONDS)
         node_returncode, node_stdout, node_stderr = outputs[0]
         details_returncode, details_stdout, details_stderr = outputs[1]
         jobs_returncode, jobs_stdout, jobs_stderr = outputs[2]
