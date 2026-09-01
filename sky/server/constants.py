@@ -165,7 +165,7 @@ DEFAULT_DAEMON_LOG_MAX_BYTES = 128 * 1024 * 1024  # 128 MB
 
 # Default retention for per-operation artifacts under ~/sky_logs on the API
 # server. Configurable via api_server.logs_retention_hours; negative disables.
-DEFAULT_LOGS_RETENTION_HOURS = 720  # 30 days
+DEFAULT_LOGS_RETENTION_HOURS = -1  # disabled unless api_server.logs_retention_hours is set
 
 # Interval for the server-side heartbeat daemon that sends plugin metrics
 # to Loki (e.g., GPU inventory from billing plugin).
