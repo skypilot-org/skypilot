@@ -78,6 +78,69 @@ You can also :ref:`setup GPU metric collection <api-server-gpu-metrics-setup>`
 to directly export GPU memory, utilization and power consumption from
 each compute cluster.
 
+Additional lifecycle metrics:
+
+* ``sky_provision_duration_seconds`` — wall-clock time of each provisioning
+  attempt (one cloud/region attempt per observation), labeled by ``cloud``
+  and ``result`` (``success`` / ``failure``). This is the "compute
+  acquisition time" for cluster launches; failover across regions or clouds
+  yields one observation per attempt.
+* ``sky_apiserver_request_pending_seconds`` — time from a request being
+  created to its first execution start, labeled by request ``name`` and
+  ``schedule_type``. Unlike ``sky_apiserver_queue_wait_seconds`` (per-enqueue
+  queue residency), it includes scheduling preconditions and retry backoff,
+  and is observed once per request.
+* ``sky_apiserver_start_time_seconds`` — Unix timestamp of the API server's
+  start; ``time() - sky_apiserver_start_time_seconds`` is the server uptime.
+
+Availability tracking
+---------------------
+
+The Grafana dashboard's *Server Availability* panel reports the percentage of
+time at least one API server metrics target was scrapeable, based on the
+Prometheus ``up`` metric. The panel shows two values: the dashboard's selected
+time range, and a fixed trailing-30-day number backed by recording rules.
+
+The 30-day value requires installing the recording rules below and shows no
+data until they are in place. With the chart-managed Prometheus, add them via
+the Prometheus subchart's ``serverFiles``:
+
+.. code-block:: yaml
+
+   prometheus:
+     server:
+       # The 30d rule averages over its full window only if the TSDB retains
+       # at least that much history (Prometheus defaults to 15d).
+       retention: 45d
+     serverFiles:
+       recording_rules.yml:
+         groups:
+           - name: skypilot-slo
+             interval: 15s
+             rules:
+               # 1 if at least one API server metrics target is scrapeable.
+               # The selector covers both scrape styles: dedicated/static
+               # jobs matched by job name, and annotation-based discovery
+               # matched by the pod's labelmapped "app" label. Adapt it if
+               # your scrape config names differ.
+               - record: sky:apiserver_up:max
+                 expr: max(up{job=~"skypilot-api(-server)?(-metrics)?"} or up{app=~"skypilot.*-api"})
+               # Fraction of the trailing 30 days the service was up.
+               - record: sky:apiserver_availability:ratio_30d
+                 expr: avg_over_time(sky:apiserver_up:max[30d])
+
+Two caveats when quoting the 30-day number:
+
+* Recording rules are not backfilled: the series accumulates from the moment
+  the rule is deployed, so for the first 30 days the average covers a shorter
+  period than its name suggests.
+* ``avg_over_time`` averages the samples that exist, so periods where
+  Prometheus itself recorded nothing do not count against availability.
+
+Also note ``up`` measures reachability of the metrics endpoint, not request
+success. For a stricter availability signal, probe ``/api/health`` (e.g. with
+the Prometheus blackbox exporter) through the same path clients use.
+
 Forward metrics to an OpenTelemetry-based backend
 -------------------------------------------------
 

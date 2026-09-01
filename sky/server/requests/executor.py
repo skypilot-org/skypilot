@@ -938,6 +938,10 @@ def _request_execution_wrapper(request_id: str,
                     f'skipping execution')
                 return
             log_path = request_task.log_path
+            # A pid was set by a previous attempt: this is a retry-requeue
+            # (e.g. retry_until_up), not the first execution start.
+            first_execution = request_task.pid is None
+            pending_seconds = time.time() - request_task.created_at
             request_task.pid = pid
             request_task.status = api_requests.RequestStatus.RUNNING
             # Clear any leftover retry-backoff message now that we are running.
@@ -945,6 +949,11 @@ def _request_execution_wrapper(request_id: str,
             func = request_task.entrypoint
             request_body = request_task.request_body
             request_name = request_task.name
+            schedule_type = request_task.schedule_type.value
+
+        if first_execution:
+            metrics_utils.observe_request_pending(request_name, schedule_type,
+                                                  pending_seconds)
 
         # Store copies of the original stdout and stderr file descriptors
         # We do this in two steps because we should make sure to restore the
@@ -1126,6 +1135,11 @@ async def _execute_request_coroutine(request: api_requests.Request):
     logger.info(f'Executing request {request.request_id} in coroutine')
     func = request.entrypoint
     request_body = request.request_body
+    # Coroutine requests are executed once (no retry-requeue path), so this
+    # is always the first execution start.
+    metrics_utils.observe_request_pending(request.name,
+                                          request.schedule_type.value,
+                                          time.time() - request.created_at)
     await api_requests.update_status_async(request.request_id,
                                            api_requests.RequestStatus.RUNNING)
     # Redirect stdout and stderr to the request log path.
