@@ -4039,6 +4039,16 @@ async def serve_dashboard(request: fastapi.Request, full_path: str):
         raise fastapi.HTTPException(status_code=500, detail=str(e))
 
 
+# Browsers request /favicon.ico from the origin root regardless of the page's
+# base path, so serve the dashboard icon there too.
+@app.get('/favicon.ico')
+async def favicon():
+    favicon_path = os.path.join(server_constants.DASHBOARD_DIR, 'favicon.ico')
+    if not os.path.isfile(favicon_path):
+        raise fastapi.HTTPException(status_code=404, detail='Not found')
+    return fastapi.responses.FileResponse(favicon_path)
+
+
 # Redirect the root path to dashboard
 @app.get('/')
 async def root():
