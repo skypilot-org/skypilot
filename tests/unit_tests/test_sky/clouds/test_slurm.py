@@ -1058,6 +1058,41 @@ class TestSbatchOptionsPrecedence:
             'constraint': 'skylake',
         }
 
+    def test_workspace_cluster_overrides_global(self, tmp_path):
+        result = self._load_config_and_get_sbatch_options(
+            tmp_path, {
+                'active_workspace': 'research',
+                'slurm': {
+                    'cluster_configs': {
+                        'mycluster': {
+                            'sbatch_options': {
+                                'account': 'global-account',
+                                'constraint': 'skylake',
+                            },
+                        },
+                    },
+                },
+                'workspaces': {
+                    'research': {
+                        'slurm': {
+                            'cluster_configs': {
+                                'mycluster': {
+                                    'sbatch_options': {
+                                        'account': 'workspace-account',
+                                        'qos': 'workspace-qos',
+                                    },
+                                },
+                            },
+                        },
+                    },
+                },
+            })
+        assert result == {
+            'account': 'workspace-account',
+            'qos': 'workspace-qos',
+            'constraint': 'skylake',
+        }
+
     def test_partition_overrides_cluster_and_global(self, tmp_path):
         """Level 3 overrides levels 1 and 2 for same key."""
         result = self._load_config_and_get_sbatch_options(

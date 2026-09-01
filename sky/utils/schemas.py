@@ -2594,11 +2594,11 @@ def get_config_schema():
 
     allowed_workspace_cloud_names = list(
         constants.ALL_CLOUDS) + constants.STORAGE_ONLY_CLOUDS
-    # Create pattern for not supported clouds, i.e.
-    # all clouds except aws, gcp, kubernetes, ssh, nebius
+    # Create pattern for not supported clouds, i.e. all clouds except aws,
+    # gcp, kubernetes, ssh, nebius, slurm.
     not_supported_clouds = [
-        cloud for cloud in allowed_workspace_cloud_names
-        if cloud.lower() not in ['aws', 'gcp', 'kubernetes', 'ssh', 'nebius']
+        cloud for cloud in allowed_workspace_cloud_names if cloud.lower() not in
+        ['aws', 'gcp', 'kubernetes', 'ssh', 'nebius', 'slurm']
     ]
     not_supported_cloud_regex = '|'.join(not_supported_clouds)
     workspaces_schema = {
@@ -2794,6 +2794,15 @@ def get_config_schema():
                     # unknown properties to pass through for
                     # server-side validation.
                     'additionalProperties': _allow_additional_properties(),
+                },
+                'slurm': {
+                    **cloud_configs['slurm'],
+                    'properties': {
+                        **cloud_configs['slurm']['properties'],
+                        'disabled': {
+                            'type': 'boolean'
+                        },
+                    },
                 },
                 'nebius': {
                     'type': 'object',
