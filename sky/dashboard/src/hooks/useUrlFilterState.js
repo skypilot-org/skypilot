@@ -62,7 +62,7 @@ export function useUrlFilterState(filterSchema, viewSchema = []) {
     }
     return { filters: queryToFilters(filterSchema, named), view };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [readQuery]);
+  }, [readQuery, filterSchema]);
 
   const initial = useRef(null);
   if (initial.current === null) {
@@ -98,6 +98,24 @@ export function useUrlFilterState(filterSchema, viewSchema = []) {
       JSON.stringify(prev) === JSON.stringify(next.view) ? prev : next.view
     );
   }, [router.isReady, router.asPath, readInitial]);
+
+  // Re-decode when the schema itself grows (a plugin registering filter
+  // properties after mount): a deep-linked param that was passing through
+  // as an unowned key may now decode into a chip. The adopt-external effect
+  // above can't cover this — the URL hasn't changed, only the schema has.
+  const lastSchema = useRef(filterSchema);
+  useEffect(() => {
+    if (lastSchema.current === filterSchema) {
+      return;
+    }
+    lastSchema.current = filterSchema;
+    const next = readInitial();
+    setFilters((prev) =>
+      JSON.stringify(prev) === JSON.stringify(next.filters)
+        ? prev
+        : next.filters
+    );
+  }, [filterSchema, readInitial]);
 
   // Mirror state into the address bar. Keys not owned by this hook (a plugin's
   // own params, `tab`, ...) are preserved.

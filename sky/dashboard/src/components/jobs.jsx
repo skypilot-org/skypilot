@@ -82,6 +82,7 @@ import {
   useTableColumns,
   usePluginComponents,
   useMergedTableColumns,
+  usePluginTableFilters,
 } from '@/plugins/PluginProvider';
 import {
   FilterDropdown,
@@ -209,18 +210,10 @@ export const JOB_FILTER_SCHEMA = [
   { key: 'name', label: 'Name', kind: 'text' },
   { key: 'id', label: 'ID', kind: 'text' },
   { key: 'user', label: 'User', kind: 'text' },
-  // Slurm accounting fields, populated only on external rows. They stay in
-  // the schema unconditionally so a shared URL always decodes, but the
-  // dropdown only offers them once external rows have been seen.
-  { key: 'account', label: 'Account', kind: 'text' },
-  { key: 'qos', label: 'QOS', kind: 'text' },
   { key: 'workspace', label: 'Workspace', kind: 'text' },
   { key: 'pool', label: 'Pool', kind: 'text' },
   { key: 'labels', label: 'Labels', kind: 'kv', multi: 'repeat' },
 ];
-
-// Filter properties that can only ever match external rows.
-const EXTERNAL_ONLY_FILTER_KEYS = new Set(['account', 'qos']);
 
 // Non-filter state that belongs in a shared link too.
 //
@@ -258,11 +251,6 @@ export function deriveStatusView(statusParam) {
     activeTab: statusGroupName || (selectedStatuses.length > 0 ? null : 'all'),
   };
 }
-
-const PROPERTY_OPTIONS = JOB_FILTER_SCHEMA.map(({ key, label }) => ({
-  label,
-  value: key,
-}));
 
 // Properties that may hold several chips; the rest replace, so the page can
 // never show more filters than the URL is able to carry.
@@ -354,9 +342,17 @@ export function ManagedJobs() {
   const jobsRefreshRef = React.useRef(null);
   const poolsRefreshRef = React.useRef(null);
   const [poolsData, setPoolsData] = useState([]);
+  // Plugins may register extra filter properties for this table (e.g. the
+  // pagination plugin's Slurm Account/QOS filters) — registration is
+  // reactive, typically arriving with the plugin's first data response.
+  const pluginFilterProps = usePluginTableFilters('jobs');
+  const filterSchema = React.useMemo(
+    () => [...JOB_FILTER_SCHEMA, ...pluginFilterProps],
+    [pluginFilterProps]
+  );
   // Filters and the shareable view state both live in the URL, keyed by name.
   const { filters, setFilters, view, setView } = useUrlFilterState(
-    JOB_FILTER_SCHEMA,
+    filterSchema,
     JOB_VIEW_SCHEMA
   );
   const [valueList, setValueList] = useState({
@@ -368,11 +364,6 @@ export function ManagedJobs() {
   });
   const [preloadingComplete, setPreloadingComplete] = useState(false);
   const [lastFetchedTime, setLastFetchedTime] = useState(null);
-  // Deployment-level signal from the jobs provider (`externalJobsEnabled`
-  // on the response): external Slurm clusters are configured, so the
-  // Account/QOS column and filter options apply. Independent of which rows
-  // the current page happens to hold.
-  const [hasExternalRows, setHasExternalRows] = useState(false);
 
   const fetchData = React.useCallback(
     async (isRefreshButton = false) => {
@@ -476,13 +467,10 @@ export function ManagedJobs() {
         />
         <div className="w-full sm:w-auto max-w-xl">
           <FilterDropdown
-            propertyList={
-              hasExternalRows
-                ? PROPERTY_OPTIONS
-                : PROPERTY_OPTIONS.filter(
-                    (o) => !EXTERNAL_ONLY_FILTER_KEYS.has(o.value)
-                  )
-            }
+            propertyList={filterSchema.map(({ key, label }) => ({
+              label,
+              value: key,
+            }))}
             valueList={valueList}
             setFilters={setFilters}
             addFilter={addFilter}
@@ -508,8 +496,6 @@ export function ManagedJobs() {
         setValueList={setValueList}
         preloadingComplete={preloadingComplete}
         lastFetchedTime={lastFetchedTime}
-        hasExternalRows={hasExternalRows}
-        setHasExternalRows={setHasExternalRows}
       />
 
       {/* Pools table - always visible */}
@@ -613,13 +599,14 @@ export function ManagedJobsTable({
   setValueList,
   preloadingComplete,
   lastFetchedTime,
-  hasExternalRows,
-  setHasExternalRows,
 }) {
   const [sortConfig, setSortConfig] = useState({
     key: 'id',
     direction: 'descending',
   });
+  // Plugin-registered filter properties (see ManagedJobs): their values are
+  // forwarded to the data provider verbatim as {property: key, value}.
+  const pluginFilterProps = usePluginTableFilters('jobs');
   const [loading, setLocalLoading] = useState(false);
   const [isInitialLoad, setIsInitialLoad] = useState(true);
   const [currentPage, setCurrentPage] = useState(() => {
@@ -825,10 +812,16 @@ export function ManagedJobsTable({
           jobIdMatch: jobIdFilter,
           nameMatch: getFilterValue('name'),
           userMatch: effectiveUserMatch,
-          accountMatch: getFilterValue('account'),
-          qosMatch: getFilterValue('qos'),
           workspaceMatch: getFilterValue('workspace'),
           poolMatch: getFilterValue('pool'),
+          // Values of plugin-registered filter properties, keyed by their
+          // schema key — the plugin's fetch function interprets them.
+          pluginFilters: pluginFilterProps
+            .map((f) => {
+              const value = getFilterValue(f.label.toLowerCase());
+              return value ? { property: f.key, value } : null;
+            })
+            .filter(Boolean),
           statuses: computedStatuses.length > 0 ? computedStatuses : undefined,
           page: currentPage,
           limit: pageSize,
@@ -855,13 +848,6 @@ export function ManagedJobsTable({
             setExternalFetchErrors([]);
           } else {
             setHookControllerStopped(false);
-            // Deployment-level signal from the jobs provider (external
-            // Slurm clusters configured) — page contents alone can't tell,
-            // since the current page may hold only managed rows while
-            // external rows sit on later pages.
-            if (response.externalJobsEnabled && setHasExternalRows) {
-              setHasExternalRows(true);
-            }
             setData(response.jobs || []);
             setTotalCount(response.total || 0);
             setTotalNoFilter(response.totalNoFilter || response.total || 0);
@@ -951,7 +937,7 @@ export function ManagedJobsTable({
       sortOrder,
       userScope,
       currentUser,
-      setHasExternalRows,
+      pluginFilterProps,
     ]
   );
 
@@ -1732,37 +1718,6 @@ export function ManagedJobsTable({
           ) : null,
       },
       {
-        id: 'account',
-        order: 2.7,
-        conditional: true,
-        renderHeader: () =>
-          hasExternalRows ? (
-            <TableHead
-              className="sortable whitespace-nowrap"
-              onClick={() => requestSort('account')}
-            >
-              Account / QOS{getSortDirection('account')}
-            </TableHead>
-          ) : null,
-        renderCell: (item) =>
-          hasExternalRows ? (
-            <TableCell>
-              {item.account || item.qos ? (
-                // Either half may be missing (a cluster can stamp QOS
-                // without an account and vice versa); a lone QOS keeps the
-                // '— /' prefix so it can't read as an account name.
-                <span className="whitespace-nowrap">
-                  {item.qos
-                    ? `${item.account || '—'} / ${item.qos}`
-                    : item.account}
-                </span>
-              ) : (
-                <span className="text-gray-400">—</span>
-              )}
-            </TableCell>
-          ) : null,
-      },
-      {
         id: 'submitted',
         order: 3,
         renderHeader: () => (
@@ -2106,7 +2061,6 @@ export function ManagedJobsTable({
       getSortDirection,
       shouldShowWorkspace,
       shouldShowPool,
-      hasExternalRows,
       expandedRowId,
       poolsLoading,
       poolsData,
@@ -2181,7 +2135,6 @@ export function ManagedJobsTable({
         // Handle conditional columns
         if (columnId === 'workspace') return shouldShowWorkspace;
         if (columnId === 'pool') return shouldShowPool;
-        if (columnId === 'account') return hasExternalRows;
         return true;
       },
     },
