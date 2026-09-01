@@ -119,4 +119,26 @@ describe('useLogStreamer line assembly', () => {
     const lines = await linesFrom(['(w1) 50%|##\n', '(w1) 100%|####']);
     expect(lines).toEqual(['(w1) 100%|####']);
   });
+
+  // Measuring only what the reader sees leaves the raw carry unbounded for
+  // a writer that emits mostly escape sequences: six chunks here carry 48
+  // raw characters but 6 visible ones, so the visible cap alone never
+  // trips and the carry grows for the length of the stream.
+  it('bounds a carry that is almost entirely escape sequences', async () => {
+    const streamFn = streamOf(
+      Array.from({ length: 6 }, () => '\x1b[0m\x1b[0m\x1b[0mx'),
+      { ends: false }
+    );
+    const { result } = renderHook(() =>
+      useLogStreamer({
+        streamFn,
+        streamArgs: STREAM_ARGS,
+        flushIntervalMs: 0,
+        maxLineChars: 10,
+      })
+    );
+    // maxRawCarryChars is 40 here, crossed on the fourth chunk.
+    await waitFor(() => expect(result.current.lines).toHaveLength(1));
+    expect(result.current.lines[0]).toBe('xxxx … [truncated]');
+  });
 });

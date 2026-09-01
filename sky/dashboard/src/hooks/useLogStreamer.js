@@ -1,6 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { stripAnsiCodes, shouldDropLogLine } from '@/components/utils';
 
+const TRUNCATION_MARK = ' … [truncated]';
+
+// Ceiling on the raw carry, as a multiple of the visible cap. Only reached
+// by output whose visible length barely grows - a writer emitting mostly
+// escape sequences - where the visible cap alone would never trip.
+const RAW_CARRY_FACTOR = 4;
+
 /**
  * Shared log streaming hook used by both managed job and cluster pages.
  */
@@ -76,6 +83,8 @@ export function useLogStreamer({
     const controller = new AbortController();
     controllerRef.current = controller;
 
+    const maxRawCarryChars = maxLineChars * RAW_CARRY_FACTOR;
+
     const scheduleFlush = () => {
       if (flushTimerRef.current) return;
       flushTimerRef.current = setTimeout(() => {
@@ -107,7 +116,7 @@ export function useLogStreamer({
       const cleanLine = stripAnsiCodes(line);
       if (shouldDropLogLine(cleanLine)) return null;
       return cleanLine.length > maxLineChars
-        ? cleanLine.slice(0, maxLineChars) + ' … [truncated]'
+        ? cleanLine.slice(0, maxLineChars) + TRUNCATION_MARK
         : cleanLine;
     };
 
@@ -150,22 +159,34 @@ export function useLogStreamer({
           partialLineRef.current = '';
         }
       }
-      // Compared on the stripped length, the same thing finalizeLine caps
-      // on. Against the raw string a colour-heavy fragment crosses the
-      // threshold while its visible text is still short, and would then be
-      // emitted whole - with no truncation marker - while the rest of the
-      // line was discarded.
-      if (
-        !overLongLineRef.current &&
-        stripAnsiCodes(partialLineRef.current).length > maxLineChars
-      ) {
-        parts.push(partialLineRef.current);
-        partialLineRef.current = '';
-        overLongLineRef.current = true;
+      const newLines = parts.filter((line) => line.trim());
+
+      // Bound the carry on both axes. maxLineChars is a cap on what the
+      // reader sees, so measuring the raw string cuts a colour-heavy line
+      // short of it; but output that is almost entirely escape sequences
+      // keeps a short visible length while the raw string grows without
+      // limit, which is the unbounded carry this is here to prevent.
+      // Whichever bound trips, the rest of the line is dropped, so what is
+      // emitted always says it was truncated.
+      let forcedLine = null;
+      if (!overLongLineRef.current) {
+        const visible = stripAnsiCodes(partialLineRef.current);
+        if (
+          visible.length > maxLineChars ||
+          partialLineRef.current.length > maxRawCarryChars
+        ) {
+          if (!shouldDropLogLine(visible)) {
+            forcedLine = visible.slice(0, maxLineChars) + TRUNCATION_MARK;
+          }
+          partialLineRef.current = '';
+          overLongLineRef.current = true;
+        }
       }
 
-      const newLines = parts.filter((line) => line.trim());
-      if (!hasFirstChunkRef.current && newLines.length > 0) {
+      if (
+        !hasFirstChunkRef.current &&
+        (newLines.length > 0 || forcedLine !== null)
+      ) {
         hasFirstChunkRef.current = true;
         setHasReceivedFirstChunk(true);
       }
@@ -175,6 +196,10 @@ export function useLogStreamer({
         if (cleanLine !== null) {
           emitLine(cleanLine);
         }
+      }
+      // After this chunk's completed lines: the carry sits behind them.
+      if (forcedLine !== null) {
+        emitLine(forcedLine);
       }
       scheduleFlush();
     };
