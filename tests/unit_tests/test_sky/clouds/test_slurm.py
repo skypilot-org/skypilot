@@ -1669,6 +1669,8 @@ class TestCreateVirtualInstance:
         assert '-w "${SKY_NODES[1]}"' in script
         assert f'--container-image={snapshot_dir}/rank0.sqsh' in script
         assert f'--container-image={snapshot_dir}/rank1.sqsh' in script
+        assert 'apt-get update' not in script
+        assert 'echo \'alias sudo=""\' >> ~/.bashrc' not in script
         stale_cleanup = 'enroot remove -f "$candidate"'
         assert stale_cleanup in script
         assert script.index(stale_cleanup) < script.index(

@@ -968,7 +968,6 @@ done < <(enroot list)
             for rank, snapshot_path in enumerate(
                     _snapshot_paths(snapshot_manifest)):
                 container_cmd = shlex.quote(
-                    f'{container_init_script}'
                     f'touch {container_init_done_dir}/{rank} && '
                     'sleep infinity')
                 restore_lines.extend([
@@ -1479,12 +1478,18 @@ def stop_instances(
     rc, stdout, stderr = login_node_runner.run(read_image_cmd,
                                                require_outputs=True,
                                                stream_logs=False)
-    if rc != 0 or not stdout.strip():
+    if rc != 0:
         raise exceptions.NotSupportedError(
             'Stopping Slurm clusters is supported only for containers '
             'launched with Pyxis. The running cluster has no container '
             'snapshot metadata.')
     image_id = stdout.strip()
+    # An empty marker identifies a Pyxis cluster without the image metadata
+    # required to create a restorable snapshot.
+    if not image_id:
+        raise exceptions.NotSupportedError(
+            'The running Slurm cluster has no container snapshot metadata. '
+            'Relaunch the cluster before stopping it.')
     previous_manifest = _read_snapshot_manifest(login_node_runner, snapshot_dir)
 
     cluster_info = get_cluster_info('', cluster_name_on_cloud, provider_config)

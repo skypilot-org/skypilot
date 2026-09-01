@@ -536,6 +536,19 @@ class TestStopInstances:
             'preserve_logs': True,
         }
 
+    def test_empty_container_marker_requires_relaunch(self, monkeypatch):
+        _, login_runner, head_runner, write_manifest, cancel_slurm_job = (
+            self._setup(monkeypatch, ['node-a']))
+        login_runner.run.side_effect = lambda command, **kwargs: (0, '', '')
+
+        with pytest.raises(exceptions.NotSupportedError,
+                           match='Relaunch the cluster before stopping it'):
+            instance.stop_instances(_CLUSTER, provider_config=_PROVIDER_CONFIG)
+
+        head_runner.run_driver.assert_not_called()
+        write_manifest.assert_not_called()
+        cancel_slurm_job.assert_not_called()
+
     def test_export_failure_preserves_previous_snapshot(self, monkeypatch):
         client, login_runner, _, write_manifest, cancel_slurm_job = self._setup(
             monkeypatch, ['node-a', 'node-b'])
