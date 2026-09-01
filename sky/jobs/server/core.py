@@ -306,8 +306,8 @@ class _DefaultManagedJobRunner:
                 detail = output.partition(f'{marker}: ')[2].splitlines()
                 with ux_utils.print_exception_no_traceback():
                     raise exceptions.NotSupportedError(
-                        detail[0].strip() if detail else
-                        managed_job_utils.INFRA_FILTER_UNSUPPORTED_MESSAGE)
+                        detail[0].strip() if detail else managed_job_utils.
+                        INFRA_FILTER_UNSUPPORTED_MESSAGE)
             logger.error(output)
             raise RuntimeError('Failed to fetch managed jobs with returncode: '
                                f'{returncode}.\n{output}')
@@ -1936,10 +1936,10 @@ def _resolve_accessible_job_id_for_logs(
     so it belongs there rather than in a special case for this caller.
     """
     if job_id is not None:
-        records, _, _, _ = queue_v2_api(refresh=False,
-                                        all_users=True,
-                                        job_ids=[job_id],
-                                        fields=['job_id'])
+        records, _, _, _, _ = queue_v2_api(refresh=False,
+                                           all_users=True,
+                                           job_ids=[job_id],
+                                           fields=['job_id'])
         if not records:
             logger.info(f'{colorama.Fore.YELLOW}'
                         f'Managed job {job_id} not found.'
@@ -1950,11 +1950,11 @@ def _resolve_accessible_job_id_for_logs(
     if name is not None:
         # ``name_match`` is a fuzzy match, so filter to the exact name here --
         # same two-step the ``wait`` path above uses.
-        records, _, _, _ = queue_v2_api(refresh=False,
-                                        all_users=True,
-                                        skip_finished=skip_finished,
-                                        name_match=name,
-                                        fields=['job_id', 'job_name'])
+        records, _, _, _, _ = queue_v2_api(refresh=False,
+                                           all_users=True,
+                                           skip_finished=skip_finished,
+                                           name_match=name,
+                                           fields=['job_id', 'job_name'])
         candidates = [r for r in records if r.job_name == name]
         multiple_str = (f'Multiple jobs IDs found under the name {name}. ')
     else:
@@ -1973,11 +1973,11 @@ def _resolve_accessible_job_id_for_logs(
         # the old-controller LIST fallback does not re-sort at all -- it slices
         # `filter_jobs` output directly -- so it leans on that dump already
         # being `spot_job_id DESC`.
-        records, _, _, _ = queue_v2_api(refresh=False,
-                                        all_users=True,
-                                        fields=['job_id'],
-                                        page=1,
-                                        limit=2)
+        records, _, _, _, _ = queue_v2_api(refresh=False,
+                                           all_users=True,
+                                           fields=['job_id'],
+                                           page=1,
+                                           limit=2)
         candidates = list(records)
         multiple_str = ''
 

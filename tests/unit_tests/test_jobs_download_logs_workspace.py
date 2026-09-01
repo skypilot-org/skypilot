@@ -33,7 +33,7 @@ def test_bare_sync_down_picks_latest_accessible_not_latest_global(backend):
     with mock.patch.object(core,
                            'queue_v2_api',
                            return_value=([_record(7),
-                                          _record(3)], 2, {}, 2)) as queue:
+                                          _record(3)], 2, {}, 2, [])) as queue:
         core.download_logs(name=None,
                            job_id=None,
                            refresh=False,
@@ -50,7 +50,7 @@ def test_bare_sync_down_picks_latest_accessible_not_latest_global(backend):
 
 def test_job_id_outside_accessible_workspaces_is_refused(backend):
     """An explicit id the queue cannot see must not be downloaded."""
-    with mock.patch.object(core, 'queue_v2_api', return_value=([], 0, {}, 0)):
+    with mock.patch.object(core, 'queue_v2_api', return_value=([], 0, {}, 0, [])):
         assert core.download_logs(name=None,
                                   job_id=99,
                                   refresh=False,
@@ -61,7 +61,7 @@ def test_job_id_outside_accessible_workspaces_is_refused(backend):
 def test_job_id_inside_accessible_workspaces_is_allowed(backend):
     with mock.patch.object(core,
                            'queue_v2_api',
-                           return_value=([_record(42)], 1, {}, 1)) as queue:
+                           return_value=([_record(42)], 1, {}, 1, [])) as queue:
         core.download_logs(name=None,
                            job_id=42,
                            refresh=False,
@@ -75,7 +75,7 @@ def test_name_matches_exactly_and_picks_latest(backend):
     records = [_record(5, 'train'), _record(9, 'train-v2'), _record(6, 'train')]
     with mock.patch.object(core,
                            'queue_v2_api',
-                           return_value=(records, 3, {}, 3)):
+                           return_value=(records, 3, {}, 3, [])):
         core.download_logs(name='train',
                            job_id=None,
                            refresh=False,
@@ -84,7 +84,7 @@ def test_name_matches_exactly_and_picks_latest(backend):
 
 
 def test_no_accessible_job_returns_empty(backend):
-    with mock.patch.object(core, 'queue_v2_api', return_value=([], 0, {}, 0)):
+    with mock.patch.object(core, 'queue_v2_api', return_value=([], 0, {}, 0, [])):
         assert core.download_logs(name=None,
                                   job_id=None,
                                   refresh=False,
@@ -127,7 +127,7 @@ def test_tail_bare_picks_latest_accessible_not_latest_global(runner):
     with mock.patch.object(core,
                            'queue_v2_api',
                            return_value=([_record(7),
-                                          _record(3)], 2, {}, 2)) as queue:
+                                          _record(3)], 2, {}, 2, [])) as queue:
         _tail()
     assert queue.call_args.kwargs['all_users'] is True
     kwargs = runner.tail_managed_job_logs.call_args.kwargs
@@ -136,7 +136,7 @@ def test_tail_bare_picks_latest_accessible_not_latest_global(runner):
 
 
 def test_tail_job_id_outside_accessible_workspaces_is_refused(runner):
-    with mock.patch.object(core, 'queue_v2_api', return_value=([], 0, {}, 0)):
+    with mock.patch.object(core, 'queue_v2_api', return_value=([], 0, {}, 0, [])):
         assert _tail(job_id=99) == core.exceptions.JobExitCode.NOT_FOUND
     runner.tail_managed_job_logs.assert_not_called()
 
@@ -151,19 +151,19 @@ def test_name_lookup_is_status_scoped_but_bare_lookup_is_not(runner):
     """
     with mock.patch.object(core,
                            'queue_v2_api',
-                           return_value=([_record(4, 'n')], 1, {}, 1)) as queue:
+                           return_value=([_record(4, 'n')], 1, {}, 1, [])) as queue:
         _tail(name='n')
     assert queue.call_args.kwargs['skip_finished'] is True
 
     with mock.patch.object(core,
                            'queue_v2_api',
-                           return_value=([_record(4, 'n')], 1, {}, 1)) as queue:
+                           return_value=([_record(4, 'n')], 1, {}, 1, [])) as queue:
         _tail(name='n', controller=True)
     assert queue.call_args.kwargs['skip_finished'] is False
 
     with mock.patch.object(core,
                            'queue_v2_api',
-                           return_value=([_record(4)], 1, {}, 1)) as queue:
+                           return_value=([_record(4)], 1, {}, 1, [])) as queue:
         _tail()
     assert 'skip_finished' not in queue.call_args.kwargs
 
@@ -171,7 +171,7 @@ def test_name_lookup_is_status_scoped_but_bare_lookup_is_not(runner):
 def test_bare_tail_does_not_announce_a_download(runner):
     """The sync-down notice must not leak into the streaming path."""
     with mock.patch.object(core, 'queue_v2_api',
-                           return_value=([_record(9), _record(4)], 2, {}, 2)), \
+                           return_value=([_record(9), _record(4)], 2, {}, 2, [])), \
          mock.patch.object(core.logger, 'info') as log_info:
         _tail()
     msg = ' '.join(str(c.args[0]) for c in log_info.call_args_list)
@@ -188,7 +188,7 @@ def test_tail_ambiguous_name_raises_like_master(runner):
     records = [_record(5, 'train'), _record(6, 'train')]
     with mock.patch.object(core,
                            'queue_v2_api',
-                           return_value=(records, 2, {}, 2)):
+                           return_value=(records, 2, {}, 2, [])):
         with pytest.raises(ValueError, match='Multiple running jobs found'):
             _tail(name='train')
         with pytest.raises(ValueError, match=r'Job IDs: 6, 5'):
@@ -197,7 +197,7 @@ def test_tail_ambiguous_name_raises_like_master(runner):
 
 
 def test_not_found_message_matches_master(runner):
-    with mock.patch.object(core, 'queue_v2_api', return_value=([], 0, {}, 0)), \
+    with mock.patch.object(core, 'queue_v2_api', return_value=([], 0, {}, 0, [])), \
          mock.patch.object(core.logger, 'info') as log_info:
         _tail(name='nope')
     msg = ' '.join(str(c.args[0]) for c in log_info.call_args_list)
@@ -212,7 +212,7 @@ def test_bare_lookup_is_bounded_not_a_whole_table_scan(runner):
     """
     with mock.patch.object(core,
                            'queue_v2_api',
-                           return_value=([_record(7)], 1, {}, 1)) as queue:
+                           return_value=([_record(7)], 1, {}, 1, [])) as queue:
         _tail()
     kwargs = queue.call_args.kwargs
     # Two, not one: sync-down has to be able to say "more than one job exists",
@@ -222,7 +222,7 @@ def test_bare_lookup_is_bounded_not_a_whole_table_scan(runner):
     # every matching id, so a limit there would truncate the message.
     with mock.patch.object(core,
                            'queue_v2_api',
-                           return_value=([_record(7, 'n')], 1, {}, 1)) as queue:
+                           return_value=([_record(7, 'n')], 1, {}, 1, [])) as queue:
         _tail(name='n')
     assert 'limit' not in queue.call_args.kwargs
 
@@ -230,7 +230,7 @@ def test_bare_lookup_is_bounded_not_a_whole_table_scan(runner):
 def test_sync_down_multiple_notice_reads_as_a_sentence(backend):
     """Without a name the "Multiple jobs IDs found" clause must not appear."""
     with mock.patch.object(core, 'queue_v2_api',
-                           return_value=([_record(9), _record(4)], 2, {}, 2)), \
+                           return_value=([_record(9), _record(4)], 2, {}, 2, [])), \
          mock.patch.object(core.logger, 'info') as log_info:
         core.download_logs(name=None,
                            job_id=None,
@@ -242,7 +242,7 @@ def test_sync_down_multiple_notice_reads_as_a_sentence(backend):
 
     with mock.patch.object(core, 'queue_v2_api',
                            return_value=([_record(9, 'n'), _record(4, 'n')], 2,
-                                         {}, 2)), \
+                                         {}, 2, [])), \
          mock.patch.object(core.logger, 'info') as log_info:
         core.download_logs(name='n',
                            job_id=None,
@@ -262,7 +262,7 @@ def test_multi_task_job_is_one_job_not_an_ambiguity(runner):
     two_tasks = [_record(7, 'multi'), _record(7, 'multi')]
     with mock.patch.object(core,
                            'queue_v2_api',
-                           return_value=(two_tasks, 2, {}, 2)):
+                           return_value=(two_tasks, 2, {}, 2, [])):
         _tail(name='multi')
     assert runner.tail_managed_job_logs.call_args.kwargs['job_id'] == 7
 
@@ -271,7 +271,7 @@ def test_multi_task_job_does_not_announce_multiple_on_sync_down(backend):
     """Same de-duplication on the sync-down path: one job, no 'Multiple' notice."""
     two_tasks = [_record(7, 'multi'), _record(7, 'multi')]
     with mock.patch.object(core, 'queue_v2_api',
-                           return_value=(two_tasks, 2, {}, 2)), \
+                           return_value=(two_tasks, 2, {}, 2, [])), \
          mock.patch.object(core.logger, 'info') as log_info:
         core.download_logs(name='multi',
                            job_id=None,
@@ -287,6 +287,6 @@ def test_tail_name_matches_exactly(runner):
     records = [_record(9, 'train-v2'), _record(5, 'train')]
     with mock.patch.object(core,
                            'queue_v2_api',
-                           return_value=(records, 2, {}, 2)):
+                           return_value=(records, 2, {}, 2, [])):
         _tail(name='train')
     assert runner.tail_managed_job_logs.call_args.kwargs['job_id'] == 5

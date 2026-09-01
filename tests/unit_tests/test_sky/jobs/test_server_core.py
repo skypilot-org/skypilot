@@ -20,7 +20,7 @@ def _forwarded_tail(tail):
     with mock.patch.object(jobs_core, '_maybe_restart_controller',
                            return_value=mock.MagicMock()), \
          mock.patch.object(jobs_core, 'queue_v2_api',
-                           return_value=([record], 1, {}, 1)), \
+                           return_value=([record], 1, {}, 1, [])), \
          mock.patch.object(jobs_core.backend_utils,
                            'get_backend_from_handle',
                            return_value=fake_backend), \
