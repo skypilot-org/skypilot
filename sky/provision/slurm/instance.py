@@ -798,6 +798,7 @@ def _create_virtual_instance(
     sky_cluster_home_dir = _sky_cluster_home_dir(sky_base_dir,
                                                  cluster_name_on_cloud)
     snapshot_dir = _snapshot_dir(sky_base_dir, cluster_name_on_cloud)
+    snapshot_manifest_path = _snapshot_manifest_path(snapshot_dir)
     snapshot_manifest = _read_snapshot_manifest(login_node_runner,
                                                 snapshot_dir,
                                                 expected_num_nodes=num_nodes)
@@ -1125,7 +1126,15 @@ cleanup() {{
     # that this srun will run on the same subset of nodes as the srun
     # that created the sky directories.
     srun --overlap --nodes={num_nodes} rm -rf {skypilot_runtime_dir}
-    rm -rf {sky_cluster_home_dir}
+    # A stop publishes the snapshot manifest before cancellation. Keep the
+    # logs referenced by the jobs database that start will restore.
+    if [ -f {shlex.quote(snapshot_manifest_path)} ]; then
+        find {shlex.quote(sky_cluster_home_dir)} -mindepth 1 -maxdepth 1 \\
+            ! -name sky_logs \\
+            -exec rm -rf -- {{}} +
+    else
+        rm -rf -- {shlex.quote(sky_cluster_home_dir)}
+    fi
     exit $saved_exit
 }}
 # Run cleanup on any exit, including container init failures.
@@ -1712,9 +1721,13 @@ enroot export -f -o {shlex.quote(staging_snapshot_path)} "$enroot_name"
         _remove_snapshot_paths_best_effort(
             login_node_runner, [previous_generation_dir],
             'previous Slurm snapshot generation')
-    cleanup = lambda: _cleanup_slurm_allocation(
-        client, login_node_runner, cluster_name_on_cloud, provider_config,
-        job_id, nodes)
+    cleanup = lambda: _cleanup_slurm_allocation(client,
+                                                login_node_runner,
+                                                cluster_name_on_cloud,
+                                                provider_config,
+                                                job_id,
+                                                nodes,
+                                                preserve_logs=True)
     _cancel_slurm_job(client,
                       cluster_name_on_cloud,
                       inside_slurm_cluster=False,
@@ -1754,6 +1767,7 @@ def _cleanup_slurm_allocation(
     provider_config: Dict[str, Any],
     job_id: str,
     nodes: List[str],
+    preserve_logs: bool = False,
 ) -> None:
     """Remove per-node state while the Slurm allocation is still active."""
     slurm_cluster = slurm_utils.get_slurm_cluster_from_config(provider_config)
@@ -1823,7 +1837,14 @@ rm -rf -- {shlex.quote(skypilot_runtime_dir)}
         stderr=f'{stdout}\n{stderr}',
         stream_logs=False)
 
-    remove_shared_state_cmd = f'rm -rf -- {shlex.quote(sky_cluster_home_dir)}'
+    if preserve_logs:
+        remove_shared_state_cmd = (f'find {shlex.quote(sky_cluster_home_dir)} '
+                                   '-mindepth 1 -maxdepth 1 '
+                                   '! -name sky_logs '
+                                   '-exec rm -rf -- {} +')
+    else:
+        remove_shared_state_cmd = (
+            f'rm -rf -- {shlex.quote(sky_cluster_home_dir)}')
     rc, stdout, stderr = login_node_runner.run(remove_shared_state_cmd,
                                                require_outputs=True,
                                                stream_logs=False)

@@ -1,6 +1,7 @@
 """Unit tests for sky.provision.slurm.instance."""
 import json
 import shlex
+import subprocess
 from unittest import mock
 
 import pytest
@@ -476,6 +477,64 @@ class TestStopInstances:
         shared_cleanup = login_runner.run.call_args_list[1].args[0]
         assert shared_cleanup == (
             'rm -rf -- /home/test/.sky_clusters/test-cluster')
+
+    def test_cleanup_allocation_preserves_logs(self, monkeypatch, tmp_path):
+        client = mock.MagicMock()
+        login_runner = mock.MagicMock()
+
+        def run(command, **kwargs):
+            del kwargs
+            if command.startswith('srun '):
+                return 0, '', ''
+            result = subprocess.run(['/bin/bash', '-c', command],
+                                    check=False,
+                                    capture_output=True,
+                                    text=True)
+            return result.returncode, result.stdout, result.stderr
+
+        login_runner.run.side_effect = run
+        monkeypatch.setattr(instance.skypilot_config,
+                            'get_effective_region_config',
+                            mock.MagicMock(return_value=None))
+        monkeypatch.setattr(instance, '_resolve_sky_base_dir',
+                            mock.MagicMock(return_value=str(tmp_path)))
+        monkeypatch.setattr(instance.slurm_utils,
+                            'get_slurm_cluster_from_config',
+                            mock.MagicMock(return_value='test-slurm'))
+        cluster_home = tmp_path / '.sky_clusters' / _CLUSTER
+        log_file = cluster_home / 'sky_logs' / '1-job' / 'run.log'
+        log_file.parent.mkdir(parents=True)
+        log_file.write_text('job output')
+        stale_state = cluster_home / '.sky' / 'state'
+        stale_state.parent.mkdir()
+        stale_state.write_text('state')
+        workdir = cluster_home / 'sky_workdir'
+        workdir.mkdir()
+
+        instance._cleanup_slurm_allocation(client,
+                                           login_runner,
+                                           _CLUSTER,
+                                           _PROVIDER_CONFIG,
+                                           '123', ['node-a'],
+                                           preserve_logs=True)
+
+        assert log_file.read_text() == 'job output'
+        assert not stale_state.parent.exists()
+        assert not workdir.exists()
+
+    def test_stop_cleanup_preserves_logs(self, monkeypatch):
+        _, _, _, _, cancel_slurm_job = self._setup(monkeypatch, ['node-a'])
+        cleanup_slurm_allocation = mock.MagicMock()
+        monkeypatch.setattr(instance, '_cleanup_slurm_allocation',
+                            cleanup_slurm_allocation)
+
+        instance.stop_instances(_CLUSTER, provider_config=_PROVIDER_CONFIG)
+        cleanup = cancel_slurm_job.call_args.kwargs['pre_batch_cancel']
+        cleanup()
+
+        assert cleanup_slurm_allocation.call_args.kwargs == {
+            'preserve_logs': True,
+        }
 
     def test_export_failure_preserves_previous_snapshot(self, monkeypatch):
         client, login_runner, _, write_manifest, cancel_slurm_job = self._setup(

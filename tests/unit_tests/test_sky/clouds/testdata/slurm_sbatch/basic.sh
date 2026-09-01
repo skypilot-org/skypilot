@@ -32,7 +32,15 @@ cleanup() {
     # that this srun will run on the same subset of nodes as the srun
     # that created the sky directories.
     srun --overlap --nodes=1 rm -rf /tmp/test-cluster-no-container
-    rm -rf /home/testuser/.sky_clusters/test-cluster-no-container
+    # A stop publishes the snapshot manifest before cancellation. Keep the
+    # logs referenced by the jobs database that start will restore.
+    if [ -f /home/testuser/.sky_snapshots/test-cluster-no-container/manifest.json ]; then
+        find /home/testuser/.sky_clusters/test-cluster-no-container -mindepth 1 -maxdepth 1 \
+            ! -name sky_logs \
+            -exec rm -rf -- {} +
+    else
+        rm -rf -- /home/testuser/.sky_clusters/test-cluster-no-container
+    fi
     exit $saved_exit
 }
 # Run cleanup on any exit, including container init failures.
