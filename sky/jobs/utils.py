@@ -4033,7 +4033,9 @@ class ManagedJobCodeGen:
                 '{marker}: The jobs controller does not support filtering '
                 'managed jobs by infra (it runs managed jobs version '
                 f'{{managed_job_version}}, and this needs {infra_version}). '
-                'Upgrade the jobs controller to use this filter.')
+                'It is upgraded the next time a managed job is launched on '
+                'it; if jobs are still running there, let them finish or '
+                'cancel them first.')
         # Filter out is_primary_in_job_group for older controllers (< 15)
         _fields = {fields!r}
         if managed_job_version < 15 and _fields is not None:

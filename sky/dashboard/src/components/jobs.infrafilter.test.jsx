@@ -201,8 +201,8 @@ describe('managed jobs Infra filter', () => {
   it('reports a controller too old to filter, instead of an empty table', async () => {
     const err = new Error(
       'The jobs controller does not support filtering managed jobs by infra ' +
-        '(it runs managed jobs version 23, and this needs 24). Upgrade the ' +
-        'jobs controller to use this filter.'
+        '(it runs managed jobs version 23, and this needs 24). It is ' +
+        'upgraded the next time a managed job is launched on it.'
     );
     err.infraFilterUnsupported = true;
     getPaginatedJobs.mockRejectedValue(err);
