@@ -1467,9 +1467,13 @@ def stop_instances(
                                                          default_value=None)
     if tmpdir is not None:
         tmpdir = slurm_utils.expand_path_vars(tmpdir, client.get_env())
-    skylet_pid_file = (f'{_skypilot_runtime_dir(tmpdir, cluster_name_on_cloud)}'
-                       '/.sky/skylet_pid')
+    skypilot_runtime_dir = _skypilot_runtime_dir(tmpdir, cluster_name_on_cloud)
+    skylet_start_file = (
+        f'{skypilot_runtime_dir}/{skylet_constants.SKYLET_START_FILE}')
+    skylet_pid_file = f'{skypilot_runtime_dir}/.sky/skylet_pid'
+    # Remove the start spec first so the keeper cannot restart Skylet.
     stop_skylet_script = (
+        f'rm -f -- {shlex.quote(skylet_start_file)}; '
         f'if [ -f {shlex.quote(skylet_pid_file)} ]; then '
         f'skylet_pid="$(cat {shlex.quote(skylet_pid_file)})"; '
         'if kill -0 "$skylet_pid" 2>/dev/null; then kill "$skylet_pid"; fi; '
@@ -1487,6 +1491,46 @@ def stop_instances(
         'Failed to stop Skylet before snapshotting the Slurm container.',
         stderr=f'{stdout}\n{stderr}',
         stream_logs=False)
+
+    pyxis_name = slurm_utils.pyxis_container_name(cluster_name_on_cloud)
+    global_enroot_name = f'pyxis_{pyxis_name}'
+    job_enroot_name = f'pyxis_{job_id}_{pyxis_name}'
+
+    def _find_enroot_container_script(node: str) -> str:
+        return f"""\
+enroot_name=''
+while IFS= read -r candidate; do
+    if [ "$candidate" = {shlex.quote(global_enroot_name)} ] || [ "$candidate" = {shlex.quote(job_enroot_name)} ]; then
+        if [ -n "$enroot_name" ]; then
+            echo "Multiple matching Pyxis containers found" >&2
+            exit 1
+        fi
+        enroot_name="$candidate"
+    fi
+done < <(enroot list)
+if [ -z "$enroot_name" ]; then
+    echo "Pyxis container not found on node {node}" >&2
+    exit 1
+fi
+"""
+
+    def _check_node_container(node: str) -> None:
+        check_script = 'set -e\n' + _find_enroot_container_script(node)
+        check_cmd = (
+            f'srun --unbuffered --overlap --jobid={shlex.quote(job_id)} '
+            f'--nodelist={shlex.quote(node)} --nodes=1 --ntasks=1 '
+            f'bash -c {shlex.quote(check_script)}')
+        check_rc, check_stdout, check_stderr = login_node_runner.run(
+            check_cmd, require_outputs=True, stream_logs=False)
+        subprocess_utils.handle_returncode(
+            check_rc,
+            check_cmd,
+            f'Failed to verify the Slurm container on node {node} before '
+            'preparing its snapshot.',
+            stderr=f'{check_stdout}\n{check_stderr}',
+            stream_logs=False)
+
+    subprocess_utils.run_in_parallel(_check_node_container, nodes)
 
     prepare_snapshot_cmd = (f'rm -rf -- {shlex.quote(snapshot_dir)}; '
                             f'mkdir -p {shlex.quote(snapshot_dir)}')
@@ -1544,29 +1588,12 @@ def stop_instances(
             stream_logs=False)
         raise AssertionError('unreachable')
 
-    pyxis_name = slurm_utils.pyxis_container_name(cluster_name_on_cloud)
-    global_enroot_name = f'pyxis_{pyxis_name}'
-    job_enroot_name = f'pyxis_{job_id}_{pyxis_name}'
-
     def _export_node(rank_and_node: Tuple[int, str]) -> Dict[str, Any]:
         rank, node = rank_and_node
         snapshot_path = _snapshot_rank_path(snapshot_dir, rank)
         export_script = f"""\
 set -e
-enroot_name=''
-while IFS= read -r candidate; do
-    if [ "$candidate" = {shlex.quote(global_enroot_name)} ] || [ "$candidate" = {shlex.quote(job_enroot_name)} ]; then
-        if [ -n "$enroot_name" ]; then
-            echo "Multiple matching Pyxis containers found" >&2
-            exit 1
-        fi
-        enroot_name="$candidate"
-    fi
-done < <(enroot list)
-if [ -z "$enroot_name" ]; then
-    echo "Pyxis container not found on node {node}" >&2
-    exit 1
-fi
+{_find_enroot_container_script(node)}\
 sync
 enroot export -f -o {shlex.quote(snapshot_path)} "$enroot_name"
 """
@@ -1861,9 +1888,20 @@ def terminate_instances(
             job_id = running_jobs[0]
             nodes, _ = client.get_job_nodes(job_id)
             login_node_runner = _make_login_node_runner(provider_config)
-            pre_batch_cancel = lambda: _cleanup_slurm_allocation(
-                client, login_node_runner, cluster_name_on_cloud,
-                provider_config, job_id, nodes)
+
+            def cleanup_before_terminate() -> None:
+                try:
+                    _cleanup_slurm_allocation(client, login_node_runner,
+                                              cluster_name_on_cloud,
+                                              provider_config, job_id, nodes)
+                except Exception as e:  # pylint: disable=broad-except
+                    logger.warning(
+                        'Failed to clean up the Slurm allocation before '
+                        'termination; proceeding with cancellation. Details: '
+                        f'{common_utils.format_exception(e, use_bracket=True)}')
+                    logger.debug('Full exception details:', exc_info=True)
+
+            pre_batch_cancel = cleanup_before_terminate
     _cancel_slurm_job(client,
                       cluster_name_on_cloud,
                       inside_slurm_cluster,

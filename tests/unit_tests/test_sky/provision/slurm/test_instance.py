@@ -212,6 +212,26 @@ class TestTerminateInstances:
 
         assert events == [('TERM', False), 'cleanup', ('TERM', True)]
 
+    def test_cleanup_failure_still_cancels_allocation(self, mock_client,
+                                                      monkeypatch):
+        mock_client.query_jobs.return_value = ['123']
+        mock_client.get_job_nodes.return_value = (['node-a'], ['10.0.0.1'])
+        mock_client.get_jobs_state_by_name.side_effect = [['RUNNING'], []]
+        cleanup = mock.MagicMock(side_effect=RuntimeError('cleanup failed'))
+        monkeypatch.setattr(instance, '_cleanup_slurm_allocation', cleanup)
+        warning = mock.MagicMock()
+        monkeypatch.setattr(instance.logger, 'warning', warning)
+
+        instance.terminate_instances(_CLUSTER, provider_config=_PROVIDER_CONFIG)
+
+        cleanup.assert_called_once()
+        assert mock_client.cancel_jobs_by_name.call_args_list == [
+            mock.call(_CLUSTER, signal='TERM'),
+            mock.call(_CLUSTER, signal='TERM', full=True),
+        ]
+        warning.assert_called_once()
+        assert 'cleanup failed' in warning.call_args.args[0]
+
     def test_graceful_wait_tolerates_transient_query_failure(self, mock_client):
         # One failed poll inside the wait must not fail the teardown.
         mock_client.get_jobs_state_by_name.side_effect = [
@@ -360,6 +380,16 @@ class TestStopInstances:
         head_runner.run.assert_not_called()
         assert ('cancel_jobs_encoded_results'
                 in head_runner.run_driver.call_args.args[0])
+        stop_skylet_commands = [
+            call.args[0]
+            for call in login_runner.run.call_args_list
+            if 'skylet_pid' in call.args[0]
+        ]
+        assert len(stop_skylet_commands) == 1
+        stop_skylet_command = stop_skylet_commands[0]
+        assert 'rm -f --' in stop_skylet_command
+        assert (stop_skylet_command.index('.sky/skylet_start') <
+                stop_skylet_command.index('.sky/skylet_pid'))
         manifest = write_manifest.call_args.args[2]
         assert manifest['num_nodes'] == 2
         assert manifest['job_db_path'] == (
@@ -424,6 +454,30 @@ class TestStopInstances:
         with pytest.raises(exceptions.CommandError, match='rank 1'):
             instance.stop_instances(_CLUSTER, provider_config=_PROVIDER_CONFIG)
 
+        write_manifest.assert_not_called()
+        cancel_slurm_job.assert_not_called()
+
+    def test_missing_container_preserves_existing_snapshot(self, monkeypatch):
+        _, login_runner, _, write_manifest, cancel_slurm_job = self._setup(
+            monkeypatch, ['node-a', 'node-b'])
+        original_run = login_runner.run.side_effect
+
+        def fail_node_preflight(command, **kwargs):
+            if ('enroot list' in command and 'enroot export' not in command and
+                    '--nodelist=node-b' in command):
+                return 1, '', 'Pyxis container not found on node node-b'
+            return original_run(command, **kwargs)
+
+        login_runner.run.side_effect = fail_node_preflight
+
+        with pytest.raises(exceptions.CommandError, match='node node-b'):
+            instance.stop_instances(_CLUSTER, provider_config=_PROVIDER_CONFIG)
+
+        commands = [call.args[0] for call in login_runner.run.call_args_list]
+        assert not any(
+            command.startswith(
+                'rm -rf -- /home/test/.sky_snapshots/test-cluster')
+            for command in commands)
         write_manifest.assert_not_called()
         cancel_slurm_job.assert_not_called()
 
