@@ -3,11 +3,14 @@
 import os
 from pathlib import Path
 import re
+import subprocess
+import textwrap
 from unittest.mock import patch
 import unittest.mock as mock
 
 import pytest
 
+import sky
 from sky import resources as resources_lib
 from sky.adaptors import slurm
 from sky.clouds import slurm as slurm_cloud
@@ -1946,3 +1949,88 @@ class TestExpandPathVars:
         result = slurm_utils.expand_path_vars('/home/; rm -rf /',
                                               self.REMOTE_ENV)
         assert result == '/home/; rm -rf /'
+
+
+class TestSkySshRcHook:
+    """Behavioral tests for the ~/.sky_ssh_rc hook in slurm-ray.yml.j2.
+
+    The hook is sourced from ~/.bashrc, so every nested interactive shell
+    re-runs it. It must land a fresh SSH session in the cluster-private
+    directory, but must not overwrite HOME or the working directory the
+    user has since changed (#10405).
+    """
+
+    CLUSTER_NAME = 'test-cluster-abc12'
+
+    @pytest.fixture
+    def rc_path(self, tmp_path):
+        template = (Path(sky.__file__).parent / 'templates' /
+                    'slurm-ray.yml.j2').read_text()
+        match = re.search(r"<<'SKYPILOT_SSH_RC'\n(.*?)\n\s*SKYPILOT_SSH_RC\n",
+                          template, re.DOTALL)
+        assert match is not None, ('sky_ssh_rc heredoc not found in '
+                                   'slurm-ray.yml.j2')
+        body = textwrap.dedent(match.group(1)).replace(
+            '{{slurm_cluster_name_env_var}}',
+            constants.SKY_CLUSTER_NAME_ENV_VAR_KEY)
+        rc = tmp_path / 'sky_ssh_rc'
+        rc.write_text(body)
+        return rc
+
+    def _run(self, script, home, cluster_name=None):
+        env = {'PATH': os.environ['PATH'], 'HOME': str(home)}
+        if cluster_name is not None:
+            env[constants.SKY_CLUSTER_NAME_ENV_VAR_KEY] = cluster_name
+        result = subprocess.run(['bash', '-c', script],
+                                env=env,
+                                capture_output=True,
+                                text=True,
+                                check=True)
+        return result.stdout.splitlines()
+
+    @pytest.fixture
+    def home(self, tmp_path):
+        home = tmp_path / 'home'
+        (home / '.sky_clusters' / self.CLUSTER_NAME).mkdir(parents=True)
+        return home
+
+    def test_login_lands_in_cluster_dir(self, rc_path, home):
+        cluster_dir = str(home / '.sky_clusters' / self.CLUSTER_NAME)
+        out = self._run(f'source {rc_path}; echo "$HOME"; pwd',
+                        home,
+                        cluster_name=self.CLUSTER_NAME)
+        assert out == [cluster_dir, cluster_dir]
+
+    def test_nested_shell_preserves_home_and_cwd(self, rc_path, home):
+        # Login shell applies the hook; the user then restores HOME and
+        # changes directory; a nested interactive shell re-sources the
+        # hook and must not undo either.
+        out = self._run(
+            f'source {rc_path}; '
+            f'export HOME={home}; cd /; '
+            f'bash -c \'source {rc_path}; echo "$HOME"; pwd\'',
+            home,
+            cluster_name=self.CLUSTER_NAME)
+        assert out == [str(home), '/']
+
+    def test_fresh_session_reapplies(self, rc_path, home):
+        # A new SSH connection starts without the guard variable in its
+        # environment, so it lands in the cluster directory again.
+        cluster_dir = str(home / '.sky_clusters' / self.CLUSTER_NAME)
+        out = self._run(
+            f'source {rc_path}; '
+            f'env -u SKY_SSH_RC_APPLIED HOME={home} '
+            f'bash -c \'source {rc_path}; echo "$HOME"; pwd\'',
+            home,
+            cluster_name=self.CLUSTER_NAME)
+        assert out == [cluster_dir, cluster_dir]
+
+    def test_noop_without_cluster_name(self, rc_path, home):
+        out = self._run(f'cd /; source {rc_path}; echo "$HOME"; pwd', home)
+        assert out == [str(home), '/']
+
+    def test_noop_when_cluster_dir_missing(self, rc_path, home):
+        out = self._run(f'cd /; source {rc_path}; echo "$HOME"; pwd',
+                        home,
+                        cluster_name='nonexistent-cluster')
+        assert out == [str(home), '/']
