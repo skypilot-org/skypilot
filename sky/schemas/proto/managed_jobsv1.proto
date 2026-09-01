@@ -178,6 +178,12 @@ message GetJobTableResponse {
   // right and is wrong. A server that predates the field leaves it false, so
   // the caller can tell "filtered to none" from "never filtered".
   bool infra_match_applied = 5;
+  // The distinct `--infra` specs across the jobs the request's other filters
+  // select, for the dashboard's Infra filter to offer. Added in
+  // ManagedJobsService v23. A server that predates the field leaves it empty,
+  // which is not an error the way a dropped `infra_match` is: the caller falls
+  // back to deriving the options from the rows on the page.
+  repeated string infra_options = 6;
 }
 
 message GetAllJobIdsByNameRequest {

@@ -2988,6 +2988,21 @@ def get_managed_job_queue(
 
     total_no_filter = managed_job_state.get_managed_jobs_total()
 
+    # The values the dashboard's Infra filter offers. Computed over the same
+    # set the counts are, and without `infra_match`, so picking one option
+    # does not hide the others. See `get_infra_options_with_filters`.
+    infra_options = managed_job_state.get_infra_options_with_filters(
+        job_ids=job_ids,
+        accessible_workspaces=accessible_workspaces,
+        workspace_match=workspace_match,
+        name_match=name_match,
+        pool_match=pool_match,
+        user_hashes=user_hashes,
+        skip_finished=skip_finished,
+        submitted_after=submitted_after,
+        submitted_before=submitted_before,
+    )
+
     status_counts = managed_job_state.get_status_count_with_filters(
         fields=fields,
         job_ids=job_ids,
@@ -3150,7 +3165,8 @@ def get_managed_job_queue(
         'jobs': jobs,
         'total': total,
         'total_no_filter': total_no_filter,
-        'status_counts': status_counts
+        'status_counts': status_counts,
+        'infra_options': infra_options,
     }
 
 
@@ -3239,16 +3255,20 @@ def filter_jobs(
 def load_managed_job_queue(
     payload: str
 ) -> Tuple[List[Dict[str, Any]], int, ManagedJobQueueResultType, int, Dict[
-        str, int]]:
+        str, int], List[str]]:
     """Load job queue from json string."""
     result = message_utils.decode_payload(payload)
     result_type = ManagedJobQueueResultType.DICT
     status_counts: Dict[str, int] = {}
+    # Absent from a controller that predates the field, which is not an error:
+    # the caller falls back to deriving the options from the rows it has.
+    infra_options: List[str] = []
     if isinstance(result, dict):
         jobs: List[Dict[str, Any]] = result['jobs']
         total: int = result['total']
         status_counts = result.get('status_counts', {})
         total_no_filter: int = result.get('total_no_filter', total)
+        infra_options = result.get('infra_options', [])
     else:
         jobs = result
         total = len(jobs)
@@ -3263,7 +3283,8 @@ def load_managed_job_queue(
             # Skip jobs that do not have user_hash info.
             # TODO(cooperc): Remove check before 0.12.0.
             job['user_name'] = all_users_map.get(job['user_hash'])
-    return jobs, total, result_type, total_no_filter, status_counts
+    return jobs, total, result_type, total_no_filter, status_counts, \
+        infra_options
 
 
 def _get_job_status_from_tasks(

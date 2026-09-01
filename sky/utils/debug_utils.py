@@ -400,7 +400,7 @@ def _get_requests_from_managed_jobs(
                 errors=debug_dump_context['errors'],
                 orphans=debug_dump_context['timed_out_ops'])
             if ok and result is not None:
-                jobs, _, _, _ = result
+                jobs, _, _, _, _ = result
                 for job in jobs:
                     name = job.get('job_name')
                     if name:
@@ -680,7 +680,7 @@ def _get_managed_jobs_from_clusters(
             orphans=debug_dump_context['timed_out_ops'])
         if not ok or result is None:
             return
-        jobs, _, _, _ = result
+        jobs, _, _, _, _ = result
         job_cluster_names = _managed_job_cluster_names_from_records(jobs)
     except Exception as e:  # pylint: disable=broad-except
         logger.warning(f'Failed to get managed jobs for clusters: {e}')
@@ -721,9 +721,9 @@ def _get_job_clusters_from_managed_jobs(
     job_ids = list(debug_dump_context['managed_job_ids'])
     logger.debug(f'Getting job clusters for {len(job_ids)} managed jobs')
     try:
-        jobs, _, _, _ = managed_jobs_core.queue_v2(refresh=False,
-                                                   job_ids=job_ids,
-                                                   all_users=True)
+        jobs, _, _, _, _ = managed_jobs_core.queue_v2(refresh=False,
+                                                      job_ids=job_ids,
+                                                      all_users=True)
         job_cluster_names = _managed_job_cluster_names_from_records(jobs)
     except Exception as e:  # pylint: disable=broad-except
         logger.warning(f'Failed to get job clusters for managed jobs: {e}')
@@ -865,7 +865,7 @@ def _populate_recent_context(
                 errors=debug_dump_context['errors'],
                 orphans=debug_dump_context['timed_out_ops'])
             if ok and result is not None:
-                jobs, _, _, _ = result
+                jobs, _, _, _, _ = result
                 for job in jobs:
                     submitted_at = job.get('submitted_at') or 0
                     end_at = job.get('end_at') or time.time()
@@ -2001,7 +2001,7 @@ def _dump_managed_job_queue_info(
             orphans=orphans)
         if not ok or result is None:
             return
-        all_records, _, _, _ = result
+        all_records, _, _, _, _ = result
     except Exception as e:  # pylint: disable=broad-except
         logger.warning(f'Failed to fetch managed job queue info: {e}')
         if errors is not None:

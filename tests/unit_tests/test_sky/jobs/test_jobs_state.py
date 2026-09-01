@@ -1641,3 +1641,62 @@ class TestInfraFilter:
     def test_malformed_spec_is_rejected(self, _seed_infra_jobs):
         with pytest.raises(ValueError, match='Invalid infra format'):
             state.get_managed_jobs_with_filters(infra_match='aws//us-east-1')
+
+
+class TestInfraOptions:
+    """The values the dashboard's Infra filter offers, computed in SQL.
+
+    They have to be `--infra` specs, because that is what the filter is
+    matched as, and they have to describe the whole selected queue rather
+    than one page of it -- that is the reason they are computed here at all.
+    """
+
+    def test_names_every_infra_in_the_queue(self, _seed_infra_jobs):
+        assert state.get_infra_options_with_filters() == [
+            'aws/us-east-1',
+            'kubernetes/gkeXsky-dev_us-central1-c_alpha',
+            'kubernetes/gke_sky-dev_us-central1-c_alpha',
+            'kubernetes/team/ctx',
+            'slurm/prod-cpu',
+            'slurm/prod-gpu',
+            'ssh/my-pool',
+        ]
+
+    def test_every_option_round_trips_as_a_filter(self, _seed_infra_jobs):
+        # The point of the pairing: an option handed straight back as the
+        # filter has to select a non-empty result.
+        for option in state.get_infra_options_with_filters():
+            jobs, total = state.get_managed_jobs_with_filters(
+                infra_match=option)
+            assert jobs, option
+            assert total > 0, option
+
+    def test_ssh_pool_is_named_without_its_prefix(self, _seed_infra_jobs):
+        # `ssh-my-pool` is the stored context; `ssh/my-pool` is what a user
+        # types, and what `InfraInfo.from_str` turns back into the context.
+        options = state.get_infra_options_with_filters()
+        assert 'ssh/my-pool' in options
+        assert 'ssh/ssh-my-pool' not in options
+
+    def test_a_zone_never_narrows_an_option(self, _seed_infra_jobs):
+        # The AWS job has a zone, but the option stops at the region: the
+        # region matches by prefix, so a zone would only select less.
+        assert 'aws/us-east-1' in state.get_infra_options_with_filters()
+        assert 'aws/us-east-1/us-east-1a' not in (
+            state.get_infra_options_with_filters())
+
+    def test_unplaced_job_contributes_nothing(self, _seed_infra_jobs):
+        # `job-unplaced` never launched, so it has no infra to offer.
+        assert all(option for option in state.get_infra_options_with_filters())
+        assert len(state.get_infra_options_with_filters()) == 7
+
+    def test_other_filters_narrow_the_options(self, _seed_infra_jobs):
+        # An option always names a non-empty result, so a filter that
+        # excludes an infra has to drop it from the list too.
+        assert state.get_infra_options_with_filters(name_match='job-slurm') == [
+            'slurm/prod-cpu', 'slurm/prod-gpu'
+        ]
+
+    def test_an_inaccessible_workspace_hides_its_infra(self, _seed_infra_jobs):
+        assert state.get_infra_options_with_filters(
+            accessible_workspaces=['other-ws']) == []

@@ -266,7 +266,7 @@ class IpPair(_message.Message):
     def __init__(self, internal_ip: _Optional[str] = ..., external_ip: _Optional[str] = ...) -> None: ...
 
 class GetJobTableResponse(_message.Message):
-    __slots__ = ("jobs", "total", "total_no_filter", "status_counts", "infra_match_applied")
+    __slots__ = ("jobs", "total", "total_no_filter", "status_counts", "infra_match_applied", "infra_options")
     class StatusCountsEntry(_message.Message):
         __slots__ = ("key", "value")
         KEY_FIELD_NUMBER: _ClassVar[int]
@@ -279,12 +279,14 @@ class GetJobTableResponse(_message.Message):
     TOTAL_NO_FILTER_FIELD_NUMBER: _ClassVar[int]
     STATUS_COUNTS_FIELD_NUMBER: _ClassVar[int]
     INFRA_MATCH_APPLIED_FIELD_NUMBER: _ClassVar[int]
+    INFRA_OPTIONS_FIELD_NUMBER: _ClassVar[int]
     jobs: _containers.RepeatedCompositeFieldContainer[ManagedJobInfo]
     total: int
     total_no_filter: int
     status_counts: _containers.ScalarMap[str, int]
     infra_match_applied: bool
-    def __init__(self, jobs: _Optional[_Iterable[_Union[ManagedJobInfo, _Mapping]]] = ..., total: _Optional[int] = ..., total_no_filter: _Optional[int] = ..., status_counts: _Optional[_Mapping[str, int]] = ..., infra_match_applied: bool = ...) -> None: ...
+    infra_options: _containers.RepeatedScalarFieldContainer[str]
+    def __init__(self, jobs: _Optional[_Iterable[_Union[ManagedJobInfo, _Mapping]]] = ..., total: _Optional[int] = ..., total_no_filter: _Optional[int] = ..., status_counts: _Optional[_Mapping[str, int]] = ..., infra_match_applied: bool = ..., infra_options: _Optional[_Iterable[str]] = ...) -> None: ...
 
 class GetAllJobIdsByNameRequest(_message.Message):
     __slots__ = ("job_name",)

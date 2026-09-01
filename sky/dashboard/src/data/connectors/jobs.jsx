@@ -243,6 +243,11 @@ export async function getManagedJobs(options = {}) {
       : (parsed?.total ?? managedJobs.length);
     const totalNoFilter = parsed?.total_no_filter || total;
     const statusCounts = parsed?.status_counts || {};
+    // The distinct `--infra` specs across everything the other filters select,
+    // computed server-side because the queue is paginated. Absent from a server
+    // or jobs controller that predates the field, in which case the page falls
+    // back to deriving the options from the rows it has.
+    const infraOptions = parsed?.infra_options || [];
 
     // Process jobs data
     const jobData = managedJobs.map((job) => {
@@ -372,6 +377,7 @@ export async function getManagedJobs(options = {}) {
       totalNoFilter,
       controllerStopped: false,
       statusCounts,
+      infraOptions,
     };
   } catch (error) {
     console.error('Error fetching managed job data:', error);

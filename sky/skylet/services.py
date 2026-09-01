@@ -511,6 +511,7 @@ class ManagedJobsServiceImpl(managed_jobsv1_pb2_grpc.ManagedJobsServiceServicer
             total = job_queue['total']
             total_no_filter = job_queue['total_no_filter']
             status_counts = job_queue['status_counts']
+            infra_options = job_queue['infra_options']
 
             jobs_info = []
             for job in jobs:
@@ -586,7 +587,8 @@ class ManagedJobsServiceImpl(managed_jobsv1_pb2_grpc.ManagedJobsServiceServicer
                 # Tell the caller the infra filter was honoured. A server that
                 # predates the field leaves it false, which is how the caller
                 # tells an empty result apart from an unfiltered one.
-                infra_match_applied=True)
+                infra_match_applied=True,
+                infra_options=infra_options)
         except Exception as e:  # pylint: disable=broad-except
             logger.error(e, exc_info=True)
             context.abort(grpc.StatusCode.INTERNAL, str(e))
