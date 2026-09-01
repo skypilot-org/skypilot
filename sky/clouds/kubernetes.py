@@ -1923,7 +1923,7 @@ class Kubernetes(clouds.Cloud):
                                     metadata = {'efa_count': efa_count}
                                     return (network_type, metadata)
                             # No EFA available, but it's an AWS node
-                            return (network_type, metadata)
+                            continue
 
                     # Check for GKE clusters with specific GPUDirect variants
                     machine_family = node.metadata.labels.get(
