@@ -2601,6 +2601,8 @@ def get_config_schema():
         ['aws', 'gcp', 'kubernetes', 'ssh', 'nebius', 'slurm']
     ]
     not_supported_cloud_regex = '|'.join(not_supported_clouds)
+    slurm_allowed_clusters_schema = cloud_configs['slurm']['properties'][
+        'allowed_clusters']
     workspaces_schema = {
         'type': 'object',
         'required': [],
@@ -2796,11 +2798,40 @@ def get_config_schema():
                     'additionalProperties': _allow_additional_properties(),
                 },
                 'slurm': {
-                    **cloud_configs['slurm'],
+                    'type': 'object',
+                    'required': [],
+                    'additionalProperties': False,
                     'properties': {
-                        **cloud_configs['slurm']['properties'],
                         'disabled': {
                             'type': 'boolean'
+                        },
+                        'allowed_clusters': slurm_allowed_clusters_schema,
+                        'sbatch_options': _SBATCH_OPTIONS_SCHEMA,
+                        'cluster_configs': {
+                            'type': 'object',
+                            'required': [],
+                            'properties': {},
+                            'additionalProperties': {
+                                'type': 'object',
+                                'required': [],
+                                'additionalProperties': False,
+                                'properties': {
+                                    'sbatch_options': _SBATCH_OPTIONS_SCHEMA,
+                                    'partition_configs': {
+                                        'type': 'object',
+                                        'required': [],
+                                        'properties': {},
+                                        'additionalProperties': {
+                                            'type': 'object',
+                                            'required': [],
+                                            'additionalProperties': False,
+                                            'properties': {
+                                                'sbatch_options': _SBATCH_OPTIONS_SCHEMA,  # pylint: disable=line-too-long
+                                            },
+                                        },
+                                    },
+                                },
+                            },
                         },
                     },
                 },
