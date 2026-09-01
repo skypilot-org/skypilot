@@ -1848,6 +1848,11 @@ def _resolve_accessible_job_id_for_logs(
       rather than guessing, matching ``managed_job_utils.stream_logs``.
     - otherwise (``--sync-down``): every status, ambiguity takes the latest,
       matching ``sync_down_managed_job_logs``.
+
+    Costs one queue call on top of the handle the caller already resolved. That
+    is a direct DB read under consolidation, and a controller round-trip
+    otherwise -- a cost of ``queue_v2`` itself (``sky jobs queue`` pays it too),
+    so it belongs there rather than in a special case for this caller.
     """
     if job_id is not None:
         records, _, _, _ = queue_v2_api(refresh=False,
