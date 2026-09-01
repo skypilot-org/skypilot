@@ -249,8 +249,8 @@ class Kubernetes(clouds.Cloud):
     # same contract. Do not change this string; instead repoint the same tag to
     # the new image (a new concrete datetag) in the catalog, so existing servers
     # pick up the update.
-    IMAGE_CPU = 'skypilot:custom-cpu-ubuntu-2204-v1'
-    IMAGE_GPU = 'skypilot:custom-gpu-ubuntu-2204-v1'
+    IMAGE_CPU = 'skypilot:custom-cpu-ubuntu-2204-v2'
+    IMAGE_GPU = 'skypilot:custom-gpu-ubuntu-2204-v2'
 
     PROVISIONER_VERSION = clouds.ProvisionerVersion.SKYPILOT
     STATUS_VERSION = clouds.StatusVersion.SKYPILOT
