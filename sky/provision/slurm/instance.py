@@ -1132,7 +1132,7 @@ touch {sky_cluster_home_dir}/.hushlogin
 {f'touch {ready_signal}' if container_image is None else ''}
 # Host-side keeper step that starts skylet and restarts it if it dies.
 {skylet_keeper_block}
-{'sleep infinity' if container_image is None else 'wait "$CONTAINER_PID"'}
+{'sleep infinity' if container_image is None else 'wait -n "${CONTAINER_PIDS[@]}"'}
 """
     # fmt: on
     # pylint: enable=line-too-long

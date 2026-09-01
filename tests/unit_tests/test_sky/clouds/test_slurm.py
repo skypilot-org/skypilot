@@ -1869,7 +1869,8 @@ class TestCreateVirtualInstance:
         keeper_idx = script.index(
             '( while true; do srun --overlap --jobid=$SLURM_JOB_ID '
             '--nodes=1 --ntasks=1 --nodelist=$SKY_HEAD_NODE')
-        anchor_idx = script.rindex('\nwait "$CONTAINER_PID"\n')
+        anchor_idx = script.rindex(
+            '\nwait -n "${CONTAINER_PIDS[@]}"\n')
         assert keeper_idx < anchor_idx
         keeper_line = script[keeper_idx:script.index('\n', keeper_idx)]
         # The keeper never attaches the container: Slurm CLIs are host-only.

@@ -119,4 +119,4 @@ touch /home/testuser/.sky_clusters/test-cluster/.sky_sbatch_ready
 # Host-side keeper step that starts skylet and restarts it if it dies.
 SKY_HEAD_NODE=$(scontrol show hostnames "$SLURM_JOB_NODELIST" | head -n1)
 ( while true; do srun --overlap --jobid=$SLURM_JOB_ID --nodes=1 --ntasks=1 --nodelist=$SKY_HEAD_NODE bash -c 'while true; do if [ -f /tmp/test-cluster/.sky/skylet_start ]; then HOME=/home/testuser/.sky_clusters/test-cluster bash /tmp/test-cluster/.sky/skylet_start; fi; sleep 5; done'; sleep 5; done ) &
-wait "$CONTAINER_PID"
+wait -n "${CONTAINER_PIDS[@]}"
