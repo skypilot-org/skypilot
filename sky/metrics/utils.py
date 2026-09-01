@@ -2,6 +2,7 @@
 import asyncio
 import contextlib
 import functools
+import inspect
 import os
 import queue
 import random
@@ -644,7 +645,27 @@ def time_it(name: str, group: str = 'default'):
 
 
 def time_me(func):
-    """Measure the duration of decorated function."""
+    """Measure the duration of decorated function.
+
+    Coroutine and generator functions are dispatched to wrappers that span
+    their execution: calling them only builds the coroutine/generator object,
+    so timing the call alone would record a near-zero duration.
+    """
+    if inspect.iscoroutinefunction(func):
+        return time_me_async(func)
+
+    if inspect.isgeneratorfunction(func):
+
+        @functools.wraps(func)
+        def generator_wrapper(*args, **kwargs):
+            if not METRICS_ENABLED:
+                yield from func(*args, **kwargs)
+                return
+            name = f'{func.__module__}/{func.__name__}'
+            with time_it(name, group='function'):
+                yield from func(*args, **kwargs)
+
+        return generator_wrapper
 
     @functools.wraps(func)
     def wrapper(*args, **kwargs):

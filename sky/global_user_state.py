@@ -1629,7 +1629,7 @@ def get_cluster_name_to_handle_map(
     return name_to_handle
 
 
-@metrics_lib.time_me
+@metrics_lib.time_me_async
 async def get_status_from_cluster_name_async(
         cluster_name: str) -> Optional[status_lib.ClusterStatus]:
     """Get the status of a cluster."""

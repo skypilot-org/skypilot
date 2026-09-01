@@ -790,7 +790,7 @@ def update_request(request_id: str) -> Generator[Optional[Request], None, None]:
         yield request
 
 
-@metrics_lib.time_me
+@metrics_lib.time_me_async
 @asyncio_utils.shield
 async def update_status_async(request_id: str, status: RequestStatus) -> None:
     """Update the status of a request"""
@@ -798,7 +798,7 @@ async def update_status_async(request_id: str, status: RequestStatus) -> None:
         request_id, status)
 
 
-@metrics_lib.time_me
+@metrics_lib.time_me_async
 @asyncio_utils.shield
 async def update_status_msg_async(request_id: str, status_msg: str) -> None:
     """Update the status message of a request"""
@@ -901,7 +901,7 @@ async def _get_request_no_lock_async(
     return Request.from_row(row)
 
 
-@metrics_lib.time_me
+@metrics_lib.time_me_async
 async def get_latest_request_id_async() -> Optional[str]:
     """Get the latest request ID."""
     return await request_storage.get_request_backend(
@@ -1252,7 +1252,7 @@ async def set_request_cancelled_async(request_id: str) -> None:
         request_task.status = RequestStatus.CANCELLED
 
 
-@metrics_lib.time_me
+@metrics_lib.time_me_async
 async def _delete_requests(request_ids: List[str]):
     """Clean up requests by their IDs."""
     await request_storage.get_request_backend().delete_requests(request_ids)
