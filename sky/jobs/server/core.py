@@ -307,9 +307,7 @@ class _DefaultManagedJobRunner:
                 with ux_utils.print_exception_no_traceback():
                     raise exceptions.NotSupportedError(
                         detail[0].strip() if detail else
-                        'The jobs controller does not support filtering '
-                        'managed jobs by infra. It is upgraded the next time '
-                        'a managed job is launched on it.')
+                        managed_job_utils.INFRA_FILTER_UNSUPPORTED_MESSAGE)
             logger.error(output)
             raise RuntimeError('Failed to fetch managed jobs with returncode: '
                                f'{returncode}.\n{output}')
@@ -1481,11 +1479,7 @@ def queue_v2(
                 # rather than pass it off as filtered.
                 with ux_utils.print_exception_no_traceback():
                     raise exceptions.NotSupportedError(
-                        'The jobs controller does not support filtering '
-                        'managed jobs by infra. It is upgraded the next time '
-                        'a managed job is launched on it; if jobs are still '
-                        'running there, let them finish or cancel them '
-                        'first.')
+                        managed_job_utils.INFRA_FILTER_UNSUPPORTED_MESSAGE)
             jobs = managed_job_utils.decode_managed_job_protos(response.jobs)
             return (jobs, response.total, dict(response.status_counts),
                     response.total_no_filter, list(response.infra_options))

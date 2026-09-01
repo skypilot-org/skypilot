@@ -200,9 +200,9 @@ describe('managed jobs Infra filter', () => {
 
   it('reports a controller too old to filter, instead of an empty table', async () => {
     const err = new Error(
-      'The jobs controller does not support filtering managed jobs by infra ' +
-        '(it runs managed jobs version 23, and this needs 24). It is ' +
-        'upgraded the next time a managed job is launched on it.'
+      'The jobs controller does not support filtering managed jobs by ' +
+        'infra. Launching your next managed job updates the controller ' +
+        'automatically; try this filter again after that.'
     );
     err.infraFilterUnsupported = true;
     getPaginatedJobs.mockRejectedValue(err);
@@ -210,7 +210,7 @@ describe('managed jobs Infra filter', () => {
     await openAt('?owner=all&infra=slurm');
     await waitFor(() =>
       expect(
-        screen.getAllByText(/managed jobs version 23/).length
+        screen.getAllByText(/updates the controller automatically/).length
       ).toBeGreaterThan(0)
     );
     expect(screen.getByText(/Cannot filter these jobs by infra/)).toBeTruthy();

@@ -49,9 +49,9 @@ const serverError = (type, message) => ({
 });
 
 const UNSUPPORTED =
-  'The jobs controller does not support filtering managed jobs by infra ' +
-  '(it runs managed jobs version 23, and this needs 24). It is upgraded ' +
-  'the next time a managed job is launched on it.';
+  'The jobs controller does not support filtering managed jobs by infra. ' +
+  'Launching your next managed job updates the controller automatically; ' +
+  'try this filter again after that.';
 
 describe('getManagedJobs and the infra filter', () => {
   beforeEach(() => {

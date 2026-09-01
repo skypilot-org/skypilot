@@ -3964,6 +3964,15 @@ def parse_job_cancel_file(content: str) -> Tuple[bool, Optional[int]]:
 # generic non-zero exit into a clean, user-facing error.
 INFRA_FILTER_UNSUPPORTED_MARKER = 'SKYPILOT_INFRA_FILTER_UNSUPPORTED'
 
+# What the user is told when the filter reaches a controller too old to apply
+# it. Deliberately says nothing about versions: the number a controller runs is
+# not something a user can act on. What they can act on is that the controller
+# upgrades itself the next time a managed job is launched on it.
+INFRA_FILTER_UNSUPPORTED_MESSAGE = (
+    'The jobs controller does not support filtering managed jobs by infra. '
+    'Launching your next managed job updates the controller automatically; '
+    'try this filter again after that.')
+
 # The managed jobs version that first accepted `infra_match`.
 INFRA_FILTER_MANAGED_JOBS_VERSION = 24
 
@@ -4021,6 +4030,7 @@ class ManagedJobCodeGen:
         submitted_before: Optional[float] = None,
     ) -> str:
         marker = INFRA_FILTER_UNSUPPORTED_MARKER
+        message = INFRA_FILTER_UNSUPPORTED_MESSAGE
         infra_version = INFRA_FILTER_MANAGED_JOBS_VERSION
         code = textwrap.dedent(f"""\
         # An infra filter a controller cannot apply must be an error, not a
@@ -4029,13 +4039,7 @@ class ManagedJobCodeGen:
         # wrong. Checked on the controller, which is what knows its version.
         _infra_match = {infra_match!r}
         if _infra_match is not None and managed_job_version < {infra_version}:
-            raise RuntimeError(
-                '{marker}: The jobs controller does not support filtering '
-                'managed jobs by infra (it runs managed jobs version '
-                f'{{managed_job_version}}, and this needs {infra_version}). '
-                'It is upgraded the next time a managed job is launched on '
-                'it; if jobs are still running there, let them finish or '
-                'cancel them first.')
+            raise RuntimeError('{marker}: {message}')
         # Filter out is_primary_in_job_group for older controllers (< 15)
         _fields = {fields!r}
         if managed_job_version < 15 and _fields is not None:
