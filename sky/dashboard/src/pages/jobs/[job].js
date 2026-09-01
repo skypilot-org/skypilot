@@ -766,6 +766,22 @@ function JobDetails() {
               />
             )}
 
+            {/* Plugin Slot: Job Detail GPU metrics. The built-in
+                TelemetrySection above covers Kubernetes; this lets a plugin
+                contribute a GPU-metrics/telemetry panel for other infra
+                (empty when no plugin registers for it). */}
+            <PluginSlot
+              name="jobs.detail.gpu-metrics"
+              context={{
+                clusterName: detailJobData.current_cluster_name,
+                clusterNameOnCloud: detailJobData.cluster_name_on_cloud,
+                nodeNames: detailJobData.node_names,
+                infra: detailJobData.full_infra,
+                status: detailJobData.status,
+              }}
+              wrapperClassName="mt-6"
+            />
+
             {/* Plugin Slot: Job Infra Nodes */}
             <PluginSlot
               name="jobs.detail.nodes"

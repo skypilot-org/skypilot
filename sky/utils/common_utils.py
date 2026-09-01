@@ -415,6 +415,24 @@ def is_in_request_context() -> bool:
     return context.get_context_var(_REQUEST_ID_KEY) is not None
 
 
+def get_current_request_actor() -> Optional[str]:
+    """Names who is making the current API request, for audit messages.
+
+    Returns e.g. ``alice (request ID: 2f0c8e2b-...)``, suitable for embedding
+    in an event log so a record says who asked for an action and under which
+    request. Returns None outside a server-side request execution (see
+    ``set_request_context``): an in-process caller has no requesting user or
+    request to name.
+    """
+    if not is_in_request_context():
+        return None
+    user = get_current_user()
+    # The hash is the fallback identity: a display name is not guaranteed
+    # (e.g. an identity recorded before names were stored).
+    who = user.name or user.id
+    return f'{who} (request ID: {get_current_request_id()})'
+
+
 def get_current_command() -> str:
     """Returns the command related to this operation.
 

@@ -95,7 +95,7 @@ message GetJobTableRequest {
   // ManagedJobsService v22.
   optional double submitted_after = 15;
   optional double submitted_before = 16;
-  // `--infra` spec to filter on, added in ManagedJobsService v23. A server
+  // `--infra` spec to filter on, added in ManagedJobsService v24. A server
   // that predates it ignores this field, so the response reports back whether
   // it was honoured rather than leaving the caller to assume it was.
   optional string infra_match = 17;
@@ -172,7 +172,7 @@ message GetJobTableResponse {
   int32 total = 2;
   int32 total_no_filter = 3;
   map<string, int32> status_counts = 4;
-  // Whether `infra_match` was applied, added in ManagedJobsService v23.
+  // Whether `infra_match` was applied, added in ManagedJobsService v24.
   // Unlike a filter that merely widens the result when it is dropped, an
   // ignored infra filter returns jobs on other infra -- an answer that looks
   // right and is wrong. A server that predates the field leaves it false, so
@@ -180,7 +180,7 @@ message GetJobTableResponse {
   bool infra_match_applied = 5;
   // The distinct `--infra` specs across the jobs the request's other filters
   // select, for the dashboard's Infra filter to offer. Added in
-  // ManagedJobsService v23. A server that predates the field leaves it empty,
+  // ManagedJobsService v24. A server that predates the field leaves it empty,
   // which is not an error the way a dropped `infra_match` is: the caller falls
   // back to deriving the options from the rows on the page.
   repeated string infra_options = 6;

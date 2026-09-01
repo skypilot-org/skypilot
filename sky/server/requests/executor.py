@@ -50,6 +50,7 @@ from sky.server import daemons
 from sky.server import metrics as metrics_lib
 from sky.server import plugins
 from sky.server import versions
+from sky.server.requests import event_loop
 from sky.server.requests import payloads
 from sky.server.requests import preconditions
 from sky.server.requests import process
@@ -206,9 +207,13 @@ _queue_factory: Optional[queue_base.QueueBackendFactory] = None
 
 
 def executor_initializer(proc_group: str,
-                         clean_env: Optional[Dict[str, str]] = None):
+                         clean_env: Optional[Dict[str, str]] = None,
+                         num_db_connections_per_worker: int = 0):
     setproctitle.setproctitle(f'SkyPilot:executor:{proc_group}:'
                               f'{multiprocessing.current_process().pid}')
+    # Must precede plugin install: a plugin that keeps the engine it gets
+    # during install() would otherwise hold one built for the wrong budget.
+    db_utils.set_max_connections(num_db_connections_per_worker)
     # Load plugins for executor process.
     plugins.load_plugins(
         plugins.ExtensionContext(context=plugins.PluginContext.EXECUTOR))
@@ -270,19 +275,17 @@ def _refresh_waiting_status_msg(request_id: str, retry_suffix: str,
         request_task.status_msg = _waiting_status_msg(reason, retry_suffix)
 
 
-def _wait_for_continue_condition(
-        condition: Any, *, is_cancelled: Callable[[], bool],
-        fallback_wait_seconds: float,
-        update_status_msg: Callable[[str], None]) -> bool:
-    """Run a continue condition's wait, tolerating an older ``wait()``.
+def _condition_wait_kwargs(wait_fn: Callable, *, is_cancelled: Callable,
+                           fallback_wait_seconds: float,
+                           update_status_msg: Callable) -> Dict[str, Any]:
+    """Build the kwargs for a wait, tolerating an older signature.
 
     The continue-condition contract is duck-typed (see
     ``continue_condition.ContinueCondition``), and implementations live in
     separately versioned packages, so ``update_status_msg`` is passed only to
-    a ``wait()`` that accepts it rather than raising TypeError on one that
-    does not.
+    a wait that accepts it rather than raising TypeError on one that does not.
 
-    The probe reads the signature, so a ``wait()`` wrapped by a decorator that
+    The probe reads the signature, so a wait wrapped by a decorator that
     neither ``functools.wraps`` it nor declares ``**kwargs`` is treated as not
     accepting the callback: the wait still runs, it just never reports a
     reason.
@@ -291,12 +294,36 @@ def _wait_for_continue_condition(
         'is_cancelled': is_cancelled,
         'fallback_wait_seconds': fallback_wait_seconds,
     }
-    parameters = inspect.signature(condition.wait).parameters
+    parameters = inspect.signature(wait_fn).parameters
     if ('update_status_msg' in parameters or
             any(parameter.kind is inspect.Parameter.VAR_KEYWORD
                 for parameter in parameters.values())):
         kwargs['update_status_msg'] = update_status_msg
+    return kwargs
+
+
+def _wait_for_continue_condition(
+        condition: Any, *, is_cancelled: Callable[[], bool],
+        fallback_wait_seconds: float,
+        update_status_msg: Callable[[str], None]) -> bool:
+    """Run a continue condition's wait in the calling thread."""
+    kwargs = _condition_wait_kwargs(condition.wait,
+                                    is_cancelled=is_cancelled,
+                                    fallback_wait_seconds=fallback_wait_seconds,
+                                    update_status_msg=update_status_msg)
     return condition.wait(**kwargs)
+
+
+def _async_condition_wait(condition: Any) -> Optional[Callable]:
+    """The condition's ``wait_async`` coroutine function, if it has one.
+
+    Only a real coroutine function opts a condition into the shared waiter
+    loop: a plain callable that happens to be named ``wait_async`` cannot be
+    awaited, and silently degrading it to the fallback wait would discard the
+    condition's actual policy in ``wait()``.
+    """
+    wait_async = getattr(condition, 'wait_async', None)
+    return wait_async if inspect.iscoroutinefunction(wait_async) else None
 
 
 class RequestWorker:
@@ -361,9 +388,8 @@ class RequestWorker:
             # multiple requests can share the same process pid, which may cause
             # issues with SkyPilot core functions if they rely on the exit of
             # the process, such as subprocess_daemon.py.
-            fut = executor.submit_until_success(
-                _request_execution_wrapper, request_id, ignore_return_value,
-                self.num_db_connections_per_worker)
+            fut = executor.submit_until_success(_request_execution_wrapper,
+                                                request_id, ignore_return_value)
             # Decrement the free executor count when a request starts
             if metrics_utils.METRICS_ENABLED:
                 if self.schedule_type == api_requests.ScheduleType.LONG:
@@ -449,6 +475,18 @@ class RequestWorker:
                 assert request_task is not None, request_id
                 request_task.status = api_requests.RequestStatus.WAITING
                 request_task.status_msg = status_msg
+            if condition is not None:
+                wait_async = _async_condition_wait(condition)
+                if wait_async is not None:
+                    # An async-capable condition waits as a coroutine on the
+                    # shared request event loop; this monitor thread ends here
+                    # instead of blocking for the length of the pause.
+                    event_loop.run(
+                        self._wait_async_and_reschedule(wait_async,
+                                                        request_element,
+                                                        retry_wait_seconds,
+                                                        retry_suffix))
+                    return
             try:
                 if condition is not None:
                     should_reschedule = _wait_for_continue_condition(
@@ -474,6 +512,56 @@ class RequestWorker:
                 queue.put(request_element)
                 logger.info(f'Rescheduled request {request_id} for retry')
 
+    async def _wait_async_and_reschedule(self, wait_async: Callable,
+                                         request_element: Tuple[str, bool,
+                                                                bool],
+                                         retry_wait_seconds: float,
+                                         retry_suffix: str) -> None:
+        """Drive a condition's ``wait_async`` and requeue on resume.
+
+        Same policy as the thread path in ``handle_task_result``: a failing
+        wait falls back to one fixed backoff and reschedules, a False verdict
+        drops the request. Runs on the shared waiter loop, so everything
+        blocking — the DB access behind the callbacks, the queue put — must
+        go through the loop's thread pool.
+        """
+        request_id, _, _ = request_element
+        loop = asyncio.get_running_loop()
+
+        async def is_cancelled() -> bool:
+            return await loop.run_in_executor(None,
+                                              _request_is_gone_or_cancelled,
+                                              request_id)
+
+        async def update_status_msg(reason: str) -> None:
+            await loop.run_in_executor(None, _refresh_waiting_status_msg,
+                                       request_id, retry_suffix, reason)
+
+        try:
+            try:
+                kwargs = _condition_wait_kwargs(
+                    wait_async,
+                    is_cancelled=is_cancelled,
+                    fallback_wait_seconds=retry_wait_seconds,
+                    update_status_msg=update_status_msg)
+                should_reschedule = await wait_async(**kwargs)
+            except Exception as wait_err:  # pylint: disable=broad-except
+                logger.error(
+                    f'Continue-condition wait failed for {request_id}: '
+                    f'{common_utils.format_exception(wait_err)}')
+                await asyncio.sleep(retry_wait_seconds)
+                should_reschedule = True
+            if should_reschedule:
+                queue = _get_queue(self.schedule_type)
+                await loop.run_in_executor(None, queue.put, request_element)
+                logger.info(f'Rescheduled request {request_id} for retry')
+        except Exception as e:  # pylint: disable=broad-except
+            # Nothing reads this coroutine's future; an exception escaping
+            # here would otherwise vanish, with the request left parked.
+            logger.error(
+                f'Continue-condition handling failed for {request_id}: '
+                f'{common_utils.format_exception(e, use_bracket=True)}')
+
     def run(self) -> None:
         # Handle the SIGTERM signal to abort the executor process gracefully.
         proc_group = f'{self.schedule_type.value}'
@@ -496,7 +584,8 @@ class RequestWorker:
                 garanteed_workers=self.garanteed_parallelism,
                 burst_workers=self.burstable_parallelism,
                 initializer=executor_initializer,
-                initargs=(proc_group, clean_env_module.get_clean_server_env()))
+                initargs=(proc_group, clean_env_module.get_clean_server_env(),
+                          self.num_db_connections_per_worker))
             # Initialize the appropriate gauge for the number of free executors
             total_executors = (self.garanteed_parallelism +
                                self.burstable_parallelism)
@@ -782,8 +871,7 @@ def _gated_sigterm_handler(signum: int,
 
 
 def _request_execution_wrapper(request_id: str,
-                               ignore_return_value: bool,
-                               num_db_connections_per_worker: int = 0) -> None:
+                               ignore_return_value: bool) -> None:
     """Wrapper for a request execution.
 
     It wraps the execution of a request to:
@@ -797,7 +885,6 @@ def _request_execution_wrapper(request_id: str,
     pid = multiprocessing.current_process().pid
     proc = psutil.Process(pid)
     rss_begin = proc.memory_info().rss
-    db_utils.set_max_connections(num_db_connections_per_worker)
     # Handle the SIGTERM signal to abort the request processing gracefully.
     # Only set up signal handlers in the main thread, as signal.signal() raises
     # ValueError if called from a non-main thread (e.g., in tests).
