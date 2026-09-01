@@ -172,6 +172,10 @@ def bulk_provision(
             try:
                 provision_record = _bulk_provision(cloud, region, cluster_name,
                                                    bootstrap_config)
+            except exceptions.ExecutionPausedError:
+                # A pause to wait on an external condition is neither a
+                # success nor a failure; the attempt resumes later.
+                raise
             except BaseException:
                 metrics_utils.observe_provision_duration(
                     repr(cloud), 'failure',

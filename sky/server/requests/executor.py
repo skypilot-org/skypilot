@@ -938,9 +938,13 @@ def _request_execution_wrapper(request_id: str,
                     f'skipping execution')
                 return
             log_path = request_task.log_path
-            # A pid was set by a previous attempt: this is a retry-requeue
-            # (e.g. retry_until_up), not the first execution start.
-            first_execution = request_task.pid is None
+            # PENDING means this request never started executing before: the
+            # retry/pause requeue path is the only writer of WAITING, so a
+            # WAITING request here is a re-execution (e.g. retry_until_up),
+            # not the first start. pid cannot discriminate this: the
+            # ExecutionRetryableError handler clears it before requeueing.
+            first_execution = (
+                request_task.status == api_requests.RequestStatus.PENDING)
             pending_seconds = time.time() - request_task.created_at
             request_task.pid = pid
             request_task.status = api_requests.RequestStatus.RUNNING
