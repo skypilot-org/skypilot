@@ -64,6 +64,29 @@ def test_time_me_times_generator_execution():
     assert _duration('generator_fn') >= _SLEEP
 
 
+def test_time_me_preserves_generator_return_value():
+
+    @metrics_utils.time_me
+    def returning_generator_fn():
+        yield 'value'
+        return 'returned'
+
+    generator = returning_generator_fn()
+    assert next(generator) == 'value'
+    with pytest.raises(StopIteration) as exc_info:
+        next(generator)
+    assert exc_info.value.value == 'returned'
+
+
+def test_time_me_rejects_async_generators():
+
+    with pytest.raises(TypeError):
+
+        @metrics_utils.time_me
+        async def async_generator_fn():
+            yield 'value'
+
+
 def test_time_me_records_on_exception():
 
     @metrics_utils.time_me
