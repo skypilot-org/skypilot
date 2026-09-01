@@ -98,15 +98,19 @@ class TestGetContextNamespace:
         assert context == 'my-context'
         assert namespace == 'my-namespace'
 
+    @patch('sky.clouds.Kubernetes.existing_allowed_contexts')
     @patch('sky.provision.kubernetes.volume.kubernetes_utils.'
            'get_current_kube_config_context_name')
     @patch('sky.provision.kubernetes.volume.kubernetes_utils.'
            'get_kube_config_context_namespace')
     def test_get_context_namespace_without_region(self, mock_get_namespace,
-                                                  mock_get_context):
+                                                  mock_get_context,
+                                                  mock_allowed_contexts):
         """Test when region is not specified."""
         mock_get_context.return_value = 'default-context'
         mock_get_namespace.return_value = 'default-namespace'
+        # The current context is allowed, so it is the one that gets used.
+        mock_allowed_contexts.return_value = ['default-context']
 
         config = models.VolumeConfig(
             _version=1,
@@ -1414,6 +1418,12 @@ class TestCreatePersistentVolumeClaim:
                                                       config)
         assert 'does not exist' in str(exc_info.value)
         assert 'use_existing' in str(exc_info.value)
+        # The PVC may well exist -- just on a context this lookup never
+        # searched, e.g. when the volume named none and one was resolved
+        # for it. Say which cluster came up empty, and how to pin another.
+        assert 'my-context' in str(exc_info.value)
+        assert 'my-namespace' in str(exc_info.value)
+        assert '--infra k8s/<context>' in str(exc_info.value)
 
     @patch('sky.provision.kubernetes.volume.kubernetes')
     def test_create_pvc_success(self, mock_k8s):

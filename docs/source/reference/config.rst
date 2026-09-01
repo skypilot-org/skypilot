@@ -110,6 +110,10 @@ Below is the configuration syntax and some example values. See detailed explanat
     :ref:`apt_mirrors <config-yaml-kubernetes-apt-mirrors>`:
       - mirror.math.princeton.edu
       - mirrors.kernel.org
+    :ref:`rdma <config-yaml-kubernetes-rdma>`:
+      mode: sriov
+      resource: nvidia.com/rdma-vf
+      networks: default/rdma-vf
     :ref:`context_configs <config-yaml-kubernetes-context-configs>`:
       context1:
         pod_config:
@@ -165,6 +169,10 @@ Below is the configuration syntax and some example values. See detailed explanat
         gpu_partition_map:
           H100: h100-custom
         cpu_partition: cpu-only
+        prometheus:
+          url: http://prometheus.internal:9090
+          filter:
+            cluster: mycluster1-fleet
 
   :ref:`aws <config-yaml-aws>`:
     :ref:`labels <config-yaml-aws-labels>`:
@@ -251,6 +259,7 @@ Below is the configuration syntax and some example values. See detailed explanat
         fabric: fabric-5
     :ref:`use_internal_ips <config-yaml-nebius-use-internal-ips>`: true
     :ref:`use_static_ip_address <config-yaml-nebius-use-static-ip-address>`: true
+    :ref:`disk_encrypted <config-yaml-nebius-disk-encrypted>`: true
     :ref:`ssh_proxy_command <config-yaml-nebius-ssh-proxy-command>`: ssh -W %h:%p user@host
     :ref:`tenant_id <config-yaml-nebius-tenant-id>`: tenant-1234567890
     :ref:`domain <config-yaml-nebius-domain>`: api.nebius.cloud:443
@@ -2177,6 +2186,92 @@ Example:
 
 Can also be set per-context via ``context_configs``.
 
+.. _config-yaml-kubernetes-rdma:
+
+``kubernetes.rdma``
+~~~~~~~~~~~~~~~~~~~
+
+How RDMA NICs are delivered to pods on an RDMA-capable cluster (optional).
+
+.. note::
+
+    This setting currently applies **only to Oracle OKE RoCE clusters** — those
+    that SkyPilot detects as OCI RoCE when a task requests
+    :ref:`network_tier: best <yaml-spec-resources-network-tier>`.
+
+Oracle documents two ways for a pod to reach the RDMA fabric on OKE, and a
+cluster is set up for one of them:
+
+- **Host networking** (default). The pod shares the node's network namespace
+  and reaches the RDMA devices through a ``/dev/infiniband`` hostPath, which
+  requires a privileged container. This is what SkyPilot has always done on an
+  OKE RoCE cluster, so leave ``rdma`` unset for it.
+- **SR-IOV**. The pod keeps its own network namespace; the RDMA NICs arrive as
+  SR-IOV virtual functions, requested as an extended resource and attached by
+  Multus. Select it with ``mode: sriov``.
+
+Fields:
+
+- ``mode``: ``sriov`` to use the SR-IOV model. Unset means host networking.
+- ``resource``: the extended resource advertised by the RDMA device plugin,
+  e.g. ``nvidia.com/rdma-vf``. Required when ``mode: sriov``.
+- ``networks``: the ``NetworkAttachmentDefinition`` to attach, named the way
+  Multus expects — either ``<name>`` (looked up in the pod's namespace) or
+  ``<namespace>/<name>``, e.g. ``default/rdma-vf``. Required when
+  ``mode: sriov``.
+
+``resource`` and ``networks`` both name objects that whoever installed the
+device plugin chose, so SkyPilot cannot infer them and fails with an actionable
+error if ``mode: sriov`` is set without them. The number of NICs is not
+configurable: SkyPilot reads the VF-to-GPU ratio off a node that is running and
+can host the request, then scales it to the GPUs requested. A context whose
+RDMA node pool is scaled to zero therefore has no node to read, and launches
+fail naming the resource rather than waiting for the autoscaler.
+
+SkyPilot also sets ``NCCL_IB_HCA`` to the ``mlx5`` family prefix under
+``mode: sriov``, rather than the exact device list it uses for host networking —
+a pod holding virtual functions never sees the host's physical function names.
+Narrow it through task ``envs:`` if your ``SriovNetworkNodePolicy`` also exposes
+NICs that are not part of the compute fabric.
+
+Example:
+
+.. code-block:: yaml
+
+  kubernetes:
+    context_configs:
+      my-oke-cluster:
+        rdma:
+          mode: sriov
+          resource: nvidia.com/rdma-vf
+          networks: default/rdma-vf
+
+With ``mode: sriov``, SkyPilot does not enable host networking and does not
+mount ``/dev/infiniband`` or run the container privileged — an SR-IOV device
+plugin configured with ``isRdma`` injects the RDMA character devices itself.
+
+.. note::
+
+    This is a deliberate deviation from Oracle's SR-IOV example manifest, which
+    keeps both. There are two ways a container can receive RDMA character
+    devices, and it needs one: a ``/dev/infiniband`` hostPath, which grants no
+    device-cgroup access and so requires ``privileged: true``; or a device
+    plugin running with ``isRdma``, which grants both and hands the pod only
+    its own virtual functions. Doing both means the hostPath shadows the
+    injected devices with every device on the node, which puts ``privileged``
+    back — the thing the SR-IOV model exists to avoid.
+
+    If your device plugin does *not* set ``isRdma``, nothing injects the
+    devices and the pod has no RDMA. Add them back through
+    :ref:`pod_config <config-yaml-kubernetes-pod-config>`.
+
+Two cluster-side prerequisites are outside SkyPilot's control. Multus must be
+installed, since the attachment is delivered through its annotation. And if the
+context uses :ref:`Kueue <config-yaml-kubernetes-kueue>`, the ClusterQueue must
+list the VF resource in ``coveredResources`` *and* give it a quota in a
+ResourceFlavor — a ClusterQueue that does not cover a requested extended
+resource never admits the workload, so jobs sit pending with no error.
+
 .. _config-yaml-kubernetes-context-configs:
 
 ``kubernetes.context_configs``
@@ -2528,6 +2623,52 @@ Supported fields:
   the cluster level. Entries are merged per container path, with per-cluster
   values overriding global values.
 
+- ``prometheus``: Opts the cluster into GPU metrics federation, surfacing its
+  DCGM and node-exporter metrics in the SkyPilot dashboard. Sub-fields:
+
+  - ``url``: URL of a Prometheus that scrapes the cluster's DCGM and
+    node exporters, reachable from a login node (the cluster's own, or the
+    ``via`` cluster's). SkyPilot runs ``GET /federate`` against it from the
+    login node, so the API server never needs direct network access to it.
+  - ``filter``: Label matchers (label name to exact value) scoping this
+    cluster's slice of ``url``, for a central Prometheus that aggregates
+    metrics from several clusters. Without a filter, all series returned by
+    ``url`` are attributed to this cluster. Clusters sharing a ``url``
+    automatically exclude each other's filtered slices, so a fleet is never
+    counted twice.
+  - ``via``: Name of another Slurm cluster whose login node runs the
+    ``/federate`` request instead of this cluster's own, for a central
+    Prometheus reachable from only some login nodes. The fetched series are
+    still attributed to this cluster.
+
+  The flat ``prometheus_url`` field is a deprecated spelling of
+  ``prometheus.url`` and is still honored; ``prometheus.url`` wins when both
+  are set.
+
+  ``url`` and ``via`` can also be set once at the cloud level under
+  ``slurm.prometheus`` as shared defaults, inherited by any cluster that does
+  not override them. This suits the common case of one central Prometheus,
+  reachable through a single fleet's login node, serving every cluster: set
+  ``url`` (and ``via``) once and give each cluster only its own ``filter``.
+
+  .. code-block:: yaml
+
+    slurm:
+      # Shared defaults: one central Prometheus, reachable only through
+      # hub's login node, serving every cluster.
+      prometheus:
+        url: http://prometheus.internal:9090
+        via: hub
+      cluster_configs:
+        hub:
+          prometheus:
+            filter:
+              cluster: hub-fleet
+        edge:
+          prometheus:
+            filter:
+              cluster: edge-fleet
+
 Example:
 
 .. code-block:: yaml
@@ -2553,6 +2694,14 @@ Example:
           cpu: 0.06
           accelerators:
             A100: 4.00   # Override A100; V100 inherited
+        # Surface this cluster's GPU metrics in the SkyPilot dashboard,
+        # federated from a Prometheus reachable from the login node.
+        prometheus:
+          url: http://prometheus.internal:9090
+          # Only needed when the Prometheus aggregates several clusters:
+          # collect only the series carrying these labels.
+          filter:
+            cluster: mycluster1-fleet
 
       mycluster2:
         workdir: /home/$USER
@@ -2572,6 +2721,15 @@ Example:
             pricing:
               accelerators:
                 H100: 5.00
+        # GPU metrics federation from a central Prometheus that aggregates
+        # both clusters but is reachable only from mycluster1's login node.
+        prometheus:
+          url: http://prometheus.internal:9090
+          # Run the /federate request on mycluster1's login node.
+          via: mycluster1
+          # Collect only this cluster's slice of the shared Prometheus.
+          filter:
+            cluster: mycluster2-fleet
 
 .. _config-yaml-oci:
 
@@ -2720,6 +2878,19 @@ Set to ``false`` to use only publicly available pricing information.
 Pricing tiers and free quotas are ignored in this estimate, and the final cost could be lower or higher.
 
 Default: ``true``.
+
+.. _config-yaml-nebius-disk-encrypted:
+
+``nebius.disk_encrypted``
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Encrypted boot disk (optional).
+
+Set to ``true`` to enable Nebius-managed encryption for Network SSD
+Non-replicated and Network SSD IO M3 boot disks launched by SkyPilot. Network
+SSD boot disks are encrypted by default.
+
+Default: ``false``.
 
 .. _config-yaml-nebius-ssh-proxy-command:
 

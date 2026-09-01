@@ -93,6 +93,58 @@ class TestSlurmClientSubmitUser:
                                                   slurm_user='alice')
 
 
+class TestCheckComputeCredentials:
+    """The credential check must not impersonate the submit user.
+
+    Sites that enable submit_as_user commonly grant passwordless sudo for
+    the submission commands only (sbatch/srun/scancel/squeue), so an
+    impersonated read-only probe (sinfo) is denied — and a failed check
+    disables the cluster for every consumer of the enabled-clouds cache.
+    The check's probes carry no identity requirement, so they run as the
+    SSH user (slurm_user=None).
+    """
+
+    @patch('sky.clouds.slurm.skypilot_config.get_effective_region_config',
+           return_value=None)
+    @patch('sky.clouds.slurm.slurm_utils.get_identities_only',
+           return_value=True)
+    @patch('sky.clouds.slurm.slurm_utils.get_identity_file',
+           return_value='/root/.ssh/key')
+    @patch('sky.clouds.slurm.Slurm.existing_allowed_clusters',
+           return_value=['restricted'])
+    @patch('sky.clouds.slurm.slurm_utils.get_slurm_ssh_config')
+    @patch('sky.clouds.slurm.slurm.SlurmClient')
+    def test_check_runs_as_ssh_user_under_restricted_sudo(
+            self, mock_client_class, mock_get_ssh_config, *_mocks):
+        mock_get_ssh_config.return_value.lookup.return_value = {
+            'hostname': 'login.example.com',
+            'port': 22,
+            'user': 'svc',
+        }
+
+        def make_client(*args, **kwargs):
+            del args  # unused
+            client = mock.MagicMock()
+            if kwargs.get('slurm_user') is not None:
+                # Restricted-sudo cluster: any impersonated command is
+                # denied, exactly what the check must not depend on.
+                client.info.side_effect = RuntimeError(
+                    'sudo: a password is required')
+            else:
+                client.info.return_value = 'PARTITION AVAIL NODES'
+                client.get_env.return_value = {'HOME': '/home/svc'}
+                client.check_dir_shared_fs.return_value = 'nfs'
+            return client
+
+        mock_client_class.side_effect = make_client
+
+        success, ctx2text = slurm_cloud.Slurm._check_compute_credentials()
+
+        assert success
+        assert 'enabled' in ctx2text['restricted']
+        assert mock_client_class.call_args.kwargs['slurm_user'] is None
+
+
 class TestSubmitUserDeployVariables:
 
     @staticmethod

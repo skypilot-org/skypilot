@@ -119,12 +119,17 @@ class KubernetesHighPerformanceNetworkType(enum.Enum):
     NONE = 'none'
 
     def get_network_env_vars(self,
-                             acc_type: Optional[str] = None) -> Dict[str, str]:
+                             acc_type: Optional[str] = None,
+                             pod_local_rdma: bool = False) -> Dict[str, str]:
         """Get network environment variables for this cluster type.
 
         Args:
             acc_type: The canonical accelerator type requested (e.g. 'GB200').
                 Used by OCI to pick a shape-specific NCCL profile.
+            pod_local_rdma: The pod receives its own RDMA devices (SR-IOV
+                virtual functions) instead of sharing the node's. Profiles that
+                name the host's physical functions have to widen their HCA
+                list, since those names do not exist in such a pod.
         """
         if self == KubernetesHighPerformanceNetworkType.NEBIUS:
             # Nebius cluster with InfiniBand - use InfiniBand optimizations
@@ -160,6 +165,19 @@ class KubernetesHighPerformanceNetworkType(enum.Enum):
             # any of these via task `envs:`.
             # Refer to the examples https://github.com/oracle-quickstart/oci-hpc-oke/tree/main/manifests/nccl-tests/kueue for more details. # pylint: disable=line-too-long
             acc = (acc_type or '').upper()
+            # The Grace profiles below name the host's physical functions
+            # exactly. A pod holding SR-IOV virtual functions never sees those
+            # names, so the list has to widen to the family prefix. This is the
+            # only NCCL difference between Oracle's two reference manifests for
+            # the same shape, and it fails silently: NCCL finds no matching
+            # device and falls back to TCP rather than erroring.
+            #
+            # Widening hands NIC selection to the device plugin: the pod holds
+            # only the VFs its SriovNetworkNodePolicy chose to create, so the
+            # prefix cannot reach a PF the exact list was excluding. A policy
+            # that also exposes non-fabric NICs would need `NCCL_IB_HCA`
+            # narrowed again through task `envs:`.
+            pf_names_visible = not pod_local_rdma
             if acc == 'GB200':
                 # GB200 NVL72 runs Quantum-2 InfiniBand plus rack-scale
                 # multi-node NVLink (MNNVL) and NVLink SHARP (NVLS) -- a
@@ -175,7 +193,8 @@ class KubernetesHighPerformanceNetworkType(enum.Enum):
                     # Required for MNNVL to work.
                     'NCCL_CUMEM_ENABLE': '1',
                     'NCCL_NET_PLUGIN': 'sys',
-                    'NCCL_IB_HCA': 'mlx5_0,mlx5_1,mlx5_3,mlx5_4',
+                    'NCCL_IB_HCA': ('mlx5_0,mlx5_1,mlx5_3,mlx5_4'
+                                    if pf_names_visible else 'mlx5'),
                     # NVLink SHARP in-network reductions.
                     'NCCL_NVLS_ENABLE': '1',
                     'NCCL_SOCKET_IFNAME': 'eth0',
@@ -194,7 +213,8 @@ class KubernetesHighPerformanceNetworkType(enum.Enum):
                     'NCCL_CUMEM_ENABLE': '1',
                     'NCCL_NET_PLUGIN': 'none',
                     'NCCL_IB_HCA': ('=mlx5_0,mlx5_1,mlx5_2,mlx5_3,'
-                                    'mlx5_5,mlx5_6,mlx5_7,mlx5_8'),
+                                    'mlx5_5,mlx5_6,mlx5_7,mlx5_8'
+                                    if pf_names_visible else 'mlx5'),
                     'NCCL_NVLS_ENABLE': '1',
                     'NCCL_SOCKET_IFNAME': 'eth0',
                     # GPU-to-CPU (C2C) GPUDirect over the Grace link.

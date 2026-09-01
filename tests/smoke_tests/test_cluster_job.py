@@ -1408,14 +1408,23 @@ def test_task_labels_kubernetes():
                 # so its in-cluster kubectl can see the target's resources.
                 smoke_tests_utils.resolve_k8s_context_cmd(name),
                 smoke_tests_utils.launch_cloud_cmd_on_landed_context(name),
-                # Verify with kubectl that the labels are set.
+                # Verify with kubectl that the labels are set. Scope the
+                # selector to this cluster's own pods: the namespace is shared
+                # (other API servers and concurrent smoke runs land their pods
+                # in it too), and `jsonpath={.items[*].metadata.name}` emits
+                # every match space-joined on a single line, so an anchored
+                # `grep '^<name>'` on that line only passes when this cluster's
+                # pod happens to sort first among the matches. Ask the API
+                # server for the intersection instead and just require a hit.
+                # One `--selector` flag, not three: kubectl's `-l/--selector`
+                # is a plain string flag, so repeating it silently keeps only
+                # the last occurrence.
                 smoke_tests_utils.run_cloud_cmd_on_cluster(
                     name, 'kubectl get pods '
-                    '--selector inlinelabel1=inlinevalue1 '
-                    '--selector inlinelabel2=inlinevalue2 '
-                    '-o jsonpath=\'{.items[*].metadata.name}\' | '
-                    f'grep \'^{common_utils.make_cluster_name_on_cloud(name, sky.Kubernetes.max_cluster_name_length())}\''
-                )
+                    '--selector inlinelabel1=inlinevalue1,'
+                    'inlinelabel2=inlinevalue2,'
+                    f'skypilot-cluster-name={common_utils.make_cluster_name_on_cloud(name, sky.Kubernetes.max_cluster_name_length())} '
+                    '-o jsonpath=\'{.items[*].metadata.name}\' | grep .')
             ],
             smoke_tests_utils.chain_teardown(
                 f'sky down -y {name}',

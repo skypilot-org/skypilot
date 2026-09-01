@@ -902,8 +902,8 @@ _SLURM_PROM_URL = 'http://prometheus.hpc.internal:9090/'
 
 
 def _slurm_config(keys, default_value=None, **_):
-    # Only cluster 'hpc' opted in via slurm.cluster_configs.hpc.prometheus_url.
-    if tuple(keys) == ('slurm', 'cluster_configs', 'hpc', 'prometheus_url'):
+    # Only cluster 'hpc' opted in, via slurm.cluster_configs.hpc.prometheus.url.
+    if tuple(keys) == ('slurm', 'cluster_configs', 'hpc', 'prometheus', 'url'):
         return _SLURM_PROM_URL
     return default_value
 
@@ -923,14 +923,14 @@ def test_get_slurm_metrics_clusters_tolerates_enumeration_failure(monkeypatch):
 
 
 def test_get_slurm_metrics_clusters_respects_allowed_clusters(monkeypatch):
-    # A cluster with a prometheus_url that is NOT in allowed_clusters is
+    # A cluster with a prometheus.url that is NOT in allowed_clusters is
     # excluded: federation is scoped to slurm.allowed_clusters (via
     # Slurm.existing_allowed_clusters), mirroring the Kubernetes federation's
     # use of allowed_contexts.
     def _cfg(keys, default_value=None, **_):
         if tuple(keys) in (
-            ('slurm', 'cluster_configs', 'hpc', 'prometheus_url'),
-            ('slurm', 'cluster_configs', 'blocked', 'prometheus_url'),
+            ('slurm', 'cluster_configs', 'hpc', 'prometheus', 'url'),
+            ('slurm', 'cluster_configs', 'blocked', 'prometheus', 'url'),
         ):
             return _SLURM_PROM_URL
         return default_value
@@ -1002,6 +1002,401 @@ def test_get_metrics_for_slurm_cluster_nonzero_exit_raises(monkeypatch):
 def test_get_metrics_for_slurm_cluster_unconfigured_raises(monkeypatch):
     monkeypatch.setattr(utils.skypilot_config, 'get_nested', _slurm_config)
     with mock.patch('sky.provision.slurm.utils.run_on_login_node') as run:
-        with pytest.raises(ValueError, match='No prometheus_url'):
+        with pytest.raises(ValueError, match='No prometheus.url'):
             asyncio.run(utils.get_metrics_for_slurm_cluster('other'))
     run.assert_not_called()
+
+
+# --- Slurm federate scoping (prometheus.filter) ---
+# One Prometheus aggregating several fleets: without scoping, an unscoped
+# DCGM_.* pull stamps every fleet's series with whichever cluster asked.
+
+_SHARED_PROM_URL = 'http://central-vm.internal:9091'
+
+
+def _shared_prom_config(filters_by_cluster):
+    """get_nested stub: two clusters on one Prometheus, given filters."""
+
+    def _cfg(keys, default_value=None, **_):
+        keys = tuple(keys)
+        if keys == ('slurm', 'cluster_configs'):
+            return {name: {} for name in filters_by_cluster}
+        if (len(keys) == 5 and keys[:2] == ('slurm', 'cluster_configs') and
+                keys[3:] == ('prometheus', 'url')):
+            return (_SHARED_PROM_URL
+                    if keys[2] in filters_by_cluster else default_value)
+        if (len(keys) == 5 and keys[:2] == ('slurm', 'cluster_configs') and
+                keys[3:] == ('prometheus', 'filter')):
+            return filters_by_cluster.get(keys[2]) or default_value
+        return default_value
+
+    return _cfg
+
+
+def test_slurm_filters_become_positive_matchers(monkeypatch):
+    monkeypatch.setattr(
+        utils.skypilot_config, 'get_nested',
+        _shared_prom_config({'prod': {
+            'cluster': 'site-prod-gpu'
+        }}))
+    with mock.patch('sky.clouds.Slurm.existing_allowed_clusters',
+                    return_value=['prod']):
+        assert utils.slurm_federate_matchers('prod') == [
+            'cluster="site-prod-gpu"'
+        ]
+
+
+def test_slurm_sibling_filter_becomes_negative_matcher(monkeypatch):
+    # 'prod' declares nothing; 'lab' claims cluster="site-lab" on the same
+    # Prometheus. 'prod' must not also collect (and re-stamp) that slice.
+    monkeypatch.setattr(
+        utils.skypilot_config, 'get_nested',
+        _shared_prom_config({
+            'prod': None,
+            'lab': {
+                'cluster': 'site-lab'
+            },
+        }))
+    with mock.patch('sky.clouds.Slurm.existing_allowed_clusters',
+                    return_value=['prod', 'lab']):
+        assert utils.slurm_federate_matchers('prod') == ['cluster!="site-lab"']
+        # The claimant itself keeps only its positive matcher.
+        assert utils.slurm_federate_matchers('lab') == ['cluster="site-lab"']
+
+
+def test_slurm_own_filter_wins_over_sibling_negation(monkeypatch):
+    # Both constrain `cluster`; 'prod' pinning its own value already excludes
+    # the sibling, and adding cluster!="site-lab" would be redundant noise.
+    monkeypatch.setattr(
+        utils.skypilot_config, 'get_nested',
+        _shared_prom_config({
+            'prod': {
+                'cluster': 'site-prod-gpu'
+            },
+            'lab': {
+                'cluster': 'site-lab'
+            },
+        }))
+    with mock.patch('sky.clouds.Slurm.existing_allowed_clusters',
+                    return_value=['prod', 'lab']):
+        assert utils.slurm_federate_matchers('prod') == [
+            'cluster="site-prod-gpu"'
+        ]
+
+
+def test_slurm_sibling_not_federated_is_not_subtracted(monkeypatch):
+    # 'lab' is configured but excluded by allowed_clusters, so it collects
+    # nothing; subtracting its slice would drop those series entirely.
+    monkeypatch.setattr(
+        utils.skypilot_config, 'get_nested',
+        _shared_prom_config({
+            'prod': None,
+            'lab': {
+                'cluster': 'site-lab'
+            },
+        }))
+    with mock.patch('sky.clouds.Slurm.existing_allowed_clusters',
+                    return_value=['prod']):
+        assert utils.slurm_federate_matchers('prod') == []
+
+
+def test_slurm_multi_label_sibling_filter_not_negated(monkeypatch):
+    # Negating an AND of matchers is a disjunction, which a Prometheus
+    # selector cannot express; leave it rather than over-exclude — but warn,
+    # since the unfiltered cluster will double-count the sibling's slice.
+    # (sky loggers set propagate=False, so pytest's caplog — a root-logger
+    # handler — never sees their records; assert on the logger call instead.)
+    monkeypatch.setattr(
+        utils.skypilot_config, 'get_nested',
+        _shared_prom_config({
+            'prod': None,
+            'lab': {
+                'cluster': 'site-lab',
+                'region': 'us'
+            },
+        }))
+    with mock.patch('sky.clouds.Slurm.existing_allowed_clusters',
+                    return_value=['prod', 'lab']):
+        with mock.patch.object(utils.logger, 'warning') as warn:
+            assert utils.slurm_federate_matchers('prod') == []
+    assert any('double-counted' in str(call) for call in warn.call_args_list)
+
+
+def test_slurm_distinct_prometheus_urls_do_not_interact(monkeypatch):
+
+    def _cfg(keys, default_value=None, **_):
+        keys = tuple(keys)
+        if keys == ('slurm', 'cluster_configs'):
+            return {'prod': {}, 'lab': {}}
+        if keys == ('slurm', 'cluster_configs', 'prod', 'prometheus', 'url'):
+            return _SHARED_PROM_URL
+        if keys == ('slurm', 'cluster_configs', 'lab', 'prometheus', 'url'):
+            return 'http://other-vm.internal:9091'
+        if keys == ('slurm', 'cluster_configs', 'lab', 'prometheus', 'filter'):
+            return {'cluster': 'site-lab'}
+        return default_value
+
+    monkeypatch.setattr(utils.skypilot_config, 'get_nested', _cfg)
+    with mock.patch('sky.clouds.Slurm.existing_allowed_clusters',
+                    return_value=['prod', 'lab']):
+        assert utils.slurm_federate_matchers('prod') == []
+
+
+def test_slurm_invalid_filter_label_is_dropped(monkeypatch):
+    # An invalid label name would build a selector Prometheus rejects,
+    # failing the cluster's whole federation.
+    monkeypatch.setattr(
+        utils.skypilot_config, 'get_nested',
+        _shared_prom_config(
+            {'prod': {
+                'bad label': 'x',
+                'cluster': 'site-prod-gpu'
+            }}))
+    with mock.patch('sky.clouds.Slurm.existing_allowed_clusters',
+                    return_value=['prod']):
+        assert utils.slurm_federate_matchers('prod') == [
+            'cluster="site-prod-gpu"'
+        ]
+
+
+def test_slurm_filter_value_is_escaped(monkeypatch):
+    monkeypatch.setattr(utils.skypilot_config, 'get_nested',
+                        _shared_prom_config({'prod': {
+                            'cluster': 'a"b\\c'
+                        }}))
+    with mock.patch('sky.clouds.Slurm.existing_allowed_clusters',
+                    return_value=['prod']):
+        assert utils.slurm_federate_matchers('prod') == ['cluster="a\\"b\\\\c"']
+
+
+def test_with_label_matchers_selector_shapes():
+    # Braced selector with existing matchers.
+    assert utils._with_label_matchers(
+        'node_cpu{mode="idle"}',
+        ['cluster="c"']) == ('node_cpu{mode="idle",cluster="c"}')
+    # Name-less selector.
+    assert utils._with_label_matchers(
+        '{__name__=~"DCGM_.*"}',
+        ['cluster="c"']) == ('{__name__=~"DCGM_.*",cluster="c"}')
+    # Empty brace section must not produce a leading comma.
+    assert utils._with_label_matchers(
+        'node_cpu{}', ['cluster="c"']) == 'node_cpu{cluster="c"}'
+    # Bare metric name.
+    assert utils._with_label_matchers(
+        'node_cpu', ['cluster="c"']) == 'node_cpu{cluster="c"}'
+    # No matchers leaves the pattern byte-identical.
+    assert utils._with_label_matchers('node_cpu{mode="idle"}',
+                                      []) == 'node_cpu{mode="idle"}'
+
+
+def test_get_metrics_for_slurm_cluster_applies_filters(monkeypatch):
+    monkeypatch.setattr(
+        utils.skypilot_config, 'get_nested',
+        _shared_prom_config({'prod': {
+            'cluster': 'site-prod-gpu'
+        }}))
+    with mock.patch('sky.clouds.Slurm.existing_allowed_clusters',
+                    return_value=['prod']):
+        with mock.patch('sky.provision.slurm.utils.run_on_login_node',
+                        return_value=(0, '', '')) as run:
+            asyncio.run(utils.get_metrics_for_slurm_cluster('prod'))
+    cmd = run.call_args.args[1]
+    # The matcher rides inside every match[] selector, percent-encoded.
+    assert cmd.count('cluster%3D%22site-prod-gpu%22') == len(
+        utils.SLURM_GPU_METRICS_MATCH_PATTERNS)
+
+
+def test_slurm_flat_prometheus_url_still_honored(monkeypatch):
+    # The pre-`prometheus:` spelling is live in deployed configs; dropping it
+    # would silently stop a cluster's federation on upgrade.
+    def _cfg(keys, default_value=None, **_):
+        if tuple(keys) == ('slurm', 'cluster_configs', 'hpc', 'prometheus_url'):
+            return _SLURM_PROM_URL
+        return default_value
+
+    monkeypatch.setattr(utils.skypilot_config, 'get_nested', _cfg)
+    with mock.patch('sky.clouds.Slurm.existing_allowed_clusters',
+                    return_value=['hpc']):
+        assert utils.get_slurm_metrics_clusters() == ['hpc']
+    with mock.patch('sky.provision.slurm.utils.run_on_login_node',
+                    return_value=(0, '', '')) as run:
+        asyncio.run(utils.get_metrics_for_slurm_cluster('hpc'))
+    assert _SLURM_PROM_URL.rstrip('/') + '/federate?' in run.call_args.args[1]
+
+
+def test_slurm_nested_prometheus_url_wins_over_flat(monkeypatch):
+
+    def _cfg(keys, default_value=None, **_):
+        keys = tuple(keys)
+        if keys == ('slurm', 'cluster_configs', 'hpc', 'prometheus', 'url'):
+            return 'http://new.internal:9091'
+        if keys == ('slurm', 'cluster_configs', 'hpc', 'prometheus_url'):
+            return 'http://old.internal:9090'
+        return default_value
+
+    monkeypatch.setattr(utils.skypilot_config, 'get_nested', _cfg)
+    with mock.patch('sky.provision.slurm.utils.run_on_login_node',
+                    return_value=(0, '', '')) as run:
+        asyncio.run(utils.get_metrics_for_slurm_cluster('hpc'))
+    cmd = run.call_args.args[1]
+    assert 'http://new.internal:9091/federate?' in cmd
+    assert 'old.internal' not in cmd
+
+
+def test_slurm_via_routes_curl_to_other_login_node(monkeypatch):
+    # A central Prometheus reachable only from 'hub': 'edge' collects its own
+    # slice through hub's login node, and the series are still attributed to
+    # 'edge' — transport and attribution are independent.
+    def _cfg(keys, default_value=None, **_):
+        keys = tuple(keys)
+        if keys == ('slurm', 'cluster_configs'):
+            return {'hub': {}, 'edge': {}}
+        if keys[-2:] == ('prometheus', 'url') and keys[2] in ('hub', 'edge'):
+            return _SHARED_PROM_URL
+        if keys == ('slurm', 'cluster_configs', 'edge', 'prometheus', 'via'):
+            return 'hub'
+        if keys == ('slurm', 'cluster_configs', 'edge', 'prometheus', 'filter'):
+            return {'cluster': 'site-edge'}
+        return default_value
+
+    monkeypatch.setattr(utils.skypilot_config, 'get_nested', _cfg)
+    body = 'DCGM_FI_DEV_GPU_UTIL{cluster="site-edge",gpu="0"} 5\n'
+    with mock.patch('sky.clouds.Slurm.existing_allowed_clusters',
+                    return_value=['hub', 'edge']):
+        with mock.patch('sky.provision.slurm.utils.run_on_login_node',
+                        return_value=(0, body, '')) as run:
+            out = asyncio.run(utils.get_metrics_for_slurm_cluster('edge'))
+    # curl ran on hub's login node...
+    assert run.call_args.args[0] == 'hub'
+    # ...scoped to edge's slice...
+    assert 'cluster%3D%22site-edge%22' in run.call_args.args[1]
+    # ...and the series are stamped as edge, not hub.
+    assert out == 'DCGM_FI_DEV_GPU_UTIL{cluster="slurm/edge",gpu="0"} 5'
+
+
+def test_slurm_via_failure_names_both_clusters(monkeypatch):
+
+    def _cfg(keys, default_value=None, **_):
+        keys = tuple(keys)
+        if keys == ('slurm', 'cluster_configs', 'edge', 'prometheus', 'url'):
+            return _SHARED_PROM_URL
+        if keys == ('slurm', 'cluster_configs', 'edge', 'prometheus', 'via'):
+            return 'hub'
+        return default_value
+
+    monkeypatch.setattr(utils.skypilot_config, 'get_nested', _cfg)
+    with mock.patch('sky.provision.slurm.utils.run_on_login_node',
+                    return_value=(7, '', 'curl: (7) Failed to connect')):
+        with pytest.raises(RuntimeError,
+                           match=r"'edge' \(via 'hub'\) exited 7"):
+            asyncio.run(utils.get_metrics_for_slurm_cluster('edge'))
+
+
+def test_slurm_top_level_prometheus_url_default(monkeypatch):
+    # One central Prometheus for every fleet: set slurm.prometheus.url once,
+    # and a cluster with no per-cluster url inherits it.
+    def _cfg(keys, default_value=None, **_):
+        if tuple(keys) == ('slurm', 'prometheus', 'url'):
+            return _SHARED_PROM_URL
+        return default_value
+
+    monkeypatch.setattr(utils.skypilot_config, 'get_nested', _cfg)
+    with mock.patch('sky.clouds.Slurm.existing_allowed_clusters',
+                    return_value=['hpc']):
+        assert utils.get_slurm_metrics_clusters() == ['hpc']
+        with mock.patch('sky.provision.slurm.utils.run_on_login_node',
+                        return_value=(0, '', '')) as run:
+            asyncio.run(utils.get_metrics_for_slurm_cluster('hpc'))
+    assert _SHARED_PROM_URL.rstrip('/') + '/federate?' in run.call_args.args[1]
+
+
+def test_slurm_per_cluster_url_wins_over_top_level_default(monkeypatch):
+
+    def _cfg(keys, default_value=None, **_):
+        keys = tuple(keys)
+        if keys == ('slurm', 'cluster_configs', 'hpc', 'prometheus', 'url'):
+            return 'http://per-cluster:9091'
+        if keys == ('slurm', 'prometheus', 'url'):
+            return 'http://shared:9090'
+        return default_value
+
+    monkeypatch.setattr(utils.skypilot_config, 'get_nested', _cfg)
+    with mock.patch('sky.provision.slurm.utils.run_on_login_node',
+                    return_value=(0, '', '')) as run:
+        asyncio.run(utils.get_metrics_for_slurm_cluster('hpc'))
+    cmd = run.call_args.args[1]
+    assert 'http://per-cluster:9091/federate?' in cmd
+    assert 'shared' not in cmd
+
+
+def test_slurm_flat_url_wins_over_top_level_default(monkeypatch):
+    # The deprecated flat per-cluster spelling is more specific than the
+    # shared default and must not be overridden by it on upgrade.
+    def _cfg(keys, default_value=None, **_):
+        keys = tuple(keys)
+        if keys == ('slurm', 'cluster_configs', 'hpc', 'prometheus_url'):
+            return 'http://flat:9090'
+        if keys == ('slurm', 'prometheus', 'url'):
+            return 'http://shared:9091'
+        return default_value
+
+    monkeypatch.setattr(utils.skypilot_config, 'get_nested', _cfg)
+    with mock.patch('sky.provision.slurm.utils.run_on_login_node',
+                    return_value=(0, '', '')) as run:
+        asyncio.run(utils.get_metrics_for_slurm_cluster('hpc'))
+    cmd = run.call_args.args[1]
+    assert 'http://flat:9090/federate?' in cmd
+    assert 'shared' not in cmd
+
+
+def test_slurm_top_level_via_default(monkeypatch):
+    # Central Prometheus reachable only through one fleet's login node: set
+    # slurm.prometheus.{url,via} once, and a cluster with no per-cluster via
+    # routes its curl through that login node.
+    def _cfg(keys, default_value=None, **_):
+        keys = tuple(keys)
+        if keys == ('slurm', 'prometheus', 'url'):
+            return _SHARED_PROM_URL
+        if keys == ('slurm', 'prometheus', 'via'):
+            return 'hub'
+        return default_value
+
+    monkeypatch.setattr(utils.skypilot_config, 'get_nested', _cfg)
+    with mock.patch('sky.provision.slurm.utils.run_on_login_node',
+                    return_value=(0, '', '')) as run:
+        asyncio.run(utils.get_metrics_for_slurm_cluster('edge'))
+    assert run.call_args.args[0] == 'hub'
+
+
+def test_slurm_filter_newline_is_escaped(monkeypatch):
+    # A literal newline in a matcher ends the selector mid-string and fails
+    # the whole federate request; it must ride as the \n escape instead.
+    monkeypatch.setattr(utils.skypilot_config, 'get_nested',
+                        _shared_prom_config({'prod': {
+                            'cluster': 'a\nb'
+                        }}))
+    with mock.patch('sky.clouds.Slurm.existing_allowed_clusters',
+                    return_value=['prod']):
+        assert utils.slurm_federate_matchers('prod') == ['cluster="a\\nb"']
+
+
+def test_slurm_trailing_slash_urls_count_as_shared(monkeypatch):
+    # http://vm:9091 and http://vm:9091/ are the same service (federate_url
+    # is built with the same rstrip); the sibling exclusion must agree, or an
+    # unfiltered cluster re-imports its sibling's slice.
+    def _cfg(keys, default_value=None, **_):
+        keys = tuple(keys)
+        if keys == ('slurm', 'cluster_configs'):
+            return {'prod': {}, 'lab': {}}
+        if keys == ('slurm', 'cluster_configs', 'prod', 'prometheus', 'url'):
+            return _SHARED_PROM_URL
+        if keys == ('slurm', 'cluster_configs', 'lab', 'prometheus', 'url'):
+            return _SHARED_PROM_URL + '/'
+        if keys == ('slurm', 'cluster_configs', 'lab', 'prometheus', 'filter'):
+            return {'cluster': 'site-lab'}
+        return default_value
+
+    monkeypatch.setattr(utils.skypilot_config, 'get_nested', _cfg)
+    with mock.patch('sky.clouds.Slurm.existing_allowed_clusters',
+                    return_value=['prod', 'lab']):
+        assert utils.slurm_federate_matchers('prod') == ['cluster!="site-lab"']

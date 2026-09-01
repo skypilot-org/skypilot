@@ -1421,6 +1421,163 @@ SLURM_CONTEXT_PREFIX = 'slurm/'
 # stamping after it have to fit in the same budget.
 _SLURM_FEDERATE_CURL_HEADROOM_SECONDS = 5
 
+# A Prometheus label name. Filter keys are validated against this before
+# being interpolated into a selector: an invalid name would produce a
+# selector Prometheus rejects, failing the whole cluster's federation.
+_PROM_LABEL_NAME_RE = re.compile(r'^[a-zA-Z_][a-zA-Z0-9_]*$')
+
+
+def _escape_prom_label_value(value: str) -> str:
+    """Escapes a string for use inside a double-quoted label matcher.
+
+    Prometheus string literals take backslash escapes; a literal newline,
+    by contrast, ends the selector mid-string and fails the whole request.
+    """
+    return (value.replace('\\', '\\\\').replace('"',
+                                                '\\"').replace('\n', '\\n'))
+
+
+def _slurm_prometheus_url(cluster_name: str) -> Optional[str]:
+    """Configured /federate base URL for a Slurm cluster, if any.
+
+    Resolution order: the per-cluster
+    ``slurm.cluster_configs.<name>.prometheus.url``; the flat
+    ``prometheus_url`` it replaced (still honored — live in deployed configs,
+    and dropping it would silently stop a cluster's federation on upgrade);
+    then the shared ``slurm.prometheus.url`` default, so a single central
+    Prometheus serving every fleet need not be repeated on each cluster.
+    """
+    url = skypilot_config.get_nested(
+        ('slurm', 'cluster_configs', cluster_name, 'prometheus', 'url'), None)
+    if url:
+        return url
+    flat = skypilot_config.get_nested(
+        ('slurm', 'cluster_configs', cluster_name, 'prometheus_url'), None)
+    if flat:
+        return flat
+    return skypilot_config.get_nested(('slurm', 'prometheus', 'url'), None)
+
+
+def get_slurm_prometheus_filters(cluster_name: str) -> Dict[str, str]:
+    """Label matchers scoping a Slurm cluster's slice of its Prometheus.
+
+    Read from ``slurm.cluster_configs.<name>.prometheus.filter``: a mapping
+    of label name to exact value. Entries whose key is not a valid Prometheus
+    label name are dropped with a warning rather than allowed to corrupt the
+    selector, which would fail the cluster's whole federation.
+    """
+    raw = skypilot_config.get_nested(
+        ('slurm', 'cluster_configs', cluster_name, 'prometheus', 'filter'),
+        None) or {}
+    if not isinstance(raw, dict):
+        logger.warning(
+            f'Ignoring prometheus.filter for Slurm cluster {cluster_name!r}: '
+            f'expected a mapping of label name to value, got {type(raw)}.')
+        return {}
+    filters: Dict[str, str] = {}
+    for label, value in raw.items():
+        if not _PROM_LABEL_NAME_RE.match(str(label)):
+            logger.warning(
+                f'Ignoring prometheus.filter entry {label!r} for Slurm '
+                f'cluster {cluster_name!r}: not a valid Prometheus label '
+                f'name.')
+            continue
+        filters[str(label)] = str(value)
+    return filters
+
+
+def slurm_federate_matchers(cluster_name: str) -> List[str]:
+    """Label matchers appended to this cluster's /federate selectors.
+
+    Two sources, both aimed at the same problem: one Prometheus that
+    aggregates several fleets, where an unscoped ``DCGM_.*`` pull would
+    attribute every fleet's series to whichever Slurm cluster asked.
+
+    1. This cluster's own ``prometheus.filter`` becomes positive matchers,
+       so the source Prometheus does the filtering and only this fleet's
+       series cross the wire.
+    2. Sibling clusters configured against the *same* ``prometheus.url``
+       contribute negative matchers derived from their own filters. This is
+       what keeps a fleet from being double-counted when only some clusters
+       declare a filter: whatever a sibling has positively claimed is
+       excluded here. Only single-label sibling filters are usable — a
+       multi-label filter negates to a disjunction, which a Prometheus
+       selector (an AND of matchers) cannot express; when that leaves an
+       unfiltered cluster unable to carve out a sibling's slice, a warning
+       is logged instead of silently double-counting. A label this
+       cluster already constrains is left alone, since its own filter is
+       the more specific statement.
+    """
+    own = get_slurm_prometheus_filters(cluster_name)
+    matchers = [
+        f'{label}="{_escape_prom_label_value(value)}"'
+        for label, value in sorted(own.items())
+    ]
+
+    url = _slurm_prometheus_url(cluster_name)
+    if url is None:
+        return matchers
+    # Trailing-slash variants are the same service — the federate URL is
+    # built with the same rstrip — and must count as sharing a Prometheus,
+    # or an unfiltered cluster silently re-imports its sibling's slice.
+    url = url.rstrip('/')
+
+    # Candidates come from the config mapping first: it is a plain dict read,
+    # where get_slurm_metrics_clusters() enumerates ~/.slurm/config. The
+    # overwhelmingly common case is a cluster that shares its Prometheus with
+    # nobody, and that case should not pay for the enumeration.
+    configs = skypilot_config.get_nested(
+        ('slurm', 'cluster_configs'), None) or {}
+    candidates = [
+        name for name in configs if name != cluster_name and
+        (_slurm_prometheus_url(name) or '').rstrip('/') == url
+    ]
+    if not candidates:
+        return matchers
+
+    # Narrowed to clusters actually federated: a cluster excluded by
+    # slurm.allowed_clusters claims nothing, so subtracting its slice here
+    # would drop series no cluster goes on to collect.
+    federated = set(get_slurm_metrics_clusters())
+    for sibling in candidates:
+        if sibling not in federated:
+            continue
+        sibling_filters = get_slurm_prometheus_filters(sibling)
+        if len(sibling_filters) != 1:
+            if sibling_filters and not own:
+                # This cluster pulls the whole endpoint and cannot carve
+                # out the sibling's compound slice, so that fleet will be
+                # collected twice. Surfaced rather than silent: the fix is
+                # a filter on this cluster (or a single-label one on the
+                # sibling).
+                logger.warning(
+                    f'Slurm cluster {cluster_name!r} has no '
+                    f'prometheus.filter and shares its Prometheus with '
+                    f'{sibling!r}, whose multi-label filter cannot be '
+                    f'excluded from an unscoped pull; {sibling!r} series '
+                    f'may be double-counted. Configure a filter for '
+                    f'{cluster_name!r} to scope its slice.')
+            continue
+        label, value = next(iter(sibling_filters.items()))
+        if label in own:
+            continue
+        matchers.append(f'{label}!="{_escape_prom_label_value(value)}"')
+    return matchers
+
+
+def _with_label_matchers(pattern: str, matchers: List[str]) -> str:
+    """Adds ``matchers`` to a /federate selector's label section."""
+    if not matchers:
+        return pattern
+    extra = ','.join(matchers)
+    if pattern.endswith('}'):
+        head = pattern[:-1]
+        # '{}' / a bare '{' would leave a leading comma, which Prometheus
+        # rejects.
+        separator = '' if head.endswith('{') else ','
+        return f'{head}{separator}{extra}}}'
+    return f'{pattern}{{{extra}}}'
+
 
 def get_slurm_metrics_clusters() -> List[str]:
     """Slurm clusters opted into GPU metrics federation.
@@ -1428,10 +1585,11 @@ def get_slurm_metrics_clusters() -> List[str]:
     A cluster participates when it is allowed by ``slurm.allowed_clusters``
     (the analog of ``kubernetes.allowed_contexts``; defaults to every cluster
     in ``~/.slurm/config``) *and*
-    ``slurm.cluster_configs.<name>.prometheus_url`` is set: the URL of a
-    Prometheus reachable *from the cluster's login node* (typically running
-    inside the cluster) that scrapes the cluster's node/DCGM exporters. No SSH
-    probing happens here — enumeration reads only local config.
+    ``slurm.cluster_configs.<name>.prometheus.url`` is set: the URL of a
+    Prometheus reachable *from a login node* — the cluster's own, or the
+    ``prometheus.via`` cluster's — that scrapes the cluster's node/DCGM
+    exporters. No SSH probing happens here — enumeration reads only local
+    config.
     """
     try:
         # pylint: disable=import-outside-toplevel
@@ -1445,11 +1603,7 @@ def get_slurm_metrics_clusters() -> List[str]:
     except Exception as e:  # pylint: disable=broad-except
         logger.debug(f'Could not enumerate Slurm clusters: {e}')
         return []
-    return [
-        name for name in names
-        if skypilot_config.get_nested(('slurm', 'cluster_configs', name,
-                                       'prometheus_url'), None)
-    ]
+    return [name for name in names if _slurm_prometheus_url(name)]
 
 
 async def get_metrics_for_slurm_cluster(cluster_name: str,
@@ -1457,13 +1611,18 @@ async def get_metrics_for_slurm_cluster(cluster_name: str,
                                         timeout: float = 30.0) -> str:
     """Federate GPU metrics from a Slurm cluster's own Prometheus.
 
-    The /federate request is executed *on* the login node (curl) through
-    the cluster's SSH transport, so it traverses outbound-only tunnel
+    The /federate request is executed *on* a login node (curl) through
+    that cluster's SSH transport, so it traverses outbound-only tunnel
     agents unchanged and never requires network reachability from the API
-    server to the cluster's Prometheus. Series are stamped with
-    ``cluster="slurm/<name>"``, mirroring the Kubernetes federation path,
-    so every downstream consumer (central Prometheus, Grafana dashboards,
-    GPU Manager queries) treats the Slurm cluster like any other context.
+    server to the cluster's Prometheus. By default that is this cluster's
+    own login node; ``prometheus.via`` names a different Slurm cluster to
+    run the curl on, for a central Prometheus reachable from only some
+    login nodes — every cluster it aggregates can then still be collected,
+    each through the login node that can reach it. Series are stamped with
+    ``cluster="slurm/<name>"`` regardless of which login node fetched
+    them, mirroring the Kubernetes federation path, so every downstream
+    consumer (central Prometheus, Grafana dashboards, GPU Manager queries)
+    treats the Slurm cluster like any other context.
 
     Timeouts mirror the Kubernetes path's single per-context budget: the
     SSH invocation is hard-killed at ``timeout`` (a hung login node cannot
@@ -1482,13 +1641,21 @@ async def get_metrics_for_slurm_cluster(cluster_name: str,
     Raises:
         Exception: If the login-node curl or the federate request fails.
     """
-    prometheus_url = skypilot_config.get_nested(
-        ('slurm', 'cluster_configs', cluster_name, 'prometheus_url'), None)
+    prometheus_url = _slurm_prometheus_url(cluster_name)
     if not prometheus_url:
         raise ValueError(
-            f'No prometheus_url configured for Slurm cluster {cluster_name!r}')
+            f'No prometheus.url configured for Slurm cluster {cluster_name!r}')
+    login_cluster = skypilot_config.get_nested(
+        ('slurm', 'cluster_configs', cluster_name, 'prometheus', 'via'),
+        None) or skypilot_config.get_nested(
+            ('slurm', 'prometheus', 'via'), None) or cluster_name
 
-    query = '&'.join('match[]=' + urllib.parse.quote(pattern)
+    # Scope the pull when the source Prometheus aggregates several fleets;
+    # without this every fleet's series would be stamped with this cluster's
+    # context. See slurm_federate_matchers().
+    matchers = slurm_federate_matchers(cluster_name)
+    query = '&'.join('match[]=' +
+                     urllib.parse.quote(_with_label_matchers(pattern, matchers))
                      for pattern in SLURM_GPU_METRICS_MATCH_PATTERNS)
     federate_url = prometheus_url.rstrip('/') + '/federate?' + query
     curl_timeout = max(1, int(timeout) - _SLURM_FEDERATE_CURL_HEADROOM_SECONDS)
@@ -1506,11 +1673,13 @@ async def get_metrics_for_slurm_cluster(cluster_name: str,
         # exposition text would make Prometheus reject the *entire*
         # /gpu-metrics body, every cluster included.
         returncode, stdout, stderr = slurm_utils.run_on_login_node(
-            cluster_name, curl_cmd, timeout=int(timeout))
+            login_cluster, curl_cmd, timeout=int(timeout))
         if returncode != 0:
+            via = ('' if login_cluster == cluster_name else
+                   f' (via {login_cluster!r})')
             raise RuntimeError(
-                f'Federate curl on Slurm cluster {cluster_name!r} exited '
-                f'{returncode}: {(stderr or stdout).strip()[:500]}')
+                f'Federate curl on Slurm cluster {cluster_name!r}{via} '
+                f'exited {returncode}: {(stderr or stdout).strip()[:500]}')
         return stdout
 
     start = time.monotonic()

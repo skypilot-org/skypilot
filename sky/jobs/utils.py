@@ -8,6 +8,7 @@ import asyncio
 import collections
 import concurrent.futures
 import contextlib
+import dataclasses
 from datetime import datetime
 import enum
 import json
@@ -1500,15 +1501,93 @@ def generate_managed_job_cluster_name(task_name: str, job_id: int) -> str:
     return f'{cluster_name}-{job_id}'
 
 
-def cancel_jobs_by_id(job_ids: Optional[List[int]],
-                      all_users: bool = False,
-                      current_workspace: Optional[str] = None,
-                      user_hash: Optional[str] = None,
-                      graceful: bool = False,
-                      graceful_timeout: Optional[int] = None) -> str:
+@dataclasses.dataclass
+class CancelRequestInfo:
+    """Who asked for a cancellation, and under which API request.
+
+    Recorded in the job's event log so the events table tells a
+    user-requested cancel (and which user asked for it) apart from an
+    internal one, e.g. a job group tearing down its auxiliary jobs.
+
+    The fields are all optional because the identity is not always
+    knowable: an old client/controller does not send it, and a cancel that
+    does not originate from an API request has no requester at all.
+    """
+    user_hash: Optional[str] = None
+    user_name: Optional[str] = None
+    request_id: Optional[str] = None
+
+    @classmethod
+    def from_request_context(cls) -> Optional['CancelRequestInfo']:
+        """Build from the ambient API request context, or None if there is none.
+
+        Only a server-side request execution has a request context (see
+        ``common_utils.set_request_context``). On a controller -- where the
+        cancel arrives over gRPC or as generated code -- it is unset, and the
+        requester has to be passed in explicitly instead.
+        """
+        if not common_utils.is_in_request_context():
+            return None
+        user = common_utils.get_current_user()
+        return cls(user_hash=user.id,
+                   user_name=user.name,
+                   request_id=common_utils.get_current_request_id())
+
+    def event_reason(self) -> Optional[str]:
+        """The job-event reason for this cancel request.
+
+        None when nothing identifying is known, so the caller can skip
+        writing an event that would say nothing.
+        """
+        # The hash is the fallback identity: a user row (and so the display
+        # name) may be missing on the controller side.
+        who = self.user_name or self.user_hash
+        if who is None and self.request_id is None:
+            return None
+        if who is not None:
+            reason = f'Cancellation requested by user {who}'
+        else:
+            reason = 'Cancellation requested'
+        if self.request_id is not None:
+            reason += f' (request ID: {self.request_id})'
+        return reason
+
+
+def _record_cancel_request_event(job_id: int, reason: Optional[str]) -> None:
+    """Append the cancel-request event to a job's event log, best-effort.
+
+    Written before the cancellation is acted on, so the events table
+    attributes the request even if the job reaches a terminal state (or the
+    signal write fails) immediately after. A failure to record must never
+    fail the cancellation itself -- this is an audit trail, not state.
+    """
+    if reason is None:
+        return
+    try:
+        managed_job_state.add_job_event(
+            job_id, None, managed_job_state.ManagedJobStatus.CANCELLING, reason)
+    except Exception as e:  # pylint: disable=broad-except
+        logger.warning(f'Failed to record the cancel request event for job '
+                       f'{job_id}: {common_utils.format_exception(e)}')
+
+
+def cancel_jobs_by_id(
+        job_ids: Optional[List[int]],
+        all_users: bool = False,
+        current_workspace: Optional[str] = None,
+        user_hash: Optional[str] = None,
+        graceful: bool = False,
+        graceful_timeout: Optional[int] = None,
+        cancel_request_info: Optional[CancelRequestInfo] = None) -> str:
     """Cancel jobs by id.
 
     If job_ids is None, cancel all jobs.
+
+    Args:
+        cancel_request_info: who requested the cancellation, recorded in each
+            job's event log. Defaults to the ambient API request context,
+            which is only set when this runs in-process on the API server
+            (consolidation mode); a remote controller gets it passed in.
     """
     if job_ids is None:
         job_ids = managed_job_state.get_nonterminal_job_ids_by_name(
@@ -1518,6 +1597,11 @@ def cancel_jobs_by_id(job_ids: Optional[List[int]],
         return 'No job to cancel.'
     if current_workspace is None:
         current_workspace = constants.SKYPILOT_DEFAULT_WORKSPACE
+
+    if cancel_request_info is None:
+        cancel_request_info = CancelRequestInfo.from_request_context()
+    cancel_event_reason = (cancel_request_info.event_reason()
+                           if cancel_request_info is not None else None)
 
     cancelled_job_ids: List[int] = []
     wrong_workspace_job_ids: List[int] = []
@@ -1544,7 +1628,14 @@ def cancel_jobs_by_id(job_ids: Optional[List[int]],
             logger.info(f'Job {job_id} is already in terminal state '
                         f'{job_status.value}. Skipped.')
             continue
-        elif job_status == managed_job_state.ManagedJobStatus.PENDING:
+
+        # Attribute the cancellation in the job's event log. Done here, once
+        # the job is known to be cancellable and before any of the paths
+        # below act on it, so the audit entry precedes the resulting
+        # CANCELLING / CANCELLED events.
+        _record_cancel_request_event(job_id, cancel_event_reason)
+
+        if job_status == managed_job_state.ManagedJobStatus.PENDING:
             # the "if PENDING" is a short circuit, this will be atomic.
             cancelled = managed_job_state.set_pending_cancelled(job_id)
             if cancelled:
@@ -1611,10 +1702,12 @@ def cancel_jobs_by_id(job_ids: Optional[List[int]],
     return msg
 
 
-def cancel_job_by_name(job_name: str,
-                       current_workspace: Optional[str] = None,
-                       graceful: bool = False,
-                       graceful_timeout: Optional[int] = None) -> str:
+def cancel_job_by_name(
+        job_name: str,
+        current_workspace: Optional[str] = None,
+        graceful: bool = False,
+        graceful_timeout: Optional[int] = None,
+        cancel_request_info: Optional[CancelRequestInfo] = None) -> str:
     """Cancel a job by name."""
     job_ids = managed_job_state.get_nonterminal_job_ids_by_name(job_name)
     if not job_ids:
@@ -1626,17 +1719,22 @@ def cancel_job_by_name(job_name: str,
     msg = cancel_jobs_by_id(job_ids,
                             current_workspace=current_workspace,
                             graceful=graceful,
-                            graceful_timeout=graceful_timeout)
+                            graceful_timeout=graceful_timeout,
+                            cancel_request_info=cancel_request_info)
     return f'{job_name!r} {msg}'
 
 
-def cancel_jobs_by_pool(pool_name: str,
-                        current_workspace: Optional[str] = None) -> str:
+def cancel_jobs_by_pool(
+        pool_name: str,
+        current_workspace: Optional[str] = None,
+        cancel_request_info: Optional[CancelRequestInfo] = None) -> str:
     """Cancel all jobs in a pool."""
     job_ids = managed_job_state.get_nonterminal_job_ids_by_pool(pool_name)
     if not job_ids:
         return f'No running job found in pool {pool_name!r}.'
-    return cancel_jobs_by_id(job_ids, current_workspace=current_workspace)
+    return cancel_jobs_by_id(job_ids,
+                             current_workspace=current_workspace,
+                             cancel_request_info=cancel_request_info)
 
 
 def cancel_managed_jobs(
@@ -1650,6 +1748,7 @@ def cancel_managed_jobs(
     graceful_timeout: Optional[int] = None,
     current_workspace: Optional[str] = None,
     user_hash: Optional[str] = None,
+    cancel_request_info: Optional[CancelRequestInfo] = None,
 ) -> str:
     """Dispatch to the correct cancel variant based on selector args.
 
@@ -1674,6 +1773,7 @@ def cancel_managed_jobs(
             user_hash=user_hash,
             graceful=graceful,
             graceful_timeout=graceful_timeout,
+            cancel_request_info=cancel_request_info,
         )
     if name is not None:
         return cancel_job_by_name(
@@ -1681,11 +1781,13 @@ def cancel_managed_jobs(
             current_workspace=current_workspace,
             graceful=graceful,
             graceful_timeout=graceful_timeout,
+            cancel_request_info=cancel_request_info,
         )
     assert pool is not None, (job_ids, name, pool, all)
     return cancel_jobs_by_pool(
         pool,
         current_workspace=current_workspace,
+        cancel_request_info=cancel_request_info,
     )
 
 
@@ -3973,8 +4075,16 @@ class ManagedJobCodeGen:
         targeted call to the underlying ``utils.cancel_jobs_by_id`` /
         ``cancel_job_by_name`` / ``cancel_jobs_by_pool`` chosen
         client-side based on the selector args.
+
+        The cancel requester (``cancel_request_info``) is only passed to
+        controllers running ``MANAGED_JOBS_VERSION >= 23``; older ones don't
+        have the parameter, and simply record an unattributed cancel.
         """
         active_workspace = skypilot_config.get_active_workspace()
+        # This runs on the API server, inside the request that asked for the
+        # cancellation, so the requester comes from the ambient context; the
+        # controller executing the generated code has no such context.
+        cancel_request_info = CancelRequestInfo.from_request_context()
 
         # ``user_hash`` is intentionally omitted below — the controller runs
         # the generated code under ``_build()``, which exports
@@ -4037,18 +4147,32 @@ class ManagedJobCodeGen:
             ]
 
         legacy_block = '\n'.join(f'    {line}' for line in legacy_call_lines)
+        dispatch_args = (f'        name={name!r},\n'
+                         f'        job_ids={job_ids!r},\n'
+                         f'        pool={pool!r},\n'
+                         f'        all={all!r},\n'
+                         f'        all_users={all_users!r},\n'
+                         f'        graceful={graceful!r},\n'
+                         f'        graceful_timeout={graceful_timeout!r},\n'
+                         f'        current_workspace={active_workspace!r},\n')
+        requester_arg = ''
+        if cancel_request_info is not None:
+            requester_arg = (
+                f'        cancel_request_info=utils.CancelRequestInfo(\n'
+                f'            user_hash={cancel_request_info.user_hash!r},\n'
+                f'            user_name={cancel_request_info.user_name!r},\n'
+                f'            request_id={cancel_request_info.request_id!r},\n'
+                f'        ),\n')
         code = (f'if managed_job_version < 19:\n'
                 f'{legacy_block}\n'
+                f'elif managed_job_version < 23:\n'
+                f'    msg = utils.cancel_managed_jobs(\n'
+                f'{dispatch_args}'
+                f'    )\n'
                 f'else:\n'
                 f'    msg = utils.cancel_managed_jobs(\n'
-                f'        name={name!r},\n'
-                f'        job_ids={job_ids!r},\n'
-                f'        pool={pool!r},\n'
-                f'        all={all!r},\n'
-                f'        all_users={all_users!r},\n'
-                f'        graceful={graceful!r},\n'
-                f'        graceful_timeout={graceful_timeout!r},\n'
-                f'        current_workspace={active_workspace!r},\n'
+                f'{dispatch_args}'
+                f'{requester_arg}'
                 f'    )\n'
                 f'print(msg, end="", flush=True)\n')
         return cls._build(code)

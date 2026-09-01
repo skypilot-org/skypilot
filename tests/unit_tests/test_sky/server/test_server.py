@@ -15,6 +15,7 @@ import pytest
 import uvicorn
 
 from sky import models
+from sky.schemas.api import responses as api_responses
 from sky.server import common as server_common
 from sky.server import constants as server_constants
 from sky.server import server
@@ -1518,3 +1519,121 @@ class TestJwtSecretStartupBootstrap:
 
             mock_token_service.ensure_secret_loaded.assert_called_once()
             mock_logger.error.assert_called_once()
+
+
+def _write_part(path: pathlib.Path) -> pathlib.Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(b'data')
+    return path
+
+
+def test_publish_chunk_single_chunk_upload_has_nothing_to_wait_for(tmp_path):
+    tmp = _write_part(tmp_path / 'upload.tmp.deadbeef.zip')
+    final = tmp_path / 'upload.zip'
+
+    assert server._publish_chunk(tmp, final, None, 1) == set()
+    assert final.read_bytes() == b'data'
+    assert not tmp.exists()
+
+
+def test_publish_chunk_reports_chunks_not_published_yet(tmp_path):
+    chunk_dir = tmp_path / 'staging'
+    _write_part(chunk_dir / 'part0')
+    # A concurrent writer's in-flight tmp file must not count as published.
+    _write_part(chunk_dir / 'part2.tmp.deadbeef')
+    tmp = _write_part(chunk_dir / 'part1.tmp.cafe1234')
+
+    missing = server._publish_chunk(tmp, chunk_dir / 'part1', chunk_dir, 4)
+
+    assert missing == {'part2', 'part3'}
+    assert (chunk_dir / 'part1').read_bytes() == b'data'
+
+
+def test_publish_chunk_last_chunk_completes_the_upload(tmp_path):
+    chunk_dir = tmp_path / 'staging'
+    _write_part(chunk_dir / 'part0')
+    tmp = _write_part(chunk_dir / 'part1.tmp.cafe1234')
+
+    assert server._publish_chunk(tmp, chunk_dir / 'part1', chunk_dir,
+                                 2) == set()
+
+
+class _FakeUploadRequest:
+    """Minimal stand-in for the streaming request of an upload endpoint."""
+
+    def __init__(self, payload: bytes = b'chunk'):
+        self._payload = payload
+
+    async def stream(self):
+        yield self._payload
+
+
+@pytest.mark.asyncio
+async def test_receive_chunks_does_no_sync_fs_work_on_the_event_loop(
+        tmp_path, monkeypatch):
+    """The rename and the directory listing must not block the serving loop.
+
+    Both are synchronous calls that can take seconds on a shared filesystem,
+    and while either runs no other request on the same worker can proceed.
+    """
+    loop_thread = threading.get_ident()
+    calls = []
+
+    real_rename = os.rename
+    real_scandir = os.scandir
+
+    def tracking_rename(src, dst):
+        if str(tmp_path) in str(src):
+            calls.append(('rename', threading.get_ident()))
+        return real_rename(src, dst)
+
+    def tracking_scandir(path):
+        if str(tmp_path) in str(path):
+            calls.append(('scandir', threading.get_ident()))
+        return real_scandir(path)
+
+    monkeypatch.setattr(os, 'rename', tracking_rename)
+    monkeypatch.setattr(os, 'scandir', tracking_scandir)
+
+    result = await server._receive_and_assemble_chunks(
+        base_dir=tmp_path,
+        zip_name='upload',
+        request=_FakeUploadRequest(),
+        chunk_index=0,
+        total_chunks=2,
+        extract=False,
+        assemble=False)
+
+    # Chunk 1 has not arrived, so the client is told to keep going.
+    assert result is not None
+    assert result.status == api_responses.UploadStatus.UPLOADING.value
+    assert {op for op, _ in calls} == {'rename', 'scandir'}
+    assert [ident for _, ident in calls if ident == loop_thread] == []
+
+
+@pytest.mark.asyncio
+async def test_receive_chunks_skips_the_directory_listing_for_one_chunk(
+        tmp_path, monkeypatch):
+    """A single-chunk upload has nothing to wait for, so it must not list."""
+    real_scandir = os.scandir
+    listed = []
+
+    def tracking_scandir(path):
+        if str(tmp_path) in str(path):
+            listed.append(str(path))
+        return real_scandir(path)
+
+    monkeypatch.setattr(os, 'scandir', tracking_scandir)
+
+    result = await server._receive_and_assemble_chunks(
+        base_dir=tmp_path,
+        zip_name='upload',
+        request=_FakeUploadRequest(),
+        chunk_index=0,
+        total_chunks=1,
+        extract=False,
+        assemble=False)
+
+    assert result is None
+    assert listed == []
+    assert (tmp_path / 'upload.zip').read_bytes() == b'chunk'
