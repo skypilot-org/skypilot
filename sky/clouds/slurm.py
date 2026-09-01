@@ -639,6 +639,18 @@ class Slurm(clouds.Cloud):
         volume_mount_vars.extend(
             mount.to_yaml_config() for mount in volume_mounts or [])
 
+        client = slurm.SlurmClient(
+            ssh_config_dict['hostname'],
+            int(ssh_config_dict.get('port', 22)),
+            ssh_config_dict['user'],
+            slurm_utils.get_identity_file(ssh_config_dict),
+            ssh_proxy_command=ssh_config_dict.get('proxycommand', None),
+            ssh_proxy_jump=ssh_config_dict.get('proxyjump', None),
+            identities_only=slurm_utils.get_identities_only(ssh_config_dict),
+            slurm_user=slurm_user,
+        )
+        sky_base_dir = slurm_utils.resolve_sky_base_dir(cluster, client)
+
         deploy_vars = {
             'instance_type': resources.instance_type,
             'custom_resources': custom_resources,
@@ -649,6 +661,7 @@ class Slurm(clouds.Cloud):
             'slurm_cluster': cluster,
             'slurm_partition': partition,
             'provision_timeout': provision_timeout,
+            'sky_base_dir': sky_base_dir,
             # TODO(jwj): Pass SSH config in a smarter way
             'ssh_hostname': ssh_config_dict['hostname'],
             'ssh_port': str(ssh_config_dict.get('port', 22)),

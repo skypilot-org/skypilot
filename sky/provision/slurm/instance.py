@@ -554,22 +554,15 @@ def _make_login_node_runner(
 def _resolve_sky_base_dir(client: 'slurm.SlurmClient',
                           provider_config: Dict[str, Any]) -> str:
     """Resolve the shared base directory used for Slurm cluster state."""
+    sky_base_dir = provider_config.get('sky_base_dir')
+    if sky_base_dir is not None:
+        if not isinstance(sky_base_dir, str) or not os.path.isabs(sky_base_dir):
+            raise RuntimeError('Slurm sky_base_dir must be an absolute path, '
+                               f'got {sky_base_dir!r}.')
+        return sky_base_dir
+
     slurm_cluster = slurm_utils.get_slurm_cluster_from_config(provider_config)
-    workdir = skypilot_config.get_effective_region_config(cloud='slurm',
-                                                          region=slurm_cluster,
-                                                          keys=('workdir',),
-                                                          default_value=None)
-    if workdir is not None:
-        workdir = slurm_utils.expand_path_vars(workdir, client.get_env())
-        if not os.path.isabs(workdir):
-            raise RuntimeError('Resolved Slurm workdir must be absolute, got '
-                               f'{workdir!r}.')
-        return workdir
-    remote_home_dir = client.get_remote_home_dir()
-    if not os.path.isabs(remote_home_dir):
-        raise RuntimeError('Slurm remote home directory must be absolute, got '
-                           f'{remote_home_dir!r}.')
-    return remote_home_dir
+    return slurm_utils.resolve_sky_base_dir(slurm_cluster, client)
 
 
 def _wait_for_job_ready(
@@ -709,10 +702,6 @@ def _create_virtual_instance(
             rich_utils.force_update_status(status_msg)
             last_status_msg = status_msg
 
-    workdir = skypilot_config.get_effective_region_config(cloud='slurm',
-                                                          region=region,
-                                                          keys=('workdir',),
-                                                          default_value=None)
     tmpdir = skypilot_config.get_effective_region_config(cloud='slurm',
                                                          region=region,
                                                          keys=('tmpdir',),
@@ -774,20 +763,11 @@ def _create_virtual_instance(
     )
     remote_home_dir = login_node_runner.get_remote_home_dir()
 
-    # Resolve shell variables (e.g. $USER) in workdir/tmpdir using the
-    # remote host's environment.
-    if workdir is not None or tmpdir is not None:
-        remote_env = client.get_env()
-        if workdir is not None:
-            workdir = slurm_utils.expand_path_vars(workdir, remote_env)
-        if tmpdir is not None:
-            tmpdir = slurm_utils.expand_path_vars(tmpdir, remote_env)
-        logger.debug(f'Resolved workdir: {workdir}, tmpdir: {tmpdir}')
+    if tmpdir is not None:
+        tmpdir = slurm_utils.expand_path_vars(tmpdir, client.get_env())
+        logger.debug(f'Resolved tmpdir: {tmpdir}')
 
-    # Must be absolute — #SBATCH directives don't expand ~ or $HOME.
-    sky_base_dir = workdir if workdir is not None else remote_home_dir
-    assert os.path.isabs(sky_base_dir), (
-        f'sky_base_dir must be absolute, got: {sky_base_dir}')
+    sky_base_dir = _resolve_sky_base_dir(client, provider_config)
     sbatch_log_base_dir = sky_base_dir
 
     provision_script_path = _sbatch_provision_script_path(
@@ -876,11 +856,9 @@ def _create_virtual_instance(
             # The host python symlink is invalid inside the container.
             f'{skypilot_runtime_dir}/.sky:{skypilot_runtime_dir}/.sky',
         ]
-        # When workdir differs from remote_home_dir (e.g. workdir is on
-        # NFS at /home/ubuntu while $HOME is /home_local/ubuntu), mount
-        # it so the container can access sky_cluster_home_dir.
-        if workdir is not None and workdir != remote_home_dir:
-            mount_paths.append(f'{workdir}:{workdir}')
+        # The cluster state directory may be outside the remote home directory.
+        if sky_base_dir != remote_home_dir:
+            mount_paths.append(f'{sky_base_dir}:{sky_base_dir}')
         for volume_mount in resources.get('volume_mounts', []) or []:
             dst_path = volume_mount['path']
             volume_config = volume_mount['volume_config']
@@ -2126,29 +2104,16 @@ def get_command_runners(
         identities_only=login_node_identities_only,
         slurm_user=slurm_user,
     )
-    remote_home_dir = client.get_remote_home_dir()
-
     slurm_cluster_name = provider_config.get('cluster')
-    workdir = skypilot_config.get_effective_region_config(
-        cloud='slurm',
-        region=slurm_cluster_name,
-        keys=('workdir',),
-        default_value=None)
     tmpdir = skypilot_config.get_effective_region_config(
         cloud='slurm',
         region=slurm_cluster_name,
         keys=('tmpdir',),
         default_value=None)
-    if workdir is not None or tmpdir is not None:
-        remote_env = client.get_env()
-        if workdir is not None:
-            workdir = slurm_utils.expand_path_vars(workdir, remote_env)
-        if tmpdir is not None:
-            tmpdir = slurm_utils.expand_path_vars(tmpdir, remote_env)
+    if tmpdir is not None:
+        tmpdir = slurm_utils.expand_path_vars(tmpdir, client.get_env())
 
-    sky_base_dir = workdir if workdir is not None else remote_home_dir
-    assert os.path.isabs(sky_base_dir), (
-        f'sky_base_dir must be absolute, got: {sky_base_dir}')
+    sky_base_dir = _resolve_sky_base_dir(client, provider_config)
     sky_cluster_home_dir = _sky_cluster_home_dir(sky_base_dir,
                                                  cluster_name_on_cloud)
     container_marker = (

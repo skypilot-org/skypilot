@@ -112,6 +112,43 @@ class TestSnapshotManifest:
             instance._validate_snapshot_files(runner, manifest)
 
 
+class TestResolveSkyBaseDir:
+    """Tests persisted Slurm cluster state directory lookup."""
+
+    def test_uses_persisted_provider_value(self, monkeypatch):
+        client = mock.MagicMock()
+        get_config = mock.MagicMock(
+            side_effect=AssertionError('global config must not be read'))
+        monkeypatch.setattr(instance.skypilot_config,
+                            'get_effective_region_config', get_config)
+        provider_config = {
+            **_PROVIDER_CONFIG,
+            'sky_base_dir': '/old/shared/path',
+        }
+
+        result = instance._resolve_sky_base_dir(client, provider_config)
+
+        assert result == '/old/shared/path'
+        get_config.assert_not_called()
+        client.get_env.assert_not_called()
+        client.get_remote_home_dir.assert_not_called()
+
+    def test_provider_without_value_resolves_current_config(self, monkeypatch):
+        client = mock.MagicMock()
+        resolve = mock.MagicMock(return_value='/current/shared/path')
+        monkeypatch.setattr(instance.slurm_utils, 'resolve_sky_base_dir',
+                            resolve)
+        provider_config = {
+            **_PROVIDER_CONFIG,
+            'cluster': 'test-slurm',
+        }
+
+        result = instance._resolve_sky_base_dir(client, provider_config)
+
+        assert result == '/current/shared/path'
+        resolve.assert_called_once_with('test-slurm', client)
+
+
 @pytest.fixture
 def mock_client(monkeypatch):
     """Mock SlurmClient for terminate_instances tests (SSH path)."""
@@ -665,18 +702,25 @@ class TestQueryInstances:
         client.query_jobs.return_value = []
         monkeypatch.setattr(instance.slurm, 'SlurmClient',
                             mock.MagicMock(return_value=client))
+        login_runner = mock.MagicMock()
         monkeypatch.setattr(instance, '_make_login_node_runner',
-                            mock.MagicMock(return_value=mock.MagicMock()))
-        monkeypatch.setattr(instance, '_resolve_sky_base_dir',
-                            mock.MagicMock(return_value='/home/test'))
+                            mock.MagicMock(return_value=login_runner))
+        get_config = mock.MagicMock(
+            side_effect=AssertionError('global config must not be read'))
+        monkeypatch.setattr(instance.skypilot_config,
+                            'get_effective_region_config', get_config)
         manifest = _snapshot_manifest('/home/test/.sky_snapshots/test-cluster',
                                       num_nodes=2)
-        monkeypatch.setattr(instance, '_read_snapshot_manifest',
-                            mock.MagicMock(return_value=manifest))
+        read_manifest = mock.MagicMock(return_value=manifest)
+        monkeypatch.setattr(instance, '_read_snapshot_manifest', read_manifest)
+        provider_config = {
+            **_PROVIDER_CONFIG,
+            'sky_base_dir': '/home/test',
+        }
 
         statuses = instance.query_instances('test-cluster',
                                             _CLUSTER,
-                                            provider_config=_PROVIDER_CONFIG)
+                                            provider_config=provider_config)
 
         assert statuses == {
             'snapshot-rank-0':
@@ -684,6 +728,9 @@ class TestQueryInstances:
             'snapshot-rank-1':
                 (instance.status_lib.ClusterStatus.STOPPED, None),
         }
+        read_manifest.assert_called_once_with(
+            login_runner, '/home/test/.sky_snapshots/test-cluster')
+        get_config.assert_not_called()
 
     def test_running_job_ignores_recent_terminal_allocation(self, monkeypatch):
         client = mock.MagicMock()

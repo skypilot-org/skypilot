@@ -218,7 +218,10 @@ class TestSubmitUserDeployVariables:
              patch('sky.clouds.slurm.skypilot_config.get_nested',
                    side_effect=_get_nested), \
              patch('sky.clouds.slurm.skypilot_config.'
-                   'get_effective_region_config', return_value=None):
+                   'get_effective_region_config', return_value=None), \
+             patch('sky.clouds.slurm.slurm.SlurmClient'), \
+             patch('sky.clouds.slurm.slurm_utils.resolve_sky_base_dir',
+                   return_value='/home/testuser'):
             return cloud.make_deploy_resources_variables(
                 resources=resources,
                 cluster_name=mock.MagicMock(),
@@ -231,6 +234,11 @@ class TestSubmitUserDeployVariables:
         deploy_vars = self._make_deploy_variables('alice')
 
         assert deploy_vars['slurm_user'] == 'alice'
+
+    def test_sky_base_dir_persisted(self):
+        deploy_vars = self._make_deploy_variables('alice')
+
+        assert deploy_vars['sky_base_dir'] == '/home/testuser'
 
     def test_disabled_keeps_default(self):
         deploy_vars = self._make_deploy_variables(None, ssh_user='ubuntu')
@@ -368,6 +376,7 @@ class TestSubmitUserTemplate:
                 'slurm_cluster': 'my-cluster',
                 'slurm_partition': 'gpu',
                 'provision_timeout': 120,
+                'sky_base_dir': '/fsx/alice',
                 'ssh_hostname': 'login.example.com',
                 'ssh_port': 22,
                 'slurm_private_key': '/root/.ssh/key',
@@ -415,6 +424,7 @@ class TestSubmitUserTemplate:
         else:
             assert config['provider']['slurm_user'] == slurm_user
         assert config['provider']['ssh']['user'] == transport_user
+        assert config['provider']['sky_base_dir'] == '/fsx/alice'
         assert config['auth']['ssh_user'] == expected_ssh_user
         assert config['available_node_types']['ray_head_default'][
             'node_config']['volume_mounts'][0]['path'] == '/data'
@@ -1035,7 +1045,11 @@ class TestSbatchOptionsPrecedence:
                     return_value=['gpu', 'cpu']), \
                  patch(
                     'sky.clouds.slurm.slurm_utils.resolve_gres_gpu_type',
-                    side_effect=lambda cluster, t, count=1, partition=None: t):
+                    side_effect=lambda cluster, t, count=1, partition=None: t), \
+                 patch('sky.clouds.slurm.slurm.SlurmClient'), \
+                 patch(
+                    'sky.clouds.slurm.slurm_utils.resolve_sky_base_dir',
+                    return_value='/home/slurm'):
                 deploy_vars = cloud.make_deploy_resources_variables(
                     resources=mock_resources,
                     cluster_name=mock.MagicMock(),
@@ -1250,7 +1264,10 @@ class TestSlurmProvisionTimeout:
              patch('sky.clouds.slurm.slurm_utils.get_submit_user',
                    return_value=None), \
              patch('sky.clouds.slurm.slurm_utils.resolve_gres_gpu_type',
-                   side_effect=lambda cluster, t, count=1, partition=None: t):
+                   side_effect=lambda cluster, t, count=1, partition=None: t), \
+             patch('sky.clouds.slurm.slurm.SlurmClient'), \
+             patch('sky.clouds.slurm.slurm_utils.resolve_sky_base_dir',
+                   return_value='/home/slurm'):
             deploy_vars = cloud.make_deploy_resources_variables(
                 resources=mock_resources,
                 cluster_name=mock.MagicMock(),
@@ -1329,6 +1346,7 @@ class TestProvisionTimeoutPassthrough:
                 'cluster': 'test-slurm',
                 'partition': 'gpu',
                 'provision_timeout': 120,
+                'sky_base_dir': '/home/testuser',
             },
             authentication_config={},
             docker_config={},
@@ -1402,6 +1420,7 @@ class TestProvisionTimeoutPassthrough:
                 'cluster': 'test-slurm',
                 'partition': 'gpu',
                 'provision_timeout': 120,
+                'sky_base_dir': '/home/testuser',
             },
             authentication_config={},
             docker_config={},
@@ -1499,6 +1518,7 @@ class TestCreateVirtualInstance:
                 'partition': 'cpus',
                 'provision_timeout': 300,
                 'slurm_user': 'alice',
+                'sky_base_dir': '/home/testuser',
             },
             authentication_config={},
             docker_config={},
@@ -1540,6 +1560,7 @@ class TestCreateVirtualInstance:
                 'cluster': 'test-slurm',
                 'partition': 'gpu',
                 'provision_timeout': 300,
+                'sky_base_dir': '/home/testuser',
             },
             authentication_config={},
             docker_config={},
@@ -1647,6 +1668,7 @@ class TestCreateVirtualInstance:
                 'cluster': 'test-slurm',
                 'partition': 'gpu',
                 'provision_timeout': 300,
+                'sky_base_dir': '/home/testuser',
             },
             authentication_config={},
             docker_config={},
@@ -1828,6 +1850,7 @@ class TestCreateVirtualInstance:
                 'cluster': 'test-slurm',
                 'partition': 'gpu',
                 'provision_timeout': 300,
+                'sky_base_dir': '/home/testuser',
             },
             authentication_config={},
             docker_config={},
@@ -1896,6 +1919,7 @@ class TestCreateVirtualInstance:
                 'cluster': 'test-slurm',
                 'partition': 'cpus',
                 'provision_timeout': 300,
+                'sky_base_dir': '/home/testuser',
             },
             authentication_config={},
             docker_config={},
@@ -2079,3 +2103,36 @@ class TestExpandPathVars:
         result = slurm_utils.expand_path_vars('/home/; rm -rf /',
                                               self.REMOTE_ENV)
         assert result == '/home/; rm -rf /'
+
+
+class TestResolveSkyBaseDir:
+    """Tests initial Slurm cluster state directory resolution."""
+
+    @patch('sky.provision.slurm.utils.skypilot_config.'
+           'get_effective_region_config',
+           return_value='/fsx/$USER')
+    def test_resolves_configured_workdir(self, mock_get_config):
+        client = mock.MagicMock(spec=slurm.SlurmClient)
+        client.get_env.return_value = {'USER': 'alice'}
+
+        result = slurm_utils.resolve_sky_base_dir('my-cluster', client)
+
+        assert result == '/fsx/alice'
+        mock_get_config.assert_called_once_with(cloud='slurm',
+                                                region='my-cluster',
+                                                keys=('workdir',),
+                                                default_value=None)
+        client.get_remote_home_dir.assert_not_called()
+
+    @patch('sky.provision.slurm.utils.skypilot_config.'
+           'get_effective_region_config',
+           return_value=None)
+    def test_uses_remote_home_without_workdir(self, mock_get_config):
+        client = mock.MagicMock(spec=slurm.SlurmClient)
+        client.get_remote_home_dir.return_value = '/home/alice'
+
+        result = slurm_utils.resolve_sky_base_dir('my-cluster', client)
+
+        assert result == '/home/alice'
+        mock_get_config.assert_called_once()
+        client.get_env.assert_not_called()
