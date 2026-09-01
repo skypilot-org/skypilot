@@ -9,6 +9,7 @@ import unittest.mock as mock
 import pytest
 
 from sky import resources as resources_lib
+from sky import skypilot_config
 from sky.adaptors import slurm
 from sky.clouds import slurm as slurm_cloud
 from sky.provision.slurm import instance as slurm_instance
@@ -961,7 +962,6 @@ class TestSbatchOptionsPrecedence:
                                             skypilot_config_dict,
                                             cluster_config_overrides=None):
         """Write config to tmp file, reload, and call make_deploy_resources_variables."""
-        from sky import skypilot_config
         from sky.utils import yaml_utils
 
         # Write config dict to a tmp YAML file.
@@ -1055,6 +1055,41 @@ class TestSbatchOptionsPrecedence:
         assert result == {
             'account': 'cluster-account',
             'qos': 'normal',
+            'constraint': 'skylake',
+        }
+
+    def test_workspace_cluster_overrides_global(self, tmp_path):
+        with skypilot_config.local_active_workspace_ctx('research'):
+            result = self._load_config_and_get_sbatch_options(
+                tmp_path, {
+                    'slurm': {
+                        'cluster_configs': {
+                            'mycluster': {
+                                'sbatch_options': {
+                                    'account': 'global-account',
+                                    'constraint': 'skylake',
+                                },
+                            },
+                        },
+                    },
+                    'workspaces': {
+                        'research': {
+                            'slurm': {
+                                'cluster_configs': {
+                                    'mycluster': {
+                                        'sbatch_options': {
+                                            'account': 'workspace-account',
+                                            'qos': 'workspace-qos',
+                                        },
+                                    },
+                                },
+                            },
+                        },
+                    },
+                })
+        assert result == {
+            'account': 'workspace-account',
+            'qos': 'workspace-qos',
             'constraint': 'skylake',
         }
 

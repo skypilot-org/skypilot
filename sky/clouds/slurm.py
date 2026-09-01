@@ -574,14 +574,15 @@ class Slurm(clouds.Cloud):
         # Read sbatch_options with three-level merge:
         # global < cluster < partition.
         sbatch_options: Dict[str, Any] = {}
+        slurm_config = skypilot_config.get_workspace_cloud('slurm')
         for config_keys in [
-            ('slurm', 'sbatch_options'),
-            ('slurm', 'cluster_configs', cluster, 'sbatch_options'),
-            ('slurm', 'cluster_configs', cluster, 'partition_configs',
-             partition, 'sbatch_options'),
+            ('sbatch_options',),
+            ('cluster_configs', cluster, 'sbatch_options'),
+            ('cluster_configs', cluster, 'partition_configs', partition,
+             'sbatch_options'),
         ]:
-            level_config = skypilot_config.get_nested(config_keys,
-                                                      default_value=None)
+            level_config = slurm_config.get_nested(config_keys,
+                                                   default_value=None)
             if level_config is not None:
                 sbatch_options.update(level_config)
         # Merge task-level config overrides (from `config:` in task YAML).
