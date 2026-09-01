@@ -111,7 +111,7 @@ for ((attempt = 1; attempt <= 30; attempt++)); do
 done
 echo "[container] ERROR: Container is not running as $global_target or $job_target." >&2
 exit 1
-'
+' || exit 1
 echo "[container] Ready in $((SECONDS - CONTAINER_START))s"
 printf '%s\n' nvcr.io/nvidia/pytorch:24.01-py3 > /home/testuser/.sky_clusters/test-cluster/.sky_slurm_container
 touch /home/testuser/.sky_clusters/test-cluster/.sky_sbatch_ready
