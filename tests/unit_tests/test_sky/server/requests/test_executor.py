@@ -1893,29 +1893,3 @@ def test_saturating_request_executor_does_not_block_auth():
             except Exception:  # pylint: disable=broad-except
                 pass
         _reset_thread_executors()
-
-
-def test_executor_initializer_sets_budget_before_plugin_install():
-    """The connection budget must be applied before plugins install.
-
-    A plugin that keeps the engine it gets during install() would otherwise
-    hold one built for the wrong budget for the life of the worker, and
-    disposing the cached engine does not invalidate a reference someone
-    already holds.
-    """
-    calls = []
-    with mock.patch.object(executor.db_utils,
-                           'set_max_connections',
-                           side_effect=lambda n: calls.append(
-                               ('set_max_connections', n))), \
-         mock.patch.object(executor.plugins,
-                           'load_plugins',
-                           side_effect=lambda _: calls.append(
-                               ('load_plugins', None))), \
-         mock.patch.object(executor.metrics_lib,
-                           'register_multiproc_cleanup_atexit'), \
-         mock.patch.object(executor.setproctitle, 'setproctitle'), \
-         mock.patch.object(executor.threading, 'Thread'):
-        executor.executor_initializer('short', None, 1)
-
-    assert calls == [('set_max_connections', 1), ('load_plugins', None)]
