@@ -101,4 +101,22 @@ describe('useLogStreamer line assembly', () => {
     });
     expect(lines).toEqual(['a', 'b'.repeat(10) + ' … [truncated]', 'c']);
   });
+
+  // The cap is on what the user sees. Measuring the carry with its escape
+  // sequences still in it cuts a colour-heavy line short of the cap - and
+  // without the truncation marker, so nothing shows that text was dropped.
+  it('measures the carry by visible length, not by escape sequences', async () => {
+    const lines = await linesFrom(['\x1b[32mabc\x1b[0m', 'def\n'], {
+      maxLineChars: 10,
+    });
+    expect(lines).toEqual(['abcdef']);
+  });
+
+  // A progress bar's last update usually arrives without a trailing
+  // newline. Pushing it straight into the buffer leaves the previous
+  // update sitting in the progress map, so the bar renders twice.
+  it('collapses a final progress update onto its predecessor', async () => {
+    const lines = await linesFrom(['(w1) 50%|##\n', '(w1) 100%|####']);
+    expect(lines).toEqual(['(w1) 100%|####']);
+  });
 });

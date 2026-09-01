@@ -111,6 +111,24 @@ export function useLogStreamer({
         : cleanLine;
     };
 
+    // Where a finished line lands: a progress bar collapses onto its
+    // previous update, everything else appends. Shared with the
+    // stream-completion path below, so a final progress update replaces its
+    // predecessor instead of appearing beside it.
+    const emitLine = (cleanLine) => {
+      const isProgressBar = /\d+%\s*\|/.test(cleanLine);
+      if (isProgressBar) {
+        appendProgressLine(cleanLine);
+        return;
+      }
+      bufferRef.current.push(cleanLine);
+      if (bufferRef.current.length > maxRenderLines * 2) {
+        bufferRef.current = bufferRef.current.slice(
+          bufferRef.current.length - maxRenderLines
+        );
+      }
+    };
+
     const processChunk = (chunk) => {
       const parts = chunk.split('\n');
       parts[0] = partialLineRef.current + parts[0];
@@ -132,9 +150,14 @@ export function useLogStreamer({
           partialLineRef.current = '';
         }
       }
+      // Compared on the stripped length, the same thing finalizeLine caps
+      // on. Against the raw string a colour-heavy fragment crosses the
+      // threshold while its visible text is still short, and would then be
+      // emitted whole - with no truncation marker - while the rest of the
+      // line was discarded.
       if (
         !overLongLineRef.current &&
-        partialLineRef.current.length > maxLineChars
+        stripAnsiCodes(partialLineRef.current).length > maxLineChars
       ) {
         parts.push(partialLineRef.current);
         partialLineRef.current = '';
@@ -149,20 +172,8 @@ export function useLogStreamer({
 
       for (const line of newLines) {
         const cleanLine = finalizeLine(line);
-        if (cleanLine === null) {
-          continue;
-        }
-
-        const isProgressBar = /\d+%\s*\|/.test(cleanLine);
-        if (isProgressBar) {
-          appendProgressLine(cleanLine);
-        } else {
-          bufferRef.current.push(cleanLine);
-          if (bufferRef.current.length > maxRenderLines * 2) {
-            bufferRef.current = bufferRef.current.slice(
-              bufferRef.current.length - maxRenderLines
-            );
-          }
+        if (cleanLine !== null) {
+          emitLine(cleanLine);
         }
       }
       scheduleFlush();
@@ -187,7 +198,7 @@ export function useLogStreamer({
         if (partialLineRef.current && !overLongLineRef.current) {
           const finalLine = finalizeLine(partialLineRef.current);
           if (finalLine !== null) {
-            bufferRef.current.push(finalLine);
+            emitLine(finalLine);
           }
         }
         partialLineRef.current = '';
@@ -220,6 +231,7 @@ export function useLogStreamer({
       }
       bufferRef.current = [];
       partialLineRef.current = '';
+      overLongLineRef.current = false;
       progressMapRef.current.clear();
     };
   }, [
