@@ -228,6 +228,31 @@ const JOB_VIEW_SCHEMA = [
   { key: 'status', default: '' },
 ];
 
+// The `--infra` spec for a job row, i.e. what the Infra filter box has to be
+// submitted as.
+//
+// The box is parsed server-side by `InfraInfo.from_str`, so a suggestion has
+// to be in that syntax. The string the Infra column renders (`AWS
+// (us-east-1)`) is not: it parses to a cloud named `aws (us-east-1)`, which
+// matches no job, so offering it would hand back a filter that empties the
+// table. Mirrors `InfraInfo.to_str()` -- cloud lowercased, and the `ssh-`
+// prefix dropped from an SSH node pool's context, which `from_str` puts back.
+export function jobInfraSpec(job) {
+  const cloud = (job?.cloud || '').trim();
+  if (!cloud) {
+    return null;
+  }
+  const cloudSpec = cloud.toLowerCase();
+  let region = (job?.region || '').trim();
+  if (!region || region === '-') {
+    return cloudSpec;
+  }
+  if (cloudSpec === 'ssh' && region.startsWith('ssh-')) {
+    region = region.slice('ssh-'.length);
+  }
+  return `${cloudSpec}/${region}`;
+}
+
 const STATUS_GROUP_NAMES = Object.keys(statusGroups);
 
 const KNOWN_STATUSES = new Set([...PRIMARY_STATUSES, ...OTHER_STATUSES]);
@@ -702,6 +727,10 @@ export function ManagedJobsTable({
 
   // Local state for jobs data (replacing useJobsData hook)
   const [data, setData] = useState([]);
+  // The Infra values the server computed across everything the other filters
+  // select. Empty when it did not send any (an older API server or jobs
+  // controller), and the page then falls back to the rows it has.
+  const [serverInfraOptions, setServerInfraOptions] = useState([]);
   // Set when the jobs controller refused the infra filter because it is too
   // old to apply it. The server errors rather than answering unfiltered, so
   // there are no rows to show and the page has to say why.
@@ -832,6 +861,11 @@ export function ManagedJobsTable({
           if (response.controllerStopped) {
             setHookControllerStopped(true);
             setData([]);
+            setServerInfraOptions([]);
+            // The table is empty because the controller is down, not because a
+            // filter was refused. Leaving the refusal up would explain the
+            // empty table with a reason that no longer applies.
+            setInfraFilterUnsupported(null);
             setTotalCount(0);
             setTotalNoFilter(0);
             setStatusCounts({});
@@ -842,6 +876,7 @@ export function ManagedJobsTable({
             setHookControllerStopped(false);
             setInfraFilterUnsupported(null);
             setData(response.jobs || []);
+            setServerInfraOptions(response.infraOptions || []);
             setTotalCount(response.total || 0);
             setTotalNoFilter(response.totalNoFilter || response.total || 0);
             setStatusCounts(response.statusCounts || {});
@@ -1100,11 +1135,11 @@ export function ManagedJobsTable({
       if (job.user) users.add(job.user);
       if (job.workspace) workspaces.add(job.workspace);
       if (job.pool) pools.add(job.pool);
-      // The string the Infra column renders, not `full_infra`: that one is
-      // the tooltip, and on a job it carries an accelerator group too
-      // (`Slurm (prod-gpu) (8xB300)`), which would list one infra once per
-      // accelerator shape.
-      if (job.infra && job.infra !== '-') infras.add(job.infra);
+      // An `--infra` spec, not the rendered `infra` / `full_infra` cell:
+      // the box is matched server-side by `InfraInfo.from_str`, and a
+      // display string does not parse. See `jobInfraSpec`.
+      const infraSpec = jobInfraSpec(job);
+      if (infraSpec) infras.add(infraSpec);
 
       // Extract labels - add only key:value pairs
       const jobLabels = job.labels || {};
@@ -1147,7 +1182,12 @@ export function ManagedJobsTable({
       user: Array.from(users).sort(),
       workspace: Array.from(workspaces).sort(),
       pool: Array.from(pools).sort(),
-      infra: Array.from(infras).sort(),
+      // The server's list covers the whole filtered queue; the page-derived
+      // one only covers the current page, and is the fallback for a server
+      // that does not send one.
+      infra: serverInfraOptions.length
+        ? [...serverInfraOptions].sort()
+        : Array.from(infras).sort(),
       labels: Array.from(labels).sort(),
     });
 
@@ -1170,7 +1210,7 @@ export function ManagedJobsTable({
           : prev.workspace,
       }));
     });
-  }, [data, poolsData, setValueList]);
+  }, [data, poolsData, serverInfraOptions, setValueList]);
 
   const requestSort = React.useCallback(
     (key) => {
