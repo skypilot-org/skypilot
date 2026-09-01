@@ -608,7 +608,8 @@ def _ray_version_for_cluster(cluster_name: str,
     old_config = yaml_utils.safe_load(old_yaml_content)
     if not isinstance(old_config, dict):
         return constants.SKY_REMOTE_RAY_VERSION
-    recorded = old_config.get('provider', {}).get(_RAY_VERSION_KEY)
+    # `provider:` with nothing under it parses to None, not {}.
+    recorded = (old_config.get('provider') or {}).get(_RAY_VERSION_KEY)
     # Clusters created before the marker existed carry no record, and are all
     # on the legacy version.
     return recorded if recorded else _LEGACY_RAY_VERSION
@@ -616,13 +617,18 @@ def _ray_version_for_cluster(cluster_name: str,
 
 def _log_pinned_ray_version(cluster_name: str, ray_version: str,
                             cloud: clouds.Cloud,
-                            resources: 'resources_lib.Resources') -> None:
+                            resources: 'resources_lib.Resources',
+                            region: Optional[str]) -> None:
     """Say why the cluster is not on the Ray this SkyPilot ships.
 
     How to move it depends on the cloud: `sky stop` + `sky start` is the only
     in-place path, and a good many clouds -- Kubernetes, Slurm, RunPod, Lambda,
     and AWS/GCP for spot, among others -- cannot stop at all, so there the
     version is fixed for the life of the cluster.
+
+    `region` is passed through because asking Kubernetes without one makes it
+    enumerate every allowed context and probe each cluster's API, none of which
+    the STOP answer depends on.
     """
     if ray_version == constants.SKY_REMOTE_RAY_VERSION:
         return
@@ -630,13 +636,23 @@ def _log_pinned_ray_version(cluster_name: str, ray_version: str,
                 f'SkyPilot ships {constants.SKY_REMOTE_RAY_VERSION}.')
     try:
         cloud.check_features_are_supported(
-            resources, {clouds.CloudImplementationFeatures.STOP})
+            resources, {clouds.CloudImplementationFeatures.STOP}, region)
     except exceptions.NotSupportedError:
         # Not actionable in place, and permanent for this cluster, so keep it
         # out of every launch's output and leave it for whoever is asking why.
         logger.debug(f'{preamble} {cloud} cannot stop a cluster, so it keeps '
                      f'that version until it is recreated (`sky down '
                      f'{cluster_name}`).')
+        return
+    except Exception:  # pylint: disable=broad-except
+        # Deciding the wording is not worth failing a launch over. The check
+        # reaches the cloud on some providers -- Kubernetes probes every
+        # allowed context -- so it can fail for reasons that have nothing to
+        # do with the question being asked.
+        logger.debug(
+            f'{preamble} Could not tell whether {cloud} can stop a '
+            'cluster.',
+            exc_info=True)
         return
     logger.info(f'{preamble} Run `sky stop {cluster_name}` and `sky start '
                 f'{cluster_name}` to move the whole cluster to it.')
@@ -1275,7 +1291,8 @@ def write_cluster_config(
     # the Ray version it already runs, or its nodes end up disagreeing.
     old_yaml_content = global_user_state.get_cluster_yaml_str(yaml_path)
     ray_version = _ray_version_for_cluster(cluster_name, old_yaml_content)
-    _log_pinned_ray_version(cluster_name, ray_version, cloud, to_provision)
+    _log_pinned_ray_version(cluster_name, ray_version, cloud, to_provision,
+                            region.name)
     variables = dict(
         resources_vars,
         **{

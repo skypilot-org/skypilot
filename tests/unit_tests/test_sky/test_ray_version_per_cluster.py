@@ -216,7 +216,7 @@ def _notice(cloud, pinned='2.4.0', **resource_kwargs):
                                         **resource_kwargs)
     with mock.patch.object(backend_utils, 'logger') as log:
         backend_utils._log_pinned_ray_version(  # pylint: disable=protected-access
-            'c', pinned, cloud, resources)
+            'c', pinned, cloud, resources, 'fake-region')
     join = lambda calls: ' '.join(str(c) for c in calls)
     return join(log.info.call_args_list), join(log.debug.call_args_list)
 
@@ -233,11 +233,24 @@ def test_a_cluster_that_cannot_stop_is_not_told_to_stop():
     Naming it would send the user at a command that errors out, and the
     condition is permanent for such a cluster, so it does not belong in every
     launch's output either.
+
+    Only the cloud I/O is stubbed -- that STOP really is unsupported is the
+    cloud's own declaration, asserted just below.
     """
-    info, debug = _notice(clouds.Kubernetes())
+    stop = clouds.CloudImplementationFeatures.STOP
+    with mock.patch.object(clouds.Kubernetes,
+                           '_unsupported_features_for_resources',
+                           return_value={stop: 'no stop on Kubernetes'}):
+        info, debug = _notice(clouds.Kubernetes())
     assert not info, f'told a Kubernetes user to stop the cluster: {info}'
     assert 'sky stop' not in debug
     assert 'recreated' in debug and 'sky down c' in debug
+
+
+def test_kubernetes_really_does_declare_stop_unsupported():
+    """The premise the test above stubs out, taken from the cloud itself."""
+    assert (clouds.CloudImplementationFeatures.STOP
+            in clouds.Kubernetes._CLOUD_UNSUPPORTED_FEATURES)  # pylint: disable=protected-access
 
 
 def test_whether_a_cluster_can_stop_depends_on_the_resources_too():
@@ -307,3 +320,47 @@ def test_only_kubernetes_installs_ray_where_the_restore_reaches():
         'a template installs Ray under a key that is restored for existing '
         'clusters, so restarting will not move its Ray version: '
         f'{unexpected}')
+
+
+def test_a_bare_provider_key_does_not_raise():
+    """`provider:` with nothing under it parses to None, not {}.
+
+    Only a malformed stored YAML gets here, but resolving the version is on
+    the launch path -- an AttributeError out of it fails the launch.
+    """
+    assert _resolve('c', 'cluster_name: c\nprovider:\n',
+                    status_lib.ClusterStatus.UP) == LEGACY
+
+
+def test_the_notice_never_fails_the_launch():
+    """It is a log line. Asking the cloud reaches the cloud on some providers.
+
+    Kubernetes answers STOP by enumerating every allowed context and probing
+    each cluster's API, catching only KubeAPIUnreachableError -- so a bad
+    kubeconfig or an auth-plugin failure would propagate out of a diagnostic
+    and abort write_cluster_config.
+    """
+    cloud = clouds.Kubernetes()
+    resources = resources_lib.Resources(cloud=cloud, instance_type='fake-type')
+    # Not a mocked failure: a context that is not in the kubeconfig makes
+    # Kubernetes raise a bare ValueError out of the feature check.
+    with mock.patch.object(backend_utils, 'logger') as log:
+        backend_utils._log_pinned_ray_version(  # pylint: disable=protected-access
+            'c', '2.4.0', cloud, resources, 'context-that-does-not-exist')
+    assert not log.info.call_args_list, 'said something it could not check'
+    assert log.debug.call_args_list, 'swallowed it without a word'
+
+
+def test_the_notice_passes_the_region_it_already_has():
+    """Without it, Kubernetes enumerates contexts and probes their APIs.
+
+    None of that work changes the answer: kubernetes.py assigns
+    unsupported_features[STOP] unconditionally, before the context loop.
+    """
+    cloud = clouds.Kubernetes()
+    resources = resources_lib.Resources(cloud=cloud, instance_type='fake-type')
+    with mock.patch.object(clouds.Kubernetes,
+                           'check_features_are_supported') as checked:
+        backend_utils._log_pinned_ray_version(  # pylint: disable=protected-access
+            'c', '2.4.0', cloud, resources, 'my-context')
+    assert checked.call_args.args[2] == 'my-context'
