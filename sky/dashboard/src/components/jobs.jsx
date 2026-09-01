@@ -368,8 +368,10 @@ export function ManagedJobs() {
   });
   const [preloadingComplete, setPreloadingComplete] = useState(false);
   const [lastFetchedTime, setLastFetchedTime] = useState(null);
-  // Latched once any fetched page contains an external row, so the
-  // Account/QOS filter options and column don't flicker across pages.
+  // Deployment-level signal from the jobs provider (`externalJobsEnabled`
+  // on the response): external Slurm clusters are configured, so the
+  // Account/QOS column and filter options apply. Independent of which rows
+  // the current page happens to hold.
   const [hasExternalRows, setHasExternalRows] = useState(false);
 
   const fetchData = React.useCallback(
@@ -743,19 +745,6 @@ export function ManagedJobsTable({
     }
     return 'desc';
   }, [sortConfig.key, sortConfig.direction]);
-
-  // Fallback latch for providers that don't send `externalJobsEnabled`
-  // (older plugin builds): external-row presence in fetched pages also
-  // reveals the Account/QOS column and filter options (never unlatches).
-  React.useEffect(() => {
-    if (
-      !hasExternalRows &&
-      setHasExternalRows &&
-      (data || []).some((job) => job.is_external)
-    ) {
-      setHasExternalRows(true);
-    }
-  }, [data, hasExternalRows, setHasExternalRows]);
 
   // Determine if we should show the Workspace column
   // Only show if there are multiple workspaces or a workspace other than 'default'
