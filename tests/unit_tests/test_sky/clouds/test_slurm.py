@@ -1687,6 +1687,12 @@ class TestCreateVirtualInstance:
         assert script.index(readiness_check) < script.index(
             'touch /home/testuser/.sky_clusters/'
             'test-cluster-restore/.sky_sbatch_ready')
+        consume_snapshot = ('rm -rf -- /home/testuser/.sky_snapshots/'
+                            'test-cluster-restore')
+        ready_signal = ('touch /home/testuser/.sky_clusters/'
+                        'test-cluster-restore/.sky_sbatch_ready')
+        assert script.index(readiness_check) < script.index(consume_snapshot)
+        assert script.index(consume_snapshot) < script.index(ready_signal)
 
     @pytest.mark.parametrize('path', [
         '/host/data,other',

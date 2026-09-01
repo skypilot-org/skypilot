@@ -969,6 +969,16 @@ echo "[container] ERROR: Container is not running as $global_target or $job_targ
 exit 1
 """
         assert original_container_image is not None
+        container_ready_failure = ''
+        snapshot_restore_complete_block = ''
+        if snapshot_manifest is not None:
+            container_ready_failure = ' || exit 1'
+            snapshot_restore_complete_block = (
+                f'if ! rm -rf -- {shlex.quote(snapshot_dir)}; then\n'
+                '  echo "[container] ERROR: Failed to consume snapshot." '
+                '>&2\n'
+                '  exit 1\n'
+                'fi\n')
         container_block = (
             f'srun --nodes={num_nodes} mkdir -p {host_ccache_dir}\n'
             f'CONTAINER_START=$SECONDS\n'
@@ -995,10 +1005,12 @@ exit 1
             f'done\n'
             f'srun --overlap --unbuffered --nodes={num_nodes} '
             f'--ntasks-per-node=1 bash -c '
-            f'{shlex.quote(container_ready_script)}\n'
+            f'{shlex.quote(container_ready_script)}'
+            f'{container_ready_failure}\n'
             f'echo "[container] Ready in $((SECONDS - CONTAINER_START))s"\n'
             f'printf \'%s\\n\' {shlex.quote(original_container_image)} > '
             f'{container_marker_file}\n'
+            f'{snapshot_restore_complete_block}'
             f'touch {ready_signal}')
 
     # sbatch batch script ── lives as long as the allocation
