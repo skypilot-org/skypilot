@@ -343,6 +343,7 @@ class JobsCacheManager {
     const hasPrev = result.hasPrev || result.has_prev || page > 1;
     const statusCounts = result.statusCounts || {};
     const externalFetchErrors = result.externalFetchErrors || [];
+    const externalJobsEnabled = result.externalJobsEnabled === true;
 
     // Cache this specific page
     this.pageCache.set(cacheKey, {
@@ -355,6 +356,7 @@ class JobsCacheManager {
       controllerStopped: false,
       statusCounts,
       externalFetchErrors,
+      externalJobsEnabled,
       timestamp: Date.now(),
     });
 
@@ -368,6 +370,7 @@ class JobsCacheManager {
       controllerStopped: false,
       statusCounts,
       externalFetchErrors,
+      externalJobsEnabled,
       fromCache: false,
       cacheStatus: 'plugin_path_fetched',
     };

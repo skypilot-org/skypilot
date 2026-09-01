@@ -744,8 +744,9 @@ export function ManagedJobsTable({
     return 'desc';
   }, [sortConfig.key, sortConfig.direction]);
 
-  // Latch external-row presence up to the page component (never unlatches),
-  // which gates the Account/QOS column and filter options.
+  // Fallback latch for providers that don't send `externalJobsEnabled`
+  // (older plugin builds): external-row presence in fetched pages also
+  // reveals the Account/QOS column and filter options (never unlatches).
   React.useEffect(() => {
     if (
       !hasExternalRows &&
@@ -865,6 +866,13 @@ export function ManagedJobsTable({
             setExternalFetchErrors([]);
           } else {
             setHookControllerStopped(false);
+            // Deployment-level signal from the jobs provider (external
+            // Slurm clusters configured) — page contents alone can't tell,
+            // since the current page may hold only managed rows while
+            // external rows sit on later pages.
+            if (response.externalJobsEnabled && setHasExternalRows) {
+              setHasExternalRows(true);
+            }
             setData(response.jobs || []);
             setTotalCount(response.total || 0);
             setTotalNoFilter(response.totalNoFilter || response.total || 0);
@@ -954,6 +962,7 @@ export function ManagedJobsTable({
       sortOrder,
       userScope,
       currentUser,
+      setHasExternalRows,
     ]
   );
 
