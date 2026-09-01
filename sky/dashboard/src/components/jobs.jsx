@@ -1749,10 +1749,14 @@ export function ManagedJobsTable({
         renderCell: (item) =>
           hasExternalRows ? (
             <TableCell>
-              {item.account ? (
+              {item.account || item.qos ? (
+                // Either half may be missing (a cluster can stamp QOS
+                // without an account and vice versa); a lone QOS keeps the
+                // '— /' prefix so it can't read as an account name.
                 <span className="whitespace-nowrap">
-                  {item.account}
-                  {item.qos ? ` / ${item.qos}` : ''}
+                  {item.qos
+                    ? `${item.account || '—'} / ${item.qos}`
+                    : item.account}
                 </span>
               ) : (
                 <span className="text-gray-400">—</span>
