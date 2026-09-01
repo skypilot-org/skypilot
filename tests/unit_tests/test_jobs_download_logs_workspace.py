@@ -204,7 +204,7 @@ def test_not_found_message_matches_master(runner):
     assert "No running managed job found with name 'nope'." in msg
 
 
-def test_bare_lookup_asks_for_one_job_not_the_whole_table(runner):
+def test_bare_lookup_is_bounded_not_a_whole_table_scan(runner):
     """It replaces a `LIMIT 1` query; an unbounded fetch is a real regression.
 
     Pagination here is by unique job, and the query already defaults to job_id
@@ -215,7 +215,9 @@ def test_bare_lookup_asks_for_one_job_not_the_whole_table(runner):
                            return_value=([_record(7)], 1, {}, 1)) as queue:
         _tail()
     kwargs = queue.call_args.kwargs
-    assert kwargs['limit'] == 1 and kwargs['page'] == 1
+    # Two, not one: sync-down has to be able to say "more than one job exists",
+    # which a limit of 1 would make unanswerable.
+    assert kwargs['limit'] == 2 and kwargs['page'] == 1
     # The name path must stay unbounded: `--controller` ambiguity has to list
     # every matching id, so a limit there would truncate the message.
     with mock.patch.object(core,

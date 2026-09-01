@@ -1843,9 +1843,10 @@ def _resolve_accessible_job_id_for_logs(
     and messages are reproduced exactly, since they are not what this is
     fixing:
 
-    - ``for_tail`` (``sky jobs logs``): only non-terminal jobs unless
-      ``--controller`` (``skip_finished``), and an ambiguous name raises
-      rather than guessing, matching ``managed_job_utils.stream_logs``.
+    - ``for_tail`` (``sky jobs logs``): a *named* lookup sees only
+      non-terminal jobs unless ``--controller`` (``skip_finished``; the bare
+      lookup ignores it), and an ambiguous name raises rather than guessing,
+      matching ``managed_job_utils.stream_logs``.
     - otherwise (``--sync-down``): every status, ambiguity takes the latest,
       matching ``sync_down_managed_job_logs``.
 
@@ -1875,24 +1876,30 @@ def _resolve_accessible_job_id_for_logs(
                                         name_match=name,
                                         fields=['job_id', 'job_name'])
         candidates = [r for r in records if r.job_name == name]
-        name_str = f'Multiple jobs IDs found under the name {name}. '
+        multiple_str = (f'Multiple jobs IDs found under the name {name}. ')
     else:
         # No selector: take the latest job whatever its status. `skip_finished`
         # is deliberately not applied -- it mirrors the *name* lookup only
         # (`get_nonterminal_job_ids_by_name`), while the bare path mirrors
         # `get_latest_job_id`, which has no status filter.
         #
-        # Ask for a single job rather than the whole table: this replaces a
+        # Ask for two jobs rather than the whole table: this replaces a
         # `LIMIT 1` query, and pagination here is by unique job, not by task.
-        # No `sort_by` is needed -- the query already defaults to job_id
-        # descending, which is the order we want.
+        # Two, not one, so that "is there more than one job" stays answerable
+        # -- sync-down reports that (`Downloading the latest job logs.`) and a
+        # limit of 1 would silently drop the notice. `[0]` is still the newest.
+        #
+        # No `sort_by`: the query already defaults to job_id descending. Note
+        # the old-controller LIST fallback does not re-sort at all -- it slices
+        # `filter_jobs` output directly -- so it leans on that dump already
+        # being `spot_job_id DESC`.
         records, _, _, _ = queue_v2_api(refresh=False,
                                         all_users=True,
                                         fields=['job_id'],
                                         page=1,
-                                        limit=1)
+                                        limit=2)
         candidates = list(records)
-        name_str = ''
+        multiple_str = ''
 
     # De-duplicate: the queue returns one record per *task*, so a multi-task
     # job repeats its id and would otherwise look like several jobs. The
@@ -1930,7 +1937,7 @@ def _resolve_accessible_job_id_for_logs(
         # Downloading the latest job logs."
         controller_str = ' (controller)' if controller else ''
         logger.info(f'{colorama.Fore.YELLOW}'
-                    f'{name_str}'
+                    f'{multiple_str}'
                     f'Downloading the latest job logs{controller_str}.'
                     f'{colorama.Style.RESET_ALL}')
     return job_ids[0]
