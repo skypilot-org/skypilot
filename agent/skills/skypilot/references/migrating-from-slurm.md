@@ -57,7 +57,7 @@ Follow this order. Do not skip step 5.
 | `--cpus-per-task=32` | `resources.cpus: 32+` | `+` means "at least". Emitted as `--cpus-per-task` |
 | `--mem=256G` | `resources.memory: 256+` | In GB. Emitted as `--mem` |
 | `--partition=gpu` | `resources.infra: slurm/<cluster>/gpu` | Omit to let the optimizer choose a partition |
-| `--time=24:00:00` | `config.slurm.sbatch_options.time: "24:00:00"` | Defaults to the partition's `MaxTime` if unset. **Not** `autostop` — see section 8 |
+| `--time=24:00:00` | `config.slurm.sbatch_options.time: "24:00:00"` | Defaults to the partition's `MaxTime` (or `DefaultTime` when `MaxTime` is `UNLIMITED`) if unset. **Not** `autostop` — see section 8 |
 | `--job-name=train` | `name: train` | |
 | `--output=`, `--error=` | *(nothing)* | SkyPilot manages job logs; see section 7.4 |
 | `--account`, `--qos`, `--reservation`, `--exclusive`, `--constraint`, ... | `config.slurm.sbatch_options.<key>` | Section 3 |
@@ -137,8 +137,9 @@ config:
 ```
 
 The same block works in `~/.sky/config.yaml` under a top-level `slurm:` key to
-apply fleet-wide, and can be scoped per cluster or per partition under
-`slurm.cluster_configs`.
+apply fleet-wide, and can be scoped per cluster or per partition:
+`slurm.cluster_configs.<cluster>.sbatch_options` and
+`slurm.cluster_configs.<cluster>.partition_configs.<partition>.sbatch_options`.
 
 **Do not put these in `sbatch_options`** — SkyPilot manages them and will drop
 them with a warning:
@@ -302,7 +303,8 @@ run: |
 
 Each job provisions its own allocation. To reuse workers across submissions
 instead — closer to how a long-lived Slurm allocation behaves, and much
-cheaper when `setup` is expensive — submit to a pool:
+cheaper when `setup` is expensive — submit to a pool (note `pool.yaml` is a
+pool spec: it needs a `pool:` section, not a bare task YAML):
 
 ```bash
 sky jobs pool apply -p mypool pool.yaml
@@ -341,7 +343,28 @@ run: python eval.py
 ```
 
 For tasks that should run *in parallel* rather than in sequence, use a job
-group instead of a pipeline.
+group instead of a pipeline. A job group is the same multi-document layout,
+but the header must set `execution: parallel` — without it the file is a
+*serial* pipeline:
+
+```yaml
+name: train-and-eval
+execution: parallel
+
+---
+
+name: train
+resources:
+  accelerators: H100:8
+run: python train.py
+
+---
+
+name: eval
+resources:
+  accelerators: L4:1
+run: python eval.py
+```
 
 ### 7.3 Login node workflow
 
