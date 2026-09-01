@@ -1216,14 +1216,14 @@ async def set_request_failed_async(request_id: str, e: BaseException) -> None:
 
 @metrics_lib.time_me_async
 @asyncio_utils.shield
-async def set_request_failed_if_executable_async(request_id: str,
-                                                 e: BaseException) -> bool:
-    """Set a not-yet-claimed request to failed.
+async def set_request_failed_if_pending_async(request_id: str,
+                                              e: BaseException) -> bool:
+    """Set a request to failed only while it is still PENDING.
 
-    The transition only happens while the request is still in an executable
-    status -- the same guard the worker applies at dequeue. Once a worker
-    claimed the request (RUNNING) or it reached a terminal status, the row is
-    left untouched and the owner's outcome stands.
+    PENDING is the only status a request can be in while its initial enqueue
+    is in flight: any other status means a worker already claimed the request
+    (the put actually committed) and the owner's outcome stands -- including
+    WAITING, which is only ever set after a claimed run parks for a retry.
 
     Returns:
         True if the request was transitioned to FAILED.
@@ -1232,7 +1232,7 @@ async def set_request_failed_if_executable_async(request_id: str,
     storage = request_storage.get_request_backend()
     async with storage.update_request_async(request_id) as request_task:
         assert request_task is not None, request_id
-        if request_task.status not in RequestStatus.executable_statuses():
+        if request_task.status != RequestStatus.PENDING:
             return False
         request_task.status = RequestStatus.FAILED
         request_task.finished_at = time.time()

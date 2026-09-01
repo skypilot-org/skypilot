@@ -1372,7 +1372,7 @@ async def schedule_prepared_request(request_task: api_requests.Request,
             logger.error(
                 f'Failed to enqueue request {request_task.request_id}: '
                 f'{common_utils.format_exception(e)}')
-            await api_requests.set_request_failed_if_executable_async(
+            await api_requests.set_request_failed_if_pending_async(
                 request_task.request_id, e)
             raise
 

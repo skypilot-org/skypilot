@@ -225,14 +225,19 @@ async def test_enqueue_cancellation_marks_request_failed(isolated_database):
     assert updated.status == requests_lib.RequestStatus.FAILED
 
 
+@pytest.mark.parametrize('claimed_status', [
+    requests_lib.RequestStatus.RUNNING,
+    requests_lib.RequestStatus.WAITING,
+])
 @pytest.mark.asyncio
 async def test_enqueue_failure_does_not_clobber_claimed_request(
-        isolated_database):
+        isolated_database, claimed_status):
     """A row claimed by a worker before the failure mark is left untouched.
 
     The queue put may commit and still raise (e.g. a timeout racing the
-    commit); a worker can then dequeue and claim the request before the
-    failure path runs. The failure mark must not overwrite the claimed run.
+    commit); a worker can then dequeue and claim the request -- and even park
+    it WAITING for a retry -- before the failure path runs. The failure mark
+    must not overwrite the claimed run.
     """
     req = _make_pending_request('enqueue-claimed')
     assert await requests_lib.create_if_not_exists_async(req) is True
@@ -241,7 +246,7 @@ async def test_enqueue_failure_does_not_clobber_claimed_request(
         del input_tuple
         with requests_lib.update_request('enqueue-claimed') as claimed:
             assert claimed is not None
-            claimed.status = requests_lib.RequestStatus.RUNNING
+            claimed.status = claimed_status
         raise RuntimeError('put failed after commit')
 
     queue = mock.Mock()
@@ -252,7 +257,7 @@ async def test_enqueue_failure_does_not_clobber_claimed_request(
 
     updated = requests_lib.get_request('enqueue-claimed')
     assert updated is not None
-    assert updated.status == requests_lib.RequestStatus.RUNNING
+    assert updated.status == claimed_status
 
 
 class _AlwaysMetPrecondition(preconditions.Precondition):
