@@ -1450,9 +1450,9 @@ def stop_instances(
         raise RuntimeError('Cannot stop Slurm cluster because its head node '
                            'command runner is unavailable.')
     cancel_jobs_code = job_lib.JobLibCodeGen.cancel_jobs(None, cancel_all=True)
-    rc, stdout, stderr = command_runners[0].run(cancel_jobs_code,
-                                                require_outputs=True,
-                                                stream_logs=False)
+    rc, stdout, stderr = command_runners[0].run_driver(cancel_jobs_code,
+                                                       require_outputs=True,
+                                                       stream_logs=False)
     subprocess_utils.handle_returncode(
         rc,
         cancel_jobs_code,

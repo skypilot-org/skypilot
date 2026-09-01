@@ -328,7 +328,7 @@ class TestStopInstances:
 
         login_runner.run.side_effect = run
         head_runner = mock.MagicMock()
-        head_runner.run.return_value = (0, '', '')
+        head_runner.run_driver.return_value = (0, '', '')
         monkeypatch.setattr(instance, '_make_slurm_client',
                             mock.MagicMock(return_value=client))
         monkeypatch.setattr(instance, '_make_login_node_runner',
@@ -356,9 +356,10 @@ class TestStopInstances:
 
         instance.stop_instances(_CLUSTER, provider_config=_PROVIDER_CONFIG)
 
-        head_runner.run.assert_called_once()
-        assert 'cancel_jobs_encoded_results' in head_runner.run.call_args.args[
-            0]
+        head_runner.run_driver.assert_called_once()
+        head_runner.run.assert_not_called()
+        assert ('cancel_jobs_encoded_results'
+                in head_runner.run_driver.call_args.args[0])
         manifest = write_manifest.call_args.args[2]
         assert manifest['num_nodes'] == 2
         assert manifest['job_db_path'] == (
