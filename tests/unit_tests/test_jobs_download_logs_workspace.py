@@ -50,7 +50,9 @@ def test_bare_sync_down_picks_latest_accessible_not_latest_global(backend):
 
 def test_job_id_outside_accessible_workspaces_is_refused(backend):
     """An explicit id the queue cannot see must not be downloaded."""
-    with mock.patch.object(core, 'queue_v2_api', return_value=([], 0, {}, 0, [])):
+    with mock.patch.object(core,
+                           'queue_v2_api',
+                           return_value=([], 0, {}, 0, [])):
         assert core.download_logs(name=None,
                                   job_id=99,
                                   refresh=False,
@@ -84,7 +86,9 @@ def test_name_matches_exactly_and_picks_latest(backend):
 
 
 def test_no_accessible_job_returns_empty(backend):
-    with mock.patch.object(core, 'queue_v2_api', return_value=([], 0, {}, 0, [])):
+    with mock.patch.object(core,
+                           'queue_v2_api',
+                           return_value=([], 0, {}, 0, [])):
         assert core.download_logs(name=None,
                                   job_id=None,
                                   refresh=False,
@@ -136,7 +140,9 @@ def test_tail_bare_picks_latest_accessible_not_latest_global(runner):
 
 
 def test_tail_job_id_outside_accessible_workspaces_is_refused(runner):
-    with mock.patch.object(core, 'queue_v2_api', return_value=([], 0, {}, 0, [])):
+    with mock.patch.object(core,
+                           'queue_v2_api',
+                           return_value=([], 0, {}, 0, [])):
         assert _tail(job_id=99) == core.exceptions.JobExitCode.NOT_FOUND
     runner.tail_managed_job_logs.assert_not_called()
 
@@ -151,13 +157,15 @@ def test_name_lookup_is_status_scoped_but_bare_lookup_is_not(runner):
     """
     with mock.patch.object(core,
                            'queue_v2_api',
-                           return_value=([_record(4, 'n')], 1, {}, 1, [])) as queue:
+                           return_value=([_record(4, 'n')], 1, {}, 1,
+                                         [])) as queue:
         _tail(name='n')
     assert queue.call_args.kwargs['skip_finished'] is True
 
     with mock.patch.object(core,
                            'queue_v2_api',
-                           return_value=([_record(4, 'n')], 1, {}, 1, [])) as queue:
+                           return_value=([_record(4, 'n')], 1, {}, 1,
+                                         [])) as queue:
         _tail(name='n', controller=True)
     assert queue.call_args.kwargs['skip_finished'] is False
 
@@ -222,7 +230,8 @@ def test_bare_lookup_is_bounded_not_a_whole_table_scan(runner):
     # every matching id, so a limit there would truncate the message.
     with mock.patch.object(core,
                            'queue_v2_api',
-                           return_value=([_record(7, 'n')], 1, {}, 1, [])) as queue:
+                           return_value=([_record(7, 'n')], 1, {}, 1,
+                                         [])) as queue:
         _tail(name='n')
     assert 'limit' not in queue.call_args.kwargs
 
