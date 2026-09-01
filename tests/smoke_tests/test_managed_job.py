@@ -113,7 +113,11 @@ def test_managed_jobs_basic(generic_cloud: str):
             # unmatched filter is an empty queue, not an error.
             f's=$(sky jobs queue --infra {generic_cloud}); echo "$s"; '
             f'echo "$s" | grep {name}-1 && echo "$s" | grep {name}-2',
+            # The negative case has to prove the queue answered before it
+            # concludes anything from an absent name: an error prints neither
+            # job either, so `! grep` alone would pass on a broken filter.
             f's=$(sky jobs queue --infra nonexistent-cloud); echo "$s"; '
+            f'echo "$s" | grep -q "Managed jobs" && '
             f'! echo "$s" | grep {name}-1 && ! echo "$s" | grep {name}-2',
             # A malformed spec is rejected rather than silently ignored --
             # a dropped infra filter would answer with jobs on other infra.
