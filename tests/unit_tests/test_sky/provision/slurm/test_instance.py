@@ -1,11 +1,13 @@
 """Unit tests for sky.provision.slurm.instance."""
 import json
+import shlex
 from unittest import mock
 
 import pytest
 
 from sky import exceptions
 from sky.provision.slurm import instance
+from sky.skylet import constants as skylet_constants
 
 _CLUSTER = 'test-cluster'
 _PROVIDER_CONFIG = {
@@ -16,12 +18,17 @@ _PROVIDER_CONFIG = {
         'private_key': '/path/to/key',
     }
 }
+_SNAPSHOT_GENERATION = '0123456789abcdef0123456789abcdef'
+_NEW_SNAPSHOT_GENERATION = 'fedcba9876543210fedcba9876543210'
 
 
 def _snapshot_manifest(snapshot_dir='/home/test/.sky_snapshots/test-cluster',
-                       num_nodes=2):
+                       num_nodes=2,
+                       generation=_SNAPSHOT_GENERATION):
+    generation_dir = instance._snapshot_generation_dir(snapshot_dir, generation)
     return {
         'version': instance.SNAPSHOT_MANIFEST_VERSION,
+        'generation': generation,
         'image_id': 'ubuntu:24.04',
         'num_nodes': num_nodes,
         'created_at': 1234.5,
@@ -29,7 +36,7 @@ def _snapshot_manifest(snapshot_dir='/home/test/.sky_snapshots/test-cluster',
         'snapshots': [{
             'rank': rank,
             'node': f'node-{rank}',
-            'path': instance._snapshot_rank_path(snapshot_dir, rank),
+            'path': instance._snapshot_rank_path(generation_dir, rank),
         } for rank in range(num_nodes)],
     }
 
@@ -56,6 +63,13 @@ class TestSnapshotManifest:
         manifest = _snapshot_manifest(snapshot_dir)
         manifest['snapshots'][1]['path'] = '/other/rank1.sqsh'
         with pytest.raises(RuntimeError, match='path for rank 1'):
+            instance._validate_snapshot_manifest(manifest, snapshot_dir)
+
+    def test_invalid_generation(self):
+        snapshot_dir = '/home/test/.sky_snapshots/test-cluster'
+        manifest = _snapshot_manifest(snapshot_dir)
+        manifest['generation'] = '../other'
+        with pytest.raises(RuntimeError, match='invalid generation'):
             instance._validate_snapshot_manifest(manifest, snapshot_dir)
 
     def test_missing_manifest(self):
@@ -88,7 +102,9 @@ class TestSnapshotManifest:
     def test_missing_job_db_snapshot(self):
         snapshot_dir = '/home/test/.sky_snapshots/test-cluster'
         manifest = _snapshot_manifest(snapshot_dir)
-        manifest['job_db_path'] = instance._snapshot_job_db_path(snapshot_dir)
+        generation_dir = instance._snapshot_generation_dir(
+            snapshot_dir, manifest['generation'])
+        manifest['job_db_path'] = instance._snapshot_job_db_path(generation_dir)
         runner = mock.MagicMock()
         runner.run.side_effect = [(0, '', ''), (0, '', ''), (1, '', '')]
         with pytest.raises(RuntimeError, match='missing job database'):
@@ -355,6 +371,12 @@ class TestStopInstances:
                             mock.MagicMock(return_value=login_runner))
         monkeypatch.setattr(instance, '_resolve_sky_base_dir',
                             mock.MagicMock(return_value='/home/test'))
+        read_manifest = mock.MagicMock(return_value=None)
+        monkeypatch.setattr(instance, '_read_snapshot_manifest', read_manifest)
+        new_uuid = mock.MagicMock()
+        new_uuid.hex = _NEW_SNAPSHOT_GENERATION
+        monkeypatch.setattr(instance.uuid, 'uuid4',
+                            mock.MagicMock(return_value=new_uuid))
         monkeypatch.setattr(instance, 'get_cluster_info', mock.MagicMock())
         monkeypatch.setattr(instance, 'get_command_runners',
                             mock.MagicMock(return_value=[head_runner]))
@@ -366,6 +388,7 @@ class TestStopInstances:
         monkeypatch.setattr(instance.slurm_utils,
                             'get_slurm_cluster_from_config',
                             mock.MagicMock(return_value='test-slurm'))
+        client.test_read_manifest = read_manifest
         return (client, login_runner, head_runner, write_manifest,
                 cancel_slurm_job)
 
@@ -391,9 +414,11 @@ class TestStopInstances:
         assert (stop_skylet_command.index('.sky/skylet_start') <
                 stop_skylet_command.index('.sky/skylet_pid'))
         manifest = write_manifest.call_args.args[2]
+        assert manifest['generation'] == _NEW_SNAPSHOT_GENERATION
         assert manifest['num_nodes'] == 2
         assert manifest['job_db_path'] == (
-            '/home/test/.sky_snapshots/test-cluster/jobs.db')
+            '/home/test/.sky_snapshots/test-cluster/generations/'
+            f'{_NEW_SNAPSHOT_GENERATION}/jobs.db')
         assert [entry['node'] for entry in manifest['snapshots']] == nodes
         assert [entry['rank'] for entry in manifest['snapshots']] == [0, 1]
         export_commands = [
@@ -403,10 +428,23 @@ class TestStopInstances:
         ]
         assert len(export_commands) == 2
         assert all('enroot export -f' in command for command in export_commands)
+        assert all(f'.staging-{_NEW_SNAPSHOT_GENERATION}' in command
+                   for command in export_commands)
         assert any(
             '--nodelist=node-a' in command for command in export_commands)
         assert any(
             '--nodelist=node-b' in command for command in export_commands)
+        backup_job_db_commands = [
+            call.args[0]
+            for call in login_runner.run.call_args_list
+            if 'sqlite3.connect' in call.args[0]
+        ]
+        assert len(backup_job_db_commands) == 1
+        backup_job_db_script = shlex.split(backup_job_db_commands[0])[-1]
+        assert backup_job_db_script.startswith(
+            'export SKY_RUNTIME_DIR=/tmp/test-cluster && ')
+        assert skylet_constants.SKY_SLURM_PYTHON_CMD in backup_job_db_script
+        assert '/usr/bin/python3 -c' not in backup_job_db_script
         cancel_slurm_job.assert_called_once()
 
     def test_cleanup_allocation_runs_on_every_node(self, monkeypatch):
@@ -439,9 +477,11 @@ class TestStopInstances:
         assert shared_cleanup == (
             'rm -rf -- /home/test/.sky_clusters/test-cluster')
 
-    def test_export_failure_keeps_allocation_running(self, monkeypatch):
-        _, login_runner, _, write_manifest, cancel_slurm_job = self._setup(
+    def test_export_failure_preserves_previous_snapshot(self, monkeypatch):
+        client, login_runner, _, write_manifest, cancel_slurm_job = self._setup(
             monkeypatch, ['node-a', 'node-b'])
+        previous_manifest = _snapshot_manifest()
+        client.test_read_manifest.return_value = previous_manifest
         original_run = login_runner.run.side_effect
 
         def fail_rank_one(command, **kwargs):
@@ -456,10 +496,73 @@ class TestStopInstances:
 
         write_manifest.assert_not_called()
         cancel_slurm_job.assert_not_called()
+        previous_generation_dir = instance._snapshot_generation_dir(
+            '/home/test/.sky_snapshots/test-cluster',
+            previous_manifest['generation'])
+        commands = [call.args[0] for call in login_runner.run.call_args_list]
+        assert not any(
+            previous_generation_dir in command for command in commands)
+
+    def test_previous_generation_removed_after_manifest_publish(
+            self, monkeypatch):
+        client, login_runner, _, write_manifest, _ = self._setup(
+            monkeypatch, ['node-a'])
+        previous_manifest = _snapshot_manifest(num_nodes=1)
+        client.test_read_manifest.return_value = previous_manifest
+        previous_generation_dir = instance._snapshot_generation_dir(
+            '/home/test/.sky_snapshots/test-cluster',
+            previous_manifest['generation'])
+        original_run = login_runner.run.side_effect
+        events = []
+
+        def record_snapshot_events(command, **kwargs):
+            if command.startswith('test ! -e ') and 'mv --' in command:
+                events.append('commit generation')
+            if command == f'rm -rf -- {previous_generation_dir}':
+                events.append('remove previous generation')
+            return original_run(command, **kwargs)
+
+        login_runner.run.side_effect = record_snapshot_events
+        write_manifest.side_effect = lambda *args: events.append(
+            'publish manifest')
+
+        instance.stop_instances(_CLUSTER, provider_config=_PROVIDER_CONFIG)
+
+        assert events == [
+            'commit generation',
+            'publish manifest',
+            'remove previous generation',
+        ]
+
+    def test_manifest_publish_failure_preserves_generations(self, monkeypatch):
+        client, login_runner, _, write_manifest, cancel_slurm_job = self._setup(
+            monkeypatch, ['node-a'])
+        previous_manifest = _snapshot_manifest(num_nodes=1)
+        client.test_read_manifest.return_value = previous_manifest
+        write_manifest.side_effect = RuntimeError('publish failed')
+
+        with pytest.raises(RuntimeError, match='publish failed'):
+            instance.stop_instances(_CLUSTER, provider_config=_PROVIDER_CONFIG)
+
+        previous_generation_dir = instance._snapshot_generation_dir(
+            '/home/test/.sky_snapshots/test-cluster',
+            previous_manifest['generation'])
+        new_generation_dir = instance._snapshot_generation_dir(
+            '/home/test/.sky_snapshots/test-cluster', _NEW_SNAPSHOT_GENERATION)
+        commands = [call.args[0] for call in login_runner.run.call_args_list]
+        remove_commands = [
+            command for command in commands if command.startswith('rm -rf -- ')
+        ]
+        assert not any(
+            previous_generation_dir in command for command in remove_commands)
+        assert not any(
+            new_generation_dir in command for command in remove_commands)
+        cancel_slurm_job.assert_not_called()
 
     def test_missing_container_preserves_existing_snapshot(self, monkeypatch):
-        _, login_runner, _, write_manifest, cancel_slurm_job = self._setup(
+        client, login_runner, _, write_manifest, cancel_slurm_job = self._setup(
             monkeypatch, ['node-a', 'node-b'])
+        client.test_read_manifest.return_value = _snapshot_manifest()
         original_run = login_runner.run.side_effect
 
         def fail_node_preflight(command, **kwargs):

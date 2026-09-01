@@ -10,6 +10,7 @@ import tempfile
 import threading
 import time
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple
+import uuid
 
 import colorama
 
@@ -37,6 +38,7 @@ PROVISION_SCRIPTS_DIRECTORY_NAME = '.sky_provision'
 SNAPSHOT_DIRECTORY_NAME = '.sky_snapshots'
 SNAPSHOT_MANIFEST_FILENAME = 'manifest.json'
 SNAPSHOT_JOB_DB_FILENAME = 'jobs.db'
+SNAPSHOT_GENERATIONS_DIRECTORY_NAME = 'generations'
 SNAPSHOT_MANIFEST_VERSION = 1
 
 
@@ -294,12 +296,17 @@ def _snapshot_manifest_path(snapshot_dir: str) -> str:
     return f'{snapshot_dir}/{SNAPSHOT_MANIFEST_FILENAME}'
 
 
-def _snapshot_rank_path(snapshot_dir: str, rank: int) -> str:
-    return f'{snapshot_dir}/rank{rank}.sqsh'
+def _snapshot_generation_dir(snapshot_dir: str, generation: str) -> str:
+    return (f'{snapshot_dir}/{SNAPSHOT_GENERATIONS_DIRECTORY_NAME}/'
+            f'{generation}')
 
 
-def _snapshot_job_db_path(snapshot_dir: str) -> str:
-    return f'{snapshot_dir}/{SNAPSHOT_JOB_DB_FILENAME}'
+def _snapshot_rank_path(generation_dir: str, rank: int) -> str:
+    return f'{generation_dir}/rank{rank}.sqsh'
+
+
+def _snapshot_job_db_path(generation_dir: str) -> str:
+    return f'{generation_dir}/{SNAPSHOT_JOB_DB_FILENAME}'
 
 
 def _validate_snapshot_manifest(
@@ -314,6 +321,12 @@ def _validate_snapshot_manifest(
         raise RuntimeError(
             'Unsupported Slurm container snapshot manifest version: '
             f'{manifest.get("version")!r}.')
+    generation = manifest.get('generation')
+    if (not isinstance(generation, str) or
+            re.fullmatch(r'[0-9a-f]{32}', generation) is None):
+        raise RuntimeError('Slurm container snapshot manifest has an invalid '
+                           f'generation: {generation!r}.')
+    generation_dir = _snapshot_generation_dir(snapshot_dir, generation)
     image_id = manifest.get('image_id')
     if not isinstance(image_id, str) or not image_id:
         raise RuntimeError('Slurm container snapshot manifest has no image ID.')
@@ -331,7 +344,7 @@ def _validate_snapshot_manifest(
         raise RuntimeError('Slurm container snapshot manifest has no job '
                            'database entry.')
     job_db_path = manifest['job_db_path']
-    expected_job_db_path = _snapshot_job_db_path(snapshot_dir)
+    expected_job_db_path = _snapshot_job_db_path(generation_dir)
     if job_db_path is not None and job_db_path != expected_job_db_path:
         raise RuntimeError('Slurm container snapshot job database path must be '
                            f'{expected_job_db_path!r}, got {job_db_path!r}.')
@@ -341,7 +354,7 @@ def _validate_snapshot_manifest(
             'Slurm container snapshot manifest does not contain exactly '
             f'{num_nodes} rank snapshots.')
     for rank, snapshot in enumerate(snapshots):
-        expected_path = _snapshot_rank_path(snapshot_dir, rank)
+        expected_path = _snapshot_rank_path(generation_dir, rank)
         if not isinstance(snapshot, dict):
             raise RuntimeError(
                 f'Slurm container snapshot entry for rank {rank} is invalid.')
@@ -418,6 +431,28 @@ def _write_snapshot_manifest(
         'Failed to publish Slurm container snapshot manifest.',
         stderr=f'{stdout}\n{stderr}',
         stream_logs=False)
+
+
+def _remove_snapshot_paths_best_effort(
+    login_node_runner: 'command_runner.SlurmLoginNodeCommandRunner',
+    paths: List[str],
+    description: str,
+) -> None:
+    """Remove unreferenced snapshot paths without masking the main result."""
+    remove_cmd = 'rm -rf -- ' + ' '.join(shlex.quote(path) for path in paths)
+    try:
+        rc, stdout, stderr = login_node_runner.run(remove_cmd,
+                                                   require_outputs=True,
+                                                   stream_logs=False)
+        subprocess_utils.handle_returncode(rc,
+                                           remove_cmd,
+                                           f'Failed to remove {description}.',
+                                           stderr=f'{stdout}\n{stderr}',
+                                           stream_logs=False)
+    except Exception as e:  # pylint: disable=broad-except
+        logger.warning(f'Failed to remove {description}: '
+                       f'{common_utils.format_exception(e, use_bracket=True)}')
+        logger.debug('Full exception details:', exc_info=True)
 
 
 def _validate_snapshot_files(
@@ -1443,6 +1478,7 @@ def stop_instances(
             'launched with Pyxis. The running cluster has no container '
             'snapshot metadata.')
     image_id = stdout.strip()
+    previous_manifest = _read_snapshot_manifest(login_node_runner, snapshot_dir)
 
     cluster_info = get_cluster_info('', cluster_name_on_cloud, provider_config)
     command_runners = get_command_runners(cluster_info)
@@ -1532,8 +1568,12 @@ fi
 
     subprocess_utils.run_in_parallel(_check_node_container, nodes)
 
-    prepare_snapshot_cmd = (f'rm -rf -- {shlex.quote(snapshot_dir)}; '
-                            f'mkdir -p {shlex.quote(snapshot_dir)}')
+    generation = uuid.uuid4().hex
+    generations_dir = (f'{snapshot_dir}/{SNAPSHOT_GENERATIONS_DIRECTORY_NAME}')
+    generation_dir = _snapshot_generation_dir(snapshot_dir, generation)
+    staging_dir = f'{snapshot_dir}/.staging-{generation}'
+    prepare_snapshot_cmd = (f'mkdir -p {shlex.quote(generations_dir)} && '
+                            f'mkdir {shlex.quote(staging_dir)}')
     rc, stdout, stderr = login_node_runner.run(prepare_snapshot_cmd,
                                                require_outputs=True,
                                                stream_logs=False)
@@ -1544,88 +1584,134 @@ fi
         stderr=f'{stdout}\n{stderr}',
         stream_logs=False)
 
-    runtime_job_db_path = (
-        f'{_skypilot_runtime_dir(tmpdir, cluster_name_on_cloud)}/.sky/jobs.db')
-    snapshot_job_db_path = _snapshot_job_db_path(snapshot_dir)
-    backup_job_db_code = (
-        'import sqlite3, sys; '
-        'source = sqlite3.connect(f"file:{sys.argv[1]}?mode=ro", uri=True); '
-        'destination = sqlite3.connect(sys.argv[2]); '
-        'source.backup(destination); '
-        'destination.close(); source.close()')
-    backup_job_db_script = (
-        f'if [ -f {shlex.quote(runtime_job_db_path)} ]; then '
-        f'/usr/bin/python3 -c {shlex.quote(backup_job_db_code)} '
-        f'{shlex.quote(runtime_job_db_path)} '
-        f'{shlex.quote(snapshot_job_db_path)}; fi')
-    backup_job_db_cmd = (
-        f'srun --unbuffered --overlap --jobid={shlex.quote(job_id)} '
-        f'--nodelist={shlex.quote(nodes[0])} --nodes=1 --ntasks=1 '
-        f'bash -c {shlex.quote(backup_job_db_script)}')
-    rc, stdout, stderr = login_node_runner.run(backup_job_db_cmd,
-                                               require_outputs=True,
-                                               stream_logs=False)
-    subprocess_utils.handle_returncode(
-        rc,
-        backup_job_db_cmd,
-        'Failed to snapshot the Slurm cluster job database.',
-        stderr=f'{stdout}\n{stderr}',
-        stream_logs=False)
-    job_db_exists_cmd = f'test -f {shlex.quote(snapshot_job_db_path)}'
-    rc, stdout, stderr = login_node_runner.run(job_db_exists_cmd,
-                                               require_outputs=True,
-                                               stream_logs=False)
-    if rc == 0:
-        manifest_job_db_path: Optional[str] = snapshot_job_db_path
-    elif rc == 1:
-        manifest_job_db_path = None
-    else:
+    generation_committed = False
+    manifest_publish_started = False
+    try:
+        skypilot_runtime_dir = _skypilot_runtime_dir(tmpdir,
+                                                     cluster_name_on_cloud)
+        runtime_job_db_path = f'{skypilot_runtime_dir}/.sky/jobs.db'
+        staging_job_db_path = _snapshot_job_db_path(staging_dir)
+        generation_job_db_path = _snapshot_job_db_path(generation_dir)
+        backup_job_db_code = (
+            'import sqlite3, sys; '
+            'source = sqlite3.connect(f"file:{sys.argv[1]}?mode=ro", '
+            'uri=True); '
+            'destination = sqlite3.connect(sys.argv[2]); '
+            'source.backup(destination); '
+            'destination.close(); source.close()')
+        backup_job_db_script = (
+            f'export {skylet_constants.SKY_RUNTIME_DIR_ENV_VAR_KEY}='
+            f'{shlex.quote(skypilot_runtime_dir)} && '
+            f'if [ -f {shlex.quote(runtime_job_db_path)} ]; then '
+            f'{skylet_constants.SKY_SLURM_PYTHON_CMD} -c '
+            f'{shlex.quote(backup_job_db_code)} '
+            f'{shlex.quote(runtime_job_db_path)} '
+            f'{shlex.quote(staging_job_db_path)}; fi')
+        backup_job_db_cmd = (
+            f'srun --unbuffered --overlap --jobid={shlex.quote(job_id)} '
+            f'--nodelist={shlex.quote(nodes[0])} --nodes=1 --ntasks=1 '
+            f'bash -c {shlex.quote(backup_job_db_script)}')
+        rc, stdout, stderr = login_node_runner.run(backup_job_db_cmd,
+                                                   require_outputs=True,
+                                                   stream_logs=False)
         subprocess_utils.handle_returncode(
             rc,
-            job_db_exists_cmd,
-            'Failed to inspect the Slurm cluster job database snapshot.',
+            backup_job_db_cmd,
+            'Failed to snapshot the Slurm cluster job database.',
             stderr=f'{stdout}\n{stderr}',
             stream_logs=False)
-        raise AssertionError('unreachable')
+        job_db_exists_cmd = f'test -f {shlex.quote(staging_job_db_path)}'
+        rc, stdout, stderr = login_node_runner.run(job_db_exists_cmd,
+                                                   require_outputs=True,
+                                                   stream_logs=False)
+        if rc == 0:
+            manifest_job_db_path: Optional[str] = generation_job_db_path
+        elif rc == 1:
+            manifest_job_db_path = None
+        else:
+            subprocess_utils.handle_returncode(
+                rc,
+                job_db_exists_cmd,
+                'Failed to inspect the Slurm cluster job database snapshot.',
+                stderr=f'{stdout}\n{stderr}',
+                stream_logs=False)
+            raise AssertionError('unreachable')
 
-    def _export_node(rank_and_node: Tuple[int, str]) -> Dict[str, Any]:
-        rank, node = rank_and_node
-        snapshot_path = _snapshot_rank_path(snapshot_dir, rank)
-        export_script = f"""\
+        def _export_node(rank_and_node: Tuple[int, str]) -> Dict[str, Any]:
+            rank, node = rank_and_node
+            staging_snapshot_path = _snapshot_rank_path(staging_dir, rank)
+            snapshot_path = _snapshot_rank_path(generation_dir, rank)
+            export_script = f"""\
 set -e
 {_find_enroot_container_script(node)}\
 sync
-enroot export -f -o {shlex.quote(snapshot_path)} "$enroot_name"
+enroot export -f -o {shlex.quote(staging_snapshot_path)} "$enroot_name"
 """
-        export_cmd = (
-            f'srun --unbuffered --overlap --jobid={shlex.quote(job_id)} '
-            f'--nodelist={shlex.quote(node)} --nodes=1 --ntasks=1 '
-            f'bash -c {shlex.quote(export_script)}')
-        export_rc, export_stdout, export_stderr = login_node_runner.run(
-            export_cmd, require_outputs=True, stream_logs=False)
-        subprocess_utils.handle_returncode(
-            export_rc,
-            export_cmd,
-            f'Failed to snapshot Slurm container rank {rank} on node {node}.',
-            stderr=f'{export_stdout}\n{export_stderr}',
-            stream_logs=False)
-        return {
-            'rank': rank,
-            'node': node,
-            'path': snapshot_path,
-        }
+            export_cmd = (
+                f'srun --unbuffered --overlap --jobid={shlex.quote(job_id)} '
+                f'--nodelist={shlex.quote(node)} --nodes=1 --ntasks=1 '
+                f'bash -c {shlex.quote(export_script)}')
+            export_rc, export_stdout, export_stderr = login_node_runner.run(
+                export_cmd, require_outputs=True, stream_logs=False)
+            subprocess_utils.handle_returncode(
+                export_rc,
+                export_cmd,
+                f'Failed to snapshot Slurm container rank {rank} on node '
+                f'{node}.',
+                stderr=f'{export_stdout}\n{export_stderr}',
+                stream_logs=False)
+            return {
+                'rank': rank,
+                'node': node,
+                'path': snapshot_path,
+            }
 
-    snapshots = subprocess_utils.run_in_parallel(_export_node,
-                                                 list(enumerate(nodes)))
-    manifest = {
-        'version': SNAPSHOT_MANIFEST_VERSION,
-        'image_id': image_id,
-        'num_nodes': len(nodes),
-        'created_at': time.time(),
-        'job_db_path': manifest_job_db_path,
-        'snapshots': snapshots,
-    }
-    _write_snapshot_manifest(login_node_runner, snapshot_dir, manifest)
+        snapshots = subprocess_utils.run_in_parallel(_export_node,
+                                                     list(enumerate(nodes)))
+        manifest = {
+            'version': SNAPSHOT_MANIFEST_VERSION,
+            'generation': generation,
+            'image_id': image_id,
+            'num_nodes': len(nodes),
+            'created_at': time.time(),
+            'job_db_path': manifest_job_db_path,
+            'snapshots': snapshots,
+        }
+        commit_generation_cmd = (f'test ! -e {shlex.quote(generation_dir)} && '
+                                 f'mv -- {shlex.quote(staging_dir)} '
+                                 f'{shlex.quote(generation_dir)}')
+        rc, stdout, stderr = login_node_runner.run(commit_generation_cmd,
+                                                   require_outputs=True,
+                                                   stream_logs=False)
+        subprocess_utils.handle_returncode(
+            rc,
+            commit_generation_cmd,
+            'Failed to commit the Slurm container snapshot generation.',
+            stderr=f'{stdout}\n{stderr}',
+            stream_logs=False)
+        generation_committed = True
+        _validate_snapshot_files(login_node_runner, manifest)
+        # Keep the previous generation reachable until its replacement is
+        # complete and the manifest can switch to it atomically.
+        manifest_publish_started = True
+        _write_snapshot_manifest(login_node_runner, snapshot_dir, manifest)
+    except Exception:
+        # A manifest rename may complete even if SSH loses its acknowledgement.
+        # Keep committed data so any manifest published remotely stays usable.
+        if not (generation_committed and manifest_publish_started):
+            incomplete_path = (generation_dir
+                               if generation_committed else staging_dir)
+            _remove_snapshot_paths_best_effort(
+                login_node_runner, [incomplete_path],
+                'incomplete Slurm snapshot generation')
+        raise
+
+    if previous_manifest is not None:
+        previous_generation_dir = _snapshot_generation_dir(
+            snapshot_dir, previous_manifest['generation'])
+        _remove_snapshot_paths_best_effort(
+            login_node_runner, [previous_generation_dir],
+            'previous Slurm snapshot generation')
     cleanup = lambda: _cleanup_slurm_allocation(
         client, login_node_runner, cluster_name_on_cloud, provider_config,
         job_id, nodes)
