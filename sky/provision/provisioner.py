@@ -176,6 +176,11 @@ def bulk_provision(
                 # A pause to wait on an external condition is neither a
                 # success nor a failure; the attempt resumes later.
                 raise
+            except (KeyboardInterrupt, SystemExit):
+                # User cancellation (SIGTERM on the executor surfaces as
+                # KeyboardInterrupt): not an outcome of the attempt, so
+                # record nothing.
+                raise
             except BaseException:
                 metrics_utils.observe_provision_duration(
                     repr(cloud), 'failure',

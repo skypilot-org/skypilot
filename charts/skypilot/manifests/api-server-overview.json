@@ -278,7 +278,7 @@
           },
           "editorMode": "code",
           "exemplar": false,
-          "expr": "avg_over_time((max(up{job=~\"skypilot-api(-server)?(-metrics)?\"} or up{app=~\"skypilot.*-api\"}))[$__range:]) * 100",
+          "expr": "avg_over_time((max(up{job=~\"skypilot-api(-server)?(-metrics)?\"} or up{app=~\"$app\", app!=\"\"}))[$__range:]) * 100",
           "instant": true,
           "legendFormat": "range",
           "range": false,
@@ -624,7 +624,7 @@
       },
       "gridPos": {
         "h": 8,
-        "w": 8,
+        "w": 6,
         "x": 0,
         "y": 5
       },
@@ -722,8 +722,8 @@
       },
       "gridPos": {
         "h": 8,
-        "w": 8,
-        "x": 8,
+        "w": 6,
+        "x": 6,
         "y": 5
       },
       "id": 2,
@@ -816,8 +816,8 @@
       },
       "gridPos": {
         "h": 8,
-        "w": 8,
-        "x": 16,
+        "w": 6,
+        "x": 12,
         "y": 5
       },
       "id": 3,
@@ -914,9 +914,9 @@
       },
       "gridPos": {
         "h": 8,
-        "w": 8,
-        "x": 0,
-        "y": 13
+        "w": 6,
+        "x": 18,
+        "y": 5
       },
       "id": 33,
       "options": {
@@ -957,7 +957,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 21
+        "y": 13
       },
       "id": 27,
       "panels": [],
@@ -1028,7 +1028,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 22
+        "y": 14
       },
       "id": 8,
       "options": {
@@ -1122,7 +1122,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 22
+        "y": 14
       },
       "id": 15,
       "options": {
@@ -1219,7 +1219,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 30
+        "y": 22
       },
       "id": 14,
       "options": {
@@ -1313,7 +1313,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 30
+        "y": 22
       },
       "id": 13,
       "options": {
@@ -1411,7 +1411,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 38
+        "y": 30
       },
       "id": 25,
       "options": {
@@ -1505,7 +1505,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 38
+        "y": 30
       },
       "id": 24,
       "options": {
@@ -1541,7 +1541,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 46
+        "y": 38
       },
       "id": 19,
       "panels": [],
@@ -1578,7 +1578,7 @@
         "h": 8,
         "w": 5,
         "x": 0,
-        "y": 47
+        "y": 39
       },
       "id": 28,
       "options": {
@@ -1675,7 +1675,7 @@
         "h": 8,
         "w": 12,
         "x": 5,
-        "y": 47
+        "y": 39
       },
       "id": 26,
       "options": {
@@ -1710,7 +1710,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 55
+        "y": 47
       },
       "id": 17,
       "panels": [],
@@ -1747,7 +1747,7 @@
         "h": 4,
         "w": 4,
         "x": 0,
-        "y": 56
+        "y": 48
       },
       "id": 31,
       "options": {
@@ -1811,7 +1811,7 @@
         "h": 4,
         "w": 4,
         "x": 4,
-        "y": 56
+        "y": 48
       },
       "id": 29,
       "options": {
@@ -1912,7 +1912,7 @@
         "h": 7,
         "w": 8,
         "x": 8,
-        "y": 56
+        "y": 48
       },
       "id": 20,
       "options": {
@@ -2011,7 +2011,7 @@
         "h": 7,
         "w": 8,
         "x": 16,
-        "y": 56
+        "y": 48
       },
       "id": 21,
       "options": {
@@ -2076,7 +2076,7 @@
         "h": 4,
         "w": 4,
         "x": 0,
-        "y": 60
+        "y": 52
       },
       "id": 32,
       "options": {
@@ -2139,7 +2139,7 @@
         "h": 4,
         "w": 4,
         "x": 4,
-        "y": 60
+        "y": 52
       },
       "id": 30,
       "options": {
@@ -2236,7 +2236,7 @@
         "h": 7,
         "w": 8,
         "x": 8,
-        "y": 63
+        "y": 55
       },
       "id": 5,
       "options": {
@@ -2335,7 +2335,7 @@
         "h": 7,
         "w": 8,
         "x": 16,
-        "y": 63
+        "y": 55
       },
       "id": 22,
       "options": {
@@ -2434,7 +2434,7 @@
         "h": 7,
         "w": 8,
         "x": 0,
-        "y": 64
+        "y": 56
       },
       "id": 7,
       "options": {
@@ -2533,7 +2533,7 @@
         "h": 7,
         "w": 8,
         "x": 8,
-        "y": 70
+        "y": 62
       },
       "id": 9,
       "options": {
@@ -2632,7 +2632,7 @@
         "h": 7,
         "w": 8,
         "x": 16,
-        "y": 70
+        "y": 62
       },
       "id": 23,
       "options": {
@@ -2731,7 +2731,7 @@
         "h": 7,
         "w": 8,
         "x": 0,
-        "y": 71
+        "y": 63
       },
       "id": 6,
       "options": {
@@ -2830,7 +2830,7 @@
         "h": 7,
         "w": 8,
         "x": 0,
-        "y": 78
+        "y": 70
       },
       "id": 10,
       "options": {
@@ -2871,7 +2871,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 85
+        "y": 77
       },
       "id": 34,
       "panels": [],
@@ -2883,7 +2883,7 @@
         "type": "prometheus",
         "uid": "prometheus"
       },
-      "description": "Time from request creation to its first execution start, by request name. Includes queue wait, scheduling preconditions and retry backoff; observed once per request. Companion to Queue Wait (sky_apiserver_queue_wait_seconds), which measures per-enqueue queue residency only.",
+      "description": "Time from request creation to its first execution start, by request name. Includes queue wait and scheduling preconditions; observed once per request at its first execution start, so retry backoff after that start is excluded. Companion to Queue Wait (sky_apiserver_queue_wait_seconds), which measures per-enqueue queue residency only.",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -2943,7 +2943,7 @@
         "h": 8,
         "w": 10,
         "x": 0,
-        "y": 86
+        "y": 78
       },
       "id": 36,
       "options": {
@@ -3038,7 +3038,7 @@
         "h": 8,
         "w": 10,
         "x": 10,
-        "y": 86
+        "y": 78
       },
       "id": 37,
       "options": {

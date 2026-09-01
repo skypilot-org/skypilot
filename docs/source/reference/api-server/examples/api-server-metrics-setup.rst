@@ -88,8 +88,9 @@ Additional lifecycle metrics:
 * ``sky_apiserver_request_pending_seconds`` — time from a request being
   created to its first execution start, labeled by request ``name`` and
   ``schedule_type``. Unlike ``sky_apiserver_queue_wait_seconds`` (per-enqueue
-  queue residency), it includes scheduling preconditions and retry backoff,
-  and is observed once per request.
+  queue residency), it includes scheduling preconditions, which hold a
+  request pending. It is observed once per request, at the first execution
+  start, so retry backoff after that start is excluded.
 * ``sky_apiserver_start_time_seconds`` — Unix timestamp of the API server's
   start; ``time() - sky_apiserver_start_time_seconds`` is the server uptime.
 
@@ -108,10 +109,6 @@ the Prometheus subchart's ``serverFiles``:
 .. code-block:: yaml
 
    prometheus:
-     server:
-       # The 30d rule averages over its full window only if the TSDB retains
-       # at least that much history (Prometheus defaults to 15d).
-       retention: 45d
      serverFiles:
        recording_rules.yml:
          groups:
@@ -121,13 +118,22 @@ the Prometheus subchart's ``serverFiles``:
                # 1 if at least one API server metrics target is scrapeable.
                # The selector covers both scrape styles: dedicated/static
                # jobs matched by job name, and annotation-based discovery
-               # matched by the pod's labelmapped "app" label. Adapt it if
-               # your scrape config names differ.
+               # matched by the pod's labelmapped "app" label. Replace
+               # <release> with your Helm release name (API server pods
+               # carry app: <release>-api), and adapt the job regex if your
+               # scrape config names differ.
                - record: sky:apiserver_up:max
-                 expr: max(up{job=~"skypilot-api(-server)?(-metrics)?"} or up{app=~"skypilot.*-api"})
+                 expr: max(up{job=~"skypilot-api(-server)?(-metrics)?"} or up{app="<release>-api"})
                # Fraction of the trailing 30 days the service was up.
                - record: sky:apiserver_availability:ratio_30d
                  expr: avg_over_time(sky:apiserver_up:max[30d])
+
+The 30d rule averages over its full window only if the Prometheus TSDB
+retains at least 30 days of history. The chart-managed Prometheus already
+does (``prometheus.server.retention`` defaults to ``1000d``); if you scrape
+from your own Prometheus, check its retention, since upstream Prometheus
+defaults to 15 days and ``avg_over_time`` silently averages whatever
+history exists.
 
 Two caveats when quoting the 30-day number:
 

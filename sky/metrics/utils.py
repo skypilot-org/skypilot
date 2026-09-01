@@ -384,13 +384,14 @@ SKY_APISERVER_SKY_LOGS_PRUNED_ENTRIES_TOTAL = prom.Counter(
 )
 
 # Time a request spent before its execution first started: from the request
-# row being created (PENDING) to the first PENDING/WAITING -> RUNNING
-# transition. Unlike SKY_APISERVER_QUEUE_WAIT_SECONDS (per-enqueue queue
-# residency), this includes scheduling preconditions and retry backoff, and
-# is observed exactly once per request, so a request looping through the
+# row being created (PENDING) to its first transition to RUNNING. Unlike
+# SKY_APISERVER_QUEUE_WAIT_SECONDS (per-enqueue queue residency), this
+# includes scheduling preconditions, which hold a request PENDING. It is
+# observed exactly once, at the first execution start, so retry backoff
+# after that start is excluded and a request looping through the
 # retry-requeue path cannot re-observe its ever-growing age (see #9988).
-# The tail extends past the queue-wait buckets because precondition/backoff
-# waits (e.g. exec waiting on cluster start) routinely exceed 600s.
+# The tail extends past the queue-wait buckets because precondition waits
+# (e.g. exec waiting on cluster start) routinely exceed 600s.
 SKY_APISERVER_REQUEST_PENDING_SECONDS = prom.Histogram(
     'sky_apiserver_request_pending_seconds',
     'Time from request creation to its first execution start',
