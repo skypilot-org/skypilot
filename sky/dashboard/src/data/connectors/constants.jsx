@@ -73,9 +73,11 @@ export const VERSION_HEADER = 'X-SkyPilot-Version';
 // identifying placeholder that the server parses but doesn't depend on
 // for correctness (only used to format upgrade-hint messages).
 export const CLIENT_VERSION = 'dashboard;';
-// Custom events used to coordinate plugin loading with the layout shell.
-// layout.jsx listens for these to avoid flashing the fallback top bar before
-// a navigation plugin (e.g. sidebar) has had a chance to register.
+// Custom events used to coordinate plugin loading with the app shell.
+// _app.js waits for EVENT_PLUGINS_LOADED before building the tree, so that
+// slots plugins register into are already populated on first render.
+// EVENT_NAVIGATION_READY is dispatched by a navigation plugin once it has
+// registered; it is kept for plugins that want to observe that point.
 export const EVENT_NAVIGATION_READY = 'skydashboard:navigation-ready';
 export const EVENT_PLUGINS_LOADED = 'skydashboard:plugins-loaded';
 
