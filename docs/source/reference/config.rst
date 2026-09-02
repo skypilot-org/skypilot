@@ -1652,10 +1652,41 @@ Port configuration mode (optional).
 Can be one of:
 
 - ``loadbalancer``: Use LoadBalancer service to expose ports.
-- ``nodeport``: Use NodePort service to expose ports.
+- ``ingress``: Use an Ingress to expose ports. See :ref:`kubernetes.ingress <config-yaml-kubernetes-ingress>`.
 - ``podip``: Use Pod IPs to expose ports. Cannot be accessed from outside the cluster.
 
 Default: ``loadbalancer``.
+
+.. _config-yaml-kubernetes-ingress:
+
+``kubernetes.ingress``
+~~~~~~~~~~~~~~~~~~~~~~
+
+Settings for the Ingress objects SkyPilot generates when :ref:`kubernetes.ports <config-yaml-kubernetes-ports>` is ``ingress`` (optional).
+
+The defaults match a stock `ingress-nginx <https://github.com/kubernetes/ingress-nginx/blob/main/docs/deploy/index.md>`_ install; set these if you run nginx under a different class or namespace.
+
+- ``class_name``: ``ingressClassName`` written on the generated Ingresses. Default: ``nginx``.
+- ``controller_service``: name of the ingress controller's Service, which SkyPilot reads to resolve endpoints. Default: ``ingress-nginx-controller``.
+- ``controller_namespace``: namespace of that Service. Default: ``ingress-nginx``.
+
+.. code-block:: yaml
+
+  kubernetes:
+    ports: ingress
+    ingress:
+      class_name: internal-nginx
+      controller_service: internal-nginx-controller
+      controller_namespace: platform-ingress
+
+.. note::
+
+  The generated Ingresses carry ingress-nginx-specific routing annotations
+  (``use-regex`` and ``rewrite-target``) to strip the
+  ``/skypilot/<namespace>/<cluster>/<port>`` prefix before traffic reaches the
+  workload. A controller that does not honor those annotations will resolve
+  endpoints correctly but will not strip the prefix, so these settings are
+  only expected to work with ingress-nginx today.
 
 .. _config-yaml-kubernetes-remote-identity:
 
