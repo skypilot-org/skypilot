@@ -7,8 +7,9 @@ resumes without a full-cluster restart. This minimizes training downtime
 during failures.
 
 > [!NOTE]
-> This example uses **Frontier Trainer** for Dynamic Node Set recovery, which
-> is available on the **[SkyPilot Platform](https://docs.skypilot.ai/en/latest/skypilot-platform.html)**.
+> This example uses **Frontier Trainer** for Dynamic Node Set recovery. The
+> NVL72 variant also uses topology-aware scheduling. Both are available on the
+> **[SkyPilot Platform](https://docs.skypilot.ai/en/latest/skypilot-platform.html)**.
 
 ## Requirements
 
