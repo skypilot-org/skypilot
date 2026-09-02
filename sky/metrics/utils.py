@@ -521,6 +521,37 @@ SKY_MANAGED_JOB_TIME_TO_RUNNING_SECONDS = prom.Histogram(
     buckets=_LAUNCH_PHASE_BUCKETS,
 )
 
+# The denominator for the timings above. Without it a fleet where half the
+# jobs never start shows a healthy p95 computed only over the survivors, and
+# nothing says how many there were.
+#
+# outcome is 'running' for a job that reached RUNNING and so has a timing, or
+# 'never_ran' for one that went terminal first. path separates jobs placed on a
+# warm pool -- they skip provisioning entirely, so their absence from the
+# provisioning phases is expected rather than missing data.
+SKY_MANAGED_JOB_STARTS_TOTAL = prom.Counter(
+    'sky_managed_job_starts_total',
+    'Managed job tasks that finished waiting to start, by how they ended up',
+    ['outcome', 'path', 'workspace'],
+)
+
+JOB_OUTCOME_RUNNING = 'running'
+JOB_OUTCOME_NEVER_RAN = 'never_ran'
+JOB_PATH_POOL = 'pool'
+JOB_PATH_PROVISION = 'provision'
+
+
+def count_managed_job_start(outcome: str, path: str, workspace: str) -> None:
+    """Record that a job finished waiting to start, however it ended up."""
+    if not METRICS_ENABLED:
+        return
+    try:
+        SKY_MANAGED_JOB_STARTS_TOTAL.labels(outcome=outcome,
+                                            path=path,
+                                            workspace=workspace).inc()
+    except Exception as e:  # pylint: disable=broad-except
+        logger.error(f'Failed to count a managed job start: {e}')
+
 
 def observe_managed_job_phase(phase: str, workspace: str,
                               duration_seconds: float) -> None:

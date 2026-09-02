@@ -414,12 +414,27 @@ def _record_job_launch_timelines() -> int:
             if managed_job_state.record_launch_timeline(
                     task['spot_job_id'], task['task_id'],
                     launch_phases.timeline_columns(phases, total)):
-                launch_phases.observe_job_timeline(task['workspace'], total,
-                                                   phases)
+                launch_phases.observe_job_timeline(task['workspace'],
+                                                   total, phases,
+                                                   bool(task.get('pool')))
                 recorded += 1
         except Exception as e:  # pylint: disable=broad-except
             logger.error(f'Failed to record the launch timeline of job '
                          f'{task["spot_job_id"]}: {e}')
+
+    # Jobs that went terminal without ever running have no timing to report,
+    # but they belong in the counts: a fleet that mostly fails to start would
+    # otherwise show only the survivors' latency and look healthy.
+    for task in managed_job_state.get_jobs_that_never_ran():
+        try:
+            if managed_job_state.record_controller_queue_only(
+                    task['spot_job_id'], task['task_id'],
+                    max(0.0, task['submitted_at'] - task['created_at'])):
+                launch_phases.count_job_that_never_ran(task['workspace'],
+                                                       bool(task.get('pool')))
+        except Exception as e:  # pylint: disable=broad-except
+            logger.error(f'Failed to count job {task["spot_job_id"]} as never '
+                         f'having run: {e}')
     return recorded
 
 

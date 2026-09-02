@@ -130,3 +130,36 @@ def test_a_recovery_after_first_running_does_not_become_the_final_attempt():
 
     assert phases[launch_phases.RUNTIME_SETUP] > 0
     assert sum(phases.values()) == total
+
+
+def test_a_started_job_is_counted_on_the_path_it_took(monkeypatch):
+    """The timings need a denominator, split by whether provisioning happened.
+
+    A pool job skips provisioning, so its absence from those phases is expected
+    rather than missing data -- without the split the two are indistinguishable.
+    """
+    counted = []
+    monkeypatch.setattr(launch_phases.metrics_utils,
+                        'observe_managed_job_time_to_running', lambda *a: None)
+    monkeypatch.setattr(launch_phases.metrics_utils,
+                        'observe_managed_job_phase', lambda *a: None)
+    monkeypatch.setattr(launch_phases.metrics_utils, 'count_managed_job_start',
+                        lambda o, p, w: counted.append((o, p, w)))
+
+    launch_phases.observe_job_timeline('eng', 100.0, {}, on_pool=False)
+    launch_phases.observe_job_timeline('eng', 100.0, {}, on_pool=True)
+
+    assert counted == [('running', 'provision', 'eng'),
+                       ('running', 'pool', 'eng')]
+
+
+def test_a_job_that_never_ran_is_still_counted(monkeypatch):
+    """It has no latency to report, but excluding it from the counts is how a
+    fleet that mostly fails to start comes to look fast."""
+    counted = []
+    monkeypatch.setattr(launch_phases.metrics_utils, 'count_managed_job_start',
+                        lambda o, p, w: counted.append((o, p, w)))
+
+    launch_phases.count_job_that_never_ran(None, on_pool=False)
+
+    assert counted == [('never_ran', 'provision', 'unknown')]

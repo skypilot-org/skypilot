@@ -204,9 +204,24 @@ def timeline_columns(phases: Dict[str, float],
 
 
 def observe_job_timeline(workspace: Optional[str], total: float,
-                         phases: Dict[str, float]) -> None:
+                         phases: Dict[str, float], on_pool: bool) -> None:
     """Emit the metrics for one job's submission-to-running time."""
     label = workspace or _UNKNOWN_WORKSPACE
     metrics_utils.observe_managed_job_time_to_running(label, total)
     for phase, duration in phases.items():
         metrics_utils.observe_managed_job_phase(phase, label, duration)
+    metrics_utils.count_managed_job_start(
+        metrics_utils.JOB_OUTCOME_RUNNING, metrics_utils.JOB_PATH_POOL
+        if on_pool else metrics_utils.JOB_PATH_PROVISION, label)
+
+
+def count_job_that_never_ran(workspace: Optional[str], on_pool: bool) -> None:
+    """Record a job that went terminal without ever running.
+
+    It has no timing to report, but leaving it out of the count entirely is how
+    a fleet that mostly fails to start comes to look fast.
+    """
+    metrics_utils.count_managed_job_start(
+        metrics_utils.JOB_OUTCOME_NEVER_RAN, metrics_utils.JOB_PATH_POOL
+        if on_pool else metrics_utils.JOB_PATH_PROVISION, workspace or
+        _UNKNOWN_WORKSPACE)
