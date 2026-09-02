@@ -929,10 +929,11 @@ export function InfrastructureSection({
                   );
                 })}
                 {/* Name-only rows for contexts the server knows about but
-                    has not enabled for compute. The namePrefix / actions
-                    slots stay live so plugins can attach a status dot and
-                    an enable action; the name is plain text — there is no
-                    capacity or detail data behind it to navigate to. */}
+                    has not enabled for compute. The name navigates to the
+                    context detail page like any other row — that is where a
+                    plugin can explain the state and offer remediation — and
+                    the namePrefix / actions slots stay live for a status
+                    dot; capacity cells stay dashes (never probed). */}
                 {safeInactive.map((row) => (
                   <tr key={`inactive-${row.name}`}>
                     <td className="w-0 px-0 py-3 align-top">
@@ -955,7 +956,10 @@ export function InfrastructureSection({
                           content={row.name}
                           className="text-sm text-muted-foreground"
                         >
-                          <span className="font-medium text-gray-600 cursor-default">
+                          <span
+                            className="text-blue-600 hover:underline cursor-pointer font-medium"
+                            onClick={() => handleContextClick(row.name)}
+                          >
                             {truncateInfraName(row.name)}
                           </span>
                         </NonCapitalizedTooltip>
@@ -1140,7 +1144,10 @@ export function InfrastructureSection({
                         }}
                       />
                     </div>
-                    <span className="font-medium text-gray-600 truncate">
+                    <span
+                      className="text-blue-600 hover:underline cursor-pointer font-medium truncate"
+                      onClick={() => handleContextClick(row.name)}
+                    >
                       {row.name}
                     </span>
                     <span className="px-1.5 py-0.5 bg-gray-100 text-gray-500 rounded text-xs font-medium flex-shrink-0">

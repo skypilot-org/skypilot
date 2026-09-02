@@ -309,7 +309,16 @@ describe('InfrastructureSection inactive (not-enabled) context rows', () => {
     expect(cells).toContain('parked-ctxNot enabled');
     // Nodes, CPU, Memory, GPU Type, GPUs, Utilization — no data, no skeleton.
     expect(cells.filter((c) => c === '-')).toHaveLength(6);
-    expect(rows[1].querySelector('.cursor-pointer')).toBeNull();
+  });
+
+  it('navigates to the context detail page on name click', () => {
+    // The detail page is where a plugin explains the not-enabled state and
+    // offers remediation, so the name must navigate like any other row.
+    const handleContextClick = jest.fn();
+    const { container } = renderSection({ ...K8S_PROPS, handleContextClick });
+    const inactiveRow = tableRows(container)[1];
+    fireEvent.click(inactiveRow.querySelector('.cursor-pointer'));
+    expect(handleContextClick).toHaveBeenCalledWith('parked-ctx');
   });
 
   it('keeps the namePrefix and actions slots live, keyed k8s/<name>', () => {
