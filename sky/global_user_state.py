@@ -338,6 +338,12 @@ launch_attempt_table = sqlalchemy.Table(
     # Recorded on the row rather than joined from the clusters table, which is
     # deleted on teardown -- the attempt outlives the cluster it provisioned.
     sqlalchemy.Column('workspace', sqlalchemy.Text, server_default=None),
+    # The external scheduler queue this launch was submitted to, where one
+    # gates it (a Kueue LocalQueue today). NULL where nothing does. Recorded by
+    # whichever scheduler plugin owns the admission boundary, and used only to
+    # slice the admission wait -- "which queue is starving" is the question it
+    # answers, and it is the only one that needs this dimension.
+    sqlalchemy.Column('queue', sqlalchemy.Text, server_default=None),
     # Milestones, epoch seconds. Named cloud-agnostically: on Kubernetes
     # instances_requested is pod creation and instances_ready is all pods
     # running; on VM clouds they are the create call and the instances being
@@ -4050,6 +4056,31 @@ def sweep_abandoned_launch_attempts() -> int:
             }))
         session.commit()
         return result.rowcount
+
+
+@db_retries.retry
+def record_launch_queue_for_cluster(cluster_name: str, queue: str) -> None:
+    """Note which external scheduler queue this launch was submitted to.
+
+    Separate from the admission milestone so that a launch still waiting is
+    already attributable to its queue -- otherwise the queue a workload is
+    stuck in would only be known once it stopped being stuck.
+
+    Same targeting and no-op behaviour as record_launch_milestone_for_cluster.
+    """
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
+        session.execute(launch_attempt_table.update().where(
+            sqlalchemy.and_(
+                sqlalchemy.or_(
+                    launch_attempt_table.c.cluster_name == cluster_name,
+                    launch_attempt_table.c.cluster_name_on_cloud ==
+                    cluster_name,
+                ),
+                launch_attempt_table.c.outcome.is_(None),
+                launch_attempt_table.c.queue.is_(None),
+            )).values({launch_attempt_table.c.queue: queue}))
+        session.commit()
 
 
 @db_retries.retry

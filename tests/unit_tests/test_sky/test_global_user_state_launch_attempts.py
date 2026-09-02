@@ -290,3 +290,48 @@ def test_milestone_can_be_stamped_by_the_on_cloud_name(tmp_path, monkeypatch):
         'c-abc123', _MILESTONE.ADMITTED, 700.0)
 
     assert _rows()[0].admitted == 700.0
+
+
+def test_queue_is_recorded_while_the_launch_is_still_waiting(
+        tmp_path, monkeypatch):
+    """The queue must be attributable before admission, not only after.
+
+    "Which queue is starving" is a question about the launches that are stuck;
+    recording only on admission would answer it solely for the ones that got
+    through.
+    """
+    _fresh_db(tmp_path, monkeypatch)
+
+    _open(start=100.0)
+    global_user_state.record_launch_queue_for_cluster('c', 'team-a')
+
+    row = _rows()[0]
+    assert row.queue == 'team-a'
+    assert row.admitted is None, 'still waiting'
+
+
+def test_queue_is_not_reassigned_mid_launch(tmp_path, monkeypatch):
+    """Recorded on every poll, so it must keep the first value.
+
+    An attempt belongs to the queue it was submitted to; letting a later poll
+    rewrite it would silently reattribute a wait that already happened.
+    """
+    _fresh_db(tmp_path, monkeypatch)
+
+    _open(start=100.0)
+    global_user_state.record_launch_queue_for_cluster('c', 'team-a')
+    global_user_state.record_launch_queue_for_cluster('c', 'team-b')
+
+    assert _rows()[0].queue == 'team-a'
+
+
+def test_queue_is_not_recorded_against_a_finished_attempt(
+        tmp_path, monkeypatch):
+    """A closed attempt is history; nothing may still be written to it."""
+    _fresh_db(tmp_path, monkeypatch)
+
+    attempt = _open(start=100.0)
+    global_user_state.close_launch_attempt(attempt, _OPEN.SUCCEEDED)
+    global_user_state.record_launch_queue_for_cluster('c', 'team-a')
+
+    assert _rows()[0].queue is None

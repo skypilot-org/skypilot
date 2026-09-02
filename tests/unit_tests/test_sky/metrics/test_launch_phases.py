@@ -14,6 +14,7 @@ def _row(**kw):
         'instances_ready': None,
         'outcome': 'succeeded',
         'workspace': 'eng',
+        'queue': None,
     }
     fields.update(kw)
     return types.SimpleNamespace(**fields)
@@ -158,3 +159,49 @@ def test_missing_workspace_becomes_a_label_value(monkeypatch):
     launch_phases.observe_attempt(_row(instances_ready=200.0, workspace=None))
 
     assert observed == ['unknown']
+
+
+def test_queue_wait_is_also_reported_against_its_queue(monkeypatch):
+    """Which ClusterQueue is starving is the one question needing that label.
+
+    Carried on a separate metric so the queue dimension does not multiply every
+    other phase's buckets for no added answer.
+    """
+    queue_waits = []
+    monkeypatch.setattr(launch_phases.metrics_utils, 'observe_launch_phase',
+                        lambda *a: None)
+    monkeypatch.setattr(launch_phases.metrics_utils,
+                        'observe_launch_queue_wait',
+                        lambda w, q, d: queue_waits.append((w, q, d)))
+
+    launch_phases.observe_attempt(
+        _row(instances_requested=110.0,
+             admitted=3710.0,
+             instances_ready=3760.0,
+             queue='team-a'))
+
+    assert queue_waits == [('eng', 'team-a', 3600.0)]
+
+
+def test_no_queue_series_where_no_scheduler_named_one(monkeypatch):
+    """A wait can be measured without knowing which queue it happened in.
+
+    Prometheus labels cannot be None, so emitting the series anyway would
+    either crash the observation or invent a "None" queue that no one can act
+    on. Deliberately a gated attempt: an ungated one has no wait at all, and
+    would not exercise this.
+    """
+    queue_waits = []
+    monkeypatch.setattr(launch_phases.metrics_utils, 'observe_launch_phase',
+                        lambda *a: None)
+    monkeypatch.setattr(launch_phases.metrics_utils,
+                        'observe_launch_queue_wait',
+                        lambda w, q, d: queue_waits.append((w, q, d)))
+
+    launch_phases.observe_attempt(
+        _row(instances_requested=110.0,
+             admitted=3710.0,
+             instances_ready=3760.0,
+             queue=None))
+
+    assert not queue_waits

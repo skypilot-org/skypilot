@@ -434,6 +434,34 @@ SKY_LAUNCH_PHASE_ANOMALIES_TOTAL = prom.Counter(
     ['phase', 'reason'],
 )
 
+# The admission wait alone, sliced by the queue the workload sat in. Carried
+# separately from the phase histogram because the queue dimension is only
+# meaningful for this one phase, and folding it in would multiply every other
+# phase's buckets by the number of queues for no added answer.
+#
+# Kueue publishes its own kueue_admission_wait_time_seconds per ClusterQueue.
+# This is the same wait seen from SkyPilot's side, attributed to a workspace
+# and a launch; where the two disagree, the difference is our detection lag.
+SKY_LAUNCH_QUEUE_WAIT_SECONDS = prom.Histogram(
+    'sky_launch_queue_wait_seconds',
+    'Time a launch waited for admission, by scheduler queue',
+    ['workspace', 'queue'],
+    buckets=_LAUNCH_PHASE_BUCKETS,
+)
+
+
+def observe_launch_queue_wait(workspace: str, queue_name: str,
+                              duration_seconds: float) -> None:
+    """Record an admission wait against the queue it happened in."""
+    if not METRICS_ENABLED:
+        return
+    try:
+        SKY_LAUNCH_QUEUE_WAIT_SECONDS.labels(workspace=workspace,
+                                             queue=queue_name).observe(
+                                                 max(0.0, duration_seconds))
+    except Exception as e:  # pylint: disable=broad-except
+        logger.error(f'Failed to observe queue wait metric: {e}')
+
 
 def observe_launch_phase(phase: str, attempt: str, workspace: str,
                          duration_seconds: float) -> None:

@@ -110,6 +110,10 @@ def observe_attempt(row: Any) -> None:
     for sample in samples:
         metrics_utils.observe_launch_phase(sample.phase, attempt, workspace,
                                            sample.duration)
+        # Also against the queue it waited in, where a scheduler named one.
+        if sample.phase == QUEUE_WAIT and row.queue:
+            metrics_utils.observe_launch_queue_wait(workspace, row.queue,
+                                                    sample.duration)
     for drop in dropped:
         metrics_utils.count_launch_phase_dropped(drop.phase, drop.reason)
 
