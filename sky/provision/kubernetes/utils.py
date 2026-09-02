@@ -883,8 +883,8 @@ class GFDLabelFormatter(GPULabelFormatter):
                                                  '').replace('RTX-', 'RTX')
 
 
-def _accelerator_name_matches(requested_acc: str,
-                              viable_names: List[str]) -> bool:
+def accelerator_name_matches(requested_acc: str,
+                             viable_names: List[str]) -> bool:
     """Check if requested accelerator matches any viable name.
 
     For backward compatibility with GPU name changes (e.g., when canonical names
@@ -1409,9 +1409,9 @@ class GKEAutoscaler(Autoscaler):
                 continue
             node_accelerator_count = accelerator['acceleratorCount']
             viable_names = [node_accelerator_type.lower(), raw_value.lower()]
-            # Use _accelerator_name_matches for backward compatibility
+            # Use accelerator_name_matches for backward compatibility
             # with GPU name changes (e.g., 'H200' vs 'H200-SXM-80GB').
-            if (_accelerator_name_matches(requested_gpu_type, viable_names) and
+            if (accelerator_name_matches(requested_gpu_type, viable_names) and
                     int(node_accelerator_count) >= requested_gpu_count):
                 return True
         return False
@@ -2894,12 +2894,12 @@ def get_accelerator_label_key_values(
                 for label, value in label_list:
                     if label_formatter.match_label_key(label):
                         # Match either canonicalized name or raw name.
-                        # Use _accelerator_name_matches for backward compatibility
+                        # Use accelerator_name_matches for backward compatibility
                         # with GPU name changes (e.g., H200-SXM-80GB -> H200).
                         accelerator = (label_formatter.
                                        get_accelerator_from_label_value(value))
                         viable = [value.lower(), accelerator.lower()]
-                        if not _accelerator_name_matches(acc_type, viable):
+                        if not accelerator_name_matches(acc_type, viable):
                             continue
                         if is_tpu_on_gke(acc_type):
                             assert isinstance(label_formatter,
