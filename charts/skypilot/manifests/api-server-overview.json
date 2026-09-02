@@ -2967,7 +2967,11 @@
           "interval": "",
           "legendFormat": "{{name}}",
           "range": true,
-          "refId": "A"
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          }
         }
       ],
       "title": "Request Pending P95",
@@ -3062,7 +3066,11 @@
           "interval": "",
           "legendFormat": "p95 {{cloud}} ({{result}})",
           "range": true,
-          "refId": "A"
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          }
         },
         {
           "editorMode": "code",
@@ -3070,7 +3078,11 @@
           "interval": "",
           "legendFormat": "avg {{cloud}} ({{result}})",
           "range": true,
-          "refId": "B"
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          }
         }
       ],
       "title": "Provision Duration (compute acquisition)",
