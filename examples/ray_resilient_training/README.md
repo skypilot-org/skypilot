@@ -148,5 +148,5 @@ for details about the embedded RocksDB backend.
 
 ## Acknowledgements
 
-The NVLink domain-aware example was inspired by Anyscale's
+The NVLink domain-aware example was inspired by
 [Maximizing the Power of NVIDIA GB300 NVL72: NVLink Domain-Aware Placement Groups in Ray](https://www.anyscale.com/blog/nvidia-gb300-nvlink-domain-aware-placement-groups-ray).
