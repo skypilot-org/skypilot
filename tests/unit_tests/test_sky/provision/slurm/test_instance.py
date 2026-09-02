@@ -23,22 +23,14 @@ _SNAPSHOT_GENERATION = '0123456789abcdef0123456789abcdef'
 _NEW_SNAPSHOT_GENERATION = 'fedcba9876543210fedcba9876543210'
 
 
-def _snapshot_manifest(snapshot_dir='/home/test/.sky_snapshots/test-cluster',
-                       num_nodes=2,
-                       generation=_SNAPSHOT_GENERATION):
-    generation_dir = instance._snapshot_generation_dir(snapshot_dir, generation)
+def _snapshot_manifest(num_nodes=2, generation=_SNAPSHOT_GENERATION):
     return {
         'version': instance.SNAPSHOT_MANIFEST_VERSION,
         'generation': generation,
         'image_id': 'ubuntu:24.04',
-        'num_nodes': num_nodes,
         'created_at': 1234.5,
-        'job_db_path': None,
-        'snapshots': [{
-            'rank': rank,
-            'node': f'node-{rank}',
-            'path': instance._snapshot_rank_path(generation_dir, rank),
-        } for rank in range(num_nodes)],
+        'has_job_db': False,
+        'nodes': [f'node-{rank}' for rank in range(num_nodes)],
     }
 
 
@@ -46,32 +38,26 @@ class TestSnapshotManifest:
     """Tests snapshot manifest parsing and validation."""
 
     def test_valid_manifest(self):
-        snapshot_dir = '/home/test/.sky_snapshots/test-cluster'
-        manifest = _snapshot_manifest(snapshot_dir)
+        manifest = _snapshot_manifest()
         assert instance._validate_snapshot_manifest(
-            manifest, snapshot_dir, expected_num_nodes=2) is manifest
+            manifest, expected_num_nodes=2) is manifest
 
     def test_num_nodes_mismatch(self):
-        snapshot_dir = '/home/test/.sky_snapshots/test-cluster'
         with pytest.raises(RuntimeError, match='node count does not match'):
-            instance._validate_snapshot_manifest(
-                _snapshot_manifest(snapshot_dir),
-                snapshot_dir,
-                expected_num_nodes=1)
+            instance._validate_snapshot_manifest(_snapshot_manifest(),
+                                                 expected_num_nodes=1)
 
-    def test_rank_path_mismatch(self):
-        snapshot_dir = '/home/test/.sky_snapshots/test-cluster'
-        manifest = _snapshot_manifest(snapshot_dir)
-        manifest['snapshots'][1]['path'] = '/other/rank1.sqsh'
-        with pytest.raises(RuntimeError, match='path for rank 1'):
-            instance._validate_snapshot_manifest(manifest, snapshot_dir)
+    def test_invalid_source_nodes(self):
+        manifest = _snapshot_manifest()
+        manifest['nodes'][1] = ''
+        with pytest.raises(RuntimeError, match='source node list'):
+            instance._validate_snapshot_manifest(manifest)
 
     def test_invalid_generation(self):
-        snapshot_dir = '/home/test/.sky_snapshots/test-cluster'
-        manifest = _snapshot_manifest(snapshot_dir)
+        manifest = _snapshot_manifest()
         manifest['generation'] = '../other'
         with pytest.raises(RuntimeError, match='invalid generation'):
-            instance._validate_snapshot_manifest(manifest, snapshot_dir)
+            instance._validate_snapshot_manifest(manifest)
 
     def test_missing_manifest(self):
         runner = mock.MagicMock()
@@ -80,12 +66,11 @@ class TestSnapshotManifest:
             runner, '/home/test/.sky_snapshots/test-cluster') is None
 
     def test_read_valid_manifest(self):
-        snapshot_dir = '/home/test/.sky_snapshots/test-cluster'
-        manifest = _snapshot_manifest(snapshot_dir)
+        manifest = _snapshot_manifest()
         runner = mock.MagicMock()
         runner.run.return_value = (0, json.dumps(manifest), '')
-        assert instance._read_snapshot_manifest(runner,
-                                                snapshot_dir) == manifest
+        assert instance._read_snapshot_manifest(
+            runner, '/home/test/.sky_snapshots/test-cluster') == manifest
 
     def test_read_corrupt_manifest(self):
         runner = mock.MagicMock()
@@ -94,22 +79,35 @@ class TestSnapshotManifest:
             instance._read_snapshot_manifest(
                 runner, '/home/test/.sky_snapshots/test-cluster')
 
+    def test_manifest_paths_derived_from_generation(self):
+        snapshot_dir = '/home/test/.sky_snapshots/test-cluster'
+        manifest = _snapshot_manifest()
+        manifest['has_job_db'] = True
+        generation_dir = (f'{snapshot_dir}/generations/{_SNAPSHOT_GENERATION}')
+        rank_paths, job_db_path = instance._manifest_paths(
+            snapshot_dir, manifest)
+        assert rank_paths == [
+            f'{generation_dir}/rank0.sqsh',
+            f'{generation_dir}/rank1.sqsh',
+        ]
+        assert job_db_path == f'{generation_dir}/jobs.db'
+
     def test_missing_rank_snapshot(self):
         runner = mock.MagicMock()
         runner.run.side_effect = [(0, '', ''), (1, '', '')]
         with pytest.raises(RuntimeError, match='rank 1'):
-            instance._validate_snapshot_files(runner, _snapshot_manifest())
+            instance._validate_snapshot_files(
+                runner, '/home/test/.sky_snapshots/test-cluster',
+                _snapshot_manifest())
 
     def test_missing_job_db_snapshot(self):
-        snapshot_dir = '/home/test/.sky_snapshots/test-cluster'
-        manifest = _snapshot_manifest(snapshot_dir)
-        generation_dir = instance._snapshot_generation_dir(
-            snapshot_dir, manifest['generation'])
-        manifest['job_db_path'] = instance._snapshot_job_db_path(generation_dir)
+        manifest = _snapshot_manifest()
+        manifest['has_job_db'] = True
         runner = mock.MagicMock()
         runner.run.side_effect = [(0, '', ''), (0, '', ''), (1, '', '')]
         with pytest.raises(RuntimeError, match='missing job database'):
-            instance._validate_snapshot_files(runner, manifest)
+            instance._validate_snapshot_files(
+                runner, '/home/test/.sky_snapshots/test-cluster', manifest)
 
 
 class TestResolveSkyBaseDir:
@@ -453,12 +451,8 @@ class TestStopInstances:
                 stop_skylet_command.index('.sky/skylet_pid'))
         manifest = write_manifest.call_args.args[2]
         assert manifest['generation'] == _NEW_SNAPSHOT_GENERATION
-        assert manifest['num_nodes'] == 2
-        assert manifest['job_db_path'] == (
-            '/home/test/.sky_snapshots/test-cluster/generations/'
-            f'{_NEW_SNAPSHOT_GENERATION}/jobs.db')
-        assert [entry['node'] for entry in manifest['snapshots']] == nodes
-        assert [entry['rank'] for entry in manifest['snapshots']] == [0, 1]
+        assert manifest['nodes'] == nodes
+        assert manifest['has_job_db'] is True
         export_commands = [
             call.args[0]
             for call in login_runner.run.call_args_list
@@ -709,8 +703,7 @@ class TestQueryInstances:
             side_effect=AssertionError('global config must not be read'))
         monkeypatch.setattr(instance.skypilot_config,
                             'get_effective_region_config', get_config)
-        manifest = _snapshot_manifest('/home/test/.sky_snapshots/test-cluster',
-                                      num_nodes=2)
+        manifest = _snapshot_manifest(num_nodes=2)
         read_manifest = mock.MagicMock(return_value=manifest)
         monkeypatch.setattr(instance, '_read_snapshot_manifest', read_manifest)
         provider_config = {

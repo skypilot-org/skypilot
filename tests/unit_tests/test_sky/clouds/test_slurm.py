@@ -1645,17 +1645,16 @@ class TestCreateVirtualInstance:
         snapshot_dir = (
             f'/home/testuser/{slurm_instance.SNAPSHOT_DIRECTORY_NAME}'
             f'/{cluster_name}')
+        generation = '0123456789abcdef0123456789abcdef'
+        generation_dir = slurm_instance._snapshot_generation_dir(
+            snapshot_dir, generation)
         mock_read_manifest.return_value = {
             'version': slurm_instance.SNAPSHOT_MANIFEST_VERSION,
+            'generation': generation,
             'image_id': 'ubuntu:24.04',
-            'num_nodes': 2,
             'created_at': 1234.5,
-            'job_db_path': f'{snapshot_dir}/jobs.db',
-            'snapshots': [{
-                'rank': rank,
-                'node': f'old-node-{rank}',
-                'path': slurm_instance._snapshot_rank_path(snapshot_dir, rank),
-            } for rank in range(2)],
+            'has_job_db': True,
+            'nodes': ['old-node-0', 'old-node-1'],
         }
         config = common.ProvisionConfig(
             provider_config={
@@ -1689,25 +1688,25 @@ class TestCreateVirtualInstance:
         assert 'mapfile -t SKY_NODES' in script
         assert '-w "${SKY_NODES[0]}"' in script
         assert '-w "${SKY_NODES[1]}"' in script
-        assert f'--container-image={snapshot_dir}/rank0.sqsh' in script
-        assert f'--container-image={snapshot_dir}/rank1.sqsh' in script
+        assert f'--container-image={generation_dir}/rank0.sqsh' in script
+        assert f'--container-image={generation_dir}/rank1.sqsh' in script
         assert 'apt-get update' not in script
         assert 'echo \'alias sudo=""\' >> ~/.bashrc' not in script
         stale_cleanup = 'enroot remove -f "$candidate"'
         assert stale_cleanup in script
         assert script.index(stale_cleanup) < script.index(
-            f'--container-image={snapshot_dir}/rank0.sqsh')
-        restore_job_db = f'cp -f {snapshot_dir}/jobs.db'
+            f'--container-image={generation_dir}/rank0.sqsh')
+        restore_job_db = f'cp -f {generation_dir}/jobs.db'
         assert restore_job_db in script
         assert script.index(restore_job_db) < script.index(
-            f'--container-image={snapshot_dir}/rank0.sqsh')
+            f'--container-image={generation_dir}/rank0.sqsh')
         assert script.count('CONTAINER_PIDS+=("$!")') == 2
         readiness_check = 'done < <(enroot list -f)'
         assert readiness_check in script
         assert ('job_target="pyxis_${SLURM_JOB_ID}_"'
                 'test-cluster-restore' in script)
         assert script.index(readiness_check) > script.index(
-            f'--container-image={snapshot_dir}/rank1.sqsh')
+            f'--container-image={generation_dir}/rank1.sqsh')
         assert script.index(readiness_check) < script.index(
             'touch /home/testuser/.sky_clusters/'
             'test-cluster-restore/.sky_sbatch_ready')
