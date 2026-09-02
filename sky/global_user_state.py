@@ -1359,12 +1359,25 @@ def cleanup_launch_attempts_with_retention(retention_hours: float) -> int:
     Returns the number of rows removed.
     """
     cutoff = time.time() - retention_hours * 3600
+    hard_cutoff = time.time() - retention_hours * 2 * 3600
     engine = _db_manager.get_engine()
     with orm.Session(engine) as session:
+        # Observed attempts go at the window. Unobserved ones are held back:
+        # the daemon deliberately leaves them unclaimed while metrics are off
+        # or their output would be invisible, and deleting them anyway makes
+        # that hold pointless. They are still dropped eventually -- at twice
+        # the window -- so a deployment that never turns metrics on does not
+        # accumulate them forever.
         result = session.execute(launch_attempt_table.delete().where(
             sqlalchemy.and_(
                 launch_attempt_table.c.outcome.is_not(None),
-                launch_attempt_table.c.provision_start < cutoff,
+                sqlalchemy.or_(
+                    sqlalchemy.and_(
+                        launch_attempt_table.c.metrics_observed_at.is_not(None),
+                        launch_attempt_table.c.provision_start < cutoff,
+                    ),
+                    launch_attempt_table.c.provision_start < hard_cutoff,
+                ),
             )))
         session.commit()
         return result.rowcount
@@ -3916,7 +3929,9 @@ def get_cluster_hash(cluster_name: str) -> Optional[str]:
 @db_retries.retry
 def open_launch_attempt(
     cluster_name: str,
-    cluster_hash: str,
+    # Optional because a cluster's row -- and so its hash -- may not exist yet
+    # on a first launch.
+    cluster_hash: Optional[str],
     request_id: Optional[str],
     provision_start: float,
     cluster_name_on_cloud: Optional[str] = None,
@@ -4038,26 +4053,28 @@ def claim_unobserved_launch_attempts(limit: int = 500) -> List[Any]:
     not happened yet.
     """
     engine = _db_manager.get_engine()
-    claimed: List[Any] = []
+    # The claim is one UPDATE, and the timestamp doubles as its token: rows
+    # carrying it are exactly the ones this call won. A row-at-a-time loop
+    # would hold write locks for its whole length, so two replicas running
+    # this would block each other rather than each taking a share.
     now = time.time()
     with orm.Session(engine) as session:
-        candidates = session.execute(
+        candidates = sqlalchemy.select(launch_attempt_table.c.attempt_id).where(
+            sqlalchemy.and_(
+                launch_attempt_table.c.outcome.is_not(None),
+                launch_attempt_table.c.metrics_observed_at.is_(None),
+            )).order_by(launch_attempt_table.c.provision_start).limit(limit)
+        session.execute(launch_attempt_table.update().where(
+            sqlalchemy.and_(
+                launch_attempt_table.c.attempt_id.in_(
+                    candidates.scalar_subquery()),
+                launch_attempt_table.c.metrics_observed_at.is_(None),
+            )).values({launch_attempt_table.c.metrics_observed_at: now}))
+        claimed = session.execute(
             sqlalchemy.select(launch_attempt_table).where(
-                sqlalchemy.and_(
-                    launch_attempt_table.c.outcome.is_not(None),
-                    launch_attempt_table.c.metrics_observed_at.is_(None),
-                )).order_by(
-                    launch_attempt_table.c.provision_start).limit(limit)).all()
-        for row in candidates:
-            won = session.execute(launch_attempt_table.update().where(
-                sqlalchemy.and_(
-                    launch_attempt_table.c.attempt_id == row.attempt_id,
-                    launch_attempt_table.c.metrics_observed_at.is_(None),
-                )).values({launch_attempt_table.c.metrics_observed_at: now}))
-            if won.rowcount:
-                claimed.append(row)
+                launch_attempt_table.c.metrics_observed_at == now)).all()
         session.commit()
-    return claimed
+    return list(claimed)
 
 
 @db_retries.retry

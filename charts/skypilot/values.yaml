@@ -795,7 +795,11 @@ prometheus:
       scheme: https
       tls_config:
         # Kueue serves its metrics endpoint with a self-signed certificate by
-        # default; verifying it would need the operator to wire in a CA.
+        # default, so verifying it would need the operator to wire in its CA.
+        # The same trade kube-prometheus-stack makes for the kubelet: the
+        # bearer token below goes to an in-cluster address over the pod
+        # network. An operator who has provisioned a real cert for Kueue can
+        # replace this block with ca_file + server_name.
         insecure_skip_verify: true
       authorization:
         credentials_file: /var/run/secrets/kubernetes.io/serviceaccount/token

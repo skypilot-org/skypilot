@@ -2,8 +2,13 @@
 import types
 from unittest import mock
 
+import sqlalchemy
+
+from sky.jobs import state as managed_job_state
 from sky.metrics import utils as metrics_lib
 from sky.server import daemons
+from sky.skylet import constants as skylet_constants
+from sky.utils.db import db_utils
 
 
 def _attempt(attempt_id='a1'):
@@ -55,6 +60,9 @@ def test_one_bad_row_does_not_block_the_others(monkeypatch):
         daemons.global_user_state, 'claim_unobserved_launch_attempts',
         lambda: [_attempt('bad'), _attempt('good')])
     monkeypatch.setattr(daemons.time, 'sleep', lambda _: None)
+    monkeypatch.setattr(daemons.global_user_state,
+                        'sweep_abandoned_launch_attempts', lambda: 0)
+    monkeypatch.setattr(daemons, '_record_job_launch_timelines', lambda: 0)
 
     observed = []
 
@@ -76,12 +84,6 @@ def test_the_timeline_query_carries_the_pool(tmp_path, monkeypatch):
     path=provision, so a pool job's missing provisioning phases read the same
     as lost data. Caught by running a real pool job, not by a unit test.
     """
-    import sqlalchemy
-
-    from sky.jobs import state as managed_job_state
-    from sky.skylet import constants as skylet_constants
-    from sky.utils.db import db_utils
-
     monkeypatch.setenv(skylet_constants.SKY_RUNTIME_DIR_ENV_VAR_KEY,
                        str(tmp_path))
     monkeypatch.setattr(

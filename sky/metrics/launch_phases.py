@@ -92,8 +92,12 @@ def compute_phases(row: Any) -> Tuple[List[PhaseSample], List[DroppedPhase]]:
         samples.append(PhaseSample(phase, end - start))
 
     add(PROVISION_SETUP, row.provision_start, row.instances_requested)
-    # Only where an external scheduler actually gated the workload.
-    if row.admitted is not None or abandoned:
+    # Only where an external scheduler was involved at all. An abandoned
+    # attempt counts a dropped phase, so without the queue check every
+    # abandoned launch on a deployment with no scheduler would report losing a
+    # measurement that never existed -- noise in a counter that is supposed to
+    # mean exactly that something was lost.
+    if row.admitted is not None or (abandoned and row.queue):
         add(QUEUE_WAIT, row.instances_requested, row.admitted)
     add(NODE_STARTUP,
         _first_set(row.admitted, row.instances_requested, row.provision_start),

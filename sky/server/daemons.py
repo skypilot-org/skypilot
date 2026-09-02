@@ -374,6 +374,10 @@ def launch_metrics_event():
         except Exception as e:  # pylint: disable=broad-except
             # One malformed row must not stop the rest from being observed,
             # and the row stays claimed so a poison record cannot spin here.
+            # Counted, because the claim already happened: without this the
+            # sample is simply gone, and a phase silently missing reads the
+            # same as a phase that was fast.
+            metrics_lib.count_launch_phase_dropped('unknown', 'observe_error')
             logger.error(f'Failed to observe launch attempt '
                          f'{attempt.attempt_id}: {e}')
     if claimed:
@@ -383,6 +387,17 @@ def launch_metrics_event():
     recorded = _record_job_launch_timelines()
     if recorded:
         logger.info(f'Recorded the launch timeline of {recorded} job(s).')
+
+    # Also here, not only at server start: a server that runs for weeks would
+    # otherwise leave a row from a dead executor open forever, and retention
+    # only deletes closed ones. Guarded like the rest of this event -- a sweep
+    # that fails must not cost the tick its observations.
+    try:
+        stranded = global_user_state.sweep_abandoned_launch_attempts()
+        if stranded:
+            logger.info(f'Closed {stranded} abandoned launch attempt(s).')
+    except Exception as e:  # pylint: disable=broad-except
+        logger.error(f'Failed to sweep abandoned launch attempts: {e}')
 
     interval = skypilot_config.get_nested(
         ('daemons', 'launch-metrics-daemon', 'interval_seconds'),

@@ -116,13 +116,26 @@ def test_abandoned_attempt_reports_the_measurement_it_lost():
     the same as a fast one.
     """
     samples, dropped = _phases(
-        _row(instances_requested=110.0, outcome='abandoned'))
+        _row(instances_requested=110.0, outcome='abandoned', queue='team-a'))
 
     assert samples == {launch_phases.PROVISION_SETUP: 10.0}
     assert dropped == {
         launch_phases.QUEUE_WAIT: 'abandoned',
         launch_phases.NODE_STARTUP: 'abandoned',
     }
+
+
+def test_an_abandoned_ungated_attempt_reports_no_lost_queue_wait():
+    """Nothing gated this launch, so there was no admission wait to lose.
+
+    The dropped counter is meant to mean a measurement went missing; reporting
+    one for a segment that never existed makes it noise on every deployment
+    without an external scheduler.
+    """
+    _, dropped = _phases(_row(instances_requested=110.0, outcome='abandoned'))
+
+    assert launch_phases.QUEUE_WAIT not in dropped
+    assert dropped == {launch_phases.NODE_STARTUP: 'abandoned'}
 
 
 def test_superseded_attempts_are_labelled_apart_from_the_final_one(monkeypatch):

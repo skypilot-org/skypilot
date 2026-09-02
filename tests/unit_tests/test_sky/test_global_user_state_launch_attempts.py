@@ -398,3 +398,30 @@ def test_retention_drops_finished_attempts_but_not_live_ones(
     assert old_done not in remaining
     assert fresh in remaining
     assert len(remaining) == 2
+
+
+def test_retention_holds_attempts_the_daemon_left_unclaimed(
+        tmp_path, monkeypatch):
+    """The daemon deliberately leaves attempts unclaimed while metrics are off
+    or their output would be invisible, so that they are still there when the
+    setup is fixed.
+
+    Deleting them at the ordinary window makes that hold pointless. They are
+    dropped eventually -- at twice the window -- so a deployment that never
+    turns metrics on does not accumulate them forever.
+    """
+    _fresh_db(tmp_path, monkeypatch)
+    now = time.time()
+
+    # Past the window, but not past the hard cap: held.
+    held = _open(cluster='held', chash='h1', request='r1', start=now - 5400)
+    global_user_state.close_launch_attempt(held, _OPEN.SUCCEEDED)
+    # Past the hard cap: dropped even though it was never observed.
+    ancient = _open(cluster='old', chash='h2', request='r2', start=now - 100000)
+    global_user_state.close_launch_attempt(ancient, _OPEN.SUCCEEDED)
+
+    assert global_user_state.cleanup_launch_attempts_with_retention(1.0) == 1
+
+    remaining = {r.attempt_id for r in _rows()}
+    assert held in remaining
+    assert ancient not in remaining
