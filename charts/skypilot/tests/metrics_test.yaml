@@ -49,6 +49,37 @@ tests:
           path: data["prometheus.yml"]
           pattern: "/endpoints-metrics"
 
+  - it: should NOT render the Kueue scrape job by default
+    set:
+      prometheus.enabled: true
+    asserts:
+      - notMatchRegex:
+          path: data["prometheus.yml"]
+          pattern: "job_name: 'kueue-metrics'"
+
+  - it: should render the Kueue scrape job when scrapeKueueMetrics is enabled
+    set:
+      prometheus.enabled: true
+      prometheus.scrapeKueueMetrics: true
+    asserts:
+      - matchRegex:
+          path: data["prometheus.yml"]
+          pattern: "job_name: 'kueue-metrics'"
+      - matchRegex:
+          path: data["prometheus.yml"]
+          pattern: "kueue-controller-manager-metrics-service\\.kueue-system\\.svc\\.cluster\\.local:8443"
+
+  - it: should honor an overridden Kueue metrics namespace and service
+    set:
+      prometheus.enabled: true
+      prometheus.scrapeKueueMetrics: true
+      prometheus.kueueMetricsNamespace: platform
+      prometheus.kueueMetricsService: kueue-metrics
+    asserts:
+      - matchRegex:
+          path: data["prometheus.yml"]
+          pattern: "kueue-metrics\\.platform\\.svc\\.cluster\\.local:8443"
+
 ---
 # yaml-language-server: $schema=https://raw.githubusercontent.com/helm-unittest/helm-unittest/main/schema/helm-testsuite.json
 suite: grafana_ingress_annotations_test
