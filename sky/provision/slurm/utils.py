@@ -83,6 +83,26 @@ def expand_path_vars(path: str, env: Dict[str, str]) -> str:
     return _VAR_PATTERN.sub(_repl, path)
 
 
+def resolve_sky_base_dir(cluster: str, client: 'slurm.SlurmClient') -> str:
+    """Resolve the absolute shared directory used for Slurm cluster state."""
+    workdir = skypilot_config.get_effective_region_config(cloud='slurm',
+                                                          region=cluster,
+                                                          keys=('workdir',),
+                                                          default_value=None)
+    if workdir is not None:
+        workdir = expand_path_vars(workdir, client.get_env())
+        if not os.path.isabs(workdir):
+            raise RuntimeError('Resolved Slurm workdir must be absolute, got '
+                               f'{workdir!r}.')
+        return workdir
+
+    remote_home_dir = client.get_remote_home_dir()
+    if not os.path.isabs(remote_home_dir):
+        raise RuntimeError('Slurm remote home directory must be absolute, got '
+                           f'{remote_home_dir!r}.')
+    return remote_home_dir
+
+
 def get_gpu_type_and_count(gres_str: str) -> Tuple[Optional[str], int]:
     """Parses GPU type and count from a GRES string.
 
