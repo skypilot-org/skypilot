@@ -2,9 +2,12 @@
 import asyncio
 import concurrent.futures
 import functools
+import json
 import os
 import pathlib
 import queue as queue_lib
+import subprocess
+import sys
 import threading
 import time
 from typing import List
@@ -1893,3 +1896,58 @@ def test_saturating_request_executor_does_not_block_auth():
             except Exception:  # pylint: disable=broad-except
                 pass
         _reset_thread_executors()
+
+
+_NUMERIC_THREAD_ENV_VARS = ('OPENBLAS_NUM_THREADS', 'OMP_NUM_THREADS',
+                            'MKL_NUM_THREADS', 'NUMEXPR_NUM_THREADS',
+                            'NUMEXPR_MAX_THREADS')
+
+
+def _numeric_thread_envs_after_importing_executor(env_overrides):
+    """Report these vars right after the only import that can pull sky's
+    numpy chain in, in a fresh subprocess so no earlier import in this test
+    process's own history can taint the result."""
+    env = {
+        k: v for k, v in os.environ.items() if k not in _NUMERIC_THREAD_ENV_VARS
+    }
+    # The suite runs with SKYPILOT_DEBUG=1 (pyproject.toml), which makes the
+    # sky.* import chain itself print debug lines to stdout ahead of ours.
+    env['SKYPILOT_DEBUG'] = '0'
+    env.update(env_overrides)
+    script = ('import os, json\n'
+              'from sky.server.requests import executor\n'
+              'print(json.dumps({v: os.environ.get(v) for v in %r}))' %
+              (_NUMERIC_THREAD_ENV_VARS,))
+    result = subprocess.run([sys.executable, '-c', script],
+                            env=env,
+                            capture_output=True,
+                            text=True,
+                            check=True,
+                            timeout=60)
+    return json.loads(result.stdout.strip().splitlines()[-1])
+
+
+def test_executor_import_caps_numeric_threads_before_numpy():
+    """A freshly spawned executor worker must default OpenBLAS/NumExpr's
+    thread pools before numpy loads, or every burst worker's own pool
+    compounds toward the container's PID limit (#10559)."""
+    envs = _numeric_thread_envs_after_importing_executor({})
+    assert envs == {var: '1' for var in _NUMERIC_THREAD_ENV_VARS}
+
+
+def test_executor_import_does_not_override_explicit_thread_env():
+    """setdefault must not clobber an operator's own numeric-thread config."""
+    envs = _numeric_thread_envs_after_importing_executor(
+        {'OPENBLAS_NUM_THREADS': '8'})
+    assert envs['OPENBLAS_NUM_THREADS'] == '8'
+    assert envs['OMP_NUM_THREADS'] == '1'
+
+
+def test_executor_import_derives_numexpr_max_threads_from_num_threads():
+    """NUMEXPR_MAX_THREADS must track an operator-set NUMEXPR_NUM_THREADS,
+    not default to 1 independently: numexpr raises at import time if
+    NUM_THREADS ends up greater than MAX_THREADS."""
+    envs = _numeric_thread_envs_after_importing_executor(
+        {'NUMEXPR_NUM_THREADS': '4'})
+    assert envs['NUMEXPR_NUM_THREADS'] == '4'
+    assert envs['NUMEXPR_MAX_THREADS'] == '4'
