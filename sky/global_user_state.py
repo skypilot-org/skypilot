@@ -291,6 +291,84 @@ cluster_event_table = sqlalchemy.Table(
     sqlalchemy.Column('request_id', sqlalchemy.Text, server_default=None),
 )
 
+# One row per provisioning attempt, recording the milestones a launch passes
+# through so launch latency can be broken down after the fact.
+#
+# Why a table rather than in-memory timers: a launch that parks on an external
+# condition (e.g. waiting for quota admission) raises ExecutionPausedError,
+# which unwinds bulk_provision entirely and resumes as a fresh call in a
+# possibly different executor worker. Milestones held in memory do not survive
+# that, so the wait that matters most is exactly the one that would be lost.
+#
+# Every segment is a subtraction between two persisted timestamps, so whoever
+# closes a segment can read the opening one back instead of carrying state.
+#
+# attempt_id is minted per real provisioning attempt (one per failover
+# iteration). A pause/resume continues the existing row -- the resources are
+# kept, not torn down, so it is one attempt.
+launch_attempt_table = sqlalchemy.Table(
+    'launch_attempts',
+    Base.metadata,
+    sqlalchemy.Column('attempt_id', sqlalchemy.Text, primary_key=True),
+    # Not a key: failover reuses the hash (the clusters row is kept), while a
+    # teardown + relaunch mints a new one. Neither per-attempt nor per-job
+    # stable -- see attempt_seq for ordering.
+    sqlalchemy.Column('cluster_hash', sqlalchemy.Text),
+    # Display only. A name outlives the cluster it named, so it must never be
+    # used to group attempts or to find a row to resume.
+    sqlalchemy.Column('cluster_name', sqlalchemy.Text),
+    # Recorded so that provisioning code holding only the on-cloud name (the
+    # one stamped on pods) can stamp a milestone without resolving it back.
+    sqlalchemy.Column('cluster_name_on_cloud',
+                      sqlalchemy.Text,
+                      server_default=None),
+    # The request whose execution opened this attempt. This is what makes
+    # resuming exact rather than a guess: a pause re-queues the *same* request,
+    # so an open row under the same request_id is this launch resuming, while a
+    # row left behind by a crashed earlier launch carries a different one and
+    # is never adopted.
+    sqlalchemy.Column('request_id', sqlalchemy.Text, server_default=None),
+    # Set for managed-job launches, NULL otherwise. Anchors attempts to the job
+    # so a recovery that mints a new cluster_hash does not orphan them.
+    sqlalchemy.Column('job_id', sqlalchemy.Integer, server_default=None),
+    sqlalchemy.Column('task_id', sqlalchemy.Integer, server_default=None),
+    # Monotonic within cluster_name. See open_launch_attempt for why the name
+    # rather than the hash.
+    sqlalchemy.Column('attempt_seq', sqlalchemy.Integer),
+    # Recorded on the row rather than joined from the clusters table, which is
+    # deleted on teardown -- the attempt outlives the cluster it provisioned.
+    sqlalchemy.Column('workspace', sqlalchemy.Text, server_default=None),
+    # Milestones, epoch seconds. Named cloud-agnostically: on Kubernetes
+    # instances_requested is pod creation and instances_ready is all pods
+    # running; on VM clouds they are the create call and the instances being
+    # up. admitted stays NULL where no external scheduler gates the workload.
+    sqlalchemy.Column('provision_start', sqlalchemy.Float),
+    sqlalchemy.Column('instances_requested',
+                      sqlalchemy.Float,
+                      server_default=None),
+    sqlalchemy.Column('admitted', sqlalchemy.Float, server_default=None),
+    sqlalchemy.Column('instances_ready', sqlalchemy.Float, server_default=None),
+    # NULL while in flight. 'succeeded' | 'failed' | 'abandoned', where
+    # abandoned means the writing process died and the startup sweep closed the
+    # row -- only that case counts as a lost metric.
+    sqlalchemy.Column('outcome', sqlalchemy.Text, server_default=None),
+    # Set when the segments of this row have been turned into metric
+    # observations, so a row is never observed twice.
+    sqlalchemy.Column('metrics_observed_at',
+                      sqlalchemy.Float,
+                      server_default=None),
+    # Resume lookup, attempt_seq allocation, the in-flight milestone lookup,
+    # and the per-cluster timeline. cluster_hash is not indexed: a timeline
+    # scoped to one incarnation filters these few rows by hash.
+    sqlalchemy.Index('ix_launch_attempts_cluster', 'cluster_name',
+                     'attempt_seq'),
+    # Per-job timeline, the retry_overhead residual, and phase-timing queries.
+    sqlalchemy.Index('ix_launch_attempts_job', 'job_id', 'task_id',
+                     'attempt_seq'),
+    # Retention sweep. Without it the sweep full-scans on every tick.
+    sqlalchemy.Index('ix_launch_attempts_provision_start', 'provision_start'),
+)
+
 ssh_key_table = sqlalchemy.Table(
     'ssh_key',
     Base.metadata,
@@ -3760,3 +3838,252 @@ def get_max_db_connections() -> Optional[int]:
         if max_connections is None:
             return None
         return int(max_connections)
+
+
+# --- Launch attempts ---------------------------------------------------------
+#
+# See launch_attempt_table for why these milestones are persisted rather than
+# timed in memory.
+
+
+class LaunchMilestone(enum.Enum):
+    """A boundary in a provisioning attempt, one column of launch_attempts."""
+    # Instances/pods asked for. Closes the provision-setup segment.
+    INSTANCES_REQUESTED = 'instances_requested'
+    # An external scheduler (e.g. a quota admission gate) let the workload
+    # through. Never set where nothing gates it.
+    ADMITTED = 'admitted'
+    # All instances/pods up. Closes the startup segment.
+    INSTANCES_READY = 'instances_ready'
+
+
+class LaunchOutcome(enum.Enum):
+    """Terminal state of a provisioning attempt."""
+    SUCCEEDED = 'succeeded'
+    FAILED = 'failed'
+    # The writing process died without closing the row; set by the startup
+    # sweep. Only this outcome means a metric was actually lost.
+    ABANDONED = 'abandoned'
+
+
+def get_cluster_hash(cluster_name: str) -> Optional[str]:
+    """The hash of the live cluster with this name, or None if there is none.
+
+    A cluster's hash is minted on first launch and reused while its row lives,
+    so it identifies one incarnation: failover keeps it, `sky down` + relaunch
+    replaces it.
+    """
+    return _get_hash_for_existing_cluster(cluster_name)
+
+
+@db_retries.retry
+def open_launch_attempt(
+    cluster_name: str,
+    cluster_hash: str,
+    request_id: Optional[str],
+    provision_start: float,
+    cluster_name_on_cloud: Optional[str] = None,
+    workspace: Optional[str] = None,
+    job_id: Optional[int] = None,
+    task_id: Optional[int] = None,
+) -> str:
+    """Open a provisioning attempt, or resume the one already in flight.
+
+    Returns the attempt_id to record milestones against.
+
+    A launch that parks on an external condition unwinds its whole provision
+    call and resumes as a fresh one, possibly in another worker process. That
+    resume must continue the *same* attempt: the resources were kept, so the
+    wait it is still serving is one continuous interval. Resuming is keyed on
+    the request, which survives the pause unchanged -- an open row left behind
+    by some earlier, crashed launch of the same cluster carries a different
+    request_id and is therefore never adopted.
+
+    A failover retry is the opposite case: the previous attempt is closed as
+    failed before the next begins, so no open row is found and a new attempt
+    starts even though cluster_hash is unchanged.
+    """
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
+        if request_id is not None:
+            in_flight = session.execute(
+                sqlalchemy.select(launch_attempt_table.c.attempt_id).where(
+                    sqlalchemy.and_(
+                        launch_attempt_table.c.cluster_name == cluster_name,
+                        launch_attempt_table.c.request_id == request_id,
+                        launch_attempt_table.c.outcome.is_(None),
+                    )).order_by(
+                        launch_attempt_table.c.attempt_seq.desc()).limit(
+                            1)).fetchone()
+            if in_flight is not None:
+                return in_flight[0]
+
+        # A new attempt. The sequence is allocated per cluster_name rather
+        # than per cluster_hash because a managed-job recovery tears the
+        # cluster down and mints a *new* hash for what is still the same job:
+        # scoping by hash would restart the sequence there and make the second
+        # attempt look like the first. The name is stable across that, and for
+        # a managed job it encodes the job id, so it is job-scoped in effect.
+        #
+        # The tradeoff is that relaunching a plain cluster under a reused name
+        # continues the sequence instead of restarting at 0. That is cosmetic:
+        # timelines are always scoped by cluster_hash (one incarnation) or by
+        # the job, so ordering stays correct either way.
+        last_seq = session.execute(
+            sqlalchemy.select(
+                sqlalchemy.func.max(  # pylint: disable=not-callable
+                    launch_attempt_table.c.attempt_seq)).where(
+                        launch_attempt_table.c.cluster_name ==
+                        cluster_name)).scalar()
+
+        attempt_id = str(uuid.uuid4())
+        session.execute(launch_attempt_table.insert().values(
+            attempt_id=attempt_id,
+            cluster_hash=cluster_hash,
+            cluster_name=cluster_name,
+            cluster_name_on_cloud=cluster_name_on_cloud,
+            request_id=request_id,
+            job_id=job_id,
+            task_id=task_id,
+            workspace=workspace,
+            attempt_seq=0 if last_seq is None else last_seq + 1,
+            provision_start=provision_start,
+        ))
+        session.commit()
+    return attempt_id
+
+
+@db_retries.retry
+def record_launch_milestone(attempt_id: str, milestone: LaunchMilestone,
+                            timestamp: float) -> None:
+    """Stamp a milestone on an attempt, keeping the earliest value.
+
+    Write-once: a resumed launch re-walks the provisioning path and would
+    otherwise restamp milestones it already passed, which is exactly how the
+    wait before the pause would get erased.
+    """
+    column = launch_attempt_table.c[milestone.value]
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
+        session.execute(launch_attempt_table.update().where(
+            sqlalchemy.and_(
+                launch_attempt_table.c.attempt_id == attempt_id,
+                column.is_(None),
+            )).values({column: timestamp}))
+        session.commit()
+
+
+@db_retries.retry
+def claim_unobserved_launch_attempts(limit: int = 500) -> List[Any]:
+    """Claim finished attempts that have not been turned into metrics yet.
+
+    Claiming is a conditional UPDATE, so an attempt is observed exactly once
+    even when several API server replicas run this concurrently: only the
+    writer whose UPDATE matched gets the row. That is what lets the observer be
+    a plain background loop -- no global cursor to keep, and no leader election
+    to decide who is allowed to run it.
+
+    Only closed attempts are returned; an in-flight one has segments that have
+    not happened yet.
+    """
+    engine = _db_manager.get_engine()
+    claimed: List[Any] = []
+    now = time.time()
+    with orm.Session(engine) as session:
+        candidates = session.execute(
+            sqlalchemy.select(launch_attempt_table).where(
+                sqlalchemy.and_(
+                    launch_attempt_table.c.outcome.is_not(None),
+                    launch_attempt_table.c.metrics_observed_at.is_(None),
+                )).order_by(
+                    launch_attempt_table.c.provision_start).limit(limit)).all()
+        for row in candidates:
+            won = session.execute(launch_attempt_table.update().where(
+                sqlalchemy.and_(
+                    launch_attempt_table.c.attempt_id == row.attempt_id,
+                    launch_attempt_table.c.metrics_observed_at.is_(None),
+                )).values({launch_attempt_table.c.metrics_observed_at: now}))
+            if won.rowcount:
+                claimed.append(row)
+        session.commit()
+    return claimed
+
+
+@db_retries.retry
+def sweep_abandoned_launch_attempts() -> int:
+    """Close attempts left open by a process that died mid-launch.
+
+    Called at API server start, when nothing can legitimately be in flight:
+    every launch runs inside a request execution, and none has resumed yet.
+    An open row at that moment is therefore one whose writer never came back.
+
+    Marking them (rather than leaving them open) matters twice over. It keeps a
+    later launch of the same cluster from stamping milestones onto a dead
+    attempt, and it is what makes a lost measurement countable instead of
+    silently missing.
+
+    Returns the number of attempts closed.
+    """
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
+        result = session.execute(launch_attempt_table.update().where(
+            launch_attempt_table.c.outcome.is_(None)).values({
+                launch_attempt_table.c.outcome: LaunchOutcome.ABANDONED.value
+            }))
+        session.commit()
+        return result.rowcount
+
+
+@db_retries.retry
+def record_launch_milestone_for_cluster(cluster_name: str,
+                                        milestone: LaunchMilestone,
+                                        timestamp: float) -> None:
+    """Stamp a milestone on whichever attempt is in flight for this cluster.
+
+    Lets provisioning code -- and scheduler plugins patched into it -- record a
+    boundary without the attempt id being threaded down through every layer.
+    A cluster has at most one launch running at a time, so the newest open row
+    for the name is that launch: a row left behind by an earlier crashed launch
+    is older, and the live attempt always sorts ahead of it.
+
+    ``cluster_name`` may be either the display name or the on-cloud name, so a
+    caller stamps with whichever it happens to hold (pod labels carry the
+    on-cloud one).
+
+    A no-op when nothing is in flight, so callers never have to guard.
+    """
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
+        row = session.execute(
+            sqlalchemy.select(launch_attempt_table.c.attempt_id).where(
+                sqlalchemy.and_(
+                    sqlalchemy.or_(
+                        launch_attempt_table.c.cluster_name == cluster_name,
+                        launch_attempt_table.c.cluster_name_on_cloud ==
+                        cluster_name,
+                    ),
+                    launch_attempt_table.c.outcome.is_(None),
+                )).order_by(launch_attempt_table.c.attempt_seq.desc()).limit(
+                    1)).fetchone()
+        if row is None:
+            return
+        column = launch_attempt_table.c[milestone.value]
+        session.execute(launch_attempt_table.update().where(
+            sqlalchemy.and_(
+                launch_attempt_table.c.attempt_id == row[0],
+                column.is_(None),
+            )).values({column: timestamp}))
+        session.commit()
+
+
+@db_retries.retry
+def close_launch_attempt(attempt_id: str, outcome: LaunchOutcome) -> None:
+    """Mark an attempt terminal. No-op if it is already closed."""
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
+        session.execute(launch_attempt_table.update().where(
+            sqlalchemy.and_(
+                launch_attempt_table.c.attempt_id == attempt_id,
+                launch_attempt_table.c.outcome.is_(None),
+            )).values({launch_attempt_table.c.outcome: outcome.value}))
+        session.commit()

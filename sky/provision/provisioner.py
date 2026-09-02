@@ -125,6 +125,20 @@ def _bulk_provision(
     return provision_record
 
 
+def _active_workspace() -> Optional[str]:
+    """The workspace this launch belongs to, for slicing launch latency.
+
+    Best-effort: a label missing from a metric is better than a launch failing
+    because the workspace could not be resolved.
+    """
+    try:
+        return skypilot_config.get_active_workspace()
+    except Exception:  # pylint: disable=broad-except
+        logger.debug('Could not resolve the active workspace for the launch '
+                     'attempt record.')
+        return None
+
+
 def bulk_provision(
     cloud: clouds.Cloud,
     region: clouds.Region,
@@ -159,6 +173,15 @@ def bulk_provision(
         resume_stopped_nodes=True,
         ports_to_open_on_launch=ports_to_open_on_launch)
 
+    # None outside a server-side request execution, where no scheduler exists
+    # to park and resume a launch -- so no attempt can ever be resumed there,
+    # which is exactly what a None request_id means to open_launch_attempt.
+    # Read via is_in_request_context() rather than trusting
+    # get_current_request_id(), which returns a shared placeholder when unset;
+    # two unrelated launches sharing that value could adopt each other's rows.
+    request_id = (common_utils.get_current_request_id()
+                  if common_utils.is_in_request_context() else None)
+
     with provision_logging.setup_provision_logging(log_dir):
         try:
             logger.debug(f'SkyPilot version: {sky.__version__}; '
@@ -167,8 +190,38 @@ def bulk_provision(
             redacted_config = bootstrap_config.get_redacted_config()
             logger.debug('Provision config:\n'
                          f'{json.dumps(redacted_config, indent=2)}')
-            return _bulk_provision(cloud, region, cluster_name,
-                                   bootstrap_config)
+            attempt_id = global_user_state.open_launch_attempt(
+                cluster_name=cluster_name.display_name,
+                cluster_hash=global_user_state.get_cluster_hash(
+                    cluster_name.display_name),
+                request_id=request_id,
+                provision_start=time.time(),
+                cluster_name_on_cloud=cluster_name.name_on_cloud,
+                workspace=_active_workspace())
+            try:
+                provision_record = _bulk_provision(cloud, region, cluster_name,
+                                                   bootstrap_config)
+            except exceptions.ExecutionPausedError:
+                # Deliberately left open. The resources are kept for the
+                # resume, which re-enters here and continues this same
+                # attempt, so the wait being served stays one interval
+                # instead of being split at the pause.
+                raise
+            except (KeyboardInterrupt, SystemExit):
+                # Cancellation is not an outcome of the attempt. The row stays
+                # open and the sweep closes it as abandoned, which is honest:
+                # the measurement really was lost.
+                raise
+            except BaseException:
+                global_user_state.close_launch_attempt(
+                    attempt_id, global_user_state.LaunchOutcome.FAILED)
+                raise
+            global_user_state.record_launch_milestone(
+                attempt_id, global_user_state.LaunchMilestone.INSTANCES_READY,
+                time.time())
+            global_user_state.close_launch_attempt(
+                attempt_id, global_user_state.LaunchOutcome.SUCCEEDED)
+            return provision_record
         except exceptions.NoClusterLaunchedError:
             # Skip the teardown if the cluster was never launched.
             raise

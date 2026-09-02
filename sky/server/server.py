@@ -4179,6 +4179,15 @@ if __name__ == '__main__':
     permission.permission_service.initialize()
     logger.info('Permission service initialized')
 
+    # Nothing can legitimately be provisioning yet, so any launch attempt
+    # still open belongs to a process that died mid-launch. Closing them here
+    # keeps a new launch of the same cluster from stamping milestones onto a
+    # dead attempt, and makes the measurements that were lost countable.
+    stranded = global_user_state.sweep_abandoned_launch_attempts()
+    if stranded:
+        logger.info(f'Closed {stranded} launch attempt(s) abandoned by a '
+                    'previous server process.')
+
     max_db_connections = global_user_state.get_max_db_connections()
     logger.info(f'Max db connections: {max_db_connections}')
 
