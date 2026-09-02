@@ -67,3 +67,42 @@ def test_one_bad_row_does_not_block_the_others(monkeypatch):
         daemons.launch_metrics_event()
 
     assert observed == ['good']
+
+
+def test_the_timeline_query_carries_the_pool(tmp_path, monkeypatch):
+    """A pool job skips provisioning, so its path must be distinguishable.
+
+    The query decides that: selecting only the workspace made every job report
+    path=provision, so a pool job's missing provisioning phases read the same
+    as lost data. Caught by running a real pool job, not by a unit test.
+    """
+    import sqlalchemy
+
+    from sky.jobs import state as managed_job_state
+    from sky.skylet import constants as skylet_constants
+    from sky.utils.db import db_utils
+
+    monkeypatch.setenv(skylet_constants.SKY_RUNTIME_DIR_ENV_VAR_KEY,
+                       str(tmp_path))
+    monkeypatch.setattr(
+        managed_job_state, '_db_manager',
+        db_utils.DatabaseManager('spot_jobs', managed_job_state.create_table))
+
+    engine = managed_job_state._db_manager.get_engine()
+    with sqlalchemy.orm.Session(engine) as session:
+        session.execute(managed_job_state.spot_table.insert().values(
+            spot_job_id=1,
+            task_id=0,
+            task_name='t',
+            status='RUNNING',
+            created_at=100.0,
+            submitted_at=110.0,
+            start_at=200.0))
+        session.execute(managed_job_state.job_info_table.insert().values(
+            spot_job_id=1, workspace='eng', pool='warm-pool'))
+        session.commit()
+
+    rows = managed_job_state.get_jobs_pending_launch_timeline()
+
+    assert len(rows) == 1
+    assert rows[0]['pool'] == 'warm-pool'

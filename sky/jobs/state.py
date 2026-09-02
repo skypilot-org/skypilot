@@ -4255,6 +4255,9 @@ def get_jobs_pending_launch_timeline(limit: int = 200) -> List[Dict[str, Any]]:
                 spot_table.c.submitted_at,
                 spot_table.c.start_at,
                 job_info_table.c.workspace,
+                # Distinguishes a job placed on a warm pool, which skips
+                # provisioning, from one that provisioned its own cluster.
+                job_info_table.c.pool,
             ).select_from(
                 spot_table.join(
                     job_info_table,
