@@ -273,7 +273,8 @@ def main() -> None:
         args.gpus_per_worker,
         allow_create=allow_create,
     )
-    identities = ray.get([worker.identity.remote() for worker in workers])
+    identities = ray.get([worker.identity.remote() for worker in workers],
+                         timeout=args.recovery_timeout)
     workers_by_clique = collections.Counter(
         identity['clique'] for identity in identities)
     if len(workers_by_clique) != args.num_cliques or any(
