@@ -1641,22 +1641,11 @@ def tail_logs(name: Optional[str],
     backend = backend_utils.get_backend_from_handle(handle)
     assert isinstance(backend, backends.CloudVmRayBackend), backend
 
-    # Same reason as in download_logs: the controller-side resolution
-    # (`get_latest_job_id` / `get_nonterminal_job_ids_by_name`) has no
-    # workspace filter, so resolve here through the queue instead and hand the
-    # runner a concrete id. Without `--controller`, streaming only ever
-    # targeted non-terminal jobs, and an ambiguous name was an error rather
-    # than a silent pick -- both preserved here.
-    resolved_job_id = _resolve_accessible_job_id_for_logs(
-        name, job_id, controller, skip_finished=not controller, for_tail=True)
-    if resolved_job_id is None:
-        return exceptions.JobExitCode.NOT_FOUND
-
     return managed_job_runner.current().tail_managed_job_logs(
         handle=handle,
         backend=backend,
-        job_id=resolved_job_id,
-        job_name=None,
+        job_id=job_id,
+        job_name=name,
         follow=follow,
         controller=controller,
         tail=tail,
@@ -1810,137 +1799,11 @@ def download_logs(
     backend = backend_utils.get_backend_from_handle(handle)
     assert isinstance(backend, backends.CloudVmRayBackend), backend
 
-    # Resolve to a concrete job id here rather than letting the backend do it.
-    # The backend resolves via ``GetAllJobIdsByName``, which has no workspace
-    # filter, so it would hand back a job the caller cannot read -- and with no
-    # selector it picks the globally newest job, not the newest the caller can
-    # see. Going through the queue applies ``accessible_workspaces`` (on the
-    # controller for new versions, client-side for old ones).
-    resolved_job_id = _resolve_accessible_job_id_for_logs(
-        name, job_id, controller)
-    if resolved_job_id is None:
-        return {}
-
     return backend.sync_down_managed_job_logs(handle,
-                                              job_id=resolved_job_id,
-                                              job_name=None,
+                                              job_id=job_id,
+                                              job_name=name,
                                               controller=controller,
                                               local_dir=local_dir)
-
-
-def _resolve_accessible_job_id_for_logs(
-        name: Optional[str],
-        job_id: Optional[int],
-        controller: bool,
-        *,
-        skip_finished: bool = False,
-        for_tail: bool = False) -> Optional[int]:
-    """The job id to read logs for, or None if the caller cannot see one.
-
-    Scoped by workspace, not by user: a workspace member may read any job in
-    it, which is what the dashboard already shows. Workspace scoping is the
-    only behaviour change here -- each caller's pre-existing name semantics
-    and messages are reproduced exactly, since they are not what this is
-    fixing:
-
-    - ``for_tail`` (``sky jobs logs``): a *named* lookup sees only
-      non-terminal jobs unless ``--controller`` (``skip_finished``; the bare
-      lookup ignores it), and an ambiguous name raises rather than guessing,
-      matching ``managed_job_utils.stream_logs``.
-    - otherwise (``--sync-down``): every status, ambiguity takes the latest,
-      matching ``sync_down_managed_job_logs``.
-
-    Costs one queue call on top of the handle the caller already resolved. That
-    is a direct DB read under consolidation, and a controller round-trip
-    otherwise -- a cost of ``queue_v2`` itself (``sky jobs queue`` pays it too),
-    so it belongs there rather than in a special case for this caller.
-    """
-    if job_id is not None:
-        records, _, _, _ = queue_v2_api(refresh=False,
-                                        all_users=True,
-                                        job_ids=[job_id],
-                                        fields=['job_id'])
-        if not records:
-            logger.info(f'{colorama.Fore.YELLOW}'
-                        f'Managed job {job_id} not found.'
-                        f'{colorama.Style.RESET_ALL}')
-            return None
-        return job_id
-
-    if name is not None:
-        # ``name_match`` is a fuzzy match, so filter to the exact name here --
-        # same two-step the ``wait`` path above uses.
-        records, _, _, _ = queue_v2_api(refresh=False,
-                                        all_users=True,
-                                        skip_finished=skip_finished,
-                                        name_match=name,
-                                        fields=['job_id', 'job_name'])
-        candidates = [r for r in records if r.job_name == name]
-        multiple_str = (f'Multiple jobs IDs found under the name {name}. ')
-    else:
-        # No selector: take the latest job whatever its status. `skip_finished`
-        # is deliberately not applied -- it mirrors the *name* lookup only
-        # (`get_nonterminal_job_ids_by_name`), while the bare path mirrors
-        # `get_latest_job_id`, which has no status filter.
-        #
-        # Ask for two jobs rather than the whole table: this replaces a
-        # `LIMIT 1` query, and pagination here is by unique job, not by task.
-        # Two, not one, so that "is there more than one job" stays answerable
-        # -- sync-down reports that (`Downloading the latest job logs.`) and a
-        # limit of 1 would silently drop the notice. `[0]` is still the newest.
-        #
-        # No `sort_by`: the query already defaults to job_id descending. Note
-        # the old-controller LIST fallback does not re-sort at all -- it slices
-        # `filter_jobs` output directly -- so it leans on that dump already
-        # being `spot_job_id DESC`.
-        records, _, _, _ = queue_v2_api(refresh=False,
-                                        all_users=True,
-                                        fields=['job_id'],
-                                        page=1,
-                                        limit=2)
-        candidates = list(records)
-        multiple_str = ''
-
-    # De-duplicate: the queue returns one record per *task*, so a multi-task
-    # job repeats its id and would otherwise look like several jobs. The
-    # lookups this replaces select `spot_job_id` DISTINCT for the same reason.
-    job_ids = sorted({r.job_id for r in candidates if r.job_id is not None},
-                     reverse=True)
-    if not job_ids:
-        if not for_tail:
-            msg = 'No matching job found'
-        elif name is None:
-            msg = 'No managed job found.'
-        elif skip_finished:
-            msg = f'No running managed job found with name {name!r}.'
-        else:
-            msg = f'No managed job found with name {name!r}.'
-        logger.info(f'{colorama.Fore.YELLOW}{msg}{colorama.Style.RESET_ALL}')
-        return None
-    if len(job_ids) > 1 and for_tail and name is not None:
-        # Raise rather than report-and-return, matching `stream_logs`. That
-        # means the message is invisible under `--no-follow` (the client only
-        # fetches the result when following) -- a pre-existing wart of the
-        # streaming endpoints, not something to change here.
-        if controller:
-            ids_str = ', '.join(str(i) for i in job_ids)
-            err = (f'Multiple managed jobs found with name {name!r} '
-                   f'(Job IDs: {ids_str}). Please specify the job_id instead.')
-        else:
-            err = f'Multiple running jobs found with name {name!r}.'
-        with ux_utils.print_exception_no_traceback():
-            raise ValueError(err)
-    if len(job_ids) > 1 and not for_tail:
-        # Sync-down only: the tail path picks the latest silently, as before.
-        # The whole "Multiple jobs IDs found ..." clause is conditional on a
-        # name, otherwise the sentence reads "Multiple jobs IDs found
-        # Downloading the latest job logs."
-        controller_str = ' (controller)' if controller else ''
-        logger.info(f'{colorama.Fore.YELLOW}'
-                    f'{multiple_str}'
-                    f'Downloading the latest job logs{controller_str}.'
-                    f'{colorama.Style.RESET_ALL}')
-    return job_ids[0]
 
 
 @usage_lib.entrypoint
