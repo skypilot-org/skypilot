@@ -426,8 +426,24 @@ def _record_job_launch_timelines() -> int:
                                                    bool(task.get('pool')))
                 recorded += 1
         except Exception as e:  # pylint: disable=broad-except
+            # Take the task out of the pending set even so. It is selected by
+            # `t_time_to_running IS NULL` with a LIMIT, so a row that keeps
+            # raising is returned every tick forever and, once enough of them
+            # accumulate, starves every newer job out of the batch. Record the
+            # total alone: it is the one number that needs no breakdown, and it
+            # is honest about the rest being unknown.
             logger.error(f'Failed to record the launch timeline of job '
                          f'{task["spot_job_id"]}: {e}')
+            try:
+                total = task['start_at'] - task['created_at']
+                managed_job_state.record_launch_timeline(
+                    task['spot_job_id'], task['task_id'], {
+                        't_time_to_running': total,
+                        't_unattributed': total,
+                    })
+            except Exception as inner:  # pylint: disable=broad-except
+                logger.error(f'Could not park the launch timeline of job '
+                             f'{task["spot_job_id"]}: {inner}')
 
     # Jobs that went terminal without ever running have no timing to report,
     # but they belong in the counts: a fleet that mostly fails to start would

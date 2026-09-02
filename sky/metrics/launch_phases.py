@@ -128,11 +128,15 @@ def observe_attempt(row: Any) -> None:
 CONTROLLER_QUEUE = 'controller_queue'
 RETRY_OVERHEAD = 'retry_overhead'
 RUNTIME_SETUP = 'runtime_setup'
+# Time that belongs to no phase we can name, kept apart from retry_overhead so
+# a job that threw nothing away does not read as though it had.
+UNATTRIBUTED = 'unattributed'
 
 # The spot column each phase is denormalized into.
 _JOB_PHASE_COLUMNS = {
     CONTROLLER_QUEUE: 't_controller_queue',
     RETRY_OVERHEAD: 't_retry_overhead',
+    UNATTRIBUTED: 't_unattributed',
     PROVISION_SETUP: 't_provision_setup',
     QUEUE_WAIT: 't_queue_wait',
     NODE_STARTUP: 't_node_startup',
@@ -172,10 +176,13 @@ def compute_job_timeline(task: Any,
                   if a.outcome == _OUTCOME_SUCCEEDED and a.instances_ready
                   is not None and a.instances_ready <= task['start_at']), None)
     if final is None:
-        # No attempt delivered a cluster we can break down -- a job placed on a
-        # warm pool, or one launched before these milestones existed. The wait
-        # still happened, so report it whole rather than dropping the job.
-        phases[RETRY_OVERHEAD] = total - sum(phases.values())
+        # Nothing to break down: a job placed on a warm pool never
+        # provisions, and one launched before these milestones has no attempt
+        # recorded. The wait still happened, so report it whole rather than
+        # dropping the job -- but as unattributed. Calling it retry overhead
+        # would render a pool job that threw nothing away as almost entirely
+        # retries, which is the misdiagnosis this breakdown exists to prevent.
+        phases[UNATTRIBUTED] = total - sum(phases.values())
         return total, phases
 
     retry_overhead = final.provision_start - attempts[0].provision_start
@@ -190,7 +197,12 @@ def compute_job_timeline(task: Any,
     phases[PROVISION_SETUP] = (startup_from - task['submitted_at'] -
                                retry_overhead)
     if final.admitted is not None:
-        phases[QUEUE_WAIT] = final.admitted - final.instances_requested
+        # Measured from whichever boundary the cloud gave us. Subtracting
+        # instances_requested unguarded was the one place here that could raise
+        # on a missing milestone, and skipping the phase instead would drop the
+        # interval from the total rather than attribute it -- the caller writes
+        # a whole batch of jobs, so both failure modes are expensive.
+        phases[QUEUE_WAIT] = final.admitted - startup_from
     phases[NODE_STARTUP] = final.instances_ready - _first_set(
         final.admitted, startup_from)
     phases[RUNTIME_SETUP] = task['start_at'] - final.instances_ready

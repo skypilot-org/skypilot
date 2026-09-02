@@ -32,6 +32,7 @@ _TIMELINE_COLUMNS = (
     'created_at',
     't_controller_queue',
     't_retry_overhead',
+    't_unattributed',
     't_provision_setup',
     't_queue_wait',
     't_node_startup',

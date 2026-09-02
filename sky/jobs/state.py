@@ -155,6 +155,12 @@ spot_table = sqlalchemy.Table(
                       server_default=None),
     sqlalchemy.Column('t_retry_overhead', sqlalchemy.Float,
                       server_default=None),
+    # Time that belongs to no phase we can name: a job placed on a warm pool
+    # never provisions, and one launched before these milestones has no
+    # attempt to break down. Kept apart from retry_overhead so such a job does
+    # not read as "99% retried launches", which is the misdiagnosis this
+    # breakdown exists to prevent.
+    sqlalchemy.Column('t_unattributed', sqlalchemy.Float, server_default=None),
     sqlalchemy.Column('t_provision_setup',
                       sqlalchemy.Float,
                       server_default=None),
@@ -492,6 +498,7 @@ def _get_jobs_dict(r: 'row.RowMapping') -> Dict[str, Any]:
         'created_at': r.get('created_at'),
         't_controller_queue': r.get('t_controller_queue'),
         't_retry_overhead': r.get('t_retry_overhead'),
+        't_unattributed': r.get('t_unattributed'),
         't_provision_setup': r.get('t_provision_setup'),
         't_queue_wait': r.get('t_queue_wait'),
         't_node_startup': r.get('t_node_startup'),

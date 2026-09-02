@@ -90,14 +90,37 @@ def test_runtime_setup_covers_instances_up_to_the_job_running():
     assert phases[launch_phases.RUNTIME_SETUP] == 70.0
 
 
-def test_a_job_with_no_recorded_attempt_still_reports_its_total():
-    """A launch that predates the milestones, or a job placed on a warm pool,
-    has no attempt to break down -- but the user still waited."""
+def test_a_job_with_no_recorded_attempt_is_not_reported_as_retried():
+    """A pool job never provisions, so it has no attempt to break down.
+
+    Putting its whole wait in retry_overhead renders a job that threw nothing
+    away as almost entirely retries -- the exact misdiagnosis this breakdown
+    exists to prevent. It has to be named as unknown instead.
+    """
     total, phases = launch_phases.compute_job_timeline(_task(), [])
 
     assert total == 1000.0
     assert sum(phases.values()) == total
     assert launch_phases.QUEUE_WAIT not in phases
+    assert phases.get(launch_phases.RETRY_OVERHEAD) in (None, 0)
+    assert phases[launch_phases.UNATTRIBUTED] == 990.0
+
+
+def test_an_admission_without_a_request_milestone_is_measured_not_dropped():
+    """This was the one subtraction here with no guard on both endpoints.
+
+    Raising is expensive -- the caller writes a whole batch of jobs, and a row
+    that raises stays in the pending set to be retried forever. Skipping the
+    phase instead would be quieter but drop the interval from the total. The
+    wait is real, so it is measured from whichever boundary the cloud gave us.
+    """
+    total, phases = launch_phases.compute_job_timeline(_task(), [
+        _attempt(
+            instances_requested=None, admitted=700.0, instances_ready=900.0)
+    ])
+
+    assert sum(phases.values()) == total
+    assert phases[launch_phases.QUEUE_WAIT] == 680.0
 
 
 def test_timeline_columns_include_the_headline_total():
