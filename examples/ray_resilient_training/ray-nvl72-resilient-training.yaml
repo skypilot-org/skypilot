@@ -97,8 +97,7 @@ config:
     pod_config:
       spec:
         containers:
-        - name: ray-node
-          env:
+        - env:
           - name: K8S_NODE_NAME
             valueFrom:
               fieldRef:
