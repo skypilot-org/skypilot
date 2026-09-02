@@ -193,6 +193,51 @@ def test_slurm_single_node_with_gpu():
                                     testdata_dir=SLURM_TESTDATA_DIR)
 
 
+def test_slurm_multi_node_with_node_names():
+    """Multi-node Slurm job with node names passed to the executor.
+
+    The executor prefers node names over IP matching to determine the node
+    index (#10333), so the generated driver must forward them via
+    --cluster-nodes on new enough skylets.
+    """
+    codegen = task_codegen.SlurmCodeGen(
+        slurm_job_id='12345',
+        container_name=None,
+        cluster_node_names=['node-1', 'node-2'],
+    )
+    codegen.add_prologue(job_id=3)
+
+    resources_dict = {'CPU': 2.0}
+    task_env_vars = {
+        'SKYPILOT_TASK_ID': 'sky-2024-11-17-00-00-00-000002-cluster-3',
+    }
+
+    codegen.add_setup(
+        2,
+        resources_dict=resources_dict,
+        stable_cluster_internal_ips=['10.0.0.1', '10.0.0.2'],
+        env_vars=task_env_vars,
+        log_dir='/sky/logs',
+        setup_cmd=None,
+    )
+
+    codegen.add_task(
+        2,
+        bash_script='echo "Running on node $SKYPILOT_NODE_RANK"',
+        task_name='distributed_task',
+        resources_dict={'CPU': 2.0},
+        log_dir='/sky/logs/tasks',
+        env_vars=task_env_vars,
+    )
+
+    codegen.add_epilogue()
+
+    result = codegen.build()
+    assert_codegen_matches_snapshot('slurm_multi_node_with_node_names',
+                                    result,
+                                    testdata_dir=SLURM_TESTDATA_DIR)
+
+
 def test_slurm_codegen_with_container():
     codegen = task_codegen.SlurmCodeGen(
         slurm_job_id='12345',

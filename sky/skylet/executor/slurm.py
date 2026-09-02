@@ -12,6 +12,7 @@ import shutil
 import socket
 import sys
 import time
+from typing import List
 
 import colorama
 import hostlist
@@ -71,6 +72,48 @@ def _get_ip_address() -> str:
     # which resolves hostnames the same way. Using `hostname -I` can return
     # Docker bridge IPs (172.17.x.x) first, causing IP mismatch errors.
     return socket.gethostbyname(socket.gethostname())
+
+
+def _get_node_idx(cluster_nodes: List[str], cluster_ips: List[str],
+                  ip_addr: str) -> int:
+    """Determines this node's index in the cluster.
+
+    Never raises: the node index only feeds log filenames and streaming
+    log prefixes, so failing to resolve it must not fail the task.
+    """
+    # 1. Match by Slurm node name. slurmstepd sets SLURMD_NODENAME per task,
+    # and it is stable across containers, network interfaces and job steps,
+    # unlike the IP resolved inside the job. With containerized slurmd or
+    # multiple network views, the runtime IP may not match the NodeAddr
+    # recorded at provisioning time. See #10333.
+    node_name = os.environ.get('SLURMD_NODENAME')
+    if node_name is not None and node_name in cluster_nodes:
+        return cluster_nodes.index(node_name)
+
+    # 2. Match by IP, for clusters where the provisioning-time and runtime
+    # network views agree (and for executors launched without
+    # --cluster-nodes).
+    if ip_addr in cluster_ips:
+        return cluster_ips.index(ip_addr)
+
+    # 3. Single-node cluster: only one possible index.
+    if len(cluster_ips) == 1:
+        return 0
+
+    # 4. Last resort: SLURM_NODEID is this node's index within the job
+    # *step*, which may differ from its index in the cluster (e.g. a 1-node
+    # task on a multi-node cluster always sees SLURM_NODEID=0). It is still
+    # unique per node within the step, which keeps per-node log filenames on
+    # the shared filesystem from colliding.
+    print(
+        f'Could not locate node {node_name!r} (IP {ip_addr}) in cluster '
+        f'nodes {cluster_nodes} / IPs {cluster_ips}; falling back to '
+        'SLURM_NODEID. Node labels in logs may be inaccurate.',
+        file=sys.stderr)
+    try:
+        return int(os.environ.get('SLURM_NODEID', 0))
+    except ValueError:
+        return 0
 
 
 def _get_job_node_ips() -> str:
@@ -174,6 +217,10 @@ def main():
     parser.add_argument('--cluster-ips',
                         required=True,
                         help='Comma-separated list of cluster node IPs')
+    parser.add_argument('--cluster-nodes',
+                        default=None,
+                        help='Comma-separated list of Slurm node names, '
+                        'aligned with --cluster-ips')
     parser.add_argument('--task-name',
                         default=None,
                         help='Task name for single-node log prefix')
@@ -202,14 +249,13 @@ def main():
     num_nodes = int(os.environ.get('SLURM_NNODES', 1))
     is_single_node_cluster = (args.cluster_num_nodes == 1)
 
-    # Determine node index from IP (like Ray's cluster_ips_to_node_id)
+    # Determine this node's index in the cluster, preferring the Slurm node
+    # name over the runtime IP (like Ray's cluster_ips_to_node_id).
     cluster_ips = args.cluster_ips.split(',')
+    cluster_nodes = (args.cluster_nodes.split(',')
+                     if args.cluster_nodes else [])
     ip_addr = _get_ip_address()
-    try:
-        node_idx = cluster_ips.index(ip_addr)
-    except ValueError as e:
-        raise RuntimeError(f'IP address {ip_addr} not found in '
-                           f'cluster IPs: {cluster_ips}') from e
+    node_idx = _get_node_idx(cluster_nodes, cluster_ips, ip_addr)
     node_name = 'head' if node_idx == 0 else f'worker{node_idx}'
 
     # Log files are written to a shared filesystem, so each node must use a
