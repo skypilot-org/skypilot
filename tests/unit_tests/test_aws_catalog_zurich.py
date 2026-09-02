@@ -1,0 +1,7 @@
+"""Tests for Zurich in the AWS service-catalog source."""
+
+from sky.catalog.data_fetchers import fetch_aws
+
+
+def test_zurich_region_is_fetched() -> None:
+    assert 'eu-central-2' in fetch_aws.ALL_REGIONS
