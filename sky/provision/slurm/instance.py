@@ -299,6 +299,8 @@ def _sky_cluster_home_dir(base_dir: str, cluster_name_on_cloud: str) -> str:
 
 def _snapshot_dir(base_dir: str, cluster_name_on_cloud: str) -> str:
     """Returns the shared directory for a Slurm container snapshot."""
+    # TODO(kevin): Verify that base_dir is on a shared filesystem (e.g., NFS)
+    # visible to every allocated node before using it for snapshots.
     return f'{base_dir}/{SNAPSHOT_DIRECTORY_NAME}/{cluster_name_on_cloud}'
 
 
