@@ -82,6 +82,7 @@ import {
   useTableColumns,
   usePluginComponents,
   useMergedTableColumns,
+  usePluginTableFilters,
 } from '@/plugins/PluginProvider';
 import {
   FilterDropdown,
@@ -251,11 +252,6 @@ export function deriveStatusView(statusParam) {
   };
 }
 
-const PROPERTY_OPTIONS = JOB_FILTER_SCHEMA.map(({ key, label }) => ({
-  label,
-  value: key,
-}));
-
 // Properties that may hold several chips; the rest replace, so the page can
 // never show more filters than the URL is able to carry.
 const MULTI_VALUE_LABELS = new Set(
@@ -346,9 +342,17 @@ export function ManagedJobs() {
   const jobsRefreshRef = React.useRef(null);
   const poolsRefreshRef = React.useRef(null);
   const [poolsData, setPoolsData] = useState([]);
+  // Plugins may register extra filter properties for this table (e.g. the
+  // pagination plugin's Slurm Account/QOS filters) — registration is
+  // reactive, typically arriving with the plugin's first data response.
+  const pluginFilterProps = usePluginTableFilters('jobs');
+  const filterSchema = React.useMemo(
+    () => [...JOB_FILTER_SCHEMA, ...pluginFilterProps],
+    [pluginFilterProps]
+  );
   // Filters and the shareable view state both live in the URL, keyed by name.
   const { filters, setFilters, view, setView } = useUrlFilterState(
-    JOB_FILTER_SCHEMA,
+    filterSchema,
     JOB_VIEW_SCHEMA
   );
   const [valueList, setValueList] = useState({
@@ -463,7 +467,10 @@ export function ManagedJobs() {
         />
         <div className="w-full sm:w-auto max-w-xl">
           <FilterDropdown
-            propertyList={PROPERTY_OPTIONS}
+            propertyList={filterSchema.map(({ key, label }) => ({
+              label,
+              value: key,
+            }))}
             valueList={valueList}
             setFilters={setFilters}
             addFilter={addFilter}
@@ -597,6 +604,9 @@ export function ManagedJobsTable({
     key: 'id',
     direction: 'descending',
   });
+  // Plugin-registered filter properties (see ManagedJobs): their values are
+  // forwarded to the data provider verbatim as {property: key, value}.
+  const pluginFilterProps = usePluginTableFilters('jobs');
   const [loading, setLocalLoading] = useState(false);
   const [isInitialLoad, setIsInitialLoad] = useState(true);
   const [currentPage, setCurrentPage] = useState(() => {
@@ -804,6 +814,14 @@ export function ManagedJobsTable({
           userMatch: effectiveUserMatch,
           workspaceMatch: getFilterValue('workspace'),
           poolMatch: getFilterValue('pool'),
+          // Values of plugin-registered filter properties, keyed by their
+          // schema key — the plugin's fetch function interprets them.
+          pluginFilters: pluginFilterProps
+            .map((f) => {
+              const value = getFilterValue(f.label.toLowerCase());
+              return value ? { property: f.key, value } : null;
+            })
+            .filter(Boolean),
           statuses: computedStatuses.length > 0 ? computedStatuses : undefined,
           page: currentPage,
           limit: pageSize,
@@ -919,6 +937,7 @@ export function ManagedJobsTable({
       sortOrder,
       userScope,
       currentUser,
+      pluginFilterProps,
     ]
   );
 

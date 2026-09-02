@@ -699,6 +699,114 @@ def test_docker_preinstalled_package_slurm_sqsh(generic_cloud: str):
     smoke_tests_utils.run_one_test(test)
 
 
+@pytest.mark.slurm
+def test_slurm_container_stop_start(generic_cloud: str):
+    """A Slurm container keeps its state, job queue, and logs after restart."""
+    name = smoke_tests_utils.get_cluster_name()
+    test = smoke_tests_utils.Test(
+        'slurm_container_stop_start',
+        [
+            f'sky launch -y -c {name} --infra {generic_cloud} '
+            f'{smoke_tests_utils.LOW_RESOURCE_ARG} '
+            '--image-id docker:ubuntu:24.04 -- '
+            "'echo pre-stop-job-1; echo generation-1 > /snapshot_marker; "
+            "apt-get update; apt-get install -y tree'",
+            f'sky logs {name} 1 --status',
+            f'sky exec {name} -- echo pre-stop-job-2',
+            f'sky logs {name} 2 --status',
+            # Shared-FS cleanup can transiently return stale handles; Slurm
+            # stop is idempotent, so retry once.
+            f'sky stop -y {name} || sky stop -y {name}',
+            smoke_tests_utils.get_cmd_wait_until_cluster_status_contains(
+                cluster_name=name,
+                cluster_status=[sky.ClusterStatus.STOPPED],
+                timeout=smoke_tests_utils.get_timeout('slurm')),
+            f'sky start -y {name}',
+            smoke_tests_utils.get_cmd_wait_until_cluster_status_contains(
+                cluster_name=name,
+                cluster_status=[sky.ClusterStatus.UP],
+                timeout=smoke_tests_utils.get_timeout('slurm')),
+            smoke_tests_utils.
+            get_cmd_wait_until_job_status_contains_matching_job_id(
+                cluster_name=name,
+                job_id='1',
+                job_status=[sky.JobStatus.SUCCEEDED],
+                timeout=60),
+            smoke_tests_utils.
+            get_cmd_wait_until_job_status_contains_matching_job_id(
+                cluster_name=name,
+                job_id='2',
+                job_status=[sky.JobStatus.SUCCEEDED],
+                timeout=60),
+            f'logs="$(sky logs {name} 1 --no-follow)"; '
+            'printf "%s\\n" "$logs"; '
+            '[[ "$logs" == *pre-stop-job-1* ]]',
+            f'logs="$(sky logs {name} 2 --no-follow)"; '
+            'printf "%s\\n" "$logs"; '
+            '[[ "$logs" == *pre-stop-job-2* ]]',
+            f'sky exec {name} -- '
+            "'test \"$(cat /snapshot_marker)\" = generation-1; "
+            "dpkg -s tree'",
+            f'sky logs {name} 3 --status',
+            f'ssh {name} \'test "$(cat /snapshot_marker)" = generation-1\'',
+            f'sky down -y {name}',
+        ],
+        f'sky down -y {name} || true',
+        timeout=30 * 60,
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.slurm
+def test_slurm_container_stop_start_multi_node(generic_cloud: str):
+    """Each Slurm node restores the snapshot from its previous rank."""
+    name = smoke_tests_utils.get_cluster_name()
+    test = smoke_tests_utils.Test(
+        'slurm_container_stop_start_multi_node',
+        [
+            f'sky launch -y -c {name} --infra {generic_cloud} '
+            f'--num-nodes 2 {smoke_tests_utils.LOW_RESOURCE_ARG} '
+            '--image-id docker:ubuntu:24.04 -- '
+            "'echo pre-stop-rank-$SKYPILOT_NODE_RANK; "
+            "echo rank-$SKYPILOT_NODE_RANK > /snapshot_rank_marker'",
+            f'sky logs {name} 1 --status',
+            # Shared-FS cleanup can transiently return stale handles; Slurm
+            # stop is idempotent, so retry once.
+            f'sky stop -y {name} || sky stop -y {name}',
+            smoke_tests_utils.get_cmd_wait_until_cluster_status_contains(
+                cluster_name=name,
+                cluster_status=[sky.ClusterStatus.STOPPED],
+                timeout=smoke_tests_utils.get_timeout('slurm')),
+            f'sky start -y {name}',
+            smoke_tests_utils.get_cmd_wait_until_cluster_status_contains(
+                cluster_name=name,
+                cluster_status=[sky.ClusterStatus.UP],
+                timeout=smoke_tests_utils.get_timeout('slurm')),
+            smoke_tests_utils.
+            get_cmd_wait_until_job_status_contains_matching_job_id(
+                cluster_name=name,
+                job_id='1',
+                job_status=[sky.JobStatus.SUCCEEDED],
+                timeout=60),
+            f'logs="$(sky logs {name} 1 --no-follow)"; '
+            'printf "%s\\n" "$logs"; '
+            '[[ "$logs" == *pre-stop-rank-0* ]]; '
+            '[[ "$logs" == *pre-stop-rank-1* ]]',
+            f'sky exec {name} --num-nodes 2 -- '
+            "'test \"$(cat /snapshot_rank_marker)\" = "
+            "\"rank-$SKYPILOT_NODE_RANK\"; "
+            "echo restored-rank-$SKYPILOT_NODE_RANK'",
+            f'sky logs {name} 2 --status',
+            f'ssh {name} '
+            '\'test "$(cat /snapshot_rank_marker)" = rank-0\'',
+            f'sky down -y {name}',
+        ],
+        f'sky down -y {name} || true',
+        timeout=30 * 60,
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
 # ---------- Submitting multiple tasks to the same cluster. ----------
 @pytest.mark.no_vast  # Vast has low availability of T4 GPUs
 @pytest.mark.no_shadeform  # Shadeform does not have T4 GPUs

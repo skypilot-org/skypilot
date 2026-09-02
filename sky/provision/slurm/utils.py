@@ -4,6 +4,7 @@ import math
 import os
 import re
 import shlex
+import subprocess
 import time
 from typing import Any, Callable, Dict, List, NamedTuple, Optional, Tuple, Union
 
@@ -80,6 +81,26 @@ def expand_path_vars(path: str, env: Dict[str, str]) -> str:
         return env.get(name, m.group(0))
 
     return _VAR_PATTERN.sub(_repl, path)
+
+
+def resolve_sky_base_dir(cluster: str, client: 'slurm.SlurmClient') -> str:
+    """Resolve the absolute shared directory used for Slurm cluster state."""
+    workdir = skypilot_config.get_effective_region_config(cloud='slurm',
+                                                          region=cluster,
+                                                          keys=('workdir',),
+                                                          default_value=None)
+    if workdir is not None:
+        workdir = expand_path_vars(workdir, client.get_env())
+        if not os.path.isabs(workdir):
+            raise RuntimeError('Resolved Slurm workdir must be absolute, got '
+                               f'{workdir!r}.')
+        return workdir
+
+    remote_home_dir = client.get_remote_home_dir()
+    if not os.path.isabs(remote_home_dir):
+        raise RuntimeError('Slurm remote home directory must be absolute, got '
+                           f'{remote_home_dir!r}.')
+    return remote_home_dir
 
 
 def get_gpu_type_and_count(gres_str: str) -> Tuple[Optional[str], int]:
@@ -1311,7 +1332,7 @@ def slurm_node_info(
         try:
             return _get_slurm_node_info_list(
                 slurm_cluster_name=slurm_cluster_name)
-        except (FileNotFoundError, RuntimeError,
+        except (FileNotFoundError, RuntimeError, subprocess.TimeoutExpired,
                 exceptions.NotSupportedError) as e:
             logger.debug(f'Could not retrieve Slurm node info: {e}')
             return []
