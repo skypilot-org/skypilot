@@ -383,6 +383,89 @@ SKY_APISERVER_SKY_LOGS_PRUNED_ENTRIES_TOTAL = prom.Counter(
     'Expired ~/sky_logs artifacts removed by the retention sweep',
 )
 
+# --- Launch latency -----------------------------------------------------------
+
+# Launch phases span seconds (a container starting) to hours (a workload
+# waiting for quota), so the API-latency buckets, which stop at 1000s, would
+# put every interesting queue wait in +Inf and make p95 meaningless.
+_LAUNCH_PHASE_BUCKETS = (1.0, 5.0, 15.0, 30.0, 60.0, 120.0, 300.0, 600.0,
+                         1200.0, 1800.0, 3600.0, 7200.0, 21600.0, 43200.0,
+                         86400.0, float('inf'))
+
+# One phase of one provisioning attempt.
+#
+# phase partitions the attempt's wall clock, so a stacked panel of the phases
+# adds up to the whole attempt and nothing is counted twice:
+#   provision_setup  provision start -> instances/pods asked for
+#   queue_wait       asked for -> admitted by an external scheduler (absent
+#                    where nothing gates the workload)
+#   node_startup     admitted (or asked for) -> instances/pods up
+#
+# attempt is 'final' for the attempt that delivered the cluster and
+# 'superseded' for one that was thrown away. Do not mix them in one quantile:
+# a superseded attempt answers how long doomed launches burn, which is a
+# different question from how long a launch takes.
+#
+# Labels stop at workspace on purpose. Adding infra and queue here multiplies
+# every bucket by both and puts this one metric an order of magnitude over the
+# series budget; per-launch detail belongs in the launch_attempts table.
+SKY_LAUNCH_PHASE_DURATION_SECONDS = prom.Histogram(
+    'sky_launch_phase_duration_seconds',
+    'Duration of one phase of a provisioning attempt',
+    ['phase', 'attempt', 'workspace'],
+    buckets=_LAUNCH_PHASE_BUCKETS,
+)
+
+# Segments that never closed, so no duration could be observed. Counted rather
+# than skipped: a phase silently missing from the histogram looks the same as a
+# phase that was fast.
+SKY_LAUNCH_PHASE_DROPPED_TOTAL = prom.Counter(
+    'sky_launch_phase_dropped_total',
+    'Launch phases that could not be measured',
+    ['phase', 'reason'],
+)
+
+# A segment whose end preceded its start. Clamped to zero before observing, but
+# counted here: a negative observation lands in the lowest bucket, so absorbing
+# it silently would leave the histogram looking healthy while being wrong.
+SKY_LAUNCH_PHASE_ANOMALIES_TOTAL = prom.Counter(
+    'sky_launch_phase_anomalies_total',
+    'Launch phase durations that were not usable as measured',
+    ['phase', 'reason'],
+)
+
+
+def observe_launch_phase(phase: str, attempt: str, workspace: str,
+                         duration_seconds: float) -> None:
+    """Record one launch phase duration.
+
+    Metric emission must never disrupt the caller, so any failure is logged
+    and swallowed.
+    """
+    if not METRICS_ENABLED:
+        return
+    try:
+        if duration_seconds < 0:
+            SKY_LAUNCH_PHASE_ANOMALIES_TOTAL.labels(phase=phase,
+                                                    reason='negative').inc()
+        SKY_LAUNCH_PHASE_DURATION_SECONDS.labels(phase=phase,
+                                                 attempt=attempt,
+                                                 workspace=workspace).observe(
+                                                     max(0.0, duration_seconds))
+    except Exception as e:  # pylint: disable=broad-except
+        logger.error(f'Failed to observe launch phase metric: {e}')
+
+
+def count_launch_phase_dropped(phase: str, reason: str) -> None:
+    """Record a launch phase that could not be measured."""
+    if not METRICS_ENABLED:
+        return
+    try:
+        SKY_LAUNCH_PHASE_DROPPED_TOTAL.labels(phase=phase, reason=reason).inc()
+    except Exception as e:  # pylint: disable=broad-except
+        logger.error(f'Failed to count dropped launch phase: {e}')
+
+
 # --- Managed Jobs Metrics ---
 
 # Per-controller-process gauges (consolidation mode only).
