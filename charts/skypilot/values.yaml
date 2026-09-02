@@ -725,6 +725,18 @@ prometheus:
   # unless you run model-serving workloads.
   # @schema type: [boolean, null]
   scrapeEndpointMetrics: false
+  # Add a scrape job for Kueue's own controller metrics
+  # (kueue_admission_wait_time_seconds, kueue_pending_workloads, ...), which
+  # give the queue-side view of admission that SkyPilot's own launch metrics
+  # attribute per job. Opt-in: leave false unless Kueue is installed.
+  # @schema type: [boolean, null]
+  scrapeKueueMetrics: false
+  # Namespace and service Kueue's controller metrics are served from. Defaults
+  # match an upstream `kubectl apply` install of Kueue.
+  # @schema type: [string, null]
+  kueueMetricsNamespace: kueue-system
+  # @schema type: [string, null]
+  kueueMetricsService: kueue-controller-manager-metrics-service
   enabled: false
   # Keep the installation minimal by default. If you want to monitor more resources other than the API server,
   # it is recommended to install and manage prometheus separately.
@@ -770,6 +782,29 @@ prometheus:
       metrics_path: '/endpoints-metrics'
       scrape_interval: 60s
       scrape_timeout: 45s
+    {{- end }}
+    {{- if .Values.scrapeKueueMetrics }}
+    # Kueue's own controller metrics. This is the queue's view of admission
+    # (kueue_admission_wait_time_seconds per ClusterQueue); SkyPilot's
+    # sky_launch_phase_duration_seconds{phase="queue_wait"} is the same wait
+    # attributed to a workspace and a launch. Keeping both is deliberate --
+    # where they disagree, the difference is SkyPilot's own detection lag.
+    - job_name: 'kueue-metrics'
+      static_configs:
+        - targets: ['{{ .Values.kueueMetricsService }}.{{ .Values.kueueMetricsNamespace }}.svc.cluster.local:8443']
+      scheme: https
+      tls_config:
+        # Kueue serves its metrics endpoint with a self-signed certificate by
+        # default, so verifying it would need the operator to wire in its CA.
+        # The same trade kube-prometheus-stack makes for the kubelet: the
+        # bearer token below goes to an in-cluster address over the pod
+        # network. An operator who has provisioned a real cert for Kueue can
+        # replace this block with ca_file + server_name.
+        insecure_skip_verify: true
+      authorization:
+        credentials_file: /var/run/secrets/kubernetes.io/serviceaccount/token
+      scrape_interval: 60s
+      scrape_timeout: 30s
     {{- end }}
     {{ if .Values.useDedicatedScrapeConfig }}
     - job_name: 'skypilot-api-server-metrics'

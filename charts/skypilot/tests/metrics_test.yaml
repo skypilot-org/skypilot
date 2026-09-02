@@ -49,6 +49,37 @@ tests:
           path: data["prometheus.yml"]
           pattern: "/endpoints-metrics"
 
+  - it: should NOT render the Kueue scrape job by default
+    set:
+      prometheus.enabled: true
+    asserts:
+      - notMatchRegex:
+          path: data["prometheus.yml"]
+          pattern: "job_name: 'kueue-metrics'"
+
+  - it: should render the Kueue scrape job when scrapeKueueMetrics is enabled
+    set:
+      prometheus.enabled: true
+      prometheus.scrapeKueueMetrics: true
+    asserts:
+      - matchRegex:
+          path: data["prometheus.yml"]
+          pattern: "job_name: 'kueue-metrics'"
+      - matchRegex:
+          path: data["prometheus.yml"]
+          pattern: "kueue-controller-manager-metrics-service\\.kueue-system\\.svc\\.cluster\\.local:8443"
+
+  - it: should honor an overridden Kueue metrics namespace and service
+    set:
+      prometheus.enabled: true
+      prometheus.scrapeKueueMetrics: true
+      prometheus.kueueMetricsNamespace: platform
+      prometheus.kueueMetricsService: kueue-metrics
+    asserts:
+      - matchRegex:
+          path: data["prometheus.yml"]
+          pattern: "kueue-metrics\\.platform\\.svc\\.cluster\\.local:8443"
+
 ---
 # yaml-language-server: $schema=https://raw.githubusercontent.com/helm-unittest/helm-unittest/main/schema/helm-testsuite.json
 suite: grafana_ingress_annotations_test
@@ -78,3 +109,34 @@ tests:
       - equal:
           path: metadata.annotations["example.com/baz"]
           value: "qux"
+
+---
+# yaml-language-server: $schema=https://raw.githubusercontent.com/helm-unittest/helm-unittest/main/schema/helm-testsuite.json
+suite: job_latency_dashboard_test
+templates:
+  - api-dashboard-grafana-configmap.yaml
+tests:
+  - it: should ship the job start-up latency panels
+    set:
+      grafana.enabled: true
+      grafana.sidecar.dashboards.enabled: true
+    asserts:
+      - matchRegex:
+          path: data["api-server-overview.json"]
+          pattern: '"Job start-up latency"'
+      # The headline and the breakdown answer different questions: how long
+      # jobs take to start, and which stage to go and fix.
+      - matchRegex:
+          path: data["api-server-overview.json"]
+          pattern: "sky_managed_job_time_to_running_seconds_bucket"
+      # Means, not quantiles: a stack of per-phase medians sums to a
+      # number no job ever experienced.
+      - matchRegex:
+          path: data["api-server-overview.json"]
+          pattern: "sky_managed_job_phase_duration_seconds_sum"
+      - notMatchRegex:
+          path: data["api-server-overview.json"]
+          pattern: "histogram_quantile\\(0.5, sum by \\(le, phase"
+      - matchRegex:
+          path: data["api-server-overview.json"]
+          pattern: "sky_launch_queue_wait_seconds_bucket"

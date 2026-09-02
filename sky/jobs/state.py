@@ -129,6 +129,49 @@ spot_table = sqlalchemy.Table(
     # PENDING while it waits in an external scheduler queue) without altering
     # the underlying job lifecycle. NULL means "no override".
     sqlalchemy.Column('status_override', sqlalchemy.Text, server_default=None),
+    # When the job was accepted, as epoch seconds. T0 of the launch timeline.
+    #
+    # A separate column rather than reusing the PENDING job_events row, whose
+    # timestamp is written as a naive local datetime while every other
+    # timestamp here is time.time(). Subtracting the two is wrong by the UTC
+    # offset on any non-UTC deployment and can come out negative -- and a
+    # negative observation lands silently in a histogram's lowest bucket, so
+    # the metric would look healthy while being wrong.
+    sqlalchemy.Column('created_at', sqlalchemy.Float, server_default=None),
+    # The launch timeline, denormalized once the job first reaches RUNNING, so
+    # the jobs list renders from one indexed row read instead of a per-job scan
+    # of launch_attempts. Write-once: they describe how long the job took to
+    # start, which a preemption three hours later does not redefine.
+    #
+    # Together they partition the wall clock from created_at to RUNNING:
+    #   controller_queue  accepted -> a controller claimed the job
+    #   retry_overhead    launch attempts that were thrown away, plus backoff
+    #   provision_setup   the final attempt's provision start -> instances asked
+    #   queue_wait        asked for -> admitted by an external scheduler
+    #   node_startup      admitted -> instances up
+    #   runtime_setup     instances up -> the job is RUNNING
+    sqlalchemy.Column('t_controller_queue',
+                      sqlalchemy.Float,
+                      server_default=None),
+    sqlalchemy.Column('t_retry_overhead', sqlalchemy.Float,
+                      server_default=None),
+    # Time that belongs to no phase we can name: a job placed on a warm pool
+    # never provisions, and one launched before these milestones has no
+    # attempt to break down. Kept apart from retry_overhead so such a job does
+    # not read as "99% retried launches", which is the misdiagnosis this
+    # breakdown exists to prevent.
+    sqlalchemy.Column('t_unattributed', sqlalchemy.Float, server_default=None),
+    sqlalchemy.Column('t_provision_setup',
+                      sqlalchemy.Float,
+                      server_default=None),
+    sqlalchemy.Column('t_queue_wait', sqlalchemy.Float, server_default=None),
+    sqlalchemy.Column('t_node_startup', sqlalchemy.Float, server_default=None),
+    sqlalchemy.Column('t_runtime_setup', sqlalchemy.Float, server_default=None),
+    # The headline: accepted -> RUNNING. Measured directly rather than summed,
+    # because histogram quantiles are not additive.
+    sqlalchemy.Column('t_time_to_running',
+                      sqlalchemy.Float,
+                      server_default=None),
 )
 
 job_info_table = sqlalchemy.Table(
@@ -450,6 +493,17 @@ def _get_jobs_dict(r: 'row.RowMapping') -> Dict[str, Any]:
         'status': r.get('status'),
         'run_timestamp': r.get('run_timestamp'),
         'start_at': r.get('start_at'),
+        # The launch timeline. All None until the job first reaches RUNNING,
+        # and on jobs that predate it.
+        'created_at': r.get('created_at'),
+        't_controller_queue': r.get('t_controller_queue'),
+        't_retry_overhead': r.get('t_retry_overhead'),
+        't_unattributed': r.get('t_unattributed'),
+        't_provision_setup': r.get('t_provision_setup'),
+        't_queue_wait': r.get('t_queue_wait'),
+        't_node_startup': r.get('t_node_startup'),
+        't_runtime_setup': r.get('t_runtime_setup'),
+        't_time_to_running': r.get('t_time_to_running'),
         'end_at': r.get('end_at'),
         'last_recovered_at': r.get('last_recovered_at'),
         'recovery_count': r.get('recovery_count'),
@@ -963,6 +1017,7 @@ def set_pending(
                 metadata=metadata,
                 status=ManagedJobStatus.PENDING.value,
                 is_primary_in_job_group=is_primary_in_job_group,
+                created_at=time.time(),
             ))
         session.commit()
 
@@ -4178,3 +4233,124 @@ async def job_event_retention_daemon():
             logger.error(f'Error running job event retention daemon: {e}')
 
         await asyncio.sleep(JOB_EVENT_DAEMON_INTERVAL_SECONDS)
+
+
+# --- Launch timeline ---------------------------------------------------------
+#
+# See the spot table's t_* columns for what these durations mean and why they
+# are denormalized here.
+
+
+@db_retries.retry
+def get_jobs_pending_launch_timeline(limit: int = 200) -> List[Dict[str, Any]]:
+    """Tasks that have first reached RUNNING but have no timeline recorded yet.
+
+    A task that never reaches RUNNING is deliberately not returned: it has no
+    time-to-running to report, and its individual launch attempts are already
+    accounted for on their own. Leaving it out also means no extra marker is
+    needed to avoid rescanning it forever -- there simply is no timeline to
+    write.
+    """
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
+        rows = session.execute(
+            sqlalchemy.select(
+                spot_table.c.spot_job_id,
+                spot_table.c.task_id,
+                spot_table.c.task_name,
+                spot_table.c.created_at,
+                spot_table.c.submitted_at,
+                spot_table.c.start_at,
+                job_info_table.c.workspace,
+                # Distinguishes a job placed on a warm pool, which skips
+                # provisioning, from one that provisioned its own cluster.
+                job_info_table.c.pool,
+            ).select_from(
+                spot_table.join(
+                    job_info_table,
+                    spot_table.c.spot_job_id == job_info_table.c.spot_job_id,
+                    isouter=True)).where(
+                        sqlalchemy.and_(
+                            spot_table.c.start_at.is_not(None),
+                            spot_table.c.created_at.is_not(None),
+                            spot_table.c.t_time_to_running.is_(None),
+                        )).order_by(spot_table.c.start_at).limit(limit)).all()
+        return [dict(row._mapping) for row in rows]  # pylint: disable=protected-access
+
+
+@db_retries.retry
+def record_launch_timeline(job_id: int, task_id: int,
+                           durations: Dict[str, float]) -> bool:
+    """Write a task's launch timeline, once.
+
+    Returns whether this writer was the one that recorded it. The update is
+    conditional on the timeline still being absent, so concurrent API server
+    replicas write it exactly once and only the winner emits the metrics --
+    otherwise every rate would be multiplied by the replica count.
+    """
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
+        result = session.execute(spot_table.update().where(
+            sqlalchemy.and_(
+                spot_table.c.spot_job_id == job_id,
+                spot_table.c.task_id == task_id,
+                spot_table.c.t_time_to_running.is_(None),
+            )).values({
+                spot_table.c[name]: value for name, value in durations.items()
+            }))
+        session.commit()
+        return bool(result.rowcount)
+
+
+@db_retries.retry
+def get_jobs_that_never_ran(limit: int = 200) -> List[Dict[str, Any]]:
+    """Finished tasks that never reached RUNNING and are not yet accounted for.
+
+    They have no time-to-running, but leaving them out of the counts entirely
+    is how a fleet that mostly fails to start comes to look fast. They did wait
+    for a controller, so that phase is still a real measurement -- and having
+    written it is what marks the task as counted.
+    """
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
+        rows = session.execute(
+            sqlalchemy.select(
+                spot_table.c.spot_job_id,
+                spot_table.c.task_id,
+                spot_table.c.created_at,
+                spot_table.c.submitted_at,
+                job_info_table.c.workspace,
+                job_info_table.c.pool,
+            ).select_from(
+                spot_table.join(
+                    job_info_table,
+                    spot_table.c.spot_job_id == job_info_table.c.spot_job_id,
+                    isouter=True)).where(
+                        sqlalchemy.and_(
+                            spot_table.c.end_at.is_not(None),
+                            spot_table.c.start_at.is_(None),
+                            spot_table.c.created_at.is_not(None),
+                            spot_table.c.submitted_at.is_not(None),
+                            spot_table.c.t_controller_queue.is_(None),
+                        )).order_by(spot_table.c.end_at).limit(limit)).all()
+        return [dict(row._mapping) for row in rows]  # pylint: disable=protected-access
+
+
+@db_retries.retry
+def record_controller_queue_only(job_id: int, task_id: int,
+                                 duration: float) -> bool:
+    """Record the controller wait of a task that never ran, once.
+
+    Returns whether this writer recorded it, so concurrent replicas count the
+    task exactly once.
+    """
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
+        result = session.execute(spot_table.update().where(
+            sqlalchemy.and_(
+                spot_table.c.spot_job_id == job_id,
+                spot_table.c.task_id == task_id,
+                spot_table.c.t_controller_queue.is_(None),
+            )).values({spot_table.c.t_controller_queue: duration}))
+        session.commit()
+        return bool(result.rowcount)

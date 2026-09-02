@@ -49,6 +49,7 @@ import {
   streamManagedJobLogs,
   downloadManagedJobLogs,
 } from '@/data/connectors/jobs';
+import { JobStartupTimeline } from '@/components/jobs.startuptimeline';
 import { StatusBadge } from '@/components/elements/StatusBadge';
 import { PrimaryBadge } from '@/components/elements/PrimaryBadge';
 import { BatchBadge } from '@/components/elements/BatchBadge';
@@ -1363,6 +1364,10 @@ function JobDetailsContent({
   // Default 'info' tab content
   return (
     <div className="grid grid-cols-2 gap-6">
+      {/* Spans both columns: the bar is only readable at full width. */}
+      <div className="col-span-2">
+        <JobStartupTimeline jobData={jobData} />
+      </div>
       <div>
         <div className="text-gray-600 font-medium text-base">Job ID (Name)</div>
         <div className="text-base mt-1 flex items-center gap-2">

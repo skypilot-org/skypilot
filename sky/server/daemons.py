@@ -7,8 +7,10 @@ import sys
 import time
 from typing import Callable, Optional
 
+from sky import global_user_state
 from sky import sky_logging
 from sky import skypilot_config
+from sky.metrics import utils as metrics_lib
 from sky.server import constants as server_constants
 from sky.server.requests import request_names
 from sky.skylet import constants
@@ -344,6 +346,164 @@ def expired_token_cleanup_event():
     time.sleep(interval)
 
 
+def launch_metrics_event():
+    """Turn finished launch attempts into phase-duration metrics.
+
+    The observing is done here, away from provisioning, for two reasons. The
+    process that provisions is disposable -- burst requests get a fresh one per
+    task -- and it is not even reliably the process that finishes a phase it
+    started, since a launch waiting on quota parks and resumes elsewhere. This
+    daemon is long-lived and reads the milestones back from the database
+    instead.
+
+    Claiming is a conditional update, so running on several API server replicas
+    at once observes each attempt exactly once rather than multiplying every
+    rate by the replica count.
+    """
+    # Imported here, like every other daemon event in this module: importing
+    # sky.metrics.launch_phases at module scope would pull the metrics package
+    # into every consumer of daemons.py, including the CLI, for code only this
+    # daemon runs.
+    # pylint: disable=import-outside-toplevel
+    from sky.metrics import launch_phases
+
+    claimed = global_user_state.claim_unobserved_launch_attempts()
+    for attempt in claimed:
+        try:
+            launch_phases.observe_attempt(attempt)
+        except Exception as e:  # pylint: disable=broad-except
+            # One malformed row must not stop the rest from being observed,
+            # and the row stays claimed so a poison record cannot spin here.
+            # Counted, because the claim already happened: without this the
+            # sample is simply gone, and a phase silently missing reads the
+            # same as a phase that was fast.
+            metrics_lib.count_launch_phase_dropped('unknown', 'observe_error')
+            logger.error(f'Failed to observe launch attempt '
+                         f'{attempt.attempt_id}: {e}')
+    if claimed:
+        logger.info(f'Claimed and observed {len(claimed)} finished launch '
+                    'attempt(s).')
+
+    recorded = _record_job_launch_timelines()
+    if recorded:
+        logger.info(f'Recorded the launch timeline of {recorded} job(s).')
+
+    # Also here, not only at server start: a server that runs for weeks would
+    # otherwise leave a row from a dead executor open forever, and retention
+    # only deletes closed ones. Guarded like the rest of this event -- a sweep
+    # that fails must not cost the tick its observations.
+    try:
+        stranded = global_user_state.sweep_abandoned_launch_attempts()
+        if stranded:
+            logger.info(f'Closed {stranded} abandoned launch attempt(s).')
+    except Exception as e:  # pylint: disable=broad-except
+        logger.error(f'Failed to sweep abandoned launch attempts: {e}')
+
+    interval = skypilot_config.get_nested(
+        ('daemons', 'launch-metrics-daemon', 'interval_seconds'),
+        server_constants.LAUNCH_METRICS_DAEMON_INTERVAL_SECONDS)
+    time.sleep(interval)
+
+
+def _record_job_launch_timelines() -> int:
+    """Split each newly running job's wait into phases, and record it.
+
+    Done for the job as a whole, not just its successful launch: a job that
+    failed over twice waited through those attempts too, and reporting only the
+    attempt that worked would say it started promptly.
+
+    Returns how many jobs were recorded by this process.
+    """
+    # sky.jobs.state imports sky.jobs.utils, which reaches back into the
+    # server package; importing it at module scope here closes that cycle. The
+    # metrics import follows the same convention as the caller above.
+    # pylint: disable=import-outside-toplevel
+    from sky.jobs import state as managed_job_state
+    from sky.jobs import utils as managed_job_utils
+    from sky.metrics import launch_phases
+
+    recorded = 0
+    for task in managed_job_state.get_jobs_pending_launch_timeline():
+        try:
+            attempts = []
+            if task['task_name'] is not None:
+                attempts = global_user_state.get_launch_attempts_for_cluster(
+                    managed_job_utils.generate_managed_job_cluster_name(
+                        task['task_name'], task['spot_job_id']))
+            total, phases = launch_phases.compute_job_timeline(task, attempts)
+            # Only the writer that won the row emits the metrics; otherwise
+            # every replica running this daemon would observe the same job.
+            if managed_job_state.record_launch_timeline(
+                    task['spot_job_id'], task['task_id'],
+                    launch_phases.timeline_columns(phases, total)):
+                launch_phases.observe_job_timeline(task['workspace'],
+                                                   total, phases,
+                                                   bool(task.get('pool')))
+                recorded += 1
+        except Exception as e:  # pylint: disable=broad-except
+            # Take the task out of the pending set even so. It is selected by
+            # `t_time_to_running IS NULL` with a LIMIT, so a row that keeps
+            # raising is returned every tick forever and, once enough of them
+            # accumulate, starves every newer job out of the batch. Record the
+            # total alone: it is the one number that needs no breakdown, and it
+            # is honest about the rest being unknown.
+            logger.error(f'Failed to record the launch timeline of job '
+                         f'{task["spot_job_id"]}: {e}')
+            try:
+                total = task['start_at'] - task['created_at']
+                managed_job_state.record_launch_timeline(
+                    task['spot_job_id'], task['task_id'], {
+                        't_time_to_running': total,
+                        't_unattributed': total,
+                    })
+            except Exception as inner:  # pylint: disable=broad-except
+                logger.error(f'Could not park the launch timeline of job '
+                             f'{task["spot_job_id"]}: {inner}')
+
+    # Jobs that went terminal without ever running have no timing to report,
+    # but they belong in the counts: a fleet that mostly fails to start would
+    # otherwise show only the survivors' latency and look healthy.
+    for task in managed_job_state.get_jobs_that_never_ran():
+        try:
+            if managed_job_state.record_controller_queue_only(
+                    task['spot_job_id'], task['task_id'],
+                    max(0.0, task['submitted_at'] - task['created_at'])):
+                launch_phases.count_job_that_never_ran(task['workspace'],
+                                                       bool(task.get('pool')))
+        except Exception as e:  # pylint: disable=broad-except
+            logger.error(f'Failed to count job {task["spot_job_id"]} as never '
+                         f'having run: {e}')
+    return recorded
+
+
+def should_skip_launch_metrics() -> bool:
+    """Skip entirely unless an observation here could actually be read.
+
+    Claiming marks a row observed, so claiming while the output goes nowhere
+    consumes the attempts silently and leaves a permanent hole if the setup is
+    fixed later. Two ways the output can go nowhere:
+
+    * Metrics are off.
+    * Metrics are on but ``PROMETHEUS_MULTIPROC_DIR`` is unset. This daemon
+      runs in its own process, so without multiprocess mode ``/metrics`` serves
+      only the main server process's registry and everything observed here is
+      invisible -- while the metrics written in-process keep working, which is
+      what makes it easy to miss. A supported deployment always sets the two
+      together (see ``_set_metrics_env_var``); this guards the hand-rolled
+      setups that export the enable flag on its own.
+    """
+    if not metrics_lib.METRICS_ENABLED:
+        return True
+    if not os.environ.get('PROMETHEUS_MULTIPROC_DIR'):
+        logger.warning(
+            'Launch latency metrics are enabled but PROMETHEUS_MULTIPROC_DIR '
+            'is unset, so anything this daemon observed would not appear on '
+            '/metrics. Skipping, to keep the attempts available for when it '
+            'is set.')
+        return True
+    return False
+
+
 def server_heartbeat_event():
     """Periodically send server-side plugin metrics to Loki."""
     # pylint: disable=import-outside-toplevel
@@ -406,6 +566,11 @@ INTERNAL_REQUEST_DAEMONS = [
         id='expired-token-cleanup-daemon',
         name=request_names.RequestName.REQUEST_DAEMON_EXPIRED_TOKEN_CLEANUP,
         event_fn=expired_token_cleanup_event),
+    InternalRequestDaemon(
+        id='launch-metrics-daemon',
+        name=request_names.RequestName.REQUEST_DAEMON_LAUNCH_METRICS,
+        event_fn=launch_metrics_event,
+        should_skip=should_skip_launch_metrics),
 ]
 
 HIDDEN_REQUEST_NAMES = [

@@ -2168,6 +2168,14 @@ def _create_pods(region: str, cluster_name: str, cluster_name_on_cloud: str,
     context = kubernetes_utils.get_context_from_config(provider_config)
     pod_spec = copy.deepcopy(config.node_config)
     create_pods_start = datetime.datetime.now(datetime.timezone.utc)
+    # Closes the provision-setup segment of this launch attempt and opens the
+    # admission-wait one. The same reference point _wait_for_pods_to_schedule
+    # measures from, so the two agree. Write-once, so a resumed launch
+    # re-entering here keeps the original time rather than restarting the wait
+    # at admission.
+    global_user_state.record_launch_milestone_for_cluster(
+        cluster_name, global_user_state.LaunchMilestone.INSTANCES_REQUESTED,
+        create_pods_start.timestamp())
 
     to_create_deployment = 'deployment_spec' in pod_spec
     if to_create_deployment:
