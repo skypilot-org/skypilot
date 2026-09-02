@@ -145,3 +145,8 @@ make retried work idempotent.
 
 See Ray's [GCS fault-tolerance documentation](https://docs.ray.io/en/latest/ray-core/fault_tolerance/gcs.html#fault-tolerance-gcs-rocksdb)
 for details about the embedded RocksDB backend.
+
+## Acknowledgements
+
+The NVLink domain-aware example was inspired by Anyscale's
+[Maximizing the Power of NVIDIA GB300 NVL72: NVLink Domain-Aware Placement Groups in Ray](https://www.anyscale.com/blog/nvidia-gb300-nvlink-domain-aware-placement-groups-ray).
