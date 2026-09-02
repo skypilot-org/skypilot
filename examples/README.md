@@ -16,6 +16,8 @@ Machine learning examples:
 
 - [**`cosmos3-finetuning/`**](./cosmos3-finetuning/README.md): Fine-tune [NVIDIA Cosmos 3](https://github.com/NVIDIA/cosmos-framework) (`Cosmos3-Nano`, a 16B world foundation model for Physical AI) on robot-manipulation video as a managed job, using NVIDIA's `vision_sft_nano` SFT recipe with checkpoint-to-bucket auto-recovery.
 
+- [**`hf-storage-transcription/`**](./hf-storage-transcription/README.md): Batch audio transcription with [Hugging Face storage](https://huggingface.co/docs/hub/storage-buckets) as the only storage layer — audio bucket in, transcript bucket out, same YAML on any cloud.
+
 - [**`resnet_distributed_torch.yaml`**](./resnet_distributed_torch.yaml): Run Distributed PyTorch (DDP) training of ResNet50 on 2 nodes.
 
 - [**`ray_resilient_training/`**](./ray_resilient_training/README.md): Run resilient Ray training with a CPU-only head, two GPU workers, node recovery, and RocksDB-backed GCS state.
