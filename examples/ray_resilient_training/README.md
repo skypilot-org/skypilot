@@ -123,9 +123,10 @@ the node's clique label through the Kubernetes API, and registers the value as
 the Ray node label `ray.io/gpu-domain`.
 
 > [!NOTE]
-> The helper is one way to pass the node label to Ray. A mutation policy, such
-> as [Kyverno](https://kyverno.io/), can instead copy the clique label onto the
-> scheduled pod and expose it to the container through the Downward API.
+> The helper is one way to pass the node label to Ray. A mutating admission
+> webhook, such as [Kyverno](https://kyverno.io/), can instead copy the clique
+> label onto the scheduled pod and expose it to the container through the
+> Downward API.
 
 Launch the variant from the repository root:
 
