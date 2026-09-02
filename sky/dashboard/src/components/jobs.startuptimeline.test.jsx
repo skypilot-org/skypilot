@@ -45,6 +45,26 @@ describe('JobStartupTimeline', () => {
     expect(screen.queryByText('Retried launches')).not.toBeInTheDocument();
   });
 
+  it('draws a pool job as a full bar, not a 1%-wide one', () => {
+    // A pool job never provisions, so its whole wait lands in one phase. Leave
+    // that phase out of the bar and the header still reads the full time while
+    // the bar renders almost empty -- which reads as a rendering bug rather
+    // than as the measurement it is.
+    render(
+      <JobStartupTimeline
+        jobData={{
+          t_time_to_running: 1000,
+          t_controller_queue: 10,
+          t_unattributed: 990,
+        }}
+      />
+    );
+
+    expect(screen.getByTestId('startup-segment-t_unattributed')).toHaveStyle(
+      'width: 99%'
+    );
+  });
+
   it('renders nothing for a job with no recorded timeline', () => {
     // Jobs that never started, and jobs launched before the timeline existed.
     // An empty bar would read as "started instantly".

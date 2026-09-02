@@ -26,6 +26,12 @@ const PHASES = [
     color: 'bg-amber-400',
   },
   {
+    key: 't_unattributed',
+    label: 'Unaccounted',
+    hint: 'Time no phase claims -- a job placed on a warm pool never provisions, and one that started before this breakdown existed has no attempt recorded.',
+    color: 'bg-gray-300',
+  },
+  {
     key: 't_provision_setup',
     label: 'Preparing the launch',
     hint: 'Resolving resources, uploading files, and asking for the instances.',

@@ -77,6 +77,49 @@ def test_one_bad_row_does_not_block_the_others(monkeypatch):
     assert observed == ['good']
 
 
+def _one_running_job(tmp_path, monkeypatch, pool=None):
+    """A spot_jobs DB holding a single job that has reached RUNNING."""
+    monkeypatch.setenv(skylet_constants.SKY_RUNTIME_DIR_ENV_VAR_KEY,
+                       str(tmp_path))
+    monkeypatch.setattr(
+        managed_job_state, '_db_manager',
+        db_utils.DatabaseManager('spot_jobs', managed_job_state.create_table))
+
+    engine = managed_job_state._db_manager.get_engine()
+    with sqlalchemy.orm.Session(engine) as session:
+        session.execute(managed_job_state.spot_table.insert().values(
+            spot_job_id=1,
+            task_id=0,
+            task_name='t',
+            status='RUNNING',
+            created_at=100.0,
+            submitted_at=110.0,
+            start_at=200.0))
+        session.execute(managed_job_state.job_info_table.insert().values(
+            spot_job_id=1, workspace='eng', pool=pool))
+        session.commit()
+
+
+def test_a_job_that_cannot_be_broken_down_leaves_the_pending_set(
+        tmp_path, monkeypatch):
+    """A row that keeps raising must not be handed back every tick.
+
+    The pending set is `t_time_to_running IS NULL` with a LIMIT and ordered by
+    the oldest first, so rows that always fail sit at the head of it: enough of
+    them and no newer job is ever reached again. Parking the total alone is
+    what takes the row out.
+    """
+    _one_running_job(tmp_path, monkeypatch)
+    monkeypatch.setattr(daemons.global_user_state,
+                        'get_launch_attempts_for_cluster', lambda _: [])
+
+    with mock.patch('sky.metrics.launch_phases.compute_job_timeline',
+                    side_effect=ValueError('malformed attempt')):
+        assert daemons._record_job_launch_timelines() == 0
+
+    assert managed_job_state.get_jobs_pending_launch_timeline() == []
+
+
 def test_the_timeline_query_carries_the_pool(tmp_path, monkeypatch):
     """A pool job skips provisioning, so its path must be distinguishable.
 
