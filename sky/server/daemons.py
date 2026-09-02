@@ -7,8 +7,10 @@ import sys
 import time
 from typing import Callable, Optional
 
+from sky import global_user_state
 from sky import sky_logging
 from sky import skypilot_config
+from sky.metrics import utils as metrics_lib
 from sky.server import constants as server_constants
 from sky.server.requests import request_names
 from sky.skylet import constants
@@ -344,6 +346,50 @@ def expired_token_cleanup_event():
     time.sleep(interval)
 
 
+def launch_metrics_event():
+    """Turn finished launch attempts into phase-duration metrics.
+
+    The observing is done here, away from provisioning, for two reasons. The
+    process that provisions is disposable -- burst requests get a fresh one per
+    task -- and it is not even reliably the process that finishes a phase it
+    started, since a launch waiting on quota parks and resumes elsewhere. This
+    daemon is long-lived and reads the milestones back from the database
+    instead.
+
+    Claiming is a conditional update, so running on several API server replicas
+    at once observes each attempt exactly once rather than multiplying every
+    rate by the replica count.
+    """
+    # pylint: disable=import-outside-toplevel
+    from sky.metrics import launch_phases
+
+    claimed = global_user_state.claim_unobserved_launch_attempts()
+    for attempt in claimed:
+        try:
+            launch_phases.observe_attempt(attempt)
+        except Exception as e:  # pylint: disable=broad-except
+            # One malformed row must not stop the rest from being observed,
+            # and the row stays claimed so a poison record cannot spin here.
+            logger.error(f'Failed to observe launch attempt '
+                         f'{attempt.attempt_id}: {e}')
+    if claimed:
+        logger.info(f'Observed {len(claimed)} finished launch attempt(s).')
+    interval = skypilot_config.get_nested(
+        ('daemons', 'launch-metrics-daemon', 'interval_seconds'),
+        server_constants.LAUNCH_METRICS_DAEMON_INTERVAL_SECONDS)
+    time.sleep(interval)
+
+
+def should_skip_launch_metrics() -> bool:
+    """Skip entirely when metrics are off, so nothing is claimed.
+
+    Claiming marks a row observed. Doing that with metrics disabled would
+    consume the attempts silently and leave a permanent hole in the data if
+    metrics were later turned on.
+    """
+    return not metrics_lib.METRICS_ENABLED
+
+
 def server_heartbeat_event():
     """Periodically send server-side plugin metrics to Loki."""
     # pylint: disable=import-outside-toplevel
@@ -406,6 +452,11 @@ INTERNAL_REQUEST_DAEMONS = [
         id='expired-token-cleanup-daemon',
         name=request_names.RequestName.REQUEST_DAEMON_EXPIRED_TOKEN_CLEANUP,
         event_fn=expired_token_cleanup_event),
+    InternalRequestDaemon(
+        id='launch-metrics-daemon',
+        name=request_names.RequestName.REQUEST_DAEMON_LAUNCH_METRICS,
+        event_fn=launch_metrics_event,
+        should_skip=should_skip_launch_metrics),
 ]
 
 HIDDEN_REQUEST_NAMES = [
