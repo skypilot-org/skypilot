@@ -25,16 +25,21 @@ GPU_NAME_MAP = {
 
     # NVIDIA B-series
     'B200': 'NVIDIA B200',
+    'B300': 'NVIDIA B300 SXM6 AC',
 
     # GeForce
     'RTX3070': 'NVIDIA GeForce RTX 3070',
     'RTX3080': 'NVIDIA GeForce RTX 3080',
     'RTX3080Ti': 'NVIDIA GeForce RTX 3080 Ti',
+    'RTX3080-Ti': 'NVIDIA GeForce RTX 3080 Ti',
     'RTX3090': 'NVIDIA GeForce RTX 3090',
     'RTX3090Ti': 'NVIDIA GeForce RTX 3090 Ti',
+    'RTX3090-Ti': 'NVIDIA GeForce RTX 3090 Ti',
     'RTX4070Ti': 'NVIDIA GeForce RTX 4070 Ti',
+    'RTX4070-Ti': 'NVIDIA GeForce RTX 4070 Ti',
     'RTX4080': 'NVIDIA GeForce RTX 4080',
     'RTX4080SUPER': 'NVIDIA GeForce RTX 4080 SUPER',
+    'RTX4080-SUPER': 'NVIDIA GeForce RTX 4080 SUPER',
     'RTX4090': 'NVIDIA GeForce RTX 4090',
     'RTX5080': 'NVIDIA GeForce RTX 5080',
     'RTX5090': 'NVIDIA GeForce RTX 5090',
@@ -46,6 +51,7 @@ GPU_NAME_MAP = {
     'H100-NVL': 'NVIDIA H100 NVL',
     'H100': 'NVIDIA H100 PCIe',
     'H200-SXM': 'NVIDIA H200',
+    'H200-NVL': 'NVIDIA H200 NVL',
 
     # NVIDIA L-series
     'L4': 'NVIDIA L4',
@@ -67,15 +73,29 @@ GPU_NAME_MAP = {
     'RTXA6000': 'NVIDIA RTX A6000',
 
     # NVIDIA RTX PRO (Blackwell)
+    'RTXPRO4000': 'NVIDIA RTX PRO 4000 Blackwell',
     'RTXPRO4500': 'NVIDIA RTX PRO 4500 Blackwell',
+    'RTXPRO4500-SE': 'NVIDIA RTX PRO 4500 Blackwell Server Edition',
+    'RTXPRO5000': 'NVIDIA RTX PRO 5000 Blackwell',
     'RTXPRO6000': 'NVIDIA RTX PRO 6000 Blackwell Server Edition',
+    'RTXPRO6000-MaxQ': ('NVIDIA RTX PRO 6000 Blackwell Max-Q Workstation '
+                        'Edition'),
     'RTXPRO6000-WK': 'NVIDIA RTX PRO 6000 Blackwell Workstation Edition',
+    # MIG slices of the RTX PRO 6000 Server Edition. RunPod displays these
+    # as 'PRO 6000 MIG <VRAM>', hence the different naming.
+    'PRO-6000-MIG-24GB': ('NVIDIA RTX PRO 6000 Blackwell Server Edition '
+                          'MIG 1g.24gb'),
+    'PRO-6000-MIG-48GB': ('NVIDIA RTX PRO 6000 Blackwell Server Edition '
+                          'MIG 2g.48gb'),
 
     # Tesla V100 variants
     'V100-16GB-FHHL': 'Tesla V100-FHHL-16GB',
     'V100-16GB-SXM2': 'Tesla V100-SXM2-16GB',
+    'V100-SXM2': 'Tesla V100-SXM2-16GB',
     'V100-32GB-SXM2': 'Tesla V100-SXM2-32GB',
+    'V100-SXM2-32GB': 'Tesla V100-SXM2-32GB',
     'V100-16GB-PCIe': 'Tesla V100-PCIE-16GB',
+    'Tesla-V100': 'Tesla V100-PCIE-16GB',
 }
 
 
@@ -384,7 +404,13 @@ def launch(
             'instance_id': instance_type,
         })
     else:
-        gpu_type = GPU_NAME_MAP[instance_type.split('_')[1]]
+        gpu_name = instance_type.split('_')[1]
+        if gpu_name not in GPU_NAME_MAP:
+            raise ValueError(
+                f'GPU {gpu_name!r} is in the SkyPilot catalog but is not in '
+                'GPU_NAME_MAP, so its RunPod GPU ID is unknown. Please report '
+                'this at https://github.com/skypilot-org/skypilot/issues.')
+        gpu_type = GPU_NAME_MAP[gpu_name]
         gpu_quantity = int(instance_type.split('_')[0].replace('x', ''))
         cloud_type = instance_type.split('_')[2]
         gpu_specs = runpod.runpod.get_gpu(gpu_type)
