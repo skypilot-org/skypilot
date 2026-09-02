@@ -9,6 +9,7 @@ import pytest
 from sky import exceptions
 from sky.provision.slurm import instance
 from sky.skylet import constants as skylet_constants
+from sky.utils import command_runner
 
 _CLUSTER = 'test-cluster'
 _PROVIDER_CONFIG = {
@@ -109,6 +110,23 @@ class TestSnapshotManifest:
             instance._validate_snapshot_files(
                 runner, '/home/test/.sky_snapshots/test-cluster', manifest)
 
+    def test_local_runner_publishes_without_rsync(self, tmp_path):
+        """Inside-cluster publication writes the manifest directly.
+
+        The head node's host is not guaranteed to have rsync, so the local
+        runner path must not go through it.
+        """
+        runner = command_runner.LocalProcessCommandRunner()
+        rsync = mock.MagicMock(wraps=runner.rsync)
+        runner.rsync = rsync
+        manifest = _snapshot_manifest()
+
+        instance._write_snapshot_manifest(runner, str(tmp_path), manifest)
+
+        rsync.assert_not_called()
+        published = json.loads((tmp_path / 'manifest.json').read_text())
+        assert published == manifest
+
 
 class TestResolveSkyBaseDir:
     """Tests persisted Slurm cluster state directory lookup."""
@@ -145,6 +163,28 @@ class TestResolveSkyBaseDir:
 
         assert result == '/current/shared/path'
         resolve.assert_called_once_with('test-slurm', client)
+
+
+class TestResolveSkyPilotRuntimeDir:
+    """Tests inside-cluster runtime directory lookup."""
+
+    def test_inside_cluster_requires_runtime_dir_env(self, monkeypatch):
+        monkeypatch.delenv(skylet_constants.SKY_RUNTIME_DIR_ENV_VAR_KEY,
+                           raising=False)
+        get_cluster = mock.MagicMock(
+            side_effect=AssertionError('config fallback must not run'))
+        monkeypatch.setattr(instance.slurm_utils,
+                            'get_slurm_cluster_from_config', get_cluster)
+        client = mock.MagicMock()
+
+        with pytest.raises(RuntimeError, match='SKY_RUNTIME_DIR is not set'):
+            instance._resolve_skypilot_runtime_dir(client,
+                                                   _PROVIDER_CONFIG,
+                                                   _CLUSTER,
+                                                   inside_slurm_cluster=True)
+
+        get_cluster.assert_not_called()
+        client.get_env.assert_not_called()
 
 
 @pytest.fixture
@@ -472,7 +512,7 @@ class TestStopInstances:
     """Tests Slurm container export and stop ordering."""
 
     @staticmethod
-    def _setup(monkeypatch, nodes):
+    def _setup(monkeypatch, nodes, inside=False):
         client = mock.MagicMock()
         client.query_jobs.return_value = ['123']
         client.get_job_nodes.return_value = (nodes, [
@@ -490,12 +530,30 @@ class TestStopInstances:
         login_runner.run.side_effect = run
         head_runner = mock.MagicMock()
         head_runner.run_driver.return_value = (0, '', '')
-        monkeypatch.setattr(instance, '_make_slurm_client',
-                            mock.MagicMock(return_value=client))
+        make_client = mock.MagicMock(return_value=client)
+        monkeypatch.setattr(instance, '_make_slurm_client', make_client)
         monkeypatch.setattr(instance, '_make_login_node_runner',
                             mock.MagicMock(return_value=login_runner))
         monkeypatch.setattr(instance, '_resolve_sky_base_dir',
                             mock.MagicMock(return_value='/home/test'))
+        if inside:
+            # Inside the cluster, stop runs from the head node's skylet: the
+            # factory must build the local client/runner instead of SSH ones.
+            monkeypatch.setattr(instance.slurm_utils, 'is_inside_slurm_cluster',
+                                mock.MagicMock(return_value=True))
+            slurm_client_factory = mock.MagicMock(return_value=client)
+            monkeypatch.setattr(instance.slurm, 'SlurmClient',
+                                slurm_client_factory)
+            monkeypatch.setattr(instance.command_runner,
+                                'LocalProcessCommandRunner',
+                                mock.MagicMock(return_value=login_runner))
+            monkeypatch.setenv(skylet_constants.SKY_RUNTIME_DIR_ENV_VAR_KEY,
+                               '/tmp/test-cluster')
+            client.test_slurm_client_factory = slurm_client_factory
+        else:
+            monkeypatch.setattr(instance.slurm_utils, 'is_inside_slurm_cluster',
+                                mock.MagicMock(return_value=False))
+        client.test_make_client = make_client
         read_manifest = mock.MagicMock(return_value=None)
         monkeypatch.setattr(instance, '_read_snapshot_manifest', read_manifest)
         new_uuid = mock.MagicMock()
@@ -835,6 +893,113 @@ class TestStopInstances:
             for command in commands)
         write_manifest.assert_not_called()
         cancel_slurm_job.assert_not_called()
+
+    def test_inside_cluster_uses_local_execution(self, monkeypatch):
+        (client, local_runner, head_runner, write_manifest,
+         cancel_slurm_job) = self._setup(monkeypatch, ['node-a'], inside=True)
+
+        instance.stop_instances(_CLUSTER, provider_config=_PROVIDER_CONFIG)
+
+        # No SSH to the login node: the local client is built directly.
+        client.test_make_client.assert_not_called()
+        client.test_slurm_client_factory.assert_called_once_with(
+            is_inside_slurm_cluster=True)
+        # The job-driver cancel runs locally instead of via srun over SSH.
+        instance.get_command_runners.assert_not_called()
+        head_runner.run_driver.assert_not_called()
+        cancel_commands = [
+            call.args[0]
+            for call in local_runner.run.call_args_list
+            if 'cancel_jobs_encoded_results' in call.args[0]
+        ]
+        assert len(cancel_commands) == 1
+        assert cancel_commands[0].startswith(
+            f'export {skylet_constants.SKY_RUNTIME_DIR_ENV_VAR_KEY}=/tmp/'
+            'test-cluster && ')
+        write_manifest.assert_called_once()
+        cancel_slurm_job.assert_called_once()
+        assert cancel_slurm_job.call_args.args[2] is True
+
+    def test_inside_cluster_skips_skylet_kill(self, monkeypatch):
+        _, local_runner, _, _, _ = self._setup(monkeypatch, ['node-a'],
+                                               inside=True)
+
+        instance.stop_instances(_CLUSTER, provider_config=_PROVIDER_CONFIG)
+
+        # The skylet executing the stop is the process the skylet-kill step
+        # would stop, so the stop flow must not touch its keeper spec or pid.
+        commands = [call.args[0] for call in local_runner.run.call_args_list]
+        assert not any('skylet_pid' in command for command in commands)
+        assert not any('skylet_start' in command for command in commands)
+
+    def test_inside_cluster_cancels_after_manifest_without_precleanup(
+            self, monkeypatch):
+        cancel_slurm_job = instance._cancel_slurm_job
+        (client, local_runner, _, write_manifest, _) = self._setup(monkeypatch,
+                                                                   ['node-a'],
+                                                                   inside=True)
+        monkeypatch.setattr(instance, '_cancel_slurm_job', cancel_slurm_job)
+        client.get_jobs_state_by_name.return_value = ['RUNNING']
+        events = []
+        original_run = local_runner.run.side_effect
+
+        def run(command, **kwargs):
+            if 'cancel_jobs_encoded_results' in command:
+                events.append('cancel jobs')
+            if 'sqlite3.connect' in command:
+                events.append('backup jobs db')
+            if command.startswith('test ! -e ') and 'mv --' in command:
+                events.append('commit generation')
+            return original_run(command, **kwargs)
+
+        local_runner.run.side_effect = run
+        client.list_job_steps.side_effect = lambda job_id: (events.append(
+            'drain steps') or [])
+        write_manifest.side_effect = lambda *args: events.append(
+            'publish manifest')
+        cleanup = mock.MagicMock()
+        monkeypatch.setattr(instance, '_cleanup_slurm_allocation', cleanup)
+
+        def cancel(job_name, signal=None, full=False):
+            assert job_name == _CLUSTER
+            events.append(('cancel', signal, full))
+
+        client.cancel_jobs_by_name.side_effect = cancel
+
+        instance.stop_instances(_CLUSTER, provider_config=_PROVIDER_CONFIG)
+
+        assert events == [
+            'cancel jobs',
+            'drain steps',
+            'backup jobs db',
+            'commit generation',
+            'publish manifest',
+            ('cancel', 'TERM', True),
+        ]
+        cleanup.assert_not_called()
+        # Fire-and-forget: the only state query is the pre-cancel one.
+        assert client.get_jobs_state_by_name.call_count == 1
+
+    def test_inside_cluster_cancel_failure_preserves_runtime_state(
+            self, monkeypatch):
+        cancel_slurm_job = instance._cancel_slurm_job
+        (client, local_runner, _, write_manifest, _) = self._setup(monkeypatch,
+                                                                   ['node-a'],
+                                                                   inside=True)
+        monkeypatch.setattr(instance, '_cancel_slurm_job', cancel_slurm_job)
+        client.get_jobs_state_by_name.return_value = ['RUNNING']
+        client.cancel_jobs_by_name.side_effect = RuntimeError('scancel failed')
+        cleanup = mock.MagicMock()
+        monkeypatch.setattr(instance, '_cleanup_slurm_allocation', cleanup)
+
+        with pytest.raises(RuntimeError, match='scancel failed'):
+            instance.stop_instances(_CLUSTER, provider_config=_PROVIDER_CONFIG)
+
+        write_manifest.assert_called_once()
+        cleanup.assert_not_called()
+        commands = [call.args[0] for call in local_runner.run.call_args_list]
+        assert not any(
+            command == 'rm -rf -- /tmp/test-cluster' for command in commands)
 
 
 class TestQueryInstances:
