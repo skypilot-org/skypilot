@@ -1607,7 +1607,7 @@ enroot export -f -o {shlex.quote(staging_snapshot_path)} "$enroot_name"
     _cancel_slurm_job(client,
                       cluster_name_on_cloud,
                       inside_slurm_cluster=False,
-                      pre_batch_cancel=_make_pre_batch_cancel_cleanup(
+                      pre_batch_cancel=lambda: _cleanup_slurm_allocation(
                           client,
                           login_node_runner,
                           cluster_name_on_cloud,
@@ -1763,41 +1763,6 @@ rm -rf -- {shlex.quote(skypilot_runtime_dir)}
         'Failed to clean up shared Slurm cluster state before cancellation.')
 
 
-def _make_pre_batch_cancel_cleanup(
-    client: 'slurm.SlurmClient',
-    login_node_runner: 'command_runner.SlurmLoginNodeCommandRunner',
-    cluster_name_on_cloud: str,
-    provider_config: Dict[str, Any],
-    job_id: str,
-    nodes: List[str],
-    preserve_logs: bool = False,
-) -> Callable[[], None]:
-    """Best-effort node cleanup to run between step and batch cancellation.
-
-    Cleanup failures must not abort the cancellation: the batch script's
-    exit trap re-runs the same cleanup, and the allocation must come down
-    regardless.
-    """
-
-    def _cleanup() -> None:
-        try:
-            _cleanup_slurm_allocation(client,
-                                      login_node_runner,
-                                      cluster_name_on_cloud,
-                                      provider_config,
-                                      job_id,
-                                      nodes,
-                                      preserve_logs=preserve_logs)
-        except Exception as e:  # pylint: disable=broad-except
-            logger.warning(
-                'Failed to clean up the Slurm allocation before '
-                'cancellation; proceeding with cancellation. Details: '
-                f'{common_utils.format_exception(e, use_bracket=True)}')
-            logger.debug('Full exception details:', exc_info=True)
-
-    return _cleanup
-
-
 def _cancel_slurm_job(
     client: 'slurm.SlurmClient',
     cluster_name_on_cloud: str,
@@ -1850,7 +1815,14 @@ def _cancel_slurm_job(
         # batch script and its child processes.
         client.cancel_jobs_by_name(cluster_name_on_cloud, signal='TERM')
         if pre_batch_cancel is not None:
-            pre_batch_cancel()
+            try:
+                pre_batch_cancel()
+            except Exception as e:  # pylint: disable=broad-except
+                logger.warning(
+                    'Failed to clean up the Slurm allocation before '
+                    'cancellation; proceeding with cancellation. Details: '
+                    f'{common_utils.format_exception(e, use_bracket=True)}')
+                logger.debug('Full exception details:', exc_info=True)
         client.cancel_jobs_by_name(cluster_name_on_cloud,
                                    signal='TERM',
                                    full=True)
@@ -1918,9 +1890,10 @@ def terminate_instances(
         if len(running_jobs) == 1:
             job_id = running_jobs[0]
             nodes, _ = client.get_job_nodes(job_id)
-            pre_batch_cancel = _make_pre_batch_cancel_cleanup(
-                client, _make_login_node_runner(provider_config),
-                cluster_name_on_cloud, provider_config, job_id, nodes)
+            login_node_runner = _make_login_node_runner(provider_config)
+            pre_batch_cancel = lambda: _cleanup_slurm_allocation(
+                client, login_node_runner, cluster_name_on_cloud,
+                provider_config, job_id, nodes)
     _cancel_slurm_job(client,
                       cluster_name_on_cloud,
                       inside_slurm_cluster,

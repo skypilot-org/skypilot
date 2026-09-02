@@ -678,6 +678,44 @@ class TestStopInstances:
             'preserve_logs': True,
         }
 
+    def test_stop_cleanup_failure_still_cancels_after_manifest(
+            self, monkeypatch):
+        cancel_slurm_job = instance._cancel_slurm_job
+        client, _, _, write_manifest, _ = self._setup(monkeypatch, ['node-a'])
+        monkeypatch.setattr(instance, '_cancel_slurm_job', cancel_slurm_job)
+        client.get_jobs_state_by_name.side_effect = [['RUNNING'], []]
+        events = []
+        write_manifest.side_effect = lambda *args: events.append('manifest')
+
+        def fail_cleanup(*args, **kwargs):
+            del args, kwargs
+            events.append('cleanup')
+            raise RuntimeError('cleanup failed')
+
+        cleanup = mock.MagicMock(side_effect=fail_cleanup)
+        monkeypatch.setattr(instance, '_cleanup_slurm_allocation', cleanup)
+
+        def cancel(job_name, signal=None, full=False):
+            assert job_name == _CLUSTER
+            events.append(('cancel', signal, full))
+
+        client.cancel_jobs_by_name.side_effect = cancel
+        warning = mock.MagicMock()
+        monkeypatch.setattr(instance.logger, 'warning', warning)
+
+        instance.stop_instances(_CLUSTER, provider_config=_PROVIDER_CONFIG)
+
+        write_manifest.assert_called_once()
+        cleanup.assert_called_once()
+        assert events == [
+            'manifest',
+            ('cancel', 'TERM', False),
+            'cleanup',
+            ('cancel', 'TERM', True),
+        ]
+        warning.assert_called_once()
+        assert 'cleanup failed' in warning.call_args.args[0]
+
     def test_empty_container_marker_requires_relaunch(self, monkeypatch):
         _, login_runner, head_runner, write_manifest, cancel_slurm_job = (
             self._setup(monkeypatch, ['node-a']))
