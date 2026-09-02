@@ -92,6 +92,19 @@ def test_cloud_without_a_request_milestone_reports_one_startup_phase():
     assert samples == {launch_phases.NODE_STARTUP: 300.0}
 
 
+def test_queue_wait_falls_back_to_the_start_of_provisioning():
+    """A scheduler-gated launch on a cloud with no separate request step.
+
+    The job timeline computes this same wait from provision_start, so anchoring
+    it only on instances_requested here would drop the phase in one place and
+    report it in the other -- two answers for one launch.
+    """
+    samples, _ = _phases(_row(admitted=250.0, instances_ready=400.0, queue='q'))
+
+    assert samples[launch_phases.QUEUE_WAIT] == 150.0
+    assert (sum(samples.values()) == 300.0)
+
+
 def test_failed_attempt_contributes_only_the_phases_it_finished():
     """The phase it died in never happened; it was not lost.
 

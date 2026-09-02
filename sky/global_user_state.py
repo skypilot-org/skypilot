@@ -3963,6 +3963,7 @@ def open_launch_attempt(
                         launch_attempt_table.c.request_id == request_id,
                         launch_attempt_table.c.outcome.is_(None),
                     )).order_by(
+                        launch_attempt_table.c.provision_start.desc(),
                         launch_attempt_table.c.attempt_seq.desc()).limit(
                             1)).fetchone()
             if in_flight is not None:
@@ -3979,6 +3980,13 @@ def open_launch_attempt(
         # continues the sequence instead of restarting at 0. That is cosmetic:
         # timelines are always scoped by cluster_hash (one incarnation) or by
         # the job, so ordering stays correct either way.
+        # Read-then-insert, with no unique constraint on
+        # (cluster_name, attempt_seq). Deliberate: a duplicate would need two
+        # provisions of one cluster name to open a row at the same instant,
+        # which the per-cluster launch lock already excludes, and a constraint
+        # here could fail a launch over a measurement. The lookups above order
+        # by provision_start first, so even a tie picks the newer row; the
+        # sequence is a display and tie-break column, not an identifier.
         last_seq = session.execute(
             sqlalchemy.select(
                 sqlalchemy.func.max(  # pylint: disable=not-callable
@@ -4055,8 +4063,15 @@ def claim_unobserved_launch_attempts(limit: int = 500) -> List[Any]:
     engine = _db_manager.get_engine()
     # The claim is one UPDATE, and the timestamp doubles as its token: rows
     # carrying it are exactly the ones this call won. A row-at-a-time loop
-    # would hold write locks for its whole length, so two replicas running
-    # this would block each other rather than each taking a share.
+    # would instead hold write locks for its whole length, so a second replica
+    # would block for the length of the batch rather than for one statement.
+    # It still comes away with nothing this tick -- its UPDATE re-checks
+    # metrics_observed_at IS NULL and matches none -- which is the point: the
+    # observation happens exactly once, not once per replica.
+    #
+    # Recovering the rows by equality against a float is exact here because
+    # the column is double precision on both SQLite and Postgres. A NUMERIC
+    # column would round it and silently return nothing.
     now = time.time()
     with orm.Session(engine) as session:
         candidates = sqlalchemy.select(launch_attempt_table.c.attempt_id).where(
@@ -4132,8 +4147,9 @@ def record_launch_queue_for_cluster(cluster_name: str, queue: str) -> None:
                         cluster_name,
                     ),
                     launch_attempt_table.c.outcome.is_(None),
-                )).order_by(launch_attempt_table.c.attempt_seq.desc()).limit(
-                    1)).fetchone()
+                )).order_by(launch_attempt_table.c.provision_start.desc(),
+                            launch_attempt_table.c.attempt_seq.desc()).limit(
+                                1)).fetchone()
         if row is None:
             return
         session.execute(launch_attempt_table.update().where(
@@ -4173,8 +4189,9 @@ def record_launch_milestone_for_cluster(cluster_name: str,
                         cluster_name,
                     ),
                     launch_attempt_table.c.outcome.is_(None),
-                )).order_by(launch_attempt_table.c.attempt_seq.desc()).limit(
-                    1)).fetchone()
+                )).order_by(launch_attempt_table.c.provision_start.desc(),
+                            launch_attempt_table.c.attempt_seq.desc()).limit(
+                                1)).fetchone()
         if row is None:
             return
         column = launch_attempt_table.c[milestone.value]

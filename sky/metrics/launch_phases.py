@@ -92,13 +92,18 @@ def compute_phases(row: Any) -> Tuple[List[PhaseSample], List[DroppedPhase]]:
         samples.append(PhaseSample(phase, end - start))
 
     add(PROVISION_SETUP, row.provision_start, row.instances_requested)
+    # From whichever boundary the cloud gave us, the same fallback the job
+    # timeline uses: a cloud that stamps admitted but has no separate request
+    # step would otherwise have the phase dropped here and reported there, two
+    # answers for one launch.
+    queue_from = _first_set(row.instances_requested, row.provision_start)
     # Only where an external scheduler was involved at all. An abandoned
     # attempt counts a dropped phase, so without the queue check every
     # abandoned launch on a deployment with no scheduler would report losing a
     # measurement that never existed -- noise in a counter that is supposed to
     # mean exactly that something was lost.
     if row.admitted is not None or (abandoned and row.queue):
-        add(QUEUE_WAIT, row.instances_requested, row.admitted)
+        add(QUEUE_WAIT, queue_from, row.admitted)
     add(NODE_STARTUP,
         _first_set(row.admitted, row.instances_requested, row.provision_start),
         row.instances_ready)
