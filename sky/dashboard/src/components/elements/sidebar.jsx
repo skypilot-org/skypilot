@@ -266,13 +266,12 @@ export function TopBar() {
   // Function to determine if a path is active
   const isActivePath = (path) => {
     // Special case: highlight workspaces for both /workspaces and /workspace paths
-    if (path === '/workspaces') {
-      return (
-        router.pathname.startsWith('/workspaces') ||
-        router.pathname.startsWith('/workspace')
-      );
-    }
-    if (router.pathname.startsWith(path)) {
+    const builtInMatch =
+      path === '/workspaces'
+        ? router.pathname.startsWith('/workspaces') ||
+          router.pathname.startsWith('/workspace')
+        : router.pathname.startsWith(path);
+    if (builtInMatch) {
       return true;
     }
     // Plugin routes are served by a catch-all page, so router.pathname is
