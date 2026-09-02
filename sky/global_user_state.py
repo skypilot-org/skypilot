@@ -53,6 +53,13 @@ _ENABLED_CLOUDS_KEY_PREFIX = 'enabled_clouds_'
 _ALLOWED_CLOUDS_KEY_PREFIX = 'allowed_clouds_'
 
 DEFAULT_CLUSTER_EVENT_RETENTION_HOURS = 30 * 24.0
+# Matches the event retentions above so the launch timeline and the events it
+# sits alongside expire together by default.
+DEFAULT_LAUNCH_ATTEMPT_RETENTION_HOURS = 30 * 24.0
+# How long an attempt may stay open before it is treated as abandoned. Well
+# past any provision timeout, because a launch parked waiting for quota is
+# legitimately open for hours and must not be swept out from under itself.
+ABANDONED_LAUNCH_ATTEMPT_HOURS = 24.0
 DEBUG_CLUSTER_EVENT_RETENTION_HOURS = 30 * 24.0
 TERMINAL_CLUSTER_EVENT_RETENTION_HOURS = 30 * 24.0
 # How often the cluster-event retention daemon wakes up. Fixed, and
@@ -1348,6 +1355,28 @@ def cleanup_cluster_events_with_retention(retention_hours: float,
         session.commit()
 
 
+@db_retries.retry
+def cleanup_launch_attempts_with_retention(retention_hours: float) -> int:
+    """Drop finished launch attempts older than the window.
+
+    Only finished ones: an attempt still in flight has a launch waiting on it,
+    and a queue wait can legitimately outlast any sane retention window. Age is
+    measured from when the attempt started, which is also what the index is on.
+
+    Returns the number of rows removed.
+    """
+    cutoff = time.time() - retention_hours * 3600
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
+        result = session.execute(launch_attempt_table.delete().where(
+            sqlalchemy.and_(
+                launch_attempt_table.c.outcome.is_not(None),
+                launch_attempt_table.c.provision_start < cutoff,
+            )))
+        session.commit()
+        return result.rowcount
+
+
 async def cluster_event_retention_daemon():
     """Garbage collect cluster events periodically."""
     await asyncio_utils.sleep_startup_jitter('cluster event retention daemon')
@@ -1386,6 +1415,15 @@ async def cluster_event_retention_daemon():
                     f'{terminal_retention_hours} hours.')
                 cleanup_cluster_events_with_retention(terminal_retention_hours,
                                                       ClusterEventType.TERMINAL)
+            launch_retention_hours = skypilot_config.get_nested(
+                ('api_server', 'launch_attempt_retention_hours'),
+                DEFAULT_LAUNCH_ATTEMPT_RETENTION_HOURS)
+            if launch_retention_hours >= 0:
+                removed = cleanup_launch_attempts_with_retention(
+                    launch_retention_hours)
+                if removed:
+                    logger.debug(
+                        f'Removed {removed} expired launch attempt(s).')
         except asyncio.CancelledError:
             logger.info('Cluster event retention daemon cancelled')
             break
@@ -4034,24 +4072,33 @@ def claim_unobserved_launch_attempts(limit: int = 500) -> List[Any]:
 
 
 @db_retries.retry
-def sweep_abandoned_launch_attempts() -> int:
+def sweep_abandoned_launch_attempts(
+        older_than_hours: float = ABANDONED_LAUNCH_ATTEMPT_HOURS) -> int:
     """Close attempts left open by a process that died mid-launch.
 
-    Called at API server start, when nothing can legitimately be in flight:
-    every launch runs inside a request execution, and none has resumed yet.
-    An open row at that moment is therefore one whose writer never came back.
-
-    Marking them (rather than leaving them open) matters twice over. It keeps a
+    Marking them (rather than leaving them open) matters twice over: it keeps a
     later launch of the same cluster from stamping milestones onto a dead
-    attempt, and it is what makes a lost measurement countable instead of
-    silently missing.
+    attempt, and it makes a lost measurement countable instead of silently
+    missing.
+
+    Bounded by age rather than sweeping every open row. The table is shared
+    across API server replicas, so a server starting up does not mean nothing
+    is provisioning: during a rolling upgrade an older replica is still running
+    launches, and closing their rows would discard their milestones and let
+    their paused launches resume as duplicate attempts. The bound is generous
+    because a launch parked waiting for quota is legitimately open for hours;
+    an attempt older than it has outlived any provision timeout.
 
     Returns the number of attempts closed.
     """
+    cutoff = time.time() - older_than_hours * 3600
     engine = _db_manager.get_engine()
     with orm.Session(engine) as session:
         result = session.execute(launch_attempt_table.update().where(
-            launch_attempt_table.c.outcome.is_(None)).values({
+            sqlalchemy.and_(
+                launch_attempt_table.c.outcome.is_(None),
+                launch_attempt_table.c.provision_start < cutoff,
+            )).values({
                 launch_attempt_table.c.outcome: LaunchOutcome.ABANDONED.value
             }))
         session.commit()
@@ -4070,14 +4117,22 @@ def record_launch_queue_for_cluster(cluster_name: str, queue: str) -> None:
     """
     engine = _db_manager.get_engine()
     with orm.Session(engine) as session:
+        row = session.execute(
+            sqlalchemy.select(launch_attempt_table.c.attempt_id).where(
+                sqlalchemy.and_(
+                    sqlalchemy.or_(
+                        launch_attempt_table.c.cluster_name == cluster_name,
+                        launch_attempt_table.c.cluster_name_on_cloud ==
+                        cluster_name,
+                    ),
+                    launch_attempt_table.c.outcome.is_(None),
+                )).order_by(launch_attempt_table.c.attempt_seq.desc()).limit(
+                    1)).fetchone()
+        if row is None:
+            return
         session.execute(launch_attempt_table.update().where(
             sqlalchemy.and_(
-                sqlalchemy.or_(
-                    launch_attempt_table.c.cluster_name == cluster_name,
-                    launch_attempt_table.c.cluster_name_on_cloud ==
-                    cluster_name,
-                ),
-                launch_attempt_table.c.outcome.is_(None),
+                launch_attempt_table.c.attempt_id == row[0],
                 launch_attempt_table.c.queue.is_(None),
             )).values({launch_attempt_table.c.queue: queue}))
         session.commit()

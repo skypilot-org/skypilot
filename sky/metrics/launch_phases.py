@@ -180,13 +180,19 @@ def compute_job_timeline(task: Any,
 
     retry_overhead = final.provision_start - attempts[0].provision_start
     phases[RETRY_OVERHEAD] = retry_overhead
-    if final.instances_requested is not None:
-        phases[PROVISION_SETUP] = (final.instances_requested -
-                                   task['submitted_at'] - retry_overhead)
+    # Everything from the controller claiming the job up to the point the
+    # instances were asked for, minus the attempts that were thrown away.
+    # Measured to instances_requested where the cloud records it, and to the
+    # start of provisioning where it does not -- on a cloud with no separate
+    # request step the preparation still happened, and leaving it out would
+    # drop it from the total rather than attribute it.
+    startup_from = _first_set(final.instances_requested, final.provision_start)
+    phases[PROVISION_SETUP] = (startup_from - task['submitted_at'] -
+                               retry_overhead)
     if final.admitted is not None:
         phases[QUEUE_WAIT] = final.admitted - final.instances_requested
     phases[NODE_STARTUP] = final.instances_ready - _first_set(
-        final.admitted, final.instances_requested, final.provision_start)
+        final.admitted, startup_from)
     phases[RUNTIME_SETUP] = task['start_at'] - final.instances_ready
     return total, phases
 

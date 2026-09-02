@@ -163,3 +163,18 @@ def test_a_job_that_never_ran_is_still_counted(monkeypatch):
     launch_phases.count_job_that_never_ran(None, on_pool=False)
 
     assert counted == [('never_ran', 'provision', 'unknown')]
+
+
+def test_a_cloud_without_a_request_milestone_still_accounts_for_everything():
+    """VM clouds record no separate "instances requested" step.
+
+    The preparation before provisioning still happened; leaving it out of every
+    phase drops it from the total instead of attributing it, and the stack then
+    silently under-reports the wait on those clouds.
+    """
+    total, phases = launch_phases.compute_job_timeline(_task(start_at=1000.0), [
+        _attempt(instances_requested=None, admitted=None, instances_ready=900.0)
+    ])
+
+    assert sum(phases.values()) == total
+    assert launch_phases.QUEUE_WAIT not in phases

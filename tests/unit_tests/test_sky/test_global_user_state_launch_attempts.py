@@ -5,6 +5,7 @@ latency breakdown most easily got wrong: a pause must continue one attempt,
 a failover must start a new one, and a row abandoned by a crashed launch must
 never be adopted by a later one.
 """
+
 import time
 
 from sky import global_user_state
@@ -335,3 +336,65 @@ def test_queue_is_not_recorded_against_a_finished_attempt(
     global_user_state.record_launch_queue_for_cluster('c', 'team-a')
 
     assert _rows()[0].queue is None
+
+
+def test_queue_lands_on_the_live_attempt_not_a_stale_one(tmp_path, monkeypatch):
+    """A crashed launch leaves an open row behind.
+
+    Updating every matching open row would give that corpse the new launch's
+    queue, and its wait would then be attributed to a queue it never sat in.
+    """
+    _fresh_db(tmp_path, monkeypatch)
+
+    orphan = _open(request='req-dead', start=100.0)
+    live = _open(request='req-new', start=500.0)
+    global_user_state.record_launch_queue_for_cluster('c', 'team-a')
+
+    rows = {r.attempt_id: r for r in _rows()}
+    assert rows[live].queue == 'team-a'
+    assert rows[orphan].queue is None
+
+
+def test_the_sweep_leaves_a_launch_that_is_still_waiting_alone(
+        tmp_path, monkeypatch):
+    """The table is shared across replicas, so a starting server does not mean
+    nothing is provisioning.
+
+    During a rolling upgrade an older replica is still running launches;
+    closing their rows discards their milestones and lets their paused launches
+    resume as duplicate attempts. A launch parked on quota is legitimately open
+    for hours.
+    """
+    _fresh_db(tmp_path, monkeypatch)
+
+    recent = _open(cluster='live', chash='h1', request='r1', start=time.time())
+    stale = _open(cluster='dead', chash='h2', request='r2', start=1000.0)
+
+    assert global_user_state.sweep_abandoned_launch_attempts() == 1
+
+    outcomes = {r.attempt_id: r.outcome for r in _rows()}
+    assert outcomes[recent] is None
+    assert outcomes[stale] == _OPEN.ABANDONED.value
+
+
+def test_retention_drops_finished_attempts_but_not_live_ones(
+        tmp_path, monkeypatch):
+    """Nothing deleted these rows, so the table only ever grew.
+
+    In-flight rows are exempt whatever their age: a launch waiting on quota can
+    outlast any sane window, and deleting its row loses the wait it is serving.
+    """
+    _fresh_db(tmp_path, monkeypatch)
+
+    old_done = _open(cluster='a', chash='h1', request='r1', start=1000.0)
+    global_user_state.close_launch_attempt(old_done, _OPEN.SUCCEEDED)
+    _open(cluster='b', chash='h2', request='r2', start=1000.0)  # old, in flight
+    fresh = _open(cluster='d', chash='h3', request='r3', start=time.time())
+    global_user_state.close_launch_attempt(fresh, _OPEN.SUCCEEDED)
+
+    assert global_user_state.cleanup_launch_attempts_with_retention(1.0) == 1
+
+    remaining = {r.attempt_id for r in _rows()}
+    assert old_done not in remaining
+    assert fresh in remaining
+    assert len(remaining) == 2
