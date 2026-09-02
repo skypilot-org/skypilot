@@ -22,11 +22,27 @@ def test_daemon_is_skipped_when_metrics_are_disabled(monkeypatch):
     Otherwise the attempts are consumed silently and turning metrics on later
     starts from a permanent hole.
     """
+    monkeypatch.setenv('PROMETHEUS_MULTIPROC_DIR', '/tmp/metrics')
     monkeypatch.setattr(metrics_lib, 'METRICS_ENABLED', False)
     assert daemons.should_skip_launch_metrics() is True
 
     monkeypatch.setattr(metrics_lib, 'METRICS_ENABLED', True)
     assert daemons.should_skip_launch_metrics() is False
+
+
+def test_daemon_is_skipped_when_its_output_would_be_invisible(monkeypatch):
+    """This daemon has its own process, so without multiprocess mode nothing
+    it observes reaches /metrics.
+
+    Found by running it for real: metrics were on, the daemon claimed every
+    attempt and logged success, and no series ever appeared -- because
+    in-process metrics kept working, which is what makes this easy to miss.
+    Claiming in that state burns the attempts for good.
+    """
+    monkeypatch.setattr(metrics_lib, 'METRICS_ENABLED', True)
+    monkeypatch.delenv('PROMETHEUS_MULTIPROC_DIR', raising=False)
+
+    assert daemons.should_skip_launch_metrics() is True
 
 
 def test_one_bad_row_does_not_block_the_others(monkeypatch):

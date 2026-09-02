@@ -373,7 +373,8 @@ def launch_metrics_event():
             logger.error(f'Failed to observe launch attempt '
                          f'{attempt.attempt_id}: {e}')
     if claimed:
-        logger.info(f'Observed {len(claimed)} finished launch attempt(s).')
+        logger.info(f'Claimed and observed {len(claimed)} finished launch '
+                    'attempt(s).')
 
     recorded = _record_job_launch_timelines()
     if recorded:
@@ -423,13 +424,31 @@ def _record_job_launch_timelines() -> int:
 
 
 def should_skip_launch_metrics() -> bool:
-    """Skip entirely when metrics are off, so nothing is claimed.
+    """Skip entirely unless an observation here could actually be read.
 
-    Claiming marks a row observed. Doing that with metrics disabled would
-    consume the attempts silently and leave a permanent hole in the data if
-    metrics were later turned on.
+    Claiming marks a row observed, so claiming while the output goes nowhere
+    consumes the attempts silently and leaves a permanent hole if the setup is
+    fixed later. Two ways the output can go nowhere:
+
+    * Metrics are off.
+    * Metrics are on but ``PROMETHEUS_MULTIPROC_DIR`` is unset. This daemon
+      runs in its own process, so without multiprocess mode ``/metrics`` serves
+      only the main server process's registry and everything observed here is
+      invisible -- while the metrics written in-process keep working, which is
+      what makes it easy to miss. A supported deployment always sets the two
+      together (see ``_set_metrics_env_var``); this guards the hand-rolled
+      setups that export the enable flag on its own.
     """
-    return not metrics_lib.METRICS_ENABLED
+    if not metrics_lib.METRICS_ENABLED:
+        return True
+    if not os.environ.get('PROMETHEUS_MULTIPROC_DIR'):
+        logger.warning(
+            'Launch latency metrics are enabled but PROMETHEUS_MULTIPROC_DIR '
+            'is unset, so anything this daemon observed would not appear on '
+            '/metrics. Skipping, to keep the attempts available for when it '
+            'is set.')
+        return True
+    return False
 
 
 def server_heartbeat_event():
