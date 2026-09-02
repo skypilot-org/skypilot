@@ -96,6 +96,48 @@ The published Ray GPU image does not include PyTorch, so the worker `setup`
 installs it. For shorter replacement times, build an image containing both Ray
 and PyTorch and use it for `ray-workers`.
 
+## NVLink domain-aware placement
+
+For GB300 NVL72 clusters,
+`ray-nvl72-resilient-training.yaml` extends the same recovery design across two
+NVLink domains. It runs 32 Ray actors on 32 four-GPU workers and creates two
+detached placement groups with 16 bundles each. `STRICT_PACK` on
+`ray.io/gpu-domain` keeps each group in one domain, while `PACK` on
+`ray.io/node-id` gives Ray flexibility within that domain.
+
+An NVL72 domain has 18 four-GPU nodes. Using 16 workers per placement group
+leaves up to two nodes in each domain as standby capacity. When one worker is
+replaced, Ray preserves the placement group's domain assignment and
+reconstructs the lost actor. Healthy actors continue their current rollouts.
+
+Before launching this variant:
+
+- Configure topology-aware scheduling to place the workers as two 16-node
+  slices keyed by the `nvidia.com/gpu.clique` Kubernetes Node label.
+- Confirm that every GPU node has a non-empty `nvidia.com/gpu.clique` label.
+  NVIDIA GPU Feature Discovery normally creates this label.
+- Create the same `ray-gcs-rocksdb` volume used by the basic example.
+
+The worker task gets its Kubernetes Node name through the Downward API, reads
+the node's clique label through the Kubernetes API, and registers the value as
+the Ray node label `ray.io/gpu-domain`.
+
+Launch the variant from the repository root:
+
+```bash
+sky jobs launch \
+  examples/ray_resilient_training/ray-nvl72-resilient-training.yaml
+```
+
+The program reserves all 128 Ray GPU resources but runs a CPU-only synthetic
+rollout. Replace `RolloutWorker.rollout()` in `train_nvl72.py` with the
+application's GPU work. Delete one worker pod during a rollout to exercise
+in-domain replacement; the other actors continue on their existing workers.
+
+Ray marks topology strategy scheduling as alpha. See Ray's
+[topology strategy documentation](https://docs.ray.io/en/latest/ray-core/scheduling/placement-group.html#alpha-topology-strategy-scheduling)
+for the current API and fault-tolerance semantics.
+
 Ray marks the embedded RocksDB backend as alpha. RocksDB stores Ray cluster
 metadata, not model weights or mutable actor state. Real training code should
 checkpoint application state to its own durable volume or object store and

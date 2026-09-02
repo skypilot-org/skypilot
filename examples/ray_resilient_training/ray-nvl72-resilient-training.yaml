@@ -1,0 +1,134 @@
+# A CPU-only Ray head and two 16-node NVLink domains run as one Job Group.
+# The actors reserve Ray GPU resources but execute CPU-only work so the example
+# can focus on topology placement and worker recovery.
+#
+# Prerequisite:
+#   sky volumes apply examples/ray_resilient_training/gcs-volume.yaml
+#
+# Launch:
+#   sky jobs launch \
+#     examples/ray_resilient_training/ray-nvl72-resilient-training.yaml
+---
+name: ray-nvl72-resilient-training
+execution: parallel
+inter_connection: true
+primary_tasks: [ray-head]
+termination_delay: 20s
+
+---
+name: ray-head
+
+resources:
+  infra: kubernetes
+  cpus: 4+
+  memory: 16+
+  image_id: docker:rayproject/ray:2.58.0-py311
+  job_recovery:
+    strategy: DYNAMIC_NODE_SET
+
+volumes:
+  /ray-gcs: ray-gcs-rocksdb
+
+config:
+  kubernetes:
+    pod_config:
+      spec:
+        securityContext:
+          fsGroup: 100
+          fsGroupChangePolicy: OnRootMismatch
+
+envs:
+  NUM_CLIQUES: 2
+  WORKERS_PER_CLIQUE: 16
+  GPUS_PER_WORKER: 4
+  TOTAL_STEPS: 1000
+  ROLLOUT_SECONDS: 600
+  HEARTBEAT_SECONDS: 30
+  RECOVERY_TIMEOUT_SECONDS: 1800
+
+workdir: examples/ray_resilient_training
+
+run: |
+  set -euo pipefail
+  ulimit -n 65536
+
+  RAY_HEAD_HOST="ray-head-0.${SKYPILOT_JOBGROUP_NAME}"
+  RAY_GCS_ROOT="/ray-gcs/nvl72-job-${SKYPILOT_MANAGED_JOB_ID}"
+  mkdir -p "${RAY_GCS_ROOT}"
+
+  export RAY_gcs_storage=rocksdb
+  export RAY_gcs_storage_path="${RAY_GCS_ROOT}/rocksdb"
+
+  ray start \
+    --head \
+    --port=6379 \
+    --dashboard-host=0.0.0.0 \
+    --num-cpus=0 \
+    --num-gpus=0 \
+    --disable-usage-stats
+
+  python train_nvl72.py \
+    --address "${RAY_HEAD_HOST}:6379" \
+    --num-cliques "${NUM_CLIQUES}" \
+    --workers-per-clique "${WORKERS_PER_CLIQUE}" \
+    --gpus-per-worker "${GPUS_PER_WORKER}" \
+    --steps "${TOTAL_STEPS}" \
+    --rollout-seconds "${ROLLOUT_SECONDS}" \
+    --heartbeat-seconds "${HEARTBEAT_SECONDS}" \
+    --recovery-timeout "${RECOVERY_TIMEOUT_SECONDS}" \
+    --state-path "${RAY_GCS_ROOT}/driver-state.json"
+
+---
+name: ray-workers
+
+num_nodes: 32
+
+resources:
+  infra: kubernetes
+  cpus: 2+
+  memory: 4+
+  accelerators: GB300:4
+  image_id: docker:rayproject/ray:2.58.0-py311
+  job_recovery:
+    strategy: DYNAMIC_NODE_SET
+
+config:
+  kubernetes:
+    pod_config:
+      spec:
+        containers:
+        - name: ray-node
+          env:
+          - name: K8S_NODE_NAME
+            valueFrom:
+              fieldRef:
+                fieldPath: spec.nodeName
+
+envs:
+  RAY_gcs_rpc_server_reconnect_timeout_s: 600
+
+workdir: examples/ray_resilient_training
+
+run: |
+  set -euo pipefail
+  ulimit -n 65536
+
+  RAY_HEAD_HOST="ray-head-0.${SKYPILOT_JOBGROUP_NAME}"
+  python wait_for_head.py \
+    --host "${RAY_HEAD_HOST}" \
+    --port 6379 \
+    --timeout 900
+
+  NVIDIA_GPU_CLIQUE="$(python kubernetes_node_label.py \
+    --node "${K8S_NODE_NAME}" \
+    --label nvidia.com/gpu.clique)"
+  export NVIDIA_GPU_CLIQUE
+  echo "Ray worker rank=${SKYPILOT_NODE_RANK} node=${K8S_NODE_NAME} clique=${NVIDIA_GPU_CLIQUE}"
+
+  ray start \
+    --address="${RAY_HEAD_HOST}:6379" \
+    --num-cpus=2 \
+    --num-gpus=4 \
+    --labels="ray.io/accelerator-type=GB300,ray.io/gpu-domain=${NVIDIA_GPU_CLIQUE}" \
+    --disable-usage-stats \
+    --block
