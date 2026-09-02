@@ -40,6 +40,9 @@ import {
   getContextJobs,
   getContextClusters,
   getSlurmInfrastructure,
+  getSlurmClusterNames,
+  getSlurmClusterInfrastructure,
+  aggregateSlurmGPUsByType,
 } from '@/data/connectors/infra';
 import {
   CLOUDS_LIST,
@@ -486,9 +489,9 @@ export function InfrastructureSection({
     const contextStatsKey = buildContextStatsKey(context, { isSSH, isSlurm });
     const stats = contextStats[contextStatsKey] || { clusters: 0, jobs: 0 };
 
-    // Kubernetes uses progressive per-context loading; Slurm/SSH load all at once.
-    const hasGpuData =
-      isSlurm || isSSH ? !isLoading : loadedContexts.has(context);
+    // Kubernetes and Slurm use progressive per-context loading (each
+    // context/cluster settles independently); SSH loads all at once.
+    const hasGpuData = isSSH ? !isLoading : loadedContexts.has(context);
     const hasNodeData = hasGpuData;
 
     const aggregatedCpu = calculateAggregatedResource(nodes, 'cpu_count', true);
@@ -565,12 +568,12 @@ export function InfrastructureSection({
   }
 
   // Determine if table should show refreshing state
-  // For K8s: show during loading or when contexts haven't all loaded yet
-  // For SSH/Slurm: only show during loading
+  // For K8s/Slurm: show during loading or when contexts haven't all loaded
+  // For SSH: only show during loading
   const isTableRefreshing =
     !isInitialLoad &&
     (isLoading ||
-      (!(isSlurm || isSSH) &&
+      (!isSSH &&
         safeContexts.length > 0 &&
         !safeContexts.every((c) => loadedContexts.has(c))));
 
@@ -677,7 +680,7 @@ export function InfrastructureSection({
                   // Expanding appends the partition breakdown under the
                   // cluster's own totals, so the aggregate stays on screen and
                   // the toggle keeps its place. When the cluster has no GPU
-                  // type rows (e.g. its availability sweep failed), a null
+                  // type rows (e.g. its node query failed), a null
                   // summary row stands in — otherwise every expanded row would
                   // be a partition row, and the toggle cell (the only way to
                   // collapse) would never render again.
@@ -2631,9 +2634,11 @@ export function GPUs() {
   const [perNodeGPUs, setPerNodeGPUs] = useState([]);
   // Track which contexts have had their GPU/node data loaded (for progressive loading)
   const [loadedContexts, setLoadedContexts] = useState(new Set());
-  const [allSlurmGPUs, setAllSlurmGPUs] = useState([]);
   const [perClusterSlurmGPUs, setPerClusterSlurmGPUs] = useState([]);
   const [perNodeSlurmGPUs, setPerNodeSlurmGPUs] = useState([]);
+  // Slurm clusters whose GPU/node queries have settled — the Slurm
+  // counterpart of loadedContexts, driving per-cluster skeleton cells.
+  const [slurmLoadedClusters, setSlurmLoadedClusters] = useState(new Set());
   // Slurm clusters from ~/.slurm/config, independent of whether they answer a
   // query right now.
   const [configuredSlurmClusters, setConfiguredSlurmClusters] = useState([]);
@@ -2735,7 +2740,7 @@ export function GPUs() {
           fetchCloudData(forceRefresh),
           fetchManagedJobsData(),
           fetchClusterStatsData(),
-          fetchSlurmData(),
+          fetchSlurmData(forceRefresh, showLoadingIndicators),
         ]);
 
         // Mark main fetch as done, check if we can set isFetching = false
@@ -2768,9 +2773,9 @@ export function GPUs() {
         setSshLoading(false);
         setSlurmLoading(false);
         setConfiguredSlurmClusters([]);
-        setAllSlurmGPUs([]);
         setPerClusterSlurmGPUs([]);
         setPerNodeSlurmGPUs([]);
+        setSlurmLoadedClusters(new Set());
         setSshAndKubeJobsData({});
         setSshAndKubeJobsDataLoading(false);
 
@@ -2999,24 +3004,77 @@ export function GPUs() {
     }
   };
 
-  // Fetch Slurm data separately for parallel loading with Kubernetes/SSH
-  const fetchSlurmData = async () => {
+  // Fetch Slurm data with per-cluster settlement, mirroring the Kubernetes
+  // section's progressive per-context loading: the configured cluster names
+  // (answered without contacting any login node) render the rows
+  // immediately, then each cluster's GPU/node queries fill its row in as
+  // they land — one slow or unreachable cluster can neither blank nor delay
+  // the other clusters' rendering.
+  const fetchSlurmData = async (forceRefresh, showLoadingIndicators = true) => {
     try {
-      const slurmData = await dashboardCache.get(getSlurmInfrastructure);
-      if (slurmData) {
-        setConfiguredSlurmClusters(slurmData.slurmClusterNames || []);
-        setAllSlurmGPUs(slurmData.allSlurmGPUs || []);
-        setPerClusterSlurmGPUs(slurmData.perClusterSlurmGPUs || []);
-        setPerNodeSlurmGPUs(slurmData.perNodeSlurmGPUs || []);
-      }
+      const clusterNames = forceRefresh
+        ? await getSlurmClusterNames()
+        : await dashboardCache.get(getSlurmClusterNames);
+      const validClusters = (clusterNames || []).filter(
+        (name) => name && typeof name === 'string'
+      );
+      setConfiguredSlurmClusters(validClusters);
+      // Names are enough to render the section (rows show skeleton cells
+      // until their own data lands), so clear the panel-level loading state
+      // now rather than after the slowest cluster.
       setSlurmDataLoaded(true);
       setSlurmLoading(false);
+
+      if (validClusters.length === 0) {
+        if (showLoadingIndicators) {
+          setPerClusterSlurmGPUs([]);
+          setPerNodeSlurmGPUs([]);
+          setSlurmLoadedClusters(new Set());
+        }
+        return;
+      }
+
+      // Reset loaded-cluster tracking so cells show skeletons during a
+      // foreground refresh, but keep existing data on screen (progressive
+      // overwrite, like the Kubernetes path).
+      if (showLoadingIndicators) {
+        setSlurmLoadedClusters(new Set());
+      }
+
+      await Promise.allSettled(
+        validClusters.map(async (clusterName) => {
+          try {
+            const data = forceRefresh
+              ? await getSlurmClusterInfrastructure(clusterName)
+              : await dashboardCache.get(getSlurmClusterInfrastructure, [
+                  clusterName,
+                ]);
+            setPerClusterSlurmGPUs((prev) => [
+              ...(prev || []).filter((gpu) => gpu.cluster !== clusterName),
+              ...(data?.perClusterGPUs || []),
+            ]);
+            setPerNodeSlurmGPUs((prev) => [
+              ...(prev || []).filter((node) => node.cluster !== clusterName),
+              ...(data?.perNodeGPUs || []),
+            ]);
+          } catch (error) {
+            console.error(
+              `Error fetching Slurm cluster ${clusterName}:`,
+              error
+            );
+          } finally {
+            // Mark the cluster loaded even on error so its row settles to
+            // empty cells instead of shimmering forever.
+            setSlurmLoadedClusters((prev) => new Set([...prev, clusterName]));
+          }
+        })
+      );
     } catch (error) {
       console.error('Error in fetchSlurmData:', error);
       setConfiguredSlurmClusters([]);
-      setAllSlurmGPUs([]);
       setPerClusterSlurmGPUs([]);
       setPerNodeSlurmGPUs([]);
+      setSlurmLoadedClusters(new Set());
       setSlurmDataLoaded(true);
       setSlurmLoading(false);
     }
@@ -3223,6 +3281,9 @@ export function GPUs() {
     dashboardCache.invalidate(getCloudInfrastructure, [false]); // Keep for backwards compatibility
     dashboardCache.invalidate(getSSHNodePools);
     dashboardCache.invalidate(getSlurmInfrastructure);
+    dashboardCache.invalidate(getSlurmClusterNames);
+    // One cache entry per cluster; invalidateFunction clears every variant.
+    dashboardCache.invalidateFunction(getSlurmClusterInfrastructure);
 
     // Increment GPU metrics refresh trigger to force iframe reload
     setGpuMetricsRefreshTrigger((prev) => prev + 1);
@@ -3460,19 +3521,6 @@ export function GPUs() {
     return [...clusterSet].sort();
   }, [configuredSlurmClusters, perClusterSlurmGPUs, perNodeSlurmGPUs]);
 
-  // Group perClusterSlurmGPUs by cluster
-  const groupedPerClusterSlurmGPUs = React.useMemo(() => {
-    if (!perClusterSlurmGPUs) return {};
-    return perClusterSlurmGPUs.reduce((acc, gpu) => {
-      const { cluster } = gpu;
-      if (!acc[cluster]) {
-        acc[cluster] = [];
-      }
-      acc[cluster].push(gpu);
-      return acc;
-    }, {});
-  }, [perClusterSlurmGPUs]);
-
   // Group perNodeSlurmGPUs by cluster
   const groupedPerNodeSlurmGPUs = React.useMemo(() => {
     if (!perNodeSlurmGPUs) return {};
@@ -3485,6 +3533,29 @@ export function GPUs() {
       return acc;
     }, {});
   }, [perNodeSlurmGPUs]);
+
+  // Group perClusterSlurmGPUs by cluster. These entries are derived from the
+  // node feed (see slurmClusterGPUsFromNodes in the connector), so the
+  // cluster-level GPU cells and the partition breakdown below them always
+  // agree — they read one source.
+  const groupedPerClusterSlurmGPUs = React.useMemo(() => {
+    if (!perClusterSlurmGPUs) return {};
+    return perClusterSlurmGPUs.reduce((acc, gpu) => {
+      const { cluster } = gpu;
+      if (!acc[cluster]) {
+        acc[cluster] = [];
+      }
+      acc[cluster].push(gpu);
+      return acc;
+    }, {});
+  }, [perClusterSlurmGPUs]);
+
+  // Fleet-wide Slurm GPU totals, derived from the per-cluster data so the
+  // summary strip fills in as each cluster's data streams in.
+  const allSlurmGPUs = React.useMemo(
+    () => aggregateSlurmGPUsByType(perClusterSlurmGPUs),
+    [perClusterSlurmGPUs]
+  );
 
   // Group perNodeGPUs by context
   const groupedPerNodeGPUs = React.useMemo(() => {
@@ -3863,6 +3934,7 @@ export function GPUs() {
         isSSH={false}
         isSlurm={true}
         contextWorkspaceMap={{}}
+        loadedContexts={slurmLoadedClusters}
         isInitialLoad={isInitialLoad}
         statusByKey={extraStatusByKey}
       />

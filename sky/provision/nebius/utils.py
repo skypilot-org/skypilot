@@ -546,6 +546,7 @@ def launch(cluster_name_on_cloud: str,
            associate_public_ip_address: bool,
            filesystems: List[Dict[str, Any]],
            disk_tier: str,
+           disk_encrypted: bool = False,
            use_static_ip_address: bool = False,
            use_spot: bool = False,
            network_tier: Optional[resources_utils.NetworkTier] = None,
@@ -564,7 +565,7 @@ def launch(cluster_name_on_cloud: str,
     # The GPU clusters are built with InfiniBand secure high-speed networking.
     # https://docs.nebius.com/compute/clusters/gpu
     if platform in nebius_constants.INFINIBAND_INSTANCE_PLATFORMS:
-        if preset == '8gpu-128vcpu-1600gb':
+        if preset.startswith(nebius_constants.INFINIBAND_PRESET_PREFIX):
             fabric = skypilot_config.get_effective_region_config(
                 cloud='nebius',
                 region=region,
@@ -615,10 +616,25 @@ def launch(cluster_name_on_cloud: str,
                 f'Requested {disk_size} GiB, rounding up to '
                 f'{actual_disk_size} GiB.')
 
-    disk_spec = nebius.compute().DiskSpec(
+    compute = nebius.compute()
+    disk_type = _disk_tier_to_disk_type(disk_tier)
+    disk_spec = compute.DiskSpec(
         size_gibibytes=actual_disk_size,
-        type=_disk_tier_to_disk_type(disk_tier),
+        type=disk_type,
     )
+    encryptable_disk_types = (
+        compute.DiskSpec.DiskType.NETWORK_SSD_IO_M3,
+        compute.DiskSpec.DiskType.NETWORK_SSD_NON_REPLICATED,
+    )
+    if disk_encrypted and disk_type in encryptable_disk_types:
+        disk_spec.disk_encryption = compute.DiskEncryption(
+            type=compute.DiskEncryption.DiskEncryptionType.
+            DISK_ENCRYPTION_MANAGED)
+    elif disk_encrypted:
+        logger.warning(
+            f'Disk encryption was requested, but disk type {disk_type.name} '
+            'does not support explicitly configured Nebius-managed '
+            'encryption. Continuing without setting disk encryption.')
     if image_id_or_family.startswith('computeimage-'):
         disk_spec.source_image_id = image_id_or_family
     else:
