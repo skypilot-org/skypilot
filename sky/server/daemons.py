@@ -360,6 +360,10 @@ def launch_metrics_event():
     at once observes each attempt exactly once rather than multiplying every
     rate by the replica count.
     """
+    # Imported here, like every other daemon event in this module: importing
+    # sky.metrics.launch_phases at module scope would pull the metrics package
+    # into every consumer of daemons.py, including the CLI, for code only this
+    # daemon runs.
     # pylint: disable=import-outside-toplevel
     from sky.metrics import launch_phases
 
@@ -395,6 +399,9 @@ def _record_job_launch_timelines() -> int:
 
     Returns how many jobs were recorded by this process.
     """
+    # sky.jobs.state imports sky.jobs.utils, which reaches back into the
+    # server package; importing it at module scope here closes that cycle. The
+    # metrics import follows the same convention as the caller above.
     # pylint: disable=import-outside-toplevel
     from sky.jobs import state as managed_job_state
     from sky.jobs import utils as managed_job_utils

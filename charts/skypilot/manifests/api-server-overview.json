@@ -2906,7 +2906,7 @@
         "type": "prometheus",
         "uid": "prometheus"
       },
-      "description": "The phases partition the wait, so the stack adds up to the time to running. controller_queue is our scheduler being saturated; queue_wait is the cluster being out of quota; retry_overhead is launches that were thrown away. They have different owners and opposite fixes.",
+      "description": "Average seconds each phase contributes to one job reaching RUNNING. Means, not quantiles: quantiles are not additive, so a stack of per-phase medians sums to a number no job ever experienced. controller_queue is our scheduler being saturated, queue_wait is the cluster being out of quota, retry_overhead is launches that were thrown away -- different owners, opposite fixes.",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -2985,14 +2985,14 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "histogram_quantile(0.5, sum by (le, phase) (rate(sky_managed_job_phase_duration_seconds_bucket[$__rate_interval])))",
+          "expr": "sum by (phase) (rate(sky_managed_job_phase_duration_seconds_sum[$__rate_interval]))\n/ clamp_min(sum(rate(sky_managed_job_time_to_running_seconds_count[$__rate_interval])), 1)",
           "instant": false,
           "legendFormat": "{{phase}}",
           "range": true,
           "refId": "A"
         }
       ],
-      "title": "Where the time goes (median per phase)",
+      "title": "Where the time goes (mean per phase)",
       "type": "timeseries"
     },
     {

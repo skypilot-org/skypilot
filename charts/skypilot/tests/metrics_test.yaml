@@ -129,9 +129,14 @@ tests:
       - matchRegex:
           path: data["api-server-overview.json"]
           pattern: "sky_managed_job_time_to_running_seconds_bucket"
+      # Means, not quantiles: a stack of per-phase medians sums to a
+      # number no job ever experienced.
       - matchRegex:
           path: data["api-server-overview.json"]
-          pattern: "sky_managed_job_phase_duration_seconds_bucket"
+          pattern: "sky_managed_job_phase_duration_seconds_sum"
+      - notMatchRegex:
+          path: data["api-server-overview.json"]
+          pattern: "histogram_quantile\\(0.5, sum by \\(le, phase"
       - matchRegex:
           path: data["api-server-overview.json"]
           pattern: "sky_launch_queue_wait_seconds_bucket"

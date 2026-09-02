@@ -141,9 +141,9 @@ def test_attempt_seq_continues_across_a_managed_job_recovery(
     """
     _fresh_db(tmp_path, monkeypatch)
 
-    first = _open(chash='h1', request='req-1', start=100.0, job_id=7, task_id=0)
+    first = _open(chash='h1', request='req-1', start=100.0)
     global_user_state.close_launch_attempt(first, _OPEN.FAILED)
-    _open(chash='h2', request='req-2', start=200.0, job_id=7, task_id=0)
+    _open(chash='h2', request='req-2', start=200.0)
 
     rows = _rows()
     assert [(r.cluster_hash, r.attempt_seq) for r in rows] == [('h1', 0),

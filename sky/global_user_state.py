@@ -335,10 +335,6 @@ launch_attempt_table = sqlalchemy.Table(
     # row left behind by a crashed earlier launch carries a different one and
     # is never adopted.
     sqlalchemy.Column('request_id', sqlalchemy.Text, server_default=None),
-    # Set for managed-job launches, NULL otherwise. Anchors attempts to the job
-    # so a recovery that mints a new cluster_hash does not orphan them.
-    sqlalchemy.Column('job_id', sqlalchemy.Integer, server_default=None),
-    sqlalchemy.Column('task_id', sqlalchemy.Integer, server_default=None),
     # Monotonic within cluster_name. See open_launch_attempt for why the name
     # rather than the hash.
     sqlalchemy.Column('attempt_seq', sqlalchemy.Integer),
@@ -374,9 +370,6 @@ launch_attempt_table = sqlalchemy.Table(
     # and the per-cluster timeline. cluster_hash is not indexed: a timeline
     # scoped to one incarnation filters these few rows by hash.
     sqlalchemy.Index('ix_launch_attempts_cluster', 'cluster_name',
-                     'attempt_seq'),
-    # Per-job timeline, the retry_overhead residual, and phase-timing queries.
-    sqlalchemy.Index('ix_launch_attempts_job', 'job_id', 'task_id',
                      'attempt_seq'),
     # Retention sweep. Without it the sweep full-scans on every tick.
     sqlalchemy.Index('ix_launch_attempts_provision_start', 'provision_start'),
@@ -3928,8 +3921,6 @@ def open_launch_attempt(
     provision_start: float,
     cluster_name_on_cloud: Optional[str] = None,
     workspace: Optional[str] = None,
-    job_id: Optional[int] = None,
-    task_id: Optional[int] = None,
 ) -> str:
     """Open a provisioning attempt, or resume the one already in flight.
 
@@ -3987,8 +3978,6 @@ def open_launch_attempt(
             cluster_name=cluster_name,
             cluster_name_on_cloud=cluster_name_on_cloud,
             request_id=request_id,
-            job_id=job_id,
-            task_id=task_id,
             workspace=workspace,
             attempt_seq=0 if last_seq is None else last_seq + 1,
             provision_start=provision_start,
