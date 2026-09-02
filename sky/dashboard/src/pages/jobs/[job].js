@@ -1457,6 +1457,12 @@ function JobDetailsContent({
         </div>
       </div>
       <div>
+        <div className="text-gray-600 font-medium text-base">Started</div>
+        <div className="text-base mt-1">
+          {jobData.started_at ? formatFullTimestamp(jobData.started_at) : '-'}
+        </div>
+      </div>
+      <div>
         <div className="text-gray-600 font-medium text-base">Duration</div>
         <div className="text-base mt-1">
           {formatDuration(jobData.job_duration)}
@@ -1522,6 +1528,16 @@ function JobDetailsContent({
           )}
         </div>
       </div>
+      {/* Slurm schedules onto a partition (its zone); it is how quota and
+          priority are carved up on a Slurm cluster, so it gets its own row. */}
+      {jobData.cloud &&
+        jobData.cloud.toLowerCase() === 'slurm' &&
+        jobData.zone && (
+          <div>
+            <div className="text-gray-600 font-medium text-base">Partition</div>
+            <div className="text-base mt-1">{jobData.zone}</div>
+          </div>
+        )}
       <div>
         <div className="text-gray-600 font-medium text-base">Resources</div>
         <div className="text-base mt-1">
