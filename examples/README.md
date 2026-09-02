@@ -20,7 +20,7 @@ Machine learning examples:
 
 - [**`resnet_distributed_torch.yaml`**](./resnet_distributed_torch.yaml): Run Distributed PyTorch (DDP) training of ResNet50 on 2 nodes.
 
-- [**`ray_resilient_training/`**](./ray_resilient_training/README.md): Run resilient Ray training with a CPU-only head, two GPU workers, node recovery, and RocksDB-backed GCS state.
+- [**`ray_resilient_training/`**](./ray_resilient_training/README.md): Run resilient Ray training with a CPU-only head, GPU worker recovery, RocksDB-backed GCS state, and optional NVLink domain-aware placement.
 
 - [**`detectron2_app.yaml`**](./detectron2_app.yaml): Run Detectron2 on a V100 GPU.
 
