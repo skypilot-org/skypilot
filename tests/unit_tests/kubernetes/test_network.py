@@ -2,6 +2,9 @@
 
 from unittest.mock import patch
 
+import pytest
+
+from sky import exceptions
 from sky.provision.kubernetes import network
 
 
@@ -120,3 +123,88 @@ class TestOpenPortsUsingIngress:
             assert 'team-b' in url_path, (
                 f'Every port URL path must use the resolved namespace, '
                 f'got: {url_path!r}')
+
+
+class TestCleanupPortsUsingIngress:
+    """Tests for `_cleanup_ports_for_ingress`."""
+
+    @patch('sky.provision.kubernetes.network.network_utils'
+           '.delete_namespaced_ingress')
+    @patch('sky.provision.kubernetes.network.network_utils'
+           '.delete_namespaced_service')
+    @patch('sky.provision.kubernetes.network.kubernetes_utils'
+           '.get_namespace_from_config')
+    @patch('sky.provision.kubernetes.network.kubernetes_utils'
+           '.get_context_from_config')
+    def test_already_deleted_service_does_not_strand_the_rest(
+            self, mock_get_context, mock_get_ns_from_config,
+            mock_delete_service, mock_delete_ingress):
+        """One already-deleted service must not abort the whole cleanup.
+
+        Regression: `network_utils.delete_namespaced_service` turns a 404
+        into `PortDoesNotExistError`, so a single port service that was
+        already gone raised out of the loop. The remaining port services
+        and the shared ingress were then never deleted. The caller in
+        `cloud_vm_ray_backend` catches that error, logs at debug level and
+        marks ports as cleaned up, so those resources leak silently.
+        """
+        provider_config = {'context': 'ctx', 'namespace': 'ns'}
+        mock_get_context.return_value = 'ctx'
+        mock_get_ns_from_config.return_value = 'ns'
+
+        def _delete(context, namespace, service_name):
+            del context, namespace  # Unused.
+            if service_name.endswith('--8080'):
+                raise exceptions.PortDoesNotExistError(
+                    'Port 8080 does not exist.')
+
+        mock_delete_service.side_effect = _delete
+
+        network._cleanup_ports_for_ingress(  # pylint: disable=protected-access
+            cluster_name_on_cloud='cluster0',
+            ports=[8080, 8081, 8082],
+            provider_config=provider_config,
+        )
+
+        attempted = [
+            call.kwargs['service_name']
+            for call in mock_delete_service.call_args_list
+        ]
+        assert attempted == [
+            'cluster0--skypilot-svc--8080',
+            'cluster0--skypilot-svc--8081',
+            'cluster0--skypilot-svc--8082',
+        ], ('Every port service must still be attempted after an earlier one '
+            f'is found already deleted, got: {attempted}')
+        mock_delete_ingress.assert_called_once()
+
+    @patch('sky.provision.kubernetes.network.network_utils'
+           '.delete_namespaced_ingress')
+    @patch('sky.provision.kubernetes.network.network_utils'
+           '.delete_namespaced_service')
+    @patch('sky.provision.kubernetes.network.kubernetes_utils'
+           '.get_namespace_from_config')
+    @patch('sky.provision.kubernetes.network.kubernetes_utils'
+           '.get_context_from_config')
+    def test_genuine_service_delete_failure_still_propagates(
+            self, mock_get_context, mock_get_ns_from_config,
+            mock_delete_service, mock_delete_ingress):
+        """Only "already gone" is tolerated; real failures must surface.
+
+        Tolerating every exception would hide a service that still exists
+        but could not be deleted (RBAC, API server outage), which is the
+        case teardown must not silently report as cleaned up.
+        """
+        provider_config = {'context': 'ctx', 'namespace': 'ns'}
+        mock_get_context.return_value = 'ctx'
+        mock_get_ns_from_config.return_value = 'ns'
+        mock_delete_service.side_effect = RuntimeError('api server is down')
+
+        with pytest.raises(RuntimeError, match='api server is down'):
+            network._cleanup_ports_for_ingress(  # pylint: disable=protected-access
+                cluster_name_on_cloud='cluster0',
+                ports=[8080, 8081],
+                provider_config=provider_config,
+            )
+
+        mock_delete_ingress.assert_not_called()
