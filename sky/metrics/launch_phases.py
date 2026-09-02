@@ -162,10 +162,15 @@ def compute_job_timeline(task: Any,
         CONTROLLER_QUEUE: task['submitted_at'] - task['created_at'],
     }
 
-    final = next(
-        (a for a in reversed(attempts)
-         if a.outcome == _OUTCOME_SUCCEEDED and a.instances_ready is not None),
-        None)
+    # The attempt that delivered the cluster the job *first* ran on. Bounded by
+    # start_at rather than simply the newest success: a job can be preempted
+    # and recover before this is computed, and that recovery's attempt finished
+    # after the job first ran. Picking it would make runtime_setup negative and
+    # break the invariant that the phases sum to the total -- which the detail
+    # page renders directly, as a segment of negative width.
+    final = next((a for a in reversed(attempts)
+                  if a.outcome == _OUTCOME_SUCCEEDED and a.instances_ready
+                  is not None and a.instances_ready <= task['start_at']), None)
     if final is None:
         # No attempt delivered a cluster we can break down -- a job placed on a
         # warm pool, or one launched before these milestones existed. The wait

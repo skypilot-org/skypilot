@@ -108,3 +108,25 @@ def test_timeline_columns_include_the_headline_total():
     assert columns['t_time_to_running'] == total
     assert columns['t_queue_wait'] == 600.0
     assert columns['t_controller_queue'] == 10.0
+
+
+def test_a_recovery_after_first_running_does_not_become_the_final_attempt():
+    """A job can be preempted and recover before its timeline is computed.
+
+    That recovery's attempt finishes *after* the job first ran, so treating it
+    as the delivering attempt makes runtime_setup negative and breaks the sum;
+    the detail page would render a segment of negative width.
+    """
+    total, phases = launch_phases.compute_job_timeline(
+        _task(start_at=1000.0),
+        [
+            _attempt(),  # delivered the cluster the job first ran on
+            # A recovery that finished long after the job first reached RUNNING.
+            _attempt(provision_start=1200.0,
+                     instances_requested=1210.0,
+                     admitted=1220.0,
+                     instances_ready=1500.0),
+        ])
+
+    assert phases[launch_phases.RUNTIME_SETUP] > 0
+    assert sum(phases.values()) == total
