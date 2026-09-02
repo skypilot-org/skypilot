@@ -440,6 +440,13 @@ root filesystem are preserved. The user's home directory remains available
 through its existing shared-filesystem mount. Running processes and memory are
 not preserved, and ``/tmp`` and ``/run`` are recreated when the cluster starts.
 
+Before exporting the container filesystem, SkyPilot waits for the allocation's
+workload steps to exit. On clusters using ``proctrack/linuxproc``, a process
+that double-forks out of its Slurm step may remain alive after the step exits
+and cannot be detected by this drain. Workloads on these clusters should not
+detach processes from their Slurm steps before the cluster is stopped.
+``proctrack/cgroup`` tracks these descendants with the step.
+
 Snapshots are stored under
 ``<workdir>/.sky_snapshots/<cluster-name-on-cloud>``. If ``workdir`` is not
 configured, SkyPilot uses the remote user's home directory. A snapshot uses

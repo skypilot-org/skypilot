@@ -189,6 +189,95 @@ class TestRunCommand:
         assert mock_run.call_args.kwargs['timeout'] == 9
 
 
+class TestJobSteps:
+    """Tests for querying and signalling Slurm job steps."""
+
+    @staticmethod
+    def _client():
+        return slurm.SlurmClient(ssh_host='localhost',
+                                 ssh_port=22,
+                                 ssh_user='root',
+                                 ssh_key=None)
+
+    def test_list_job_steps(self):
+        client = self._client()
+        with mock.patch.object(client, '_run_slurm_cmd') as mock_run:
+            mock_run.return_value = (
+                0, 'StepId=123.batch State=RUNNING Name=batch TRES=(null)\n'
+                'StepId=123.0 State=RUNNING Name=sky-container-keeper '
+                'TRES=cpu=1\n'
+                'StepId=123.1 State=RUNNING Name=bash TRES=cpu=1\n', '')
+
+            assert client.list_job_steps('123') == [
+                slurm.JobStepInfo('123.batch', 'batch'),
+                slurm.JobStepInfo('123.0', 'sky-container-keeper'),
+                slurm.JobStepInfo('123.1', 'bash'),
+            ]
+
+        mock_run.assert_called_once_with('scontrol -o show step 123')
+
+    def test_rejects_malformed_job_step_output(self):
+        client = self._client()
+        with mock.patch.object(client,
+                               '_run_slurm_cmd',
+                               return_value=(0, 'StepId=123.0 State=RUNNING\n',
+                                             '')):
+            with pytest.raises(RuntimeError, match='Unexpected.*step'):
+                client.list_job_steps('123')
+
+    def test_rejects_empty_job_step_output(self):
+        client = self._client()
+        with mock.patch.object(client,
+                               '_run_slurm_cmd',
+                               return_value=(0, '', '')):
+            with pytest.raises(RuntimeError, match='Unexpected empty'):
+                client.list_job_steps('123')
+
+    @pytest.mark.parametrize(
+        'error', ['Invalid job id specified', 'Job step 123. not found'])
+    def test_list_job_steps_reports_disappeared_allocation(self, error):
+        client = self._client()
+        with mock.patch.object(client,
+                               '_run_slurm_cmd',
+                               return_value=(1, '', error)):
+            with pytest.raises(exceptions.CommandError,
+                               match='allocation 123 disappeared during stop'):
+                client.list_job_steps('123')
+
+    def test_signal_job_step(self):
+        client = self._client()
+        with mock.patch.object(client,
+                               '_run_slurm_cmd',
+                               return_value=(0, '', '')) as mock_run:
+            client.signal_job_step('123', '123.4', 'TERM')
+
+        mock_run.assert_called_once_with('scancel --signal TERM 123.4')
+
+    def test_signal_tolerates_step_exiting_concurrently(self):
+        client = self._client()
+        with mock.patch.object(client, '_run_slurm_cmd') as mock_run:
+            mock_run.side_effect = [
+                (1, '', 'Invalid job id'),
+                (0, 'StepId=123.batch State=RUNNING Name=batch\n', ''),
+            ]
+            client.signal_job_step('123', '123.4', 'TERM')
+
+        assert mock_run.call_args_list == [
+            mock.call('scancel --signal TERM 123.4'),
+            mock.call('scontrol -o show step 123'),
+        ]
+
+    def test_signal_failure_for_active_step_is_reported(self):
+        client = self._client()
+        with mock.patch.object(client, '_run_slurm_cmd') as mock_run:
+            mock_run.side_effect = [(1, '', 'Permission denied'),
+                                    (0, 'StepId=123.4 State=RUNNING '
+                                     'Name=bash\n', '')]
+            with pytest.raises(exceptions.CommandError,
+                               match='Failed to signal'):
+                client.signal_job_step('123', '123.4', 'TERM')
+
+
 class TestGetPartitions:
     """Test SlurmClient.get_partitions()."""
 

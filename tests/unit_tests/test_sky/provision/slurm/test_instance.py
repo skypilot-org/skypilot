@@ -380,6 +380,94 @@ class TestWaitForJobStates:
             client, 'job', instance._EXITING_JOB_STATES, timeout=0)
 
 
+class TestDrainSlurmWorkloadSteps:
+    """Tests the pre-snapshot Slurm step drain."""
+
+    @staticmethod
+    def _patch_clock(monkeypatch):
+        clock = mock.MagicMock()
+        elapsed = [0.0]
+        clock.monotonic.side_effect = lambda: elapsed[0]
+
+        def sleep(seconds):
+            elapsed[0] += seconds
+
+        clock.sleep.side_effect = sleep
+        monkeypatch.setattr(instance.time, 'monotonic', clock.monotonic)
+        monkeypatch.setattr(instance.time, 'sleep', clock.sleep)
+        monkeypatch.setattr(instance, 'POLL_INTERVAL_SECONDS', 1)
+        monkeypatch.setattr(instance,
+                            '_WORKLOAD_STEP_TERM_GRACE_PERIOD_SECONDS', 1)
+        monkeypatch.setattr(instance, '_WORKLOAD_STEP_DRAIN_TIMEOUT_SECONDS', 3)
+        return clock
+
+    def test_preserves_only_infrastructure_steps(self):
+        client = mock.MagicMock()
+        client.list_job_steps.return_value = [
+            instance.slurm.JobStepInfo('123.batch', 'batch'),
+            instance.slurm.JobStepInfo('123.extern', 'extern'),
+            instance.slurm.JobStepInfo('123.0', 'sky-container-keeper'),
+            instance.slurm.JobStepInfo('123.1', 'sky-skylet-keeper'),
+        ]
+
+        instance._drain_slurm_workload_steps(client, '123')
+
+        client.signal_job_step.assert_not_called()
+
+    def test_terms_task_and_ssh_steps_then_waits_for_exit(self, monkeypatch):
+        self._patch_clock(monkeypatch)
+        client = mock.MagicMock()
+        workload_steps = [
+            instance.slurm.JobStepInfo('123.2', 'sky-1'),
+            instance.slurm.JobStepInfo('123.3', 'bash'),
+        ]
+        client.list_job_steps.side_effect = [workload_steps, []]
+
+        instance._drain_slurm_workload_steps(client, '123')
+
+        assert client.signal_job_step.call_args_list == [
+            mock.call('123', '123.2', 'TERM'),
+            mock.call('123', '123.3', 'TERM'),
+        ]
+
+    def test_escalates_surviving_step_to_kill(self, monkeypatch):
+        self._patch_clock(monkeypatch)
+        client = mock.MagicMock()
+        workload_step = instance.slurm.JobStepInfo('123.2', 'sky-1')
+        killed = [False]
+        client.list_job_steps.side_effect = lambda job_id: ([] if killed[0] else
+                                                            [workload_step])
+
+        def signal(job_id, step_id, signal_name):
+            del job_id, step_id
+            if signal_name == 'KILL':
+                killed[0] = True
+
+        client.signal_job_step.side_effect = signal
+
+        instance._drain_slurm_workload_steps(client, '123')
+
+        assert client.signal_job_step.call_args_list == [
+            mock.call('123', '123.2', 'TERM'),
+            mock.call('123', '123.2', 'KILL'),
+        ]
+
+    def test_fails_if_step_survives_kill(self, monkeypatch):
+        self._patch_clock(monkeypatch)
+        client = mock.MagicMock()
+        client.list_job_steps.return_value = [
+            instance.slurm.JobStepInfo('123.2', 'bash')
+        ]
+
+        with pytest.raises(RuntimeError, match=r'123\.2 \(bash\)'):
+            instance._drain_slurm_workload_steps(client, '123')
+
+        assert client.signal_job_step.call_args_list == [
+            mock.call('123', '123.2', 'TERM'),
+            mock.call('123', '123.2', 'KILL'),
+        ]
+
+
 class TestStopInstances:
     """Tests Slurm container export and stop ordering."""
 
@@ -390,6 +478,7 @@ class TestStopInstances:
         client.get_job_nodes.return_value = (nodes, [
             f'10.0.0.{i + 1}' for i in range(len(nodes))
         ])
+        client.list_job_steps.return_value = []
         login_runner = mock.MagicMock()
 
         def run(command, **kwargs):
@@ -427,6 +516,28 @@ class TestStopInstances:
         client.test_read_manifest = read_manifest
         return (client, login_runner, head_runner, write_manifest,
                 cancel_slurm_job)
+
+    def test_drains_steps_before_snapshotting_job_database(self, monkeypatch):
+        client, login_runner, head_runner, _, _ = self._setup(
+            monkeypatch, ['node-a'])
+        events = []
+        head_runner.run_driver.side_effect = lambda *args, **kwargs: (
+            events.append('cancel jobs') or (0, '', ''))
+        client.list_job_steps.side_effect = lambda job_id: (events.append(
+            'drain steps') or [])
+        original_run = login_runner.run.side_effect
+
+        def run(command, **kwargs):
+            if 'sqlite3.connect' in command:
+                events.append('backup jobs db')
+            return original_run(command, **kwargs)
+
+        login_runner.run.side_effect = run
+
+        instance.stop_instances(_CLUSTER, provider_config=_PROVIDER_CONFIG)
+
+        assert events.index('cancel jobs') < events.index('drain steps')
+        assert events.index('drain steps') < events.index('backup jobs db')
 
     def test_exports_all_nodes_then_publishes_manifest(self, monkeypatch):
         nodes = ['node-a', 'node-b']

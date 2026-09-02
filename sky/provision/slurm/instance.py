@@ -40,6 +40,8 @@ SNAPSHOT_MANIFEST_FILENAME = 'manifest.json'
 SNAPSHOT_JOB_DB_FILENAME = 'jobs.db'
 SNAPSHOT_GENERATIONS_DIRECTORY_NAME = 'generations'
 SNAPSHOT_MANIFEST_VERSION = 1
+_CONTAINER_KEEPER_STEP_NAME = 'sky-container-keeper'
+_SKYLET_KEEPER_STEP_NAME = 'sky-skylet-keeper'
 
 
 def _sbatch_log_path(base_dir: str, job_id: str) -> str:
@@ -53,6 +55,14 @@ _JOB_TERMINATION_TIMEOUT_SECONDS = 60
 # before escalating to a plain scancel. Matches Slurm's default KillWait,
 # the grace Slurm itself gives between SIGTERM and SIGKILL.
 _TERMINATION_GRACE_PERIOD_SECONDS = 30
+# Workloads get longer than Slurm's default 30-second KillWait to finish their
+# TERM handlers before the stop path escalates individual steps to KILL.
+_WORKLOAD_STEP_TERM_GRACE_PERIOD_SECONDS = 40
+_WORKLOAD_STEP_DRAIN_TIMEOUT_SECONDS = 120
+_WORKLOAD_KEEPER_STEP_NAMES = frozenset({
+    _CONTAINER_KEEPER_STEP_NAME,
+    _SKYLET_KEEPER_STEP_NAME,
+})
 
 # Terminal states where scancel is not needed or will fail.
 _TERMINAL_JOB_STATES = {
@@ -893,6 +903,7 @@ echo "[container-init] Packages installed in $((SECONDS - INIT_START))s"
             container_launch_block = (
                 f'CONTAINER_PIDS=()\n'
                 f'srun --overlap '
+                f'--job-name={_CONTAINER_KEEPER_STEP_NAME} '
                 f'{"--label " if num_nodes > 1 else ""}--unbuffered '
                 f'--nodes={num_nodes} --ntasks-per-node=1 '
                 f'--container-image={shlex.quote(container_image)} '
@@ -941,7 +952,9 @@ done < <(enroot list)
                 restore_lines.extend([
                     f'echo "[container] Restoring rank {rank} on '
                     f'${{SKY_NODES[{rank}]}}"',
-                    f'srun --overlap --unbuffered --nodes=1 --ntasks=1 '
+                    f'srun --overlap '
+                    f'--job-name={_CONTAINER_KEEPER_STEP_NAME} '
+                    f'--unbuffered --nodes=1 --ntasks=1 '
                     f'-w "${{SKY_NODES[{rank}]}}" '
                     f'--container-image={shlex.quote(snapshot_path)} '
                     f'{pyxis_args} bash -c {container_cmd} &',
@@ -1041,6 +1054,7 @@ exit 1
         '| head -n1)\n'
         f'( while true; do '
         f'srun --overlap --jobid=$SLURM_JOB_ID --nodes=1 --ntasks=1 '
+        f'--job-name={_SKYLET_KEEPER_STEP_NAME} '
         f'--nodelist=$SKY_HEAD_NODE '
         f'bash -c {shlex.quote(keeper_loop)}; '
         f'sleep 5; done ) &')
@@ -1458,6 +1472,7 @@ def stop_instances(
         'Failed to cancel jobs before snapshotting the Slurm container.',
         stderr=f'{stdout}\n{stderr}',
         stream_logs=False)
+    _drain_slurm_workload_steps(client, job_id)
 
     skypilot_runtime_dir = _resolve_skypilot_runtime_dir(
         client, provider_config, cluster_name_on_cloud)
@@ -1600,6 +1615,51 @@ enroot export -f -o {shlex.quote(staging_snapshot_path)} "$enroot_name"
                           job_id,
                           nodes,
                           preserve_logs=True))
+
+
+def _drain_slurm_workload_steps(client: 'slurm.SlurmClient',
+                                job_id: str) -> None:
+    """Stop every non-infrastructure step before snapshotting an allocation."""
+    deadline = time.monotonic() + _WORKLOAD_STEP_DRAIN_TIMEOUT_SECONDS
+    term_sent_at: Dict[str, float] = {}
+    kill_sent: Set[str] = set()
+    infrastructure_step_ids = {f'{job_id}.batch', f'{job_id}.extern'}
+
+    while True:
+        active_steps = client.list_job_steps(job_id)
+        workload_steps = [
+            step for step in active_steps
+            if step.step_id not in infrastructure_step_ids and
+            step.name not in _WORKLOAD_KEEPER_STEP_NAMES
+        ]
+        if not workload_steps:
+            return
+
+        now = time.monotonic()
+        for step in workload_steps:
+            if step.step_id not in term_sent_at:
+                logger.debug(f'Signalling Slurm workload step {step.step_id} '
+                             f'({step.name}) with TERM before snapshotting.')
+                client.signal_job_step(job_id, step.step_id, 'TERM')
+                term_sent_at[step.step_id] = now
+            elif (step.step_id not in kill_sent and
+                  now - term_sent_at[step.step_id] >=
+                  _WORKLOAD_STEP_TERM_GRACE_PERIOD_SECONDS):
+                logger.warning(f'Slurm workload step {step.step_id} '
+                               f'({step.name}) did not exit after TERM; '
+                               'escalating to KILL.')
+                client.signal_job_step(job_id, step.step_id, 'KILL')
+                kill_sent.add(step.step_id)
+
+        if now >= deadline:
+            remaining = ', '.join(
+                f'{step.step_id} ({step.name})' for step in workload_steps)
+            raise RuntimeError(
+                'Cannot snapshot the Slurm cluster because workload steps '
+                f'are still running after '
+                f'{_WORKLOAD_STEP_DRAIN_TIMEOUT_SECONDS}s: {remaining}')
+        time.sleep(
+            min(POLL_INTERVAL_SECONDS, max(0, deadline - time.monotonic())))
 
 
 def _wait_for_job_states(client: 'slurm.SlurmClient', job_name: str,

@@ -1690,6 +1690,7 @@ class TestCreateVirtualInstance:
         assert '-w "${SKY_NODES[1]}"' in script
         assert f'--container-image={generation_dir}/rank0.sqsh' in script
         assert f'--container-image={generation_dir}/rank1.sqsh' in script
+        assert script.count('--job-name=sky-container-keeper') == 2
         assert 'apt-get update' not in script
         assert 'echo \'alias sudo=""\' >> ~/.bashrc' not in script
         stale_cleanup = 'enroot remove -f "$candidate"'
@@ -1798,7 +1799,8 @@ class TestCreateVirtualInstance:
 
         keeper_idx = script.index(
             '( while true; do srun --overlap --jobid=$SLURM_JOB_ID '
-            '--nodes=1 --ntasks=1 --nodelist=$SKY_HEAD_NODE')
+            '--nodes=1 --ntasks=1 --job-name=sky-skylet-keeper '
+            '--nodelist=$SKY_HEAD_NODE')
         anchor_idx = script.rindex('sleep infinity\n')
         # The keeper is backgrounded before the allocation-lifetime anchor.
         assert keeper_idx < anchor_idx
@@ -1867,7 +1869,8 @@ class TestCreateVirtualInstance:
 
         keeper_idx = script.index(
             '( while true; do srun --overlap --jobid=$SLURM_JOB_ID '
-            '--nodes=1 --ntasks=1 --nodelist=$SKY_HEAD_NODE')
+            '--nodes=1 --ntasks=1 --job-name=sky-skylet-keeper '
+            '--nodelist=$SKY_HEAD_NODE')
         anchor_idx = script.rindex('\nwait -n "${CONTAINER_PIDS[@]}"\n')
         assert keeper_idx < anchor_idx
         keeper_line = script[keeper_idx:script.index('\n', keeper_idx)]
