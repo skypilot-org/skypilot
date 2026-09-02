@@ -272,7 +272,18 @@ export function TopBar() {
         router.pathname.startsWith('/workspace')
       );
     }
-    return router.pathname.startsWith(path);
+    if (router.pathname.startsWith(path)) {
+      return true;
+    }
+    // Plugin routes are served by a catch-all page, so router.pathname is
+    // '/[...path]' for all of them. A plugin route may declare the nav link
+    // it belongs under via `navHref`; match those against the real URL.
+    const currentPath = router.asPath.split(/[?#]/)[0];
+    return pluginRoutes.some(
+      (route) =>
+        route.navHref === path &&
+        (currentPath === route.path || currentPath.startsWith(`${route.path}/`))
+    );
   };
 
   // Modify the getLinkClasses function to handle mobile styles
