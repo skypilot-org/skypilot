@@ -466,6 +466,62 @@ def count_launch_phase_dropped(phase: str, reason: str) -> None:
         logger.error(f'Failed to count dropped launch phase: {e}')
 
 
+# One phase of a managed job's path from submission to running. Unlike
+# sky_launch_phase_duration_seconds, which describes a single provisioning
+# attempt, these partition the *job's* wall clock -- so a retried job's thrown
+# away attempts show up as retry_overhead rather than disappearing:
+#   controller_queue  accepted -> a controller claimed the job
+#   retry_overhead    attempts that were thrown away, plus backoff between them
+#   provision_setup   the final attempt's provision start -> instances asked for
+#   queue_wait        asked for -> admitted by an external scheduler
+#   node_startup      admitted -> instances up
+#   runtime_setup     instances up -> the job is RUNNING
+SKY_MANAGED_JOB_PHASE_DURATION_SECONDS = prom.Histogram(
+    'sky_managed_job_phase_duration_seconds',
+    'Duration of one phase of a managed job reaching RUNNING',
+    ['phase', 'workspace'],
+    buckets=_LAUNCH_PHASE_BUCKETS,
+)
+
+# The headline: submission to running. Measured directly rather than summed
+# from the phases above, because histogram quantiles are not additive --
+# p95 of the total is not the sum of the phases' p95s.
+SKY_MANAGED_JOB_TIME_TO_RUNNING_SECONDS = prom.Histogram(
+    'sky_managed_job_time_to_running_seconds',
+    'Time from a managed job being accepted to it running',
+    ['workspace'],
+    buckets=_LAUNCH_PHASE_BUCKETS,
+)
+
+
+def observe_managed_job_phase(phase: str, workspace: str,
+                              duration_seconds: float) -> None:
+    """Record one phase of a managed job reaching RUNNING."""
+    if not METRICS_ENABLED:
+        return
+    try:
+        if duration_seconds < 0:
+            SKY_LAUNCH_PHASE_ANOMALIES_TOTAL.labels(phase=phase,
+                                                    reason='negative').inc()
+        SKY_MANAGED_JOB_PHASE_DURATION_SECONDS.labels(
+            phase=phase,
+            workspace=workspace).observe(max(0.0, duration_seconds))
+    except Exception as e:  # pylint: disable=broad-except
+        logger.error(f'Failed to observe managed job phase metric: {e}')
+
+
+def observe_managed_job_time_to_running(workspace: str,
+                                        duration_seconds: float) -> None:
+    """Record a managed job's submission-to-running time."""
+    if not METRICS_ENABLED:
+        return
+    try:
+        SKY_MANAGED_JOB_TIME_TO_RUNNING_SECONDS.labels(
+            workspace=workspace).observe(max(0.0, duration_seconds))
+    except Exception as e:  # pylint: disable=broad-except
+        logger.error(f'Failed to observe time-to-running metric: {e}')
+
+
 # --- Managed Jobs Metrics ---
 
 # Per-controller-process gauges (consolidation mode only).

@@ -374,10 +374,52 @@ def launch_metrics_event():
                          f'{attempt.attempt_id}: {e}')
     if claimed:
         logger.info(f'Observed {len(claimed)} finished launch attempt(s).')
+
+    recorded = _record_job_launch_timelines()
+    if recorded:
+        logger.info(f'Recorded the launch timeline of {recorded} job(s).')
+
     interval = skypilot_config.get_nested(
         ('daemons', 'launch-metrics-daemon', 'interval_seconds'),
         server_constants.LAUNCH_METRICS_DAEMON_INTERVAL_SECONDS)
     time.sleep(interval)
+
+
+def _record_job_launch_timelines() -> int:
+    """Split each newly running job's wait into phases, and record it.
+
+    Done for the job as a whole, not just its successful launch: a job that
+    failed over twice waited through those attempts too, and reporting only the
+    attempt that worked would say it started promptly.
+
+    Returns how many jobs were recorded by this process.
+    """
+    # pylint: disable=import-outside-toplevel
+    from sky.jobs import state as managed_job_state
+    from sky.jobs import utils as managed_job_utils
+    from sky.metrics import launch_phases
+
+    recorded = 0
+    for task in managed_job_state.get_jobs_pending_launch_timeline():
+        try:
+            attempts = []
+            if task['task_name'] is not None:
+                attempts = global_user_state.get_launch_attempts_for_cluster(
+                    managed_job_utils.generate_managed_job_cluster_name(
+                        task['task_name'], task['spot_job_id']))
+            total, phases = launch_phases.compute_job_timeline(task, attempts)
+            # Only the writer that won the row emits the metrics; otherwise
+            # every replica running this daemon would observe the same job.
+            if managed_job_state.record_launch_timeline(
+                    task['spot_job_id'], task['task_id'],
+                    launch_phases.timeline_columns(phases, total)):
+                launch_phases.observe_job_timeline(task['workspace'], total,
+                                                   phases)
+                recorded += 1
+        except Exception as e:  # pylint: disable=broad-except
+            logger.error(f'Failed to record the launch timeline of job '
+                         f'{task["spot_job_id"]}: {e}')
+    return recorded
 
 
 def should_skip_launch_metrics() -> bool:

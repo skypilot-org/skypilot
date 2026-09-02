@@ -11,7 +11,7 @@ one is disposable (a new process per burst request), and it is not even
 guaranteed to be the process that closes a segment it opened.
 """
 import dataclasses
-from typing import Any, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from sky import sky_logging
 from sky.metrics import utils as metrics_utils
@@ -112,3 +112,92 @@ def observe_attempt(row: Any) -> None:
                                            sample.duration)
     for drop in dropped:
         metrics_utils.count_launch_phase_dropped(drop.phase, drop.reason)
+
+
+# --- Job timeline -----------------------------------------------------------
+#
+# The phases above describe one provisioning attempt. These describe a managed
+# job's whole path from submission to running, which is what the user actually
+# waited through: it spans the attempts that were thrown away as well as the
+# one that worked.
+
+CONTROLLER_QUEUE = 'controller_queue'
+RETRY_OVERHEAD = 'retry_overhead'
+RUNTIME_SETUP = 'runtime_setup'
+
+# The spot column each phase is denormalized into.
+_JOB_PHASE_COLUMNS = {
+    CONTROLLER_QUEUE: 't_controller_queue',
+    RETRY_OVERHEAD: 't_retry_overhead',
+    PROVISION_SETUP: 't_provision_setup',
+    QUEUE_WAIT: 't_queue_wait',
+    NODE_STARTUP: 't_node_startup',
+    RUNTIME_SETUP: 't_runtime_setup',
+}
+
+
+def compute_job_timeline(task: Any,
+                         attempts: List[Any]) -> Tuple[float, Dict[str, float]]:
+    """Split a job's submission-to-running time into phases.
+
+    ``task`` carries created_at (accepted), submitted_at (claimed by a
+    controller) and start_at (running); ``attempts`` is every launch attempt
+    made for its cluster, oldest first.
+
+    ``retry_overhead`` spans from the first attempt to the one that worked, so
+    it covers the tries that were thrown away and the backoff between them.
+    Measuring it that way rather than as a leftover matters: a leftover would
+    also absorb the ordinary preparation between a controller claiming the job
+    and provisioning starting, and every clean run would then report retry
+    overhead it never had.
+
+    Returns the total and the per-phase durations, which sum to it.
+    """
+    total = task['start_at'] - task['created_at']
+    phases: Dict[str, float] = {
+        CONTROLLER_QUEUE: task['submitted_at'] - task['created_at'],
+    }
+
+    final = next(
+        (a for a in reversed(attempts)
+         if a.outcome == _OUTCOME_SUCCEEDED and a.instances_ready is not None),
+        None)
+    if final is None:
+        # No attempt delivered a cluster we can break down -- a job placed on a
+        # warm pool, or one launched before these milestones existed. The wait
+        # still happened, so report it whole rather than dropping the job.
+        phases[RETRY_OVERHEAD] = total - sum(phases.values())
+        return total, phases
+
+    retry_overhead = final.provision_start - attempts[0].provision_start
+    phases[RETRY_OVERHEAD] = retry_overhead
+    if final.instances_requested is not None:
+        phases[PROVISION_SETUP] = (final.instances_requested -
+                                   task['submitted_at'] - retry_overhead)
+    if final.admitted is not None:
+        phases[QUEUE_WAIT] = final.admitted - final.instances_requested
+    phases[NODE_STARTUP] = final.instances_ready - _first_set(
+        final.admitted, final.instances_requested, final.provision_start)
+    phases[RUNTIME_SETUP] = task['start_at'] - final.instances_ready
+    return total, phases
+
+
+def timeline_columns(phases: Dict[str, float],
+                     total: float) -> Dict[str, float]:
+    """The spot columns to write for a computed timeline."""
+    columns = {
+        _JOB_PHASE_COLUMNS[phase]: duration
+        for phase, duration in phases.items()
+        if phase in _JOB_PHASE_COLUMNS
+    }
+    columns['t_time_to_running'] = total
+    return columns
+
+
+def observe_job_timeline(workspace: Optional[str], total: float,
+                         phases: Dict[str, float]) -> None:
+    """Emit the metrics for one job's submission-to-running time."""
+    label = workspace or _UNKNOWN_WORKSPACE
+    metrics_utils.observe_managed_job_time_to_running(label, total)
+    for phase, duration in phases.items():
+        metrics_utils.observe_managed_job_phase(phase, label, duration)

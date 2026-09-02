@@ -3974,6 +3974,24 @@ def record_launch_milestone(attempt_id: str, milestone: LaunchMilestone,
 
 
 @db_retries.retry
+def get_launch_attempts_for_cluster(cluster_name: str) -> List[Any]:
+    """Every attempt made for this cluster, oldest first.
+
+    All of them, not just the one that worked: the abandoned tries are what
+    the retry overhead is measured from, and a job that took five tries waited
+    through all of them.
+    """
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
+        return list(
+            session.execute(
+                sqlalchemy.select(launch_attempt_table).where(
+                    launch_attempt_table.c.cluster_name ==
+                    cluster_name).order_by(
+                        launch_attempt_table.c.attempt_seq)).all())
+
+
+@db_retries.retry
 def claim_unobserved_launch_attempts(limit: int = 500) -> List[Any]:
     """Claim finished attempts that have not been turned into metrics yet.
 
