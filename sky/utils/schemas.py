@@ -1942,6 +1942,9 @@ def get_config_schema():
                 'disk_encrypted': {
                     'type': 'boolean',
                 },
+                'tag_volumes': {
+                    'type': 'boolean',
+                },
                 'ssh_user': {
                     'type': 'string',
                 },

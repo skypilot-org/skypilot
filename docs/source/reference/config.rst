@@ -802,6 +802,8 @@ Apply to all new instances but not existing ones.
 ~~~~~~~~~~~~~~~
 
 Tags to assign to all instances and buckets created by SkyPilot (optional).
+If :ref:`aws.tag_volumes <config-yaml-aws-tag-volumes>` is enabled, these tags
+are also applied to AWS EBS volumes managed by SkyPilot.
 
 Example use case: cost tracking by user/team/project.
 
@@ -827,6 +829,38 @@ Example:
       Owner: user-unique-name
       # Other examples:
       my-tag: my-value
+
+
+.. _config-yaml-aws-tag-volumes:
+
+``aws.tag_volumes``
+~~~~~~~~~~~~~~~~~~~
+
+Whether to propagate ``aws.labels`` to AWS EBS volumes created or resumed by
+SkyPilot.
+
+This is disabled by default for backward compatibility and to avoid requiring
+additional AWS IAM permissions in existing setups. When enabled, SkyPilot will:
+
+- include your configured labels in launch-time EBS volume tags
+- attempt to re-apply those labels to attached EBS volumes when resuming stopped
+  instances
+
+If volume tagging is not permitted by IAM during resume, SkyPilot will warn and
+continue. During initial launch, AWS may still reject the launch if tag
+permissions are insufficient.
+
+Default: ``false``.
+
+Example:
+
+.. code-block:: yaml
+
+  aws:
+    labels:
+      Owner: user-unique-name
+      Service: skypilot
+    tag_volumes: true
 
 
 

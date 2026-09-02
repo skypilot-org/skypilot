@@ -17,6 +17,7 @@ from sky.provision import common as provision_common
 from sky.provision import constants as provision_constants
 from sky.provision.aws import config
 from sky.provision.aws import instance as aws_instance
+from sky.utils import auth_utils
 from sky.utils import common_utils
 from sky.utils import config_utils
 
@@ -179,7 +180,10 @@ def test_run_instances_tags_resumed_instance_volumes():
                       return_value=mock_ec2), patch.object(
                           aws_instance.aws,
                           'resource',
-                          return_value=mock_ec2_fail_fast):
+                          return_value=mock_ec2_fail_fast), patch.object(
+                              aws_instance.skypilot_config,
+                              'get_effective_region_config',
+                              return_value=True):
         record = aws_instance.run_instances(region='us-east-1',
                                             cluster_name='cluster',
                                             cluster_name_on_cloud='cluster',
@@ -261,7 +265,10 @@ def test_run_instances_volume_tag_failure_does_not_abort_resume(mock_logger):
                       return_value=mock_ec2), patch.object(
                           aws_instance.aws,
                           'resource',
-                          return_value=mock_ec2_fail_fast):
+                          return_value=mock_ec2_fail_fast), patch.object(
+                              aws_instance.skypilot_config,
+                              'get_effective_region_config',
+                              return_value=True):
         record = aws_instance.run_instances(region='us-east-1',
                                             cluster_name='cluster',
                                             cluster_name_on_cloud='cluster',
@@ -655,6 +662,46 @@ def test_ssm_default(monkeypatch):
     monkeypatch.setattr(common_utils, 'fill_template',
                         fill_template_side_effect)
     with pytest.raises(RuntimeError) as e:
+        backend_utils.write_cluster_config(
+            to_provision=resources.Resources(cloud=AWS(),
+                                             instance_type='c2.xlarge'),
+            num_nodes=1,
+            cluster_config_template='aws-ray.yml.j2',
+            cluster_name='fake-cluster',
+            local_wheel_path=pathlib.Path('fake-wheel-path'),
+            wheel_hash='fake-wheel-hash',
+            region=Region(name='fake-region'),
+            zones=[Zone(name='fake-zone')])
+
+
+def test_aws_tag_volumes_passed_to_cluster_template(monkeypatch):
+    monkeypatch.setattr(common_utils, 'make_cluster_name_on_cloud',
+                        lambda *args, **kwargs: args[0])
+    tmp_yaml_path = '/tmp/fake-yaml-path'
+    monkeypatch.setattr(backend_utils, '_get_yaml_path_from_cluster_name',
+                        lambda *args, **kwargs: tmp_yaml_path)
+    monkeypatch.setattr(
+        auth_utils, 'get_or_generate_keys', lambda *args, **kwargs:
+        ('/tmp/fake-key', '/tmp/fake-key.pub'))
+    monkeypatch.setattr(resources.Resources, 'make_deploy_variables',
+                        lambda *args, **kwargs: {'region': 'us-east-1'})
+    monkeypatch.setattr(logs, 'get_logging_agent', lambda *args, **kwargs: None)
+    config_dict = config_utils.Config.from_dict({
+        'aws': {
+            'tag_volumes': True,
+        },
+    })
+    monkeypatch.setattr(skypilot_config, '_get_loaded_config',
+                        lambda *args, **kwargs: config_dict)
+
+    def fill_template_side_effect(*args, **kwargs):
+        template_vars = args[1]
+        assert template_vars['tag_volumes'] is True
+        raise RuntimeError('fake-error')
+
+    monkeypatch.setattr(common_utils, 'fill_template',
+                        fill_template_side_effect)
+    with pytest.raises(RuntimeError):
         backend_utils.write_cluster_config(
             to_provision=resources.Resources(cloud=AWS(),
                                              instance_type='c2.xlarge'),

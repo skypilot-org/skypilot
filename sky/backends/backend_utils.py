@@ -1015,6 +1015,12 @@ def write_cluster_config(
     if to_provision.labels:
         labels.update(to_provision.labels)
 
+    tag_volumes = skypilot_config.get_effective_region_config(
+        cloud=str(cloud).lower(),
+        region=region.name,
+        keys=('tag_volumes',),
+        default_value=False)
+
     install_conda = skypilot_config.get_nested(('provision', 'install_conda'),
                                                False)
 
@@ -1233,6 +1239,7 @@ def write_cluster_config(
                 override_configs=to_provision.cluster_config_overrides),
             # User-supplied labels.
             'labels': labels,
+            'tag_volumes': tag_volumes,
             # User-supplied remote_identity
             'remote_identity': remote_identity,
             # The reservation pools that specified by the user. This is

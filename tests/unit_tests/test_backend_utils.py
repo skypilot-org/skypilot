@@ -220,14 +220,16 @@ def test_aws_template_applies_labels_to_volume_tags() -> None:
     template_path = pathlib.Path('sky/templates/aws-ray.yml.j2')
     template = template_path.read_text(encoding='utf-8')
 
-    expected_block = """        - ResourceType: volume
+    expected_block = """        {%- if tag_volumes %}
+        - ResourceType: volume
           Tags:
             - Key: skypilot-user
               Value: {{ user }}
             {%- for label_key, label_value in labels.items() %}
             - Key: {{ label_key }}
               Value: {{ label_value|tojson }}
-            {%- endfor %}"""
+            {%- endfor %}
+        {%- endif %}"""
 
     assert expected_block in template
 

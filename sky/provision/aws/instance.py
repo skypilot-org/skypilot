@@ -13,6 +13,7 @@ import typing
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple, TypeVar
 
 from sky import sky_logging
+from sky import skypilot_config
 from sky.adaptors import aws
 from sky.clouds import aws as aws_cloud
 from sky.clouds.utils import aws_utils
@@ -347,6 +348,8 @@ def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
     resumed_instance_ids: List[str] = []
     created_instance_ids: List[str] = []
     max_efa_interfaces = config.provider_config.get('max_efa_interfaces', 0)
+    tag_volumes = skypilot_config.get_effective_region_config(
+        cloud='aws', region=region, keys=('tag_volumes',), default_value=False)
 
     # sort tags by key to support deterministic unit test stubbing
     tags = dict(sorted(copy.deepcopy(config.tags).items()))
@@ -493,7 +496,7 @@ def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
             ec2.meta.client.create_tags(Resources=resumed_instance_ids,
                                         Tags=_format_tags(tags))
             resumed_volume_ids = _get_attached_volume_ids(resumed_instances)
-            if resumed_volume_ids:
+            if tag_volumes and resumed_volume_ids:
                 try:
                     ec2.meta.client.create_tags(Resources=resumed_volume_ids,
                                                 Tags=_format_tags(tags))

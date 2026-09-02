@@ -151,6 +151,7 @@ available_node_types:
             - Key: {{ label_key }}
               Value: {{ label_value|tojson }}
             {%- endfor %}
+        {%- if tag_volumes %}
         - ResourceType: volume
           Tags:
             - Key: skypilot-user
@@ -159,6 +160,7 @@ available_node_types:
             - Key: {{ label_key }}
               Value: {{ label_value|tojson }}
             {%- endfor %}
+        {%- endif %}
       # Use IDMSv2
       MetadataOptions:
         HttpTokens: required
