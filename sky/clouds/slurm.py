@@ -36,8 +36,9 @@ class Slurm(clouds.Cloud):
     _CLOUD_UNSUPPORTED_FEATURES = {
         clouds.CloudImplementationFeatures.AUTOSTOP: 'Slurm does not '
                                                      'support autostop.',
-        clouds.CloudImplementationFeatures.STOP: 'Slurm does not support '
-                                                 'stopping instances.',
+        clouds.CloudImplementationFeatures.STOP:
+            'Stopping is supported only for container clusters on Slurm '
+            'clusters with Pyxis installed.',
         clouds.CloudImplementationFeatures.SPOT_INSTANCE: 'Spot instances are '
                                                           'not supported in '
                                                           'Slurm.',
@@ -67,6 +68,7 @@ class Slurm(clouds.Cloud):
     # Used for early exit in _unsupported_features_for_resources().
     _DYNAMICALLY_CHECKED_FEATURES = {
         clouds.CloudImplementationFeatures.DOCKER_IMAGE,
+        clouds.CloudImplementationFeatures.STOP,
         clouds.CloudImplementationFeatures.STORAGE_MOUNTING,
     }
     _MAX_CLUSTER_NAME_LEN_LIMIT = 120
@@ -116,12 +118,20 @@ class Slurm(clouds.Cloud):
             clusters = cls.existing_allowed_clusters()
         else:
             clusters = [cluster]
+        uses_container = resources.extract_docker_image() is not None
+        dynamically_checked_features = cls._DYNAMICALLY_CHECKED_FEATURES.copy()
+        if not uses_container:
+            dynamically_checked_features.remove(
+                clouds.CloudImplementationFeatures.STOP)
         for c in clusters:
             try:
                 # Docker image support requires the Pyxis SPANK plugin.
                 if slurm_utils.check_pyxis_enabled(c):
                     unsupported.pop(
                         clouds.CloudImplementationFeatures.DOCKER_IMAGE, None)
+                    if uses_container:
+                        unsupported.pop(clouds.CloudImplementationFeatures.STOP,
+                                        None)
                 # Storage mounting requires FUSE (/dev/fuse).
                 if slurm_utils.check_fuse_enabled(c):
                     unsupported.pop(
@@ -131,8 +141,7 @@ class Slurm(clouds.Cloud):
                 logger.debug(f'Failed to check cluster features on {c}: '
                              f'{common_utils.format_exception(e)}')
             # Stop early if all dynamically checked features are resolved.
-            if not any(f in unsupported
-                       for f in cls._DYNAMICALLY_CHECKED_FEATURES):
+            if not any(f in unsupported for f in dynamically_checked_features):
                 break
         return unsupported
 
@@ -574,14 +583,15 @@ class Slurm(clouds.Cloud):
         # Read sbatch_options with three-level merge:
         # global < cluster < partition.
         sbatch_options: Dict[str, Any] = {}
+        slurm_config = skypilot_config.get_workspace_cloud('slurm')
         for config_keys in [
-            ('slurm', 'sbatch_options'),
-            ('slurm', 'cluster_configs', cluster, 'sbatch_options'),
-            ('slurm', 'cluster_configs', cluster, 'partition_configs',
-             partition, 'sbatch_options'),
+            ('sbatch_options',),
+            ('cluster_configs', cluster, 'sbatch_options'),
+            ('cluster_configs', cluster, 'partition_configs', partition,
+             'sbatch_options'),
         ]:
-            level_config = skypilot_config.get_nested(config_keys,
-                                                      default_value=None)
+            level_config = slurm_config.get_nested(config_keys,
+                                                   default_value=None)
             if level_config is not None:
                 sbatch_options.update(level_config)
         # Merge task-level config overrides (from `config:` in task YAML).
@@ -630,6 +640,18 @@ class Slurm(clouds.Cloud):
         volume_mount_vars.extend(
             mount.to_yaml_config() for mount in volume_mounts or [])
 
+        client = slurm.SlurmClient(
+            ssh_config_dict['hostname'],
+            int(ssh_config_dict.get('port', 22)),
+            ssh_config_dict['user'],
+            slurm_utils.get_identity_file(ssh_config_dict),
+            ssh_proxy_command=ssh_config_dict.get('proxycommand', None),
+            ssh_proxy_jump=ssh_config_dict.get('proxyjump', None),
+            identities_only=slurm_utils.get_identities_only(ssh_config_dict),
+            slurm_user=slurm_user,
+        )
+        sky_base_dir = slurm_utils.resolve_sky_base_dir(cluster, client)
+
         deploy_vars = {
             'instance_type': resources.instance_type,
             'custom_resources': custom_resources,
@@ -640,6 +662,7 @@ class Slurm(clouds.Cloud):
             'slurm_cluster': cluster,
             'slurm_partition': partition,
             'provision_timeout': provision_timeout,
+            'sky_base_dir': sky_base_dir,
             # TODO(jwj): Pass SSH config in a smarter way
             'ssh_hostname': ssh_config_dict['hostname'],
             'ssh_port': str(ssh_config_dict.get('port', 22)),

@@ -915,7 +915,11 @@ async def cleanup_sky_logs():
     await asyncio_utils.sleep_startup_jitter('sky_logs cleanup daemon')
     while True:
         try:
-            skypilot_config.reload_config()
+            # reload_config() does a blocking file read and, with the
+            # Postgres backend, a synchronous SELECT on the config DB.
+            # Run it off the event loop so it can't stall the other
+            # background daemons sharing this loop.
+            await asyncio.to_thread(skypilot_config.reload_config)
             retention_hours = skypilot_config.get_nested(
                 ('api_server', 'logs_retention_hours'),
                 server_constants.DEFAULT_LOGS_RETENTION_HOURS)
@@ -4141,10 +4145,6 @@ if __name__ == '__main__':
         logger.error(f'Port {cmd_args.port} is not available, exiting.')
         raise RuntimeError(f'Port {cmd_args.port} is not available')
 
-    # Must precede plugin install: a plugin that keeps the engine it gets
-    # during install() would otherwise hold one built for the wrong budget.
-    db_utils.set_max_connections(1)
-
     # Always load plugin in main process, an edge case is that the main process
     # will also run uvicorn server when num_worker=1 and then the plugins will
     # be installed twice in main process (second time with the uvicorn app).
@@ -4157,6 +4157,7 @@ if __name__ == '__main__':
     usage_lib.maybe_show_privacy_policy()
 
     # Initialize global user state db
+    db_utils.set_max_connections(1)
     logger.info('Initializing database engine')
     global_user_state.initialize_and_get_db()
     logger.info('Database engine initialized')

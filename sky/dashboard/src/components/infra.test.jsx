@@ -35,6 +35,9 @@ const renderSection = (props) =>
       isInitialLoad={false}
       groupedPerContextGPUs={{}}
       groupedPerNodeGPUs={{}}
+      // Progressive per-context loading: a row renders its data only once
+      // its context has settled, so default every listed context to loaded.
+      loadedContexts={new Set(props.contexts || [])}
       {...props}
     />
   );

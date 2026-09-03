@@ -266,13 +266,23 @@ export function TopBar() {
   // Function to determine if a path is active
   const isActivePath = (path) => {
     // Special case: highlight workspaces for both /workspaces and /workspace paths
-    if (path === '/workspaces') {
-      return (
-        router.pathname.startsWith('/workspaces') ||
-        router.pathname.startsWith('/workspace')
-      );
+    const builtInMatch =
+      path === '/workspaces'
+        ? router.pathname.startsWith('/workspaces') ||
+          router.pathname.startsWith('/workspace')
+        : router.pathname.startsWith(path);
+    if (builtInMatch) {
+      return true;
     }
-    return router.pathname.startsWith(path);
+    // Plugin routes are served by a catch-all page, so router.pathname is
+    // '/[...path]' for all of them. A plugin route may declare the nav link
+    // it belongs under via `navHref`; match those against the real URL.
+    const currentPath = router.asPath.split(/[?#]/)[0];
+    return pluginRoutes.some(
+      (route) =>
+        route.navHref === path &&
+        (currentPath === route.path || currentPath.startsWith(`${route.path}/`))
+    );
   };
 
   // Modify the getLinkClasses function to handle mobile styles

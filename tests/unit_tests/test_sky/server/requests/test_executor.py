@@ -20,6 +20,7 @@ from sky.server import daemons as server_daemons
 from sky.server.requests import continue_condition as continue_condition_lib
 from sky.server.requests import executor
 from sky.server.requests import payloads
+from sky.server.requests import preconditions
 from sky.server.requests import process
 from sky.server.requests import requests as requests_lib
 from sky.skylet import constants
@@ -175,6 +176,117 @@ async def test_api_cancel_race_condition(isolated_database):
     updated = requests_lib.get_request('race-cancel-before')
     assert updated is not None
     assert updated.status == requests_lib.RequestStatus.CANCELLED
+
+
+def _make_pending_request(request_id: str) -> requests_lib.Request:
+    return requests_lib.Request(request_id=request_id,
+                                name='test-request',
+                                entrypoint=dummy_entrypoint,
+                                request_body=payloads.RequestBody(),
+                                status=requests_lib.RequestStatus.PENDING,
+                                created_at=0.0,
+                                user_id='test-user')
+
+
+@pytest.mark.asyncio
+async def test_enqueue_failure_marks_request_failed(isolated_database):
+    """A failed queue put must leave the request FAILED, not PENDING."""
+    req = _make_pending_request('enqueue-fails')
+    assert await requests_lib.create_if_not_exists_async(req) is True
+
+    queue = mock.Mock()
+    queue.put_async = mock.AsyncMock(side_effect=RuntimeError('put failed'))
+    with mock.patch.object(executor, '_get_queue', return_value=queue):
+        with pytest.raises(RuntimeError, match='put failed'):
+            await executor.schedule_prepared_request(req)
+
+    updated = requests_lib.get_request('enqueue-fails')
+    assert updated is not None
+    assert updated.status == requests_lib.RequestStatus.FAILED
+    error = updated.get_error()
+    assert error is not None
+    assert 'put failed' in str(error['object'])
+
+
+@pytest.mark.asyncio
+async def test_enqueue_cancellation_marks_request_failed(isolated_database):
+    """A cancelled queue put must not strand the request in PENDING."""
+    req = _make_pending_request('enqueue-cancelled')
+    assert await requests_lib.create_if_not_exists_async(req) is True
+
+    queue = mock.Mock()
+    queue.put_async = mock.AsyncMock(side_effect=asyncio.CancelledError())
+    with mock.patch.object(executor, '_get_queue', return_value=queue):
+        with pytest.raises(asyncio.CancelledError):
+            await executor.schedule_prepared_request(req)
+
+    updated = requests_lib.get_request('enqueue-cancelled')
+    assert updated is not None
+    assert updated.status == requests_lib.RequestStatus.FAILED
+
+
+@pytest.mark.parametrize('claimed_status', [
+    requests_lib.RequestStatus.RUNNING,
+    requests_lib.RequestStatus.WAITING,
+])
+@pytest.mark.asyncio
+async def test_enqueue_failure_does_not_clobber_claimed_request(
+        isolated_database, claimed_status):
+    """A row claimed by a worker before the failure mark is left untouched.
+
+    The queue put may commit and still raise (e.g. a timeout racing the
+    commit); a worker can then dequeue and claim the request -- and even park
+    it WAITING for a retry -- before the failure path runs. The failure mark
+    must not overwrite the claimed run.
+    """
+    req = _make_pending_request('enqueue-claimed')
+    assert await requests_lib.create_if_not_exists_async(req) is True
+
+    async def claim_then_fail(input_tuple):
+        del input_tuple
+        with requests_lib.update_request('enqueue-claimed') as claimed:
+            assert claimed is not None
+            claimed.status = claimed_status
+        raise RuntimeError('put failed after commit')
+
+    queue = mock.Mock()
+    queue.put_async = mock.AsyncMock(side_effect=claim_then_fail)
+    with mock.patch.object(executor, '_get_queue', return_value=queue):
+        with pytest.raises(RuntimeError, match='put failed after commit'):
+            await executor.schedule_prepared_request(req)
+
+    updated = requests_lib.get_request('enqueue-claimed')
+    assert updated is not None
+    assert updated.status == claimed_status
+
+
+class _AlwaysMetPrecondition(preconditions.Precondition):
+
+    async def check(self):
+        return True, None
+
+
+@pytest.mark.asyncio
+async def test_enqueue_failure_with_precondition_marks_request_failed(
+        isolated_database):
+    """The terminal-state guard must also cover the precondition path."""
+    req = _make_pending_request('enqueue-fails-precondition')
+    assert await requests_lib.create_if_not_exists_async(req) is True
+
+    queue = mock.Mock()
+    queue.put_async = mock.AsyncMock(side_effect=RuntimeError('put failed'))
+    with mock.patch.object(executor, '_get_queue', return_value=queue):
+        before = set(preconditions.background_tasks)
+        await executor.schedule_prepared_request(
+            req, precondition=_AlwaysMetPrecondition(req.request_id))
+        new_tasks = preconditions.background_tasks - before
+        assert len(new_tasks) == 1
+        with pytest.raises(RuntimeError, match='put failed'):
+            await next(iter(new_tasks))
+
+    updated = requests_lib.get_request('enqueue-fails-precondition')
+    assert updated is not None
+    assert updated.status == requests_lib.RequestStatus.FAILED
 
 
 @pytest.mark.asyncio
@@ -1783,27 +1895,36 @@ def test_saturating_request_executor_does_not_block_auth():
         _reset_thread_executors()
 
 
-def test_executor_initializer_sets_budget_before_plugin_install():
-    """The connection budget must be applied before plugins install.
+def test_maybe_observe_request_pending_first_execution_only():
+    """Pending-time metric observes first executions only.
 
-    A plugin that keeps the engine it gets during install() would otherwise
-    hold one built for the wrong budget for the life of the worker, and
-    disposing the cached engine does not invalidate a reference someone
-    already holds.
+    The retry/pause requeue path sets WAITING (and clears pid) before
+    re-enqueueing, so a WAITING request at execution start is a
+    re-execution and must not re-observe its age; a PENDING request is
+    the first start and must observe exactly once.
     """
-    calls = []
-    with mock.patch.object(executor.db_utils,
-                           'set_max_connections',
-                           side_effect=lambda n: calls.append(
-                               ('set_max_connections', n))), \
-         mock.patch.object(executor.plugins,
-                           'load_plugins',
-                           side_effect=lambda _: calls.append(
-                               ('load_plugins', None))), \
-         mock.patch.object(executor.metrics_lib,
-                           'register_multiproc_cleanup_atexit'), \
-         mock.patch.object(executor.setproctitle, 'setproctitle'), \
-         mock.patch.object(executor.threading, 'Thread'):
-        executor.executor_initializer('short', None, 1)
 
-    assert calls == [('set_max_connections', 1), ('load_plugins', None)]
+    def make_request(status):
+        return requests_lib.Request(
+            request_id='pending-metric-test',
+            name='test-request',
+            status=status,
+            created_at=time.time() - 5,
+            user_id='test-user',
+            entrypoint=dummy_entrypoint,
+            request_body=payloads.RequestBody(),
+            schedule_type=requests_lib.ScheduleType.SHORT)
+
+    with mock.patch.object(executor.metrics_utils,
+                           'observe_request_pending') as observe:
+        executor._maybe_observe_request_pending(  # pylint: disable=protected-access
+            make_request(requests_lib.RequestStatus.PENDING))
+        assert observe.call_count == 1
+        name, schedule_type, pending_seconds = observe.call_args[0]
+        assert name == 'test-request'
+        assert schedule_type == requests_lib.ScheduleType.SHORT.value
+        assert pending_seconds >= 5
+
+        executor._maybe_observe_request_pending(  # pylint: disable=protected-access
+            make_request(requests_lib.RequestStatus.WAITING))
+        assert observe.call_count == 1

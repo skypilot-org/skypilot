@@ -26,6 +26,18 @@ _ALL_JOBS_INFO_CMD = (f'squeue -h --states=running,completing '
                       f'-o "%i{SEP}%j{SEP}%u{SEP}%N{SEP}%b"')
 _PARTITIONS_INFO_CMD = 'scontrol show partitions -o'
 _BATCH_OUTPUT_HEADER = 'SKYPILOT_SLURM_BATCH\n'
+_JOB_STEP_ID_REGEX = re.compile(r'(?:^|\s)StepId=(\S+)')
+_JOB_STEP_NAME_REGEX = re.compile(r'(?:^|\s)Name=(\S+)')
+_JOB_STEP_NOT_FOUND_REGEX = re.compile(
+    r'(?:Invalid job id|Job step .* not found)', re.IGNORECASE)
+
+# Wall-clock bound for the batched inventory invocations (SSH connect
+# included). The inventory endpoints fan out over every configured cluster,
+# and a login node that accepts the TCP connect but never answers (e.g. a
+# broken tunnel data path) would otherwise hang the aggregate forever. On
+# expiry the SSH process is killed and subprocess.TimeoutExpired is raised,
+# which the aggregation callers degrade to an empty per-cluster result.
+_INVENTORY_TIMEOUT_SECONDS = 60
 
 # Regex pattern to extract partition names from scontrol output
 # Matches PartitionName=<name> and captures until the next field
@@ -83,6 +95,12 @@ class JobGresInfo(NamedTuple):
     # The job's per-node GRES request (squeue %b, TRES_PER_NODE), e.g.
     # 'gres/gpu:h100:4'.
     gres_str: str
+
+
+class JobStepInfo(NamedTuple):
+    """A Slurm job step returned by scontrol."""
+    step_id: str
+    name: str
 
 
 class SlurmInventorySnapshot(NamedTuple):
@@ -512,6 +530,65 @@ class SlurmClient:
                                            stream_logs=False)
         logger.debug(f'Successfully cancelled job {job_name}: {stdout}')
 
+    def list_job_steps(self, job_id: str) -> List[JobStepInfo]:
+        """Lists the active steps in a Slurm job allocation."""
+        cmd = f'scontrol -o show step {shlex.quote(job_id)}'
+        rc, stdout, stderr = self._run_slurm_cmd(cmd)
+        error_output = f'{stdout}\n{stderr}'
+        if rc != 0 and _JOB_STEP_NOT_FOUND_REGEX.search(error_output):
+            subprocess_utils.handle_returncode(
+                rc,
+                cmd,
+                f'Slurm allocation {job_id} disappeared during stop.',
+                stderr=error_output,
+                stream_logs=False)
+        subprocess_utils.handle_returncode(
+            rc,
+            cmd,
+            f'Failed to query steps for Slurm job {job_id}.',
+            stderr=error_output,
+            stream_logs=False)
+        steps = []
+        for line in stdout.splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            step_id_match = _JOB_STEP_ID_REGEX.search(line)
+            name_match = _JOB_STEP_NAME_REGEX.search(line)
+            if step_id_match is None or name_match is None:
+                raise RuntimeError(
+                    f'Unexpected Slurm job step output: {line!r}.')
+            steps.append(
+                JobStepInfo(step_id=step_id_match.group(1),
+                            name=name_match.group(1)))
+        if not steps:
+            raise RuntimeError('Unexpected empty Slurm job step output for '
+                               f'allocation {job_id}.')
+        return steps
+
+    def signal_job_step(self, job_id: str, step_id: str, signal: str) -> None:
+        """Signals one step, tolerating its concurrent completion."""
+        if not step_id.startswith(f'{job_id}.'):
+            raise ValueError(f'Slurm step {step_id!r} does not belong to job '
+                             f'{job_id!r}.')
+        cmd = (f'scancel --signal {shlex.quote(signal)} '
+               f'{shlex.quote(step_id)}')
+        rc, stdout, stderr = self._run_slurm_cmd(cmd)
+        if rc != 0:
+            active_step_ids = {
+                step.step_id for step in self.list_job_steps(job_id)
+            }
+            if step_id not in active_step_ids:
+                logger.debug(f'Slurm step {step_id} exited before it could be '
+                             f'signalled.')
+                return
+        subprocess_utils.handle_returncode(
+            rc,
+            cmd,
+            f'Failed to signal Slurm job step {step_id}.',
+            stderr=f'{stdout}\n{stderr}',
+            stream_logs=False)
+
     def info(self) -> str:
         """Get Slurm cluster information.
 
@@ -551,7 +628,8 @@ class SlurmClient:
     def get_node_inventory(
             self) -> Tuple[List[NodeInfo], Dict[str, Dict[str, str]]]:
         """Get node information and details in one remote invocation."""
-        outputs = self._run_slurm_cmds([_INFO_NODES_CMD, _ALL_NODE_DETAILS_CMD])
+        outputs = self._run_slurm_cmds([_INFO_NODES_CMD, _ALL_NODE_DETAILS_CMD],
+                                       timeout=_INVENTORY_TIMEOUT_SECONDS)
         node_returncode, node_stdout, node_stderr = outputs[0]
         details_returncode, details_stdout, details_stderr = outputs[1]
         subprocess_utils.handle_returncode(
@@ -587,7 +665,8 @@ class SlurmClient:
             _ALL_NODE_DETAILS_CMD,
             _ALL_JOBS_INFO_CMD,
             _PARTITIONS_INFO_CMD,
-        ])
+        ],
+                                       timeout=_INVENTORY_TIMEOUT_SECONDS)
         node_returncode, node_stdout, node_stderr = outputs[0]
         details_returncode, details_stdout, details_stderr = outputs[1]
         jobs_returncode, jobs_stdout, jobs_stderr = outputs[2]

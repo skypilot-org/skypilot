@@ -1457,6 +1457,12 @@ function JobDetailsContent({
         </div>
       </div>
       <div>
+        <div className="text-gray-600 font-medium text-base">Started</div>
+        <div className="text-base mt-1">
+          {jobData.started_at ? formatFullTimestamp(jobData.started_at) : '-'}
+        </div>
+      </div>
+      <div>
         <div className="text-gray-600 font-medium text-base">Duration</div>
         <div className="text-base mt-1">
           {formatDuration(jobData.job_duration)}
@@ -1522,6 +1528,41 @@ function JobDetailsContent({
           )}
         </div>
       </div>
+      {/* Slurm schedules onto a partition (its zone); it is how quota and
+          priority are carved up on a Slurm cluster, so it gets its own row.
+          Multi-task jobs list every task's partition, like Requested
+          Resources above. */}
+      {(() => {
+        const slurmTasks = allTasks.filter(
+          (t) => t.cloud && t.cloud.toLowerCase() === 'slurm' && t.zone
+        );
+        if (slurmTasks.length === 0) return null;
+        const partitions = [...new Set(slurmTasks.map((t) => t.zone))];
+        return (
+          <div>
+            <div className="text-gray-600 font-medium text-base">Partition</div>
+            <div className="text-base mt-1">
+              {allTasks.length > 1 ? (
+                <NonCapitalizedTooltip
+                  content={slurmTasks
+                    .map(
+                      (task) =>
+                        `Task ${allTasks.indexOf(task)}${task.task ? ` (${task.task})` : ''}: ${task.zone}`
+                    )
+                    .join('\n')}
+                  className="text-sm text-muted-foreground"
+                >
+                  <span className="cursor-help border-b border-dotted border-gray-400">
+                    {partitions.join(', ')}
+                  </span>
+                </NonCapitalizedTooltip>
+              ) : (
+                partitions[0]
+              )}
+            </div>
+          </div>
+        );
+      })()}
       <div>
         <div className="text-gray-600 font-medium text-base">Resources</div>
         <div className="text-base mt-1">

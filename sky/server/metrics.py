@@ -517,6 +517,46 @@ try:
 except ValueError:
     pass
 
+_START_TIME_HELP = (
+    'Unix timestamp when the API server started. Compute uptime as '
+    'time() - sky_apiserver_start_time_seconds.')
+
+
+class ServerStartTimeCollector:
+    """Exports the API server start time, the uptime source.
+
+    prometheus_client's built-in process_start_time_seconds is unavailable
+    under the multiprocess collector (default collectors are not
+    aggregated). Custom collectors are only scraped from the main server
+    process (the metrics server runs in it), so that process's own creation
+    time is the server boot time. The boot-check request row (which debug
+    dumps use for uptime) is deliberately not used here: the row survives
+    server restarts (schedule_on_boot_check_async ignores
+    RequestAlreadyExistsError), so its created_at reflects the boot that
+    first inserted it, not the current one.
+    """
+
+    def __init__(self):
+        self._start_time = psutil.Process(os.getpid()).create_time()
+
+    def describe(self):
+        yield prom_core.GaugeMetricFamily('sky_apiserver_start_time_seconds',
+                                          _START_TIME_HELP)
+
+    def collect(self):
+        metric = prom_core.GaugeMetricFamily('sky_apiserver_start_time_seconds',
+                                             _START_TIME_HELP)
+        metric.add_metric([], self._start_time)
+        yield metric
+
+
+_SERVER_START_TIME_COLLECTOR = _wrap_collector(ServerStartTimeCollector())
+
+try:
+    prom.REGISTRY.register(_SERVER_START_TIME_COLLECTOR)
+except ValueError:
+    pass
+
 # Collectors registered by plugins at runtime (ResilientCollector-wrapped).
 _plugin_collectors: list = []
 
@@ -1006,6 +1046,7 @@ def metrics() -> fastapi.Response:
         registry.register(_SQLITE_DB_SIZE_COLLECTOR)
         registry.register(_WORKSPACE_USAGE_COLLECTOR)
         registry.register(_COLLECTOR_HEALTH_COLLECTOR)
+        registry.register(_SERVER_START_TIME_COLLECTOR)
         if _MANAGED_JOBS_COLLECTOR is not None:
             registry.register(_MANAGED_JOBS_COLLECTOR)
         for c in _plugin_collectors:
