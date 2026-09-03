@@ -693,6 +693,9 @@ class TestStopInstances:
             '/home/test/.sky_clusters/test-cluster', preserve_logs=True)
         assert '! -name sky_logs' in script
         assert '-print -quit' in script
+        # The verification must fail when find itself errors (e.g. a stale
+        # file handle), not only when leftovers remain.
+        assert '[ -z "$leftovers" ]' in script
 
     def test_remove_shared_state_script_retries_until_verified(self):
         script = instance._remove_shared_state_script(
@@ -700,6 +703,30 @@ class TestStopInstances:
         assert script.count('sleep') == 1
         assert 'exit 0' in script
         assert 'exit 1' in script
+
+    def test_cleanup_fails_after_exhausted_retries(self, monkeypatch, tmp_path):
+        # A removal that keeps failing must not be reported as success.
+        fake_bin = tmp_path / 'bin'
+        fake_bin.mkdir()
+        (fake_bin / 'rm').write_text('#!/bin/bash\nexit 1\n')
+        os.chmod(fake_bin / 'rm', 0o755)
+        home = tmp_path / '.sky_clusters' / _CLUSTER
+        (home / 'sky_workdir').mkdir(parents=True)
+        (home / 'sky_workdir' / 'file').write_text('state')
+        env = {**os.environ, 'PATH': f'{fake_bin}:{os.environ["PATH"]}'}
+        monkeypatch.setattr(instance,
+                            '_SHARED_STATE_CLEANUP_RETRY_INTERVAL_SECONDS', 0)
+        script = instance._remove_shared_state_script(str(home),
+                                                      preserve_logs=False)
+
+        result = subprocess.run(['/bin/bash', '-c', script],
+                                check=False,
+                                capture_output=True,
+                                text=True,
+                                env=env)
+
+        assert result.returncode == 1
+        assert (home / 'sky_workdir' / 'file').exists()
 
     def test_cleanup_retries_stale_removal(self, monkeypatch, tmp_path):
         # A stale NFS handle fails the first rm and clears later: the cleanup

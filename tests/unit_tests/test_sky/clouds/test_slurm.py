@@ -1678,6 +1678,18 @@ class TestCreateVirtualInstance:
             'has_job_db': False,
             'nodes': ['node1'],
         }
+        cleanup_script = slurm_instance._remove_shared_state_script(
+            '/home/testuser/.sky_clusters/test-cluster', preserve_logs=True)
+        submitted = {}
+
+        def check_submit(partition, cluster_name, tgt_path):
+            del partition, cluster_name, tgt_path
+            submitted['cleanup_seen'] = any(
+                call.args[0] == cleanup_script
+                for call in mock_ssh_runner.return_value.run.call_args_list)
+            return '5576'
+
+        mock_slurm_client.return_value.submit_job.side_effect = check_submit
 
         with patch('tempfile.NamedTemporaryFile') as mock_tempfile:
             mock_file = mock.MagicMock()
@@ -1693,13 +1705,15 @@ class TestCreateVirtualInstance:
                     config=config,
                 )
 
-        cleanup_script = slurm_instance._remove_shared_state_script(
-            '/home/testuser/.sky_clusters/test-cluster', preserve_logs=True)
         run_commands = [
             call.args[0]
             for call in mock_ssh_runner.return_value.run.call_args_list
         ]
         assert cleanup_script in run_commands
+        # The cleanup must precede the sbatch submission: afterwards the
+        # sbatch writes control files into the home, which the cleanup
+        # must not delete.
+        assert submitted['cleanup_seen'] is True
 
     @patch('sky.provision.slurm.instance._wait_for_job_nodes')
     @patch('sky.provision.slurm.instance.slurm_utils.get_proctrack_type')

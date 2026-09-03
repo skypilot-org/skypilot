@@ -1187,6 +1187,22 @@ touch {sky_cluster_home_dir}/.hushlogin
         cmd,
         'Failed to create provision scripts directory on login node.',
         stderr=f'{stdout}\n{stderr}')
+    if snapshot_manifest is not None:
+        # A stop leaves only sky_logs in the shared home. If stale NFS
+        # handles interrupted that cleanup, remove the leftovers now: the
+        # runtime setup is not idempotent against a half-cleaned home
+        # (e.g. a partially deleted uv-managed Python install breaks the
+        # venv creation). This runs before the sbatch is submitted so it
+        # only sees the stop's leftovers and a failure surfaces while the
+        # snapshot is still unconsumed; the sbatch writes its control
+        # files after it.
+        _run_on_login_node(
+            login_node_runner,
+            _remove_shared_state_script(sky_cluster_home_dir,
+                                        preserve_logs=True),
+            'Failed to clean leftover shared state before restoring the '
+            'Slurm cluster.')
+
     # Rsync the provision script to the login node
     with tempfile.NamedTemporaryFile(mode='w', suffix='.sh', delete=True) as f:
         f.write(provision_script)
@@ -1249,20 +1265,6 @@ touch {sky_cluster_home_dir}/.hushlogin
                          f'{stdout}'
                          f'=== End of Slurm job logs ===')
         raise e
-
-    if snapshot_manifest is not None:
-        # A stop leaves only sky_logs in the shared home. If stale NFS
-        # handles interrupted that cleanup, remove the leftovers now: the
-        # runtime setup is not idempotent against a half-cleaned home
-        # (e.g. a partially deleted uv-managed Python install breaks the
-        # venv creation). By restore time the stale handles have usually
-        # cleared, so this pass removes what the stop could not.
-        _run_on_login_node(
-            login_node_runner,
-            _remove_shared_state_script(sky_cluster_home_dir,
-                                        preserve_logs=True),
-            'Failed to clean leftover shared state after restoring the '
-            'Slurm cluster.')
 
     return common.ProvisionRecord(provider_name='slurm',
                                   region=region,
@@ -1803,9 +1805,12 @@ def _remove_shared_state_script(sky_cluster_home_dir: str,
                       '! -name sky_logs '
                       '-exec rm -rf -- {} +')
         # GNU find exits 0 even when the invoked rm fails, so the result
-        # must be verified separately.
-        verify_cmd = (f'[ -z "$(find {home} -mindepth 1 -maxdepth 1 '
-                      '! -name sky_logs -print -quit)" ]')
+        # must be verified separately. The command substitution takes
+        # find's exit status (a stale handle makes find error out), so a
+        # find failure cannot be mistaken for an empty home.
+        verify_cmd = (f'leftovers="$(find {home} -mindepth 1 -maxdepth 1 '
+                      '! -name sky_logs -print -quit)" && '
+                      '[ -z "$leftovers" ]')
     else:
         remove_cmd = f'rm -rf -- {home}'
         verify_cmd = f'[ ! -e {home} ]'
