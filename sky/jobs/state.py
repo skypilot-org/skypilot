@@ -172,6 +172,15 @@ spot_table = sqlalchemy.Table(
     sqlalchemy.Column('t_time_to_running',
                       sqlalchemy.Float,
                       server_default=None),
+    # The metrics daemon's pending-timeline query, once a minute. Without it
+    # that query full-scans spot and sorts the result to return the handful of
+    # jobs that just started -- and in the steady state, to return nothing.
+    # Leading with t_time_to_running seeks straight to the rows without a
+    # timeline; start_at then serves the ordering from the index rather than a
+    # temp b-tree. 18ms against nothing measurable over 200k rows, growing
+    # with the job history rather than with the work there is to do.
+    sqlalchemy.Index('ix_spot_pending_timeline', 't_time_to_running',
+                     'start_at'),
 )
 
 job_info_table = sqlalchemy.Table(

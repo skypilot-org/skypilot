@@ -381,6 +381,14 @@ launch_attempt_table = sqlalchemy.Table(
     # insert, and there is one insert per attempt against several lookups.
     sqlalchemy.Index('ix_launch_attempts_cluster_on_cloud',
                      'cluster_name_on_cloud'),
+    # The abandoned sweep, which runs once a minute and in the steady state
+    # finds nothing. On provision_start alone it still had to read every row
+    # older than the bound -- in the steady state, nearly the table -- before
+    # discovering that none were open. Leading with outcome makes it a seek
+    # into the few in-flight rows: 120ms against nothing measurable over 200k
+    # rows, once a minute, inside a write transaction that blocks other
+    # writers for its duration.
+    sqlalchemy.Index('ix_launch_attempts_open', 'outcome', 'provision_start'),
 )
 
 ssh_key_table = sqlalchemy.Table(

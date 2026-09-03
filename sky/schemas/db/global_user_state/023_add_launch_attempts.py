@@ -26,10 +26,12 @@ def upgrade():
         bind = op.get_bind()
         db_utils.add_table_to_db_sqlalchemy(Base.metadata, bind,
                                             'launch_attempts')
-        # Creating the table brings its indexes with it, but only when the
-        # table did not already exist. Anyone who ran an earlier form of this
-        # revision has the table and not the newer indexes, so create them
-        # here too -- checkfirst makes it a no-op in the common case.
+        # Creating the table brings its indexes with it, but checkfirst skips
+        # the whole statement when the table is already there, and then the
+        # indexes are never created. Make the revision idempotent instead of
+        # half-applied. (A database already stamped at this revision is not
+        # reached by this -- alembic will not re-run it -- which is what 024
+        # is for.)
         for index in Base.metadata.tables['launch_attempts'].indexes:
             index.create(bind=bind, checkfirst=True)
 
