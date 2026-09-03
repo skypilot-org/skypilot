@@ -364,6 +364,10 @@ class BasePlugin(abc.ABC):
         configured plugin order.
 
         Only for that ordering need. Everything else belongs in `install`.
+
+        Raising here aborts the load, exactly as raising from `install` does:
+        plugins are infrastructure, and a half-installed one is not something
+        to serve requests with. "Second pass" does not mean optional.
         """
         del extension_context  # Unused by the default no-op.
 
@@ -585,8 +589,9 @@ def load_plugins(extension_context: ExtensionContext):
     for class_path, plugin in installed_now:
         try:
             plugin.install_late(extension_context)
-        except Exception:  # pylint: disable=broad-except
-            logger.error(f'Plugin {class_path} failed its late install pass.')
+        except Exception as e:  # pylint: disable=broad-except
+            logger.error(f'Plugin {class_path} failed its late install pass: '
+                         f'{common_utils.format_exception(e)}')
             raise
 
     _plugins_loaded = True
