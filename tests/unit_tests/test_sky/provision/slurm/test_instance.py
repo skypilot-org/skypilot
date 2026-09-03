@@ -1,5 +1,6 @@
 """Unit tests for sky.provision.slurm.instance."""
 import json
+import os
 import shlex
 import subprocess
 from unittest import mock
@@ -684,8 +685,61 @@ class TestStopInstances:
                 in node_cleanup)
         assert 'rm -rf -- /tmp/test-cluster' in node_cleanup
         shared_cleanup = login_runner.run.call_args_list[1].args[0]
-        assert shared_cleanup == (
-            'rm -rf -- /home/test/.sky_clusters/test-cluster')
+        assert shared_cleanup == instance._remove_shared_state_script(
+            '/home/test/.sky_clusters/test-cluster', preserve_logs=False)
+
+    def test_remove_shared_state_script_preserves_logs(self):
+        script = instance._remove_shared_state_script(
+            '/home/test/.sky_clusters/test-cluster', preserve_logs=True)
+        assert '! -name sky_logs' in script
+        assert '-print -quit' in script
+
+    def test_remove_shared_state_script_retries_until_verified(self):
+        script = instance._remove_shared_state_script(
+            '/home/test/.sky_clusters/test-cluster', preserve_logs=False)
+        assert script.count('sleep') == 1
+        assert 'exit 0' in script
+        assert 'exit 1' in script
+
+    def test_cleanup_retries_stale_removal(self, monkeypatch, tmp_path):
+        # A stale NFS handle fails the first rm and clears later: the cleanup
+        # script must retry instead of leaving a half-deleted home behind.
+        fake_bin = tmp_path / 'bin'
+        fake_bin.mkdir()
+        real_rm = subprocess.run(['/usr/bin/which', 'rm'],
+                                 check=True,
+                                 capture_output=True,
+                                 text=True).stdout.strip()
+        (fake_bin /
+         'rm').write_text('#!/bin/bash\n'
+                          'echo "$@" >> "$CLEANUP_LOG"\n'
+                          '[ "$(wc -l < "$CLEANUP_LOG")" -ge 2 ] && exec ' +
+                          real_rm + ' "$@"\n'
+                          'exit 1\n')
+        os.chmod(fake_bin / 'rm', 0o755)
+        home = tmp_path / '.sky_clusters' / _CLUSTER
+        (home / 'sky_workdir').mkdir(parents=True)
+        (home / 'sky_workdir' / 'file').write_text('state')
+        log_file = tmp_path / 'cleanup.log'
+        log_file.touch()
+        env = {
+            **os.environ, 'PATH': f'{fake_bin}:{os.environ["PATH"]}',
+            'CLEANUP_LOG': str(log_file)
+        }
+        monkeypatch.setattr(instance,
+                            '_SHARED_STATE_CLEANUP_RETRY_INTERVAL_SECONDS', 0)
+        script = instance._remove_shared_state_script(str(home),
+                                                      preserve_logs=False)
+
+        result = subprocess.run(['/bin/bash', '-c', script],
+                                check=False,
+                                capture_output=True,
+                                text=True,
+                                env=env)
+
+        assert result.returncode == 0, result.stderr
+        assert not home.exists()
+        assert len(log_file.read_text().splitlines()) == 2
 
     def test_cleanup_allocation_preserves_logs(self, monkeypatch, tmp_path):
         client = mock.MagicMock()

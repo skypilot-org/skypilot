@@ -1250,6 +1250,20 @@ touch {sky_cluster_home_dir}/.hushlogin
                          f'=== End of Slurm job logs ===')
         raise e
 
+    if snapshot_manifest is not None:
+        # A stop leaves only sky_logs in the shared home. If stale NFS
+        # handles interrupted that cleanup, remove the leftovers now: the
+        # runtime setup is not idempotent against a half-cleaned home
+        # (e.g. a partially deleted uv-managed Python install breaks the
+        # venv creation). By restore time the stale handles have usually
+        # cleared, so this pass removes what the stop could not.
+        _run_on_login_node(
+            login_node_runner,
+            _remove_shared_state_script(sky_cluster_home_dir,
+                                        preserve_logs=True),
+            'Failed to clean leftover shared state after restoring the '
+            'Slurm cluster.')
+
     return common.ProvisionRecord(provider_name='slurm',
                                   region=region,
                                   zone=partition,
@@ -1766,6 +1780,42 @@ def _wait_for_job_states(client: 'slurm.SlurmClient', job_name: str,
         time.sleep(POLL_INTERVAL_SECONDS)
 
 
+# An NFS client can transiently serve stale file handles that make rm fail
+# partway through a directory. Retrying clears them once the client
+# revalidates; the sleep between attempts gives that time to happen.
+_SHARED_STATE_CLEANUP_ATTEMPTS = 3
+_SHARED_STATE_CLEANUP_RETRY_INTERVAL_SECONDS = 10
+
+
+def _remove_shared_state_script(sky_cluster_home_dir: str,
+                                preserve_logs: bool) -> str:
+    """Build a script that empties the shared cluster home on the login node.
+
+    A stop keeps the logs referenced by the jobs database that start restores;
+    teardown removes the whole home. The removal is verified and retried:
+    a stale-file-handle failure would otherwise leave a half-deleted home,
+    and the leftovers (e.g. a partially deleted uv-managed Python install)
+    break the next start's runtime setup.
+    """
+    home = shlex.quote(sky_cluster_home_dir)
+    if preserve_logs:
+        remove_cmd = (f'find {home} -mindepth 1 -maxdepth 1 '
+                      '! -name sky_logs '
+                      '-exec rm -rf -- {} +')
+        # GNU find exits 0 even when the invoked rm fails, so the result
+        # must be verified separately.
+        verify_cmd = (f'[ -z "$(find {home} -mindepth 1 -maxdepth 1 '
+                      '! -name sky_logs -print -quit)" ]')
+    else:
+        remove_cmd = f'rm -rf -- {home}'
+        verify_cmd = f'[ ! -e {home} ]'
+    return (f'for attempt in $(seq {_SHARED_STATE_CLEANUP_ATTEMPTS}); do\n'
+            f'  {remove_cmd} && {verify_cmd} && exit 0\n'
+            f'  sleep {_SHARED_STATE_CLEANUP_RETRY_INTERVAL_SECONDS}\n'
+            'done\n'
+            'exit 1')
+
+
 def _cleanup_slurm_allocation(
     client: 'slurm.SlurmClient',
     login_node_runner: command_runner.CommandRunner,
@@ -1826,18 +1876,10 @@ rm -rf -- {shlex.quote(skypilot_runtime_dir)}
         login_node_runner, cleanup_node_cmd,
         'Failed to clean up the Slurm allocation before cancellation.')
 
-    if preserve_logs:
-        # A stop keeps the logs referenced by the jobs database that start
-        # will restore.
-        remove_shared_state_cmd = (f'find {shlex.quote(sky_cluster_home_dir)} '
-                                   '-mindepth 1 -maxdepth 1 '
-                                   '! -name sky_logs '
-                                   '-exec rm -rf -- {} +')
-    else:
-        remove_shared_state_cmd = (
-            f'rm -rf -- {shlex.quote(sky_cluster_home_dir)}')
     _run_on_login_node(
-        login_node_runner, remove_shared_state_cmd,
+        login_node_runner,
+        _remove_shared_state_script(sky_cluster_home_dir,
+                                    preserve_logs=preserve_logs),
         'Failed to clean up shared Slurm cluster state before cancellation.')
 
 
