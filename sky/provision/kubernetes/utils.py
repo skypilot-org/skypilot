@@ -5035,6 +5035,13 @@ def get_execution_context_from_config(
     `constants.PROVIDER_EXECUTION_CONTEXT_KEY`, this falls back to the
     control context, which is the right answer whenever a cluster runs where
     it was submitted -- that is, for every cluster today.
+
+    This resolves the context and nothing else. The namespace still comes
+    from get_namespace_from_config, and any object a caller addresses by name
+    is still named as the submitting cluster named it -- the head Deployment
+    get_command_runners targets, for one. Whoever first resolves a real
+    placement owns those too: a context alone is not enough to reach a pod in
+    a cluster that holds different objects.
     """
     recorded = provider_config.get(
         kubernetes_constants.PROVIDER_EXECUTION_CONTEXT_KEY)
@@ -5058,6 +5065,10 @@ def set_execution_context_in_config(provider_config: Dict[str, Any],
     Note the value is recorded raw, exactly as `provider.context` holds it:
     the in-cluster context name is mapped to None on read, by the same
     accessor that maps `provider.context`.
+
+    Mutating the provider config is all this does. Whether a later reader
+    sees the placement depends on the caller persisting that config -- into
+    the cluster record, for a provisioner writing it at launch.
     """
     if context is None:
         return
