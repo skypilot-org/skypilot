@@ -4,19 +4,69 @@ This module loads the service catalog file and can be used to
 query instance types and pricing information for Vast.ai.
 """
 
+import ast
+import math
 import typing
 from typing import Dict, List, Optional, Tuple, Union
 
 import pandas as pd
 
 from sky.catalog import common
+from sky.utils import annotations
 from sky.utils import resources_utils
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
     from sky.clouds import cloud
 
+_REQUIRED_CATALOG_COLUMNS = {
+    'InstanceType',
+    'AcceleratorName',
+    'AcceleratorCount',
+    'vCPUs',
+    'MemoryGiB',
+    'GpuInfo',
+    'Price',
+    'SpotPrice',
+    'Region',
+}
+
 _df = common.read_catalog('vast/vms.csv')
+
+
+@annotations.lru_cache(scope='request', maxsize=1)
+def _catalog_df() -> pd.DataFrame:
+    """Return validated stable Vast instance-type metadata from local cache.
+
+    Vast marketplace offers are selected only during provisioning. They must
+    not become catalog identities because offer IDs can disappear at any time.
+    Local catalog refreshes replace the CSV atomically; all catalog queries
+    within one request share the same stable metadata snapshot.
+    """
+    try:
+        catalog_df = _df
+        missing_columns = _REQUIRED_CATALOG_COLUMNS.difference(
+            catalog_df.columns)
+        if missing_columns:
+            missing = ', '.join(sorted(missing_columns))
+            raise common.CatalogFetchError(
+                'Local Vast catalog is missing required columns: '
+                f'{missing}.')
+
+        accelerator_count = pd.to_numeric(catalog_df['AcceleratorCount'],
+                                          errors='coerce')
+        usable_gpu_rows = (catalog_df['AcceleratorName'].notna() &
+                           accelerator_count.gt(0) &
+                           catalog_df['GpuInfo'].notna())
+        if usable_gpu_rows.any():
+            return typing.cast(pd.DataFrame, catalog_df)
+        raise common.CatalogFetchError(
+            'Local Vast catalog contains no usable GPU rows.')
+    except common.CatalogFetchError:
+        raise
+    except Exception as exc:  # pylint: disable=broad-except
+        raise common.CatalogFetchError(
+            'Local Vast catalog is not valid CSV.') from exc
 
 
 def _apply_datacenter_filter(df: pd.DataFrame,
@@ -25,13 +75,16 @@ def _apply_datacenter_filter(df: pd.DataFrame,
 
     hosting_type: 0 = Consumer hosted, 1 = Datacenter hosted
     """
-    if not datacenter_only or 'HostingType' not in df.columns:
+    if not datacenter_only:
         return df
-    return df[df['HostingType'] >= 1]
+    if 'HostingType' not in df.columns:
+        return df.iloc[0:0]
+    hosting_type = pd.to_numeric(df['HostingType'], errors='coerce')
+    return df[hosting_type.ge(1)]
 
 
 def instance_type_exists(instance_type: str) -> bool:
-    return common.instance_type_exists_impl(_df, instance_type)
+    return common.instance_type_exists_impl(_catalog_df(), instance_type)
 
 
 def validate_region_zone(
@@ -40,7 +93,7 @@ def validate_region_zone(
     if zone is not None:
         with ux_utils.print_exception_no_traceback():
             raise ValueError('Vast does not support zones.')
-    return common.validate_region_zone_impl('vast', _df, region, zone)
+    return common.validate_region_zone_impl('vast', _catalog_df(), region, zone)
 
 
 def get_hourly_cost(instance_type: str,
@@ -51,13 +104,22 @@ def get_hourly_cost(instance_type: str,
     if zone is not None:
         with ux_utils.print_exception_no_traceback():
             raise ValueError('Vast does not support zones.')
-    return common.get_hourly_cost_impl(_df, instance_type, use_spot, region,
-                                       zone)
+    try:
+        return common.get_hourly_cost_impl(_catalog_df(), instance_type,
+                                           use_spot, region, zone)
+    except ValueError:
+        if region is None:
+            raise
+        # A live offer may exist in a country absent from the refreshed
+        # metadata. Use the global catalog price as an estimate in that case.
+        return common.get_hourly_cost_impl(_catalog_df(), instance_type,
+                                           use_spot, None, zone)
 
 
 def get_vcpus_mem_from_instance_type(
         instance_type: str) -> Tuple[Optional[float], Optional[float]]:
-    return common.get_vcpus_mem_from_instance_type_impl(_df, instance_type)
+    return common.get_vcpus_mem_from_instance_type_impl(_catalog_df(),
+                                                        instance_type)
 
 
 def get_default_instance_type(cpus: Optional[str] = None,
@@ -73,7 +135,7 @@ def get_default_instance_type(cpus: Optional[str] = None,
     del disk_tier, local_disk
     # NOTE: After expanding catalog to multiple entries, you may
     # want to specify a default instance type or family.
-    df = _apply_datacenter_filter(_df, datacenter_only)
+    df = _apply_datacenter_filter(_catalog_df(), datacenter_only)
     return common.get_instance_type_for_cpus_mem_impl(df, cpus, memory, region,
                                                       zone, use_spot,
                                                       max_hourly_cost)
@@ -81,7 +143,38 @@ def get_default_instance_type(cpus: Optional[str] = None,
 
 def get_accelerators_from_instance_type(
         instance_type: str) -> Optional[Dict[str, Union[int, float]]]:
-    return common.get_accelerators_from_instance_type_impl(_df, instance_type)
+    return common.get_accelerators_from_instance_type_impl(
+        _catalog_df(), instance_type)
+
+
+def get_legacy_per_gpu_vram_mib(instance_type: str, num_gpus: int) -> int:
+    """Resolve a legacy type only when all catalog rows prove one VRAM value."""
+    vram_values = set()
+    catalog_df = _catalog_df()
+    rows = catalog_df[catalog_df['InstanceType'] == instance_type]
+    for gpu_info in rows['GpuInfo']:
+        try:
+            parsed_gpu_info = (ast.literal_eval(gpu_info) if isinstance(
+                gpu_info, str) else gpu_info)
+        except (TypeError, ValueError, SyntaxError):
+            continue
+        try:
+            total_vram_mib = float(parsed_gpu_info['TotalGpuMemoryInMiB'])
+        except (KeyError, TypeError, ValueError):
+            if num_gpus != 1:
+                continue
+            try:
+                total_vram_mib = float(
+                    parsed_gpu_info['Gpus'][0]['MemoryInfo']['SizeInMiB'])
+            except (KeyError, TypeError, ValueError):
+                continue
+        if math.isfinite(total_vram_mib) and total_vram_mib > 0:
+            vram_values.add(round(total_vram_mib / num_gpus))
+    if len(vram_values) != 1:
+        raise ValueError(
+            'Legacy Vast instance type is ambiguous across GPU VRAM values; '
+            'refresh or reselect the resource.')
+    return vram_values.pop()
 
 
 def get_instance_type_for_accelerator(
@@ -105,7 +198,7 @@ def get_instance_type_for_accelerator(
     if zone is not None:
         with ux_utils.print_exception_no_traceback():
             raise ValueError('Vast does not support zones.')
-    df = _apply_datacenter_filter(_df, datacenter_only)
+    df = _apply_datacenter_filter(_catalog_df(), datacenter_only)
     return common.get_instance_type_for_accelerator_impl(
         df=df,
         acc_name=acc_name,
@@ -120,7 +213,8 @@ def get_instance_type_for_accelerator(
 
 def get_region_zones_for_instance_type(instance_type: str,
                                        use_spot: bool) -> List['cloud.Region']:
-    df = _df[_df['InstanceType'] == instance_type]
+    catalog_df = _catalog_df()
+    df = catalog_df[catalog_df['InstanceType'] == instance_type]
     return common.get_region_zones(df, use_spot)
 
 
@@ -135,6 +229,7 @@ def list_accelerators(
         require_price: bool = True) -> Dict[str, List[common.InstanceTypeInfo]]:
     """Returns all instance types in Vast offering GPUs."""
     del require_price  # Unused.
-    return common.list_accelerators_impl('Vast', _df, gpus_only, name_filter,
-                                         region_filter, quantity_filter,
-                                         case_sensitive, all_regions)
+    return common.list_accelerators_impl('Vast', _catalog_df(), gpus_only,
+                                         name_filter, region_filter,
+                                         quantity_filter, case_sensitive,
+                                         all_regions)

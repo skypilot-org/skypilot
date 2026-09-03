@@ -60,3 +60,51 @@ class TestProvisionConfigRedaction:
         assert redacted['docker_config']['image'] == 'ubuntu:latest'
         # Should not create docker_login_config.password if it doesn't exist.
         assert 'docker_login_config' not in redacted['docker_config']
+
+    def test_redact_provider_docker_password(self):
+        config = common.ProvisionConfig(
+            provider_config={
+                'docker_login_config': {
+                    'username': 'registry-user',
+                    'password': 'registry-password',
+                    'server': 'registry.example.com',
+                }
+            },
+            authentication_config={},
+            docker_config={},
+            node_config={},
+            count=1,
+            tags={},
+            resume_stopped_nodes=True,
+            ports_to_open_on_launch=None,
+        )
+
+        redacted = config.get_redacted_config()
+
+        assert redacted['provider_config']['docker_login_config'] == {
+            'username': 'registry-user',
+            'password': '<redacted>',
+            'server': 'registry.example.com',
+        }
+
+    @pytest.mark.parametrize('field_name', ['login', 'image_login'])
+    def test_redact_vast_registry_login_overrides(self, field_name):
+        config = common.ProvisionConfig(
+            provider_config={
+                'create_instance_kwargs': {
+                    field_name: 'registry-password',
+                }
+            },
+            authentication_config={},
+            docker_config={},
+            node_config={},
+            count=1,
+            tags={},
+            resume_stopped_nodes=False,
+            ports_to_open_on_launch=None,
+        )
+
+        redacted = config.get_redacted_config()
+
+        assert redacted['provider_config']['create_instance_kwargs'][
+            field_name] == '<redacted>'

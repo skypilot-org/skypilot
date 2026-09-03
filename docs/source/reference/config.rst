@@ -267,9 +267,12 @@ Below is the configuration syntax and some example values. See detailed explanat
 
   :ref:`vast <config-yaml-vast>`:
     :ref:`datacenter_only <config-yaml-vast-datacenter-only>`: true
+    :ref:`reliable_hosts <config-yaml-vast-reliable-hosts>`: true
+    :ref:`provision_timeout <config-yaml-vast-provision-timeout>`: 1800
     :ref:`create_instance_kwargs <config-yaml-vast-create-instance-kwargs>`:
       template_hash: f0e124f0e98bfbc2ecb05dc713009ee7
-      env: "-e YOUR_CUSTOM=YOUR_VAL"
+      env:
+        YOUR_CUSTOM: YOUR_VAL
 
   :ref:`rbac <config-yaml-rbac>`:
     :ref:`default_role <config-yaml-rbac-default-role>`: admin
@@ -3024,8 +3027,49 @@ parameters to filter for professional datacenter-hosted machines. Note some GPUs
 may only be available on non-datacenter offers. This config filters both the catalog
 (during resource planning) and the launch query (during provisioning). This config
 can be overridden per task via :ref:`config flag <config-client-cli-flag>`.
+SkyPilot uses stable catalog instance types for planning, then searches the
+live Vast marketplace immediately before creating an instance. Marketplace
+offer IDs are never stored as SkyPilot instance types.
+For a task without an explicit region, the live query can select any matching
+Vast country; catalog regions and prices are planning metadata, not live
+availability guarantees. An explicit Vast region remains a country constraint.
+If an unscoped targeted query has no match, SkyPilot forces one catalog refresh
+and retries before reporting the sanitized live-offer diagnostics.
 
 Default: ``false``
+
+.. _config-yaml-vast-reliable-hosts:
+
+``vast.reliable_hosts``
+~~~~~~~~~~~~~~~~~~~~~~~
+
+Use a stricter live-offer query intended for production launches (optional).
+When enabled, SkyPilot requires Vast offers to be verified, datacenter-hosted,
+have a reliability score of at least ``0.99``, and advertise at least
+``1000 Mbps`` download bandwidth. This can reduce capacity and increase price.
+It applies only while selecting the live marketplace offer; it does not change
+the stable catalog resource type used during planning.
+
+Default: ``false``
+
+.. _config-yaml-vast-provision-timeout:
+
+``vast.provision_timeout``
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Maximum total seconds SkyPilot waits for a Vast request to finish provisioning
+and report every requested instance as ``RUNNING`` with an SSH port. The
+deadline includes waiting for a previously requested node with the same cluster
+name. ``NULL``, ``CREATED``, ``RESTARTING``, ``REBOOTING``, and ``LOADING``
+remain pending until this deadline; ``EXITED``, ``STOPPED``, ``FROZEN``,
+``UNKNOWN``, and ``OFFLINE`` fail immediately.
+
+For a new instance, SkyPilot collects redacted debug diagnostics, destroys the
+failed contract, and makes one replacement attempt on a different Vast machine
+when time remains. If that is not possible, the typed provisioning error allows
+normal SkyPilot cloud failover to continue.
+
+Default: ``1800`` (30 minutes)
 
 .. _config-yaml-vast-create-instance-kwargs:
 
@@ -3034,8 +3078,22 @@ Default: ``false``
 
 Additional parameters to pass to the Vast API when creating instances (optional).
 
-This allows full access to Vast's instance creation options. User-provided
-parameters are passed through to the Vast API.
+SkyPilot passes each non-``None`` parameter to Vast's
+``create_instance`` API. This is intentionally an open-ended mapping: any
+keyword accepted by the installed ``vastai-sdk`` can be supplied, including
+options added by newer SDK versions. The options below are the fields supported
+by the current integration and Vast API. The SDK version installed with
+SkyPilot determines which fields are available.
+
+.. note::
+
+    Private-registry credentials must not be supplied through ``login`` or
+    ``image_login`` in this mapping. Supply the complete
+    ``SKYPILOT_DOCKER_SERVER``, ``SKYPILOT_DOCKER_USERNAME``, and
+    ``SKYPILOT_DOCKER_PASSWORD`` task credential triplet instead. SkyPilot
+    passes the derived credential to Vast while creating the instance, before
+    the runtime image is pulled. The reserved credential variables are used
+    only for provisioning and are not injected into task setup or run commands.
 
 .. dropdown:: Supported parameters
 
@@ -3044,7 +3102,11 @@ parameters are passed through to the Vast API.
         configuration. When using a template, this is not required. (e.g vastai/base-image:@vastai-automatic-tag)
 
     ``env``
-        Environment variables and port mappings (e.g., ``"-e KEY=value -p 8080:8080"``).
+        Environment variables. Use a mapping with the current Vast API, for
+        example ``{KEY: value}``. SkyPilot also accepts legacy strings containing
+        ``-e KEY=value`` pairs. The ``__SOURCE=skypilot`` metadata variable is
+        added automatically. Port mappings are not accepted in ``env`` by
+        ``vastai-sdk`` v6 and later.
 
     ``price`` / ``bid_price``
         Bid price for the instance. For preemptible instances, if not specified,
@@ -3059,7 +3121,8 @@ parameters are passed through to the Vast API.
         (e.g., ``cluster-name-head`` or ``cluster-name-worker``).
 
     ``extra``
-        Extra docker run arguments to pass to the container.
+        Extra Docker run options to pass to the container (for example,
+        ``"--shm-size=16g"``).
 
     ``onstart_cmd``
         Command to run on instance start. SkyPilot prepends its own initialization
@@ -3068,14 +3131,6 @@ parameters are passed through to the Vast API.
     ``onstart``
         Path to a local script file to run on instance start. The file contents
         are read and appended to ``onstart_cmd``.
-
-    ``login``
-        Docker registry login credentials (e.g., ``"-u user -p pass registry"``).
-        Required when using private Docker registries.
-
-    ``image_login``
-        Docker registry credentials if needed.
-        Required when using private Docker registries.
 
     ``python_utf8``
         Enable Python UTF-8 mode (boolean true | false).
@@ -3086,6 +3141,10 @@ parameters are passed through to the Vast API.
     ``jupyter_lab``
         Use JupyterLab instead of Jupyter Notebook (boolean true | false).
 
+    ``use_jupyter_lab``
+        JupyterLab option used by some Vast SDK versions. SkyPilot passes this
+        field through without renaming it.
+
     ``jupyter_dir``
         Jupyter notebook directory path.
 
@@ -3093,7 +3152,9 @@ parameters are passed through to the Vast API.
         Force instance creation even if warnings are present (boolean true | false).
 
     ``cancel_unavail``
-        Cancel the request if the instance becomes unavailable (boolean true | false).
+        Cancel the request if the selected offer is unavailable when Vast creates
+        it (boolean true | false). This does not detect a host that stalls after
+        contract creation; use ``vast.provision_timeout`` for that case.
 
     ``template_hash`` / ``template_hash_id``
         Use a Vast template by its hash ID. When specified, ``image`` and ``disk``
@@ -3108,17 +3169,49 @@ parameters are passed through to the Vast API.
     ``vm``
         Whether this is a VM instance. (boolean true | false)
 
+    ``runtype``
+        Vast run type, such as ``"ssh"`` or ``"jupyter"``, when supported by
+        the installed SDK.
+
+    ``volume_info``
+        Volume attachment configuration as a mapping, when supported by the
+        installed SDK.
+
+SkyPilot manages the following values during instance creation:
+
+* ``id`` is always replaced with the offer ID selected from the live Vast
+  marketplace; it cannot be overridden through this mapping.
+* ``label`` defaults to the SkyPilot cluster node name when not provided.
+* ``image`` and ``disk`` default to the task configuration when no template is
+  used. A template supplies these values instead.
+* ``price`` is populated with the offer's minimum bid for preemptible tasks
+  when no price is provided. The legacy ``bid_price`` name is translated to
+  ``price``.
+* SkyPilot initialization and SSH setup commands are prepended to
+  ``onstart_cmd``. If ``onstart`` is provided, the referenced script is read
+  and appended to the resulting startup command.
+* ``env`` is converted to a mapping before it is sent to Vast.
+
+The old ``direct`` and ``ssh`` creation kwargs are not supported by
+``vastai-sdk`` v6 and later and must not be supplied. SkyPilot handles the
+SSH connection setup itself. Unsupported or misspelled fields are not
+validated by SkyPilot; Vast returns the resulting API error.
+
 Example:
 
 .. code-block:: yaml
 
   vast:
     datacenter_only: true
+    reliable_hosts: true
+    provision_timeout: 1800
     create_instance_kwargs:
       python_utf8: true
       lang_utf8: true
       extra: "--shm-size=16g"
       onstart_cmd: "echo 'Instance started'"
+      env:
+        MY_ENV: my-value
 
 Example using a Vast template:
 
@@ -3232,9 +3325,14 @@ Valid daemon names are:
 - ``skypilot-status-refresh-daemon``
 - ``skypilot-volume-status-refresh-daemon``
 - ``managed-job-status-refresh-daemon``
+- ``vast-catalog-refresh-daemon``
 
 ``log_level``
     Log level to set for the daemon. Valid values are ``DEBUG``, ``INFO`` and ``WARNING``.
+
+``interval_seconds``
+    Refresh interval for ``vast-catalog-refresh-daemon``. Default: ``1200``
+    (20 minutes).
 
 .. code-block:: yaml
 
@@ -3245,6 +3343,8 @@ Valid daemon names are:
       log_level: INFO
     managed-job-status-refresh-daemon:
       log_level: WARNING
+    vast-catalog-refresh-daemon:
+      interval_seconds: 1200 # Refresh the Vast catalog every 20 minutes
 
 .. _config-yaml-metrics:
 

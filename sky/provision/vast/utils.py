@@ -5,14 +5,175 @@
 # python sdk.
 #
 """Vast library wrapper for SkyPilot."""
+import math
 from pathlib import Path
+import re
 import shlex
-from typing import Any, Dict, List, Optional
+import time
+from typing import Any, Dict, Iterable, List, Optional
 
+from sky import exceptions
 from sky import sky_logging
 from sky.adaptors import vast
+from sky.utils import resources_utils
 
 logger = sky_logging.init_logger(__name__)
+
+_SHOW_INSTANCE_MAX_ATTEMPTS = 3
+_SHOW_INSTANCE_RETRY_SECONDS = 1
+_OFFER_UNAVAILABLE_ERROR_SNIPPETS = (
+    'unavailable',
+    'no longer rentable',
+    'already been rented',
+    'already rented',
+)
+_REGISTRY_LOGIN_OVERRIDE_KEYS = frozenset({'login', 'image_login'})
+
+
+def _validate_registry_login_kwargs(
+        create_instance_kwargs: Dict[str, Any]) -> None:
+    """Reject provider-specific registry credentials.
+
+    SkyPilot derives the credentials from the task's complete
+    SKYPILOT_DOCKER_* secret triplet, which works consistently across
+    providers and keeps precedence unambiguous.
+    """
+    override_keys = _REGISTRY_LOGIN_OVERRIDE_KEYS & set(create_instance_kwargs)
+    if override_keys:
+        raise ValueError(
+            'Vast registry credentials must be supplied through the complete '
+            'SKYPILOT_DOCKER_* task-secret trio; '
+            'vast.create_instance_kwargs.login and image_login are not '
+            'supported.')
+
+
+def _is_offer_unavailable_error(exc: Exception) -> bool:
+    """Return whether Vast rejected creation because this offer vanished."""
+    message = str(exc).lower()
+    return 'offer' in message and any(
+        snippet in message for snippet in _OFFER_UNAVAILABLE_ERROR_SNIPPETS)
+
+
+def _get_created_instance(contract_id: str) -> Optional[Dict[str, Any]]:
+    """Read a newly created Vast contract without issuing another create.
+
+    Vast's create endpoint can succeed before its read path observes the new
+    contract. Retrying ``create_instance`` in that window risks a duplicate
+    paid instance, so only the read is retried.
+    """
+    for attempt in range(_SHOW_INSTANCE_MAX_ATTEMPTS):
+        try:
+            instance = vast.vast().show_instance(id=contract_id)
+            if instance is not None:
+                return instance
+        except Exception:  # pylint: disable=broad-except
+            pass
+        if attempt + 1 < _SHOW_INSTANCE_MAX_ATTEMPTS:
+            time.sleep(_SHOW_INSTANCE_RETRY_SECONDS)
+    return None
+
+
+def normalize_env(user_env: Any) -> Dict[str, Any]:
+    """Convert supported create-instance environment formats to a mapping."""
+    env_dict: Dict[str, Any] = {'__SOURCE': 'skypilot'}
+    if user_env is None:
+        return env_dict
+    if isinstance(user_env, dict):
+        env_dict.update(user_env)
+        return env_dict
+    if isinstance(user_env, str):
+        for match in re.finditer(r'-e\s+(\w+)=([^\s]*)', user_env):
+            env_dict[match.group(1)] = match.group(2)
+        return env_dict
+    raise ValueError(
+        'Vast create_instance_kwargs[\'env\'] must be a mapping or string.')
+
+
+def redact_log_output(output: str, sensitive_values: Iterable[Any]) -> str:
+    """Redact known secret values before writing Vast diagnostics to logs."""
+    redacted_output = output
+    values = {str(value) for value in sensitive_values if value}
+    for value in sorted(values, key=len, reverse=True):
+        redacted_output = redacted_output.replace(value, '<redacted>')
+    return redacted_output
+
+
+def get_api_key() -> str:
+    """Returns the configured Vast API key for diagnostic-log redaction."""
+    return str(vast.vast().client.api_key)
+
+
+def get_instance_logs(instance_id: str,
+                      daemon_logs: bool,
+                      tail: int = 2000) -> str:
+    """Gets a bounded normal or daemon log tail for a Vast instance."""
+    output = vast.vast().logs(instance_id=int(instance_id),
+                              tail=str(tail),
+                              daemon_logs=daemon_logs)
+    return str(output)
+
+
+def gpu_requirements(instance_type: str) -> vast.VastOfferRequirements:
+    """Extract the GPU identity, including minimum VRAM, from a type."""
+    return vast.get_offer_requirements(
+        instance_type,
+        region=None,
+        disk_size=1,
+        datacenter_only=False,
+        reliable_hosts=False,
+        network_tier=resources_utils.NetworkTier.STANDARD,
+    )
+
+
+def matches_gpu(offer: Any, requirements: vast.VastOfferRequirements) -> bool:
+    """Return whether an instance keeps the requested GPU identity intact."""
+    if not isinstance(offer, dict):
+        return False
+    offer_num_gpus = offer.get('num_gpus')
+    if offer_num_gpus is None:
+        return False
+    try:
+        normalized_num_gpus = int(offer_num_gpus)
+    except (TypeError, ValueError):
+        return False
+    try:
+        offer_gpu_ram_mib = float(offer['gpu_ram'])
+    except (KeyError, TypeError, ValueError):
+        return False
+    return (str(offer.get('gpu_name') or '').replace(
+        '_', ' ').strip().casefold() == str(
+            requirements.gpu_name or '').replace('_', ' ').strip().casefold()
+            and normalized_num_gpus == requirements.num_gpus and
+            offer_gpu_ram_mib >= requirements.gpu_ram_mib)
+
+
+def _offer_price(offer: Dict[str, Any]) -> float:
+    """Return a sortable on-demand price, putting malformed values last."""
+    price = offer.get('dph_total')
+    if price is None:
+        return math.inf
+    try:
+        return float(price)
+    except (TypeError, ValueError):
+        return math.inf
+
+
+def _validate_created_instance(
+        instance: Any, requirements: vast.VastOfferRequirements) -> None:
+    """Raise when a created contract does not identify the requested GPU."""
+    if not matches_gpu(instance, requirements):
+        actual_gpu_name = (instance.get('gpu_name') if isinstance(
+            instance, dict) else None)
+        actual_num_gpus = (instance.get('num_gpus') if isinstance(
+            instance, dict) else None)
+        actual_gpu_ram = (instance.get('gpu_ram')
+                          if isinstance(instance, dict) else None)
+        raise ValueError(
+            f'Vast reported gpu_name={actual_gpu_name!r}, '
+            f'num_gpus={actual_num_gpus!r}, gpu_ram={actual_gpu_ram!r}; '
+            f'expected gpu_name={requirements.gpu_name!r}, '
+            f'num_gpus={requirements.num_gpus}, '
+            f'gpu_ram>={requirements.gpu_ram_mib}.')
 
 
 def list_instances() -> Dict[str, Dict[str, Any]]:
@@ -21,16 +182,21 @@ def list_instances() -> Dict[str, Dict[str, Any]]:
 
     instance_dict: Dict[str, Dict[str, Any]] = {}
     for instance in instances:
-        instance['id'] = str(instance['id'])
-        info = instance
+        info = dict(instance)
+        info['id'] = str(info['id'])
 
-        if isinstance(instance['actual_status'], str):
-            info['status'] = instance['actual_status'].upper()
+        actual_status = info.get('actual_status')
+        if isinstance(actual_status, str):
+            info['status'] = actual_status.upper()
+        elif actual_status is None:
+            # Vast reports null while a new contract is being provisioned.
+            # Treat it as a pending lifecycle state, not a host outage.
+            info['status'] = 'NULL'
         else:
             info['status'] = 'UNKNOWN'
-        info['name'] = instance['label']
+        info['name'] = info.get('label')
 
-        instance_dict[instance['id']] = info
+        instance_dict[info['id']] = info
 
     return instance_dict
 
@@ -43,6 +209,10 @@ def launch(name: str,
            ports: Optional[List[int]],
            preemptible: bool,
            secure_only: bool,
+           reliable_hosts: bool = False,
+           network_tier: resources_utils.NetworkTier = resources_utils.
+           NetworkTier.STANDARD,
+           excluded_machine_ids: Optional[List[Any]] = None,
            private_docker_registry: Optional[bool] = None,
            login: Optional[str] = None,
            create_instance_kwargs: Optional[Dict[str, Any]] = None,
@@ -51,8 +221,8 @@ def launch(name: str,
 
     Converts the instance_type to the Vast GPU name, finds the specs for the
     GPU, and launches the instance. User-provided parameters in
-    create_instance_kwargs are passed through to the Vast API, allowing full
-    access to Vast's instance creation options.
+    create_instance_kwargs are passed through to the Vast API, except for
+    private-registry credentials, which SkyPilot derives from task secrets.
 
     Supported Vast API parameters (via create_instance_kwargs):
       - image: Docker image to use
@@ -63,7 +233,6 @@ def launch(name: str,
       - extra: Extra docker run arguments
       - onstart_cmd: Command to run on instance start
       - onstart: Path to a local script file to run on start
-      - login: Docker registry login (e.g., "-u user -p pass registry")
       - python_utf8: Enable Python UTF-8 mode
       - lang_utf8: Enable system UTF-8 locale
       - jupyter_lab: Use JupyterLab instead of Jupyter
@@ -111,137 +280,163 @@ def launch(name: str,
     # `ports` is currently unused. Keep it in the signature for caller
     # compatibility and future use (port-forwarding is handled separately).
     del ports
-    cpu_ram = float(instance_type.split('-')[-1]) / 1024
-    gpu_name = instance_type.split('-')[1].replace('_', ' ')
-    num_gpus = int(instance_type.split('-')[0].replace('x', ''))
+    launch_kwargs = dict(create_instance_kwargs or {})
+    _validate_registry_login_kwargs(launch_kwargs)
+    if private_docker_registry and not login:
+        raise ValueError(
+            'Private Docker registry requested but no SkyPilot registry '
+            'credentials were provided.')
 
-    query = [
-        'chunked=true',
-        'georegion=true',
-        f'geolocation="{region[-2:]}"',
-        f'disk_space>={disk_size}',
-        f'num_gpus={num_gpus}',
-        f'gpu_name="{gpu_name}"',
-        f'cpu_ram>="{cpu_ram}"',
-    ]
-    if secure_only:
-        query.append('datacenter=true')
-        query.append('hosting_type>=1')
-    query_str = ' '.join(query)
+    requirements = vast.get_offer_requirements(
+        instance_type,
+        region=region,
+        disk_size=disk_size,
+        datacenter_only=secure_only,
+        reliable_hosts=reliable_hosts,
+        network_tier=network_tier,
+    )
+    gpu_name = requirements.gpu_name
+    num_gpus = requirements.num_gpus
+    query_str = vast.build_offer_query(requirements)
 
-    instance_list = vast.vast().search_offers(query=query_str)
+    raw_instance_list = vast.vast().search_offers(query=query_str,
+                                                  order='dph_total')
 
-    if isinstance(instance_list, int) or len(instance_list) == 0:
-        raise RuntimeError('Failed to create instances, could not find an '
-                           'offer that satisfies the requirements '
-                           f'"{query_str}".')
+    excluded_machine_id_strings = {
+        str(machine_id) for machine_id in excluded_machine_ids or []
+    }
+    instance_list: List[Dict[str, Any]]
+    if isinstance(raw_instance_list, list):
+        instance_list = [
+            offer for offer in raw_instance_list if isinstance(offer, dict)
+            if str(offer.get('machine_id')) not in excluded_machine_id_strings
+            and vast.offer_matches_requirements(offer, requirements)
+        ]
+    else:
+        instance_list = []
+    instance_list.sort(key=_offer_price)
 
-    instance_touse = instance_list[0]
+    if len(instance_list) == 0:
+        raise exceptions.VastOfferUnavailableError(
+            'Failed to create instances, could not find an '
+            'offer that satisfies the requirements '
+            f'"{query_str}" for gpu_name={gpu_name!r}, '
+            f'num_gpus={num_gpus}.')
 
-    # Start with user-provided kwargs as the base
-    launch_params: Dict[str, Any] = dict(create_instance_kwargs or {})
-    # Remove None values to avoid overriding defaults
-    launch_params = {k: v for k, v in launch_params.items() if v is not None}
+    def _build_launch_params(instance_touse: Dict[str, Any]) -> Dict[str, Any]:
+        """Build create parameters for one selected live offer."""
+        launch_params: Dict[str, Any] = {
+            key: value
+            for key, value in launch_kwargs.items()
+            if value is not None
+        }
 
-    # Required skypilot parameters
-    launch_params['id'] = instance_touse['id']
-    # Use user's label if provided, otherwise use skypilot name
-    if 'label' not in launch_params:
-        launch_params['label'] = name
+        launch_params['id'] = instance_touse['id']
+        if 'label' not in launch_params:
+            launch_params['label'] = name
 
-    # Handle template - normalize both key names
-    template_hash_id = launch_params.pop('template_hash_id', None)
-    if template_hash_id is None:
-        template_hash_id = launch_params.pop('template_hash', None)
-    use_template = template_hash_id is not None
+        template_hash_id = launch_params.pop('template_hash_id', None)
+        if template_hash_id is None:
+            template_hash_id = launch_params.pop('template_hash', None)
+        use_template = template_hash_id is not None
+        if use_template:
+            launch_params['template_hash'] = template_hash_id
+            launch_params['template_hash_id'] = template_hash_id
 
-    if use_template:
-        launch_params['template_hash'] = template_hash_id
-        launch_params['template_hash_id'] = template_hash_id
+        if 'image' not in launch_params and not use_template:
+            launch_params['image'] = image_name
+        if 'disk' not in launch_params and not use_template:
+            launch_params['disk'] = disk_size
+        if login:
+            launch_params['login'] = login
 
-    # Handle image - user can override, but required if no template
-    if 'image' not in launch_params and not use_template:
-        launch_params['image'] = image_name
+        if 'bid_price' in launch_params:
+            launch_params['price'] = launch_params.pop('bid_price')
+        if 'price' not in launch_params and preemptible:
+            launch_params['price'] = instance_touse.get('min_bid')
 
-    # Handle disk - user can override
-    if 'disk' not in launch_params and not use_template:
-        launch_params['disk'] = disk_size
+        user_onstart_cmd = launch_params.pop('onstart_cmd', None)
+        onstart_path = launch_params.pop('onstart', None)
+        if onstart_path is not None:
+            try:
+                onstart_from_file = Path(onstart_path).read_text(
+                    encoding='utf-8')
+            except OSError as exc:
+                raise RuntimeError(
+                    f'Failed to read onstart script {onstart_path}: {exc}'
+                ) from exc
+            if user_onstart_cmd:
+                user_onstart_cmd = f'{user_onstart_cmd};{onstart_from_file}'
+            else:
+                user_onstart_cmd = onstart_from_file
 
-    # Handle login - from function arg or user kwargs
-    if login and 'login' not in launch_params:
-        launch_params['login'] = login
-    if private_docker_registry and 'login' not in launch_params:
-        raise RuntimeError(
-            'Private docker registry requested but no login credentials '
-            'were provided.')
+        skypilot_onstart = [
+            'touch ~/.no_auto_tmux',
+            f'echo "{vast.vast().client.api_key}" > ~/.vast_api_key',
+        ]
+        if ssh_public_key:
+            skypilot_onstart.extend([
+                'mkdir -p ~/.ssh',
+                'chmod 700 ~/.ssh',
+                'echo "" >> ~/.ssh/authorized_keys',
+                (f'echo {shlex.quote(ssh_public_key.strip())} >> '
+                 '~/.ssh/authorized_keys'),
+                'chmod 600 ~/.ssh/authorized_keys',
+            ])
+            logger.debug('Added SSH key injection to onstart_cmd')
 
-    # Handle price/bid_price - user can override
-    # Vast.ai SDK uses 'price' since SDK v6+; normalize bid_price for compat
-    if 'bid_price' in launch_params:
-        launch_params['price'] = launch_params.pop('bid_price')
-    if 'price' not in launch_params and preemptible:
-        launch_params['price'] = instance_touse.get('min_bid')
-
-    # Handle onstart_cmd - read from file if onstart path provided
-    user_onstart_cmd = launch_params.pop('onstart_cmd', None)
-    onstart_path = launch_params.pop('onstart', None)
-    if onstart_path is not None:
-        try:
-            onstart_from_file = Path(onstart_path).read_text(encoding='utf-8')
-        except OSError as e:
-            raise RuntimeError(
-                f'Failed to read onstart script {onstart_path}: {e}') from e
         if user_onstart_cmd:
-            user_onstart_cmd = f'{user_onstart_cmd};{onstart_from_file}'
-        else:
-            user_onstart_cmd = onstart_from_file
+            skypilot_onstart.append(user_onstart_cmd)
+        launch_params['onstart_cmd'] = ';'.join(skypilot_onstart)
 
-    # Build onstart command - always prepend skypilot requirements
-    # These commands are critical for SkyPilot operation and must always run,
-    # even when using a template
-    skypilot_onstart = [
-        'touch ~/.no_auto_tmux',
-        f'echo "{vast.vast().client.api_key}" > ~/.vast_api_key',
-    ]
+        user_env = launch_params.pop('env', None)
+        launch_params['env'] = normalize_env(user_env)
+        return launch_params
 
-    # Inject SSH public key into authorized_keys if provided
-    if ssh_public_key:
-        # Add commands to inject SSH key into authorized_keys
-        skypilot_onstart.extend([
-            'mkdir -p ~/.ssh',
-            'chmod 700 ~/.ssh',
-            # Add a newline first to ensure keys are on separate lines
-            'echo "" >> ~/.ssh/authorized_keys',
-            (f'echo {shlex.quote(ssh_public_key.strip())} >> '
-             '~/.ssh/authorized_keys'),
-            'chmod 600 ~/.ssh/authorized_keys',
-        ])
-        logger.debug('Added SSH key injection to onstart_cmd')
+    for offer_index, instance_touse in enumerate(instance_list):
+        logger.info(
+            'Selected Vast offer id=%s gpu_name=%s num_gpus=%s dph_total=%s',
+            instance_touse.get('id'), instance_touse.get('gpu_name'),
+            instance_touse.get('num_gpus'), instance_touse.get('dph_total'))
+        launch_params = _build_launch_params(instance_touse)
+        try:
+            new_instance_contract = vast.vast().create_instance(**launch_params)
+        except Exception as exc:  # pylint: disable=broad-except
+            if not _is_offer_unavailable_error(exc):
+                raise
+            if offer_index + 1 == len(instance_list):
+                raise exceptions.VastOfferUnavailableError(str(exc)) from exc
+            logger.info(
+                'Vast offer id=%s became unavailable; trying the next '
+                'matching offer.', instance_touse.get('id'))
+            continue
 
-    if user_onstart_cmd:
-        skypilot_onstart.append(user_onstart_cmd)
-    launch_params['onstart_cmd'] = ';'.join(skypilot_onstart)
+        contract_id = new_instance_contract['new_contract']
+        try:
+            new_instance = _get_created_instance(contract_id)
+            if new_instance is None:
+                raise RuntimeError(
+                    f'Vast contract {contract_id} was not visible after '
+                    f'{_SHOW_INSTANCE_MAX_ATTEMPTS} attempts.')
+            _validate_created_instance(new_instance, requirements)
+        except Exception as exc:  # pylint: disable=broad-except
+            try:
+                vast.vast().destroy_instance(id=contract_id)
+            except Exception as cleanup_exc:  # pylint: disable=broad-except
+                logger.warning('Failed to destroy Vast contract %s: %s',
+                               contract_id, cleanup_exc)
+                cleanup_status = 'failed to destroy'
+            else:
+                cleanup_status = 'destroyed'
+            raise exceptions.VastProvisioningError(
+                f'Vast created contract {contract_id} could not be verified '
+                f'for the requested GPU ({exc}); {cleanup_status} the '
+                'contract.') from exc
 
-    # Handle env - Vast.ai SDK requires env as a dict, not a CLI-style string.
-    # Merge user-provided env (dict or legacy string) with skypilot metadata.
-    user_env = launch_params.pop('env', None)
-    env_dict: Dict[str, str] = {'__SOURCE': 'skypilot'}
-    if user_env is not None:
-        if isinstance(user_env, dict):
-            env_dict.update(user_env)
-        elif isinstance(user_env, str):
-            # Parse legacy "-e KEY=VAL" style strings for backwards compat
-            import re  # pylint: disable=import-outside-toplevel
-            for match in re.finditer(r'-e\s+(\w+)=([^\s]*)', user_env):
-                env_dict[match.group(1)] = match.group(2)
-    launch_params['env'] = env_dict
+        return new_instance['id']
 
-    new_instance_contract = vast.vast().create_instance(**launch_params)
-
-    new_instance = vast.vast().show_instance(
-        id=new_instance_contract['new_contract'])
-
-    return new_instance['id']
+    raise exceptions.VastOfferUnavailableError(
+        f'All matching Vast offers became unavailable for "{query_str}".')
 
 
 def start(instance_id: str) -> None:

@@ -5,13 +5,14 @@
 # positive for the functions.
 #
 # pylint: disable=assignment-from-no-return
+import argparse
 import collections
 import csv
 import json
 import math
 import os
 import re
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Set, Tuple
 
 from sky.adaptors import vast
 
@@ -23,11 +24,54 @@ _map = {
     'QRTX8000': 'RTX8000'
 }
 
+_MAPPED_KEYS = (
+    ('gpu_name', 'InstanceType'),
+    ('gpu_name', 'AcceleratorName'),
+    ('num_gpus', 'AcceleratorCount'),
+    ('cpu_cores', 'vCPUs'),
+    ('cpu_ram', 'MemoryGiB'),
+    ('gpu_name', 'GpuInfo'),
+    ('search.totalHour', 'Price'),
+    ('min_bid', 'SpotPrice'),
+    ('geolocation', 'Region'),
+    ('hosting_type', 'HostingType'),
+)
 
-def create_instance_type(obj: Dict[str, Any]) -> str:
+_VAST_INSTANCE_TYPE_PREFIX = 'vastv2'
+_ACCELERATOR_MEMORY_VARIANTS = {
+    ('A100', 80 * 1024): 'A100-80GB',
+    ('V100', 32 * 1024): 'V100-32GB',
+}
+
+
+def create_instance_type(obj: Dict[str, Any], per_gpu_vram_mib: int) -> str:
+    """Return a stable Vast type that preserves per-device VRAM."""
     stubify = lambda x: re.sub(r'\s', '_', x)
-    return '{}x-{}-{}-{}'.format(obj['num_gpus'], stubify(obj['gpu_name']),
-                                 obj['cpu_cores'], obj['cpu_ram'])
+    return (f'{_VAST_INSTANCE_TYPE_PREFIX}-{obj["num_gpus"]}x-'
+            f'{stubify(obj["gpu_name"])}-{per_gpu_vram_mib}-'
+            f'{obj["cpu_cores"]}-{obj["cpu_ram"]}')
+
+
+def get_per_gpu_vram_mib(offer: Dict[str, Any]) -> int:
+    """Return validated per-device VRAM from Vast's total-memory field."""
+    try:
+        gpu_count = int(offer['num_gpus'])
+        total_vram_mib = float(offer['gpu_total_ram'])
+    except (KeyError, TypeError, ValueError) as exc:
+        raise ValueError('Vast offer is missing GPU memory metadata.') from exc
+    if (gpu_count <= 0 or not math.isfinite(total_vram_mib) or
+            total_vram_mib <= 0):
+        raise ValueError('Vast offer has invalid GPU memory metadata.')
+    return round(total_vram_mib / gpu_count)
+
+
+def _accelerator_name(gpu_name: str, per_gpu_vram_mib: int) -> str:
+    """Normalize a Vast GPU name while retaining canonical memory variants."""
+    gpu = re.sub('Ada', '-Ada', re.sub(r'\s', '', gpu_name))
+    gpu = re.sub(r'(Ti|PCIE|SXM4|SXM|NVL)$', '', gpu)
+    gpu = re.sub(r'(RTX\d0\d0)(S|D)$', r'\1', gpu)
+    gpu = _map.get(gpu, gpu)
+    return _ACCELERATOR_MEMORY_VARIANTS.get((gpu, per_gpu_vram_mib), gpu)
 
 
 def dot_get(d: dict, key: str) -> Any:
@@ -36,22 +80,16 @@ def dot_get(d: dict, key: str) -> Any:
     return d
 
 
-if __name__ == '__main__':
-    seen = set()
+def fetch_vast_catalog() -> List[Dict[str, Any]]:
+    """Fetch and normalize the current Vast offers into catalog rows."""
+    seen: Set[Tuple[str, str, str]] = set()
     # InstanceList is the buffered list to emit to
-    # the CSV
-    csvList = []
+    # the CSV.
+    csv_list = []
 
     # InstanceType and gpuInfo are basically just stubs
     # so that the dictwriter is happy without weird
     # code.
-    mapped_keys = (('gpu_name', 'InstanceType'), ('gpu_name',
-                                                  'AcceleratorName'),
-                   ('num_gpus', 'AcceleratorCount'), ('cpu_cores', 'vCPUs'),
-                   ('cpu_ram', 'MemoryGiB'), ('gpu_name', 'GpuInfo'),
-                   ('search.totalHour', 'Price'), ('min_bid', 'SpotPrice'),
-                   ('geolocation', 'Region'), ('hosting_type', 'HostingType'))
-
     # Vast has a wide variety of machines, some of
     # which will have less diskspace and network
     # bandwidth than others.
@@ -79,19 +117,20 @@ if __name__ == '__main__':
     #     in order to ensure that machines with
     #     small disk pools aren't listed
     #
-    offerList = vast.vast().search_offers(
+    offer_list = vast.vast().search_offers(
         query=('georegion = true chunked = true '
                'inet_down >= 100 disk_space >= 80'),
         limit=10000)
 
-    priceMap: Dict[str, List] = collections.defaultdict(list)
-    for offer in offerList:
+    price_map: Dict[str, List] = collections.defaultdict(list)
+    for offer in offer_list:
         entry = {}
-        for ours, theirs in mapped_keys:
+        for ours, theirs in _MAPPED_KEYS:
             field = dot_get(offer, ours)
             entry[theirs] = field
 
-        instance_type = create_instance_type(offer)
+        per_gpu_vram_mib = get_per_gpu_vram_mib(offer)
+        instance_type = create_instance_type(offer, per_gpu_vram_mib)
         entry['InstanceType'] = instance_type
 
         # the documentation says
@@ -105,12 +144,7 @@ if __name__ == '__main__':
         # we can do that.
         entry['MemoryGiB'] /= 1024
 
-        gpu = re.sub('Ada', '-Ada', re.sub(r'\s', '', offer['gpu_name']))
-        gpu = re.sub(r'(Ti|PCIE|SXM4|SXM|NVL)$', '', gpu)
-        gpu = re.sub(r'(RTX\d0\d0)(S|D)$', r'\1', gpu)
-
-        if gpu in _map:
-            gpu = _map[gpu]
+        gpu = _accelerator_name(offer['gpu_name'], per_gpu_vram_mib)
 
         entry['AcceleratorName'] = gpu
         entry['GpuInfo'] = json.dumps({
@@ -118,42 +152,67 @@ if __name__ == '__main__':
                 'Name': gpu,
                 'Count': offer['num_gpus'],
                 'MemoryInfo': {
-                    'SizeInMiB': offer['gpu_total_ram']
+                    'SizeInMiB': per_gpu_vram_mib
                 }
             }],
             'TotalGpuMemoryInMiB': offer['gpu_total_ram']
         }).replace('"', '\'')
 
-        priceMap[instance_type].append(entry)
+        price_map[instance_type].append(entry)
 
-    for instanceList in priceMap.values():
-        priceList = sorted([x['Price'] for x in instanceList])
-        index = math.ceil(0.5 * len(priceList)) - 1
-        priceTarget = priceList[index]
-        toList: List = []
-        for instance in instanceList:
-            if instance['Price'] <= priceTarget:
-                instance['Price'] = '{:.2f}'.format(priceTarget)
-                toList.append(instance)
+    for instance_list in price_map.values():
+        price_list = sorted([x['Price'] for x in instance_list])
+        index = math.ceil(0.5 * len(price_list)) - 1
+        price_target = price_list[index]
+        to_list: List = []
+        for instance in instance_list:
+            if instance['Price'] <= price_target:
+                instance['Price'] = '{:.2f}'.format(price_target)
+                to_list.append(instance)
 
-        maxBid = max([x.get('SpotPrice') for x in toList])
-        for instance in toList:
+        max_bid = max([x.get('SpotPrice') for x in to_list])
+        for instance in to_list:
             hosting_type = instance.get('HostingType', 0)
-            stub = (f'{instance["InstanceType"]} '
-                    f'{instance["Region"][-2:]} {hosting_type}')
-            if stub in seen:
-                printstub = f'{stub}#print'
-                if printstub not in seen:
-                    instance['SpotPrice'] = f'{maxBid:.2f}'
-                    csvList.append(instance)
-                    seen.add(printstub)
+            raw_region = instance['Region']
+            try:
+                country_code = vast.extract_country_code(raw_region)
+            except ValueError:
+                geographic_key = f'raw:{str(raw_region).strip().casefold()}'
             else:
-                seen.add(stub)
+                geographic_key = country_code or 'any'
+            deduplication_key = (instance['InstanceType'], geographic_key,
+                                 str(hosting_type))
+            if deduplication_key in seen:
+                continue
+            instance['SpotPrice'] = f'{max_bid:.2f}'
+            csv_list.append(instance)
+            seen.add(deduplication_key)
 
-    os.makedirs('vast', exist_ok=True)
-    with open('vast/vms.csv', 'w', newline='', encoding='utf-8') as csvfile:
-        writer = csv.DictWriter(csvfile, fieldnames=[x[1] for x in mapped_keys])
+    return csv_list
+
+
+def save_catalog(instances: List[Dict[str, Any]], output_file: str) -> None:
+    """Save previously fetched Vast catalog rows to a CSV file."""
+    output_dir = os.path.dirname(output_file)
+    if output_dir:
+        os.makedirs(output_dir, exist_ok=True)
+    with open(output_file, 'w', newline='', encoding='utf-8') as csvfile:
+        writer = csv.DictWriter(csvfile,
+                                fieldnames=[x[1] for x in _MAPPED_KEYS])
         writer.writeheader()
 
-        for instance in csvList:
+        for instance in instances:
             writer.writerow(instance)
+
+
+def main() -> None:
+    """Generate the Vast CSV used by hosted catalog publishing jobs."""
+    parser = argparse.ArgumentParser(
+        description='Update Vast catalog for SkyPilot')
+    parser.add_argument('--output', default='vast/vms.csv')
+    args = parser.parse_args()
+    save_catalog(fetch_vast_catalog(), args.output)
+
+
+if __name__ == '__main__':
+    main()

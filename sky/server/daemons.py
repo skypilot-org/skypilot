@@ -344,6 +344,28 @@ def expired_token_cleanup_event():
     time.sleep(interval)
 
 
+def refresh_vast_catalog_event():
+    """Refresh the Vast catalog and wait for the next configured sweep."""
+    # pylint: disable=import-outside-toplevel
+    from sky.catalog import vast_refresh
+
+    logger.info('=== Refreshing Vast catalog ===')
+    vast_refresh.refresh_catalog()
+    interval = skypilot_config.get_nested(
+        ('daemons', 'vast-catalog-refresh-daemon', 'interval_seconds'),
+        server_constants.VAST_CATALOG_REFRESH_DAEMON_INTERVAL_SECONDS)
+    logger.info(
+        'Vast catalog refreshed. Sleeping %s seconds for the next '
+        'refresh...', interval)
+    time.sleep(interval)
+
+
+def should_skip_vast_catalog_refresh():
+    """Skip the Vast catalog daemon when no Vast credential file exists."""
+    return not os.path.isfile(
+        os.path.expanduser('~/.config/vastai/vast_api_key'))
+
+
 def server_heartbeat_event():
     """Periodically send server-side plugin metrics to Loki."""
     # pylint: disable=import-outside-toplevel
@@ -406,10 +428,16 @@ INTERNAL_REQUEST_DAEMONS = [
         id='expired-token-cleanup-daemon',
         name=request_names.RequestName.REQUEST_DAEMON_EXPIRED_TOKEN_CLEANUP,
         event_fn=expired_token_cleanup_event),
+    InternalRequestDaemon(
+        id='vast-catalog-refresh-daemon',
+        name=request_names.RequestName.REQUEST_DAEMON_VAST_CATALOG_REFRESH,
+        event_fn=refresh_vast_catalog_event,
+        should_skip=should_skip_vast_catalog_refresh),
 ]
 
 HIDDEN_REQUEST_NAMES = [
-    request_names.RequestName.REQUEST_DAEMON_SERVER_HEARTBEAT
+    request_names.RequestName.REQUEST_DAEMON_SERVER_HEARTBEAT,
+    request_names.RequestName.REQUEST_DAEMON_VAST_CATALOG_REFRESH,
 ]
 
 _DAEMON_IDS = set(d.id for d in INTERNAL_REQUEST_DAEMONS)

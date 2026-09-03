@@ -122,6 +122,11 @@ Private registries
 When using this mode, to access Docker images hosted on private registries,
 you can use :ref:`task environment variables <env-vars>`:
 
+The complete ``SKYPILOT_DOCKER_*`` triplet is consumed only to authenticate the
+initial image pull. It is not injected into task setup or run commands. Use
+task secrets rather than plain environment variables when the task interface
+supports them.
+
 .. tab-set::
 
     .. tab-item:: Docker Hub

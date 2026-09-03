@@ -374,6 +374,19 @@ def test_to_yaml_and_load(resources_kwargs, expected_yaml_config):
     assert loaded_r.labels == r.labels
 
 
+def test_to_yaml_does_not_resolve_unspecified_instance_memory():
+    """YAML serialization must not require a client-side catalog lookup."""
+    resource = Resources(cloud=clouds.AWS(), instance_type='dynamic-offer-1')
+    with mock.patch.object(
+            clouds.AWS,
+            'get_vcpus_mem_from_instance_type',
+            side_effect=AssertionError('catalog lookup must not occur')):
+        yaml_config = resource.to_yaml_config()
+
+    assert yaml_config['instance_type'] == 'dynamic-offer-1'
+    assert 'memory' not in yaml_config
+
+
 def test_resources_any_of():
     """Test Resources creation with any_of option."""
     # Test any_of with different resources options
@@ -801,6 +814,32 @@ def test_image_id_dual_copy_preserves_both():
     copied = r.copy()
     assert copied.extract_docker_image() == 'myimage:latest'
     assert copied.get_cloud_image_id() == {'us-east-1': 'ami-0abcdef'}
+
+
+def test_resources_reuse_requires_matching_reserved_docker_images():
+    """Cluster reuse requires the same effective reserved Docker image."""
+    requested = Resources(cloud=clouds.AWS(),
+                          image_id={'docker': 'registry.example.com/app:v2'})
+    matching_cluster = Resources(
+        cloud=clouds.AWS(), image_id={'docker': 'registry.example.com/app:v2'})
+    different_cluster = Resources(
+        cloud=clouds.AWS(), image_id={'docker': 'registry.example.com/app:v1'})
+
+    assert requested.less_demanding_than(matching_cluster)
+    assert not requested.less_demanding_than(different_cluster)
+
+
+def test_legacy_region_keyed_docker_images_remain_region_restricted():
+    """Legacy Docker maps remain valid only in their declared regions."""
+    resources = Resources(cloud=clouds.RunPod(),
+                          image_id={
+                              'US': 'docker:registry.example.com/us:v1',
+                              'CA': 'docker:registry.example.com/ca:v1',
+                          })
+
+    assert resources.valid_on_region_zones('US', [])
+    assert resources.valid_on_region_zones('CA', [])
+    assert not resources.valid_on_region_zones('EU', [])
 
 
 def test_image_id_dual_pickle_round_trip():

@@ -178,3 +178,7 @@ SERVER_HEARTBEAT_INTERVAL_SECONDS = 600  # 10 minutes
 # that leak (e.g., due to controller crash mid-cleanup) are eventually
 # removed once their TTL has passed.
 EXPIRED_TOKEN_CLEANUP_DAEMON_INTERVAL_SECONDS = 3600  # 1 hour
+
+# Vast marketplace inventory changes frequently. Keep the catalog current
+# without making resource selection fetch the full provider catalog.
+VAST_CATALOG_REFRESH_DAEMON_INTERVAL_SECONDS = 20 * 60

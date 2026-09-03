@@ -303,13 +303,6 @@ def _get_cloud_dependencies_installation_commands(
     # installed, so we don't check that.
     python_packages: Set[str] = set()
 
-    step_prefix = prefix_str.replace('<step>', str(len(commands) + 1))
-    # Wrap in braces to isolate the || in SKY_UV_INSTALL_CMD from
-    # the outer && chain, preventing operator precedence issues.
-    commands.append(f'echo -en "\\r{step_prefix}uv{empty_str}" && '
-                    f'{{ {constants.SKY_UV_INSTALL_CMD} >/dev/null 2>&1; }} && '
-                    f'{command_runner.ALIAS_SUDO_TO_EMPTY_FOR_ROOT_CMD}')
-
     enabled_compute_clouds = set(
         sky_check.get_cached_enabled_clouds_or_refresh(
             sky_cloud.CloudCapability.COMPUTE))
@@ -317,6 +310,21 @@ def _get_cloud_dependencies_installation_commands(
         sky_check.get_cached_enabled_clouds_or_refresh(
             sky_cloud.CloudCapability.STORAGE))
     enabled_clouds = enabled_compute_clouds.union(enabled_storage_clouds)
+    if (any(isinstance(cloud, clouds.Azure) for cloud in enabled_clouds) and
+            any(isinstance(cloud, clouds.Vast) for cloud in enabled_clouds)):
+        with ux_utils.print_exception_no_traceback():
+            raise exceptions.NotSupportedError(
+                'Azure and Vast are not supported together on a controller '
+                'because their Python dependencies conflict. Enable either '
+                'Azure or Vast, not both.')
+
+    step_prefix = prefix_str.replace('<step>', str(len(commands) + 1))
+    # Wrap in braces to isolate the || in SKY_UV_INSTALL_CMD from
+    # the outer && chain, preventing operator precedence issues.
+    commands.append(f'echo -en "\\r{step_prefix}uv{empty_str}" && '
+                    f'{{ {constants.SKY_UV_INSTALL_CMD} >/dev/null 2>&1; }} && '
+                    f'{command_runner.ALIAS_SUDO_TO_EMPTY_FOR_ROOT_CMD}')
+
     enabled_k8s_and_ssh = [
         repr(cloud)
         for cloud in enabled_clouds
@@ -406,11 +414,9 @@ def _get_cloud_dependencies_installation_commands(
                 cloud_python_dependencies = []
         elif isinstance(cloud, clouds.Vast):
             step_prefix = prefix_str.replace('<step>', str(len(commands) + 1))
-            # Wrap in braces to isolate the || from the outer && chain.
-            commands.append(
-                f'echo -en "\\r{step_prefix}Vast{empty_str}" && '
-                '{ pip list | grep vastai_sdk > /dev/null 2>&1 || '
-                'pip install "vastai_sdk>=0.1.12" > /dev/null 2>&1; }')
+            commands.append(f'echo -en "\\r{step_prefix}Vast{empty_str}" && '
+                            '{ pip install --upgrade "vastai-sdk==1.5.0" '
+                            '> /dev/null 2>&1; }')
 
         python_packages.update(cloud_python_dependencies)
 
