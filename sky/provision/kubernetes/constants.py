@@ -28,5 +28,12 @@ RAY_NODE_CONTAINER_NAME = 'ray-node'
 # replacement is observed, so it blocks garbage-collection of a deleted pod.
 KUEUE_MANAGED_FINALIZER = 'kueue.x-k8s.io/managed'
 
+# Provider-config key recording the Kubernetes context a cluster's pods
+# actually run on, when that can differ from the context the cluster was
+# submitted to (see get_execution_context_from_config). Recorded alongside
+# `provider.context` rather than replacing it: teardown, status and resource
+# cleanup all read `context` and must keep addressing the submitting cluster.
+PROVIDER_EXECUTION_CONTEXT_KEY = 'execution_context'
+
 # Pod phases that are not holding PVCs
 PVC_NOT_HOLD_POD_PHASES = ['Succeeded', 'Failed']

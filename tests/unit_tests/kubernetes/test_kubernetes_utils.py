@@ -19,7 +19,9 @@ import yaml
 
 from sky import exceptions
 from sky import models
+from sky.adaptors import kubernetes as kubernetes_adaptor
 from sky.catalog import kubernetes_catalog
+from sky.provision.kubernetes import constants as k8s_constants
 from sky.provision.kubernetes import utils
 
 
@@ -5759,3 +5761,74 @@ def test_unbounded_oom_hint_precedes_plain_oomkilled():
     assert unbounded != bounded
     assert 'no memory limit' in unbounded
     assert bounded.startswith('The container ran out of memory.')
+
+
+# ---------------------------------------------------------------------------
+# Control vs. execution context
+# ---------------------------------------------------------------------------
+# The two are the same string for every cluster today. What these tests pin is
+# the shape that keeps it that way -- the fallback, and the in-cluster
+# handling -- so that the day a provisioner records a real placement, the
+# blast radius is one accessor and everything here still holds.
+
+_EXECUTION_KEY = k8s_constants.PROVIDER_EXECUTION_CONTEXT_KEY
+
+
+def test_control_and_execution_context_agree_by_default():
+    provider_config = {'context': 'ctx-a'}
+    assert utils.get_control_context_from_config(provider_config) == 'ctx-a'
+    assert utils.get_execution_context_from_config(provider_config) == 'ctx-a'
+
+
+def test_execution_context_falls_back_to_control_context():
+    """Every cluster provisioned before the key existed must still resolve."""
+    provider_config = {'context': 'ctx-a'}
+    assert _EXECUTION_KEY not in provider_config
+    assert utils.get_execution_context_from_config(provider_config) == 'ctx-a'
+
+
+def test_recorded_execution_context_wins():
+    """The one behaviour that matters once placements can differ: the
+    execution reader follows the recorded placement, and the control reader
+    keeps addressing the cluster the objects were submitted to."""
+    provider_config = {'context': 'ctx-manager', _EXECUTION_KEY: 'ctx-worker'}
+    assert utils.get_execution_context_from_config(
+        provider_config) == 'ctx-worker'
+    assert utils.get_control_context_from_config(
+        provider_config) == 'ctx-manager'
+
+
+def test_in_cluster_execution_context_resolves_to_none():
+    """A recorded in-cluster context has to be mapped to None just as
+    `provider.context` is -- it is not a kubeconfig entry, and passing it to
+    the client would defeat in-cluster auth."""
+    provider_config = {
+        'context': 'ctx-a',
+        _EXECUTION_KEY: kubernetes_adaptor.in_cluster_context_name(),
+    }
+    assert utils.get_execution_context_from_config(provider_config) is None
+
+
+def test_in_cluster_control_context_resolves_to_none():
+    provider_config = {'context': kubernetes_adaptor.in_cluster_context_name()}
+    assert utils.get_control_context_from_config(provider_config) is None
+    # ... and the fallback inherits that, rather than the raw name.
+    assert utils.get_execution_context_from_config(provider_config) is None
+
+
+def test_set_execution_context_records_alongside_the_control_context():
+    provider_config = {'context': 'ctx-a'}
+    utils.set_execution_context_in_config(provider_config, 'ctx-worker')
+    assert provider_config[_EXECUTION_KEY] == 'ctx-worker'
+    # `provider.context` is untouched: teardown, status and resource cleanup
+    # all read it and must keep pointing at the submitting cluster.
+    assert provider_config['context'] == 'ctx-a'
+
+
+def test_set_execution_context_ignores_none():
+    """Nothing to record for a cluster with no context: leaving the key out
+    keeps the fallback in charge rather than pinning a null placement."""
+    provider_config = {'context': 'ctx-a'}
+    utils.set_execution_context_in_config(provider_config, None)
+    assert _EXECUTION_KEY not in provider_config
+    assert utils.get_execution_context_from_config(provider_config) == 'ctx-a'
