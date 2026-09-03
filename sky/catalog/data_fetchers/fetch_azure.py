@@ -69,6 +69,38 @@ FAMILY_NAME_TO_SKYPILOT_GPU_NAME = {
     'StandardNVADSA10v5Family': 'A10',
     'StandardNCadsH100v5Family': 'H100',
     'standardNDSH100v5Family': 'H100',
+    # NC A10 v4: the COMPUTE A10 line (24GB, full GPUs, standard drivers),
+    # distinct from the NV A10 v5 visualization line above.
+    # https://learn.microsoft.com/en-us/azure/virtual-machines/sizes/gpu-accelerated/nca10v4-series
+    'StandardNCADSA10v4Family': 'A10',
+    # NCC H100 v5: the confidential-computing H100 NVL 94GB (note the double
+    # C). Same accelerator as NC H100 v5, different family.
+    # https://learn.microsoft.com/en-us/azure/virtual-machines/sizes/gpu-accelerated/nccadsh100v5-series
+    'StandardNCCads2023Family': 'H100',
+    # ND H200 v5: 8x H200 141GB.
+    # https://learn.microsoft.com/en-us/azure/virtual-machines/sizes/gpu-accelerated/ndh200v5-series
+    'standardNDISRH200V5Family': 'H200',
+    # ND GB200 v6 / ND GB300 v6: Grace-Blackwell NVL72 racks; each VM carries
+    # 4 GPUs (see AZURE_MISSING_GPU_COUNT: the SKU API reports no `GPUs`
+    # capability for these sizes).
+    # https://learn.microsoft.com/en-us/azure/virtual-machines/sizes/gpu-accelerated/nd-gb200-v6-series
+    # https://learn.microsoft.com/en-us/azure/virtual-machines/sizes/gpu-accelerated/nd-gb300-v6-series
+    'standardNDISRGB200V6NDRFamily': 'GB200',
+    'standardNDISRGB300V6Family': 'GB300',
+    # ND MI300X v5: 8x AMD MI300X 192GB.
+    # https://learn.microsoft.com/en-us/azure/virtual-machines/sizes/gpu-accelerated/ndmi300xv5-series
+    'standardNDISv5MI300XFamily': 'MI300X',
+}
+
+# Instance types whose SKU API entry carries NO `GPUs` capability even though
+# the family is a GPU family (observed 2026-09-02 via `az vm list-skus --all`).
+# Without this table those rows would be emitted without an accelerator and
+# `sky show-gpus` would not know the size exists. Counts are GPUs per VM from
+# the Azure size documentation linked above, not from the API.
+AZURE_MISSING_GPU_COUNT = {
+    'Standard_ND128isr_NDR_GB200_v6': 4,
+    'Standard_ND128isr_GB300_v6': 4,
+    'Standard_ND96is_MI300X_v5': 8,
 }
 
 
@@ -181,6 +213,42 @@ def get_gpu_name(family: str) -> Optional[str]:
     return FAMILY_NAME_TO_SKYPILOT_GPU_NAME.get(family)
 
 
+def parse_capabilities(instance_type: str, family: str, caps: List[dict]):
+    """Extract (gpu_name, gpu_count, vcpus, memory, hyperv_generation).
+
+    The GPU name comes from the FAMILY (FAMILY_NAME_TO_SKYPILOT_GPU_NAME) and
+    the count from the `GPUs` capability. Some GPU sizes carry no `GPUs`
+    capability at all (ND GB200/GB300 v6, ND96is MI300X v5); for those the
+    count comes from AZURE_MISSING_GPU_COUNT. A GPU family with neither source
+    is emitted without an accelerator rather than with a guessed count.
+    """
+    gpu_name = get_gpu_name(family)
+    gpu_count = np.nan
+    vcpus = np.nan
+    memory = np.nan
+    gen_version = None
+    for item in caps:
+        assert isinstance(item, dict), (item, caps)
+        if item['name'] == 'GPUs':
+            if gpu_name is not None:
+                gpu_count = item['value']
+        elif item['name'] == 'vCPUs':
+            vcpus = float(item['value'])
+        elif item['name'] == 'MemoryGB':
+            memory = item['value']
+        elif item['name'] == 'HyperVGenerations':
+            gen_version = item['value']
+    if gpu_name is not None and gpu_count is np.nan:
+        manual = AZURE_MISSING_GPU_COUNT.get(instance_type)
+        if manual is not None:
+            gpu_count = str(manual)
+    if gpu_name is not None and gpu_count is np.nan:
+        # A GPU family the API describes without a GPU count: do not invent
+        # one -- drop the accelerator so the row is a plain VM row.
+        gpu_name = None
+    return gpu_name, gpu_count, vcpus, memory, gen_version
+
+
 def get_all_regions_instance_types_df(region_set: Set[str]):
     if SINGLE_THREADED:
         dfs = [get_pricing_df(region) for region in region_set]
@@ -238,29 +306,9 @@ def get_all_regions_instance_types_df(region_set: Set[str]):
                      how='left')
     df = df.join(spot_df, on=['merge_name', 'Region', 'is_promo'], how='left')
 
-    def get_capabilities(row):
-        gpu_name = None
-        gpu_count = np.nan
-        vcpus = np.nan
-        memory = np.nan
-        gen_version = None
-        caps = row['capabilities']
-        for item in caps:
-            assert isinstance(item, dict), (item, caps)
-            if item['name'] == 'GPUs':
-                gpu_name = get_gpu_name(row['family'])
-                if gpu_name is not None:
-                    gpu_count = item['value']
-            elif item['name'] == 'vCPUs':
-                vcpus = float(item['value'])
-            elif item['name'] == 'MemoryGB':
-                memory = item['value']
-            elif item['name'] == 'HyperVGenerations':
-                gen_version = item['value']
-        return gpu_name, gpu_count, vcpus, memory, gen_version
-
     def get_additional_columns(row):
-        gpu_name, gpu_count, vcpus, memory, gen_version = get_capabilities(row)
+        gpu_name, gpu_count, vcpus, memory, gen_version = parse_capabilities(
+            row['InstanceType'], row['family'], row['capabilities'])
         return pd.Series({
             'AcceleratorName': gpu_name,
             'AcceleratorCount': gpu_count,
