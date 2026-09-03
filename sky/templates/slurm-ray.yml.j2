@@ -16,6 +16,12 @@ provider:
   partition: "{{slurm_partition}}"
   provision_timeout: {{provision_timeout}}
   sky_base_dir: {{sky_base_dir | tojson}}
+{% if image_id is not none %}
+  # Container-ness is read from this persisted field (see
+  # provision/slurm/instance.py::get_command_runners); it must not be probed
+  # over the shared filesystem, where NFS caching can hide the file.
+  container_image: {{image_id | tojson}}
+{% endif %}
 {% if slurm_user is defined and slurm_user is not none %}
   slurm_user: {{slurm_user | tojson}}
 {% endif %}

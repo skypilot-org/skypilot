@@ -433,6 +433,10 @@ class TestSubmitUserTemplate:
             assert config['provider']['slurm_user'] == slurm_user
         assert config['provider']['ssh']['user'] == transport_user
         assert config['provider']['sky_base_dir'] == '/fsx/alice'
+        if image_id is None:
+            assert 'container_image' not in config['provider']
+        else:
+            assert config['provider']['container_image'] == image_id
         assert config['auth']['ssh_user'] == expected_ssh_user
         assert config['available_node_types']['ray_head_default'][
             'node_config']['volume_mounts'][0]['path'] == '/data'

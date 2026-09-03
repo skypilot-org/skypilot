@@ -714,9 +714,7 @@ def test_slurm_container_stop_start(generic_cloud: str):
             f'sky logs {name} 1 --status',
             f'sky exec {name} -- echo pre-stop-job-2',
             f'sky logs {name} 2 --status',
-            # Shared-FS cleanup can transiently return stale handles; Slurm
-            # stop is idempotent, so retry once.
-            f'sky stop -y {name} || sky stop -y {name}',
+            f'sky stop -y {name}',
             smoke_tests_utils.get_cmd_wait_until_cluster_status_contains(
                 cluster_name=name,
                 cluster_status=[sky.ClusterStatus.STOPPED],
@@ -770,9 +768,7 @@ def test_slurm_container_stop_start_multi_node(generic_cloud: str):
             "'echo pre-stop-rank-$SKYPILOT_NODE_RANK; "
             "echo rank-$SKYPILOT_NODE_RANK > /snapshot_rank_marker'",
             f'sky logs {name} 1 --status',
-            # Shared-FS cleanup can transiently return stale handles; Slurm
-            # stop is idempotent, so retry once.
-            f'sky stop -y {name} || sky stop -y {name}',
+            f'sky stop -y {name}',
             smoke_tests_utils.get_cmd_wait_until_cluster_status_contains(
                 cluster_name=name,
                 cluster_status=[sky.ClusterStatus.STOPPED],

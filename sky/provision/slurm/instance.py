@@ -833,7 +833,6 @@ def _create_virtual_instance(
     # between registry and path. See:
     # https://github.com/NVIDIA/pyxis/wiki/Usage#registry-syntax
     container_image = resources.get('image_id')
-    original_container_image = container_image
     if snapshot_manifest is not None:
         if container_image is None:
             raise RuntimeError('A Slurm container snapshot exists for this '
@@ -927,8 +926,6 @@ apt-get install -y ca-certificates rsync curl git wget fuse
 echo 'alias sudo=""' >> ~/.bashrc
 echo "[container-init] Packages installed in $((SECONDS - INIT_START))s"
 """
-        container_marker_file = (f'{sky_cluster_home_dir}/'
-                                 f'{slurm_utils.SLURM_CONTAINER_MARKER_FILE}')
         container_init_done_dir = (
             f'{sky_cluster_home_dir}/.sky_container_init_done')
         pyxis_args = (f'--container-name={shlex.quote(container_name)}:create '
@@ -1027,7 +1024,6 @@ done
 echo "[container] ERROR: Container is not running as $global_target or $job_target." >&2
 exit 1
 """
-        assert original_container_image is not None
         snapshot_restore_complete_block = ''
         if snapshot_manifest is not None:
             snapshot_restore_complete_block = (
@@ -1065,8 +1061,6 @@ exit 1
             f'{shlex.quote(container_ready_script)}'
             f' || exit 1\n'
             f'echo "[container] Ready in $((SECONDS - CONTAINER_START))s"\n'
-            f'printf \'%s\\n\' {shlex.quote(original_container_image)} > '
-            f'{container_marker_file}\n'
             f'{snapshot_restore_complete_block}'
             f'touch {ready_signal}')
 
@@ -1479,27 +1473,17 @@ def stop_instances(
     job_id = running_jobs[0]
     nodes, _ = client.get_job_nodes(job_id)
 
-    sky_cluster_home_dir = _sky_cluster_home_dir(sky_base_dir,
-                                                 cluster_name_on_cloud)
-    container_marker = (
-        f'{sky_cluster_home_dir}/{slurm_utils.SLURM_CONTAINER_MARKER_FILE}')
-    rc, stdout = _run_on_login_node(
-        login_node_runner,
-        f'cat {shlex.quote(container_marker)}',
-        'Failed to read the Slurm container marker.',
-        tolerate_returncodes=(1,))
-    if rc != 0:
+    # Container-ness is persisted in the cluster config at launch
+    # (provider.container_image) and never probed over the shared
+    # filesystem: NFS attribute caching on the login node can hide the
+    # marker file right after the allocation wrote it, which would
+    # silently run a container cluster on the host as the login user.
+    image_id = provider_config.get('container_image')
+    if image_id is None:
         raise exceptions.NotSupportedError(
-            'Stopping Slurm clusters is supported only for containers '
-            'launched with Pyxis. The running cluster has no container '
-            'snapshot metadata.')
-    image_id = stdout.strip()
-    # An empty marker identifies a Pyxis cluster without the image metadata
-    # required to create a restorable snapshot.
-    if not image_id:
-        raise exceptions.NotSupportedError(
-            'The running Slurm cluster has no container snapshot metadata. '
-            'Relaunch the cluster before stopping it.')
+            'Stopping Slurm clusters is supported only for container '
+            'clusters, and the cluster record has no container image. '
+            'Relaunch the cluster with --image-id to use stop.')
     previous_manifest = _read_snapshot_manifest(login_node_runner, snapshot_dir)
 
     skypilot_runtime_dir = _resolve_skypilot_runtime_dir(
@@ -1509,16 +1493,29 @@ def stop_instances(
         inside_slurm_cluster=inside_slurm_cluster)
 
     cancel_jobs_code = job_lib.JobLibCodeGen.cancel_jobs(None, cancel_all=True)
+    # The cancel code sources the runtime venv, which a half-broken cluster
+    # may no longer have. Skipping the cancel keeps stop working as the
+    # recovery path: without a runtime there is no job driver left to cancel,
+    # and the allocation teardown below reclaims everything regardless.
+    runtime_venv_activate = shlex.quote(
+        f'{skypilot_runtime_dir}/'
+        f'{skylet_constants.SKY_REMOTE_PYTHON_ENV_NAME}/bin/activate')
+    runtime_venv_check = f'test -f {runtime_venv_activate}'
     if inside_slurm_cluster:
         # Skylet runs in the same environment as the job driver, so the
         # cancel runs locally against the shared jobs database.
-        cancel_cmd = (f'export '
-                      f'{skylet_constants.SKY_RUNTIME_DIR_ENV_VAR_KEY}='
-                      f'{shlex.quote(skypilot_runtime_dir)} && '
-                      f'{cancel_jobs_code}')
-        rc, stdout, stderr = login_node_runner.run(cancel_cmd,
-                                                   require_outputs=True,
-                                                   stream_logs=False)
+        rc, _, _ = login_node_runner.run(runtime_venv_check,
+                                         require_outputs=True,
+                                         stream_logs=False)
+        has_runtime = rc == 0
+        if has_runtime:
+            cancel_cmd = (f'export '
+                          f'{skylet_constants.SKY_RUNTIME_DIR_ENV_VAR_KEY}='
+                          f'{shlex.quote(skypilot_runtime_dir)} && '
+                          f'{cancel_jobs_code}')
+            rc, stdout, stderr = login_node_runner.run(cancel_cmd,
+                                                       require_outputs=True,
+                                                       stream_logs=False)
     else:
         cluster_info = get_cluster_info('', cluster_name_on_cloud,
                                         provider_config)
@@ -1526,15 +1523,28 @@ def stop_instances(
         if not command_runners:
             raise RuntimeError('Cannot stop Slurm cluster because its head '
                                'node command runner is unavailable.')
-        rc, stdout, stderr = command_runners[0].run_driver(cancel_jobs_code,
-                                                           require_outputs=True,
-                                                           stream_logs=False)
-    subprocess_utils.handle_returncode(
-        rc,
-        cancel_jobs_code,
-        'Failed to cancel jobs before snapshotting the Slurm container.',
-        stderr=f'{stdout}\n{stderr}',
-        stream_logs=False)
+        head_runner = command_runners[0]
+        rc, _, _ = head_runner.run_driver(runtime_venv_check,
+                                          require_outputs=True,
+                                          stream_logs=False)
+        has_runtime = rc == 0
+        if has_runtime:
+            rc, stdout, stderr = head_runner.run_driver(cancel_jobs_code,
+                                                        require_outputs=True,
+                                                        stream_logs=False)
+    if not has_runtime:
+        logger.warning(
+            f'SkyPilot runtime venv missing on the head node '
+            f'({skypilot_runtime_dir}/'
+            f'{skylet_constants.SKY_REMOTE_PYTHON_ENV_NAME}); skipping job '
+            'cancellation before the snapshot.')
+    else:
+        subprocess_utils.handle_returncode(
+            rc,
+            cancel_jobs_code,
+            'Failed to cancel jobs before snapshotting the Slurm container.',
+            stderr=f'{stdout}\n{stderr}',
+            stream_logs=False)
     _drain_slurm_workload_steps(client, job_id)
 
     if not inside_slurm_cluster:
@@ -2074,11 +2084,14 @@ def get_command_runners(
     sky_base_dir = _resolve_sky_base_dir(client, provider_config)
     sky_cluster_home_dir = _sky_cluster_home_dir(sky_base_dir,
                                                  cluster_name_on_cloud)
-    container_marker = (
-        f'{sky_cluster_home_dir}/{slurm_utils.SLURM_CONTAINER_MARKER_FILE}')
-    has_container = client.check_file_exists(container_marker)
-    container_args = _build_pyxis_args(
-        cluster_name_on_cloud) if has_container else None
+    # Container-ness is persisted in the cluster config at launch
+    # (provider.container_image). It must not be probed over the shared
+    # filesystem: NFS attribute caching on the login node can hide the
+    # marker file right after the allocation wrote it, which would
+    # silently run a container cluster on the host as the login user.
+    container_image = provider_config.get('container_image')
+    container_args = (_build_pyxis_args(cluster_name_on_cloud)
+                      if container_image is not None else None)
 
     runners = [
         # Note: For Slurm, the external IP for all instances is the same,
