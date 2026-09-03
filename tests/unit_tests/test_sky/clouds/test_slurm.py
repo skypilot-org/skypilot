@@ -19,7 +19,7 @@ from sky.skylet import constants
 
 
 class TestStopFeatureSupport:
-    """Tests dynamic stop support for Slurm resources."""
+    """Tests dynamic stop/autostop support for Slurm resources."""
 
     @pytest.mark.parametrize(
         'image_id,pyxis_enabled,stop_supported',
@@ -44,6 +44,13 @@ class TestStopFeatureSupport:
 
         assert ((clouds.CloudImplementationFeatures.STOP
                  not in unsupported) == stop_supported)
+        # Autostop gates on the same container + Pyxis conditions as stop.
+        assert ((clouds.CloudImplementationFeatures.AUTOSTOP
+                 not in unsupported) == stop_supported)
+
+    def test_autostop_is_dynamic_not_statically_unsupported(self):
+        assert (clouds.CloudImplementationFeatures.AUTOSTOP
+                in slurm_cloud.Slurm._DYNAMICALLY_CHECKED_FEATURES)
 
 
 class TestGetSubmitUser:

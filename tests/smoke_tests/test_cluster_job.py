@@ -807,6 +807,87 @@ def test_slurm_container_stop_start_multi_node(generic_cloud: str):
     smoke_tests_utils.run_one_test(test)
 
 
+@pytest.mark.slurm
+def test_slurm_container_autostop(generic_cloud: str):
+    """`-i 1` stops a container cluster with no client action.
+
+    Skylet performs the same snapshot-and-release procedure as `sky stop`,
+    and `sky start` afterwards restores the snapshot like a manual stop.
+    """
+    name = smoke_tests_utils.get_cluster_name()
+    test = smoke_tests_utils.Test(
+        'slurm_container_autostop',
+        [
+            f'sky launch -y -c {name} --infra {generic_cloud} '
+            f'{smoke_tests_utils.LOW_RESOURCE_ARG} -i 1 '
+            '--image-id docker:ubuntu:24.04 -- '
+            '"echo pre-stop-job-1; echo generation-1 > /snapshot_marker"',
+            f'sky logs {name} 1 --status',
+            # The cluster stops itself once idle; the API server's refresh
+            # converges the record to STOPPED.
+            smoke_tests_utils.get_cmd_wait_until_cluster_status_contains(
+                cluster_name=name,
+                cluster_status=[sky.ClusterStatus.STOPPED],
+                timeout=smoke_tests_utils.get_timeout('slurm')),
+            f'sky start -y {name}',
+            smoke_tests_utils.get_cmd_wait_until_cluster_status_contains(
+                cluster_name=name,
+                cluster_status=[sky.ClusterStatus.UP],
+                timeout=smoke_tests_utils.get_timeout('slurm')),
+            smoke_tests_utils.
+            get_cmd_wait_until_job_status_contains_matching_job_id(
+                cluster_name=name,
+                job_id='1',
+                job_status=[sky.JobStatus.SUCCEEDED],
+                timeout=60),
+            f'logs="$(sky logs {name} 1 --no-follow)"; '
+            'printf "%s\\n" "$logs"; '
+            '[[ "$logs" == *pre-stop-job-1* ]]',
+            f"sky exec {name} -- "
+            "'test \"$(cat /snapshot_marker)\" = generation-1'",
+            f'sky logs {name} 2 --status',
+            # Autostop can be set and cleared on the running cluster.
+            f'sky autostop -y {name} -i 20',
+            f'status="$(sky status {name})"; printf "%s\\n" "$status"; '
+            '[[ "$status" == *"20m"* ]]',
+            f'sky autostop -y {name} --cancel',
+            f'status="$(sky status {name})"; printf "%s\\n" "$status"; '
+            '[[ "$status" != *"20m"* ]]',
+            f'sky down -y {name}',
+        ],
+        f'sky down -y {name} || true',
+        timeout=30 * 60,
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.slurm
+def test_slurm_container_autodown(generic_cloud: str):
+    """`-i 1 --down` fully terminates the cluster and its snapshot."""
+    name = smoke_tests_utils.get_cluster_name()
+    test = smoke_tests_utils.Test(
+        'slurm_container_autodown',
+        [
+            f'sky launch -y -c {name} --infra {generic_cloud} '
+            f'{smoke_tests_utils.LOW_RESOURCE_ARG} -i 1 --down '
+            '--image-id docker:ubuntu:24.04 -- "echo down-job-1"',
+            f'sky logs {name} 1 --status',
+            # The cluster downs itself once idle; the refresh removes the
+            # record and no snapshot is left behind.
+            smoke_tests_utils.get_cmd_wait_until_cluster_is_not_found(
+                cluster_name=name,
+                timeout=smoke_tests_utils.get_timeout('slurm')),
+            # A down leaves no snapshot to restore, so the cluster cannot
+            # be started again.
+            f'sky start -y {name} 2>&1 | '
+            'grep -q "Cluster(s) not found"',
+        ],
+        f'sky down -y {name} || true',
+        timeout=30 * 60,
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
 # ---------- Submitting multiple tasks to the same cluster. ----------
 @pytest.mark.no_vast  # Vast has low availability of T4 GPUs
 @pytest.mark.no_shadeform  # Shadeform does not have T4 GPUs

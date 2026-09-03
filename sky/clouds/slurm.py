@@ -34,8 +34,9 @@ class Slurm(clouds.Cloud):
 
     _REPR = 'Slurm'
     _CLOUD_UNSUPPORTED_FEATURES = {
-        clouds.CloudImplementationFeatures.AUTOSTOP: 'Slurm does not '
-                                                     'support autostop.',
+        clouds.CloudImplementationFeatures.AUTOSTOP:
+            'Autostop is supported only for container clusters on Slurm '
+            'clusters with Pyxis installed.',
         clouds.CloudImplementationFeatures.STOP:
             'Stopping is supported only for container clusters on Slurm '
             'clusters with Pyxis installed.',
@@ -67,6 +68,7 @@ class Slurm(clouds.Cloud):
     # Features that are checked dynamically per cluster (e.g., via SSH).
     # Used for early exit in _unsupported_features_for_resources().
     _DYNAMICALLY_CHECKED_FEATURES = {
+        clouds.CloudImplementationFeatures.AUTOSTOP,
         clouds.CloudImplementationFeatures.DOCKER_IMAGE,
         clouds.CloudImplementationFeatures.STOP,
         clouds.CloudImplementationFeatures.STORAGE_MOUNTING,
@@ -121,8 +123,11 @@ class Slurm(clouds.Cloud):
         uses_container = resources.extract_docker_image() is not None
         dynamically_checked_features = cls._DYNAMICALLY_CHECKED_FEATURES.copy()
         if not uses_container:
+            # Stop and autostop additionally require a container cluster.
             dynamically_checked_features.remove(
                 clouds.CloudImplementationFeatures.STOP)
+            dynamically_checked_features.remove(
+                clouds.CloudImplementationFeatures.AUTOSTOP)
         for c in clusters:
             try:
                 # Docker image support requires the Pyxis SPANK plugin.
@@ -132,6 +137,8 @@ class Slurm(clouds.Cloud):
                     if uses_container:
                         unsupported.pop(clouds.CloudImplementationFeatures.STOP,
                                         None)
+                        unsupported.pop(
+                            clouds.CloudImplementationFeatures.AUTOSTOP, None)
                 # Storage mounting requires FUSE (/dev/fuse).
                 if slurm_utils.check_fuse_enabled(c):
                     unsupported.pop(
