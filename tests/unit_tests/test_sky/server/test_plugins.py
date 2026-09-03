@@ -390,3 +390,90 @@ def test_load_plugin_viewer_allowlist_default_empty(monkeypatch, tmp_path):
 
     result = plugins.load_plugin_viewer_allowlist()
     assert not result
+
+
+def test_install_late_runs_after_every_install(monkeypatch, tmp_path):
+    """The late pass is what lets a plugin's middleware be innermost.
+
+    Middleware order is install order, so a plugin listed before another
+    cannot get inside that other plugin's middleware from `install`. Assert
+    the guarantee the late pass exists to provide: every `install` completes
+    before any `install_late` starts.
+    """
+    module_name = 'sky_test_late_plugin'
+    calls = []
+
+    class FirstPlugin(plugins.BasePlugin):
+
+        def install(self, extension_context):
+            del extension_context
+            calls.append('first.install')
+
+        def install_late(self, extension_context):
+            del extension_context
+            calls.append('first.install_late')
+
+    class SecondPlugin(plugins.BasePlugin):
+
+        def install(self, extension_context):
+            del extension_context
+            calls.append('second.install')
+
+    FirstPlugin.__module__ = module_name
+    SecondPlugin.__module__ = module_name
+    module = types.ModuleType(module_name)
+    module.FirstPlugin = FirstPlugin
+    module.SecondPlugin = SecondPlugin
+    monkeypatch.setitem(sys.modules, module_name, module)
+
+    config = {
+        'plugins': [
+            {
+                'class': f'{module_name}.FirstPlugin'
+            },
+            {
+                'class': f'{module_name}.SecondPlugin'
+            },
+        ],
+    }
+    config_path = tmp_path / 'plugins.yaml'
+    config_path.write_text(yaml.safe_dump(config))
+    monkeypatch.setenv(plugins._PLUGINS_CONFIG_ENV_VAR, str(config_path))
+    monkeypatch.setattr(plugins, '_PLUGINS', {})
+
+    plugins.load_plugins(
+        plugins.ExtensionContext(context=plugins.PluginContext.UVICORN,
+                                 app=FastAPI()))
+
+    # The plugin declaring install_late is listed *first*, so this ordering
+    # only holds because the late pass is a separate pass.
+    assert calls == ['first.install', 'second.install', 'first.install_late']
+
+
+def test_install_late_defaults_to_noop(monkeypatch, tmp_path):
+    """A plugin that does not override install_late still loads."""
+    module_name = 'sky_test_no_late_plugin'
+
+    class PlainPlugin(plugins.BasePlugin):
+
+        def install(self, extension_context):
+            del extension_context
+
+    PlainPlugin.__module__ = module_name
+    module = types.ModuleType(module_name)
+    module.PlainPlugin = PlainPlugin
+    monkeypatch.setitem(sys.modules, module_name, module)
+
+    config_path = tmp_path / 'plugins.yaml'
+    config_path.write_text(
+        yaml.safe_dump({'plugins': [{
+            'class': f'{module_name}.PlainPlugin'
+        }]}))
+    monkeypatch.setenv(plugins._PLUGINS_CONFIG_ENV_VAR, str(config_path))
+    monkeypatch.setattr(plugins, '_PLUGINS', {})
+
+    plugins.load_plugins(
+        plugins.ExtensionContext(context=plugins.PluginContext.UVICORN,
+                                 app=FastAPI()))
+
+    assert len(plugins.get_plugins()) == 1

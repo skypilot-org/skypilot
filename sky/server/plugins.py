@@ -346,6 +346,27 @@ class BasePlugin(abc.ABC):
         """Hook called by API server to let the plugin install itself."""
         raise NotImplementedError
 
+    def install_late(self, extension_context: ExtensionContext):
+        """Second install pass, run after every plugin's `install`.
+
+        For middleware that must sit *inside* the middleware other plugins
+        register — anything that reads state an earlier middleware populates,
+        `request.state.auth_user` above all.
+
+        Middleware order is install order: `add_middleware_last` appends to
+        `app.user_middleware`, and the stack is built by wrapping that list in
+        reverse, so an entry appended earlier ends up further out. A plugin
+        registering an authorization middleware in `install` therefore runs
+        outside the authentication middleware of any plugin that happens to be
+        listed after it in the server config, sees no identity, and — since
+        "no identity" conventionally means "local caller, allow" — fails open.
+        Registering it here instead makes it innermost regardless of the
+        configured plugin order.
+
+        Only for that ordering need. Everything else belongs in `install`.
+        """
+        del extension_context  # Unused by the default no-op.
+
     def shutdown(self):
         """Hook called by API server to let the plugin shutdown."""
         pass
@@ -547,6 +568,18 @@ def load_plugins(extension_context: ExtensionContext):
         plugin = plugin_cls(**parameters)
         plugin.install(extension_context)
         _PLUGINS[class_path] = plugin
+
+    # Second pass, after every plugin has installed: see
+    # `BasePlugin.install_late`. A plugin whose middleware must be innermost
+    # (because it reads what another plugin's middleware sets) cannot get
+    # there from `install`, where its position depends on where it happens to
+    # sit in the configured plugin list.
+    for class_path, plugin in _PLUGINS.items():
+        try:
+            plugin.install_late(extension_context)
+        except Exception:  # pylint: disable=broad-except
+            logger.error(f'Plugin {class_path} failed its late install pass.')
+            raise
 
     _plugins_loaded = True
 
