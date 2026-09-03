@@ -540,6 +540,7 @@ def load_plugins(extension_context: ExtensionContext):
         _plugins_loaded = True
         return
 
+    installed_now: List[Tuple[str, BasePlugin]] = []
     for plugin_config in config.get('plugins', []):
         class_path = plugin_config['class']
         logger.debug(f'Loading plugins: {class_path}')
@@ -568,13 +569,20 @@ def load_plugins(extension_context: ExtensionContext):
         plugin = plugin_cls(**parameters)
         plugin.install(extension_context)
         _PLUGINS[class_path] = plugin
+        installed_now.append((class_path, plugin))
 
     # Second pass, after every plugin has installed: see
     # `BasePlugin.install_late`. A plugin whose middleware must be innermost
     # (because it reads what another plugin's middleware sets) cannot get
     # there from `install`, where its position depends on where it happens to
     # sit in the configured plugin list.
-    for class_path, plugin in _PLUGINS.items():
+    #
+    # Over what this call installed, not over `_PLUGINS`: that dict is
+    # module-global and never cleared, so in a process that loads plugins more
+    # than once (MAIN, then UVICORN in-process) it still holds instances from
+    # the earlier load — including ones whose `load_contexts` excludes the
+    # context we are in now. Those must not get a late install here.
+    for class_path, plugin in installed_now:
         try:
             plugin.install_late(extension_context)
         except Exception:  # pylint: disable=broad-except

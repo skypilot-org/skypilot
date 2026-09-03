@@ -450,6 +450,52 @@ def test_install_late_runs_after_every_install(monkeypatch, tmp_path):
     assert calls == ['first.install', 'second.install', 'first.install_late']
 
 
+def test_install_late_skips_plugins_from_an_earlier_load(monkeypatch, tmp_path):
+    """Only what this call installed gets a late install.
+
+    `_PLUGINS` is module-global and never cleared, and a process can load
+    plugins more than once (MAIN, then UVICORN in-process). Without care the
+    second load's late pass would reach the first load's instances, including
+    ones whose `load_contexts` excludes the context now being loaded.
+    """
+    module_name = 'sky_test_context_late_plugin'
+    late_calls = []
+
+    class MainOnlyPlugin(plugins.BasePlugin):
+        load_contexts = frozenset({plugins.PluginContext.MAIN})
+
+        def install(self, extension_context):
+            del extension_context
+
+        def install_late(self, extension_context):
+            late_calls.append(extension_context.context)
+
+    MainOnlyPlugin.__module__ = module_name
+    module = types.ModuleType(module_name)
+    module.MainOnlyPlugin = MainOnlyPlugin
+    monkeypatch.setitem(sys.modules, module_name, module)
+
+    config_path = tmp_path / 'plugins.yaml'
+    config_path.write_text(
+        yaml.safe_dump(
+            {'plugins': [{
+                'class': f'{module_name}.MainOnlyPlugin'
+            }]}))
+    monkeypatch.setenv(plugins._PLUGINS_CONFIG_ENV_VAR, str(config_path))
+    monkeypatch.setattr(plugins, '_PLUGINS', {})
+
+    plugins.load_plugins(
+        plugins.ExtensionContext(context=plugins.PluginContext.MAIN))
+    assert late_calls == [plugins.PluginContext.MAIN]
+
+    # Same process, second load in a context this plugin opted out of. It stays
+    # in `_PLUGINS` from the first load, but must not be installed again.
+    plugins.load_plugins(
+        plugins.ExtensionContext(context=plugins.PluginContext.UVICORN,
+                                 app=FastAPI()))
+    assert late_calls == [plugins.PluginContext.MAIN]
+
+
 def test_install_late_defaults_to_noop(monkeypatch, tmp_path):
     """A plugin that does not override install_late still loads."""
     module_name = 'sky_test_no_late_plugin'
