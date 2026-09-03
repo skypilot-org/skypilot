@@ -23,8 +23,15 @@ depends_on: Union[str, Sequence[str], None] = None
 def upgrade():
     """Create the launch_attempts table if it does not already exist."""
     with op.get_context().autocommit_block():
-        db_utils.add_table_to_db_sqlalchemy(Base.metadata, op.get_bind(),
+        bind = op.get_bind()
+        db_utils.add_table_to_db_sqlalchemy(Base.metadata, bind,
                                             'launch_attempts')
+        # Creating the table brings its indexes with it, but only when the
+        # table did not already exist. Anyone who ran an earlier form of this
+        # revision has the table and not the newer indexes, so create them
+        # here too -- checkfirst makes it a no-op in the common case.
+        for index in Base.metadata.tables['launch_attempts'].indexes:
+            index.create(bind=bind, checkfirst=True)
 
 
 def downgrade():

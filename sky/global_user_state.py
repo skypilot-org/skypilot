@@ -373,6 +373,14 @@ launch_attempt_table = sqlalchemy.Table(
                      'attempt_seq'),
     # Retention sweep. Without it the sweep full-scans on every tick.
     sqlalchemy.Index('ix_launch_attempts_provision_start', 'provision_start'),
+    # The milestone writers hold the on-cloud name (it is what is stamped on
+    # the pods) and look up the in-flight attempt by either name. Without this
+    # that branch of the OR cannot be indexed, so the whole lookup degrades to
+    # a table scan: 21ms against 4us over 200k rows, several times per launch,
+    # growing with the retention window. The extra write cost is ~2us per
+    # insert, and there is one insert per attempt against several lookups.
+    sqlalchemy.Index('ix_launch_attempts_cluster_on_cloud',
+                     'cluster_name_on_cloud'),
 )
 
 ssh_key_table = sqlalchemy.Table(
@@ -1368,14 +1376,20 @@ def cleanup_launch_attempts_with_retention(retention_hours: float) -> int:
         # that hold pointless. They are still dropped eventually -- at twice
         # the window -- so a deployment that never turns metrics on does not
         # accumulate them forever.
+        #
+        # Written as one range plus a test rather than the OR it reads as. The
+        # hard cutoff is older than the window, so everything past it is
+        # already past the window and the two are equivalent -- but the OR
+        # plans as a multi-index union that walks the older range twice, which
+        # measured 175ms against 120ms over 200k rows. This runs on the API
+        # server's background loop, alongside every other retention sweep, and
+        # a blocking statement there delays all of them.
         result = session.execute(launch_attempt_table.delete().where(
             sqlalchemy.and_(
                 launch_attempt_table.c.outcome.is_not(None),
+                launch_attempt_table.c.provision_start < cutoff,
                 sqlalchemy.or_(
-                    sqlalchemy.and_(
-                        launch_attempt_table.c.metrics_observed_at.is_not(None),
-                        launch_attempt_table.c.provision_start < cutoff,
-                    ),
+                    launch_attempt_table.c.metrics_observed_at.is_not(None),
                     launch_attempt_table.c.provision_start < hard_cutoff,
                 ),
             )))
