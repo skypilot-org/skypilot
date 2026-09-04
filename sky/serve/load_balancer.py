@@ -216,6 +216,9 @@ class SkyServeLoadBalancer:
                 content=response_body(),
                 status_code=proxy_response.status_code,
                 headers=proxy_response.headers)
+            # TODO(jgsweets): Wrap the response ASGI call in a finally block
+            # so a client disconnect before body iteration also closes the
+            # upstream response and releases the load.
             response_returned = True
             return response
         except (httpx.RequestError, httpx.HTTPStatusError) as e:
