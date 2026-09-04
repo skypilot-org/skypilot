@@ -219,7 +219,7 @@ async def log_streamer(
         except FileNotFoundError:
             # The response has already started, so this cannot be a 404.
             yield (f'Log {log_path.name} is no longer available on the API '
-                   f'server.\n')
+                   'server.\n')
             return
         try:
             async for chunk in _tail_log_file(log_file, request_id, plain_logs,
