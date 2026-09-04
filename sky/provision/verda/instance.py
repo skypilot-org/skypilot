@@ -2,6 +2,7 @@
 
 import time
 from typing import Any, Dict, List, Optional, Tuple
+import uuid
 
 from sky import exceptions
 from sky import sky_logging
@@ -59,6 +60,22 @@ def _get_head_instance_id(instances: Dict[str, Instance]) -> Optional[str]:
             head_instance_id = inst_id
             break
     return head_instance_id
+
+
+def _is_os_volume_id(image: str) -> bool:
+    """Whether `image` is a customized OS volume ID rather than an image type.
+
+    Verda's `POST /instances` accepts either an OS image type (e.g.
+    `ubuntu-24.04-cuda-12.8-open-docker`) or the UUID of a previously
+    customized OS volume. The `os_volume` field describes the *new* volume to
+    create and must only be sent for the former; sending it alongside a
+    volume UUID makes the request fail with `not_found`.
+    """
+    try:
+        uuid.UUID(image)
+    except ValueError:
+        return False
+    return True
 
 
 def find_ssh_key_id(public_key: str):
@@ -152,11 +169,14 @@ def run_instances(
                 'image': image,
                 'description': 'Created by SkyPilot',
                 'ssh_key_ids': [ssh_key_id],
-                'os_volume': {
+            }
+            if not _is_os_volume_id(image):
+                # Booting from an existing customized OS volume: the volume
+                # already exists, so there is no new one to describe.
+                instance_data['os_volume'] = {
                     'name': f'{cluster_name_on_cloud}-{node_type}',
                     'size': disk_size,
                 }
-            }
             response = verda.instance_create(instance_data)
             instance_id = response.instance_id
         except Exception as e:  # pylint: disable=broad-except
