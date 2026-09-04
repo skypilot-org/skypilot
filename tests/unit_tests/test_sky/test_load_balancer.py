@@ -1,4 +1,5 @@
 """Tests for SkyServe load balancer request accounting."""
+import asyncio
 from unittest import mock
 
 import httpx
@@ -60,8 +61,10 @@ async def test_pre_execute_error_preserves_least_load_accounting():
     assert policy.load_map[replica_url] == 1
 
 
+@pytest.mark.parametrize('spec_version', ['2.3', '2.4'])
 @pytest.mark.asyncio
-async def test_streaming_response_releases_least_load_accounting_on_close():
+async def test_streaming_response_releases_least_load_accounting_on_close(
+        spec_version):
     lb = _make_load_balancer()
     replica_url = 'http://replica'
     client = mock.MagicMock()
@@ -83,8 +86,10 @@ async def test_streaming_response_releases_least_load_accounting_on_close():
     assert lb._load_balancing_policy.load_map[replica_url] == 1
     messages = []
 
+    receive_event = asyncio.Event()
+
     async def receive():
-        return {'type': 'http.request'}
+        await receive_event.wait()
 
     async def send(message):
         messages.append(message)
@@ -92,7 +97,7 @@ async def test_streaming_response_releases_least_load_accounting_on_close():
     await response({
         'type': 'http',
         'asgi': {
-            'spec_version': '2.4'
+            'spec_version': spec_version
         }
     }, receive, send)
 
@@ -101,8 +106,10 @@ async def test_streaming_response_releases_least_load_accounting_on_close():
     proxy_response.aclose.assert_awaited_once()
 
 
+@pytest.mark.parametrize('spec_version', ['2.3', '2.4'])
 @pytest.mark.asyncio
-async def test_streaming_response_error_releases_least_load_accounting():
+async def test_streaming_response_error_releases_least_load_accounting(
+        spec_version):
     lb = _make_load_balancer()
     replica_url = 'http://replica'
     client = mock.MagicMock()
@@ -123,8 +130,10 @@ async def test_streaming_response_error_releases_least_load_accounting():
 
     response = await lb._proxy_request_to(replica_url, _make_request())
 
+    receive_event = asyncio.Event()
+
     async def receive():
-        return {'type': 'http.request'}
+        await receive_event.wait()
 
     async def send(message):
         del message
@@ -133,22 +142,24 @@ async def test_streaming_response_error_releases_least_load_accounting():
         await response({
             'type': 'http',
             'asgi': {
-                'spec_version': '2.4'
+                'spec_version': spec_version
             }
         }, receive, send)
     assert lb._load_balancing_policy.load_map[replica_url] == 0
     proxy_response.aclose.assert_awaited_once()
 
 
+@pytest.mark.parametrize('spec_version', ['2.3', '2.4'])
 @pytest.mark.asyncio
-async def test_client_disconnect_before_streaming_releases_load_accounting():
+async def test_client_disconnect_before_streaming_releases_load_accounting(
+        spec_version):
     lb = _make_load_balancer()
     replica_url = 'http://replica'
     client = mock.MagicMock()
     client.build_request.return_value = mock.sentinel.proxy_request
 
     async def response_body():
-        raise AssertionError('The response body should not be iterated.')
+        await asyncio.Event().wait()
         yield b'unreachable'
 
     proxy_response = mock.MagicMock()
@@ -162,17 +173,29 @@ async def test_client_disconnect_before_streaming_releases_load_accounting():
     response = await lb._proxy_request_to(replica_url, _make_request())
 
     async def receive():
+        if spec_version == '2.3':
+            return {'type': 'http.disconnect'}
         raise AssertionError('The request should not be received.')
 
     async def send(message):
         del message
-        raise OSError('client disconnected')
+        if spec_version == '2.4':
+            raise OSError('client disconnected')
 
-    with pytest.raises(Exception):
+    if spec_version == '2.4':
+        with pytest.raises(Exception):
+            await response(
+                {
+                    'type': 'http',
+                    'asgi': {
+                        'spec_version': spec_version
+                    }
+                }, receive, send)
+    else:
         await response({
             'type': 'http',
             'asgi': {
-                'spec_version': '2.4'
+                'spec_version': spec_version
             }
         }, receive, send)
 
