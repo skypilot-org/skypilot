@@ -116,7 +116,8 @@ async def test_streaming_response_error_releases_least_load_accounting():
     proxy_response.aiter_raw.return_value = response_body()
     proxy_response.status_code = 200
     proxy_response.headers = {}
-    proxy_response.aclose = mock.AsyncMock()
+    proxy_response.aclose = mock.AsyncMock(
+        side_effect=RuntimeError('aclose failed'))
     client.send = mock.AsyncMock(return_value=proxy_response)
     lb._client_pool[replica_url] = client
 
@@ -128,7 +129,7 @@ async def test_streaming_response_error_releases_least_load_accounting():
     async def send(message):
         del message
 
-    with pytest.raises(httpx.ReadTimeout):
+    with pytest.raises(httpx.ReadTimeout, match='timed out'):
         await response({
             'type': 'http',
             'asgi': {

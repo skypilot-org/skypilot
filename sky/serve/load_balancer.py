@@ -31,7 +31,16 @@ class _CleanupStreamingResponse(fastapi.responses.StreamingResponse):
     async def __call__(self, scope, receive, send):
         try:
             await super().__call__(scope, receive, send)
-        finally:
+        except BaseException:  # pylint: disable=broad-except
+            try:
+                await self._cleanup()
+            except BaseException:  # pylint: disable=broad-except
+                # Preserve the original response error if cleanup also fails.
+                logger.exception(
+                    'Error cleaning up streaming response; preserving the '
+                    'original response error.')
+            raise
+        else:
             # This covers a client disconnect before the response body
             # iterator is started, as well as errors and disconnects during
             # streaming.
@@ -225,6 +234,9 @@ class SkyServeLoadBalancer:
             async def cleanup_response() -> None:
                 try:
                     await proxy_response.aclose()
+                except Exception:  # pylint: disable=broad-except
+                    logger.exception(
+                        f'Error closing proxied response to {url}.')
                 finally:
                     release_load()
 
