@@ -3,6 +3,7 @@
 import os
 from pathlib import Path
 import re
+from unittest.mock import call
 from unittest.mock import patch
 import unittest.mock as mock
 
@@ -19,7 +20,7 @@ from sky.skylet import constants
 
 
 class TestStopFeatureSupport:
-    """Tests dynamic stop support for Slurm resources."""
+    """Tests dynamic stop/autostop support for Slurm resources."""
 
     @pytest.mark.parametrize(
         'image_id,pyxis_enabled,stop_supported',
@@ -44,6 +45,13 @@ class TestStopFeatureSupport:
 
         assert ((clouds.CloudImplementationFeatures.STOP
                  not in unsupported) == stop_supported)
+        # Autostop gates on the same container + Pyxis conditions as stop.
+        assert ((clouds.CloudImplementationFeatures.AUTOSTOP
+                 not in unsupported) == stop_supported)
+
+    def test_autostop_is_dynamic_not_statically_unsupported(self):
+        assert (clouds.CloudImplementationFeatures.AUTOSTOP
+                in slurm_cloud.Slurm._DYNAMICALLY_CHECKED_FEATURES)
 
 
 class TestGetSubmitUser:
@@ -426,6 +434,10 @@ class TestSubmitUserTemplate:
             assert config['provider']['slurm_user'] == slurm_user
         assert config['provider']['ssh']['user'] == transport_user
         assert config['provider']['sky_base_dir'] == '/fsx/alice'
+        if image_id is None:
+            assert 'container_image' not in config['provider']
+        else:
+            assert config['provider']['container_image'] == image_id
         assert config['auth']['ssh_user'] == expected_ssh_user
         assert config['available_node_types']['ray_head_default'][
             'node_config']['volume_mounts'][0]['path'] == '/data'
@@ -1614,6 +1626,157 @@ class TestCreateVirtualInstance:
 
         written_script = self._run_and_capture_script('test-cluster', config)
         assert_sbatch_matches_snapshot('containers', written_script)
+
+    @patch('sky.provision.slurm.instance._wait_for_job_nodes')
+    @patch('sky.provision.slurm.instance.slurm_utils.get_proctrack_type')
+    @patch('sky.provision.slurm.instance.slurm_utils.get_partition_info')
+    @patch('sky.provision.slurm.instance.slurm.SlurmClient')
+    @patch('sky.provision.slurm.instance.command_runner.'
+           'SlurmLoginNodeCommandRunner')
+    def test_restore_cleans_leftover_shared_state(self, mock_ssh_runner,
+                                                  mock_slurm_client,
+                                                  mock_get_partition_info,
+                                                  mock_get_proctrack_type,
+                                                  mock_wait_for_job_nodes):
+        """A restore empties the shared home before runtime setup runs."""
+        from sky.provision import common
+
+        self._setup_mocks(mock_ssh_runner, mock_slurm_client,
+                          mock_get_partition_info, 'gpu')
+        mock_get_proctrack_type.return_value = 'cgroup'
+
+        config = common.ProvisionConfig(
+            provider_config={
+                'ssh': {
+                    'hostname': 'login.example.com',
+                    'port': '22',
+                    'user': 'testuser',
+                    'private_key': '/path/to/key',
+                },
+                'cluster': 'test-slurm',
+                'partition': 'gpu',
+                'provision_timeout': 300,
+                'sky_base_dir': '/home/testuser',
+            },
+            authentication_config={},
+            docker_config={},
+            node_config={
+                'cpus': 4,
+                'memory': 16,
+                'image_id': 'nvcr.io/nvidia/pytorch:24.01-py3',
+            },
+            count=1,
+            tags={},
+            resume_stopped_nodes=True,
+            ports_to_open_on_launch=None,
+        )
+        manifest = {
+            'version': slurm_instance.SNAPSHOT_MANIFEST_VERSION,
+            'generation': '0123456789abcdef0123456789abcdef',
+            'image_id': 'nvcr.io/nvidia/pytorch:24.01-py3',
+            'created_at': 1234.5,
+            'has_job_db': False,
+            'nodes': ['node1'],
+        }
+        cleanup_script = slurm_instance._remove_shared_state_script(
+            '/home/testuser/.sky_clusters/test-cluster', preserve_logs=True)
+        submitted = {}
+
+        def check_submit(partition, cluster_name, tgt_path):
+            del partition, cluster_name, tgt_path
+            submitted['cleanup_seen'] = any(
+                call.args[0] == cleanup_script
+                for call in mock_ssh_runner.return_value.run.call_args_list)
+            return '5576'
+
+        mock_slurm_client.return_value.submit_job.side_effect = check_submit
+
+        with patch('tempfile.NamedTemporaryFile') as mock_tempfile:
+            mock_file = mock.MagicMock()
+            mock_file.__enter__.return_value = mock_file
+            mock_tempfile.return_value = mock_file
+            with patch.object(slurm_instance,
+                              '_read_snapshot_manifest',
+                              return_value=manifest):
+                slurm_instance._create_virtual_instance(
+                    region='us-west-2',
+                    cluster_name='test-cluster',
+                    cluster_name_on_cloud='test-cluster',
+                    config=config,
+                )
+
+        run_commands = [
+            call.args[0]
+            for call in mock_ssh_runner.return_value.run.call_args_list
+        ]
+        assert cleanup_script in run_commands
+        # The cleanup must precede the sbatch submission: afterwards the
+        # sbatch writes control files into the home, which the cleanup
+        # must not delete.
+        assert submitted['cleanup_seen'] is True
+
+    @patch('sky.provision.slurm.instance._wait_for_job_nodes')
+    @patch('sky.provision.slurm.instance.slurm_utils.get_proctrack_type')
+    @patch('sky.provision.slurm.instance.slurm_utils.get_partition_info')
+    @patch('sky.provision.slurm.instance.slurm.SlurmClient')
+    @patch('sky.provision.slurm.instance.command_runner.'
+           'SlurmLoginNodeCommandRunner')
+    def test_fresh_launch_keeps_shared_state(self, mock_ssh_runner,
+                                             mock_slurm_client,
+                                             mock_get_partition_info,
+                                             mock_get_proctrack_type,
+                                             mock_wait_for_job_nodes):
+        """Without a snapshot, the shared home is not cleaned at provision."""
+        from sky.provision import common
+
+        self._setup_mocks(mock_ssh_runner, mock_slurm_client,
+                          mock_get_partition_info, 'gpu')
+        mock_get_proctrack_type.return_value = 'cgroup'
+
+        config = common.ProvisionConfig(
+            provider_config={
+                'ssh': {
+                    'hostname': 'login.example.com',
+                    'port': '22',
+                    'user': 'testuser',
+                    'private_key': '/path/to/key',
+                },
+                'cluster': 'test-slurm',
+                'partition': 'gpu',
+                'provision_timeout': 300,
+                'sky_base_dir': '/home/testuser',
+            },
+            authentication_config={},
+            docker_config={},
+            node_config={
+                'cpus': 4,
+                'memory': 16,
+                'image_id': 'nvcr.io/nvidia/pytorch:24.01-py3',
+            },
+            count=1,
+            tags={},
+            resume_stopped_nodes=False,
+            ports_to_open_on_launch=None,
+        )
+
+        with patch('tempfile.NamedTemporaryFile') as mock_tempfile:
+            mock_file = mock.MagicMock()
+            mock_file.__enter__.return_value = mock_file
+            mock_tempfile.return_value = mock_file
+            slurm_instance._create_virtual_instance(
+                region='us-west-2',
+                cluster_name='test-cluster',
+                cluster_name_on_cloud='test-cluster',
+                config=config,
+            )
+
+        cleanup_script = slurm_instance._remove_shared_state_script(
+            '/home/testuser/.sky_clusters/test-cluster', preserve_logs=True)
+        run_commands = [
+            call.args[0]
+            for call in mock_ssh_runner.return_value.run.call_args_list
+        ]
+        assert cleanup_script not in run_commands
 
         config.node_config['volume_mounts'] = [
             {

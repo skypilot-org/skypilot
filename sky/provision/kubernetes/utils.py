@@ -4982,6 +4982,14 @@ def set_autodown_annotations(handle: 'backends.CloudVmRayResourceHandle',
 
 
 def get_context_from_config(provider_config: Dict[str, Any]) -> Optional[str]:
+    """The context recorded for this cluster at provision time.
+
+    This is the cluster's *control* context. Prefer the explicit
+    get_control_context_from_config / get_execution_context_from_config at
+    new call sites, so that a reader of the code (and of a future
+    multi-cluster placement change) can tell which of the two a call site
+    meant; they are the same string for every cluster today.
+    """
     context = provider_config.get('context')
     assert isinstance(context, str)
     if context == kubernetes.in_cluster_context_name():
@@ -4989,6 +4997,83 @@ def get_context_from_config(provider_config: Dict[str, Any]) -> Optional[str]:
         # to use in-cluster auth by setting the context to None.
         context = None
     return context
+
+
+def get_control_context_from_config(
+        provider_config: Dict[str, Any]) -> Optional[str]:
+    """The context holding the objects SkyPilot created for this cluster.
+
+    Identical to get_context_from_config; a distinct name so a call site can
+    say that the submitting cluster is what it means, rather than leaving that
+    to be inferred. See get_execution_context_from_config for why the two can
+    differ.
+    """
+    return get_context_from_config(provider_config)
+
+
+def get_execution_context_from_config(
+        provider_config: Dict[str, Any]) -> Optional[str]:
+    """The context this cluster's pods actually run on.
+
+    SkyPilot has a single notion of "the context" for a cluster: the one
+    written to `provider.context` at provision time and read back through
+    get_context_from_config. That works because the cluster SkyPilot submits
+    to is the cluster the pods run on.
+
+    A multi-cluster admission layer breaks that identity: the pods can be
+    admitted somewhere other than where they were submitted. The submitting
+    cluster keeps the objects SkyPilot created (and the API server it talks
+    to), while the pods run wherever there was room. Two questions then have
+    two answers:
+
+    - the *control* context -- where SkyPilot submitted, and so where
+      everything it writes on the cluster's behalf goes;
+    - the *execution* context -- where the pods run, and so what to exec
+      into, and read logs and events from.
+
+    Unless a provisioner records the placement under
+    `constants.PROVIDER_EXECUTION_CONTEXT_KEY`, this falls back to the
+    control context, which is the right answer whenever a cluster runs where
+    it was submitted -- that is, for every cluster today.
+
+    This resolves the context and nothing else. The namespace still comes
+    from get_namespace_from_config, and any object a caller addresses by name
+    is still named as the submitting cluster named it -- the head Deployment
+    get_command_runners targets, for one. Whoever first resolves a real
+    placement owns those too: a context alone is not enough to reach a pod in
+    a cluster that holds different objects.
+    """
+    recorded = provider_config.get(
+        kubernetes_constants.PROVIDER_EXECUTION_CONTEXT_KEY)
+    if recorded is None:
+        return get_control_context_from_config(provider_config)
+    if recorded == kubernetes.in_cluster_context_name():
+        # Mirrors get_context_from_config: the in-cluster context name is not
+        # a kubeconfig entry, and passing it on would defeat in-cluster auth.
+        return None
+    return recorded
+
+
+def set_execution_context_in_config(provider_config: Dict[str, Any],
+                                    context: Optional[str]) -> None:
+    """Record the context a cluster's pods run on in its provider config.
+
+    A no-op for a cluster with no context, so that the fallback in
+    get_execution_context_from_config stays in charge rather than a null
+    placement being pinned.
+
+    Note the value is recorded raw, exactly as `provider.context` holds it:
+    the in-cluster context name is mapped to None on read, by the same
+    accessor that maps `provider.context`.
+
+    Mutating the provider config is all this does. Whether a later reader
+    sees the placement depends on the caller persisting that config -- into
+    the cluster record, for a provisioner writing it at launch.
+    """
+    if context is None:
+        return
+    provider_config[
+        kubernetes_constants.PROVIDER_EXECUTION_CONTEXT_KEY] = context
 
 
 def get_skypilot_pods(context: Optional[str] = None) -> List[Any]:

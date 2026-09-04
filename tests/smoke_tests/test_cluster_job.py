@@ -733,9 +733,7 @@ def test_slurm_container_stop_start(generic_cloud: str):
             f'sky logs {name} 1 --status',
             f'sky exec {name} -- echo pre-stop-job-2',
             f'sky logs {name} 2 --status',
-            # Shared-FS cleanup can transiently return stale handles; Slurm
-            # stop is idempotent, so retry once.
-            f'sky stop -y {name} || sky stop -y {name}',
+            f'sky stop -y {name}',
             smoke_tests_utils.get_cmd_wait_until_cluster_status_contains(
                 cluster_name=name,
                 cluster_status=[sky.ClusterStatus.STOPPED],
@@ -789,9 +787,7 @@ def test_slurm_container_stop_start_multi_node(generic_cloud: str):
             "'echo pre-stop-rank-$SKYPILOT_NODE_RANK; "
             "echo rank-$SKYPILOT_NODE_RANK > /snapshot_rank_marker'",
             f'sky logs {name} 1 --status',
-            # Shared-FS cleanup can transiently return stale handles; Slurm
-            # stop is idempotent, so retry once.
-            f'sky stop -y {name} || sky stop -y {name}',
+            f'sky stop -y {name}',
             smoke_tests_utils.get_cmd_wait_until_cluster_status_contains(
                 cluster_name=name,
                 cluster_status=[sky.ClusterStatus.STOPPED],
@@ -819,6 +815,87 @@ def test_slurm_container_stop_start_multi_node(generic_cloud: str):
             f'ssh {name} '
             '\'test "$(cat /snapshot_rank_marker)" = rank-0\'',
             f'sky down -y {name}',
+        ],
+        f'sky down -y {name} || true',
+        timeout=30 * 60,
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.slurm
+def test_slurm_container_autostop(generic_cloud: str):
+    """`-i 1` stops a container cluster with no client action.
+
+    Skylet performs the same snapshot-and-release procedure as `sky stop`,
+    and `sky start` afterwards restores the snapshot like a manual stop.
+    """
+    name = smoke_tests_utils.get_cluster_name()
+    test = smoke_tests_utils.Test(
+        'slurm_container_autostop',
+        [
+            f'sky launch -y -c {name} --infra {generic_cloud} '
+            f'{smoke_tests_utils.LOW_RESOURCE_ARG} -i 1 '
+            '--image-id docker:ubuntu:24.04 -- '
+            '"echo pre-stop-job-1; echo generation-1 > /snapshot_marker"',
+            f'sky logs {name} 1 --status',
+            # The cluster stops itself once idle; the API server's refresh
+            # converges the record to STOPPED.
+            smoke_tests_utils.get_cmd_wait_until_cluster_status_contains(
+                cluster_name=name,
+                cluster_status=[sky.ClusterStatus.STOPPED],
+                timeout=smoke_tests_utils.get_timeout('slurm')),
+            f'sky start -y {name}',
+            smoke_tests_utils.get_cmd_wait_until_cluster_status_contains(
+                cluster_name=name,
+                cluster_status=[sky.ClusterStatus.UP],
+                timeout=smoke_tests_utils.get_timeout('slurm')),
+            smoke_tests_utils.
+            get_cmd_wait_until_job_status_contains_matching_job_id(
+                cluster_name=name,
+                job_id='1',
+                job_status=[sky.JobStatus.SUCCEEDED],
+                timeout=60),
+            f'logs="$(sky logs {name} 1 --no-follow)"; '
+            'printf "%s\\n" "$logs"; '
+            '[[ "$logs" == *pre-stop-job-1* ]]',
+            f"sky exec {name} -- "
+            "'test \"$(cat /snapshot_marker)\" = generation-1'",
+            f'sky logs {name} 2 --status',
+            # Autostop can be set and cleared on the running cluster.
+            f'sky autostop -y {name} -i 20',
+            f'status="$(sky status {name})"; printf "%s\\n" "$status"; '
+            '[[ "$status" == *"20m"* ]]',
+            f'sky autostop -y {name} --cancel',
+            f'status="$(sky status {name})"; printf "%s\\n" "$status"; '
+            '[[ "$status" != *"20m"* ]]',
+            f'sky down -y {name}',
+        ],
+        f'sky down -y {name} || true',
+        timeout=30 * 60,
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.slurm
+def test_slurm_container_autodown(generic_cloud: str):
+    """`-i 1 --down` fully terminates the cluster and its snapshot."""
+    name = smoke_tests_utils.get_cluster_name()
+    test = smoke_tests_utils.Test(
+        'slurm_container_autodown',
+        [
+            f'sky launch -y -c {name} --infra {generic_cloud} '
+            f'{smoke_tests_utils.LOW_RESOURCE_ARG} -i 1 --down '
+            '--image-id docker:ubuntu:24.04 -- "echo down-job-1"',
+            f'sky logs {name} 1 --status',
+            # The cluster downs itself once idle; the refresh removes the
+            # record and no snapshot is left behind.
+            smoke_tests_utils.get_cmd_wait_until_cluster_is_not_found(
+                cluster_name=name,
+                timeout=smoke_tests_utils.get_timeout('slurm')),
+            # A down leaves no snapshot to restore, so the cluster cannot
+            # be started again.
+            f'sky start -y {name} 2>&1 | '
+            'grep -q "Cluster(s) not found"',
         ],
         f'sky down -y {name} || true',
         timeout=30 * 60,
@@ -4009,6 +4086,197 @@ def test_aws_disk_tier():
                 f'sky down -y {name}',
                 smoke_tests_utils.down_cluster_for_cloud_cmd(name)),
             timeout=10 * 60,  # 10 mins  (it takes around ~6 mins)
+        )
+        smoke_tests_utils.run_one_test(test)
+
+
+# ---------- Volume tagging degrades instead of failing the launch ----------
+# Needs a role that may launch EC2 instances but may not tag EBS volumes -- the
+# minimal policy SkyPilot documented before volume tagging existed. Supplied by
+# the environment so no account-specific identifier lives in the test.
+_NO_VOLUME_TAG_ROLE_ENV = 'SKYPILOT_TEST_NO_VOLUME_TAG_ROLE_ARN'
+_NO_VOLUME_TAG_PROFILE = 'sky-no-volume-tags'
+_VOLUME_TAG_WARNING = 'Volumes will not be tagged'
+
+
+def _volume_tags_cmd(region: str, name_on_cloud: str, must_be_tagged: bool,
+                     label: str) -> str:
+    """Reads the attached volume's tags back from EC2 and asserts on them."""
+    if must_be_tagged:
+        assertion = (f'if ! echo "$vtags" | grep -q ray-cluster-name; then '
+                     f'echo "FAIL[{label}]: volume is not tagged"; exit 1; fi')
+    else:
+        assertion = (
+            f'if echo "$vtags" | grep -q ray-cluster-name; then '
+            f'echo "FAIL[{label}]: volume is tagged, but the credentials '
+            f'cannot tag volumes"; exit 1; fi')
+    return (
+        f'id=$(aws ec2 describe-instances --region {region} --filters '
+        f'Name=tag:ray-cluster-name,Values={name_on_cloud} '
+        f'--query "Reservations[].Instances[].InstanceId" --output text); '
+        f'echo "[{label}] instance: $id"; '
+        f'if [ -z "$id" ]; then echo "FAIL[{label}]: no instance"; exit 1; fi; '
+        # The instance must always be tagged: it is how SkyPilot finds the
+        # cluster again, and it proves the launch really used these settings.
+        f'itags=$(aws ec2 describe-instances --region {region} '
+        f'--instance-ids $id --query "Reservations[].Instances[].Tags[]" '
+        f'--output text); echo "[{label}] instance tags: $itags"; '
+        f'if ! echo "$itags" | grep -q ray-cluster-name; then '
+        f'echo "FAIL[{label}]: instance is not tagged"; exit 1; fi; '
+        # Guard against a vacuous pass: the volume query must resolve.
+        f'vols=$(aws ec2 describe-volumes --region {region} '
+        f'--filters Name=attachment.instance-id,Values=$id '
+        f'--query "Volumes[].VolumeId" --output text); '
+        f'echo "[{label}] volumes: $vols"; '
+        f'if [ -z "$vols" ]; then echo "FAIL[{label}]: no volume attached"; '
+        f'exit 1; fi; '
+        f'vtags=$(aws ec2 describe-volumes --region {region} '
+        f'--filters Name=attachment.instance-id,Values=$id '
+        f'--query "Volumes[].Tags[]" --output text); '
+        f'echo "[{label}] volume tags: $vtags"; '
+        f'{assertion}; echo "PASS[{label}]"')
+
+
+@pytest.mark.aws
+@pytest.mark.no_remote_server  # Restarts the API server to declare a workspace.
+def test_aws_volume_tagging_degrades_without_permission():
+    """`sky launch` must survive credentials that cannot tag EBS volumes.
+
+    AWS rejects the whole RunInstances call when the caller may not tag one of
+    the resource types it names, so this is the difference between a warning
+    and every EC2 launch failing.
+
+    Launches twice in the same account: once on the default credentials, once
+    through a workspace pinned to an AWS profile that cannot tag volumes. Both
+    must come up; only the volume tags and the warning differ.
+    """
+    role_arn = os.environ.get(_NO_VOLUME_TAG_ROLE_ENV)
+    if not role_arn:
+        pytest.skip(f'{_NO_VOLUME_TAG_ROLE_ENV} is not set')
+
+    name = smoke_tests_utils.get_cluster_name()
+    region = 'us-east-2'
+    allowed = f'{name}-ok'
+    denied = f'{name}-no'
+    enforced = f'{name}-en'
+    allowed_on_cloud = common_utils.make_cluster_name_on_cloud(
+        allowed, sky.AWS.max_cluster_name_length())
+    denied_on_cloud = common_utils.make_cluster_name_on_cloud(
+        denied, sky.AWS.max_cluster_name_length())
+
+    # A profile backed by the restricted role. Session credentials are enough:
+    # the launch only has to outlive the test.
+    write_profile = (
+        f'creds=$(aws sts assume-role --role-arn {role_arn} '
+        f'--role-session-name sky-volume-tag-smoke '
+        f'--query "Credentials.[AccessKeyId,SecretAccessKey,SessionToken]" '
+        f'--output text); '
+        f'aws configure set --profile {_NO_VOLUME_TAG_PROFILE} '
+        f'aws_access_key_id "$(echo "$creds" | cut -f1)"; '
+        f'aws configure set --profile {_NO_VOLUME_TAG_PROFILE} '
+        f'aws_secret_access_key "$(echo "$creds" | cut -f2)"; '
+        f'aws configure set --profile {_NO_VOLUME_TAG_PROFILE} '
+        f'aws_session_token "$(echo "$creds" | cut -f3)"; '
+        f'aws configure set --profile {_NO_VOLUME_TAG_PROFILE} '
+        f'region {region}')
+
+    # `profile` is only settable per workspace, and a workspace has to be
+    # declared server-side, so the server is restarted with this config.
+    server_config = textwrap.dedent(f"""\
+        workspaces:
+          default: {{}}
+          no-volume-tags:
+            aws:
+              profile: {_NO_VOLUME_TAG_PROFILE}
+    """)
+    denied_client_config = 'active_workspace: no-volume-tags\n'
+    # Same restricted workspace, but the tags are demanded rather than
+    # attempted, so the launch has to fail instead of degrading.
+    enforced_client_config = textwrap.dedent("""\
+        active_workspace: no-volume-tags
+        aws:
+          enforce_tags:
+            - volume
+    """)
+
+    with tempfile.NamedTemporaryFile('w', suffix='.yaml',
+                                     delete=False) as server_f, \
+         tempfile.NamedTemporaryFile('w', suffix='.yaml',
+                                     delete=False) as denied_f, \
+         tempfile.NamedTemporaryFile('w', suffix='.yaml',
+                                     delete=False) as enforced_f:
+        server_f.write(server_config)
+        denied_f.write(denied_client_config)
+        enforced_f.write(enforced_client_config)
+        server_f.flush()
+        denied_f.flush()
+        enforced_f.flush()
+
+        launch = (f'--infra aws/{region} {smoke_tests_utils.LOW_RESOURCE_ARG} '
+                  f'echo hi')
+        test = smoke_tests_utils.Test(
+            'aws_volume_tagging_degrades_without_permission',
+            [
+                smoke_tests_utils.launch_cluster_for_cloud_cmd('aws', name),
+                write_profile,
+                f'export {skypilot_config.ENV_VAR_GLOBAL_CONFIG}='
+                f'{server_f.name} && {smoke_tests_utils.SKY_API_RESTART}',
+
+                # 1. Default credentials: no warning, volumes tagged.
+                f'sky launch -y -c {allowed} {launch} '
+                f'> {allowed}.log 2>&1; cat {allowed}.log',
+                f'! grep -q "{_VOLUME_TAG_WARNING}" {allowed}.log',
+                smoke_tests_utils.run_cloud_cmd_on_cluster(
+                    name,
+                    cmd=_volume_tags_cmd(region,
+                                         allowed_on_cloud,
+                                         must_be_tagged=True,
+                                         label='default-creds')),
+
+                # 2. A role that cannot tag volumes: warning, launch succeeds,
+                #    volumes untagged.
+                smoke_tests_utils.with_config(
+                    f'sky launch -y -c {denied} {launch} '
+                    f'> {denied}.log 2>&1; cat {denied}.log', denied_f.name),
+                f'grep -q "{_VOLUME_TAG_WARNING}" {denied}.log',
+                smoke_tests_utils.run_cloud_cmd_on_cluster(
+                    name,
+                    cmd=_volume_tags_cmd(region,
+                                         denied_on_cloud,
+                                         must_be_tagged=False,
+                                         label='restricted-creds')),
+
+                # 3. Same role, but `aws.enforce_tags: [volume]`: the launch
+                #    must fail rather than quietly produce untagged volumes,
+                #    and say why.
+                smoke_tests_utils.with_config(
+                    f'! sky launch -y -c {enforced} {launch} '
+                    f'> {enforced}.log 2>&1; cat {enforced}.log',
+                    enforced_f.name),
+                # The cause must reach the failure summary the user reads,
+                # not just a log line: the headline is the generic "relax the
+                # task's resource requirements", which cannot be acted on.
+                f'grep -q "Reason: Volume tagging is required" {enforced}.log',
+                f'grep -q "ec2:CreateTags" {enforced}.log',
+                # Nothing may be left behind by a refused launch.
+                f'! sky status 2>/dev/null | grep -q "{enforced}"',
+            ],
+            smoke_tests_utils.chain_teardown(
+                f'sky down -y {allowed}',
+                # Torn down through the same workspace it was created in.
+                # The restricted profile is a different AWS identity, and
+                # SkyPilot refuses to operate on a cluster owned by another
+                # one -- tearing this down on the default credentials fails
+                # with ClusterOwnerIdentityMismatchError and leaks the VM.
+                smoke_tests_utils.with_config(f'sky down -y {denied}',
+                                              denied_f.name),
+                # Should be a no-op -- the enforced launch is refused before
+                # anything is created -- but never leave that to chance.
+                smoke_tests_utils.with_config(f'sky down -y {enforced} || true',
+                                              enforced_f.name),
+                smoke_tests_utils.down_cluster_for_cloud_cmd(name),
+                smoke_tests_utils.SKY_API_RESTART),
+            timeout=30 * 60,
         )
         smoke_tests_utils.run_one_test(test)
 
