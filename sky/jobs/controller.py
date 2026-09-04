@@ -266,7 +266,9 @@ class JobController:
         self._rank = rank
         logger.info(f'Rank for job {self._job_id}: {self._rank}')
 
-        self._load_dag()
+    async def load_dag(self) -> None:
+        """Load the job's DAG off the event loop; must run before run()."""
+        await asyncio.to_thread(self._load_dag)
 
     def _load_dag(self) -> None:
         """(Re)load the job's DAG and set up per-task environment variables.
@@ -2868,7 +2870,7 @@ class JobController:
             # Cancellation and terminal completion are owned by the resume
             # logic; retry the job loop immediately so it can complete
             # (re-raising CancelledError or finishing terminal tasks).
-            await asyncio.to_thread(self._load_dag)
+            await self.load_dag()
             return None
 
         # 4. If the error escaped mid-launch, the job may be stuck in a
@@ -2881,7 +2883,7 @@ class JobController:
 
         # The retry must start from a freshly loaded DAG: the failed attempt
         # may have left the in-memory task objects mutated (see _load_dag).
-        await asyncio.to_thread(self._load_dag)
+        await self.load_dag()
 
         nominal_backoff = min(
             jobs_constants.EMERGENCY_RECOVERY_BACKOFF_BASE_SECONDS *
@@ -3269,11 +3271,10 @@ class ControllerManager:
         graceful, graceful_timeout = False, None
         controller: Optional[JobController] = None
         try:
-            controller = await asyncio.to_thread(JobController, job_id,
-                                                 self.starting,
-                                                 self._job_tasks_lock,
-                                                 self._starting_signal, pool,
-                                                 job_rank)
+            controller = JobController(job_id, self.starting,
+                                       self._job_tasks_lock,
+                                       self._starting_signal, pool, job_rank)
+            await controller.load_dag()
 
             async with self._job_tasks_lock:
                 if job_id in self.job_tasks:

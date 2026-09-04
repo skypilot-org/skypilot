@@ -9,6 +9,7 @@ Covers the two layers of the feature:
 """
 import asyncio
 import contextlib
+import threading
 import time
 from unittest.mock import AsyncMock
 from unittest.mock import MagicMock
@@ -464,6 +465,29 @@ class TestEmergencyRecoveryState:
         # ...until the emergency bookkeeping normalizes it back to an alive,
         # non-launching state for the duration of the backoff.
         await state.normalize_schedule_state_for_emergency_retry_async(1)
+        assert _get_job_info_row(engine)['schedule_state'] == 'ALIVE'
+
+    @pytest.mark.asyncio
+    async def test_scheduled_launch_sync_reads_leave_the_loop(
+            self, _mock_managed_jobs_db_conn, monkeypatch):
+        # The pool and DAG lookups in scheduled_launch use the sync engine.
+        # They must run on a worker thread: a sync query on the loop thread
+        # blocks every asyncpg transaction this process holds open.
+        engine = _mock_managed_jobs_db_conn
+        _seed_job(engine, status='PENDING', schedule_state='LAUNCHING')
+        loop_thread = threading.get_ident()
+        real_get_engine = state._db_manager.get_engine
+
+        def guarded_get_engine():
+            assert threading.get_ident() != loop_thread, (
+                'sync state engine used on the event loop thread')
+            return real_get_engine()
+
+        monkeypatch.setattr(state._db_manager, 'get_engine', guarded_get_engine)
+        lock = asyncio.Lock()
+        async with scheduler.scheduled_launch(1, set(), lock,
+                                              asyncio.Condition(lock=lock)):
+            pass
         assert _get_job_info_row(engine)['schedule_state'] == 'ALIVE'
 
     def test_backoff_schedule_states_block_controller_autostop(

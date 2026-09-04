@@ -561,7 +561,7 @@ class StrategyExecutor:
         if self.pool is None:
             managed_job_utils.terminate_cluster(self.cluster_name)
 
-    def _refresh_priority_from_persisted_dag(self) -> None:
+    async def _refresh_priority_from_persisted_dag(self) -> None:
         """Re-read the persisted job DAG and apply any updated priority.
 
         A managed job's priority can be changed out of band after submission
@@ -572,7 +572,8 @@ class StrategyExecutor:
         task — envs, file mounts, name — is preserved.
         """
         try:
-            content = file_content_utils.get_job_dag_content(self.job_id)
+            content = await asyncio.to_thread(
+                file_content_utils.get_job_dag_content, self.job_id)
             if content is None:
                 return
             fresh_dag = dag_utils.load_dag_from_yaml_str(content)
@@ -846,7 +847,7 @@ class StrategyExecutor:
         # change takes effect on this relaunch (the controller caches the DAG
         # in memory for its lifetime).
         if recovery:
-            await asyncio.to_thread(self._refresh_priority_from_persisted_dag)
+            await self._refresh_priority_from_persisted_dag()
         # TODO(zhwu): handle the failure during `preparing sky runtime`.
         retry_cnt = 0
         backoff = common_utils.Backoff(self.RETRY_INIT_GAP_SECONDS)
