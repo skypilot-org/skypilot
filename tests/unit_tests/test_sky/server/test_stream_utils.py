@@ -1,4 +1,4 @@
-"""Tests for log streaming of a request that parks mid-execution."""
+"""Tests for request log streaming."""
 import aiofiles
 import pytest
 
@@ -161,3 +161,49 @@ async def test_parked_message_repeats_after_any_status_change(
 
     inits = [m for c, m in controls if c is rich_utils.Control.INIT]
     assert inits == [f'[dim]{msg}[/dim]'] * 2, inits
+
+
+@pytest.mark.asyncio
+async def test_a_discarded_log_is_deleted_once_the_stream_ends(tmp_path):
+    log_path = tmp_path / 'rid.log'
+    log_path.write_text('hello\n')
+
+    async def stream():
+        yield 'hello\n'
+
+    chunks = [
+        chunk async for chunk in stream_utils._discard_log_after_stream(
+            stream(), log_path)
+    ]
+
+    assert chunks == ['hello\n']
+    assert not log_path.exists()
+
+
+@pytest.mark.asyncio
+async def test_a_discarded_log_is_deleted_when_the_client_disconnects(tmp_path):
+    """A client that walks away mid-tail must not leave its copy behind."""
+    log_path = tmp_path / 'rid.log'
+    log_path.write_text('hello\n')
+
+    async def stream():
+        yield 'hello\n'
+        yield 'world\n'
+
+    gen = stream_utils._discard_log_after_stream(stream(), log_path)
+    assert await gen.__anext__() == 'hello\n'
+    await gen.aclose()
+
+    assert not log_path.exists()
+
+
+@pytest.mark.asyncio
+async def test_a_deleted_log_ends_the_stream_with_a_message(tmp_path):
+    """The response has already started, so this cannot be a 404."""
+    chunks = [
+        chunk
+        async for chunk in stream_utils.log_streamer(None, tmp_path / 'rid.log')
+    ]
+
+    assert len(chunks) == 1
+    assert 'no longer available' in chunks[0]

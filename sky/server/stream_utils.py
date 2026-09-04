@@ -214,11 +214,20 @@ async def log_streamer(
     # head node provision logs (if cluster_name is provided)
     else:
         assert log_path is not None, (request_id, cluster_name)
-        async with aiofiles.open(log_path, 'rb') as f:
-            async for chunk in _tail_log_file(f, request_id, plain_logs, tail,
-                                              follow, cluster_name,
+        try:
+            log_file = await aiofiles.open(log_path, 'rb')
+        except FileNotFoundError:
+            # The response has already started, so this cannot be a 404.
+            yield (f'Log {log_path.name} is no longer available on the API '
+                   f'server.\n')
+            return
+        try:
+            async for chunk in _tail_log_file(log_file, request_id, plain_logs,
+                                              tail, follow, cluster_name,
                                               polling_interval):
                 yield chunk
+        finally:
+            await log_file.close()
 
 
 async def _tail_log_file(
@@ -439,19 +448,45 @@ async def _tail_log_file(
         yield chunk
 
 
+async def _discard_log_after_stream(
+        stream: AsyncGenerator[str, None],
+        log_path: pathlib.Path) -> AsyncGenerator[str, None]:
+    """Yields from ``stream``, then deletes ``log_path``.
+
+    For a log tail the request log file only bridges the tail and this
+    response, and holds a full copy of the tailed log.
+    """
+    try:
+        async for chunk in stream:
+            yield chunk
+    finally:
+        try:
+            log_path.unlink(missing_ok=True)
+        except OSError as e:
+            logger.debug(f'Failed to remove request log {log_path}: {e}')
+
+
 def stream_response_for_long_request(
     request_id: str,
     logs_path: pathlib.Path,
     background_tasks: fastapi.BackgroundTasks,
     kill_request_on_disconnect: bool = True,
+    discard_log_after_stream: bool = False,
 ) -> fastapi.responses.StreamingResponse:
-    """Stream the logs of a long request."""
+    """Stream the logs of a long request.
+
+    Args:
+        discard_log_after_stream: If True, delete the request log file once
+            the response ends. Set it for requests whose output is a tail of
+            a log that lives elsewhere.
+    """
     return stream_response(
         request_id,
         logs_path,
         background_tasks,
         polling_interval=LONG_REQUEST_POLL_INTERVAL,
         kill_request_on_disconnect=kill_request_on_disconnect,
+        discard_log_after_stream=discard_log_after_stream,
     )
 
 
@@ -461,6 +496,7 @@ def stream_response(
     background_tasks: fastapi.BackgroundTasks,
     polling_interval: float = DEFAULT_POLL_INTERVAL,
     kill_request_on_disconnect: bool = True,
+    discard_log_after_stream: bool = False,
 ) -> fastapi.responses.StreamingResponse:
 
     if kill_request_on_disconnect:
@@ -477,10 +513,13 @@ def stream_response(
     # Route through LogProvider.
     # pylint: disable=import-outside-toplevel
     from sky.server.requests import log_provider as lp
+    stream = lp.get_log_provider().log_stream(request_id=request_id,
+                                              log_path=logs_path,
+                                              polling_interval=polling_interval)
+    if discard_log_after_stream:
+        stream = _discard_log_after_stream(stream, logs_path)
     return fastapi.responses.StreamingResponse(
-        lp.get_log_provider().log_stream(request_id=request_id,
-                                         log_path=logs_path,
-                                         polling_interval=polling_interval),
+        stream,
         media_type='text/plain',
         headers={
             'Cache-Control': 'no-cache, no-transform',
