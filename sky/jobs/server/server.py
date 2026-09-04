@@ -167,7 +167,6 @@ async def logs(
         logs_path=request_task.log_path,
         background_tasks=background_tasks,
         kill_request_on_disconnect=kill_request_on_disconnect,
-        discard_log_after_stream=True,
     )
 
 
@@ -265,7 +264,6 @@ async def pool_tail_logs(
         logs_path=request_task.log_path,
         background_tasks=background_tasks,
         kill_request_on_disconnect=True,
-        discard_log_after_stream=True,
     )
 
 

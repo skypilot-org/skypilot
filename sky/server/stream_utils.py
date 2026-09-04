@@ -204,30 +204,45 @@ async def log_streamer(
             header = f'\n==> {log_file_path} <==\n\n'
             yield header
 
-            async with aiofiles.open(log_file_path, 'rb') as f:
-                async for chunk in _tail_log_file(f, request_id, plain_logs,
-                                                  tail, follow, cluster_name,
-                                                  polling_interval):
-                    yield chunk
+            async for chunk in _stream_log_file(log_file_path, request_id,
+                                                plain_logs, tail, follow,
+                                                cluster_name, polling_interval):
+                yield chunk
 
     # api server request logs (if request_id is provided) or
     # head node provision logs (if cluster_name is provided)
     else:
         assert log_path is not None, (request_id, cluster_name)
-        try:
-            log_file = await aiofiles.open(log_path, 'rb')
-        except FileNotFoundError:
-            # The response has already started, so this cannot be a 404.
-            yield (f'Log {log_path.name} is no longer available on the API '
-                   'server.\n')
-            return
-        try:
-            async for chunk in _tail_log_file(log_file, request_id, plain_logs,
-                                              tail, follow, cluster_name,
-                                              polling_interval):
-                yield chunk
-        finally:
-            await log_file.close()
+        async for chunk in _stream_log_file(log_path, request_id, plain_logs,
+                                            tail, follow, cluster_name,
+                                            polling_interval):
+            yield chunk
+
+
+async def _stream_log_file(
+    log_path: pathlib.Path,
+    request_id: Optional[str] = None,
+    plain_logs: bool = False,
+    tail: Optional[int] = None,
+    follow: bool = True,
+    cluster_name: Optional[str] = None,
+    polling_interval: float = DEFAULT_POLL_INTERVAL
+) -> AsyncGenerator[str, None]:
+    """Opens one log file and streams it, or says it is gone."""
+    try:
+        log_file = await aiofiles.open(log_path, 'rb')
+    except FileNotFoundError:
+        # The response has already started, so this cannot be a 404.
+        yield (f'Log {log_path.name} is no longer available on the API '
+               'server.\n')
+        return
+    try:
+        async for chunk in _tail_log_file(log_file, request_id, plain_logs,
+                                          tail, follow, cluster_name,
+                                          polling_interval):
+            yield chunk
+    finally:
+        await log_file.close()
 
 
 async def _tail_log_file(
@@ -450,20 +465,19 @@ async def _tail_log_file(
 
 async def _discard_log_after_stream(
         stream: AsyncGenerator[str, None],
-        log_path: pathlib.Path) -> AsyncGenerator[str, None]:
-    """Yields from ``stream``, then deletes ``log_path``.
+        request_id: str) -> AsyncGenerator[str, None]:
+    """Yields from ``stream``, then discards the request's log.
 
-    For a log tail the request log file only bridges the tail and this
-    response, and holds a full copy of the tailed log.
+    For a log tail the request log only bridges the tail and this response,
+    and holds a full copy of the tailed log.
     """
+    # pylint: disable=import-outside-toplevel
+    from sky.server.requests import log_provider as lp
     try:
         async for chunk in stream:
             yield chunk
     finally:
-        try:
-            log_path.unlink(missing_ok=True)
-        except OSError as e:
-            logger.debug(f'Failed to remove request log {log_path}: {e}')
+        lp.get_log_provider().discard_log(request_id)
 
 
 def stream_response_for_long_request(
@@ -471,14 +485,14 @@ def stream_response_for_long_request(
     logs_path: pathlib.Path,
     background_tasks: fastapi.BackgroundTasks,
     kill_request_on_disconnect: bool = True,
-    discard_log_after_stream: bool = False,
+    discard_log_after_stream: bool = True,
 ) -> fastapi.responses.StreamingResponse:
     """Stream the logs of a long request.
 
     Args:
-        discard_log_after_stream: If True, delete the request log file once
-            the response ends. Set it for requests whose output is a tail of
-            a log that lives elsewhere.
+        discard_log_after_stream: Whether to discard the request log once the
+            response ends. Pass False for a request whose log is worth keeping
+            on its own, rather than a tail of a log that lives elsewhere.
     """
     return stream_response(
         request_id,
@@ -517,7 +531,7 @@ def stream_response(
                                               log_path=logs_path,
                                               polling_interval=polling_interval)
     if discard_log_after_stream:
-        stream = _discard_log_after_stream(stream, logs_path)
+        stream = _discard_log_after_stream(stream, request_id)
     return fastapi.responses.StreamingResponse(
         stream,
         media_type='text/plain',

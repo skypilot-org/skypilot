@@ -2,7 +2,9 @@
 import aiofiles
 import pytest
 
+from sky.server import constants as server_constants
 from sky.server import stream_utils
+from sky.server.requests import log_provider
 from sky.server.requests import requests as requests_lib
 from sky.utils import message_utils
 from sky.utils import rich_utils
@@ -163,36 +165,60 @@ async def test_parked_message_repeats_after_any_status_change(
     assert inits == [f'[dim]{msg}[/dim]'] * 2, inits
 
 
-@pytest.mark.asyncio
-async def test_a_discarded_log_is_deleted_once_the_stream_ends(tmp_path):
-    log_path = tmp_path / 'rid.log'
-    log_path.write_text('hello\n')
+class _RecordingLogProvider(log_provider.LocalLogProvider):
+    """Records which requests had their log discarded."""
 
-    async def stream():
-        yield 'hello\n'
+    def __init__(self):
+        self.discarded = []
+
+    def discard_log(self, request_id: str) -> None:
+        self.discarded.append(request_id)
+
+
+async def _one_chunk():
+    yield 'hello\n'
+
+
+async def _two_chunks():
+    yield 'hello\n'
+    yield 'world\n'
+
+
+@pytest.mark.asyncio
+async def test_a_discarded_log_is_dropped_once_the_stream_ends(monkeypatch):
+    provider = _RecordingLogProvider()
+    monkeypatch.setattr(log_provider, 'get_log_provider', lambda: provider)
 
     chunks = [
         chunk async for chunk in stream_utils._discard_log_after_stream(
-            stream(), log_path)
+            _one_chunk(), 'rid')
     ]
 
     assert chunks == ['hello\n']
-    assert not log_path.exists()
+    assert provider.discarded == ['rid']
 
 
 @pytest.mark.asyncio
-async def test_a_discarded_log_is_deleted_when_the_client_disconnects(tmp_path):
+async def test_a_discarded_log_is_dropped_when_the_client_disconnects(
+        monkeypatch):
     """A client that walks away mid-tail must not leave its copy behind."""
+    provider = _RecordingLogProvider()
+    monkeypatch.setattr(log_provider, 'get_log_provider', lambda: provider)
+
+    gen = stream_utils._discard_log_after_stream(_two_chunks(), 'rid')
+    assert await gen.__anext__() == 'hello\n'
+    await gen.aclose()
+
+    assert provider.discarded == ['rid']
+
+
+def test_discard_log_removes_the_request_log(monkeypatch, tmp_path):
+    monkeypatch.setattr(server_constants, 'REQUEST_LOG_PATH_PREFIX',
+                        str(tmp_path))
     log_path = tmp_path / 'rid.log'
     log_path.write_text('hello\n')
 
-    async def stream():
-        yield 'hello\n'
-        yield 'world\n'
-
-    gen = stream_utils._discard_log_after_stream(stream(), log_path)
-    assert await gen.__anext__() == 'hello\n'
-    await gen.aclose()
+    log_provider.LocalLogProvider().discard_log('rid')
 
     assert not log_path.exists()
 
