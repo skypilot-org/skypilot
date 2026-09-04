@@ -3413,7 +3413,8 @@ class ControllerManager:
                         ('Unexpected error occurred. For details, '
                          f'run: sky jobs logs --controller {job_id}')))
 
-            await finalize_step(lambda _: scheduler.job_done_async(job_id))
+            await finalize_step(
+                lambda _: scheduler.job_done_async(job_id, idempotent=True))
 
             async with self._job_tasks_lock:
                 try:

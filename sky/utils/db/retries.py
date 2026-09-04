@@ -139,12 +139,24 @@ def _new_backoff(initial_backoff: float,
                                                        initial_backoff))
 
 
-def _check_bounds(max_retries: Optional[int], deadline: Optional[float]):
+def _check_bounds(max_retries: Optional[int], deadline: Optional[float],
+                  initial_backoff: float, max_backoff: float):
     if max_retries is None and deadline is None:
         raise ValueError('Either max_retries or deadline must be set')
     if max_retries is not None and max_retries < 1:
         raise ValueError(
             f'max_retries must be greater than 0, got {max_retries}')
+    if initial_backoff <= 0 or max_backoff < initial_backoff:
+        raise ValueError('Need 0 < initial_backoff <= max_backoff, got '
+                         f'{initial_backoff} and {max_backoff}')
+
+
+def _next_delay(backoff: common_utils.Backoff,
+                deadline: Optional[float]) -> float:
+    delay = backoff.current_backoff()
+    if deadline is None:
+        return delay
+    return max(0.0, min(delay, deadline - time.monotonic()))
 
 
 def _budget_spent(failures: int, max_retries: Optional[int],
@@ -176,9 +188,10 @@ def with_db_retries(fn: Callable[[int], T],
 
     Gives up after `max_retries` attempts or once `time.monotonic()` passes
     `deadline`, whichever comes first; pass `max_retries=None` to bound the
-    loop by the deadline alone.
+    loop by the deadline alone. Backoff sleeps never run past the deadline,
+    so the last attempt starts no later than the deadline.
     """
-    _check_bounds(max_retries, deadline)
+    _check_bounds(max_retries, deadline, initial_backoff, max_backoff)
     backoff = _new_backoff(initial_backoff, max_backoff)
     attempt = 0
     while True:
@@ -196,7 +209,7 @@ def with_db_retries(fn: Callable[[int], T],
                 logger.error(f'Transient DB error: giving up after '
                              f'{attempt} attempts; {summarize(e)}')
                 raise
-            delay = backoff.current_backoff()
+            delay = _next_delay(backoff, deadline)
             _log_retry(attempt, max_retries, delay, e)
             time.sleep(delay)
 
@@ -209,7 +222,7 @@ async def with_db_retries_async(
         max_backoff: float = _DEFAULT_MAX_BACKOFF,
         deadline: Optional[float] = None) -> T:
     """Async equivalent of with_db_retries."""
-    _check_bounds(max_retries, deadline)
+    _check_bounds(max_retries, deadline, initial_backoff, max_backoff)
     backoff = _new_backoff(initial_backoff, max_backoff)
     attempt = 0
     while True:
@@ -227,7 +240,7 @@ async def with_db_retries_async(
                 logger.error(f'Transient DB error: giving up after '
                              f'{attempt} attempts; {summarize(e)}')
                 raise
-            delay = backoff.current_backoff()
+            delay = _next_delay(backoff, deadline)
             _log_retry(attempt, max_retries, delay, e)
             await asyncio.sleep(delay)
 

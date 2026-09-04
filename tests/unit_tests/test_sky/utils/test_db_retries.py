@@ -253,7 +253,20 @@ class TestDeadlineBudget:
                                         max_backoff=300,
                                         deadline=1000.0)
         assert fn.call_count > retries._DEFAULT_MAX_RETRIES
-        assert clock[0] >= 1000.0
+        # The last sleep is clamped to the remaining budget, so the final
+        # attempt starts exactly at the deadline.
+        assert clock[0] == pytest.approx(1000.0)
+
+    @pytest.mark.parametrize('initial_backoff,max_backoff', [(0, 5.0),
+                                                             (10.0, 5.0)])
+    def test_invalid_backoff_bounds_raise_value_error(self, initial_backoff,
+                                                      max_backoff):
+        fn = mock.Mock()
+        with pytest.raises(ValueError, match='initial_backoff'):
+            retries.with_db_retries(fn,
+                                    initial_backoff=initial_backoff,
+                                    max_backoff=max_backoff)
+        fn.assert_not_called()
 
     def test_attempt_bound_still_applies_with_deadline(self):
         fn = mock.Mock(side_effect=_make_op_error('persistent'))

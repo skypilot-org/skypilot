@@ -2486,7 +2486,7 @@ class TestRunJobLoopTransientDbErrors:
         assert target.await_count == 3
         assert len(sleeps) == 2
         managed_job_state.set_failed_async.assert_not_awaited()
-        scheduler.job_done_async.assert_awaited_once_with(1)
+        scheduler.job_done_async.assert_awaited_once_with(1, idempotent=True)
         assert 1 not in manager.job_tasks
 
     @pytest.mark.asyncio
@@ -2518,7 +2518,7 @@ class TestRunJobLoopTransientDbErrors:
             managed_job_state.ManagedJobStatus.FAILED_CONTROLLER)
         assert kwargs['override_terminal'] is True
         assert kwargs['failure_reason'].startswith('Failed to clean up')
-        scheduler.job_done_async.assert_awaited_once_with(1)
+        scheduler.job_done_async.assert_awaited_once_with(1, idempotent=True)
 
     @pytest.mark.asyncio
     async def test_cleanup_db_error_past_budget_fails_job(
@@ -2539,7 +2539,7 @@ class TestRunJobLoopTransientDbErrors:
         kwargs = managed_job_state.set_failed_async.await_args.kwargs
         assert kwargs['override_terminal'] is True
         assert 'OperationalError' in kwargs['failure_reason']
-        scheduler.job_done_async.assert_awaited_once_with(1)
+        scheduler.job_done_async.assert_awaited_once_with(1, idempotent=True)
 
     @pytest.mark.asyncio
     async def test_cancelled_job_ends_cancelled_after_cleanup_retry(
@@ -2557,4 +2557,4 @@ class TestRunJobLoopTransientDbErrors:
         managed_job_state.set_cancelling_async.assert_awaited_once()
         managed_job_state.set_cancelled_async.assert_awaited_once()
         managed_job_state.set_failed_async.assert_not_awaited()
-        scheduler.job_done_async.assert_awaited_once_with(1)
+        scheduler.job_done_async.assert_awaited_once_with(1, idempotent=True)
