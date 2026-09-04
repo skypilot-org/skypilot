@@ -661,6 +661,8 @@ class JobController:
         # or `recover` function from the strategy executor.
         cluster_name = managed_job_utils.generate_managed_job_cluster_name(
             task.name, self._job_id) if self._pool is None else None
+        file_mounts_blob_id = await asyncio.to_thread(
+            managed_job_state.get_file_mounts_blob_id, self._job_id)
         self._strategy_executor = recovery_strategy.StrategyExecutor.make(
             cluster_name,
             self._backend,
@@ -671,8 +673,7 @@ class JobController:
             self.starting,
             self.starting_lock,
             self.starting_signal,
-            file_mounts_blob_id=managed_job_state.get_file_mounts_blob_id(
-                self._job_id))
+            file_mounts_blob_id=file_mounts_blob_id)
         if not is_resume:
             submitted_at = time.time()
             if task_id == 0:
@@ -1728,6 +1729,8 @@ class JobController:
         cluster_name = managed_job_utils.generate_managed_job_cluster_name(
             task_name, self._job_id)
 
+        file_mounts_blob_id = await asyncio.to_thread(
+            managed_job_state.get_file_mounts_blob_id, self._job_id)
         executor = recovery_strategy.StrategyExecutor.make(
             cluster_name,
             self._backend,
@@ -1738,8 +1741,7 @@ class JobController:
             self.starting,
             self.starting_lock,
             self.starting_signal,
-            file_mounts_blob_id=managed_job_state.get_file_mounts_blob_id(
-                self._job_id))
+            file_mounts_blob_id=file_mounts_blob_id)
 
         # Only transition to STARTING for a fresh launch. A resumed task is
         # already past PENDING, so set_starting's guarded PENDING->STARTING
@@ -3070,7 +3072,7 @@ class ControllerManager:
             if error is not None:
                 raise error
 
-        dag = _get_dag(job_id)
+        dag = await asyncio.to_thread(_get_dag, job_id)
         error = None
         for task in dag.tasks:
             # most things in this function are blocking
@@ -3204,7 +3206,8 @@ class ControllerManager:
         logger.info(f'  pid={self._pid}')
 
         job_rank = None
-        env_content = file_content_utils.get_job_env_content(job_id)
+        env_content = await asyncio.to_thread(
+            file_content_utils.get_job_env_content, job_id)
         if env_content:
             try:
                 env_vars = dotenv.dotenv_values(stream=io.StringIO(env_content))
@@ -3218,9 +3221,10 @@ class ControllerManager:
                                          value)
 
                     # Restore config file if needed
-                    file_content_utils.restore_job_config_file(job_id)
+                    await asyncio.to_thread(
+                        file_content_utils.restore_job_config_file, job_id)
 
-                    skypilot_config.reload_config()
+                    await asyncio.to_thread(skypilot_config.reload_config)
 
                     # Set SKYPILOT_JOB_RANK from job_id_to_rank mapping if
                     # available
@@ -3265,9 +3269,11 @@ class ControllerManager:
         graceful, graceful_timeout = False, None
         controller: Optional[JobController] = None
         try:
-            controller = JobController(job_id, self.starting,
-                                       self._job_tasks_lock,
-                                       self._starting_signal, pool, job_rank)
+            controller = await asyncio.to_thread(JobController, job_id,
+                                                 self.starting,
+                                                 self._job_tasks_lock,
+                                                 self._starting_signal, pool,
+                                                 job_rank)
 
             async with self._job_tasks_lock:
                 if job_id in self.job_tasks:
@@ -3290,7 +3296,7 @@ class ControllerManager:
                 logger.debug(f'Job {job_id} graceful cancel: '
                              f'graceful={graceful}, timeout={graceful_timeout}')
 
-            dag = _get_dag(job_id)
+            dag = await asyncio.to_thread(_get_dag, job_id)
 
             # Query all task statuses BEFORE set_cancelling_async changes
             # them. At this point, statuses accurately reflect which tasks
