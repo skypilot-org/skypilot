@@ -247,11 +247,20 @@ def get_ingress_external_ip_and_ports(
 ) -> Tuple[Optional[str], Optional[Tuple[int, int]]]:
     """Returns external ip and ports for the ingress controller."""
     core_api = kubernetes.core_api(context)
-    ingress_services = [
-        item for item in core_api.list_namespaced_service(
-            namespace, _request_timeout=kubernetes.API_TIMEOUT).items
-        if item.metadata.name == _INGRESS_CONTROLLER_SERVICE_NAME
-    ]
+    ingress_services: List[Any] = []
+    try:
+        ingress_services = [
+            item for item in core_api.list_namespaced_service(
+                namespace, _request_timeout=kubernetes.API_TIMEOUT).items
+            if item.metadata.name == _INGRESS_CONTROLLER_SERVICE_NAME
+        ]
+    except kubernetes.kubernetes.client.ApiException as e:
+        # A user whose RBAC is scoped to their own namespace gets a 403 here
+        # (or a 404 if the namespace does not exist). That is exactly the
+        # case where the controller may live elsewhere, so treat it as "not
+        # found" and let the cluster-wide search below run.
+        logger.debug(f'Failed to list services in namespace {namespace!r} '
+                     f'while looking for the ingress controller: {e}')
     if not ingress_services:
         # The ingress controller may be deployed in a namespace other than
         # the default `ingress-nginx` (see #9150). Fall back to searching
@@ -268,6 +277,18 @@ def get_ingress_external_ip_and_ports(
             logger.debug('Failed to search for the ingress controller '
                          f'service across namespaces: {e}')
             ingress_services = []
+        if len(ingress_services) > 1:
+            # The API server's ordering is not stable across calls. Pick the
+            # controller deterministically (lowest namespace name) and tell
+            # the user, since it may not be the one they meant.
+            ingress_services = sorted(ingress_services,
+                                      key=lambda svc: svc.metadata.namespace)
+            namespaces = [svc.metadata.namespace for svc in ingress_services]
+            logger.warning(
+                f'Found {len(ingress_services)} services named '
+                f'{_INGRESS_CONTROLLER_SERVICE_NAME!r} in namespaces '
+                f'{namespaces}. Using the one in namespace '
+                f'{namespaces[0]!r} for the ingress endpoint.')
     if not ingress_services:
         return (None, None)
 
