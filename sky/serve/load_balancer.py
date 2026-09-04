@@ -4,7 +4,7 @@ import logging
 import os
 import threading
 import traceback
-from typing import Dict, List, Optional, Union
+from typing import Awaitable, Callable, Dict, List, Optional, Union
 
 import aiohttp
 import fastapi
@@ -18,6 +18,24 @@ from sky.serve import serve_utils
 from sky.utils import common_utils
 
 logger = sky_logging.init_logger(__name__)
+
+
+class _CleanupStreamingResponse(fastapi.responses.StreamingResponse):
+    """Streaming response that always runs its cleanup callback."""
+
+    def __init__(self, *response_args, cleanup: Callable[[], Awaitable[None]],
+                 **kwargs) -> None:
+        super().__init__(*response_args, **kwargs)
+        self._cleanup = cleanup
+
+    async def __call__(self, scope, receive, send):
+        try:
+            await super().__call__(scope, receive, send)
+        finally:
+            # This covers a client disconnect before the response body
+            # iterator is started. The iterator also invokes this callback in
+            # its own finally block for errors during streaming.
+            await self._cleanup()
 
 
 class SkyServeLoadBalancer:
@@ -202,23 +220,17 @@ class SkyServeLoadBalancer:
                 timeout=self._stream_timeout_seconds)
             proxy_response = await client.send(proxy_request, stream=True)
 
-            async def response_body():
+            async def cleanup_response() -> None:
                 try:
-                    async for chunk in proxy_response.aiter_raw():
-                        yield chunk
+                    await proxy_response.aclose()
                 finally:
-                    try:
-                        await proxy_response.aclose()
-                    finally:
-                        release_load()
+                    release_load()
 
-            response = fastapi.responses.StreamingResponse(
-                content=response_body(),
+            response = _CleanupStreamingResponse(
+                content=proxy_response.aiter_raw(),
                 status_code=proxy_response.status_code,
-                headers=proxy_response.headers)
-            # TODO(jgsweets): Wrap the response ASGI call in a finally block
-            # so a client disconnect before body iteration also closes the
-            # upstream response and releases the load.
+                headers=proxy_response.headers,
+                cleanup=cleanup_response)
             response_returned = True
             return response
         except (httpx.RequestError, httpx.HTTPStatusError) as e:

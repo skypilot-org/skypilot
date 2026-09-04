@@ -60,10 +60,23 @@ async def test_streaming_response_releases_least_load_accounting_on_close():
     response = await lb._proxy_request_to(replica_url, _make_request())
 
     assert lb._load_balancing_policy.load_map[replica_url] == 1
-    assert await response.body_iterator.__anext__() == b'response'
-    with pytest.raises(StopAsyncIteration):
-        await response.body_iterator.__anext__()
+    messages = []
+
+    async def receive():
+        return {'type': 'http.request'}
+
+    async def send(message):
+        messages.append(message)
+
+    await response({
+        'type': 'http',
+        'asgi': {
+            'spec_version': '2.4'
+        }
+    }, receive, send)
+
     assert lb._load_balancing_policy.load_map[replica_url] == 0
+    assert any(message.get('body') == b'response' for message in messages)
     proxy_response.aclose.assert_awaited_once()
 
 
@@ -88,8 +101,59 @@ async def test_streaming_response_error_releases_least_load_accounting():
 
     response = await lb._proxy_request_to(replica_url, _make_request())
 
+    async def receive():
+        return {'type': 'http.request'}
+
+    async def send(message):
+        del message
+
     with pytest.raises(httpx.ReadTimeout):
-        await response.body_iterator.__anext__()
+        await response({
+            'type': 'http',
+            'asgi': {
+                'spec_version': '2.4'
+            }
+        }, receive, send)
+    assert lb._load_balancing_policy.load_map[replica_url] == 0
+    proxy_response.aclose.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_client_disconnect_before_streaming_releases_load_accounting():
+    lb = _make_load_balancer()
+    replica_url = 'http://replica'
+    client = mock.MagicMock()
+    client.build_request.return_value = mock.sentinel.proxy_request
+
+    async def response_body():
+        raise AssertionError('The response body should not be iterated.')
+        yield b'unreachable'
+
+    proxy_response = mock.MagicMock()
+    proxy_response.aiter_raw.return_value = response_body()
+    proxy_response.status_code = 200
+    proxy_response.headers = {}
+    proxy_response.aclose = mock.AsyncMock()
+    client.send = mock.AsyncMock(return_value=proxy_response)
+    lb._client_pool[replica_url] = client
+
+    response = await lb._proxy_request_to(replica_url, _make_request())
+
+    async def receive():
+        raise AssertionError('The request should not be received.')
+
+    async def send(message):
+        del message
+        raise OSError('client disconnected')
+
+    with pytest.raises(Exception):
+        await response({
+            'type': 'http',
+            'asgi': {
+                'spec_version': '2.4'
+            }
+        }, receive, send)
+
     assert lb._load_balancing_policy.load_map[replica_url] == 0
     proxy_response.aclose.assert_awaited_once()
 
