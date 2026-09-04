@@ -13,7 +13,8 @@ import threading
 import time
 import traceback
 import typing
-from typing import Any, Dict, List, Optional, Set, Tuple, Union
+from typing import (Any, Awaitable, Callable, Dict, List, Optional, Set, Tuple,
+                    TypeVar, Union)
 
 import dotenv
 import filelock
@@ -55,6 +56,7 @@ from sky.utils import dag_utils
 from sky.utils import log_links
 from sky.utils import status_lib
 from sky.utils import ux_utils
+from sky.utils.db import retries as db_retries
 from sky.utils.plugin_extensions import ExternalClusterFailure
 from sky.utils.plugin_extensions import ExternalFailureSource
 from sky.utils.plugin_extensions import LogDeliverySource
@@ -69,6 +71,8 @@ else:
     jobsv1_pb2 = adaptors_common.LazyImport('sky.schemas.generated.jobsv1_pb2')
 
 logger = sky_logging.init_logger('sky.jobs.controller')
+
+T = TypeVar('T')
 
 _background_tasks: Set[asyncio.Task] = set()
 _background_tasks_lock: asyncio.Lock = asyncio.Lock()
@@ -96,6 +100,44 @@ async def create_background_task(coro: typing.Coroutine) -> None:
         _background_tasks.add(task)
         # TODO(cooperc): Discard needs a lock?
         task.add_done_callback(_background_tasks.discard)
+
+
+def _is_transient_db_error(error: BaseException) -> bool:
+    """Whether `error`, or an error it was raised from, is a transient DB
+    error (see sky.utils.db.retries)."""
+    seen: Set[int] = set()
+    current: Optional[BaseException] = error
+    while current is not None and id(current) not in seen:
+        if isinstance(current, db_retries.RETRYABLE_EXCEPTIONS):
+            return True
+        seen.add(id(current))
+        current = current.__cause__
+    return False
+
+
+async def _retry_on_transient_db_error(coro_fn: Callable[..., Awaitable[T]],
+                                       *args, **kwargs) -> T:
+    """Await `coro_fn(*args, **kwargs)`, retrying transient DB errors in place.
+
+    Backs off between attempts until the budget in jobs_constants is spent,
+    then re-raises the last error. Any other error is re-raised immediately.
+    """
+    base = jobs_constants.JOB_FINALIZE_DB_RETRY_BACKOFF_BASE_SECONDS
+    cap = jobs_constants.JOB_FINALIZE_DB_RETRY_BACKOFF_CAP_SECONDS
+    backoff = common_utils.Backoff(initial_backoff=base,
+                                   max_backoff_factor=cap // base)
+    deadline = time.time() + jobs_constants.JOB_FINALIZE_DB_RETRY_BUDGET_SECONDS
+    name = getattr(coro_fn, '__name__', repr(coro_fn))
+    while True:
+        try:
+            return await coro_fn(*args, **kwargs)
+        except Exception as e:  # pylint: disable=broad-except
+            if not _is_transient_db_error(e) or time.time() >= deadline:
+                raise
+            delay = backoff.current_backoff()
+            logger.warning(f'Transient DB error in {name}, retrying in '
+                           f'{delay:.0f}s: {db_retries.summarize(e)}')
+            await asyncio.sleep(delay)
 
 
 def _get_dag(job_id: int) -> 'sky.Dag':
@@ -3347,10 +3389,12 @@ class ControllerManager:
             raise
         finally:
             try:
-                await self._cleanup(job_id,
-                                    pool=pool,
-                                    graceful=graceful,
-                                    graceful_timeout=graceful_timeout)
+                await _retry_on_transient_db_error(
+                    self._cleanup,
+                    job_id,
+                    pool=pool,
+                    graceful=graceful,
+                    graceful_timeout=graceful_timeout)
                 logger.info(f'Cluster of managed job {job_id} has been cleaned '
                             'up.')
             except Exception as e:  # pylint: disable=broad-except
@@ -3358,7 +3402,8 @@ class ControllerManager:
                     'Failed to clean up, resources may have leaked: '
                     f'{common_utils.format_exception(e)}. Please check '
                     'whether the job\'s cluster and storage still exist.')
-                await managed_job_state.set_failed_async(
+                await _retry_on_transient_db_error(
+                    managed_job_state.set_failed_async,
                     job_id,
                     task_id=None,
                     failure_type=managed_job_state.ManagedJobStatus.
@@ -3369,7 +3414,8 @@ class ControllerManager:
             if cancelling:
                 # Since it's set with cancelling
                 assert task_id is not None, job_id
-                await managed_job_state.set_cancelled_async(
+                await _retry_on_transient_db_error(
+                    managed_job_state.set_cancelled_async,
                     job_id=job_id,
                     callback_func=managed_job_utils.event_callback_func(
                         job_id=job_id, task_id=task_id,
@@ -3377,14 +3423,16 @@ class ControllerManager:
 
             # We should check job status after 'set_cancelled', otherwise
             # the job status is not terminal.
-            job_status = await managed_job_state.get_status_async(job_id)
+            job_status = await _retry_on_transient_db_error(
+                managed_job_state.get_status_async, job_id)
             assert job_status is not None
             # The job can be non-terminal if the controller exited
             # abnormally, e.g. failed to launch cluster after reaching
             # the MAX_RETRY.
             if not job_status.is_terminal():
                 logger.info(f'Previous job status: {job_status.value}')
-                await managed_job_state.set_failed_async(
+                await _retry_on_transient_db_error(
+                    managed_job_state.set_failed_async,
                     job_id,
                     task_id=None,
                     failure_type=managed_job_state.ManagedJobStatus.
@@ -3393,7 +3441,7 @@ class ControllerManager:
                         'Unexpected error occurred. For details, '
                         f'run: sky jobs logs --controller {job_id}'))
 
-            await scheduler.job_done_async(job_id)
+            await _retry_on_transient_db_error(scheduler.job_done_async, job_id)
 
             async with self._job_tasks_lock:
                 try:
