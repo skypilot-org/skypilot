@@ -40,6 +40,27 @@ async def test_proxy_error_releases_least_load_accounting():
 
 
 @pytest.mark.asyncio
+async def test_pre_execute_error_releases_least_load_accounting():
+    lb = _make_load_balancer()
+    replica_url = 'http://replica'
+    request = _make_request()
+    policy = lb._load_balancing_policy
+    policy.set_ready_replicas([replica_url])
+
+    def increment_then_raise(replica_url_arg, request_arg):
+        del request_arg
+        policy.load_map[replica_url_arg] += 1
+        raise RuntimeError('pre-execute failed')
+
+    policy.pre_execute_hook = increment_then_raise
+
+    with pytest.raises(RuntimeError, match='pre-execute failed'):
+        await lb._proxy_request_to(replica_url, request)
+
+    assert policy.load_map[replica_url] == 0
+
+
+@pytest.mark.asyncio
 async def test_streaming_response_releases_least_load_accounting_on_close():
     lb = _make_load_balancer()
     replica_url = 'http://replica'

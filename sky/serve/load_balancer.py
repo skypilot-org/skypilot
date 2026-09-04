@@ -33,8 +33,8 @@ class _CleanupStreamingResponse(fastapi.responses.StreamingResponse):
             await super().__call__(scope, receive, send)
         finally:
             # This covers a client disconnect before the response body
-            # iterator is started. The iterator also invokes this callback in
-            # its own finally block for errors during streaming.
+            # iterator is started, as well as errors and disconnects during
+            # streaming.
             await self._cleanup()
 
 
@@ -189,7 +189,6 @@ class SkyServeLoadBalancer:
             encountered if anything goes wrong.
         """
         logger.info(f'Proxy request to {url}')
-        self._load_balancing_policy.pre_execute_hook(url, request)
         load_released = False
 
         def release_load() -> None:
@@ -201,6 +200,7 @@ class SkyServeLoadBalancer:
 
         response_returned = False
         try:
+            self._load_balancing_policy.pre_execute_hook(url, request)
             # We defer the get of the client here on purpose, for case when the
             # replica is ready in `_proxy_with_retries` but refreshed before
             # entering this function. In that case we will return an error here
