@@ -335,6 +335,26 @@ def _wrap_collector(collector) -> ResilientCollector:
     return wrapped
 
 
+_multiproc_collector: Optional[ResilientCollector] = None
+_multiproc_collector_lock = threading.Lock()
+
+
+def _get_multiproc_collector() -> ResilientCollector:
+    """Process-wide wrapper for the multiprocess merge.
+
+    The merge reads every per-pid file under ``PROMETHEUS_MULTIPROC_DIR``
+    and is CPU-bound under the GIL, so wrapping it keeps concurrent
+    scrapes from each running their own copy. Built lazily because
+    ``MultiProcessCollector()`` raises unless that directory is set.
+    """
+    global _multiproc_collector
+    with _multiproc_collector_lock:
+        if _multiproc_collector is None:
+            _multiproc_collector = _wrap_collector(
+                multiprocess.MultiProcessCollector(None))
+        return _multiproc_collector
+
+
 class BurnRateCollector:
     """Collector for SkyPilot cluster burn rate metrics.
     This collector calculates the total hourly burn rate (in USD) of all
@@ -494,6 +514,46 @@ _COLLECTOR_HEALTH_COLLECTOR = CollectorHealthCollector()
 
 try:
     prom.REGISTRY.register(_COLLECTOR_HEALTH_COLLECTOR)
+except ValueError:
+    pass
+
+_START_TIME_HELP = (
+    'Unix timestamp when the API server started. Compute uptime as '
+    'time() - sky_apiserver_start_time_seconds.')
+
+
+class ServerStartTimeCollector:
+    """Exports the API server start time, the uptime source.
+
+    prometheus_client's built-in process_start_time_seconds is unavailable
+    under the multiprocess collector (default collectors are not
+    aggregated). Custom collectors are only scraped from the main server
+    process (the metrics server runs in it), so that process's own creation
+    time is the server boot time. The boot-check request row (which debug
+    dumps use for uptime) is deliberately not used here: the row survives
+    server restarts (schedule_on_boot_check_async ignores
+    RequestAlreadyExistsError), so its created_at reflects the boot that
+    first inserted it, not the current one.
+    """
+
+    def __init__(self):
+        self._start_time = psutil.Process(os.getpid()).create_time()
+
+    def describe(self):
+        yield prom_core.GaugeMetricFamily('sky_apiserver_start_time_seconds',
+                                          _START_TIME_HELP)
+
+    def collect(self):
+        metric = prom_core.GaugeMetricFamily('sky_apiserver_start_time_seconds',
+                                             _START_TIME_HELP)
+        metric.add_metric([], self._start_time)
+        yield metric
+
+
+_SERVER_START_TIME_COLLECTOR = _wrap_collector(ServerStartTimeCollector())
+
+try:
+    prom.REGISTRY.register(_SERVER_START_TIME_COLLECTOR)
 except ValueError:
     pass
 
@@ -970,19 +1030,23 @@ def maybe_register_managed_jobs_collector():
 metrics_app = fastapi.FastAPI()
 
 
-# Serve /metrics in dedicated thread to avoid blocking the event loop
-# of metrics server.
+# Declared sync on purpose: the collection below is CPU-bound and would
+# stall the event loop of whatever server is running it, so Starlette
+# hands it to a worker thread instead. That makes the scrape latency
+# depend on the serving loop's thread pool, which is why the metrics app
+# gets an event loop to itself -- see start_metrics_server().
 @metrics_app.get('/metrics')
 def metrics() -> fastapi.Response:
     """Expose aggregated Prometheus metrics from all worker processes."""
     if os.environ.get('PROMETHEUS_MULTIPROC_DIR'):
         # In multiprocess mode, we need to collect metrics from all processes.
         registry = prom.CollectorRegistry()
-        multiprocess.MultiProcessCollector(registry)
+        registry.register(_get_multiproc_collector())
         registry.register(_BURN_RATE_COLLECTOR)
         registry.register(_SQLITE_DB_SIZE_COLLECTOR)
         registry.register(_WORKSPACE_USAGE_COLLECTOR)
         registry.register(_COLLECTOR_HEALTH_COLLECTOR)
+        registry.register(_SERVER_START_TIME_COLLECTOR)
         if _MANAGED_JOBS_COLLECTOR is not None:
             registry.register(_MANAGED_JOBS_COLLECTOR)
         for c in _plugin_collectors:
@@ -1088,8 +1152,8 @@ def _handle_federation_result(context: str, route: str, result: object,
         logger.error(
             f'Failed to get metrics for context {context} (route {route}): '
             f'timed out after {_PER_CONTEXT_TIMEOUT_SECONDS}s '
-            f'({stats.summary()}); kubectl port-forward + /federate exceeded '
-            f'the per-context budget; series for this cluster are omitted from '
+            f'({stats.summary()}); the federation attempt exceeded the '
+            f'per-context budget; series for this cluster are omitted from '
             f'this scrape')
         return
     if isinstance(result, Exception):
@@ -1148,10 +1212,36 @@ async def gpu_metrics() -> fastapi.Response:
             )) for context, stats in zip(remote_contexts, stats_list)
     ]
 
+    # Slurm clusters federate through their login node (see
+    # get_metrics_for_slurm_cluster); only clusters with a configured
+    # prometheus_url participate. Their series ride the same scrape,
+    # stamped cluster="slurm/<name>", under the same per-context budget:
+    # the budget is passed down so the SSH invocation is hard-killed at
+    # the same instant wait_for() gives up on it. There is no port-forward
+    # phase on this path, so its stats omit that phase.
+    slurm_clusters = metrics_utils.get_slurm_metrics_clusters()
+    slurm_contexts = [
+        metrics_utils.SLURM_CONTEXT_PREFIX + name for name in slurm_clusters
+    ]
+    slurm_stats = [
+        metrics_utils.FederationStats(has_port_forward=False)
+        for _ in slurm_clusters
+    ]
+    tasks += [
+        asyncio.create_task(
+            asyncio.wait_for(
+                metrics_utils.get_metrics_for_slurm_cluster(
+                    name, stats=stats, timeout=_PER_CONTEXT_TIMEOUT_SECONDS),
+                timeout=_PER_CONTEXT_TIMEOUT_SECONDS,
+            )) for name, stats in zip(slurm_clusters, slurm_stats)
+    ]
+    result_contexts = remote_contexts + slurm_contexts
+    stats_list = stats_list + slurm_stats
+
     results = await asyncio.gather(*tasks, return_exceptions=True)
 
     for i, result in enumerate(results):
-        _handle_federation_result(remote_contexts[i], 'gpu-metrics', result,
+        _handle_federation_result(result_contexts[i], 'gpu-metrics', result,
                                   stats_list[i], all_metrics)
 
     combined_metrics = '\n\n'.join(all_metrics)
@@ -1213,6 +1303,64 @@ def build_metrics_server(host: str, port: int) -> uvicorn.Server:
     )
     metrics_server_instance = uvicorn.Server(metrics_config)
     return metrics_server_instance
+
+
+# The metrics server, so stop_metrics_server() can reach the instance
+# started on the private thread.
+_metrics_server: Optional[uvicorn.Server] = None
+
+
+def start_metrics_server(host: str, port: int) -> uvicorn.Server:
+    """Serve the metrics app on an event loop of its own, in its own thread.
+
+    The metrics app must not share an event loop with anything else.
+    ``/metrics`` is a sync endpoint, so Starlette runs it through
+    ``anyio.to_thread.run_sync()``, which takes a token from the *default*
+    thread limiter of the loop serving the request -- 40 tokens, one such
+    limiter per loop. Every other coroutine on that loop that fans out
+    ``anyio`` thread work draws from the same 40, and the limiter hands
+    tokens out FIFO, so a scrape that arrives while a background task has
+    thousands of ``anyio.Path`` calls queued up waits behind all of them
+    before it even starts collecting.
+
+    The API server's background loop hosts exactly that kind of task: the
+    request GC unlinks a log file per deleted request, a batch at a time.
+    While one runs, a scrape can take tens of seconds -- past any sane
+    ``scrape_timeout`` -- so the target flaps to ``up == 0`` and every
+    API server metric disappears for the duration, even though the server
+    is otherwise healthy. Isolating the loop removes the coupling: the
+    only thing contending for this loop's thread limiter is the scrape.
+
+    Returns the server, whose ``should_exit`` the caller may set directly;
+    stop_metrics_server() does that for the instance started here.
+    """
+    global _metrics_server
+    server = build_metrics_server(host, port)
+    _metrics_server = server
+
+    def _serve() -> None:
+        try:
+            asyncio.run(server.serve())
+        except SystemExit:
+            # uvicorn calls sys.exit(1) when it cannot bind, and
+            # threading.excepthook drops SystemExit on the floor, so
+            # without this a metrics server that never came up would leave
+            # nothing behind but uvicorn's own bind error -- the scrape
+            # target just looks down, with no hint of why.
+            logger.error('Metrics server failed to start on %s:%s', host, port)
+        except Exception:  # pylint: disable=broad-except
+            # Likewise: an unhandled error here would otherwise only reach
+            # threading.excepthook.
+            logger.exception('Metrics server exited unexpectedly')
+
+    threading.Thread(target=_serve, daemon=True, name='metrics-server').start()
+    return server
+
+
+def stop_metrics_server() -> None:
+    """Ask the metrics server started by start_metrics_server() to exit."""
+    if _metrics_server is not None:
+        _metrics_server.should_exit = True
 
 
 def _get_status_code_group(status_code: int) -> str:

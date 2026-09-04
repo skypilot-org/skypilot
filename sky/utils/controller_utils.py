@@ -1378,37 +1378,68 @@ MAX_TOTAL_RUNNING_JOBS = 2000
 _CONSOLIDATION_WORKER_MEMORY_FRACTION = 0.7
 
 
+def _controller_headroom_mb(reserve_extra_for_pool: bool) -> float:
+    """Memory kept free on top of whatever the controllers themselves use."""
+    headroom = float(MAXIMUM_CONTROLLER_RESERVED_MEMORY_MB)
+    if reserve_extra_for_pool:
+        headroom *= (1. + POOL_JOBS_RESOURCES_RATIO)
+    return headroom
+
+
+def _consolidation_worker_reserved_mb(reserve_extra_for_pool: bool) -> float:
+    """Headroom plus the share set aside for the in-process controllers.
+
+    Scales with system memory, so a machine that can run more concurrent jobs
+    also holds back more memory for their controller processes. Below
+    MIN_AVAIL_MB the controller share is skipped so workers get everything.
+    """
+    headroom = _controller_headroom_mb(reserve_extra_for_pool)
+    total_memory_mb = common_utils.get_mem_size_gb() * 1024 - headroom
+    min_avail_mb = (server_constants.MIN_AVAIL_MEM_GB_CONSOLIDATION_MODE * 1024)
+    controllers_reserved = min(
+        total_memory_mb * (1 - _CONSOLIDATION_WORKER_MEMORY_FRACTION),
+        max(0, total_memory_mb - min_avail_mb))
+    return headroom + controllers_reserved
+
+
 def compute_memory_reserved_for_controllers(
-        reserve_for_controllers: bool, reserve_extra_for_pool: bool) -> float:
-    reserved_memory_mb = 0.0
-    if reserve_for_controllers:
-        reserved_memory_mb = float(MAXIMUM_CONTROLLER_RESERVED_MEMORY_MB)
-        if reserve_extra_for_pool:
-            reserved_memory_mb *= (1. + POOL_JOBS_RESOURCES_RATIO)
-    return reserved_memory_mb
+        reserve_extra_for_pool: bool) -> float:
+    """Memory (MB) to withhold from API server worker sizing.
+
+    In consolidation mode the jobs and serve/pool controllers run as processes
+    inside the API server, so their memory has to be withheld before the
+    executor pools are sized. Returns the same quantity
+    _get_total_usable_memory_mb() assumes the workers left behind, so both
+    sides of the split agree on one number. Returns 0 outside consolidation
+    mode, where the controllers run on their own cluster.
+    """
+    if os.environ.get(constants.OVERRIDE_CONSOLIDATION_MODE) is not None:
+        # A local API server started from a controller process, which inherits
+        # its env. _get_parallelism() sizes that machine assuming only the flat
+        # headroom was withheld, so withhold exactly that.
+        return _controller_headroom_mb(reserve_extra_for_pool)
+    if not env_options.Options.MEMORY_AWARE_WORKER_SIZING.get():
+        return 0.0
+    # Either kind of consolidation puts controller processes in the API
+    # server's own memory.
+    if not is_jobs_consolidation_mode() and not _is_consolidation_mode(
+            pool=False):
+        return 0.0
+    return _consolidation_worker_reserved_mb(reserve_extra_for_pool)
 
 
 def _get_total_usable_memory_mb(pool: bool, consolidation_mode: bool) -> float:
-    controller_reserved = compute_memory_reserved_for_controllers(
-        reserve_for_controllers=True, reserve_extra_for_pool=pool)
-    total_memory_mb = (common_utils.get_mem_size_gb() * 1024 -
-                       controller_reserved)
+    headroom = _controller_headroom_mb(reserve_extra_for_pool=pool)
+    total_memory_mb = common_utils.get_mem_size_gb() * 1024 - headroom
     if not consolidation_mode:
         return total_memory_mb
-    # Cap the memory available for server workers so that both workers and
-    # services scale with system memory. Without this cap, short workers
-    # grow linearly with memory, consuming nearly all of it and leaving a
-    # roughly fixed amount for services regardless of system memory size.
-    # In low-memory scenarios (total_memory_mb <= MIN_AVAIL_MB), skip the
-    # service reservation so workers get all available memory; otherwise
-    # guarantee workers at least MIN_AVAIL_MB and cap them at the fraction.
-    min_avail_mb = (server_constants.MIN_AVAIL_MEM_GB_CONSOLIDATION_MODE * 1024)
-    service_reserved = min(
-        total_memory_mb * (1 - _CONSOLIDATION_WORKER_MEMORY_FRACTION),
-        max(0, total_memory_mb - min_avail_mb))
-    worker_reserved = controller_reserved + service_reserved
+    # Size the workers against the same reservation the API server uses, then
+    # hand the controllers whatever the workers did not take.
     config = server_config.compute_server_config(
-        deploy=True, quiet=True, reserved_memory_mb=worker_reserved)
+        deploy=True,
+        quiet=True,
+        reserved_memory_mb=_consolidation_worker_reserved_mb(
+            reserve_extra_for_pool=pool))
     used = 0.0
     used += ((config.long_worker_config.garanteed_parallelism +
               config.long_worker_config.burstable_parallelism) *
@@ -1416,6 +1447,10 @@ def _get_total_usable_memory_mb(pool: bool, consolidation_mode: bool) -> float:
     used += ((config.short_worker_config.garanteed_parallelism +
               config.short_worker_config.burstable_parallelism) *
              server_config.SHORT_WORKER_MEM_GB * 1024)
+    if env_options.Options.MEMORY_AWARE_WORKER_SIZING.get():
+        # Server workers are resident too, and the parent process with them.
+        used += ((config.num_server_workers + 1) *
+                 server_config.SERVER_WORKER_MEM_GB * 1024)
     return total_memory_mb - used
 
 

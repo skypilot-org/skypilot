@@ -47,6 +47,8 @@ _extra_jobs_properties: Dict[str, Any] = {}
 
 _extra_kubernetes_properties: Dict[str, Any] = {}
 
+_extra_slurm_properties: Dict[str, Any] = {}
+
 # Registry for plugin-provided properties under the top-level
 # `plugins:` config section. Keyed by plugin name.
 _extra_plugin_properties: Dict[str, Any] = {}
@@ -106,6 +108,23 @@ def register_kubernetes_property(name: str, schema: Dict[str, Any]) -> None:
             (e.g., {'type': 'string'}).
     """
     _extra_kubernetes_properties[name] = schema
+
+
+def register_slurm_property(name: str, schema: Dict[str, Any]) -> None:
+    """Register an additional property for the slurm schema.
+
+    This allows plugins to extend the slurm dict schema with slurm-specific
+    configuration fields. The property is merged into the schema's properties
+    dict (both at the top level and under each per-cluster ``cluster_configs``
+    entry), so it passes JSON schema validation even with
+    additionalProperties: False.
+
+    Args:
+        name: The property name.
+        schema: The JSON Schema for the property
+            (e.g., {'type': 'string'}).
+    """
+    _extra_slurm_properties[name] = schema
 
 
 def _check_not_both_fields_present(field1: str, field2: str):
@@ -1619,6 +1638,33 @@ _CONTEXT_CONFIG_SCHEMA_KUBERNETES = {
             },
         },
     },
+    'rdma': {
+        # How RDMA NICs reach pods on this context. Unset preserves the
+        # historical behavior (RDMA-capable clusters imply host networking).
+        'type': 'object',
+        'required': [],
+        'additionalProperties': False,
+        'properties': {
+            'mode': {
+                'type': 'string',
+                'case_insensitive_enum': [
+                    mode.value for mode in kubernetes_enums.KubernetesRdmaMode
+                ],
+            },
+            # Extended resource advertised by the RDMA device plugin, e.g.
+            # nvidia.com/rdma-vf. Site-specific: the device plugin's config
+            # composes it from an operator-chosen prefix and name.
+            'resource': {
+                'type': 'string',
+            },
+            # Value for the Multus k8s.v1.cni.cncf.io/networks annotation --
+            # the NetworkAttachmentDefinition to attach, repeated once per
+            # requested VF.
+            'networks': {
+                'type': 'string',
+            },
+        },
+    },
     # TODO(kevin): Remove 'networking' in v0.13.0.
     'networking': {
         'type': 'string',
@@ -1857,6 +1903,27 @@ def get_config_schema():
             'properties': props,
         }
 
+    # Budgets bounding how long the managed-job controller tolerates
+    # consecutive failures of its job-status check before treating the job as
+    # unhealthy and recovering it. Recovery is only triggered once *both*
+    # budgets are exhausted; see
+    # sky.jobs.utils.TransientStatusCheckWindow.
+    jobs_status_check_schema = {
+        'type': 'object',
+        'required': [],
+        'additionalProperties': False,
+        'properties': {
+            'min_elapsed_seconds': {
+                'type': 'number',
+                'minimum': 0,
+            },
+            'min_retries': {
+                'type': 'integer',
+                'minimum': 0,
+            },
+        },
+    }
+
     cloud_configs = {
         'aws': {
             'type': 'object',
@@ -1925,6 +1992,14 @@ def get_config_schema():
                                 'type': 'string'
                             }
                         }]
+                    },
+                },
+                'enforce_tags': {
+                    'type': 'array',
+                    'uniqueItems': True,
+                    'items': {
+                        'type': 'string',
+                        'case_sensitive_enum': ['instance', 'volume'],
                     },
                 },
                 **_CAPABILITIES_SCHEMA,
@@ -2106,7 +2181,11 @@ def get_config_schema():
         'slurm': {
             'type': 'object',
             'required': [],
-            'additionalProperties': False,
+            # On the server, plugins have registered their properties via
+            # register_slurm_property(), so we can be strict. On the client we
+            # allow unknown properties to pass through for server-side
+            # validation.
+            'additionalProperties': _allow_additional_properties(),
             'properties': {
                 'allowed_clusters': {
                     'oneOf': [{
@@ -2132,6 +2211,25 @@ def get_config_schema():
                     'type': 'string',
                 },
                 'container_mounts': _CONTAINER_MOUNTS_SCHEMA,
+                # Shared GPU-metrics federation defaults, applied to any
+                # cluster that does not override them under cluster_configs.
+                # The common case: one central Prometheus, reachable through a
+                # single fleet's login node, serving every cluster — set `url`
+                # (and `via`) once here rather than on each cluster, and give
+                # each cluster only its own `prometheus.filter`.
+                'prometheus': {
+                    'type': 'object',
+                    'required': [],
+                    'additionalProperties': False,
+                    'properties': {
+                        'url': {
+                            'type': 'string',
+                        },
+                        'via': {
+                            'type': 'string',
+                        },
+                    },
+                },
                 'cluster_configs': {
                     'type': 'object',
                     'required': [],
@@ -2139,7 +2237,10 @@ def get_config_schema():
                     'additionalProperties': {
                         'type': 'object',
                         'required': [],
-                        'additionalProperties': False,
+                        # Strict on the server (plugins have registered their
+                        # per-cluster properties via register_slurm_property);
+                        # permissive on the client for server-side validation.
+                        'additionalProperties': _allow_additional_properties(),
                         'properties': {
                             'workdir': {
                                 'type': 'string',
@@ -2149,6 +2250,45 @@ def get_config_schema():
                             },
                             'submit_as_user': {
                                 'type': 'boolean',
+                            },
+                            # The Prometheus this cluster's GPU metrics are
+                            # federated from.
+                            'prometheus': {
+                                'type': 'object',
+                                'required': [],
+                                'additionalProperties': False,
+                                'properties': {
+                                    # Reachable from the cluster's login
+                                    # node, scraping the cluster's node/DCGM
+                                    # exporters; opts the cluster into
+                                    # /gpu-metrics federation.
+                                    'url': {
+                                        'type': 'string',
+                                    },
+                                    # Label matchers scoping this cluster's
+                                    # slice of `url`, for a Prometheus that
+                                    # aggregates several fleets. Without them
+                                    # an unscoped DCGM_.* pull attributes
+                                    # every fleet's series to this cluster.
+                                    'filter': {
+                                        'type': 'object',
+                                        'additionalProperties': {
+                                            'type': 'string',
+                                        },
+                                    },
+                                    # Slurm cluster whose login node runs the
+                                    # /federate curl instead of this
+                                    # cluster's own, for a central Prometheus
+                                    # reachable from only some login nodes.
+                                    'via': {
+                                        'type': 'string',
+                                    },
+                                },
+                            },
+                            # Deprecated: superseded by `prometheus.url`,
+                            # kept so deployed configs keep federating.
+                            'prometheus_url': {
+                                'type': 'string',
                             },
                             'pricing': _PRICING_SCHEMA,
                             'sbatch_options': _SBATCH_OPTIONS_SCHEMA,
@@ -2171,9 +2311,15 @@ def get_config_schema():
                                     },
                                 },
                             },
+                            # Plugin-registered per-cluster slurm properties
+                            # via register_slurm_property().
+                            **_extra_slurm_properties,
                         },
                     },
                 },
+                # Plugin-registered top-level slurm properties via
+                # register_slurm_property().
+                **_extra_slurm_properties,
             }
         },
         'oci': {
@@ -2231,6 +2377,9 @@ def get_config_schema():
                 **_NETWORK_CONFIG_SCHEMA, 'use_static_ip_address': {
                     'type': 'boolean',
                 },
+                'disk_encrypted': {
+                    'type': 'boolean',
+                },
                 'tenant_id': {
                     'type': 'string',
                 },
@@ -2259,6 +2408,9 @@ def get_config_schema():
                             },
                             'fabric': {
                                 'type': 'string',
+                            },
+                            'disk_encrypted': {
+                                'type': 'boolean',
                             },
                             'filesystems': {
                                 'type': 'array',
@@ -2450,13 +2602,15 @@ def get_config_schema():
 
     allowed_workspace_cloud_names = list(
         constants.ALL_CLOUDS) + constants.STORAGE_ONLY_CLOUDS
-    # Create pattern for not supported clouds, i.e.
-    # all clouds except aws, gcp, kubernetes, ssh, nebius
+    # Create pattern for not supported clouds, i.e. all clouds except aws,
+    # gcp, kubernetes, ssh, nebius, slurm.
     not_supported_clouds = [
-        cloud for cloud in allowed_workspace_cloud_names
-        if cloud.lower() not in ['aws', 'gcp', 'kubernetes', 'ssh', 'nebius']
+        cloud for cloud in allowed_workspace_cloud_names if cloud.lower() not in
+        ['aws', 'gcp', 'kubernetes', 'ssh', 'nebius', 'slurm']
     ]
     not_supported_cloud_regex = '|'.join(not_supported_clouds)
+    slurm_allowed_clusters_schema = cloud_configs['slurm']['properties'][
+        'allowed_clusters']
     workspaces_schema = {
         'type': 'object',
         'required': [],
@@ -2650,6 +2804,44 @@ def get_config_schema():
                     # unknown properties to pass through for
                     # server-side validation.
                     'additionalProperties': _allow_additional_properties(),
+                },
+                'slurm': {
+                    'type': 'object',
+                    'required': [],
+                    'additionalProperties': False,
+                    'properties': {
+                        'disabled': {
+                            'type': 'boolean'
+                        },
+                        'allowed_clusters': slurm_allowed_clusters_schema,
+                        'sbatch_options': _SBATCH_OPTIONS_SCHEMA,
+                        'cluster_configs': {
+                            'type': 'object',
+                            'required': [],
+                            'properties': {},
+                            'additionalProperties': {
+                                'type': 'object',
+                                'required': [],
+                                'additionalProperties': False,
+                                'properties': {
+                                    'sbatch_options': _SBATCH_OPTIONS_SCHEMA,
+                                    'partition_configs': {
+                                        'type': 'object',
+                                        'required': [],
+                                        'properties': {},
+                                        'additionalProperties': {
+                                            'type': 'object',
+                                            'required': [],
+                                            'additionalProperties': False,
+                                            'properties': {
+                                                'sbatch_options': _SBATCH_OPTIONS_SCHEMA,  # pylint: disable=line-too-long
+                                            },
+                                        },
+                                    },
+                                },
+                            },
+                        },
+                    },
                 },
                 'nebius': {
                     'type': 'object',
@@ -2866,8 +3058,10 @@ def get_config_schema():
             'db': {
                 'type': 'string',
             },
-            'jobs': _get_controller_schema(
-                extra_properties=_extra_jobs_properties,),
+            'jobs': _get_controller_schema(extra_properties={
+                'status_check': jobs_status_check_schema,
+                **_extra_jobs_properties,
+            },),
             'serve': _get_controller_schema(),
             'allowed_clouds': allowed_clouds,
             'admin_policy': admin_policy_schema,

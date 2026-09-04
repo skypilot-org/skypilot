@@ -4,6 +4,7 @@ import math
 import os
 import re
 import shlex
+import subprocess
 import time
 from typing import Any, Callable, Dict, List, NamedTuple, Optional, Tuple, Union
 
@@ -15,6 +16,7 @@ from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import slurm
 from sky.skylet import constants
+from sky.skylet import runtime_utils
 from sky.utils import annotations
 from sky.utils import common_utils
 from sky.utils import gpu_names
@@ -29,7 +31,6 @@ _VAR_PATTERN = re.compile(r'\$(\w+|\{[^}]*\})')
 _SLURM_USER_PATTERN = re.compile(r'^[a-z_][a-z0-9_.-]*$')
 
 SLURM_MARKER_FILE = '.sky_slurm_cluster'
-SLURM_CONTAINER_MARKER_FILE = '.sky_slurm_container'
 
 # Regex pattern for parsing GPU GRES strings.
 # Format: 'gpu[:acc_type]:acc_count(optional_extra_info)'
@@ -79,6 +80,26 @@ def expand_path_vars(path: str, env: Dict[str, str]) -> str:
         return env.get(name, m.group(0))
 
     return _VAR_PATTERN.sub(_repl, path)
+
+
+def resolve_sky_base_dir(cluster: str, client: 'slurm.SlurmClient') -> str:
+    """Resolve the absolute shared directory used for Slurm cluster state."""
+    workdir = skypilot_config.get_effective_region_config(cloud='slurm',
+                                                          region=cluster,
+                                                          keys=('workdir',),
+                                                          default_value=None)
+    if workdir is not None:
+        workdir = expand_path_vars(workdir, client.get_env())
+        if not os.path.isabs(workdir):
+            raise RuntimeError('Resolved Slurm workdir must be absolute, got '
+                               f'{workdir!r}.')
+        return workdir
+
+    remote_home_dir = client.get_remote_home_dir()
+    if not os.path.isabs(remote_home_dir):
+        raise RuntimeError('Slurm remote home directory must be absolute, got '
+                           f'{remote_home_dir!r}.')
+    return remote_home_dir
 
 
 def get_gpu_type_and_count(gres_str: str) -> Tuple[Optional[str], int]:
@@ -1056,6 +1077,29 @@ def _get_slurm_inventory_client(slurm_cluster_name: str) -> 'slurm.SlurmClient':
     )
 
 
+def run_on_login_node(slurm_cluster_name: str,
+                      cmd: str,
+                      timeout: Optional[int] = None) -> Tuple[int, str, str]:
+    """Runs a shell command on a Slurm cluster's login node.
+
+    Public entry point for callers outside the provisioner (e.g. the
+    GPU-metrics federation in sky/metrics/utils.py) that need to execute
+    something over the cluster's SSH transport without reaching into the
+    inventory client. See SlurmClient.run_command for the framing and
+    timeout semantics.
+
+    Args:
+        slurm_cluster_name: A Host alias in the Slurm SSH config.
+        cmd: Shell command to run on the login node.
+        timeout: Optional bound in seconds on the whole remote invocation.
+
+    Returns:
+        (returncode, stdout, stderr) of ``cmd``.
+    """
+    client = _get_slurm_inventory_client(slurm_cluster_name)
+    return client.run_command(cmd, timeout=timeout)
+
+
 def _get_slurm_node_info_list(slurm_cluster_name: str) -> List[Dict[str, Any]]:
     """Gathers detailed information about each node in the Slurm cluster.
 
@@ -1287,7 +1331,7 @@ def slurm_node_info(
         try:
             return _get_slurm_node_info_list(
                 slurm_cluster_name=slurm_cluster_name)
-        except (FileNotFoundError, RuntimeError,
+        except (FileNotFoundError, RuntimeError, subprocess.TimeoutExpired,
                 exceptions.NotSupportedError) as e:
             logger.debug(f'Could not retrieve Slurm node info: {e}')
             return []
@@ -1318,9 +1362,13 @@ def slurm_node_info(
 
 
 def is_inside_slurm_cluster() -> bool:
-    # Check for the marker file in the current home directory. When run by
-    # the skylet on a compute node, the HOME environment variable is set to
-    # the cluster's sky home directory by the SlurmCommandRunner.
+    # New allocations write the marker under the runtime dir's .sky/.
+    # That path resolves in both the host and container shapes.
+    # Older allocations only wrote it to $HOME, so keep that as a fallback.
+    if os.path.exists(
+            runtime_utils.get_runtime_dir_path(
+                os.path.join('.sky', SLURM_MARKER_FILE))):
+        return True
     marker_file = os.path.join(os.path.expanduser('~'), SLURM_MARKER_FILE)
     return os.path.exists(marker_file)
 

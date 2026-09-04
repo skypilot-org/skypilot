@@ -47,6 +47,67 @@ _INTERNAL_USER_IDS = (
 router = fastapi.APIRouter()
 
 
+def _is_admin(roles: List[str]) -> bool:
+    """Whether a role list means admin, i.e. `admin` is the only role.
+
+    Deliberately stricter than the `admin in roles` reads elsewhere, which
+    answer "does the viewer allowlist apply" rather than gating a grant. A
+    leftover role beside `admin` is unreachable (`update_role` replaces), and
+    `check_endpoint_permission` matches the blocklist against *any* of the
+    caller's roles, so it would still deny such a caller the admin endpoints.
+    """
+    return roles == [rbac.RoleName.ADMIN.value]
+
+
+def _caller_is_admin(user_id: str) -> bool:
+    """`_is_admin` for a caller whose roles have not been fetched yet."""
+    return _is_admin(permission.permission_service.get_user_roles(user_id))
+
+
+def _check_role_grantable(role: str, caller_user_id: str) -> None:
+    """Reject a role the caller may not grant, before anything is written.
+
+    An unrecognized role name must be rejected rather than passed through:
+    it has no Casbin policy at all, and the blocklist reads "no matching
+    policy" as allow, so such a role grants *more* than `user`, not less.
+    """
+    supported_roles = rbac.get_supported_roles()
+    if role not in supported_roles:
+        raise fastapi.HTTPException(
+            status_code=400,
+            detail=f'Invalid role {role!r}. Supported roles: '
+            f'{", ".join(supported_roles)}.')
+    if (role == rbac.RoleName.ADMIN.value and
+            not _caller_is_admin(caller_user_id)):
+        raise fastapi.HTTPException(
+            status_code=403, detail='Only admins can grant the admin role.')
+
+
+def _clamped_default_role(caller_user_id: str) -> str:
+    """The default role to seed a service account with, capped at the caller's.
+
+    `rbac.default_role` falls back to `admin`, so an operator who leaves it
+    unset while demoting individual people to `user` would otherwise hand a
+    non-admin an admin-scoped token just by omitting `role` -- the same
+    escalation `_check_role_grantable` blocks on the explicit path. A service
+    account must not out-rank the identity that created it.
+
+    Assumes the config was reloaded by the caller.
+    """
+    default_role = rbac.get_default_role()
+    if default_role != rbac.RoleName.ADMIN.value:
+        return default_role
+    caller_roles = permission.permission_service.get_user_roles(caller_user_id)
+    if _is_admin(caller_roles):
+        return default_role
+    if not caller_roles:
+        logger.warning(f'User {caller_user_id} holds no role; seeding their '
+                       f'service account with the most restricted role.')
+    # A caller can hold more than one role, and the order they come back in is
+    # not stable, so cap at the least privileged rather than the first.
+    return rbac.least_privileged_role(caller_roles)
+
+
 def get_user_type(user: models.User) -> str:
     """Get user type for a user for backward compatibility.
 
@@ -370,7 +431,7 @@ def user_update(request: fastapi.Request,
             current_user.id)
         if not current_user_roles:
             raise fastapi.HTTPException(status_code=403, detail='Invalid user')
-        if current_user_roles[0] != rbac.RoleName.ADMIN.value:
+        if not _is_admin(current_user_roles):
             if need_update_role:
                 raise fastapi.HTTPException(
                     status_code=403, detail='Only admin can update user role')
@@ -446,7 +507,7 @@ def user_batch_update(request: fastapi.Request,
             current_user.id)
         if not current_user_roles:
             raise fastapi.HTTPException(status_code=403, detail='Invalid user')
-        if current_user_roles[0] != rbac.RoleName.ADMIN.value:
+        if not _is_admin(current_user_roles):
             raise fastapi.HTTPException(
                 status_code=403, detail='Only admin can update user roles')
 
@@ -845,23 +906,17 @@ def create_service_account_token(
             status_code=400,
             detail='Expiration days must be positive or 0 for never expire')
 
-    # Validate the optional role up front so we fail before creating anything.
-    if token_body.role is not None:
-        if token_body.role not in rbac.get_supported_roles():
-            raise fastapi.HTTPException(
-                status_code=400,
-                detail=f'Invalid role {token_body.role!r}. Supported roles: '
-                f'{", ".join(rbac.get_supported_roles())}.')
-        # Only admins may create an admin-role service account; otherwise a
-        # non-admin could escalate by minting an admin-scoped token.
-        if token_body.role == rbac.RoleName.ADMIN.value:
-            caller_roles = permission.permission_service.get_user_roles(
-                auth_user.id)
-            if not caller_roles or caller_roles[0] != rbac.RoleName.ADMIN.value:
-                raise fastapi.HTTPException(
-                    status_code=403,
-                    detail='Only admins can create a service account with the '
-                    'admin role.')
+    # Resolve the account's role up front, so we fail before creating anything
+    # and can seed the right role in one write. Refresh the config first for
+    # the same reason `seed_new_user_role` does: this handler runs in the main
+    # API-server process, which has no per-request config reload, so a runtime
+    # `rbac.default_role` change would otherwise be missed.
+    skypilot_config.safe_reload_config()
+    seed_role = token_body.role
+    if seed_role is not None:
+        _check_role_grantable(seed_role, auth_user.id)
+    else:
+        seed_role = _clamped_default_role(auth_user.id)
 
     try:
         # Generate a unique service account user ID
@@ -881,17 +936,9 @@ def create_service_account_token(
                 f'already exists ({service_account_user_id}). '
                 'Please use a different name.')
 
-        # Add the service account to the permission system with the default
-        # role. This handler runs in the main API-server process (no per-request
-        # config reload), so seed via the helper that refreshes config first —
-        # an admin's runtime `rbac.default_role` change then applies without a
-        # server restart.
-        permission.seed_new_user_role(service_account_user_id)
-        # If a role was requested, apply it now so the token is created with the
-        # intended role atomically (no separate update-role round trip).
-        if token_body.role is not None:
-            permission.permission_service.update_role(service_account_user_id,
-                                                      token_body.role)
+        # Seed the resolved role directly, so the account is never briefly
+        # more privileged than it ends up.
+        permission.seed_new_user_role(service_account_user_id, role=seed_role)
 
         # Handle expiration: 0 means "never expire"
         expires_in_days = token_body.expires_in_days
@@ -1034,13 +1081,10 @@ def update_service_account_role(
             'Only admins can update roles for service accounts owned by other '
             'users.')
 
-    # Only admin can grant the admin role (mirrors user_update guard).
-    if role_body.role == rbac.RoleName.ADMIN.value:
-        caller_roles = permission.permission_service.get_user_roles(
-            auth_user.id)
-        if rbac.RoleName.ADMIN.value not in caller_roles:
-            raise fastapi.HTTPException(
-                status_code=403, detail='Only admin can grant the admin role.')
+    # Owning a service account does not entitle the caller to raise its role
+    # above their own. Kept outside the try below so the 400/403 is not
+    # swallowed into a 500 by the broad handler.
+    _check_role_grantable(role_body.role, auth_user.id)
 
     try:
         # Update service account role

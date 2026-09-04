@@ -21,6 +21,8 @@ See the [README.md](../README.md) for detailed architecture of the executor.
 import asyncio
 import concurrent.futures
 import contextlib
+import functools
+import inspect
 import multiprocessing
 import os
 import signal
@@ -48,6 +50,7 @@ from sky.server import daemons
 from sky.server import metrics as metrics_lib
 from sky.server import plugins
 from sky.server import versions
+from sky.server.requests import event_loop
 from sky.server.requests import payloads
 from sky.server.requests import preconditions
 from sky.server.requests import process
@@ -59,12 +62,12 @@ from sky.server.requests.queues import base as queue_base
 from sky.skylet import constants
 from sky.utils import annotations
 from sky.utils import common_utils
+from sky.utils import config_utils
 from sky.utils import context
 from sky.utils import context_utils
 from sky.utils import subprocess_utils
 from sky.utils import tempstore
 from sky.utils import timeline
-from sky.utils import yaml_utils
 from sky.utils.db import db_utils
 from sky.workspaces import constants as workspace_constants
 from sky.workspaces import core as workspaces_core
@@ -236,6 +239,89 @@ def _request_is_gone_or_cancelled(request_id: str) -> bool:
             request.status == api_requests.RequestStatus.CANCELLED)
 
 
+def _waiting_status_msg(reason: str, retry_suffix: str) -> str:
+    """Format a parked request's status message from a reason.
+
+    Single source of formatting for both the message written when the request
+    parks and the refreshes a continue condition pushes while it stays parked,
+    so the two cannot drift.
+    """
+    # status_msg is a single-line field, so strip color and collapse
+    # whitespace; the reason comes from an exception message or a live probe,
+    # so truncate to keep it readable.
+    reason = ' '.join(common_utils.remove_color(reason).split())
+    if len(reason) > _RETRY_STATUS_MSG_REASON_MAX_LEN:
+        reason = reason[:_RETRY_STATUS_MSG_REASON_MAX_LEN].rstrip() + '...'
+    return (f'{reason} ({retry_suffix})'
+            if reason else retry_suffix.capitalize())
+
+
+def _refresh_waiting_status_msg(request_id: str, retry_suffix: str,
+                                reason: str) -> None:
+    """Re-write a still-parked request's status message with a fresh reason.
+
+    Only touches a request that is still WAITING: the wait runs concurrently
+    with cancellation and with the resume that follows it, and a late refresh
+    must not resurrect a parked message on a request that has moved on.
+    """
+    with api_requests.update_request(request_id) as request_task:
+        if (request_task is None or
+                request_task.status != api_requests.RequestStatus.WAITING):
+            return
+        request_task.status_msg = _waiting_status_msg(reason, retry_suffix)
+
+
+def _condition_wait_kwargs(wait_fn: Callable, *, is_cancelled: Callable,
+                           fallback_wait_seconds: float,
+                           update_status_msg: Callable) -> Dict[str, Any]:
+    """Build the kwargs for a wait, tolerating an older signature.
+
+    The continue-condition contract is duck-typed (see
+    ``continue_condition.ContinueCondition``), and implementations live in
+    separately versioned packages, so ``update_status_msg`` is passed only to
+    a wait that accepts it rather than raising TypeError on one that does not.
+
+    The probe reads the signature, so a wait wrapped by a decorator that
+    neither ``functools.wraps`` it nor declares ``**kwargs`` is treated as not
+    accepting the callback: the wait still runs, it just never reports a
+    reason.
+    """
+    kwargs: Dict[str, Any] = {
+        'is_cancelled': is_cancelled,
+        'fallback_wait_seconds': fallback_wait_seconds,
+    }
+    parameters = inspect.signature(wait_fn).parameters
+    if ('update_status_msg' in parameters or
+            any(parameter.kind is inspect.Parameter.VAR_KEYWORD
+                for parameter in parameters.values())):
+        kwargs['update_status_msg'] = update_status_msg
+    return kwargs
+
+
+def _wait_for_continue_condition(
+        condition: Any, *, is_cancelled: Callable[[], bool],
+        fallback_wait_seconds: float,
+        update_status_msg: Callable[[str], None]) -> bool:
+    """Run a continue condition's wait in the calling thread."""
+    kwargs = _condition_wait_kwargs(condition.wait,
+                                    is_cancelled=is_cancelled,
+                                    fallback_wait_seconds=fallback_wait_seconds,
+                                    update_status_msg=update_status_msg)
+    return condition.wait(**kwargs)
+
+
+def _async_condition_wait(condition: Any) -> Optional[Callable]:
+    """The condition's ``wait_async`` coroutine function, if it has one.
+
+    Only a real coroutine function opts a condition into the shared waiter
+    loop: a plain callable that happens to be named ``wait_async`` cannot be
+    awaited, and silently degrading it to the fallback wait would discard the
+    condition's actual policy in ``wait()``.
+    """
+    wait_async = getattr(condition, 'wait_async', None)
+    return wait_async if inspect.iscoroutinefunction(wait_async) else None
+
+
 class RequestWorker:
     """A worker that polls requests from the queue and runs them.
 
@@ -377,27 +463,37 @@ class RequestWorker:
             # a fixed backoff. Either way the wait runs in this monitor thread,
             # not an executor worker.
             condition = getattr(e, 'continue_condition', None)
-            # Surface why we are retrying, not just the wait time. status_msg
-            # is a single-line field, so strip color and collapse whitespace.
-            reason = ' '.join(common_utils.remove_color(str(e)).split())
-            if len(reason) > _RETRY_STATUS_MSG_REASON_MAX_LEN:
-                reason = reason[:_RETRY_STATUS_MSG_REASON_MAX_LEN].rstrip(
-                ) + '...'
             retry_suffix = ('waiting to resume' if condition is not None else
                             f'retrying in {retry_wait_seconds}s')
-            status_msg = (f'{reason} ({retry_suffix})'
-                          if reason else retry_suffix.capitalize())
+            # Surface why we are retrying, not just the wait time.
+            status_msg = _waiting_status_msg(str(e), retry_suffix)
             # Set request to WAITING status for visibility
             with api_requests.update_request(request_id) as request_task:
                 assert request_task is not None, request_id
                 request_task.status = api_requests.RequestStatus.WAITING
                 request_task.status_msg = status_msg
+            if condition is not None:
+                wait_async = _async_condition_wait(condition)
+                if wait_async is not None:
+                    # An async-capable condition waits as a coroutine on the
+                    # shared request event loop; this monitor thread ends here
+                    # instead of blocking for the length of the pause.
+                    event_loop.run(
+                        self._wait_async_and_reschedule(wait_async,
+                                                        request_element,
+                                                        retry_wait_seconds,
+                                                        retry_suffix))
+                    return
             try:
                 if condition is not None:
-                    should_reschedule = condition.wait(
+                    should_reschedule = _wait_for_continue_condition(
+                        condition,
                         is_cancelled=lambda: _request_is_gone_or_cancelled(
                             request_id),
-                        fallback_wait_seconds=retry_wait_seconds)
+                        fallback_wait_seconds=retry_wait_seconds,
+                        update_status_msg=functools.partial(
+                            _refresh_waiting_status_msg, request_id,
+                            retry_suffix))
                 else:
                     time.sleep(retry_wait_seconds)
                     should_reschedule = True
@@ -412,6 +508,56 @@ class RequestWorker:
                 queue = _get_queue(self.schedule_type)
                 queue.put(request_element)
                 logger.info(f'Rescheduled request {request_id} for retry')
+
+    async def _wait_async_and_reschedule(self, wait_async: Callable,
+                                         request_element: Tuple[str, bool,
+                                                                bool],
+                                         retry_wait_seconds: float,
+                                         retry_suffix: str) -> None:
+        """Drive a condition's ``wait_async`` and requeue on resume.
+
+        Same policy as the thread path in ``handle_task_result``: a failing
+        wait falls back to one fixed backoff and reschedules, a False verdict
+        drops the request. Runs on the shared waiter loop, so everything
+        blocking — the DB access behind the callbacks, the queue put — must
+        go through the loop's thread pool.
+        """
+        request_id, _, _ = request_element
+        loop = asyncio.get_running_loop()
+
+        async def is_cancelled() -> bool:
+            return await loop.run_in_executor(None,
+                                              _request_is_gone_or_cancelled,
+                                              request_id)
+
+        async def update_status_msg(reason: str) -> None:
+            await loop.run_in_executor(None, _refresh_waiting_status_msg,
+                                       request_id, retry_suffix, reason)
+
+        try:
+            try:
+                kwargs = _condition_wait_kwargs(
+                    wait_async,
+                    is_cancelled=is_cancelled,
+                    fallback_wait_seconds=retry_wait_seconds,
+                    update_status_msg=update_status_msg)
+                should_reschedule = await wait_async(**kwargs)
+            except Exception as wait_err:  # pylint: disable=broad-except
+                logger.error(
+                    f'Continue-condition wait failed for {request_id}: '
+                    f'{common_utils.format_exception(wait_err)}')
+                await asyncio.sleep(retry_wait_seconds)
+                should_reschedule = True
+            if should_reschedule:
+                queue = _get_queue(self.schedule_type)
+                await loop.run_in_executor(None, queue.put, request_element)
+                logger.info(f'Rescheduled request {request_id} for retry')
+        except Exception as e:  # pylint: disable=broad-except
+            # Nothing reads this coroutine's future; an exception escaping
+            # here would otherwise vanish, with the request left parked.
+            logger.error(
+                f'Continue-condition handling failed for {request_id}: '
+                f'{common_utils.format_exception(e, use_bracket=True)}')
 
     def run(self) -> None:
         # Handle the SIGTERM signal to abort the executor process gracefully.
@@ -720,6 +866,25 @@ def _gated_sigterm_handler(signum: int,
         pass
 
 
+def _maybe_observe_request_pending(request: api_requests.Request) -> None:
+    """Observe creation -> first-execution-start time, once per request.
+
+    Must be called before the caller flips the request to RUNNING. PENDING
+    means the request never started executing before: the retry/pause
+    requeue path is the only writer of WAITING, so a WAITING request here
+    is a re-execution (e.g. retry_until_up), not the first start. pid
+    cannot discriminate this, since the ExecutionRetryableError handler
+    clears it before requeueing. Observing only the first start also means
+    retry backoff after that start can never re-inflate the histogram
+    (see #9988).
+    """
+    if request.status != api_requests.RequestStatus.PENDING:
+        return
+    metrics_utils.observe_request_pending(request.name,
+                                          request.schedule_type.value,
+                                          time.time() - request.created_at)
+
+
 def _request_execution_wrapper(request_id: str,
                                ignore_return_value: bool,
                                num_db_connections_per_worker: int = 0) -> None:
@@ -792,6 +957,7 @@ def _request_execution_wrapper(request_id: str,
                     f'skipping execution')
                 return
             log_path = request_task.log_path
+            _maybe_observe_request_pending(request_task)
             request_task.pid = pid
             request_task.status = api_requests.RequestStatus.RUNNING
             # Clear any leftover retry-backoff message now that we are running.
@@ -826,7 +992,7 @@ def _request_execution_wrapper(request_id: str,
                 if sky_logging.logging_enabled(logger, sky_logging.DEBUG):
                     config = skypilot_config.to_dict()
                     logger.debug(f'request config: \n'
-                                 f'{yaml_utils.dump_yaml_str(dict(config))}')
+                                 f'{config_utils.dump_redacted_yaml(config)}')
                 (metrics_utils.SKY_APISERVER_PROCESS_EXECUTION_START_TOTAL.
                  labels(request=request_name, pid=pid).inc())
                 with metrics_utils.time_it(name=request_name,
@@ -980,6 +1146,7 @@ async def _execute_request_coroutine(request: api_requests.Request):
     logger.info(f'Executing request {request.request_id} in coroutine')
     func = request.entrypoint
     request_body = request.request_body
+    _maybe_observe_request_pending(request)
     await api_requests.update_status_async(request.request_id,
                                            api_requests.RequestStatus.RUNNING)
     # Redirect stdout and stderr to the request log path.
@@ -1210,7 +1377,23 @@ async def schedule_prepared_request(request_task: api_requests.Request,
     async def enqueue():
         input_tuple = (request_task.request_id, ignore_return_value, retryable)
         logger.info(f'Queuing request: {request_task.request_id}')
-        await _get_queue(request_task.schedule_type).put_async(input_tuple)
+        try:
+            await _get_queue(request_task.schedule_type).put_async(input_tuple)
+        except (Exception, asyncio.CancelledError) as e:  # pylint: disable=broad-except
+            # A PENDING request that never made it onto the queue is
+            # stranded: no worker will pick it up and nothing else moves it to
+            # a terminal state, and a queue backend that recovers stale PENDING
+            # rows would resurrect and execute it long after the caller saw
+            # this error. If the put actually committed despite the error, the
+            # request is either still unclaimed (the FAILED mark lands and the
+            # row is discarded at dequeue) or already claimed by a worker (the
+            # mark is skipped and the claimed run's outcome stands).
+            logger.error(
+                f'Failed to enqueue request {request_task.request_id}: '
+                f'{common_utils.format_exception(e)}')
+            await api_requests.set_request_failed_if_pending_async(
+                request_task.request_id, e)
+            raise
 
     if precondition is not None:
         # Schedule precondition wait as a background task so the caller

@@ -131,6 +131,7 @@ def base_variables() -> Dict[str, Any]:
         },
         'image_id': 'us-docker.pkg.dev/skypilot-oss/skypilot/skypilot:latest',
         'ray_installation_commands': 'RAY_INSTALLATION_COMMANDS',
+        'ray_patches_cmd': 'RAY_PATCHES_CMD',
         'ray_head_start_command': 'RAY_HEAD_START_COMMAND',
         'skypilot_ray_port': 6380,
         'ray_worker_start_command': 'RAY_WORKER_START_COMMAND',
@@ -156,6 +157,7 @@ def base_variables() -> Dict[str, Any]:
         'k8s_enable_gpudirect_rdma_a4': False,
         'k8s_ipc_lock_capability': False,
         'k8s_enable_oci_roce': False,
+        'k8s_rdma_host_device_access': False,
         'k8s_apt_mirrors': None,
         'k8s_enable_docker_all': False,
         'k8s_enable_docker_build': False,
@@ -354,8 +356,29 @@ CASES: Dict[str, Dict[str, Any]] = {
         'k8s_resource_key': 'nvidia.com/gpu',
         'k8s_network_type': 'oci_roce',
         'k8s_enable_oci_roce': True,
+        'k8s_rdma_host_device_access': True,
         'k8s_ipc_lock_capability': True,
         'k8s_host_network': True,
+        'k8s_env_vars': _GPU_ENV_VARS,
+    },
+    # The SR-IOV delivery model: the pod keeps its own network namespace and
+    # receives virtual functions, so none of hostNetwork, the /dev/infiniband
+    # hostPath or privileged appear -- and the Multus attachment count has to
+    # agree with the resource request. Rendering the whole manifest is what
+    # pins those against each other in one artifact.
+    'oci_roce_sriov': {
+        'accelerator_count': '8',
+        'k8s_acc_label_key': _GPU_LABEL_KEY,
+        'k8s_acc_label_values': ['H100'],
+        'k8s_resource_key': 'nvidia.com/gpu',
+        'k8s_network_type': 'oci_roce',
+        'k8s_enable_oci_roce': True,
+        'k8s_rdma_host_device_access': False,
+        'k8s_ipc_lock_capability': True,
+        'k8s_host_network': False,
+        'k8s_rdma_nic_resource': 'nvidia.com/rdma-vf',
+        'k8s_rdma_nic_count': 16,
+        'k8s_rdma_networks': ','.join(['default/rdma-vf'] * 16),
         'k8s_env_vars': _GPU_ENV_VARS,
     },
     'volume_mounts': {
@@ -534,6 +557,33 @@ def test_kubernetes_ray_template_snapshot(case_name: str) -> None:
     variables = _build_variables(case_name)
     rendered = _render(variables)
     _assert_matches_snapshot(case_name, _normalize(rendered))
+
+
+def test_sriov_pod_is_coherent() -> None:
+    """The SR-IOV manifest's invariants, asserted rather than just golden-ed.
+
+    A golden pins these too, but accepts whatever a careless UPDATE_SNAPSHOT=1
+    produces. These are the properties that make the pod work at all: one
+    Multus attachment per requested VF, and none of the bare-metal device
+    access the VF model exists to avoid.
+    """
+    rendered = _render(_build_variables('oci_roce_sriov'))
+    pod = yaml.safe_load(
+        rendered)['available_node_types']['ray_head_default']['node_config']
+
+    annotation = pod['metadata']['annotations']['k8s.v1.cni.cncf.io/networks']
+    container = pod['spec']['containers'][0]
+    nic_count = container['resources']['limits']['nvidia.com/rdma-vf']
+    assert len(annotation.split(',')) == int(nic_count)
+    # Requesting without limiting would let the pod schedule with fewer NICs.
+    assert container['resources']['requests']['nvidia.com/rdma-vf'] == nic_count
+
+    assert 'hostNetwork' not in pod['spec']
+    assert 'dnsPolicy' not in pod['spec']
+    assert not container['securityContext'].get('privileged')
+    assert 'IPC_LOCK' in container['securityContext']['capabilities']['add']
+    mounts = [m['mountPath'] for m in container.get('volumeMounts', [])]
+    assert '/dev/infiniband' not in mounts
 
 
 @pytest.mark.parametrize('case_name', list(CASES.keys()))

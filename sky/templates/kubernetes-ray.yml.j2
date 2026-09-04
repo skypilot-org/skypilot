@@ -302,6 +302,11 @@ available_node_types:
             kueue.x-k8s.io/pod-group-name: {{cluster_name_on_cloud}}
             {% endif %}
         annotations:
+          {% if k8s_rdma_networks is defined and k8s_rdma_networks is not none %}
+          # Multus attaches one SR-IOV VF per entry, so the list length must
+          # match the VF resource count requested below.
+          k8s.v1.cni.cncf.io/networks: {{k8s_rdma_networks}}
+          {% endif %}
           # The skypilot-user *label* (above) sanitizes characters that are
           # invalid in Kubernetes label values (e.g. '@' and '.'), so a
           # username like alice@example.com is recorded as aliceexamplecom.
@@ -397,24 +402,18 @@ available_node_types:
         {% if preemption_hook_timeout is defined and preemption_hook_timeout %}
         terminationGracePeriodSeconds: {{ preemption_hook_timeout }}
         {% endif %}
-        {% if k8s_enable_oci_roce %}
-        # OCI OKE bare-metal GPU shapes expose RoCE NICs only on the host
-        # network namespace; pods must share host networking to reach the
-        # RDMA fabric. This is the only path that sets hostNetwork from the
-        # template — the pod_config path injects it via
-        # combine_pod_config_fields(). k8s_enable_oci_roce also implies
-        # k8s_host_network on the Python side, so the dnsPolicy below and the
-        # Ray-port probe machinery apply here too.
+        {% if k8s_host_network %}
+        # k8s_host_network is the single source of truth for "this pod runs on
+        # the host network": true when pod_config asks for it, and true by
+        # default on OCI OKE bare-metal GPU shapes, which expose RoCE NICs
+        # only in the host network namespace. An explicit pod_config
+        # `hostNetwork` overrides the OCI default either way, so a cluster
+        # whose RDMA arrives through a device plugin can opt out.
         # Refer to https://github.com/oracle-quickstart/oci-hpc-oke/blob/main/docs/running-pytorch-jobs-on-oke-using-hostnetwork-with-rdma.md for more details.
         hostNetwork: true
-        {% endif %}
-        {% if k8s_host_network %}
         # Under hostNetwork the default dnsPolicy silently falls back to
         # the host's resolv.conf — Service DNS like ${head}.svc.cluster.local
         # won't resolve, and the worker probe gets stuck dialing the head.
-        # k8s_host_network is the single source of truth for "this pod runs
-        # on the host network" (set for both the pod_config and OCI RoCE
-        # paths), so this covers OCI RoCE too.
         dnsPolicy: ClusterFirstWithHostNet
         {% endif %}
         {% if volume_mounts %}
@@ -505,7 +504,7 @@ available_node_types:
         - name: dshm
           emptyDir:
             medium: Memory
-        {% if k8s_enable_oci_roce %}
+        {% if k8s_rdma_host_device_access %}
         - name: devinf
           hostPath:
             path: /dev/infiniband
@@ -1457,31 +1456,20 @@ available_node_types:
                   fi
                 done
                 # Apply Ray patches (quality-of-life fixes: progress bar, log
-                # streaming). Best-effort: ray_patches.patch() already falls back
-                # to the Python `patch` library when the system `patch` binary is
-                # absent, but on a fully offline/minimal image that too can be
-                # unavailable. Warn and continue rather than abort the launch --
-                # the cluster comes up and runs without these patches.
-                # python_path is seeded by uv_installation_commands
-                VIRTUAL_ENV=${SKY_RUNTIME_DIR:-$HOME}/skypilot-runtime UV_LINK_MODE=copy UV_SYSTEM_PYTHON=false {{sky_unset_pythonpath_and_set_cwd}} ~/.local/bin/uv pip list | grep "ray " | grep 2.9.3 2>&1 > /dev/null && {
-                  # Fall back to `command -v python3` (POSIX builtin, no external
-                  # `which` dependency) if python_path is missing OR empty
-                  # ([ -s ]: a bare $(cat) of an empty file would render `... -c`
-                  # with no interpreter and abort under set -e).
-                  # Trailing `|| true`: without it `set -e` aborts on the
-                  # ASSIGNMENT when neither python_path nor python3 resolves,
-                  # so the non-empty guard below never runs and the "skip the
-                  # patches, don't abort" intent is dead code.
-                  _py_bin=$([ -s "${SKY_RUNTIME_DIR:-$HOME}/.sky/python_path" ] && cat "${SKY_RUNTIME_DIR:-$HOME}/.sky/python_path" 2>/dev/null || command -v python3 || true);
-                  # Guard on a non-empty interpreter (else `env ... -c ...` would
-                  # eat `-c` as its own flag) and quote it (paths may contain
-                  # spaces). Missing interpreter -> skip the patches, don't abort.
-                  if [ -n "$_py_bin" ]; then
-                    {{sky_unset_pythonpath_and_set_cwd}} "$_py_bin" -c "from sky.skylet.ray_patches import patch; patch()" || echo "WARNING: could not apply Ray patches; continuing without them.";
-                  else
-                    echo "WARNING: no python interpreter found; skipping Ray patches.";
-                  fi
-                }
+                # streaming). The patch payload is carried in this pod spec, not
+                # read out of the installed `sky`: this runs before the SkyPilot
+                # wheel is uploaded, so the only `sky` on the node is whatever
+                # `pip install skypilot` resolved to -- an unrelated release,
+                # whose patches target an unrelated Ray version. Reading them
+                # from there corrupts Ray whenever the two disagree.
+                # ray_patches_cmd self-guards on the Ray version it was
+                # generated for, and says so when it skips.
+                # Best-effort: apply_patches falls back to the Python `patch`
+                # library when the system `patch` binary is absent, but on a
+                # fully offline/minimal image that too can be unavailable. Warn
+                # and continue rather than abort the launch -- the cluster comes
+                # up and runs without these patches.
+                {{ ray_patches_cmd }} || echo "WARNING: could not apply Ray patches; continuing without them.";
                 touch /tmp/ray_skypilot_installation_complete
                 echo "=== Ray and skypilot installation completed ==="
 
@@ -1749,7 +1737,7 @@ available_node_types:
           volumeMounts:
           - mountPath: /dev/shm
             name: dshm
-          {% if k8s_enable_oci_roce %}
+          {% if k8s_rdma_host_device_access %}
           - mountPath: /dev/infiniband
             name: devinf
           {% endif %}
@@ -1819,6 +1807,9 @@ available_node_types:
               {% if k8s_efa_count is not none %}
               vpc.amazonaws.com/efa: {{k8s_efa_count}}
               {% endif %}
+              {% if k8s_rdma_nic_resource is defined and k8s_rdma_nic_resource is not none %}
+              {{k8s_rdma_nic_resource}}: {{k8s_rdma_nic_count}}
+              {% endif %}
             {% if k8s_resource_key is not none or k8s_cpu_limit is defined or k8s_ephemeral_storage_limit is defined %}
             limits:
               {% if k8s_cpu_limit is defined %}
@@ -1842,13 +1833,16 @@ available_node_types:
               {% if k8s_efa_count is not none %}
               vpc.amazonaws.com/efa: {{k8s_efa_count}}
               {% endif %}
+              {% if k8s_rdma_nic_resource is defined and k8s_rdma_nic_resource is not none %}
+              {{k8s_rdma_nic_resource}}: {{k8s_rdma_nic_count}}
+              {% endif %}
             {% endif %}
-          {% if k8s_ipc_lock_capability or k8s_enable_oci_roce %}
+          {% if k8s_ipc_lock_capability or k8s_rdma_host_device_access %}
           securityContext:
-            {% if k8s_enable_oci_roce %}
-            # OCI OKE bare-metal GPU shapes have no RDMA device plugin;
-            # pods must mount /dev/infiniband from the host and run
-            # privileged to access the RoCE NICs.
+            {% if k8s_rdma_host_device_access %}
+            # Bare-metal RDMA access: no device plugin hands the pod its NICs,
+            # so it mounts /dev/infiniband from the host and needs privileged
+            # to use them. An SR-IOV device plugin makes both unnecessary.
             privileged: true
             {% endif %}
             capabilities:

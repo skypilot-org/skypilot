@@ -1366,6 +1366,12 @@ class RetryingVmProvisioner(object):
                             zones, e)
                         continue
                     except Exception as e:  # pylint: disable=broad-except
+                        if isinstance(e, exceptions.InvalidCloudCredentials):
+                            # A permission problem is not a capacity problem:
+                            # without this the failover summary only offers
+                            # "relax the task's resource requirements", which
+                            # no amount of relaxing can fix.
+                            last_error_reason = str(e)
                         # NOTE: We try to cleanup the cluster even if the previous
                         # cluster does not exist. Also we are fast at
                         # cleaning up clusters now if there is no existing node..
@@ -2247,6 +2253,49 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
                 internal_external_ips[1:], key=lambda x: x[1])
         self.stable_internal_external_ips = stable_internal_external_ips
 
+    # TODO(kevin): Remove this backcompat migration in v0.15. It exists only
+    # for Slurm container clusters launched before provider.container_image
+    # was persisted; by v0.15 those allocations will have been recreated.
+    def _maybe_backfill_slurm_container_image(self) -> None:
+        """Backfill provider.container_image for pre-upgrade Slurm clusters.
+
+        Slurm container-ness is read from provider.container_image in the
+        cluster record (see provision/slurm/instance.py). Clusters launched
+        before that field existed lack it, which would run their containers
+        on the host. Reconcile the record with the launched resources, which
+        carry the image and are the source of truth used elsewhere (e.g. the
+        SSH proxy in server.py). Idempotent: writes only when the record is
+        missing the value or disagrees with the launched resources, so it is
+        a no-op for clusters launched with the field.
+        """
+        launched_resources = self.launched_resources
+        if (launched_resources is None or
+                not isinstance(launched_resources.cloud, clouds.Slurm)):
+            return
+        container_image = launched_resources.extract_docker_image()
+        if container_image is None:
+            return
+        try:
+            config = global_user_state.get_cluster_yaml_dict(self.cluster_yaml)
+            provider_config = config.get('provider')
+            if provider_config is None:
+                return
+            if provider_config.get('container_image') == container_image:
+                return
+            provider_config['container_image'] = container_image
+            global_user_state.set_cluster_yaml(self.cluster_name,
+                                               yaml_utils.dump_yaml_str(config))
+        except Exception as e:  # pylint: disable=broad-except
+            # Best-effort migration: a failure here just leaves the record as
+            # it was, so do not fail the operation that needed the runners.
+            logger.warning(
+                'Failed to backfill provider.container_image for Slurm '
+                f'cluster {self.cluster_name!r}: '
+                f'{common_utils.format_exception(e)}')
+            return
+        logger.info('Backfilled provider.container_image for Slurm cluster '
+                    f'{self.cluster_name!r} ({container_image}).')
+
     @context_utils.cancellation_guard
     # we expect different request to be acting on different clusters
     # (= different handles) so we have no real expectation of cache hit
@@ -2260,6 +2309,9 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
                             avoid_ssh_control: bool = False
                            ) -> List[command_runner.CommandRunner]:
         """Returns a list of command runners for the cluster."""
+        # Pre-upgrade Slurm container clusters lack provider.container_image;
+        # reconcile the record from the launched resources before it is read.
+        self._maybe_backfill_slurm_container_image()
         ssh_credentials = backend_utils.ssh_credential_from_yaml(
             self.cluster_yaml, self.docker_user, self.ssh_user)
         if avoid_ssh_control:

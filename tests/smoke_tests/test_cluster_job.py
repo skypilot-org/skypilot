@@ -24,7 +24,7 @@ import pathlib
 import shlex
 import tempfile
 import textwrap
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 import jinja2
 import pytest
@@ -695,6 +695,191 @@ def test_docker_preinstalled_package_slurm_sqsh(generic_cloud: str):
         f'sky down -y {name} {name_rel}; '
         f'SLURM_CLUSTER=$({get_slurm_cluster}) && '
         f'ssh -F ~/.slurm/config $SLURM_CLUSTER "rm -f ~/nginx+latest.sqsh"',
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.slurm
+def test_slurm_container_stop_start(generic_cloud: str):
+    """A Slurm container keeps its state, job queue, and logs after restart."""
+    name = smoke_tests_utils.get_cluster_name()
+    test = smoke_tests_utils.Test(
+        'slurm_container_stop_start',
+        [
+            f'sky launch -y -c {name} --infra {generic_cloud} '
+            f'{smoke_tests_utils.LOW_RESOURCE_ARG} '
+            '--image-id docker:ubuntu:24.04 -- '
+            "'echo pre-stop-job-1; echo generation-1 > /snapshot_marker; "
+            "apt-get update; apt-get install -y tree'",
+            f'sky logs {name} 1 --status',
+            f'sky exec {name} -- echo pre-stop-job-2',
+            f'sky logs {name} 2 --status',
+            f'sky stop -y {name}',
+            smoke_tests_utils.get_cmd_wait_until_cluster_status_contains(
+                cluster_name=name,
+                cluster_status=[sky.ClusterStatus.STOPPED],
+                timeout=smoke_tests_utils.get_timeout('slurm')),
+            f'sky start -y {name}',
+            smoke_tests_utils.get_cmd_wait_until_cluster_status_contains(
+                cluster_name=name,
+                cluster_status=[sky.ClusterStatus.UP],
+                timeout=smoke_tests_utils.get_timeout('slurm')),
+            smoke_tests_utils.
+            get_cmd_wait_until_job_status_contains_matching_job_id(
+                cluster_name=name,
+                job_id='1',
+                job_status=[sky.JobStatus.SUCCEEDED],
+                timeout=60),
+            smoke_tests_utils.
+            get_cmd_wait_until_job_status_contains_matching_job_id(
+                cluster_name=name,
+                job_id='2',
+                job_status=[sky.JobStatus.SUCCEEDED],
+                timeout=60),
+            f'logs="$(sky logs {name} 1 --no-follow)"; '
+            'printf "%s\\n" "$logs"; '
+            '[[ "$logs" == *pre-stop-job-1* ]]',
+            f'logs="$(sky logs {name} 2 --no-follow)"; '
+            'printf "%s\\n" "$logs"; '
+            '[[ "$logs" == *pre-stop-job-2* ]]',
+            f'sky exec {name} -- '
+            "'test \"$(cat /snapshot_marker)\" = generation-1; "
+            "dpkg -s tree'",
+            f'sky logs {name} 3 --status',
+            f'ssh {name} \'test "$(cat /snapshot_marker)" = generation-1\'',
+            f'sky down -y {name}',
+        ],
+        f'sky down -y {name} || true',
+        timeout=30 * 60,
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.slurm
+def test_slurm_container_stop_start_multi_node(generic_cloud: str):
+    """Each Slurm node restores the snapshot from its previous rank."""
+    name = smoke_tests_utils.get_cluster_name()
+    test = smoke_tests_utils.Test(
+        'slurm_container_stop_start_multi_node',
+        [
+            f'sky launch -y -c {name} --infra {generic_cloud} '
+            f'--num-nodes 2 {smoke_tests_utils.LOW_RESOURCE_ARG} '
+            '--image-id docker:ubuntu:24.04 -- '
+            "'echo pre-stop-rank-$SKYPILOT_NODE_RANK; "
+            "echo rank-$SKYPILOT_NODE_RANK > /snapshot_rank_marker'",
+            f'sky logs {name} 1 --status',
+            f'sky stop -y {name}',
+            smoke_tests_utils.get_cmd_wait_until_cluster_status_contains(
+                cluster_name=name,
+                cluster_status=[sky.ClusterStatus.STOPPED],
+                timeout=smoke_tests_utils.get_timeout('slurm')),
+            f'sky start -y {name}',
+            smoke_tests_utils.get_cmd_wait_until_cluster_status_contains(
+                cluster_name=name,
+                cluster_status=[sky.ClusterStatus.UP],
+                timeout=smoke_tests_utils.get_timeout('slurm')),
+            smoke_tests_utils.
+            get_cmd_wait_until_job_status_contains_matching_job_id(
+                cluster_name=name,
+                job_id='1',
+                job_status=[sky.JobStatus.SUCCEEDED],
+                timeout=60),
+            f'logs="$(sky logs {name} 1 --no-follow)"; '
+            'printf "%s\\n" "$logs"; '
+            '[[ "$logs" == *pre-stop-rank-0* ]]; '
+            '[[ "$logs" == *pre-stop-rank-1* ]]',
+            f'sky exec {name} --num-nodes 2 -- '
+            "'test \"$(cat /snapshot_rank_marker)\" = "
+            "\"rank-$SKYPILOT_NODE_RANK\"; "
+            "echo restored-rank-$SKYPILOT_NODE_RANK'",
+            f'sky logs {name} 2 --status',
+            f'ssh {name} '
+            '\'test "$(cat /snapshot_rank_marker)" = rank-0\'',
+            f'sky down -y {name}',
+        ],
+        f'sky down -y {name} || true',
+        timeout=30 * 60,
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.slurm
+def test_slurm_container_autostop(generic_cloud: str):
+    """`-i 1` stops a container cluster with no client action.
+
+    Skylet performs the same snapshot-and-release procedure as `sky stop`,
+    and `sky start` afterwards restores the snapshot like a manual stop.
+    """
+    name = smoke_tests_utils.get_cluster_name()
+    test = smoke_tests_utils.Test(
+        'slurm_container_autostop',
+        [
+            f'sky launch -y -c {name} --infra {generic_cloud} '
+            f'{smoke_tests_utils.LOW_RESOURCE_ARG} -i 1 '
+            '--image-id docker:ubuntu:24.04 -- '
+            '"echo pre-stop-job-1; echo generation-1 > /snapshot_marker"',
+            f'sky logs {name} 1 --status',
+            # The cluster stops itself once idle; the API server's refresh
+            # converges the record to STOPPED.
+            smoke_tests_utils.get_cmd_wait_until_cluster_status_contains(
+                cluster_name=name,
+                cluster_status=[sky.ClusterStatus.STOPPED],
+                timeout=smoke_tests_utils.get_timeout('slurm')),
+            f'sky start -y {name}',
+            smoke_tests_utils.get_cmd_wait_until_cluster_status_contains(
+                cluster_name=name,
+                cluster_status=[sky.ClusterStatus.UP],
+                timeout=smoke_tests_utils.get_timeout('slurm')),
+            smoke_tests_utils.
+            get_cmd_wait_until_job_status_contains_matching_job_id(
+                cluster_name=name,
+                job_id='1',
+                job_status=[sky.JobStatus.SUCCEEDED],
+                timeout=60),
+            f'logs="$(sky logs {name} 1 --no-follow)"; '
+            'printf "%s\\n" "$logs"; '
+            '[[ "$logs" == *pre-stop-job-1* ]]',
+            f"sky exec {name} -- "
+            "'test \"$(cat /snapshot_marker)\" = generation-1'",
+            f'sky logs {name} 2 --status',
+            # Autostop can be set and cleared on the running cluster.
+            f'sky autostop -y {name} -i 20',
+            f'status="$(sky status {name})"; printf "%s\\n" "$status"; '
+            '[[ "$status" == *"20m"* ]]',
+            f'sky autostop -y {name} --cancel',
+            f'status="$(sky status {name})"; printf "%s\\n" "$status"; '
+            '[[ "$status" != *"20m"* ]]',
+            f'sky down -y {name}',
+        ],
+        f'sky down -y {name} || true',
+        timeout=30 * 60,
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.slurm
+def test_slurm_container_autodown(generic_cloud: str):
+    """`-i 1 --down` fully terminates the cluster and its snapshot."""
+    name = smoke_tests_utils.get_cluster_name()
+    test = smoke_tests_utils.Test(
+        'slurm_container_autodown',
+        [
+            f'sky launch -y -c {name} --infra {generic_cloud} '
+            f'{smoke_tests_utils.LOW_RESOURCE_ARG} -i 1 --down '
+            '--image-id docker:ubuntu:24.04 -- "echo down-job-1"',
+            f'sky logs {name} 1 --status',
+            # The cluster downs itself once idle; the refresh removes the
+            # record and no snapshot is left behind.
+            smoke_tests_utils.get_cmd_wait_until_cluster_is_not_found(
+                cluster_name=name,
+                timeout=smoke_tests_utils.get_timeout('slurm')),
+            # A down leaves no snapshot to restore, so the cluster cannot
+            # be started again.
+            f'sky start -y {name} 2>&1 | '
+            'grep -q "Cluster(s) not found"',
+        ],
+        f'sky down -y {name} || true',
+        timeout=30 * 60,
     )
     smoke_tests_utils.run_one_test(test)
 
@@ -1389,14 +1574,23 @@ def test_task_labels_kubernetes():
                 # so its in-cluster kubectl can see the target's resources.
                 smoke_tests_utils.resolve_k8s_context_cmd(name),
                 smoke_tests_utils.launch_cloud_cmd_on_landed_context(name),
-                # Verify with kubectl that the labels are set.
+                # Verify with kubectl that the labels are set. Scope the
+                # selector to this cluster's own pods: the namespace is shared
+                # (other API servers and concurrent smoke runs land their pods
+                # in it too), and `jsonpath={.items[*].metadata.name}` emits
+                # every match space-joined on a single line, so an anchored
+                # `grep '^<name>'` on that line only passes when this cluster's
+                # pod happens to sort first among the matches. Ask the API
+                # server for the intersection instead and just require a hit.
+                # One `--selector` flag, not three: kubectl's `-l/--selector`
+                # is a plain string flag, so repeating it silently keeps only
+                # the last occurrence.
                 smoke_tests_utils.run_cloud_cmd_on_cluster(
                     name, 'kubectl get pods '
-                    '--selector inlinelabel1=inlinevalue1 '
-                    '--selector inlinelabel2=inlinevalue2 '
-                    '-o jsonpath=\'{.items[*].metadata.name}\' | '
-                    f'grep \'^{common_utils.make_cluster_name_on_cloud(name, sky.Kubernetes.max_cluster_name_length())}\''
-                )
+                    '--selector inlinelabel1=inlinevalue1,'
+                    'inlinelabel2=inlinevalue2,'
+                    f'skypilot-cluster-name={common_utils.make_cluster_name_on_cloud(name, sky.Kubernetes.max_cluster_name_length())} '
+                    '-o jsonpath=\'{.items[*].metadata.name}\' | grep .')
             ],
             smoke_tests_utils.chain_teardown(
                 f'sky down -y {name}',
@@ -1556,18 +1750,52 @@ def test_add_and_remove_pod_annotations_with_autostop():
 @pytest.mark.kubernetes
 def test_volumes_on_kubernetes():
     name = smoke_tests_utils.get_cluster_name()
+    # Volume names on the API server and PVC names in the cluster are both
+    # shared namespaces, so every name here carries the run's id. With fixed
+    # names a concurrent run adopts this run's volumes -- `sky volumes apply`
+    # is idempotent by name -- and then deletes them in its own teardown.
+    pvc0 = f'{name}-pvc0'
+    pvc1 = f'{name}-pvc1'
+    # existing0 is imported under its PVC's own name; existing1 is imported
+    # under a different volume name, matched by its skypilot-name label.
+    existing0 = f'{name}-existing0'
+    existing1 = f'{name}-existing1'
+    vol_existing1 = f'{name}-vol-existing1'
+    name_on_cloud = common_utils.make_cluster_name_on_cloud(
+        name, sky.Kubernetes.max_cluster_name_length())
+    # A launch names the volume it creates for an inline `volumes:` entry after
+    # the cluster, so matching on `{name}` alone would also match the volumes
+    # above. The grep for this prefix after the first launch is what keeps it
+    # honest: on a wrong prefix the delete check below would pass vacuously.
+    ephemeral_prefix = f'{name_on_cloud}-'
+    # The PVCs that must be gone once the volumes are deleted. SkyPilot labels
+    # every PVC it creates with the volume it backs, and an inline one with its
+    # cluster, so these select exactly this run's -- a name substring would also
+    # match another run's PVCs.
+    pvc_selectors = (f'"skypilot-name={pvc0}" "skypilot-name={pvc1}" '
+                     f'"skypilot-cluster-name={name_on_cloud}"')
+    list_deleted_pvcs = (f'for sel in {pvc_selectors}; do '
+                         'kubectl get pvc --no-headers -l "$sel"; done')
+    # Read before the deletes, so that the check after them cannot pass on a
+    # selector that never matched anything in the first place.
+    assert_pvcs_present = (
+        f'for sel in {pvc_selectors}; do '
+        'p=$(kubectl get pvc --no-headers -l "$sel"); echo "$sel -> $p"; '
+        '[ -n "$p" ] || { echo "no PVC is labelled $sel"; exit 1; }; done')
     test = smoke_tests_utils.Test(
         'volumes_on_kubernetes',
         [
             smoke_tests_utils.launch_cluster_for_cloud_cmd('kubernetes', name),
+            # No pre-emptive delete: the names are unique to this run, so there
+            # is nothing stale to clear, and a delete here is what would make a
+            # concurrent run destructive rather than merely confusing.
             smoke_tests_utils.run_cloud_cmd_on_cluster(
                 name,
-                f'kubectl delete pvc existing0 --ignore-not-found && '
                 f'kubectl create -f - <<EOF\n'
                 f'apiVersion: v1\n'
                 f'kind: PersistentVolumeClaim\n'
                 f'metadata:\n'
-                f'  name: existing0\n'
+                f'  name: {existing0}\n'
                 f'spec:\n'
                 f'  accessModes:\n'
                 f'    - ReadWriteOnce\n'
@@ -1578,14 +1806,13 @@ def test_volumes_on_kubernetes():
             ),
             smoke_tests_utils.run_cloud_cmd_on_cluster(
                 name,
-                f'kubectl delete pvc existing1 --ignore-not-found && '
                 f'kubectl create -f - <<EOF\n'
                 f'apiVersion: v1\n'
                 f'kind: PersistentVolumeClaim\n'
                 f'metadata:\n'
-                f'  name: existing1\n'
+                f'  name: {existing1}\n'
                 f'  labels:\n'
-                f'    skypilot-name: vol-existing1\n'
+                f'    skypilot-name: {vol_existing1}\n'
                 f'spec:\n'
                 f'  accessModes:\n'
                 f'    - ReadWriteOnce\n'
@@ -1597,46 +1824,63 @@ def test_volumes_on_kubernetes():
             smoke_tests_utils.run_cloud_cmd_on_cluster(
                 name, 'end=$((SECONDS+60)); '
                 'while [ $SECONDS -lt $end ]; do '
-                'if kubectl get pvc existing0; then exit 0; fi; '
+                f'if kubectl get pvc {existing0}; then exit 0; fi; '
                 'sleep 1; '
                 'done; '
-                'echo "Timeout waiting for PVC existing0 to appear"; '
+                f'echo "Timeout waiting for PVC {existing0} to appear"; '
                 'kubectl get pvc; exit 1'),
-            f'sky volumes apply -y -n pvc0 --type k8s-pvc --size 2GB',
-            f'sky volumes apply -y -n existing0 --type k8s-pvc --size 2GB --use-existing',
-            f'sky volumes apply -y -n vol-existing1 --type k8s-pvc --size 2GB --use-existing',
-            f'vols=$(sky volumes ls) && echo "$vols" && echo "$vols" | grep "pvc0" && echo "$vols" | grep "existing0" && echo "$vols" | grep "vol-existing1"',
+            f'sky volumes apply -y -n {pvc0} --type k8s-pvc --size 2GB',
+            f'sky volumes apply -y -n {existing0} --type k8s-pvc --size 2GB --use-existing',
+            f'sky volumes apply -y -n {vol_existing1} --type k8s-pvc --size 2GB --use-existing',
+            f'vols=$(sky volumes ls) && echo "$vols" && echo "$vols" | grep "{pvc0}" && echo "$vols" | grep "{existing0}" && echo "$vols" | grep "{vol_existing1}"',
             # `apply` only starts provisioning; launching before the claims
             # bind is refused with VolumeNotReadyError.
-            smoke_tests_utils.get_cmd_wait_until_volume_is_ready('pvc0'),
-            smoke_tests_utils.get_cmd_wait_until_volume_is_ready('existing0'),
-            smoke_tests_utils.get_cmd_wait_until_volume_is_ready(
-                'vol-existing1'),
-            f'sky launch -y -c {name} --infra kubernetes tests/test_yamls/pvc_volume.yaml',
+            smoke_tests_utils.get_cmd_wait_until_volume_is_ready(pvc0),
+            smoke_tests_utils.get_cmd_wait_until_volume_is_ready(existing0),
+            smoke_tests_utils.get_cmd_wait_until_volume_is_ready(vol_existing1),
+            # Name filter and `-o json` end to end: exactly the named volume
+            # comes back, and stdout is a parseable document. The streamed-log
+            # case that `-o json` also has to survive is not reachable here --
+            # without `-r` nothing refreshes, and the volume is READY by now so
+            # a refresh would log nothing either -- so it is a unit test.
+            # SKYPILOT_DEBUG=0 because this suite sets it to 1 for every
+            # test (pyproject.toml) and SkyPilot logs to stdout by design, so
+            # the JSON would arrive behind a wall of debug lines.
+            f'vols=$(SKYPILOT_DEBUG=0 sky volumes ls {pvc0} -o json) && '
+            'echo "$vols" && '
+            'echo "$vols" | python3 -c \''
+            'import json, sys; '
+            'sys.exit(0 if [v["name"] for v in json.load(sys.stdin)] == '
+            f'["{pvc0}"] else 1)\'',
+            # The volume names the task YAML mounts are prefixed with
+            # ${VOL_PREFIX}, which `volumes:` substitutes from the task envs.
+            f'sky launch -y -c {name} --infra kubernetes --env VOL_PREFIX={name} tests/test_yamls/pvc_volume.yaml',
             f'sky logs {name} 1 --status',  # Ensure the job succeeded.
-            f'vols=$(sky volumes ls) && echo "$vols" && echo "$vols" | grep "{name}"',
+            f'vols=$(sky volumes ls) && echo "$vols" && echo "$vols" | grep "{ephemeral_prefix}"',
             # Test volume mounting warning on relaunch with new volume
             # Create a new volume pvc1
-            f'sky volumes apply -y -n pvc1 --type k8s-pvc --size 2GB',
+            f'sky volumes apply -y -n {pvc1} --type k8s-pvc --size 2GB',
             # pvc1 is mounted by the last launch below, so it has to bind
             # first; readiness does not make the relaunch mount it.
-            smoke_tests_utils.get_cmd_wait_until_volume_is_ready('pvc1'),
+            smoke_tests_utils.get_cmd_wait_until_volume_is_ready(pvc1),
             # Launch with the new volume - should show warning that pvc1 and /mnt/data4 won't be mounted
-            f's=$(sky launch -y -c {name} --infra kubernetes tests/test_yamls/pvc_volume_with_new.yaml 2>&1 | tee /dev/stderr) && echo "$s" | grep -i "WARNING: New ephemeral volume(s) with path /mnt/data4 and new volume(s) pvc1 specified in task but not mounted"',
+            f's=$(sky launch -y -c {name} --infra kubernetes --env VOL_PREFIX={name} tests/test_yamls/pvc_volume_with_new.yaml 2>&1 | tee /dev/stderr) && echo "$s" | grep -i "WARNING: New ephemeral volume(s) with path /mnt/data4 and new volume(s) {pvc1} specified in task but not mounted"',
             f'sky logs {name} 2 --status',  # Ensure the second job succeeded.
             f'sky down -y {name}',
-            f'sky launch -y -c {name} --infra kubernetes tests/test_yamls/pvc_volume_with_new.yaml --env HAVE_SUB_DIR=true --env NEW_LAUNCH=true',
+            f'sky launch -y -c {name} --infra kubernetes --env VOL_PREFIX={name} tests/test_yamls/pvc_volume_with_new.yaml --env HAVE_SUB_DIR=true --env NEW_LAUNCH=true',
             f'sky logs {name} 1 --status',  # Ensure the first job on the new cluster succeeded.
-            f'sky down -y {name} && sky volumes ls && sky volumes delete pvc0 existing0 pvc1 vol-existing1 -y',
+            smoke_tests_utils.run_cloud_cmd_on_cluster(name,
+                                                       assert_pvcs_present),
+            f'sky down -y {name} && sky volumes ls && sky volumes delete {pvc0} {existing0} {pvc1} {vol_existing1} -y',
             # Volume deletion is asynchronous, so poll until each deleted
             # volume disappears from `sky volumes ls` instead of checking once.
-            smoke_tests_utils.get_cmd_wait_until_volume_is_not_found('pvc0'),
+            smoke_tests_utils.get_cmd_wait_until_volume_is_not_found(pvc0),
+            smoke_tests_utils.get_cmd_wait_until_volume_is_not_found(existing0),
+            smoke_tests_utils.get_cmd_wait_until_volume_is_not_found(pvc1),
             smoke_tests_utils.get_cmd_wait_until_volume_is_not_found(
-                'existing0'),
-            smoke_tests_utils.get_cmd_wait_until_volume_is_not_found('pvc1'),
+                vol_existing1),
             smoke_tests_utils.get_cmd_wait_until_volume_is_not_found(
-                'vol-existing1'),
-            smoke_tests_utils.get_cmd_wait_until_volume_is_not_found(name),
+                ephemeral_prefix, match_prefix=True),
             smoke_tests_utils.run_cloud_cmd_on_cluster(
                 name,
                 # PVC teardown for deleted volumes is asynchronous, so poll
@@ -1645,30 +1889,36 @@ def test_volumes_on_kubernetes():
                 # must be preserved.
                 'end=$((SECONDS+120)); '
                 'while [ $SECONDS -lt $end ]; do '
-                'pvcs=$(kubectl get pvc); echo "$pvcs"; '
-                'if ! echo "$pvcs" | grep -q "pvc0" && '
-                '! echo "$pvcs" | grep -q "pvc1" && '
-                f'! echo "$pvcs" | grep -q "{name}"; then break; fi; '
-                'echo "Waiting for deleted volume PVCs to be removed..."; '
+                f'left=$({list_deleted_pvcs}); '
+                'if [ -z "$left" ]; then break; fi; '
+                'echo "Waiting for PVCs of deleted volumes: $left"; '
                 'sleep 5; '
-                'done && '
-                'pvcs=$(kubectl get pvc) && echo "$pvcs" && '
-                'if echo "$pvcs" | grep -q "pvc0"; then echo "pvc for volume pvc0 not deleted" && exit 1; else echo "pvc for volume pvc0 deleted"; fi && '
-                'if echo "$pvcs" | grep -q "pvc1"; then echo "pvc for volume pvc1 not deleted" && exit 1; else echo "pvc for volume pvc1 deleted"; fi && '
-                f'if echo "$pvcs" | grep -q "{name}"; then echo "pvc for ephemeral volume of cluster {name} not deleted" && exit 1; else echo "pvc for ephemeral volume of cluster {name} deleted"; fi && '
-                # existing0 was imported with use_existing=True; the underlying PVC is preserved on delete.
-                'if ! echo "$pvcs" | grep -q "existing0"; then echo "pvc for imported volume existing0 was unexpectedly deleted" && exit 1; else echo "pvc for imported volume existing0 preserved"; fi && '
-                # vol-existing1 wraps an imported PVC named "existing1" (matched by label); that PVC is preserved on delete.
-                'if ! echo "$pvcs" | grep -q "existing1"; then echo "pvc for imported volume vol-existing1 was unexpectedly deleted" && exit 1; else echo "pvc for imported volume vol-existing1 preserved"; fi',
+                'done; '
+                f'left=$({list_deleted_pvcs}); '
+                'if [ -n "$left" ]; then '
+                'echo "PVCs of deleted volumes still present: $left"; '
+                'kubectl get pvc; exit 1; fi && '
+                'echo "PVCs of deleted volumes are gone" && '
+                f'kubectl get pvc {existing0} && '
+                f'kubectl get pvc {existing1} && '
+                'echo "PVCs of imported volumes preserved"',
             ),
         ],
         smoke_tests_utils.chain_teardown(
-            smoke_tests_utils.down_cluster_for_cloud_cmd(name),
-            'vols=$(sky volumes ls) && echo "$vols"', *[
+            'vols=$(sky volumes ls) && echo "$vols"',
+            *[
                 f'if echo "$vols" | grep -q "{vol}"; then '
                 f'sky volumes delete {vol} -y; fi'
-                for vol in ['existing0', 'pvc0', 'pvc1', 'vol-existing1']
-            ]),
+                for vol in [existing0, pvc0, pvc1, vol_existing1]
+            ],
+            # The imported PVCs outlive the volumes that wrapped them --
+            # use_existing preserves the backing resource -- so nothing else
+            # would ever delete them. `--wait=false` so a still-running test
+            # cluster holding the claim does not stall the teardown.
+            smoke_tests_utils.run_cloud_cmd_on_cluster(
+                name, f'kubectl delete pvc {existing0} {existing1} '
+                f'--ignore-not-found --wait=false'),
+            smoke_tests_utils.down_cluster_for_cloud_cmd(name)),
     )
     smoke_tests_utils.run_one_test(test)
 
@@ -1676,27 +1926,30 @@ def test_volumes_on_kubernetes():
 # ---------- Enable Docker on Kubernetes ----------
 @pytest.mark.kubernetes
 @pytest.mark.parametrize(
-    'yaml_file,volumes_needed,sidecar,cache_mount',
+    'yaml_file,case,uses_volumes,sidecar,cache_mount',
     [
-        ('tests/test_yamls/test_enable_all_default.yaml', [], 'dind',
+        ('tests/test_yamls/test_enable_all_default.yaml', 'all', False, 'dind',
          '/var/lib/docker'),
-        ('tests/test_yamls/test_enable_all_dv.yaml',
-         ['docker-all-vol0', 'docker-all-vol1'], 'dind', '/var/lib/docker'),
-        ('tests/test_yamls/test_enable_build_default.yaml', [], 'buildkitd',
-         '/home/user/.local/share/buildkit'),
-        ('tests/test_yamls/test_enable_build_dv.yaml', [
-            'docker-build-vol0', 'docker-build-vol1'
-        ], 'buildkitd', '/home/user/.local/share/buildkit'),
+        ('tests/test_yamls/test_enable_all_dv.yaml.j2', 'all-dv', True, 'dind',
+         '/var/lib/docker'),
+        ('tests/test_yamls/test_enable_build_default.yaml', 'build', False,
+         'buildkitd', '/home/user/.local/share/buildkit'),
+        ('tests/test_yamls/test_enable_build_dv.yaml.j2', 'build-dv', True,
+         'buildkitd', '/home/user/.local/share/buildkit'),
     ],
 )
-def test_enable_docker_on_kubernetes(yaml_file, volumes_needed, sidecar,
+def test_enable_docker_on_kubernetes(yaml_file, case, uses_volumes, sidecar,
                                      cache_mount):
-    name = smoke_tests_utils.get_cluster_name()
+    # Volume names are shared with any concurrent run, and get_cluster_name()
+    # keys off the (shared) test function name -- so the case id goes into both
+    # the cluster name and the volume names.
+    name = f'{smoke_tests_utils.get_cluster_name()}-{case}'
     name_on_cloud = common_utils.make_cluster_name_on_cloud(
         name, sky.Kubernetes.max_cluster_name_length())
 
+    volumes = [f'{name}-vol0', f'{name}-vol1'] if uses_volumes else []
     setup_cmds: List[str] = []
-    for vol in volumes_needed:
+    for vol in volumes:
         setup_cmds.append(
             f'sky volumes apply -y -n {vol} --type k8s-pvc --size 2GB')
         # `apply` only starts provisioning; the launch below mounts the volume
@@ -1710,31 +1963,41 @@ def test_enable_docker_on_kubernetes(yaml_file, volumes_needed, sidecar,
         f'kubectl exec {name_on_cloud}-head -c {sidecar} -- df -a '
         f'| grep {cache_mount}')
 
-    test_cmds: List[str] = [
-        *setup_cmds,
-        f'sky launch -y -c {name} --infra kubernetes {yaml_file}',
-        f'sky logs {name} 1 --status',
-        # Pin the cloud-cmd helper to the context the target landed on so its
-        # in-cluster kubectl can see the target's resources.
-        smoke_tests_utils.resolve_k8s_context_cmd(name),
-        smoke_tests_utils.launch_cloud_cmd_on_landed_context(name),
-        smoke_tests_utils.run_cloud_cmd_on_cluster(name, verify_mount_cmd),
-    ]
+    # The _dv cases take their volume names from this run, through a template;
+    # the default ones have nothing to fill in and are launched as they are.
+    content = pathlib.Path(yaml_file).read_text()
+    if volumes:
+        content = jinja2.Template(content).render(mount_volume=volumes[0],
+                                                  cache_volume=volumes[1])
 
-    teardown_parts = [
-        f'sky down -y {name}',
-        smoke_tests_utils.down_cluster_for_cloud_cmd(name),
-    ]
-    for vol in volumes_needed:
-        teardown_parts.append(f'sky volumes delete {vol} -y || true')
-    teardown = smoke_tests_utils.chain_teardown(*teardown_parts)
+    with tempfile.NamedTemporaryFile('w', suffix='.yaml') as f:
+        f.write(content)
+        f.flush()
+        test_cmds: List[str] = [
+            *setup_cmds,
+            f'sky launch -y -c {name} --infra kubernetes {f.name}',
+            f'sky logs {name} 1 --status',
+            # Pin the cloud-cmd helper to the context the target landed on so
+            # its in-cluster kubectl can see the target's resources.
+            smoke_tests_utils.resolve_k8s_context_cmd(name),
+            smoke_tests_utils.launch_cloud_cmd_on_landed_context(name),
+            smoke_tests_utils.run_cloud_cmd_on_cluster(name, verify_mount_cmd),
+        ]
 
-    test = smoke_tests_utils.Test(
-        'enable_docker_on_kubernetes',
-        test_cmds,
-        teardown,
-    )
-    smoke_tests_utils.run_one_test(test)
+        teardown_parts = [
+            f'sky down -y {name}',
+            smoke_tests_utils.down_cluster_for_cloud_cmd(name),
+        ]
+        for vol in volumes:
+            teardown_parts.append(f'sky volumes delete {vol} -y || true')
+        teardown = smoke_tests_utils.chain_teardown(*teardown_parts)
+
+        test = smoke_tests_utils.Test(
+            'enable_docker_on_kubernetes',
+            test_cmds,
+            teardown,
+        )
+        smoke_tests_utils.run_one_test(test)
 
 
 @pytest.mark.kubernetes
@@ -1887,10 +2150,17 @@ def test_auto_mount_not_ready_on_kubernetes():
     with nothing pointing at the volume as the cause -- which is how it showed
     up in the field, as a job stuck in creating.
 
-    The claim here can never bind because its storage class does not exist, so
-    it fails within seconds and needs no real storage.
+    The broken volume is on a class whose driver refuses the claim, bound
+    Immediately so the refusal is recorded before any launch. It has to be a
+    real rejection: a volume that is merely being provisioned is also not ready,
+    and is deliberately not refused.
     """
     name = smoke_tests_utils.get_cluster_name()
+    create_sc_cmd = smoke_tests_utils.create_rejecting_storage_class_cmd(
+        name, binding_mode='Immediate')
+    if create_sc_cmd is None:
+        pytest.skip('No CSI driver on this cluster with a known way to refuse '
+                    'a claim; see _REJECTED_BY_PROVISIONER.')
     broken_volume = f'{name}-broken'
     good_volume = f'{name}-hp'
     host_path = f'/tmp/skypilot-automount-{name}'
@@ -1900,7 +2170,7 @@ def test_auto_mount_not_ready_on_kubernetes():
         size: 1Gi
         config:
           access_mode: ReadWriteMany
-          storage_class_name: {smoke_tests_utils.unprovisionable_storage_class_name(name)}
+          storage_class_name: {smoke_tests_utils.rejecting_storage_class_name(name)}
     """)
     good_yaml = textwrap.dedent(f"""\
         name: {good_volume}
@@ -1948,20 +2218,24 @@ def test_auto_mount_not_ready_on_kubernetes():
         test = smoke_tests_utils.Test(
             'auto_mount_not_ready_on_kubernetes',
             [
-                smoke_tests_utils.create_unprovisionable_storage_class_cmd(
-                    name),
+                create_sc_cmd,
                 f'sky volumes apply -y {smoke_tests_utils.AGENT_K8S_INFRA} '
                 f'{broken_f.name}',
                 f'sky volumes apply -y {smoke_tests_utils.AGENT_K8S_INFRA} '
                 f'{good_f.name}',
-                # The claim cannot be provisioned, so the volume is reported
-                # unusable without waiting for the refresh daemon.
-                f'vols=$(sky volumes ls) && echo "$vols" && '
-                f'echo "$vols" | grep {broken_volume} | grep NOT_READY',
+                # The driver's answer reaches the record on the status
+                # refresh's schedule; until then the reason recorded is that the
+                # volume is being provisioned, which is deliberately not
+                # refused.
+                smoke_tests_utils.wait_until_volume_is_rejected_cmd(
+                    broken_volume),
                 # Auto-mounting it must refuse the launch, name the volume, and
-                # leave no cluster behind.
+                # leave no cluster behind. Pinned to the same context as the
+                # volumes: a multi-context server could otherwise land the
+                # launch where neither volume exists.
                 smoke_tests_utils.with_config(
-                    f'! sky launch -y -c {name} --infra kubernetes '
+                    f'! sky launch -y -c {name} '
+                    f'{smoke_tests_utils.AGENT_K8S_INFRA} '
                     f'{task_f.name} > {name}-refused.log 2>&1; '
                     f'cat {name}-refused.log && '
                     f'grep -q "not ready" {name}-refused.log && '
@@ -1972,7 +2246,8 @@ def test_auto_mount_not_ready_on_kubernetes():
                 # A usable auto-mount volume still mounts, so the check is not
                 # simply refusing everything.
                 smoke_tests_utils.with_config(
-                    f'sky launch -y -c {name} --infra kubernetes '
+                    f'sky launch -y -c {name} '
+                    f'{smoke_tests_utils.AGENT_K8S_INFRA} '
                     f'{task_f.name}', good_cfg_f.name),
                 f'sky logs {name} 1 --status',
                 f'sky logs {name} 1 | grep "auto mount ok"',
@@ -1980,8 +2255,8 @@ def test_auto_mount_not_ready_on_kubernetes():
             smoke_tests_utils.chain_teardown(
                 f'sky down -y {name}',
                 f'sky volumes delete {broken_volume} {good_volume} -y || true',
-                smoke_tests_utils.delete_unprovisionable_storage_class_cmd(
-                    name), f'rm -f {name}-refused.log'),
+                smoke_tests_utils.delete_rejecting_storage_class_cmd(name),
+                f'rm -f {name}-refused.log'),
         )
         smoke_tests_utils.run_one_test(test)
 
@@ -1998,10 +2273,18 @@ def test_volume_not_ready_on_kubernetes():
     ways of attaching a volume agree, so if this one ever stops refusing, they
     have silently diverged again.
 
-    The claim can never bind because its storage class does not exist, so it
-    needs no real storage and fails within seconds.
+    The volume is on a class whose driver refuses the claim, bound Immediately
+    so the refusal lands before any launch. What makes a volume refusable is the
+    reason recorded against it, not the not-ready flag alone -- being provisioned
+    is also not-ready, and refusing that would fail launches over volumes that
+    were about to work -- so the fixture has to produce a real rejection.
     """
     name = smoke_tests_utils.get_cluster_name()
+    create_sc_cmd = smoke_tests_utils.create_rejecting_storage_class_cmd(
+        name, binding_mode='Immediate')
+    if create_sc_cmd is None:
+        pytest.skip('No CSI driver on this cluster with a known way to refuse '
+                    'a claim; see _REJECTED_BY_PROVISIONER.')
     volume_name = f'{name}-nr'
     volume_yaml = textwrap.dedent(f"""\
         name: {volume_name}
@@ -2009,7 +2292,7 @@ def test_volume_not_ready_on_kubernetes():
         size: 1Gi
         config:
           access_mode: ReadWriteMany
-          storage_class_name: {smoke_tests_utils.unprovisionable_storage_class_name(name)}
+          storage_class_name: {smoke_tests_utils.rejecting_storage_class_name(name)}
     """)
     task_yaml = textwrap.dedent(f"""\
         resources:
@@ -2029,12 +2312,15 @@ def test_volume_not_ready_on_kubernetes():
         test = smoke_tests_utils.Test(
             'volume_not_ready_on_kubernetes',
             [
-                smoke_tests_utils.create_unprovisionable_storage_class_cmd(
-                    name),
+                create_sc_cmd,
                 f'sky volumes apply -y {smoke_tests_utils.AGENT_K8S_INFRA} '
                 f'{vol_f.name}',
-                f'vols=$(sky volumes ls) && echo "$vols" && '
-                f'echo "$vols" | grep {volume_name} | grep NOT_READY',
+                # The driver's answer reaches the record on the status
+                # refresh's schedule; until then the reason recorded is that the
+                # volume is being provisioned, which is deliberately not
+                # refused.
+                smoke_tests_utils.wait_until_volume_is_rejected_cmd(volume_name
+                                                                   ),
                 f'! sky launch -y -c {name} {smoke_tests_utils.AGENT_K8S_INFRA} '
                 f'{task_f.name} '
                 f'> {name}-refused.log 2>&1; '
@@ -2047,10 +2333,650 @@ def test_volume_not_ready_on_kubernetes():
             smoke_tests_utils.chain_teardown(
                 f'sky down -y {name} || true',
                 f'sky volumes delete {volume_name} -y || true',
-                smoke_tests_utils.delete_unprovisionable_storage_class_cmd(
-                    name), f'rm -f {name}-refused.log'),
+                smoke_tests_utils.delete_rejecting_storage_class_cmd(name),
+                f'rm -f {name}-refused.log'),
         )
         smoke_tests_utils.run_one_test(test)
+
+
+# ---------- A volume that cannot be judged before the launch ----------
+@pytest.mark.kubernetes
+def test_auto_mount_pending_volume_on_kubernetes():
+    """A WaitForFirstConsumer claim, which no pre-launch check can catch.
+
+    Such a claim is untouched until a pod needs it, so it is correctly READY
+    when the launch starts and the launch is correctly allowed to proceed. That
+    leaves the wait loop as the only place the problem can surface, which is
+    what this covers: the launch has to name the volume it is waiting on rather
+    than show a bare spinner, and it has to allow the volume the minutes a
+    network filesystem takes to provision rather than the seconds a pod takes to
+    schedule.
+    """
+    name = smoke_tests_utils.get_cluster_name()
+    volume_name = f'{name}-wffc'
+    volume_yaml = textwrap.dedent(f"""\
+        name: {volume_name}
+        type: k8s-pvc
+        size: 1Gi
+        config:
+          access_mode: ReadWriteMany
+          storage_class_name: {smoke_tests_utils.unprovisionable_storage_class_name(name)}
+    """)
+    task_yaml = textwrap.dedent("""\
+        resources:
+          cpus: 0.1+
+        run: echo should not run
+    """)
+    config = textwrap.dedent(f"""\
+        kubernetes:
+          auto_mounts:
+            - volume_name: {volume_name}
+              mount_paths: [/mnt/auto]
+    """)
+    # Comfortably above the timeout an auto-mounted volume used to get (10-60s
+    # for a single node) and below the one it gets now (180s).
+    min_wait_seconds = 120
+    with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w',
+                                     delete=False) as vol_f, \
+         tempfile.NamedTemporaryFile(suffix='.yaml', mode='w',
+                                     delete=False) as task_f, \
+         tempfile.NamedTemporaryFile(suffix='.yaml', mode='w',
+                                     delete=False) as cfg_f:
+        for handle, content in ((vol_f, volume_yaml), (task_f, task_yaml),
+                                (cfg_f, config)):
+            handle.write(content)
+            handle.flush()
+        test = smoke_tests_utils.Test(
+            'auto_mount_pending_volume_on_kubernetes',
+            [
+                smoke_tests_utils.create_unprovisionable_storage_class_cmd(
+                    name, binding_mode='WaitForFirstConsumer'),
+                f'sky volumes apply -y {smoke_tests_utils.AGENT_K8S_INFRA} '
+                f'{vol_f.name}',
+                # Nothing has asked for the claim yet, so there is nothing
+                # wrong with it to find. If this ever reports NOT_READY the
+                # premise of the test is gone.
+                f'vols=$(sky volumes ls) && echo "$vols" && '
+                f'echo "$vols" | grep {volume_name} | grep READY',
+                # What the launch names is the claim, whose name SkyPilot
+                # derives from the volume's and truncates -- so read it off the
+                # cluster rather than assuming it still contains the volume name.
+                f'kubectl get pvc -A -l skypilot-name={volume_name} '
+                f'-o jsonpath=\'{{.items[0].metadata.name}}\' '
+                f'> {name}-pvc.txt && cat {name}-pvc.txt && '
+                f'test -s {name}-pvc.txt',
+                smoke_tests_utils.with_config(
+                    f'start=$(date +%s); '
+                    f'! sky launch -y -c {name} --infra kubernetes '
+                    f'{task_f.name} > {name}-pending.log 2>&1; '
+                    f'elapsed=$(( $(date +%s) - start )); '
+                    f'cat {name}-pending.log && '
+                    f'echo "launch took ${{elapsed}}s" && '
+                    f'grep -q "$(cat {name}-pvc.txt)" {name}-pending.log && '
+                    # The volume got the minutes a network filesystem needs,
+                    # not the seconds a pod needs.
+                    f'[ "$elapsed" -ge {min_wait_seconds} ]',
+                    cfg_f.name),
+                # The volume was named while the launch was still waiting, not
+                # only in the error at the end.
+                f'sky logs --provision {name} > {name}-provision.log 2>&1; '
+                f'grep -q "waiting for volume" {name}-provision.log && '
+                f'grep -q "$(cat {name}-pvc.txt)" {name}-provision.log',
+            ],
+            smoke_tests_utils.chain_teardown(
+                f'sky down -y {name} || true',
+                f'sky volumes delete {volume_name} -y || true',
+                smoke_tests_utils.delete_unprovisionable_storage_class_cmd(
+                    name), f'rm -f {name}-pending.log {name}-provision.log '
+                f'{name}-pvc.txt'),
+            timeout=15 * 60,
+        )
+        smoke_tests_utils.run_one_test(test)
+
+
+# ---------- A volume used before its rejection was recorded ----------
+@pytest.mark.kubernetes
+# See test_auto_mount_not_ready_on_kubernetes: the StorageClass fixture
+# needs cluster-admin kubectl co-located with the API server.
+@pytest.mark.no_remote_server
+@pytest.mark.parametrize('attach_via', ['task', 'auto_mounts'])
+def test_volume_used_before_its_rejection_is_recorded(attach_via):
+    """A volume recorded as being provisioned must not refuse a launch.
+
+    A class that binds Immediately provisions asynchronously, so a volume reads
+    not-ready from the moment it is created until its backend finishes -- for a
+    network filesystem, minutes. Refusing on that is what made creating one and
+    using it two steps. Both checks now let it through, and they sit in different
+    places: `VolumeMount.resolve` when the task is submitted, the readiness check
+    on every launch. Hence both ways of attaching it.
+
+    The class here has a provisioner that does not exist, which is what makes the
+    recorded reason deterministic: nothing answers such a claim, so no failure
+    event can appear to overwrite it. A class whose driver *refuses* the claim
+    cannot be used -- whether the rejection reaches the record before the launch
+    is a race between the driver and `volume_apply`'s own status read, and CI
+    showed it landing on both sides.
+
+    What stops the launch is then the wait loop running out of time, having named
+    the claim throughout. That the launch got that far is the assertion: a
+    refusal would have said the volume is not ready instead.
+    """
+    # Both cases would otherwise share this name -- get_cluster_name() keys off
+    # the test function -- and with it the volume and the cluster-scoped storage
+    # class, whenever the run does not serialize its Kubernetes tests.
+    attach_id = attach_via.split('_')[0]
+    name = f'{smoke_tests_utils.get_cluster_name()}-{attach_id}'
+    volume_name = f'{name}-imm'
+    volume_yaml = textwrap.dedent(f"""\
+        name: {volume_name}
+        type: k8s-pvc
+        size: 1Gi
+        config:
+          access_mode: ReadWriteMany
+          storage_class_name: {smoke_tests_utils.unprovisionable_storage_class_name(name)}
+    """)
+    attached_on_task = attach_via == 'task'
+    task_yaml = textwrap.dedent(f"""\
+        resources:
+          cpus: 0.1+
+        volumes:
+          /mnt/data: {volume_name}
+        run: echo should not run
+    """) if attached_on_task else textwrap.dedent("""\
+        resources:
+          cpus: 0.1+
+        run: echo should not run
+    """)
+    # The timeout is what ends this launch, so keep it short -- but long
+    # enough for the wait loop to have reported the claim at least once.
+    # Written as two whole blocks rather than assembled from pieces: dedent
+    # strips the common indent, so a fragment ends up at the top level and the
+    # auto_mounts entry is silently not configured at all.
+    config = textwrap.dedent("""\
+        kubernetes:
+          provision_timeout: 120
+    """) if attached_on_task else textwrap.dedent(f"""\
+        kubernetes:
+          provision_timeout: 120
+          auto_mounts:
+            - volume_name: {volume_name}
+              mount_paths: [/mnt/auto]
+    """)
+    with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w',
+                                     delete=False) as vol_f, \
+         tempfile.NamedTemporaryFile(suffix='.yaml', mode='w',
+                                     delete=False) as task_f, \
+         tempfile.NamedTemporaryFile(suffix='.yaml', mode='w',
+                                     delete=False) as cfg_f:
+        for handle, content in ((vol_f, volume_yaml), (task_f, task_yaml),
+                                (cfg_f, config)):
+            handle.write(content)
+            handle.flush()
+        test = smoke_tests_utils.Test(
+            f'volume_used_before_its_rejection_is_recorded_{attach_via}',
+            [
+                smoke_tests_utils.create_unprovisionable_storage_class_cmd(
+                    name),
+                # Created without the config in scope, so this step cannot be
+                # tripped up by the auto_mounts entry it is about to become.
+                smoke_tests_utils.with_config(
+                    f'sky volumes apply -y '
+                    f'{smoke_tests_utils.AGENT_K8S_INFRA} {vol_f.name}',
+                    '/dev/null'),
+                # The premise: not-ready, and for the one reason that is not
+                # grounds for refusing a launch. Deterministic here, since
+                # nothing will ever answer this claim with a failure.
+                f'vols=$(sky volumes ls) && echo "$vols" && '
+                f'echo "$vols" | grep {volume_name} | grep NOT_READY && '
+                f'echo "$vols" | grep {volume_name} | grep "still being"',
+                # Allowed through, and stopped by the wait loop instead. Told
+                # apart by the exception: both checks raise VolumeNotReadyError
+                # when they refuse, and neither the wait loop nor the log line
+                # the check writes when it lets a volume through can produce it.
+                smoke_tests_utils.with_config(
+                    f'! sky launch -y -c {name} --infra kubernetes '
+                    f'{task_f.name} > {name}-imm.log 2>&1; '
+                    f'cat {name}-imm.log && '
+                    f'grep -q "PVC binding issue" {name}-imm.log && '
+                    f'! grep -q "VolumeNotReadyError" {name}-imm.log',
+                    cfg_f.name),
+            ],
+            smoke_tests_utils.chain_teardown(
+                f'sky down -y {name} || true',
+                f'sky volumes delete {volume_name} -y || true',
+                smoke_tests_utils.delete_unprovisionable_storage_class_cmd(
+                    name), f'rm -f {name}-imm.log'),
+            timeout=20 * 60,
+        )
+        smoke_tests_utils.run_one_test(test)
+
+
+# ---------- A volume the storage backend refuses mid-launch ----------
+@pytest.mark.kubernetes
+# See test_auto_mount_not_ready_on_kubernetes: the StorageClass fixture
+# needs cluster-admin kubectl co-located with the API server.
+@pytest.mark.no_remote_server
+def test_volume_refused_after_it_breaks_on_kubernetes():
+    """The two things a rejected claim has to produce, in one launch each.
+
+    A WaitForFirstConsumer claim is nothing to worry about until a pod asks for
+    it, so the volume is correctly ready and the first launch is correctly
+    allowed to proceed. Then the driver rejects it, and both halves of this PR's
+    behaviour follow:
+
+      1. the launch fails on what the driver said, in seconds, rather than
+         holding the volume's minutes-long timeout open for an answer that has
+         already arrived;
+      2. the volume is now on record as unusable, and the next launch reads that
+         record rather than the resolution its task arrived with -- which is
+         what stops a managed job relaunching over it for hours.
+
+    The two refusals are told apart by which component produces them: the wait
+    loop reports the claim it is waiting on, the readiness check refuses the
+    volume itself.
+    """
+    name = smoke_tests_utils.get_cluster_name()
+    create_sc_cmd = smoke_tests_utils.create_rejecting_storage_class_cmd(name)
+    if create_sc_cmd is None:
+        pytest.skip('No CSI driver on this cluster with a known way to refuse '
+                    'a claim; see _REJECTED_BY_PROVISIONER. A provisioner that '
+                    'does not exist cannot stand in: nothing answers such a '
+                    'claim, so it never reports a failure at all.')
+    volume_name = f'{name}-rej'
+    volume_yaml = textwrap.dedent(f"""\
+        name: {volume_name}
+        type: k8s-pvc
+        size: 1Gi
+        config:
+          access_mode: ReadWriteMany
+          storage_class_name: {smoke_tests_utils.rejecting_storage_class_name(name)}
+    """)
+    task_yaml = textwrap.dedent(f"""\
+        resources:
+          cpus: 0.1+
+        volumes:
+          /mnt/data: {volume_name}
+        run: echo should not run
+    """)
+    # Comfortably under the timeout a ReadWriteMany volume gets (600s), so that
+    # failing this fast can only be the driver's answer being acted on.
+    max_seconds_to_fail = 300
+    with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w',
+                                     delete=False) as vol_f, \
+         tempfile.NamedTemporaryFile(suffix='.yaml', mode='w',
+                                     delete=False) as task_f:
+        vol_f.write(volume_yaml)
+        vol_f.flush()
+        task_f.write(task_yaml)
+        task_f.flush()
+        test = smoke_tests_utils.Test(
+            'volume_refused_after_it_breaks_on_kubernetes',
+            [
+                create_sc_cmd,
+                f'sky volumes apply -y {smoke_tests_utils.AGENT_K8S_INFRA} '
+                f'{vol_f.name}',
+                # Nothing has asked for the claim, so the driver has not been
+                # called and there is nothing wrong with it yet. If this ever
+                # reports NOT_READY the premise is gone.
+                f'vols=$(sky volumes ls) && echo "$vols" && '
+                f'echo "$vols" | grep {volume_name} | grep READY',
+                # First launch: allowed through, then fails on the rejection,
+                # quoting it, well before the timeout would have expired.
+                f'start=$(date +%s); '
+                f'! sky launch -y -c {name} --infra kubernetes '
+                f'{task_f.name} > {name}-first.log 2>&1; '
+                f'elapsed=$(( $(date +%s) - start )); '
+                f'cat {name}-first.log && '
+                f'echo "launch took ${{elapsed}}s" && '
+                f'grep -q "PVC binding issue" {name}-first.log && '
+                f'grep -q "InvalidArgument" {name}-first.log && '
+                f'[ "$elapsed" -lt {max_seconds_to_fail} ]',
+                # The status refresh runs on its own schedule, so poll rather
+                # than assume it has already happened. If it never flips, the
+                # launch below would pass for the wrong reason.
+                f'for i in $(seq 1 18); do '
+                f'  vols=$(sky volumes ls); '
+                f'  echo "$vols" | grep {volume_name} | grep -q NOT_READY '
+                f'    && break; '
+                f'  sleep 10; '
+                f'done; echo "$vols" && '
+                f'echo "$vols" | grep {volume_name} | grep NOT_READY',
+                # Second launch: refused over the volume itself, without
+                # waiting on a claim again.
+                f'! sky launch -y -c {name} --infra kubernetes '
+                f'{task_f.name} > {name}-second.log 2>&1; '
+                f'cat {name}-second.log && '
+                f'grep -q "not ready" {name}-second.log && '
+                f'grep -q "{volume_name}" {name}-second.log && '
+                f'! grep -q "waiting for volume" {name}-second.log',
+            ],
+            smoke_tests_utils.chain_teardown(
+                f'sky down -y {name} || true',
+                f'sky volumes delete {volume_name} -y || true',
+                smoke_tests_utils.delete_rejecting_storage_class_cmd(name),
+                f'rm -f {name}-first.log {name}-second.log'),
+            timeout=20 * 60,
+        )
+        smoke_tests_utils.run_one_test(test)
+
+
+# ---------- An inline volume that cannot be provisioned ----------
+@pytest.mark.kubernetes
+# See test_auto_mount_not_ready_on_kubernetes: the StorageClass fixture
+# needs cluster-admin kubectl co-located with the API server.
+@pytest.mark.no_remote_server
+@pytest.mark.parametrize('binding_mode', ['Immediate', 'WaitForFirstConsumer'])
+def test_ephemeral_pending_volume_on_kubernetes(binding_mode):
+    """An inline volume is created by the launch, so nothing can vet it first.
+
+    A volume named on the task or auto-mounted is on record before the launch
+    starts, and a broken one is refused there. An inline volume has no record
+    to refuse over -- it is created a few seconds before the pods, as part of
+    the launch it belongs to -- so the wait loop is the only thing standing
+    between a broken one and the provision timeout expiring with nothing to
+    show for it.
+
+    Both binding modes are covered because they fail in different places. An
+    Immediate claim is already being provisioned when the pods appear, so its
+    events start before them; a WaitForFirstConsumer claim is not touched until
+    the scheduler picks a node for a pod. That coverage rests on the suffix
+    below: a StorageClass is cluster-scoped and named after the test, so without
+    it -- whenever the run does not serialize its Kubernetes tests -- the case
+    that creates the class last decides the binding mode both of them see.
+    """
+    mode_id = 'imm' if binding_mode == 'Immediate' else 'wffc'
+    name = f'{smoke_tests_utils.get_cluster_name()}-{mode_id}'
+    task_yaml = textwrap.dedent(f"""\
+        resources:
+          cpus: 0.1+
+        volumes:
+          /mnt/eph:
+            size: 1Gi
+            config:
+              storage_class_name: {smoke_tests_utils.unprovisionable_storage_class_name(name)}
+        run: echo should not run
+    """)
+    # Long enough for a pod to be scheduled and its claim to reach the
+    # provisioner, which is what the WaitForFirstConsumer half is about.
+    config = textwrap.dedent("""\
+        kubernetes:
+          provision_timeout: 120
+    """)
+    with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w',
+                                     delete=False) as task_f, \
+         tempfile.NamedTemporaryFile(suffix='.yaml', mode='w',
+                                     delete=False) as cfg_f:
+        for handle, content in ((task_f, task_yaml), (cfg_f, config)):
+            handle.write(content)
+            handle.flush()
+        test = smoke_tests_utils.Test(
+            f'ephemeral_pending_volume_{binding_mode.lower()}_on_kubernetes',
+            [
+                smoke_tests_utils.create_unprovisionable_storage_class_cmd(
+                    name, binding_mode=binding_mode),
+                smoke_tests_utils.with_config(
+                    f'! sky launch -y -c {name} --infra kubernetes '
+                    f'{task_f.name} > {name}-eph.log 2>&1; '
+                    f'cat {name}-eph.log && '
+                    f'grep -q "PVC binding issue" {name}-eph.log', cfg_f.name),
+                # The claim is named, and named by the reason it is pending on
+                # now rather than one it left behind minutes ago.
+                f'sky logs --provision {name} > {name}-provision.log 2>&1; '
+                f'grep -q "waiting for volume" {name}-provision.log && '
+                f'grep -q "ExternalProvisioning" {name}-provision.log',
+                # The failed launch takes the volume it created with it, rather
+                # than leaving the user a record to clean up. A claim that never
+                # bound is still a claim, and leaking one leaks the storage
+                # behind it on a cluster where the class works.
+                f'! sky volumes ls | grep -q {name}',
+                # The API server only has to ask for the claim's deletion --
+                # the pvc-protection finalizer clears on Kubernetes' own
+                # schedule.
+                f'for i in $(seq 1 12); do '
+                f'  kubectl get pvc -A | grep -q {name} || break; '
+                f'  sleep 5; '
+                f'done; ! kubectl get pvc -A | grep -q {name}',
+            ],
+            smoke_tests_utils.chain_teardown(
+                f'sky down -y {name} || true',
+                smoke_tests_utils.delete_unprovisionable_storage_class_cmd(
+                    name), f'rm -f {name}-eph.log {name}-provision.log'),
+            timeout=15 * 60,
+        )
+        smoke_tests_utils.run_one_test(test)
+
+
+# ---------- Every way of attaching a volume, at once ----------
+@pytest.mark.kubernetes
+# The RWX StorageClass lookup below reads the cluster with the agent's kubectl,
+# which a remote server's agent does not have.
+@pytest.mark.no_remote_server
+def test_volume_mix_on_kubernetes():
+    """The three ways a volume reaches a pod, in one launch.
+
+    Each is injected by its own code path -- a task's `volumes:`, an inline
+    volume created during provisioning, and the `auto_mounts` config -- and they
+    have broken separately before. Mounting all three at once also covers what
+    no single-volume test can: that they do not collide over mount paths or over
+    the volume list handed to the template.
+    """
+    name = smoke_tests_utils.get_cluster_name()
+    persistent_volume = f'{name}-p'
+    auto_volume = f'{name}-a'
+    host_path = f'/tmp/skypilot-volume-mix-{name}'
+    rwx_storage_class = smoke_tests_utils.rwx_storage_class_name()
+    if rwx_storage_class is not None:
+        # auto_mounts only takes volumes that several pods can hold at once.
+        auto_volume_kind = f'ReadWriteMany PVC on {rwx_storage_class}'
+        auto_volume_yaml = textwrap.dedent(f"""\
+            name: {auto_volume}
+            type: k8s-pvc
+            size: 1Gi
+            config:
+              access_mode: ReadWriteMany
+              storage_class_name: {rwx_storage_class}
+        """)
+    else:
+        # No RWX backend on this cluster. hostPath is the other volume type
+        # auto_mounts accepts, and needs no storage to provision, so the rest
+        # of the test still runs.
+        auto_volume_kind = 'hostPath (no RWX StorageClass on this cluster)'
+        auto_volume_yaml = textwrap.dedent(f"""\
+            name: {auto_volume}
+            type: k8s-hostpath
+            config:
+              host_path: {host_path}
+        """)
+    persistent_volume_yaml = textwrap.dedent(f"""\
+        name: {persistent_volume}
+        type: k8s-pvc
+        size: 1Gi
+        config:
+          access_mode: ReadWriteOnce
+    """)
+    task_yaml = textwrap.dedent(f"""\
+        resources:
+          cpus: 0.1+
+        volumes:
+          /mnt/persist: {persistent_volume}
+          /mnt/eph:
+            size: 1Gi
+        run: |
+          set -e
+          for d in /mnt/persist /mnt/eph /mnt/auto; do
+            echo "$d ok" > $d/probe
+            cat $d/probe
+          done
+          echo all three mounted
+    """)
+    config = textwrap.dedent(f"""\
+        kubernetes:
+          auto_mounts:
+            - volume_name: {auto_volume}
+              mount_paths: [/mnt/auto]
+    """)
+    with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w',
+                                     delete=False) as pers_f, \
+         tempfile.NamedTemporaryFile(suffix='.yaml', mode='w',
+                                     delete=False) as auto_f, \
+         tempfile.NamedTemporaryFile(suffix='.yaml', mode='w',
+                                     delete=False) as task_f, \
+         tempfile.NamedTemporaryFile(suffix='.yaml', mode='w',
+                                     delete=False) as cfg_f:
+        for handle, content in ((pers_f, persistent_volume_yaml),
+                                (auto_f, auto_volume_yaml), (task_f, task_yaml),
+                                (cfg_f, config)):
+            handle.write(content)
+            handle.flush()
+        test = smoke_tests_utils.Test(
+            'volume_mix_on_kubernetes',
+            [
+                # Which volume type the auto-mount leg used, so that a green run
+                # says whether the RWX path was exercised.
+                f'echo "auto-mount volume: {auto_volume_kind}"',
+                f'sky volumes apply -y {smoke_tests_utils.AGENT_K8S_INFRA} '
+                f'{pers_f.name}',
+                f'sky volumes apply -y {smoke_tests_utils.AGENT_K8S_INFRA} '
+                f'{auto_f.name}',
+                # An RWX class binds Immediately, so the volume above is
+                # still being provisioned and cannot be mounted yet.
+                smoke_tests_utils.get_cmd_wait_until_volume_is_ready(auto_volume
+                                                                    ),
+                smoke_tests_utils.get_cmd_wait_until_volume_is_ready(
+                    persistent_volume),
+                smoke_tests_utils.with_config(
+                    f'sky launch -y -c {name} --infra kubernetes '
+                    f'{task_f.name}', cfg_f.name),
+                f'sky logs {name} 1 --status',
+                f'sky logs {name} 1 | grep "all three mounted"',
+                # The inline volume is recorded as ephemeral and the two the
+                # user created are not. Its name is derived from the cluster's
+                # and the mount path, so read it off the record rather than
+                # reconstruct it.
+                f'vols=$(sky volumes ls) && echo "$vols" && '
+                f'echo "$vols" | grep {persistent_volume} | grep False && '
+                f'echo "$vols" | grep {auto_volume} | grep False && '
+                f'echo "$vols" | grep True | grep {name} '
+                f'| awk \'{{print $1}}\' > {name}-eph.txt && '
+                f'cat {name}-eph.txt && test -s {name}-eph.txt',
+                # The written data outlives the pod that wrote it, for the
+                # volume types where that is the point.
+                f'sky exec {name} "cat /mnt/persist/probe /mnt/auto/probe"',
+                f'sky logs {name} 2 --status',
+                # Teardown takes the inline volume with it and leaves the two
+                # the user created.
+                f'sky down -y {name}',
+                f'vols=$(sky volumes ls) && echo "$vols" && '
+                f'echo "$vols" | grep {persistent_volume} && '
+                f'echo "$vols" | grep {auto_volume} && '
+                f'! echo "$vols" | grep -q "$(cat {name}-eph.txt)"',
+            ],
+            smoke_tests_utils.chain_teardown(
+                f'sky down -y {name} || true',
+                f'sky volumes delete {persistent_volume} {auto_volume} -y '
+                f'|| true', f'rm -f {name}-eph.txt'),
+            timeout=25 * 60,
+        )
+        smoke_tests_utils.run_one_test(test)
+
+
+# ---------- A volume's recorded size follows its actual capacity ----------
+@pytest.mark.kubernetes
+# Creates and recreates the PVC with the agent's own kubectl, which a remote
+# server's agent does not have.
+@pytest.mark.no_remote_server
+def test_volume_size_resync_on_kubernetes():
+    """The recorded size has to follow the storage, not the original request.
+
+    A volume's size is written once, when it is created or registered, so a
+    volume whose backing storage changed afterwards kept advertising its
+    original size forever -- in `sky volumes ls` and on the dashboard, which
+    reads the same record.
+
+    Expansion is how that happens in the wild, but it needs a StorageClass whose
+    provisioner runs a resizer sidecar, which the CI clusters do not have: the
+    request is accepted and then never carried out. Recreating the claim at a
+    different size under the same name moves the same field (the PVC's
+    status.capacity) and is read back by the same code, and it is a real
+    scenario for a `use_existing` volume, whose PVC lifecycle SkyPilot does not
+    own.
+    """
+    storage_class = smoke_tests_utils.rwx_storage_class_name()
+    if storage_class is None:
+        pytest.skip(
+            'Needs a StorageClass that binds without a consumer. The default '
+            'local-path class is WaitForFirstConsumer, so its claims stay '
+            'Pending -- and a Pending claim reports no capacity to read back.')
+    name = smoke_tests_utils.get_cluster_name()
+    # `--use-existing` finds the PVC by the volume's own name.
+    pvc = name
+
+    def create_pvc(size: str) -> str:
+        return (f'kubectl delete pvc {pvc} --ignore-not-found --wait=true && '
+                f'kubectl create -f - <<EOF\n'
+                f'apiVersion: v1\n'
+                f'kind: PersistentVolumeClaim\n'
+                f'metadata:\n'
+                f'  name: {pvc}\n'
+                f'spec:\n'
+                f'  accessModes:\n'
+                f'    - ReadWriteMany\n'
+                f'  storageClassName: {storage_class}\n'
+                f'  resources:\n'
+                f'    requests:\n'
+                f'      storage: {size}\n'
+                f'EOF')
+
+    def wait_for_capacity(size: str) -> str:
+        # The size is only readable once the claim is bound; until then the
+        # capacity field does not exist.
+        return (f'start=$SECONDS; '
+                f'while true; do '
+                f'  cap=$(kubectl get pvc {pvc} '
+                f'-o jsonpath="{{.status.capacity.storage}}" || true); '
+                f'  echo "PVC capacity: $cap"; '
+                f'  [ "$cap" = "{size}" ] && break; '
+                f'  if (( $SECONDS - $start > 120 )); then '
+                f'    echo "Timeout waiting for PVC {pvc} to report {size}"; '
+                f'    kubectl describe pvc {pvc}; exit 1; '
+                f'  fi; '
+                f'  sleep 5; '
+                f'done')
+
+    def size_is(size: str, was: Optional[str] = None) -> str:
+        # -w so the size cannot be matched by another column of the same row.
+        cmd = (f'vols=$(sky volumes ls) && echo "$vols" && '
+               f'echo "$vols" | grep {name} | grep -w "{size}"')
+        if was is not None:
+            # The old size has to be gone, not merely accompanied.
+            cmd += f' && ! echo "$vols" | grep {name} | grep -qw "{was}"'
+        return cmd
+
+    test = smoke_tests_utils.Test(
+        'volume_size_resync_on_kubernetes',
+        [
+            f'echo "StorageClass under test: {storage_class}"',
+            create_pvc('2Gi'),
+            wait_for_capacity('2Gi'),
+            # No --size: the recorded size has to come from the claim, so that
+            # the check below cannot pass on what the command line said.
+            f'sky volumes apply -y -n {name} --type k8s-pvc '
+            f'{smoke_tests_utils.AGENT_K8S_INFRA} --use-existing',
+            size_is('2Gi'),
+            # The storage changes behind SkyPilot's back.
+            create_pvc('5Gi'),
+            wait_for_capacity('5Gi'),
+            # `ls --refresh` runs the same refresh the background daemon runs,
+            # without waiting out its interval.
+            f'sky volumes ls --refresh > /dev/null',
+            size_is('5Gi', was='2Gi'),
+        ],
+        smoke_tests_utils.chain_teardown(
+            f'sky volumes delete {name} -y || true',
+            f'kubectl delete pvc {pvc} --ignore-not-found'),
+        timeout=10 * 60,
+    )
+    smoke_tests_utils.run_one_test(test)
 
 
 # ---------- Container logs from task on Kubernetes ----------
@@ -3145,6 +4071,197 @@ def test_aws_disk_tier():
         smoke_tests_utils.run_one_test(test)
 
 
+# ---------- Volume tagging degrades instead of failing the launch ----------
+# Needs a role that may launch EC2 instances but may not tag EBS volumes -- the
+# minimal policy SkyPilot documented before volume tagging existed. Supplied by
+# the environment so no account-specific identifier lives in the test.
+_NO_VOLUME_TAG_ROLE_ENV = 'SKYPILOT_TEST_NO_VOLUME_TAG_ROLE_ARN'
+_NO_VOLUME_TAG_PROFILE = 'sky-no-volume-tags'
+_VOLUME_TAG_WARNING = 'Volumes will not be tagged'
+
+
+def _volume_tags_cmd(region: str, name_on_cloud: str, must_be_tagged: bool,
+                     label: str) -> str:
+    """Reads the attached volume's tags back from EC2 and asserts on them."""
+    if must_be_tagged:
+        assertion = (f'if ! echo "$vtags" | grep -q ray-cluster-name; then '
+                     f'echo "FAIL[{label}]: volume is not tagged"; exit 1; fi')
+    else:
+        assertion = (
+            f'if echo "$vtags" | grep -q ray-cluster-name; then '
+            f'echo "FAIL[{label}]: volume is tagged, but the credentials '
+            f'cannot tag volumes"; exit 1; fi')
+    return (
+        f'id=$(aws ec2 describe-instances --region {region} --filters '
+        f'Name=tag:ray-cluster-name,Values={name_on_cloud} '
+        f'--query "Reservations[].Instances[].InstanceId" --output text); '
+        f'echo "[{label}] instance: $id"; '
+        f'if [ -z "$id" ]; then echo "FAIL[{label}]: no instance"; exit 1; fi; '
+        # The instance must always be tagged: it is how SkyPilot finds the
+        # cluster again, and it proves the launch really used these settings.
+        f'itags=$(aws ec2 describe-instances --region {region} '
+        f'--instance-ids $id --query "Reservations[].Instances[].Tags[]" '
+        f'--output text); echo "[{label}] instance tags: $itags"; '
+        f'if ! echo "$itags" | grep -q ray-cluster-name; then '
+        f'echo "FAIL[{label}]: instance is not tagged"; exit 1; fi; '
+        # Guard against a vacuous pass: the volume query must resolve.
+        f'vols=$(aws ec2 describe-volumes --region {region} '
+        f'--filters Name=attachment.instance-id,Values=$id '
+        f'--query "Volumes[].VolumeId" --output text); '
+        f'echo "[{label}] volumes: $vols"; '
+        f'if [ -z "$vols" ]; then echo "FAIL[{label}]: no volume attached"; '
+        f'exit 1; fi; '
+        f'vtags=$(aws ec2 describe-volumes --region {region} '
+        f'--filters Name=attachment.instance-id,Values=$id '
+        f'--query "Volumes[].Tags[]" --output text); '
+        f'echo "[{label}] volume tags: $vtags"; '
+        f'{assertion}; echo "PASS[{label}]"')
+
+
+@pytest.mark.aws
+@pytest.mark.no_remote_server  # Restarts the API server to declare a workspace.
+def test_aws_volume_tagging_degrades_without_permission():
+    """`sky launch` must survive credentials that cannot tag EBS volumes.
+
+    AWS rejects the whole RunInstances call when the caller may not tag one of
+    the resource types it names, so this is the difference between a warning
+    and every EC2 launch failing.
+
+    Launches twice in the same account: once on the default credentials, once
+    through a workspace pinned to an AWS profile that cannot tag volumes. Both
+    must come up; only the volume tags and the warning differ.
+    """
+    role_arn = os.environ.get(_NO_VOLUME_TAG_ROLE_ENV)
+    if not role_arn:
+        pytest.skip(f'{_NO_VOLUME_TAG_ROLE_ENV} is not set')
+
+    name = smoke_tests_utils.get_cluster_name()
+    region = 'us-east-2'
+    allowed = f'{name}-ok'
+    denied = f'{name}-no'
+    enforced = f'{name}-en'
+    allowed_on_cloud = common_utils.make_cluster_name_on_cloud(
+        allowed, sky.AWS.max_cluster_name_length())
+    denied_on_cloud = common_utils.make_cluster_name_on_cloud(
+        denied, sky.AWS.max_cluster_name_length())
+
+    # A profile backed by the restricted role. Session credentials are enough:
+    # the launch only has to outlive the test.
+    write_profile = (
+        f'creds=$(aws sts assume-role --role-arn {role_arn} '
+        f'--role-session-name sky-volume-tag-smoke '
+        f'--query "Credentials.[AccessKeyId,SecretAccessKey,SessionToken]" '
+        f'--output text); '
+        f'aws configure set --profile {_NO_VOLUME_TAG_PROFILE} '
+        f'aws_access_key_id "$(echo "$creds" | cut -f1)"; '
+        f'aws configure set --profile {_NO_VOLUME_TAG_PROFILE} '
+        f'aws_secret_access_key "$(echo "$creds" | cut -f2)"; '
+        f'aws configure set --profile {_NO_VOLUME_TAG_PROFILE} '
+        f'aws_session_token "$(echo "$creds" | cut -f3)"; '
+        f'aws configure set --profile {_NO_VOLUME_TAG_PROFILE} '
+        f'region {region}')
+
+    # `profile` is only settable per workspace, and a workspace has to be
+    # declared server-side, so the server is restarted with this config.
+    server_config = textwrap.dedent(f"""\
+        workspaces:
+          default: {{}}
+          no-volume-tags:
+            aws:
+              profile: {_NO_VOLUME_TAG_PROFILE}
+    """)
+    denied_client_config = 'active_workspace: no-volume-tags\n'
+    # Same restricted workspace, but the tags are demanded rather than
+    # attempted, so the launch has to fail instead of degrading.
+    enforced_client_config = textwrap.dedent("""\
+        active_workspace: no-volume-tags
+        aws:
+          enforce_tags:
+            - volume
+    """)
+
+    with tempfile.NamedTemporaryFile('w', suffix='.yaml',
+                                     delete=False) as server_f, \
+         tempfile.NamedTemporaryFile('w', suffix='.yaml',
+                                     delete=False) as denied_f, \
+         tempfile.NamedTemporaryFile('w', suffix='.yaml',
+                                     delete=False) as enforced_f:
+        server_f.write(server_config)
+        denied_f.write(denied_client_config)
+        enforced_f.write(enforced_client_config)
+        server_f.flush()
+        denied_f.flush()
+        enforced_f.flush()
+
+        launch = (f'--infra aws/{region} {smoke_tests_utils.LOW_RESOURCE_ARG} '
+                  f'echo hi')
+        test = smoke_tests_utils.Test(
+            'aws_volume_tagging_degrades_without_permission',
+            [
+                smoke_tests_utils.launch_cluster_for_cloud_cmd('aws', name),
+                write_profile,
+                f'export {skypilot_config.ENV_VAR_GLOBAL_CONFIG}='
+                f'{server_f.name} && {smoke_tests_utils.SKY_API_RESTART}',
+
+                # 1. Default credentials: no warning, volumes tagged.
+                f'sky launch -y -c {allowed} {launch} '
+                f'> {allowed}.log 2>&1; cat {allowed}.log',
+                f'! grep -q "{_VOLUME_TAG_WARNING}" {allowed}.log',
+                smoke_tests_utils.run_cloud_cmd_on_cluster(
+                    name,
+                    cmd=_volume_tags_cmd(region,
+                                         allowed_on_cloud,
+                                         must_be_tagged=True,
+                                         label='default-creds')),
+
+                # 2. A role that cannot tag volumes: warning, launch succeeds,
+                #    volumes untagged.
+                smoke_tests_utils.with_config(
+                    f'sky launch -y -c {denied} {launch} '
+                    f'> {denied}.log 2>&1; cat {denied}.log', denied_f.name),
+                f'grep -q "{_VOLUME_TAG_WARNING}" {denied}.log',
+                smoke_tests_utils.run_cloud_cmd_on_cluster(
+                    name,
+                    cmd=_volume_tags_cmd(region,
+                                         denied_on_cloud,
+                                         must_be_tagged=False,
+                                         label='restricted-creds')),
+
+                # 3. Same role, but `aws.enforce_tags: [volume]`: the launch
+                #    must fail rather than quietly produce untagged volumes,
+                #    and say why.
+                smoke_tests_utils.with_config(
+                    f'! sky launch -y -c {enforced} {launch} '
+                    f'> {enforced}.log 2>&1; cat {enforced}.log',
+                    enforced_f.name),
+                # The cause must reach the failure summary the user reads,
+                # not just a log line: the headline is the generic "relax the
+                # task's resource requirements", which cannot be acted on.
+                f'grep -q "Reason: Volume tagging is required" {enforced}.log',
+                f'grep -q "ec2:CreateTags" {enforced}.log',
+                # Nothing may be left behind by a refused launch.
+                f'! sky status 2>/dev/null | grep -q "{enforced}"',
+            ],
+            smoke_tests_utils.chain_teardown(
+                f'sky down -y {allowed}',
+                # Torn down through the same workspace it was created in.
+                # The restricted profile is a different AWS identity, and
+                # SkyPilot refuses to operate on a cluster owned by another
+                # one -- tearing this down on the default credentials fails
+                # with ClusterOwnerIdentityMismatchError and leaks the VM.
+                smoke_tests_utils.with_config(f'sky down -y {denied}',
+                                              denied_f.name),
+                # Should be a no-op -- the enforced launch is refused before
+                # anything is created -- but never leave that to chance.
+                smoke_tests_utils.with_config(f'sky down -y {enforced} || true',
+                                              enforced_f.name),
+                smoke_tests_utils.down_cluster_for_cloud_cmd(name),
+                smoke_tests_utils.SKY_API_RESTART),
+            timeout=30 * 60,
+        )
+        smoke_tests_utils.run_one_test(test)
+
+
 @pytest.mark.gcp
 @pytest.mark.parametrize('instance_types',
                          [['n2-standard-2', 'n2-standard-64']])
@@ -3408,7 +4525,13 @@ def test_remote_server_api_login():
         pytest.skip('This test is only for remote server')
 
     endpoint = smoke_tests_utils.get_api_server_url()
-    config_path = skypilot_config._GLOBAL_CONFIG_PATH
+    # Smoke tests run with SKYPILOT_GLOBAL_CONFIG pointing at a temp config, and
+    # login writes the config file that is in effect, so assert on the path the
+    # login process resolves rather than the default one.
+    # $HOME rather than ~, since a tilde arriving from a parameter expansion is
+    # not expanded again by the shell.
+    config_path = (f'${{{skypilot_config.ENV_VAR_GLOBAL_CONFIG}:-'
+                   '$HOME/.sky/config.yaml}')
     backup_path = f'{config_path}.backup_for_test_remote_server_api_login'
 
     test = smoke_tests_utils.Test(

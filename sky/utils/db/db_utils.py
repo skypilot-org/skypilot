@@ -19,6 +19,7 @@ from sqlalchemy.ext import asyncio as sqlalchemy_async
 from sky import sky_logging
 from sky.skylet import constants
 from sky.skylet import runtime_utils
+from sky.utils.db import sql_metrics
 
 logger = sky_logging.init_logger(__name__)
 if typing.TYPE_CHECKING:
@@ -680,7 +681,14 @@ def get_engine(
                 logger.debug(
                     f'Creating a new postgres {engine_type} engine with '
                     f'maximum {_max_connections} connections')
+                # The engine role that labels this engine's metrics. Derived
+                # from the same conditions as the cache key, so one cached
+                # engine always carries one role: when `direct` resolves to
+                # the same connection string as the pooled path (no pooler
+                # configured) it IS the same engine, and is labelled as such.
+                role = sql_metrics.DB_STATE
                 if no_pool and not async_engine:
+                    role = sql_metrics.DB_STATE_NOPOOL
                     # Isolated per-operation engine: never shares (or starves
                     # on) the default engine's pool. See the docstring.
                     engine_no_pool = sqlalchemy.create_engine(
@@ -691,6 +699,7 @@ def get_engine(
                         })
                     _postgres_engine_cache[cache_key] = engine_no_pool
                 elif async_engine:
+                    role = sql_metrics.DB_STATE_ASYNC
                     # Use NullPool for async engines to avoid event loop binding
                     # issues. asyncpg connection pools bind to the event loop on
                     # first use, which causes "Future attached to a different
@@ -706,6 +715,8 @@ def get_engine(
                             poolclass=sqlalchemy.NullPool,
                             async_creator=_make_asyncpg_creator(conn_string)))
                 elif _max_connections == 0 or (direct and _pooler_configured()):
+                    if direct and _pooler_configured():
+                        role = sql_metrics.DB_STATE_DIRECT
                     # NullPool: no persistent connections. Used when no pool
                     # size is configured, and — crucially — for the direct
                     # engine when a pooler IS configured. The direct engine
@@ -729,6 +740,7 @@ def get_engine(
                             max_overflow=max(0, 5 - _max_connections),
                             pool_pre_ping=True,
                             pool_recycle=1800))
+                sql_metrics.install(_postgres_engine_cache[cache_key], role)
             engine = _postgres_engine_cache[cache_key]
     else:
         assert db_name is not None, 'db_name must be provided for SQLite'
@@ -737,10 +749,14 @@ def get_engine(
         if async_engine:
             # This is an AsyncEngine, instead of a (normal, synchronous) Engine,
             # so we should not put it in the cache. Instead, just return.
-            return sqlalchemy_async.create_async_engine(
+            async_sqlite_engine = sqlalchemy_async.create_async_engine(
                 'sqlite+aiosqlite:///' + db_path, connect_args={'timeout': 30})
+            sql_metrics.install(async_sqlite_engine, f'sqlite_{db_name}')
+            return async_sqlite_engine
         if db_path not in _sqlite_engine_cache:
             _sqlite_engine_cache[db_path] = sqlalchemy.create_engine(
                 'sqlite:///' + db_path)
+            sql_metrics.install(_sqlite_engine_cache[db_path],
+                                f'sqlite_{db_name}')
         engine = _sqlite_engine_cache[db_path]
     return engine
