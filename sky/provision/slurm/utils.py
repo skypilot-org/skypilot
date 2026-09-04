@@ -31,7 +31,6 @@ _VAR_PATTERN = re.compile(r'\$(\w+|\{[^}]*\})')
 _SLURM_USER_PATTERN = re.compile(r'^[a-z_][a-z0-9_.-]*$')
 
 SLURM_MARKER_FILE = '.sky_slurm_cluster'
-SLURM_CONTAINER_MARKER_FILE = '.sky_slurm_container'
 
 # Regex pattern for parsing GPU GRES strings.
 # Format: 'gpu[:acc_type]:acc_count(optional_extra_info)'
