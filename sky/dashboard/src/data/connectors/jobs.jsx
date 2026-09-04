@@ -546,6 +546,11 @@ export async function getPoolStatus() {
     const pools = poolData.map((pool) => ({
       ...pool,
       jobCounts: jobCountsByPool[pool.name] || {},
+      // Normalize the owning user onto the same `user`/`user_hash` shape the
+      // clusters and jobs tables use, so the shared UserDisplay/filtering
+      // helpers work unchanged.
+      user: pool.user_name,
+      user_hash: pool.user_hash,
     }));
 
     return { pools, controllerStopped: false };
