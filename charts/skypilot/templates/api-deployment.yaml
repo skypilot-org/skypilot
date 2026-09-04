@@ -473,10 +473,15 @@ spec:
         # Warn if logrotate is missing in the image and keep the sidecar running
         args:
         - |
+          trap 'exit 0' TERM INT
+          sleep_until_signal() {
+            sleep "$1" &
+            wait "$!" || true
+          }
           if ! command -v logrotate >/dev/null 2>&1; then
             echo "warning: logrotate not found; skipping log retention" >&2
             while true; do
-              sleep 3600
+              sleep_until_signal 3600
             done
           fi
           set -x
@@ -491,7 +496,7 @@ spec:
           EOF
           while true; do
             logrotate -s /var/lib/logrotate/status /etc/logrotate.conf
-            sleep 60;
+            sleep_until_signal 60
           done
         volumeMounts:
         {{- if and $statePersist (eq .Values.apiService.upgradeStrategy "RollingUpdate") }}

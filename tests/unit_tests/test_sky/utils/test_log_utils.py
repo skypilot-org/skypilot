@@ -3,6 +3,7 @@
 import sys
 import time
 
+import pendulum
 import pytest
 
 from sky.utils import log_utils
@@ -80,3 +81,19 @@ def test_readable_time_end_at_none():
                                                   end=None,
                                                   absolute=True)
     assert result_abs == '50s'
+
+
+def test_readable_time_duration_does_not_resolve_local_timezone(monkeypatch):
+    """Duration formatting must not depend on the system timezone name."""
+    from_timestamp = pendulum.from_timestamp
+
+    def require_explicit_timezone(timestamp, tz=None):
+        assert tz == 'UTC'
+        return from_timestamp(timestamp, tz=tz)
+
+    monkeypatch.setattr(pendulum, 'from_timestamp', require_explicit_timezone)
+
+    result = log_utils.readable_time_duration(start=NOW,
+                                              end=NOW + 60,
+                                              absolute=True)
+    assert result == '1m'

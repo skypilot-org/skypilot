@@ -233,8 +233,8 @@ def readable_time_duration(start: Optional[float],
     if end == start == 0:
         return '-'
     if end is not None:
-        end = pendulum.from_timestamp(end)
-    start_time = pendulum.from_timestamp(start)
+        end = pendulum.from_timestamp(end, tz='UTC')
+    start_time = pendulum.from_timestamp(start, tz='UTC')
     duration = start_time.diff(end)
     if absolute:
         diff = start_time.diff(end).in_words()
