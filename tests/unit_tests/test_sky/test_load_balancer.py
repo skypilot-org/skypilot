@@ -6,6 +6,7 @@ import httpx
 import pytest
 
 from sky.serve import load_balancer
+from sky.serve import load_balancing_policies
 
 
 def _make_request():
@@ -338,7 +339,7 @@ async def test_missing_client_releases_least_load_accounting():
 
 
 def test_retired_replica_load_is_removed_after_inflight_request_finishes():
-    policy = load_balancer.lb_policies.LeastLoadPolicy()
+    policy = load_balancing_policies.LeastLoadPolicy()
     replica_url = 'http://replica'
     request = _make_request()
 
@@ -357,7 +358,7 @@ def test_retired_replica_load_is_removed_after_inflight_request_finishes():
 
 
 def test_least_load_rotates_equal_load_ties():
-    policy = load_balancer.lb_policies.LeastLoadPolicy()
+    policy = load_balancing_policies.LeastLoadPolicy()
     replicas = ['http://replica-1', 'http://replica-2', 'http://replica-3']
     policy.set_ready_replicas(replicas)
 
@@ -367,7 +368,7 @@ def test_least_load_rotates_equal_load_ties():
 
 
 def test_instance_aware_least_load_rotates_equal_load_ties():
-    policy = load_balancer.lb_policies.InstanceAwareLeastLoadPolicy()
+    policy = load_balancing_policies.InstanceAwareLeastLoadPolicy()
     replicas = ['http://replica-1', 'http://replica-2']
     policy.set_ready_replicas(replicas)
 
