@@ -846,7 +846,7 @@ class StrategyExecutor:
         # change takes effect on this relaunch (the controller caches the DAG
         # in memory for its lifetime).
         if recovery:
-            self._refresh_priority_from_persisted_dag()
+            await asyncio.to_thread(self._refresh_priority_from_persisted_dag)
         # TODO(zhwu): handle the failure during `preparing sky runtime`.
         retry_cnt = 0
         backoff = common_utils.Backoff(self.RETRY_INIT_GAP_SECONDS)

@@ -414,7 +414,7 @@ async def scheduled_launch(
     multiple uses of this context are nested, behavior is undefined. Don't do
     that.
     """
-    pool = state.get_pool_from_job_id(job_id)
+    pool = await asyncio.to_thread(state.get_pool_from_job_id, job_id)
     # For pool, since there is no execution.launch, we don't need to have all
     # the ALIVE_WAITING state. The state transition will be
     # WAITING -> ALIVE -> DONE without any intermediate transitions.
@@ -427,7 +427,8 @@ async def scheduled_launch(
     # level in _run_job_group(), so bypass per-task scheduling here.
     # Check if job is a JobGroup by examining the DAG YAML content.
     # TODO(zhwu): make JobGroup scheduler aware.
-    dag_content = file_content_utils.get_job_dag_content(job_id)
+    dag_content = await asyncio.to_thread(
+        file_content_utils.get_job_dag_content, job_id)
     if dag_content is not None and dag_utils.is_job_group_yaml_str(dag_content):
         yield
         return
