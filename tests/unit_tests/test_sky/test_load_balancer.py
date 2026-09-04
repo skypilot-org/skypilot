@@ -25,6 +25,26 @@ def _make_load_balancer():
         load_balancing_policy_name='least_load')
 
 
+async def _run_response_with_client_disconnect(response, spec_version):
+
+    async def receive():
+        if spec_version == '2.3':
+            return {'type': 'http.disconnect'}
+        raise AssertionError('The request should not be received.')
+
+    async def send(message):
+        del message
+        if spec_version == '2.4':
+            raise OSError('client disconnected')
+
+    scope = {'type': 'http', 'asgi': {'spec_version': spec_version}}
+    if spec_version == '2.4':
+        with pytest.raises(Exception):
+            await response(scope, receive, send)
+    else:
+        await response(scope, receive, send)
+
+
 @pytest.mark.asyncio
 async def test_proxy_error_releases_least_load_accounting():
     lb = _make_load_balancer()
@@ -172,35 +192,138 @@ async def test_client_disconnect_before_streaming_releases_load_accounting(
 
     response = await lb._proxy_request_to(replica_url, _make_request())
 
-    async def receive():
-        if spec_version == '2.3':
-            return {'type': 'http.disconnect'}
-        raise AssertionError('The request should not be received.')
-
-    async def send(message):
-        del message
-        if spec_version == '2.4':
-            raise OSError('client disconnected')
-
-    if spec_version == '2.4':
-        with pytest.raises(Exception):
-            await response(
-                {
-                    'type': 'http',
-                    'asgi': {
-                        'spec_version': spec_version
-                    }
-                }, receive, send)
-    else:
-        await response({
-            'type': 'http',
-            'asgi': {
-                'spec_version': spec_version
-            }
-        }, receive, send)
+    await _run_response_with_client_disconnect(response, spec_version)
 
     assert lb._load_balancing_policy.load_map[replica_url] == 0
     proxy_response.aclose.assert_awaited_once()
+
+
+@pytest.mark.parametrize('spec_version', ['2.3', '2.4'])
+@pytest.mark.asyncio
+async def test_proxy_retries_spread_load_after_failure_and_disconnect(
+        spec_version, monkeypatch):
+    lb = _make_load_balancer()
+    replica_urls = [
+        'http://failing-replica',
+        'http://healthy-replica-1',
+        'http://healthy-replica-2',
+    ]
+    failing_url = replica_urls[0]
+    healthy_responses = []
+
+    def make_proxy_response():
+
+        async def response_body():
+            await asyncio.Event().wait()
+            yield b'unreachable'
+
+        proxy_response = mock.MagicMock()
+        proxy_response.aiter_raw.return_value = response_body()
+        proxy_response.status_code = 200
+        proxy_response.headers = {}
+        proxy_response.aclose = mock.AsyncMock()
+        healthy_responses.append(proxy_response)
+        return proxy_response
+
+    async def send_to_healthy_replica(proxy_request, **kwargs):
+        del proxy_request, kwargs
+        return make_proxy_response()
+
+    for replica_url in replica_urls:
+        client = mock.MagicMock()
+        client.build_request.return_value = mock.sentinel.proxy_request
+        if replica_url == failing_url:
+            client.send = mock.AsyncMock(
+                side_effect=httpx.ReadTimeout('timed out'))
+        else:
+            client.send = mock.AsyncMock(side_effect=send_to_healthy_replica)
+        lb._client_pool[replica_url] = client
+
+    policy = lb._load_balancing_policy
+    policy.set_ready_replicas(replica_urls)
+    request = _make_request()
+    request.is_disconnected = mock.AsyncMock(return_value=False)
+    monkeypatch.setattr(load_balancer.asyncio, 'sleep', mock.AsyncMock())
+
+    # The failed attempt and every disconnected response must release its
+    # load before the next request is selected.
+    for _ in range(4):
+        response = await lb._proxy_with_retries(request)
+        await _run_response_with_client_disconnect(response, spec_version)
+        assert all(
+            policy.load_map[replica_url] == 0 for replica_url in replica_urls)
+
+    assert [
+        lb._client_pool[replica_url].send.await_count
+        for replica_url in replica_urls
+    ] == [2, 2, 2]
+    assert all(
+        response.aclose.await_count == 1 for response in healthy_responses)
+
+
+@pytest.mark.parametrize('spec_version', ['2.3', '2.4'])
+@pytest.mark.asyncio
+async def test_proxy_stops_retrying_after_client_disconnect_without_leaking_load(
+        spec_version):
+    lb = _make_load_balancer()
+    replica_urls = [
+        'http://failing-replica',
+        'http://healthy-replica-1',
+        'http://healthy-replica-2',
+    ]
+    healthy_responses = []
+
+    def make_proxy_response():
+
+        async def response_body():
+            await asyncio.Event().wait()
+            yield b'unreachable'
+
+        proxy_response = mock.MagicMock()
+        proxy_response.aiter_raw.return_value = response_body()
+        proxy_response.status_code = 200
+        proxy_response.headers = {}
+        proxy_response.aclose = mock.AsyncMock()
+        healthy_responses.append(proxy_response)
+        return proxy_response
+
+    async def send_to_healthy_replica(proxy_request, **kwargs):
+        del proxy_request, kwargs
+        return make_proxy_response()
+
+    clients = {}
+    for replica_url in replica_urls:
+        client = mock.MagicMock()
+        client.build_request.return_value = mock.sentinel.proxy_request
+        if replica_url == replica_urls[0]:
+            client.send = mock.AsyncMock(
+                side_effect=httpx.ReadTimeout('timed out'))
+        else:
+            client.send = mock.AsyncMock(side_effect=send_to_healthy_replica)
+        clients[replica_url] = client
+        lb._client_pool[replica_url] = client
+
+    policy = lb._load_balancing_policy
+    policy.set_ready_replicas(replica_urls)
+    request = _make_request()
+    request.is_disconnected = mock.AsyncMock(return_value=True)
+
+    result_statuses = []
+    for _ in range(4):
+        result = await lb._proxy_with_retries(request)
+        result_statuses.append(result.status_code)
+        if result.status_code != 499:
+            await _run_response_with_client_disconnect(result, spec_version)
+        assert all(
+            policy.load_map[replica_url] == 0 for replica_url in replica_urls)
+
+    assert result_statuses == [499, 200, 200, 499]
+    assert request.is_disconnected.await_count == 2
+    assert [
+        clients[replica_url].send.await_count for replica_url in replica_urls
+    ] == [2, 1, 1]
+    assert all(
+        response.aclose.await_count == 1 for response in healthy_responses)
 
 
 @pytest.mark.asyncio
