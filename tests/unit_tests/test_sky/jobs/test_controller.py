@@ -12,6 +12,7 @@ import asyncio
 import copy
 import runpy
 import sys
+import time
 from typing import Dict, List, Optional, Tuple
 from unittest.mock import AsyncMock
 from unittest.mock import MagicMock
@@ -19,17 +20,21 @@ from unittest.mock import patch
 import warnings
 
 import pytest
+import sqlalchemy.exc
 
 import sky
 from sky import task as task_lib
+from sky.jobs import constants as jobs_constants
 from sky.jobs import controller as controller_module
 from sky.jobs import job_group_networking
+from sky.jobs import scheduler
 from sky.jobs import state as managed_job_state
 from sky.jobs import utils as managed_job_utils
 from sky.jobs.controller import ControllerManager
 from sky.jobs.controller import JobController
 from sky.skylet import job_lib
 from sky.utils import common
+from sky.utils import common_utils
 from sky.utils import status_lib
 from sky.utils.plugin_extensions import LogDeliverySource
 
@@ -2397,3 +2402,159 @@ class TestJobGroupPhase2FailurePropagation:
                 await JobController._run_job_group(controller)
 
         controller._cleanup_job_group_clusters.assert_not_awaited()
+
+
+class TestRunJobLoopTransientDbErrors:
+    """asyncio.sleep is patched to record each backoff and advance the fake
+    clock that the retry deadline reads."""
+
+    @staticmethod
+    def _db_error() -> sqlalchemy.exc.OperationalError:
+        return sqlalchemy.exc.OperationalError(
+            'SELECT 1', {},
+            Exception('server closed the connection unexpectedly'))
+
+    @pytest.fixture
+    def sleeps(self, monkeypatch) -> List[float]:
+        now = [1_000_000.0]
+        slept: List[float] = []
+
+        async def _fake_sleep(seconds):
+            slept.append(seconds)
+            now[0] += seconds
+
+        monkeypatch.setattr(asyncio, 'sleep', _fake_sleep)
+        monkeypatch.setattr(time, 'monotonic', lambda: now[0])
+        return slept
+
+    @pytest.fixture
+    def manager(self, monkeypatch) -> ControllerManager:
+        manager = ControllerManager('test-uuid')
+        manager.starting.add(1)
+        manager._cleanup = AsyncMock()
+        manager._download_logs_for_cancelled_job = AsyncMock()
+
+        job_controller = MagicMock()
+        job_controller.run = AsyncMock()
+        monkeypatch.setattr(controller_module, 'JobController',
+                            MagicMock(return_value=job_controller))
+        monkeypatch.setattr(controller_module.context, 'get',
+                            MagicMock(return_value=MagicMock()))
+        monkeypatch.setattr(controller_module.file_content_utils,
+                            'get_job_env_content', MagicMock(return_value=None))
+        monkeypatch.setattr(controller_module.usage_lib,
+                            'install_fresh_messages_for_current_context',
+                            MagicMock())
+        dag = MagicMock()
+        dag.tasks = [MagicMock()]
+        monkeypatch.setattr(controller_module, '_get_dag',
+                            MagicMock(return_value=dag))
+        monkeypatch.setattr(managed_job_utils, 'event_callback_func',
+                            MagicMock(return_value=None))
+        monkeypatch.setattr(managed_job_state, 'set_failed_async', AsyncMock())
+        monkeypatch.setattr(managed_job_state, 'set_cancelled_async',
+                            AsyncMock())
+        monkeypatch.setattr(managed_job_state, 'set_cancelling_async',
+                            AsyncMock())
+        monkeypatch.setattr(
+            managed_job_state, 'get_all_task_ids_statuses_async',
+            AsyncMock(
+                return_value=[(0, managed_job_state.ManagedJobStatus.RUNNING)]))
+        monkeypatch.setattr(
+            managed_job_state, 'get_status_async',
+            AsyncMock(
+                return_value=managed_job_state.ManagedJobStatus.SUCCEEDED))
+        monkeypatch.setattr(scheduler, 'job_done_async', AsyncMock())
+        return manager
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize('step', ['cleanup', 'get_status'])
+    async def test_transient_db_error_is_retried(self, manager, sleeps, step):
+        if step == 'cleanup':
+            target = manager._cleanup
+            target.side_effect = [self._db_error(), self._db_error(), None]
+        else:
+            target = managed_job_state.get_status_async
+            target.side_effect = [
+                self._db_error(),
+                self._db_error(),
+                managed_job_state.ManagedJobStatus.SUCCEEDED,
+            ]
+
+        await manager.run_job_loop(1, 'job.log')
+
+        assert target.await_count == 3
+        assert len(sleeps) == 2
+        managed_job_state.set_failed_async.assert_not_awaited()
+        scheduler.job_done_async.assert_awaited_once_with(1, idempotent=True)
+        assert 1 not in manager.job_tasks
+
+    @pytest.mark.asyncio
+    async def test_cleanup_error_caused_by_db_error_is_retried(
+            self, manager, sleeps):
+        wrapped = RuntimeError('Failed to terminate the cluster c.')
+        wrapped.__cause__ = self._db_error()
+        manager._cleanup.side_effect = [wrapped, None]
+
+        await manager.run_job_loop(1, 'job.log')
+
+        assert manager._cleanup.await_count == 2
+        assert len(sleeps) == 1
+        managed_job_state.set_failed_async.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_cleanup_non_db_error_fails_job(self, manager, sleeps):
+        manager._cleanup.side_effect = RuntimeError('boom')
+        managed_job_state.get_status_async.return_value = (
+            managed_job_state.ManagedJobStatus.FAILED_CONTROLLER)
+
+        await manager.run_job_loop(1, 'job.log')
+
+        assert manager._cleanup.await_count == 1
+        assert not sleeps
+        managed_job_state.set_failed_async.assert_awaited_once()
+        kwargs = managed_job_state.set_failed_async.await_args.kwargs
+        assert kwargs['failure_type'] == (
+            managed_job_state.ManagedJobStatus.FAILED_CONTROLLER)
+        assert kwargs['override_terminal'] is True
+        assert kwargs['failure_reason'].startswith('Failed to clean up')
+        scheduler.job_done_async.assert_awaited_once_with(1, idempotent=True)
+
+    @pytest.mark.asyncio
+    async def test_cleanup_db_error_past_budget_fails_job(
+            self, manager, sleeps):
+        manager._cleanup.side_effect = self._db_error()
+        managed_job_state.get_status_async.return_value = (
+            managed_job_state.ManagedJobStatus.FAILED_CONTROLLER)
+
+        await manager.run_job_loop(1, 'job.log')
+
+        assert manager._cleanup.await_count > 2
+        assert sum(sleeps) >= (
+            jobs_constants.JOB_FINALIZE_DB_RETRY_BUDGET_SECONDS)
+        assert max(sleeps) <= (
+            jobs_constants.JOB_FINALIZE_DB_RETRY_BACKOFF_CAP_SECONDS *
+            (1 + common_utils.Backoff.JITTER))
+        managed_job_state.set_failed_async.assert_awaited_once()
+        kwargs = managed_job_state.set_failed_async.await_args.kwargs
+        assert kwargs['override_terminal'] is True
+        assert 'OperationalError' in kwargs['failure_reason']
+        scheduler.job_done_async.assert_awaited_once_with(1, idempotent=True)
+
+    @pytest.mark.asyncio
+    async def test_cancelled_job_ends_cancelled_after_cleanup_retry(
+            self, manager, sleeps):
+        controller_module.JobController.return_value.run.side_effect = (
+            asyncio.CancelledError())
+        manager._cleanup.side_effect = [self._db_error(), None]
+        managed_job_state.get_status_async.return_value = (
+            managed_job_state.ManagedJobStatus.CANCELLED)
+
+        with pytest.raises(asyncio.CancelledError):
+            await manager.run_job_loop(1, 'job.log')
+
+        assert manager._cleanup.await_count == 2
+        managed_job_state.set_cancelling_async.assert_awaited_once()
+        managed_job_state.set_cancelled_async.assert_awaited_once()
+        managed_job_state.set_failed_async.assert_not_awaited()
+        scheduler.job_done_async.assert_awaited_once_with(1, idempotent=True)
