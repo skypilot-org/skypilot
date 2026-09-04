@@ -197,3 +197,42 @@ async def _coro_returning(value):
 
 async def _coro_raising(exc):
     raise exc
+
+
+class TestIsTransient:
+
+    def test_direct_retryable_exception(self):
+        assert retries.is_transient(_make_op_error())
+
+    def test_non_db_exception(self):
+        assert not retries.is_transient(RuntimeError('boom'))
+
+    def test_follows_cause_chain(self):
+        err = RuntimeError('Failed to terminate the cluster c.')
+        err.__cause__ = _make_op_error()
+        assert retries.is_transient(err)
+
+    def test_sqlalchemy_wrapper_around_asyncpg_error(self):
+        # The asyncpg dialect maps PostgresError to the generic DBAPIError;
+        # the asyncpg class survives only as the cause.
+        adapter_err = Exception('adapter')
+        adapter_err.__cause__ = asyncpg.exceptions.ProtocolViolationError(
+            'query_wait_timeout')
+        err = sqlalchemy.exc.DBAPIError('SELECT 1', {}, adapter_err)
+        err.__cause__ = adapter_err
+        assert retries.is_transient(err)
+
+    def test_cause_cycle_terminates(self):
+        a = RuntimeError('a')
+        b = RuntimeError('b')
+        a.__cause__ = b
+        b.__cause__ = a
+        assert not retries.is_transient(a)
+
+    def test_with_db_retries_retries_cause_chained_error(self):
+        err = RuntimeError('wrapped')
+        err.__cause__ = _make_op_error()
+        fn = mock.Mock(side_effect=[err, 'ok'])
+        with mock.patch.object(retries.time, 'sleep'):
+            assert retries.with_db_retries(fn) == 'ok'
+        assert fn.call_count == 2

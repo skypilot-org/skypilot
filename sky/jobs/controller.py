@@ -102,19 +102,6 @@ async def create_background_task(coro: typing.Coroutine) -> None:
         task.add_done_callback(_background_tasks.discard)
 
 
-def _is_transient_db_error(error: BaseException) -> bool:
-    """Whether `error`, or an error it was raised from, is a transient DB
-    error (see sky.utils.db.retries)."""
-    seen: Set[int] = set()
-    current: Optional[BaseException] = error
-    while current is not None and id(current) not in seen:
-        if isinstance(current, db_retries.RETRYABLE_EXCEPTIONS):
-            return True
-        seen.add(id(current))
-        current = current.__cause__
-    return False
-
-
 async def _retry_on_transient_db_error(coro_fn: Callable[..., Awaitable[T]],
                                        *args, **kwargs) -> T:
     """Await `coro_fn(*args, **kwargs)`, retrying transient DB errors in place.
@@ -132,7 +119,7 @@ async def _retry_on_transient_db_error(coro_fn: Callable[..., Awaitable[T]],
         try:
             return await coro_fn(*args, **kwargs)
         except Exception as e:  # pylint: disable=broad-except
-            if not _is_transient_db_error(e) or time.time() >= deadline:
+            if not db_retries.is_transient(e) or time.time() >= deadline:
                 raise
             delay = backoff.current_backoff()
             logger.warning(f'Transient DB error in {name}, retrying in '

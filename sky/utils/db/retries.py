@@ -9,7 +9,8 @@ catch-all's own DB write failing too, producing a silent RUNNING zombie.
 Wrap any DB-touching call site with one of these helpers. They catch
 `sqlalchemy.exc.OperationalError` (which wraps `psycopg2.OperationalError`
 and many asyncpg connection errors), plus raw driver/network exceptions
-that can escape SQLAlchemy, and retry with exponential backoff + jitter.
+that can escape SQLAlchemy, also when one of those is the `__cause__` of
+the raised exception, and retry with exponential backoff + jitter.
 """
 
 import asyncio
@@ -17,7 +18,7 @@ import functools
 import logging
 import socket
 import time
-from typing import Awaitable, Callable, Tuple, Type, TypeVar
+from typing import Awaitable, Callable, Optional, Set, Tuple, Type, TypeVar
 
 import sqlalchemy.exc
 
@@ -85,6 +86,26 @@ def _build_retryable_exceptions() -> Tuple[Type[BaseException], ...]:
 
 RETRYABLE_EXCEPTIONS = _build_retryable_exceptions()
 
+
+def is_transient(error: BaseException) -> bool:
+    """Whether `error`, or an error it was raised from, is a transient DB
+    error.
+
+    Follows `__cause__`: SQLAlchemy raises its `DBAPIError` wrapper from the
+    driver error (the asyncpg dialect maps every `PostgresError` to the
+    generic wrapper), and call sites such as `terminate_cluster` re-raise
+    with `from e`.
+    """
+    seen: Set[int] = set()
+    current: Optional[BaseException] = error
+    while current is not None and id(current) not in seen:
+        if isinstance(current, RETRYABLE_EXCEPTIONS):
+            return True
+        seen.add(id(current))
+        current = current.__cause__
+    return False
+
+
 # 5 attempts × exp backoff capped at 5s ≈ ~10s of backoff sleeps — covers
 # typical brief outages (DNS hiccup, sub-second RDS reconnect) and the
 # short tail of longer ones; very long outages (multi-second RDS failover)
@@ -125,7 +146,9 @@ def with_db_retries(fn: Callable[[int], T],
                 logger.info(
                     f'Transient DB error recovered after {attempt} retries.')
             return result
-        except RETRYABLE_EXCEPTIONS as e:
+        except Exception as e:  # pylint: disable=broad-except
+            if not is_transient(e):
+                raise
             if attempt == max_retries - 1:
                 logger.error(f'Transient DB error: giving up after '
                              f'{max_retries} attempts; {summarize(e)}')
@@ -154,7 +177,9 @@ async def with_db_retries_async(coro_fn: Callable[[int], Awaitable[T]],
                 logger.info(
                     f'Transient DB error recovered after {attempt} retries.')
             return result
-        except RETRYABLE_EXCEPTIONS as e:
+        except Exception as e:  # pylint: disable=broad-except
+            if not is_transient(e):
+                raise
             if attempt == max_retries - 1:
                 logger.error(f'Transient DB error: giving up after '
                              f'{max_retries} attempts; {summarize(e)}')
