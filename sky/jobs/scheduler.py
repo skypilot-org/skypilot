@@ -438,8 +438,9 @@ async def scheduled_launch(
 
     while True:
         async with starting_lock:
-            starting_count = len(starting)
-            if starting_count < controller_utils.LAUNCHES_PER_WORKER:
+            # start_job already reserved this job's slot for its first launch.
+            if (job_id in starting or
+                    len(starting) < controller_utils.LAUNCHES_PER_WORKER):
                 break
             logger.info('Too many jobs starting, waiting for a slot')
             await starting_signal.wait()

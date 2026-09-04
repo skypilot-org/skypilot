@@ -25,6 +25,7 @@ from sky.jobs import constants as jobs_constants
 from sky.jobs import controller
 from sky.jobs import scheduler
 from sky.jobs import state
+from sky.utils import controller_utils
 
 _PID = 1234
 _PID_STARTED_AT = 111.0
@@ -488,6 +489,29 @@ class TestEmergencyRecoveryState:
         async with scheduler.scheduled_launch(1, set(), lock,
                                               asyncio.Condition(lock=lock)):
             pass
+        assert _get_job_info_row(engine)['schedule_state'] == 'ALIVE'
+
+    @pytest.mark.asyncio
+    async def test_scheduled_launch_enters_with_reserved_slot(
+            self, _mock_managed_jobs_db_conn):
+        # start_job adds a claimed job to `starting` before its first launch.
+        # With LAUNCHES_PER_WORKER jobs claimed back to back, every job sees a
+        # full set that includes itself; it must enter anyway rather than wait
+        # for a slot none of them will release.
+        engine = _mock_managed_jobs_db_conn
+        _seed_job(engine, status='PENDING', schedule_state='LAUNCHING')
+        starting = {1} | set(
+            range(1000, 1000 + controller_utils.LAUNCHES_PER_WORKER - 1))
+        assert len(starting) == controller_utils.LAUNCHES_PER_WORKER
+        lock = asyncio.Lock()
+
+        async def _enter_and_exit():
+            async with scheduler.scheduled_launch(1, starting, lock,
+                                                  asyncio.Condition(lock=lock)):
+                assert 1 in starting
+
+        await asyncio.wait_for(_enter_and_exit(), timeout=5)
+        assert 1 not in starting
         assert _get_job_info_row(engine)['schedule_state'] == 'ALIVE'
 
     def test_backoff_schedule_states_block_controller_autostop(
