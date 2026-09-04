@@ -7,6 +7,7 @@ from sky import clouds
 from sky import exceptions
 from sky.adaptors import azure
 from sky.clouds.utils import azure_utils
+from sky.provision.azure import instance
 from sky.provision.azure.config import _remove_msi_resources_from_template
 from sky.provision.azure.config import _remove_network_resources_from_template
 from sky.provision.azure.config import _resolve_custom_managed_identity
@@ -263,3 +264,32 @@ def _make_arm_template():
             },
         }
     }
+
+
+class TestVmUserAssignedIdentity:
+    """Tests for deriving a VM's managed identity in get_cluster_info."""
+
+    @staticmethod
+    def _vm(identity_ids):
+        identity = None
+        if identity_ids is not None:
+            identity = mock.MagicMock()
+            identity.user_assigned_identities = {
+                identity_id: {} for identity_id in identity_ids
+            }
+        vm = mock.MagicMock()
+        vm.identity = identity
+        return vm
+
+    def test_single_identity_is_returned(self):
+        msi = ('/subscriptions/sub/resourceGroups/rg/providers/'
+               'Microsoft.ManagedIdentity/userAssignedIdentities/mi')
+        assert instance._vm_user_assigned_identity(self._vm([msi])) == msi
+
+    def test_no_identity_returns_none(self):
+        assert instance._vm_user_assigned_identity(self._vm(None)) is None
+        assert instance._vm_user_assigned_identity(self._vm([])) is None
+
+    def test_multiple_identities_are_ambiguous(self):
+        assert instance._vm_user_assigned_identity(self._vm(['/a', '/b'
+                                                            ])) is None
