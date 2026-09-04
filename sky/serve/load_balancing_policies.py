@@ -198,20 +198,6 @@ class InstanceAwareLeastLoadPolicy(LeastLoadPolicy,
         self.target_qps_per_accelerator: Dict[str, float] = {
         }  # accelerator_type -> target_qps
 
-    def set_ready_replicas(self, ready_replicas: List[str]) -> None:
-        if set(self.ready_replicas) == set(ready_replicas):
-            return
-        with self.lock:
-            self.ready_replicas = ready_replicas
-            # Clean up load map for removed replicas
-            for r in list(self.load_map.keys()):
-                if (r not in ready_replicas and self.load_map[r] <= 0):
-                    del self.load_map[r]
-            # Initialize load for new replicas
-            for replica in ready_replicas:
-                if replica not in self.load_map:
-                    self.load_map[replica] = 0
-
     def set_replica_info(self, replica_info: Dict[str, Dict[str, Any]]) -> None:
         """Set replica information including accelerator types.
 
@@ -298,4 +284,5 @@ class InstanceAwareLeastLoadPolicy(LeastLoadPolicy,
             logger.debug('Selected replica: %s', selected_replica)
             return selected_replica
 
-    # pre_execute_hook and post_execute_hook are inherited from LeastLoadPolicy
+    # set_ready_replicas, pre_execute_hook, and post_execute_hook are inherited
+    # from LeastLoadPolicy.
