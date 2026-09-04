@@ -122,3 +122,23 @@ def test_retired_replica_load_is_removed_after_inflight_request_finishes():
     assert policy.load_map[replica_url] == 0
     policy.set_ready_replicas([])
     assert replica_url not in policy.load_map
+
+
+def test_least_load_rotates_equal_load_ties():
+    policy = load_balancer.lb_policies.LeastLoadPolicy()
+    replicas = ['http://replica-1', 'http://replica-2', 'http://replica-3']
+    policy.set_ready_replicas(replicas)
+
+    selected_replicas = [policy._select_replica(None) for _ in range(6)]
+
+    assert selected_replicas == replicas * 2
+
+
+def test_instance_aware_least_load_rotates_equal_load_ties():
+    policy = load_balancer.lb_policies.InstanceAwareLeastLoadPolicy()
+    replicas = ['http://replica-1', 'http://replica-2']
+    policy.set_ready_replicas(replicas)
+
+    selected_replicas = [policy._select_replica(None) for _ in range(4)]
+
+    assert selected_replicas == replicas * 2
