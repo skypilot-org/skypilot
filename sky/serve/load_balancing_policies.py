@@ -118,7 +118,8 @@ class LeastLoadPolicy(LoadBalancingPolicy, name='least_load', default=True):
         self._tie_breaker_index = 0
 
     def set_ready_replicas(self, ready_replicas: List[str]) -> None:
-        if set(self.ready_replicas) == set(ready_replicas):
+        ready_replica_set = set(ready_replicas)
+        if set(self.ready_replicas) == ready_replica_set:
             return
         with self.lock:
             self.ready_replicas = ready_replicas
@@ -126,7 +127,7 @@ class LeastLoadPolicy(LoadBalancingPolicy, name='least_load', default=True):
                 # Keep the accounting for retired replicas until their
                 # in-flight requests finish. Otherwise a late completion can
                 # recreate the entry with a negative load.
-                if (r not in ready_replicas and self.load_map[r] <= 0):
+                if r not in ready_replica_set and self.load_map[r] <= 0:
                     del self.load_map[r]
             for replica in ready_replicas:
                 self.load_map[replica] = self.load_map.get(replica, 0)
@@ -145,14 +146,14 @@ class LeastLoadPolicy(LoadBalancingPolicy, name='least_load', default=True):
             ]
             return self._select_tied_replica(tied_replicas)
 
-    def _select_tied_replica(self, replicas: List[str]) -> Optional[str]:
+    def _select_tied_replica(self, replicas: List[str]) -> str:
         """Select among tied replicas without favoring the first one.
 
         The cursor is relative to all ready replicas, so changes to the set
         of tied replicas do not cause the same endpoint to win repeatedly.
         """
-        if not replicas or not self.ready_replicas:
-            return None
+        assert replicas and self.ready_replicas, (
+            'Cannot select from empty replica lists.')
         tied_replicas = set(replicas)
         for offset in range(len(self.ready_replicas)):
             index = (self._tie_breaker_index + offset) % len(
@@ -161,7 +162,7 @@ class LeastLoadPolicy(LoadBalancingPolicy, name='least_load', default=True):
             if replica in tied_replicas:
                 self._tie_breaker_index = (index + 1) % len(self.ready_replicas)
                 return replica
-        return None
+        raise RuntimeError('No tied replica found among ready replicas.')
 
     def pre_execute_hook(self, replica_url: str,
                          request: 'fastapi.Request') -> None:
