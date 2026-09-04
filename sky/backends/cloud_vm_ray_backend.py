@@ -1366,6 +1366,12 @@ class RetryingVmProvisioner(object):
                             zones, e)
                         continue
                     except Exception as e:  # pylint: disable=broad-except
+                        if isinstance(e, exceptions.InvalidCloudCredentials):
+                            # A permission problem is not a capacity problem:
+                            # without this the failover summary only offers
+                            # "relax the task's resource requirements", which
+                            # no amount of relaxing can fix.
+                            last_error_reason = str(e)
                         # NOTE: We try to cleanup the cluster even if the previous
                         # cluster does not exist. Also we are fast at
                         # cleaning up clusters now if there is no existing node..

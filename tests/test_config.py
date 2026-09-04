@@ -341,6 +341,45 @@ def test_invalid_enum_config(monkeypatch, tmp_path) -> None:
     assert 'Invalid config YAML' in e.value.args[0]
 
 
+@pytest.mark.parametrize('enforce_tags', [
+    '[]',
+    '[instance]',
+    '[volume]',
+    '[instance, volume]',
+    '[volume, instance]',
+])
+def test_aws_enforce_tags_valid(monkeypatch, tmp_path, enforce_tags) -> None:
+    config_path = tmp_path / 'valid.yaml'
+    config_path.open('w', encoding='utf-8').write(
+        textwrap.dedent(f"""\
+        aws:
+            enforce_tags: {enforce_tags}
+        """))
+    monkeypatch.setattr(skypilot_config, '_GLOBAL_CONFIG_PATH', config_path)
+    skypilot_config.reload_config()
+    assert skypilot_config.get_nested(('aws', 'enforce_tags'), None) is not None
+
+
+@pytest.mark.parametrize(('enforce_tags', 'reason'), [
+    ('[volume, volume]', 'duplicate'),
+    ('[Volume]', 'wrong case'),
+    ('[disk]', 'not a supported resource type'),
+])
+def test_aws_enforce_tags_invalid(monkeypatch, tmp_path, enforce_tags,
+                                  reason) -> None:
+    del reason  # Only for readable test ids.
+    config_path = tmp_path / 'invalid.yaml'
+    config_path.open('w', encoding='utf-8').write(
+        textwrap.dedent(f"""\
+        aws:
+            enforce_tags: {enforce_tags}
+        """))
+    monkeypatch.setattr(skypilot_config, '_GLOBAL_CONFIG_PATH', config_path)
+    with pytest.raises(ValueError) as e:
+        skypilot_config.reload_config()
+    assert 'Invalid config YAML' in e.value.args[0]
+
+
 def test_gcp_vpc_name_validation(monkeypatch, tmp_path) -> None:
     """Test GCP vpc_name validation with valid and invalid pattern.
 

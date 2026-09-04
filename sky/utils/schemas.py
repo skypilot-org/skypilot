@@ -1994,6 +1994,14 @@ def get_config_schema():
                         }]
                     },
                 },
+                'enforce_tags': {
+                    'type': 'array',
+                    'uniqueItems': True,
+                    'items': {
+                        'type': 'string',
+                        'case_sensitive_enum': ['instance', 'volume'],
+                    },
+                },
                 **_CAPABILITIES_SCHEMA,
                 **_LABELS_SCHEMA,
                 **_NETWORK_CONFIG_SCHEMA,
