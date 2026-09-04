@@ -198,9 +198,11 @@ class SkyServeLoadBalancer:
             load_released = True
             self._load_balancing_policy.post_execute_hook(url, request)
 
+        load_incremented = False
         response_returned = False
         try:
             self._load_balancing_policy.pre_execute_hook(url, request)
+            load_incremented = True
             # We defer the get of the client here on purpose, for case when the
             # replica is ready in `_proxy_with_retries` but refreshed before
             # entering this function. In that case we will return an error here
@@ -243,7 +245,7 @@ class SkyServeLoadBalancer:
             # response body cleanup cannot run to release the load. This also
             # covers a replica disappearing from the client pool between
             # selection and proxying.
-            if not response_returned:
+            if load_incremented and not response_returned:
                 release_load()
 
     async def _proxy_with_retries(
