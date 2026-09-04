@@ -60,8 +60,38 @@ async def test_streaming_response_releases_least_load_accounting_on_close():
     response = await lb._proxy_request_to(replica_url, _make_request())
 
     assert lb._load_balancing_policy.load_map[replica_url] == 1
-    await response.background()
+    assert await response.body_iterator.__anext__() == b'response'
+    with pytest.raises(StopAsyncIteration):
+        await response.body_iterator.__anext__()
     assert lb._load_balancing_policy.load_map[replica_url] == 0
+    proxy_response.aclose.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_streaming_response_error_releases_least_load_accounting():
+    lb = _make_load_balancer()
+    replica_url = 'http://replica'
+    client = mock.MagicMock()
+    client.build_request.return_value = mock.sentinel.proxy_request
+
+    async def response_body():
+        raise httpx.ReadTimeout('timed out')
+        yield b'unreachable'
+
+    proxy_response = mock.MagicMock()
+    proxy_response.aiter_raw.return_value = response_body()
+    proxy_response.status_code = 200
+    proxy_response.headers = {}
+    proxy_response.aclose = mock.AsyncMock()
+    client.send = mock.AsyncMock(return_value=proxy_response)
+    lb._client_pool[replica_url] = client
+
+    response = await lb._proxy_request_to(replica_url, _make_request())
+
+    with pytest.raises(httpx.ReadTimeout):
+        await response.body_iterator.__anext__()
+    assert lb._load_balancing_policy.load_map[replica_url] == 0
+    proxy_response.aclose.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -73,3 +103,22 @@ async def test_missing_client_releases_least_load_accounting():
 
     assert isinstance(result, RuntimeError)
     assert lb._load_balancing_policy.load_map[replica_url] == 0
+
+
+def test_retired_replica_load_is_removed_after_inflight_request_finishes():
+    policy = load_balancer.lb_policies.LeastLoadPolicy()
+    replica_url = 'http://replica'
+    request = _make_request()
+
+    policy.set_ready_replicas([replica_url])
+    policy.pre_execute_hook(replica_url, request)
+    policy.set_ready_replicas([])
+    assert policy.load_map[replica_url] == 1
+    policy.set_ready_replicas([replica_url])
+    assert policy.load_map[replica_url] == 1
+
+    policy.post_execute_hook(replica_url, request)
+
+    assert policy.load_map[replica_url] == 0
+    policy.set_ready_replicas([])
+    assert replica_url not in policy.load_map

@@ -122,7 +122,10 @@ class LeastLoadPolicy(LoadBalancingPolicy, name='least_load', default=True):
         with self.lock:
             self.ready_replicas = ready_replicas
             for r in list(self.load_map.keys()):
-                if r not in ready_replicas:
+                # Keep the accounting for retired replicas until their
+                # in-flight requests finish. Otherwise a late completion can
+                # recreate the entry with a negative load.
+                if (r not in ready_replicas and self.load_map[r] <= 0):
                     del self.load_map[r]
             for replica in ready_replicas:
                 self.load_map[replica] = self.load_map.get(replica, 0)
@@ -145,7 +148,14 @@ class LeastLoadPolicy(LoadBalancingPolicy, name='least_load', default=True):
                           request: 'fastapi.Request') -> None:
         del request  # Unused.
         with self.lock:
-            self.load_map[replica_url] -= 1
+            current_load = self.load_map.get(replica_url)
+            if current_load is None:
+                return
+            current_load = max(0, current_load - 1)
+            if current_load == 0 and replica_url not in self.ready_replicas:
+                del self.load_map[replica_url]
+            else:
+                self.load_map[replica_url] = current_load
 
 
 class InstanceAwareLeastLoadPolicy(LeastLoadPolicy,
@@ -170,7 +180,7 @@ class InstanceAwareLeastLoadPolicy(LeastLoadPolicy,
             self.ready_replicas = ready_replicas
             # Clean up load map for removed replicas
             for r in list(self.load_map.keys()):
-                if r not in ready_replicas:
+                if (r not in ready_replicas and self.load_map[r] <= 0):
                     del self.load_map[r]
             # Initialize load for new replicas
             for replica in ready_replicas:
