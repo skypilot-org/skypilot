@@ -3406,6 +3406,12 @@ async def kubernetes_pod_ssh_proxy(websocket: fastapi.WebSocket,
                      json.dumps(redirect_info).encode())
             await websocket.send_bytes(frame)
             await websocket.close()
+            # Counted before returning: this session is handed off, so none of
+            # the SSH metrics below will ever see it. Without this label an
+            # all-redirected deployment is indistinguishable from one where
+            # nobody SSHes at all.
+            metrics_utils.SKY_APISERVER_SSH_SESSIONS_TOTAL.labels(
+                path=websocket_utils.SSH_PATH_REDIRECTED).inc()
             return
 
     handle = await _validate_cluster_for_ssh_proxy_ws(websocket, cluster_name,
@@ -3482,6 +3488,8 @@ async def kubernetes_pod_ssh_proxy(websocket: fastapi.WebSocket,
     ssh_failed = False
     try:
         conn_gauge.inc()
+        metrics_utils.SKY_APISERVER_SSH_SESSIONS_TOTAL.labels(
+            path=websocket_utils.SSH_PATH_PORT_FORWARD).inc()
         # Connect to the local port
         reader, writer = await asyncio.open_connection('127.0.0.1', local_port)
 
@@ -3498,6 +3506,7 @@ async def kubernetes_pod_ssh_proxy(websocket: fastapi.WebSocket,
             write_to_backend=write_and_drain,
             close_backend=close_writer,
             timestamps_supported=timestamps_supported,
+            path=websocket_utils.SSH_PATH_PORT_FORWARD,
         )
     finally:
         conn_gauge.dec()
@@ -3660,6 +3669,8 @@ async def slurm_job_ssh_proxy(websocket: fastapi.WebSocket,
     ssh_failed = False
     try:
         conn_gauge.inc()
+        metrics_utils.SKY_APISERVER_SSH_SESSIONS_TOTAL.labels(
+            path=websocket_utils.SSH_PATH_SLURM).inc()
 
         async def write_and_drain(data: bytes) -> None:
             stdin.write(data)
@@ -3674,6 +3685,9 @@ async def slurm_job_ssh_proxy(websocket: fastapi.WebSocket,
             write_to_backend=write_and_drain,
             close_backend=close_stdin,
             timestamps_supported=timestamps_supported,
+            # srun's stdio, not a port-forward: keep the two out of one
+            # histogram, their latency profiles have nothing in common.
+            path=websocket_utils.SSH_PATH_SLURM,
         )
 
     finally:

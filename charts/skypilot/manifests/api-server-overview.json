@@ -1616,7 +1616,7 @@
         "type": "prometheus",
         "uid": "prometheus"
       },
-      "description": "Does not include latency to reach cluster, lag on pod, or overhead to send to k8s tunnel.",
+      "description": "Synthetic 10s PING/PONG on the client\u2194API-server websocket, NOT keystroke latency and not tied to user input. Excludes the k8s port-forward tunnel and the pod sshd by construction \u2014 the server echoes the PING without forwarding it. See \"SSH backend turnaround\" for that leg. Also an indirect event-loop responsiveness probe: the PONG cannot ship until the websocket read loop is free. Empty (not zero) for clients older than API version 21, when SKYPILOT_SSH_DISABLE_LATENCY_MEASUREMENT=1, or when a plugin redirected the session off this server \u2014 check \"SSH sessions by path\".",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -1701,7 +1701,200 @@
           "refId": "A"
         }
       ],
-      "title": "SSH RTT to API Server P95",
+      "title": "SSH websocket heartbeat RTT P95 (client\u2194API server)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "description": "Round trip from the API server to the SSH backend and back, paired on real traffic: port-forward tunnel + both sshd hops + shell echo. This is everything the heartbeat panel excludes. A distribution, not a per-keystroke truth. Flat here while the heartbeat is spiky means the problem is on the client leg or in the event loop, not in the cluster.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "Latency (s)",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "barWidthFactor": 0.6,
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green"
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 5,
+        "y": 47
+      },
+      "id": 34,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "hideZeros": false,
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "pluginVersion": "12.0.1",
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "histogram_quantile(\n  0.5,\n  sum by (le, path) (\n    rate(sky_apiserver_ssh_backend_turnaround_seconds_bucket{app=\"$app\"}[5m])\n  )\n)",
+          "legendFormat": "p50 {{path}}",
+          "range": true,
+          "refId": "A"
+        },
+        {
+          "editorMode": "code",
+          "expr": "histogram_quantile(\n  0.95,\n  sum by (le, path) (\n    rate(sky_apiserver_ssh_backend_turnaround_seconds_bucket{app=\"$app\"}[5m])\n  )\n)",
+          "legendFormat": "p95 {{path}}",
+          "range": true,
+          "refId": "B"
+        }
+      ],
+      "title": "SSH backend turnaround P50/P95 (API server\u2194pod)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "description": "Sessions accepted per second, split by how each was served. Read this before concluding anything from the two panels above: if `redirected` is the only line, both histograms are empty because the sessions never touched this server \u2014 not because SSH is fast.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "Sessions/s",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "barWidthFactor": 0.6,
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green"
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 5,
+        "y": 55
+      },
+      "id": 35,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "hideZeros": false,
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "pluginVersion": "12.0.1",
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "sum by (path) (rate(sky_apiserver_ssh_sessions_total{app=\"$app\"}[5m]))",
+          "legendFormat": "{{path}}",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "SSH sessions by path",
       "type": "timeseries"
     },
     {
