@@ -1,6 +1,7 @@
 """Unit tests for sky.utils.db.retries."""
 # pylint: disable=missing-class-docstring,protected-access,unnecessary-lambda
 import socket
+from typing import Optional
 from unittest import mock
 
 import asyncpg
@@ -15,6 +16,14 @@ def _make_op_error(msg: str = 'boom') -> sqlalchemy.exc.OperationalError:
     return sqlalchemy.exc.OperationalError(statement='SELECT 1',
                                            params={},
                                            orig=Exception(msg))
+
+
+def _wrapped(cause: BaseException,
+             outer: Optional[BaseException] = None) -> BaseException:
+    """`outer` (default RuntimeError) raised `from cause`."""
+    err = outer if outer is not None else RuntimeError('wrapped')
+    err.__cause__ = cause
+    return err
 
 
 class TestWithDbRetries:
@@ -39,6 +48,7 @@ class TestWithDbRetries:
             'the database system is starting up'),
         lambda: asyncpg.exceptions.TooManyConnectionsError(
             'too many connections for role "r"'),
+        lambda: _wrapped(_make_op_error()),
     ])
     def test_retries_on_each_retryable_exception(self, exc_factory):
         # Fail twice, then succeed.
@@ -208,31 +218,54 @@ class TestIsTransient:
         assert not retries.is_transient(RuntimeError('boom'))
 
     def test_follows_cause_chain(self):
-        err = RuntimeError('Failed to terminate the cluster c.')
-        err.__cause__ = _make_op_error()
-        assert retries.is_transient(err)
+        assert retries.is_transient(_wrapped(_make_op_error()))
 
     def test_sqlalchemy_wrapper_around_asyncpg_error(self):
         # The asyncpg dialect maps PostgresError to the generic DBAPIError;
-        # the asyncpg class survives only as the cause.
-        adapter_err = Exception('adapter')
-        adapter_err.__cause__ = asyncpg.exceptions.ProtocolViolationError(
-            'query_wait_timeout')
+        # the asyncpg class survives only two levels down the cause chain.
+        adapter_err = _wrapped(
+            asyncpg.exceptions.ProtocolViolationError('query_wait_timeout'),
+            Exception('adapter'))
         err = sqlalchemy.exc.DBAPIError('SELECT 1', {}, adapter_err)
         err.__cause__ = adapter_err
         assert retries.is_transient(err)
 
-    def test_cause_cycle_terminates(self):
-        a = RuntimeError('a')
-        b = RuntimeError('b')
-        a.__cause__ = b
-        b.__cause__ = a
-        assert not retries.is_transient(a)
+    def test_bare_network_error_counts_only_at_top_level(self):
+        assert retries.is_transient(ConnectionResetError('reset'))
+        assert not retries.is_transient(_wrapped(ConnectionResetError('reset')))
 
-    def test_with_db_retries_retries_cause_chained_error(self):
-        err = RuntimeError('wrapped')
-        err.__cause__ = _make_op_error()
-        fn = mock.Mock(side_effect=[err, 'ok'])
+
+class TestDeadlineBudget:
+
+    def test_deadline_bounds_the_loop(self):
+        clock = [0.0]
+
+        def fake_sleep(seconds):
+            clock[0] += seconds
+
+        fn = mock.Mock(side_effect=_make_op_error('persistent'))
+        with mock.patch.object(retries.time, 'sleep', fake_sleep), \
+             mock.patch.object(retries.time, 'monotonic', lambda: clock[0]):
+            with pytest.raises(sqlalchemy.exc.OperationalError):
+                retries.with_db_retries(fn,
+                                        max_retries=None,
+                                        initial_backoff=10,
+                                        max_backoff=300,
+                                        deadline=1000.0)
+        assert fn.call_count > retries._DEFAULT_MAX_RETRIES
+        assert clock[0] >= 1000.0
+
+    def test_attempt_bound_still_applies_with_deadline(self):
+        fn = mock.Mock(side_effect=_make_op_error('persistent'))
         with mock.patch.object(retries.time, 'sleep'):
-            assert retries.with_db_retries(fn) == 'ok'
+            with pytest.raises(sqlalchemy.exc.OperationalError):
+                retries.with_db_retries(fn,
+                                        max_retries=2,
+                                        deadline=float('inf'))
         assert fn.call_count == 2
+
+    def test_requires_a_bound(self):
+        fn = mock.Mock()
+        with pytest.raises(ValueError, match='max_retries or deadline'):
+            retries.with_db_retries(fn, max_retries=None)
+        fn.assert_not_called()
