@@ -3267,9 +3267,9 @@ function PoolsTable({ refreshInterval, setLoading, refreshDataRef }) {
     return <SharedInfraBadges replicaInfo={replicaInfo} />;
   };
 
-  // Number of columns in the pools table header (Pool, Jobs, Workers,
+  // Number of columns in the pools table header (Pool, User, Jobs, Workers,
   // Worker Details, Worker Resources) — used for the empty-state colSpan.
-  const poolColumnCount = 5;
+  const poolColumnCount = 6;
 
   return (
     <Card>
@@ -3282,6 +3282,12 @@ function PoolsTable({ refreshInterval, setLoading, refreshDataRef }) {
                 onClick={() => requestSort('name')}
               >
                 Pool{getSortDirection('name')}
+              </TableHead>
+              <TableHead
+                className="sortable whitespace-nowrap w-32"
+                onClick={() => requestSort('user')}
+              >
+                User{getSortDirection('user')}
               </TableHead>
               <TableHead
                 className="sortable whitespace-nowrap w-40"
@@ -3308,7 +3314,7 @@ function PoolsTable({ refreshInterval, setLoading, refreshDataRef }) {
             {loading && isInitialLoad ? (
               <TableRow>
                 <TableCell
-                  colSpan={5}
+                  colSpan={poolColumnCount}
                   className="text-center py-6 text-gray-500"
                 >
                   <div className="flex justify-center items-center">
@@ -3327,6 +3333,16 @@ function PoolsTable({ refreshInterval, setLoading, refreshDataRef }) {
                     >
                       {pool.name}
                     </Link>
+                  </TableCell>
+                  <TableCell>
+                    {pool.user ? (
+                      <UserDisplay
+                        username={pool.user}
+                        userHash={pool.user_hash}
+                      />
+                    ) : (
+                      '-'
+                    )}
                   </TableCell>
                   <TableCell>
                     <div className="flex items-center gap-2 flex-wrap">

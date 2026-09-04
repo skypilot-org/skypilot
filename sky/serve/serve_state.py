@@ -68,6 +68,9 @@ services_table = sqlalchemy.Table(
     # Pod IP where the controller process is running.
     # Written by the sky.serve.service process at startup.
     sqlalchemy.Column('controller_ip', sqlalchemy.Text, server_default=None),
+    # User hash of the user that created the service/pool. Passed in from the
+    # API server, since the controller itself may be shared among users.
+    sqlalchemy.Column('user_hash', sqlalchemy.Text, server_default=None),
 )
 
 replicas_table = sqlalchemy.Table(
@@ -305,7 +308,8 @@ def add_service(name: str,
                 pool: bool,
                 controller_pid: int,
                 entrypoint: str,
-                controller_ip: Optional[str] = None) -> bool:
+                controller_ip: Optional[str] = None,
+                user_hash: Optional[str] = None) -> bool:
     """Add a service in the database.
 
     Returns:
@@ -335,7 +339,8 @@ def add_service(name: str,
                 controller_pid=controller_pid,
                 controller_ip=controller_ip,
                 hash=str(uuid.uuid4()),
-                entrypoint=entrypoint)
+                entrypoint=entrypoint,
+                user_hash=user_hash)
             session.execute(insert_stmt)
             session.commit()
 
@@ -514,6 +519,7 @@ def _get_service_from_row(r: 'row.RowMapping') -> Dict[str, Any]:
         'controller_ip': r['controller_ip'],
         'hash': r['hash'],
         'entrypoint': r['entrypoint'],
+        'user_hash': r['user_hash'],
         'yaml_content': r.get('yaml_content'),
     }
     latest_spec = get_spec(r['name'], current_version)

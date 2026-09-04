@@ -40,7 +40,7 @@ def _mock_serve_db(tmp_path, monkeypatch):
     yield engine
 
 
-def _add_minimal_service(name: str, controller_ip=None):
+def _add_minimal_service(name: str, controller_ip=None, user_hash=None):
     """Add a service row with all-required-args defaults so individual tests
     only need to specify what they care about."""
     return serve_state.add_service(
@@ -55,6 +55,7 @@ def _add_minimal_service(name: str, controller_ip=None):
         controller_pid=12345,
         entrypoint='entry',
         controller_ip=controller_ip,
+        user_hash=user_hash,
     )
 
 
@@ -327,3 +328,28 @@ class TestRemoveServiceCompletely:
         # Should be a silent no-op when no rows exist.
         serve_state.remove_service_completely('never-existed')
         # No assertion needed beyond "didn't raise".
+
+
+class TestUserHash:
+    """`add_service` records the creating user so the dashboard can show the
+    owner of a service/pool. Rows written before the column existed have no
+    user hash and must keep working."""
+
+    def test_persists_user_hash(self, _mock_serve_db):
+        assert _add_minimal_service('svc-user', user_hash='abcd1234') is True
+        record = _read_row(_mock_serve_db, 'svc-user')
+        assert record is not None
+        assert record['user_hash'] == 'abcd1234'
+
+    def test_without_user_hash(self, _mock_serve_db):
+        assert _add_minimal_service('svc-no-user') is True
+        record = _read_row(_mock_serve_db, 'svc-no-user')
+        assert record is not None
+        assert record['user_hash'] is None
+
+    def test_round_trips_user_hash(self, _mock_serve_db):
+        _add_minimal_service('svc-user-rt', user_hash='abcd1234')
+        serve_state.add_version('svc-user-rt')
+        record = serve_state.get_service_from_name('svc-user-rt')
+        assert record is not None
+        assert record['user_hash'] == 'abcd1234'

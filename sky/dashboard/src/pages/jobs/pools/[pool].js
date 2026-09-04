@@ -38,6 +38,7 @@ import {
 } from '@/components/ui/table';
 import { Button } from '@/components/ui/button';
 import { buildFilterUrl } from '@/components/shared/FilterSystem';
+import { UserDisplay } from '@/components/elements/UserDisplay';
 import { getPersistedPageSize, persistPageSize } from '@/lib/utils';
 
 const POOL_PAGE_SIZE_OPTIONS = [5, 10, 20, 50];
@@ -429,6 +430,23 @@ export default function PoolDetailPage() {
               </div>
               <div className="p-4">
                 <div className="grid grid-cols-2 gap-6">
+                  {/* User */}
+                  <div>
+                    <div className="text-gray-600 font-medium text-base">
+                      User
+                    </div>
+                    <div className="text-base mt-1">
+                      {poolData.user ? (
+                        <UserDisplay
+                          username={poolData.user}
+                          userHash={poolData.user_hash}
+                        />
+                      ) : (
+                        '-'
+                      )}
+                    </div>
+                  </div>
+
                   {/* Jobs */}
                   <div>
                     <div className="text-gray-600 font-medium text-base">
