@@ -28,6 +28,25 @@ logger = sky_logging.init_logger(__name__)
 CREDENTIAL_PATH = slurm_utils.DEFAULT_SLURM_PATH
 
 
+def _make_slurm_client(ssh_config_dict: Dict[str, Any],
+                       slurm_user: Optional[str]) -> slurm.SlurmClient:
+    """Creates a client for a login node from its SSH config entry.
+
+    Raises:
+        KeyError: if the SSH config entry is missing a required option.
+    """
+    return slurm.SlurmClient(
+        ssh_config_dict['hostname'],
+        int(ssh_config_dict.get('port', 22)),
+        ssh_config_dict['user'],
+        slurm_utils.get_identity_file(ssh_config_dict),
+        ssh_proxy_command=ssh_config_dict.get('proxycommand', None),
+        ssh_proxy_jump=ssh_config_dict.get('proxyjump', None),
+        identities_only=slurm_utils.get_identities_only(ssh_config_dict),
+        slurm_user=slurm_user,
+    )
+
+
 @registry.CLOUD_REGISTRY.register
 class Slurm(clouds.Cloud):
     """Slurm."""
@@ -906,28 +925,35 @@ class Slurm(clouds.Cloud):
             # Retrieve the config options for a given SlurmctldHost name alias.
             ssh_config_dict = ssh_config.lookup(cluster)
             try:
-                client = slurm.SlurmClient(
-                    ssh_config_dict['hostname'],
-                    int(ssh_config_dict.get('port', 22)),
-                    ssh_config_dict['user'],
-                    slurm_utils.get_identity_file(ssh_config_dict),
-                    ssh_proxy_command=ssh_config_dict.get('proxycommand', None),
-                    ssh_proxy_jump=ssh_config_dict.get('proxyjump', None),
-                    identities_only=slurm_utils.get_identities_only(
-                        ssh_config_dict),
-                    # The check's probes (sinfo, env, a stat of the workdir)
-                    # are read-only: run them as the SSH user rather than the
-                    # submit user. With submit_as_user, acting as the submit
-                    # user goes through su/sudo, and clusters commonly grant
-                    # passwordless sudo only for the submission commands
-                    # (sbatch/srun/scancel/squeue) — wrapping sinfo would fail
-                    # the whole credential check and silently disable Slurm,
-                    # taking down every consumer of the enabled-clouds cache
-                    # (e.g. GPU availability on the infra page).
-                    slurm_user=None,
-                )
+                # Run the reachability check as the SSH user
+                # (slurm_user=None) so connection failures can be
+                # distinguished from submit-user access failures. This probe
+                # carries no identity requirement, and with submit_as_user,
+                # acting as the submit user goes through su/sudo: clusters
+                # commonly grant passwordless sudo only for the submission
+                # commands (sbatch/srun/scancel/squeue), so wrapping sinfo
+                # would fail the whole credential check and silently disable
+                # Slurm, taking down every consumer of the enabled-clouds
+                # cache (e.g. GPU availability on the infra page).
+                client = _make_slurm_client(ssh_config_dict, slurm_user=None)
                 info = client.info()
                 logger.debug(f'Slurm cluster {cluster} sinfo: {info}')
+
+                warning_msg = None
+                # The probes below run as the submit user. The environment
+                # probe doubles as an access check: if the submit user cannot
+                # run commands on the login node, the cluster is reported as
+                # unavailable with an explicit message, since the reachability
+                # check above already ruled out a connection problem by
+                # running as the SSH user. The filesystem type checks only
+                # produce warnings, and running them as the submit user keeps
+                # the shared filesystem warning about the home directory that
+                # this user's jobs will actually see.
+                submit_user = slurm_utils.get_submit_user(cluster)
+                fs_client = client
+                if submit_user is not None:
+                    fs_client = _make_slurm_client(ssh_config_dict,
+                                                   slurm_user=submit_user)
                 # Check if the working directory is on a shared filesystem.
                 # If workdir is configured, check that path; otherwise
                 # fall back to checking the home directory.
@@ -939,42 +965,60 @@ class Slurm(clouds.Cloud):
                 # Resolve the check path to an absolute path so that
                 # stat (via shlex.quote) gets a literal path with no
                 # shell variables or ~.
-                remote_env = client.get_env()
-                if workdir is not None:
-                    check_path = slurm_utils.expand_path_vars(
-                        workdir, remote_env)
+                access_error = None
+                if submit_user is not None:
+                    ssh_user = ssh_config_dict['user']
+                    access_error = (
+                        'disabled. Could not run commands on the login node '
+                        f'as submit user {submit_user!r}. Ensure the submit '
+                        'user has a login-node account and SSH user '
+                        f'{ssh_user!r} is permitted to run commands as that '
+                        'user.')
+                try:
+                    remote_env = fs_client.get_env(
+                        raise_on_error=submit_user is not None)
+                except exceptions.CommandError as e:
+                    assert access_error is not None
+                    ctx2text[cluster] = (f'{access_error} '
+                                         f'{common_utils.format_exception(e)}')
+                    continue
+                if access_error is not None and not remote_env:
+                    ctx2text[cluster] = access_error
+                    continue
                 else:
-                    check_path = remote_env.get('HOME', '~')
-                fs_type = client.check_dir_shared_fs(check_path)
-                path_label = (f'workdir ({workdir})'
-                              if workdir is not None else 'Home directory (~)')
-                hint = (' Set slurm.cluster_configs.'
-                        f'{cluster}.workdir in '
-                        '~/.sky/config.yaml to a shared '
-                        'filesystem path.')
-                if fs_type is None:
-                    ctx2text[cluster] = (
-                        f'{colorama.Fore.GREEN}enabled.'
-                        f'{colorama.Style.RESET_ALL} '
-                        f'{colorama.Fore.LIGHTYELLOW_EX}'
-                        f'Warning: Could not determine filesystem '
-                        f'type for {path_label} ({check_path}). '
-                        'Ensure the working directory is on a shared '
-                        'filesystem (e.g., NFS) visible to all nodes.'
-                        f'{hint}'
-                        f'{colorama.Style.RESET_ALL}')
-                elif fs_type not in cls._SHARED_FS_TYPES:
-                    ctx2text[cluster] = (
-                        f'{colorama.Fore.GREEN}enabled.'
-                        f'{colorama.Style.RESET_ALL} '
-                        f'{colorama.Fore.LIGHTYELLOW_EX}'
-                        f'Warning: {path_label} filesystem '
-                        f'type is {fs_type!r}, not a shared '
-                        'filesystem. SkyPilot requires the working '
-                        'directory to be on a shared filesystem '
-                        '(e.g., NFS) visible to all nodes.'
-                        f'{hint}'
-                        f'{colorama.Style.RESET_ALL}')
+                    if workdir is not None:
+                        check_path = slurm_utils.expand_path_vars(
+                            workdir, remote_env)
+                    else:
+                        check_path = remote_env.get('HOME', '~')
+                    fs_type = fs_client.check_dir_shared_fs(check_path)
+                    path_label = (f'workdir ({workdir})' if workdir is not None
+                                  else 'Home directory (~)')
+                    hint = (' Set slurm.cluster_configs.'
+                            f'{cluster}.workdir in '
+                            '~/.sky/config.yaml to a shared '
+                            'filesystem path.')
+                    if fs_type is None:
+                        warning_msg = (
+                            f'Warning: Could not determine filesystem '
+                            f'type for {path_label} ({check_path}). '
+                            'Ensure the working directory is on a shared '
+                            'filesystem (e.g., NFS) visible to all nodes.'
+                            f'{hint}')
+                    elif fs_type not in cls._SHARED_FS_TYPES:
+                        warning_msg = (
+                            f'Warning: {path_label} filesystem '
+                            f'type is {fs_type!r}, not a shared '
+                            'filesystem. SkyPilot requires the working '
+                            'directory to be on a shared filesystem '
+                            '(e.g., NFS) visible to all nodes.'
+                            f'{hint}')
+                if warning_msg is not None:
+                    ctx2text[cluster] = (f'{colorama.Fore.GREEN}enabled.'
+                                         f'{colorama.Style.RESET_ALL} '
+                                         f'{colorama.Fore.LIGHTYELLOW_EX}'
+                                         f'{warning_msg}'
+                                         f'{colorama.Style.RESET_ALL}')
                 else:
                     ctx2text[cluster] = (f'{colorama.Fore.GREEN}enabled'
                                          f'{colorama.Style.RESET_ALL}')
