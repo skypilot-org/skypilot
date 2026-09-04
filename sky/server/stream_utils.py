@@ -471,13 +471,19 @@ async def _discard_log_after_stream(
     For a log tail the request log only bridges the tail and this response,
     and holds a full copy of the tailed log.
     """
+    # log_provider imports this module, so this cannot be a top-level import.
     # pylint: disable=import-outside-toplevel
     from sky.server.requests import log_provider as lp
     try:
         async for chunk in stream:
             yield chunk
     finally:
-        lp.get_log_provider().discard_log(request_id)
+        # ``stream`` holds the log file open, and an open fd keeps its blocks
+        # allocated after the unlink.
+        try:
+            await stream.aclose()
+        finally:
+            lp.get_log_provider().discard_log(request_id)
 
 
 def stream_response_for_long_request(

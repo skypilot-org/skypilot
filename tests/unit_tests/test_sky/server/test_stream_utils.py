@@ -166,50 +166,59 @@ async def test_parked_message_repeats_after_any_status_change(
 
 
 class _RecordingLogProvider(log_provider.LocalLogProvider):
-    """Records which requests had their log discarded."""
+    """Records discards, in order, into a shared event list."""
 
-    def __init__(self):
-        self.discarded = []
+    def __init__(self, events):
+        self.events = events
 
     def discard_log(self, request_id: str) -> None:
-        self.discarded.append(request_id)
+        self.events.append(f'discarded {request_id}')
 
 
-async def _one_chunk():
-    yield 'hello\n'
+def _record_discards(monkeypatch, events):
+    provider = _RecordingLogProvider(events)
+    monkeypatch.setattr(log_provider, 'get_log_provider', lambda: provider)
 
 
-async def _two_chunks():
-    yield 'hello\n'
-    yield 'world\n'
+async def _stream(events, *chunks):
+    try:
+        for chunk in chunks:
+            yield chunk
+    finally:
+        events.append('closed')
 
 
 @pytest.mark.asyncio
 async def test_a_discarded_log_is_dropped_once_the_stream_ends(monkeypatch):
-    provider = _RecordingLogProvider()
-    monkeypatch.setattr(log_provider, 'get_log_provider', lambda: provider)
+    events = []
+    _record_discards(monkeypatch, events)
 
     chunks = [
         chunk async for chunk in stream_utils._discard_log_after_stream(
-            _one_chunk(), 'rid')
+            _stream(events, 'hello\n'), 'rid')
     ]
 
     assert chunks == ['hello\n']
-    assert provider.discarded == ['rid']
+    assert events == ['closed', 'discarded rid']
 
 
 @pytest.mark.asyncio
 async def test_a_discarded_log_is_dropped_when_the_client_disconnects(
         monkeypatch):
-    """A client that walks away mid-tail must not leave its copy behind."""
-    provider = _RecordingLogProvider()
-    monkeypatch.setattr(log_provider, 'get_log_provider', lambda: provider)
+    """A client that walks away mid-tail must not leave its copy behind.
 
-    gen = stream_utils._discard_log_after_stream(_two_chunks(), 'rid')
+    The stream is closed before the discard: an open fd keeps the log's
+    blocks allocated after the unlink.
+    """
+    events = []
+    _record_discards(monkeypatch, events)
+
+    gen = stream_utils._discard_log_after_stream(
+        _stream(events, 'hello\n', 'world\n'), 'rid')
     assert await gen.__anext__() == 'hello\n'
     await gen.aclose()
 
-    assert provider.discarded == ['rid']
+    assert events == ['closed', 'discarded rid']
 
 
 def test_discard_log_removes_the_request_log(monkeypatch, tmp_path):
