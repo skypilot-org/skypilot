@@ -42,6 +42,23 @@ def _build_retryable_exceptions() -> Tuple[Type[BaseException], ...]:
         psycopg2_excs = (psycopg2.OperationalError, psycopg2.InterfaceError)
     except ImportError:
         pass
+    # asyncpg.connect() runs inside the engine's async_creator, so an
+    # ErrorResponse received while connecting is raised as asyncpg's own
+    # class, not wrapped by SQLAlchemy: class 08 connection errors (which a
+    # pooler such as PgBouncer uses for every rejection it issues, 08P01),
+    # 57P03 (server starting up / shutting down) and 53300 (too many
+    # connections).
+    asyncpg_excs: Tuple[Type[BaseException], ...] = ()
+    try:
+        import asyncpg  # pylint: disable=import-outside-toplevel
+
+        asyncpg_excs = (
+            asyncpg.exceptions.PostgresConnectionError,
+            asyncpg.exceptions.CannotConnectNowError,
+            asyncpg.exceptions.TooManyConnectionsError,
+        )
+    except ImportError:
+        pass
     # `ConnectionError` is the Python builtin; asyncpg raises it
     # ("unexpected connection_lost() call") in some code paths without
     # SQLAlchemy wrapping it.
@@ -62,6 +79,7 @@ def _build_retryable_exceptions() -> Tuple[Type[BaseException], ...]:
         TimeoutError,
         asyncio.TimeoutError,
         *psycopg2_excs,
+        *asyncpg_excs,
     )
 
 

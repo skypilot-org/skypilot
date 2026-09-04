@@ -3,6 +3,7 @@
 import socket
 from unittest import mock
 
+import asyncpg
 import psycopg2
 import pytest
 import sqlalchemy.exc
@@ -32,6 +33,12 @@ class TestWithDbRetries:
         lambda: psycopg2.OperationalError('server closed the connection'),
         lambda: psycopg2.InterfaceError('connection already closed'),
         lambda: socket.gaierror(8, 'nodename nor servname provided'),
+        lambda: asyncpg.exceptions.ProtocolViolationError(
+            'database "d" is disabled'),
+        lambda: asyncpg.exceptions.CannotConnectNowError(
+            'the database system is starting up'),
+        lambda: asyncpg.exceptions.TooManyConnectionsError(
+            'too many connections for role "r"'),
     ])
     def test_retries_on_each_retryable_exception(self, exc_factory):
         # Fail twice, then succeed.
@@ -130,6 +137,8 @@ class TestWithDbRetriesAsync:
         lambda: ConnectionError('unexpected connection_lost() call'),
         lambda: socket.gaierror(8, 'nodename nor servname provided'),
         lambda: psycopg2.OperationalError('server closed the connection'),
+        lambda: asyncpg.exceptions.ProtocolViolationError(
+            'database "d" is disabled'),
     ])
     async def test_retries_on_each_retryable_exception(self, exc_factory):
         results = [
