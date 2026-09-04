@@ -207,13 +207,9 @@ _queue_factory: Optional[queue_base.QueueBackendFactory] = None
 
 
 def executor_initializer(proc_group: str,
-                         clean_env: Optional[Dict[str, str]] = None,
-                         num_db_connections_per_worker: int = 0):
+                         clean_env: Optional[Dict[str, str]] = None):
     setproctitle.setproctitle(f'SkyPilot:executor:{proc_group}:'
                               f'{multiprocessing.current_process().pid}')
-    # Must precede plugin install: a plugin that keeps the engine it gets
-    # during install() would otherwise hold one built for the wrong budget.
-    db_utils.set_max_connections(num_db_connections_per_worker)
     # Load plugins for executor process.
     plugins.load_plugins(
         plugins.ExtensionContext(context=plugins.PluginContext.EXECUTOR))
@@ -388,8 +384,9 @@ class RequestWorker:
             # multiple requests can share the same process pid, which may cause
             # issues with SkyPilot core functions if they rely on the exit of
             # the process, such as subprocess_daemon.py.
-            fut = executor.submit_until_success(_request_execution_wrapper,
-                                                request_id, ignore_return_value)
+            fut = executor.submit_until_success(
+                _request_execution_wrapper, request_id, ignore_return_value,
+                self.num_db_connections_per_worker)
             # Decrement the free executor count when a request starts
             if metrics_utils.METRICS_ENABLED:
                 if self.schedule_type == api_requests.ScheduleType.LONG:
@@ -584,8 +581,7 @@ class RequestWorker:
                 garanteed_workers=self.garanteed_parallelism,
                 burst_workers=self.burstable_parallelism,
                 initializer=executor_initializer,
-                initargs=(proc_group, clean_env_module.get_clean_server_env(),
-                          self.num_db_connections_per_worker))
+                initargs=(proc_group, clean_env_module.get_clean_server_env()))
             # Initialize the appropriate gauge for the number of free executors
             total_executors = (self.garanteed_parallelism +
                                self.burstable_parallelism)
@@ -870,8 +866,28 @@ def _gated_sigterm_handler(signum: int,
         pass
 
 
+def _maybe_observe_request_pending(request: api_requests.Request) -> None:
+    """Observe creation -> first-execution-start time, once per request.
+
+    Must be called before the caller flips the request to RUNNING. PENDING
+    means the request never started executing before: the retry/pause
+    requeue path is the only writer of WAITING, so a WAITING request here
+    is a re-execution (e.g. retry_until_up), not the first start. pid
+    cannot discriminate this, since the ExecutionRetryableError handler
+    clears it before requeueing. Observing only the first start also means
+    retry backoff after that start can never re-inflate the histogram
+    (see #9988).
+    """
+    if request.status != api_requests.RequestStatus.PENDING:
+        return
+    metrics_utils.observe_request_pending(request.name,
+                                          request.schedule_type.value,
+                                          time.time() - request.created_at)
+
+
 def _request_execution_wrapper(request_id: str,
-                               ignore_return_value: bool) -> None:
+                               ignore_return_value: bool,
+                               num_db_connections_per_worker: int = 0) -> None:
     """Wrapper for a request execution.
 
     It wraps the execution of a request to:
@@ -885,6 +901,7 @@ def _request_execution_wrapper(request_id: str,
     pid = multiprocessing.current_process().pid
     proc = psutil.Process(pid)
     rss_begin = proc.memory_info().rss
+    db_utils.set_max_connections(num_db_connections_per_worker)
     # Handle the SIGTERM signal to abort the request processing gracefully.
     # Only set up signal handlers in the main thread, as signal.signal() raises
     # ValueError if called from a non-main thread (e.g., in tests).
@@ -940,6 +957,7 @@ def _request_execution_wrapper(request_id: str,
                     f'skipping execution')
                 return
             log_path = request_task.log_path
+            _maybe_observe_request_pending(request_task)
             request_task.pid = pid
             request_task.status = api_requests.RequestStatus.RUNNING
             # Clear any leftover retry-backoff message now that we are running.
@@ -1128,6 +1146,7 @@ async def _execute_request_coroutine(request: api_requests.Request):
     logger.info(f'Executing request {request.request_id} in coroutine')
     func = request.entrypoint
     request_body = request.request_body
+    _maybe_observe_request_pending(request)
     await api_requests.update_status_async(request.request_id,
                                            api_requests.RequestStatus.RUNNING)
     # Redirect stdout and stderr to the request log path.
@@ -1358,7 +1377,23 @@ async def schedule_prepared_request(request_task: api_requests.Request,
     async def enqueue():
         input_tuple = (request_task.request_id, ignore_return_value, retryable)
         logger.info(f'Queuing request: {request_task.request_id}')
-        await _get_queue(request_task.schedule_type).put_async(input_tuple)
+        try:
+            await _get_queue(request_task.schedule_type).put_async(input_tuple)
+        except (Exception, asyncio.CancelledError) as e:  # pylint: disable=broad-except
+            # A PENDING request that never made it onto the queue is
+            # stranded: no worker will pick it up and nothing else moves it to
+            # a terminal state, and a queue backend that recovers stale PENDING
+            # rows would resurrect and execute it long after the caller saw
+            # this error. If the put actually committed despite the error, the
+            # request is either still unclaimed (the FAILED mark lands and the
+            # row is discarded at dequeue) or already claimed by a worker (the
+            # mark is skipped and the claimed run's outcome stands).
+            logger.error(
+                f'Failed to enqueue request {request_task.request_id}: '
+                f'{common_utils.format_exception(e)}')
+            await api_requests.set_request_failed_if_pending_async(
+                request_task.request_id, e)
+            raise
 
     if precondition is not None:
         # Schedule precondition wait as a background task so the caller

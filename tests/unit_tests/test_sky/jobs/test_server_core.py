@@ -14,13 +14,8 @@ def _forwarded_tail(tail):
     fake_backend = mock.MagicMock(spec=backends.CloudVmRayBackend)
     fake_runner = mock.MagicMock()
     fake_runner.tail_managed_job_logs.return_value = 0
-    # `tail_logs` resolves the job id through the queue (to scope it to the
-    # caller's workspaces) before reaching the runner.
-    record = mock.MagicMock(job_id=1, job_name=None)
     with mock.patch.object(jobs_core, '_maybe_restart_controller',
                            return_value=mock.MagicMock()), \
-         mock.patch.object(jobs_core, 'queue_v2_api',
-                           return_value=([record], 1, {}, 1, [])), \
          mock.patch.object(jobs_core.backend_utils,
                            'get_backend_from_handle',
                            return_value=fake_backend), \

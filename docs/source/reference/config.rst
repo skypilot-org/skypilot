@@ -830,6 +830,38 @@ Example:
 
 
 
+.. _config-yaml-aws-enforce-tags:
+
+``aws.enforce_tags``
+~~~~~~~~~~~~~~~~~~~~
+
+Resource types whose tagging must not be given up (optional).
+
+SkyPilot tags the EC2 instances it launches and the EBS volumes attached to
+them. If the credentials in use are not allowed to tag volumes, the volume tags
+are skipped with a warning and the cluster still comes up -- see
+:ref:`cloud-permissions-aws`.
+
+That is the right default for most deployments, but not for one that has to
+*guarantee* tag coverage: a warning in a log is not an enforcement mechanism,
+and a cluster that launches with untagged volumes may be out of compliance.
+Listing ``volume`` here makes such a refusal fail the launch instead, naming
+the missing permission.
+
+Supported values are ``instance`` and ``volume``, lowercase. Instance tagging
+is already required -- SkyPilot finds, stops and terminates a cluster by its
+instance tags -- so listing ``instance`` only records that expectation.
+
+Default: ``[]`` (tag volumes when permitted, warn when not).
+
+Example:
+
+.. code-block:: yaml
+
+  aws:
+    enforce_tags:
+      - volume
+
 .. _config-yaml-aws-vpc-names:
 
 ``aws.vpc_names``

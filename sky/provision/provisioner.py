@@ -24,6 +24,7 @@ from sky import skypilot_config
 from sky.adaptors import aws
 from sky.backends import backend_utils
 from sky.jobs.server import utils as server_jobs_utils
+from sky.metrics import utils as metrics_utils
 from sky.provision import common as provision_common
 from sky.provision import constants as provision_constants
 from sky.provision import instance_setup
@@ -167,8 +168,28 @@ def bulk_provision(
             redacted_config = bootstrap_config.get_redacted_config()
             logger.debug('Provision config:\n'
                          f'{json.dumps(redacted_config, indent=2)}')
-            return _bulk_provision(cloud, region, cluster_name,
-                                   bootstrap_config)
+            provision_start = time.time()
+            try:
+                provision_record = _bulk_provision(cloud, region, cluster_name,
+                                                   bootstrap_config)
+            except exceptions.ExecutionPausedError:
+                # A pause to wait on an external condition is neither a
+                # success nor a failure; the attempt resumes later.
+                raise
+            except (KeyboardInterrupt, SystemExit):
+                # User cancellation (SIGTERM on the executor surfaces as
+                # KeyboardInterrupt): not an outcome of the attempt, so
+                # record nothing.
+                raise
+            except BaseException:
+                metrics_utils.observe_provision_duration(
+                    repr(cloud), 'failure',
+                    time.time() - provision_start)
+                raise
+            metrics_utils.observe_provision_duration(
+                repr(cloud), 'success',
+                time.time() - provision_start)
+            return provision_record
         except exceptions.NoClusterLaunchedError:
             # Skip the teardown if the cluster was never launched.
             raise

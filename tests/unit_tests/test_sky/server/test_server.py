@@ -1202,6 +1202,88 @@ def test_prune_sky_logs_missing_dir_is_noop(tmp_path, monkeypatch):
     assert server._prune_sky_logs(cutoff=1_000_000.0) == 0
 
 
+@pytest.mark.asyncio
+async def test_cleanup_sky_logs_reads_reloaded_retention_in_to_thread(
+        monkeypatch):
+    """A config swap done by reload_config inside asyncio.to_thread must be
+    visible to the subsequent get_nested on the loop thread.
+
+    cleanup_sky_logs runs the blocking reload off-loop with
+    `await asyncio.to_thread(skypilot_config.reload_config)` and then reads
+    retention_hours back on the loop thread. This guards the cross-thread
+    visibility the daemon relies on: a config swap performed in the
+    to_thread worker must reach the on-loop get_nested, or the daemon would
+    prune on a stale retention.
+
+    The real reload_config's source I/O (file read / DB SELECT) is stubbed
+    here to keep the unit test env/DB-free; its swap tail
+    (_set_loaded_config, the mechanism the real reload uses) and the real
+    get_nested read are exercised unchanged through the real cleanup_sky_logs
+    + real asyncio.to_thread.
+    """
+    from sky import skypilot_config
+
+    fresh_retention = 7
+    # Stale value (2) so a successful reload is observable: if the swap never
+    # reaches get_nested, the assertion below sees 2 instead of 7.
+    stale = config_utils.Config()
+    stale.set_nested(('api_server', 'logs_retention_hours'), 2)
+    # Swap in the stale config through the real accessor and let monkeypatch
+    # restore the original value at teardown: the loaded config is
+    # process-global, and leaving a swapped value behind would leak into
+    # later tests in this xdist worker (including when this test fails).
+    loaded_context = skypilot_config._get_config_context()
+    monkeypatch.setattr(loaded_context, 'config', stale)
+
+    def fake_reload():
+        # Mirrors the tail of the real _reload_config_as_server: build the
+        # new config and swap it in with _set_loaded_config. Runs from inside
+        # asyncio.to_thread, i.e. a worker thread.
+        cfg = config_utils.Config()
+        cfg.set_nested(('api_server', 'logs_retention_hours'), fresh_retention)
+        skypilot_config._set_loaded_config(cfg)
+
+    monkeypatch.setattr(server.skypilot_config, 'reload_config', fake_reload)
+
+    observed_cutoffs = []
+
+    def fake_prune(cutoff):
+        observed_cutoffs.append(cutoff)
+        return 0
+
+    monkeypatch.setattr(server, '_prune_sky_logs', fake_prune)
+
+    # asyncio.sleep is the while-True's last statement, outside the try/except,
+    # so raising a BaseException here exits cleanup_sky_logs after exactly one
+    # iteration; a BaseException subclass is chosen so the daemon's broad
+    # `except Exception` cannot swallow it.
+    class _StopLoop(BaseException):
+        pass
+
+    async def bail(_seconds):
+        raise _StopLoop
+
+    # No-op the daemon's startup jitter first: it awaits asyncio.sleep before
+    # the loop, so the patched sleep below would otherwise raise _StopLoop
+    # before a single iteration ran and the reload would never be exercised.
+    async def _noop_jitter(*_args, **_kwargs):
+        pass
+
+    monkeypatch.setattr(server.asyncio_utils, 'sleep_startup_jitter',
+                        _noop_jitter)
+    monkeypatch.setattr(server.asyncio, 'sleep', bail)
+
+    with pytest.raises(_StopLoop):
+        await server.cleanup_sky_logs()
+
+    # reload ran in a worker thread; get_nested ran on the loop thread.
+    assert skypilot_config.get_nested(('api_server', 'logs_retention_hours'),
+                                      -1) == fresh_retention
+    assert len(observed_cutoffs) == 1
+    expected_cutoff = time.time() - fresh_retention * 3600
+    assert abs(observed_cutoffs[0] - expected_cutoff) < 2
+
+
 # --- Tests for cleanup_clients_tmp (client tmp dir GC) ---
 
 

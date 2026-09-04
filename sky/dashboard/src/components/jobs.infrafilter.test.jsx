@@ -46,6 +46,12 @@ jest.mock('@/plugins/PluginProvider', () => ({
     baseColumns.filter((col) =>
       col.conditional ? !!context.shouldShowColumn?.(col.id) : true
     ),
+  // Stable identity, like the real (memoized) hook: a fresh array per render
+  // would churn the fetch effect's dependencies into a loop.
+  usePluginTableFilters: (() => {
+    const empty = [];
+    return () => empty;
+  })(),
   usePluginRoute: () => null,
   getDataEnhancements: () => [],
 }));

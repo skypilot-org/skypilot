@@ -37,6 +37,12 @@ jest.mock('@/plugins/PluginProvider', () => ({
   // Empty on purpose: the table's own columns are not what these assert on, and
   // rendering them here would require emulating the plugin column merge.
   useMergedTableColumns: () => [],
+  // Stable identity, like the real (memoized) hook: a fresh array per render
+  // would churn the fetch effect's dependencies into a loop.
+  usePluginTableFilters: (() => {
+    const empty = [];
+    return () => empty;
+  })(),
   usePluginRoute: () => null,
   getDataEnhancements: () => [],
 }));

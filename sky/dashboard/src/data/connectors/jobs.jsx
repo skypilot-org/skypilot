@@ -326,6 +326,8 @@ export async function getManagedJobs(options = {}) {
         resources_str_full: job.cluster_resources_full || cluster_resources,
         cloud: cloud,
         region: job.region,
+        // Zone; for Slurm this is the partition the job was scheduled to.
+        zone: job.zone && job.zone !== '-' ? job.zone : null,
         infra: infra,
         full_infra: full_infra,
         recoveries: job.recovery_count,
@@ -340,6 +342,7 @@ export async function getManagedJobs(options = {}) {
         submitted_at: job.submitted_at
           ? new Date(job.submitted_at * 1000)
           : null,
+        started_at: job.start_at ? new Date(job.start_at * 1000) : null,
         events: events,
         dag_yaml: job.user_yaml,
         entrypoint: job.entrypoint,
