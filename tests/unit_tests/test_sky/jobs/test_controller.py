@@ -1917,12 +1917,27 @@ class TestAddK8sAnnotations:
 
     @staticmethod
     def _pod_config(resource_or_task):
-        # Task.resources is a set before _add_k8s_annotations and a list
-        # after it, so index through a list either way.
+        # Index through a list regardless of collection type.
         resource = resource_or_task
         if isinstance(resource_or_task, task_lib.Task):
             resource = list(resource_or_task.resources)[0]
         return resource.cluster_config_overrides['kubernetes']['pod_config']
+
+    @pytest.mark.parametrize('resource_type,config_key', [(set, 'any_of'),
+                                                          (list, 'ordered')])
+    def test_resource_collection_type_preserved(self, resource_type,
+                                                config_key):
+        """Adding annotations must not change any_of/ordered semantics."""
+        task = task_lib.Task(name='test-task', run='echo hi')
+        resources = [sky.Resources(cpus=1), sky.Resources(cpus=2)]
+        task.set_resources(resource_type(resources))
+
+        controller_module._add_k8s_annotations(task, job_id=1)
+
+        assert isinstance(task.resources, resource_type)
+        assert config_key in task.get_resource_config()
+        if resource_type is list:
+            assert [resource.cpus for resource in task.resources] == ['1', '2']
 
     def test_lists_without_patch_merge_key_not_duplicated(self):
         """Lists appended by the merge must not be doubled."""
