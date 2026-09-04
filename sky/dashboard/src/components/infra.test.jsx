@@ -348,3 +348,89 @@ describe('InfrastructureSection Kubernetes GPU-type rows', () => {
     );
   });
 });
+
+describe('InfrastructureSection inactive (not-enabled) context rows', () => {
+  const K8S_PROPS = {
+    title: 'Kubernetes',
+    contexts: ['usw9b'],
+    gpus: [{ gpu_name: 'H100', gpu_total: 8, gpu_free: 8 }],
+    groupedPerContextGPUs: {
+      usw9b: [
+        { gpu_name: 'H100', gpu_total: 8, gpu_free: 8, context: 'usw9b' },
+      ],
+    },
+    groupedPerNodeGPUs: { usw9b: [] },
+    loadedContexts: new Set(['usw9b']),
+    inactiveContexts: [
+      { name: 'parked-ctx', note: 'Excluded by kubernetes.allowed_contexts' },
+    ],
+  };
+
+  it('appends a name-only row with dashes in every capacity cell', () => {
+    const { container } = renderSection(K8S_PROPS);
+    const rows = tableRows(container);
+    // One active GPU-type row, then the inactive row.
+    expect(rows).toHaveLength(2);
+    const cells = cellTexts(rows[1]);
+    expect(cells).toContain('parked-ctxNot enabled');
+    // Nodes, CPU, Memory, GPU Type, GPUs, Utilization — no data, no skeleton.
+    expect(cells.filter((c) => c === '-')).toHaveLength(6);
+  });
+
+  it('navigates to the context detail page on name click', () => {
+    // The detail page is where a plugin explains the not-enabled state and
+    // offers remediation, so the name must navigate like any other row.
+    const handleContextClick = jest.fn();
+    const { container } = renderSection({ ...K8S_PROPS, handleContextClick });
+    const inactiveRow = tableRows(container)[1];
+    fireEvent.click(inactiveRow.querySelector('.cursor-pointer'));
+    expect(handleContextClick).toHaveBeenCalledWith('parked-ctx');
+  });
+
+  it('keeps the namePrefix and actions slots live, keyed k8s/<name>', () => {
+    const { container } = renderSection(K8S_PROPS);
+    const inactiveRow = tableRows(container)[1];
+    const slots = Array.from(inactiveRow.querySelectorAll('[data-slot]')).map(
+      (el) => [
+        el.getAttribute('data-slot'),
+        el.getAttribute('data-row-id'),
+        el.getAttribute('data-row-kind'),
+      ]
+    );
+    expect(slots).toEqual([
+      ['infra.row.namePrefix', 'parked-ctx', 'k8s'],
+      ['infra.row.actions', 'parked-ctx', 'k8s'],
+    ]);
+  });
+
+  it('counts inactive rows in their own badge, not the context count', () => {
+    const { container } = renderSection(K8S_PROPS);
+    const header = normalize(container.querySelector('.p-5 > div'));
+    expect(header).toContain('1 context');
+    expect(header).toContain('1 not enabled');
+  });
+
+  it('renders the section when only inactive contexts exist', () => {
+    const { container } = renderSection({
+      ...K8S_PROPS,
+      contexts: [],
+      gpus: [],
+      groupedPerContextGPUs: {},
+      loadedContexts: new Set(),
+    });
+    expect(container.textContent).not.toContain('No Kubernetes found');
+    expect(tableRows(container)).toHaveLength(1);
+    expect(cellTexts(tableRows(container)[0])).toContain(
+      'parked-ctxNot enabled'
+    );
+  });
+
+  it('renders nothing extra when there are none', () => {
+    const { container } = renderSection({
+      ...K8S_PROPS,
+      inactiveContexts: [],
+    });
+    expect(tableRows(container)).toHaveLength(1);
+    expect(container.textContent).not.toContain('not enabled');
+  });
+});
