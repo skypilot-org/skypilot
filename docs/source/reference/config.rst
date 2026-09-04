@@ -1630,6 +1630,11 @@ If true, SkyPilot will not create public IP addresses for Azure instances and on
 private IPs (optional). Requires a network setup that allows SSH access to private IPs
 (e.g., a VPN or ``ssh_proxy_command``).
 
+For SkyPilot-managed Network Security Groups, enabling this option restricts inbound
+SSH to Azure's ``VirtualNetwork`` service tag instead of allowing SSH from every
+source. When an existing VNet subnet supplies its own Network Security Group, that
+group remains user-managed.
+
 This flag is typically set together with ``vpc_name`` above and
 ``ssh_proxy_command`` below.
 
