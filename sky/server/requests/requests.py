@@ -1268,6 +1268,18 @@ def _get_legacy_log_path(request_id: str) -> pathlib.Path:
     return (legacy_path_prefix / request_id).with_suffix('.log')
 
 
+def _get_legacy_lock_path(request_id: str) -> pathlib.Path:
+    """Get the legacy lock file path for a request.
+
+    Server versions before the request logs moved out of
+    ``~/sky_logs/api_server/requests`` kept the per-request lock file next to
+    the log, under the same name this module still uses.
+    """
+    legacy_path_prefix = pathlib.Path(
+        LEGACY_REQUEST_LOG_PATH_PREFIX).expanduser().absolute()
+    return legacy_path_prefix / f'.{request_id}.lock'
+
+
 # TODO Remove this function on or after v0.15.0
 async def _cleanup_legacy_directory_if_empty():
     """Remove legacy request log directory if empty.
@@ -1343,6 +1355,13 @@ async def clean_finished_requests_with_retention(retention_seconds: int,
             futs.append(
                 asyncio.create_task(
                     anyio.Path(request_lock_path(
+                        req.request_id)).unlink(missing_ok=True)))
+            # And the legacy-path lock file, so that the legacy directory can
+            # eventually be removed as empty.
+            # TODO Remove this on or after v0.15.0
+            futs.append(
+                asyncio.create_task(
+                    anyio.Path(_get_legacy_lock_path(
                         req.request_id)).unlink(missing_ok=True)))
         await asyncio.gather(*futs)
 
