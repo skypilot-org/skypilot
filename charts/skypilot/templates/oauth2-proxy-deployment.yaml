@@ -77,6 +77,9 @@ spec:
         - --skip-provider-button=true
         - --reverse-proxy=true
         - --set-xauthrequest
+        {{- if (index $oauth2 "scope") }}
+        - --scope={{ index $oauth2 "scope" }}
+        {{- end }}
         - --session-store-type={{ index $oauth2 "session-store-type" | default "redis" }}
         {{- if not (index $oauth2 "use-https" | default false) }}
         - --cookie-secure=false

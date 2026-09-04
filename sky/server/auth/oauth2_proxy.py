@@ -224,7 +224,10 @@ class OAuth2ProxyMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
             email_hash = hashlib.md5(email_header.encode(),
                                      usedforsecurity=False).hexdigest()
             user_hash = email_hash[:common_utils.USER_HASH_LENGTH]
-            return models.User(id=user_hash,
-                               name=email_header,
-                               user_type=models.UserType.SSO.value)
+            return models.User(
+                id=user_hash,
+                name=email_header,
+                user_type=models.UserType.SSO.value,
+                groups=models.parse_groups(
+                    response.headers.get('X-Auth-Request-Groups')))
         return None
