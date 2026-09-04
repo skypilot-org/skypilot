@@ -50,6 +50,8 @@ async def _run_response_with_client_disconnect(response, spec_version):
 async def test_proxy_error_releases_least_load_accounting():
     lb = _make_load_balancer()
     replica_url = 'http://replica'
+    policy = lb._load_balancing_policy
+    policy.set_ready_replicas([replica_url])
     client = mock.MagicMock()
     client.build_request.return_value = mock.sentinel.proxy_request
     client.send = mock.AsyncMock(side_effect=httpx.ReadTimeout('timed out'))
@@ -58,7 +60,7 @@ async def test_proxy_error_releases_least_load_accounting():
     result = await lb._proxy_request_to(replica_url, _make_request())
 
     assert isinstance(result, httpx.ReadTimeout)
-    assert lb._load_balancing_policy.load_map[replica_url] == 0
+    assert policy.load_map.get(replica_url) == 0
 
 
 @pytest.mark.asyncio
@@ -79,7 +81,7 @@ async def test_pre_execute_error_preserves_least_load_accounting():
     with pytest.raises(RuntimeError, match='pre-execute failed'):
         await lb._proxy_request_to(replica_url, request)
 
-    assert policy.load_map[replica_url] == 1
+    assert policy.load_map.get(replica_url) == 1
 
 
 @pytest.mark.parametrize('spec_version', ['2.3', '2.4'])
@@ -101,10 +103,11 @@ async def test_streaming_response_releases_least_load_accounting_on_close(
     proxy_response.aclose = mock.AsyncMock()
     client.send = mock.AsyncMock(return_value=proxy_response)
     lb._client_pool[replica_url] = client
+    lb._load_balancing_policy.set_ready_replicas([replica_url])
 
     response = await lb._proxy_request_to(replica_url, _make_request())
 
-    assert lb._load_balancing_policy.load_map[replica_url] == 1
+    assert lb._load_balancing_policy.load_map.get(replica_url) == 1
     messages = []
 
     receive_event = asyncio.Event()
@@ -122,7 +125,7 @@ async def test_streaming_response_releases_least_load_accounting_on_close(
         }
     }, receive, send)
 
-    assert lb._load_balancing_policy.load_map[replica_url] == 0
+    assert lb._load_balancing_policy.load_map.get(replica_url) == 0
     assert any(message.get('body') == b'response' for message in messages)
     proxy_response.aclose.assert_awaited_once()
 
@@ -148,6 +151,7 @@ async def test_streaming_response_error_releases_least_load_accounting(
         side_effect=RuntimeError('aclose failed'))
     client.send = mock.AsyncMock(return_value=proxy_response)
     lb._client_pool[replica_url] = client
+    lb._load_balancing_policy.set_ready_replicas([replica_url])
 
     response = await lb._proxy_request_to(replica_url, _make_request())
 
@@ -166,7 +170,7 @@ async def test_streaming_response_error_releases_least_load_accounting(
                 'spec_version': spec_version
             }
         }, receive, send)
-    assert lb._load_balancing_policy.load_map[replica_url] == 0
+    assert lb._load_balancing_policy.load_map.get(replica_url) == 0
     proxy_response.aclose.assert_awaited_once()
 
 
@@ -190,12 +194,13 @@ async def test_client_disconnect_before_streaming_releases_load_accounting(
     proxy_response.aclose = mock.AsyncMock()
     client.send = mock.AsyncMock(return_value=proxy_response)
     lb._client_pool[replica_url] = client
+    lb._load_balancing_policy.set_ready_replicas([replica_url])
 
     response = await lb._proxy_request_to(replica_url, _make_request())
 
     await _run_response_with_client_disconnect(response, spec_version)
 
-    assert lb._load_balancing_policy.load_map[replica_url] == 0
+    assert lb._load_balancing_policy.load_map.get(replica_url) == 0
     proxy_response.aclose.assert_awaited_once()
 
 
@@ -252,7 +257,8 @@ async def test_proxy_retries_spread_load_after_failure_and_disconnect(
         response = await lb._proxy_with_retries(request)
         await _run_response_with_client_disconnect(response, spec_version)
         assert all(
-            policy.load_map[replica_url] == 0 for replica_url in replica_urls)
+            policy.load_map.get(replica_url) == 0
+            for replica_url in replica_urls)
 
     assert [
         lb._client_pool[replica_url].send.await_count
@@ -316,7 +322,8 @@ async def test_proxy_stops_retrying_after_client_disconnect_without_leaking_load
         if result.status_code != 499:
             await _run_response_with_client_disconnect(result, spec_version)
         assert all(
-            policy.load_map[replica_url] == 0 for replica_url in replica_urls)
+            policy.load_map.get(replica_url) == 0
+            for replica_url in replica_urls)
 
     assert result_statuses == [499, 200, 200, 499]
     assert request.is_disconnected.await_count == 2
@@ -331,11 +338,13 @@ async def test_proxy_stops_retrying_after_client_disconnect_without_leaking_load
 async def test_missing_client_releases_least_load_accounting():
     lb = _make_load_balancer()
     replica_url = 'http://replica'
+    policy = lb._load_balancing_policy
+    policy.set_ready_replicas([replica_url])
 
     result = await lb._proxy_request_to(replica_url, _make_request())
 
     assert isinstance(result, RuntimeError)
-    assert lb._load_balancing_policy.load_map[replica_url] == 0
+    assert policy.load_map.get(replica_url) == 0
 
 
 def test_retired_replica_load_is_removed_after_inflight_request_finishes():
@@ -346,13 +355,13 @@ def test_retired_replica_load_is_removed_after_inflight_request_finishes():
     policy.set_ready_replicas([replica_url])
     policy.pre_execute_hook(replica_url, request)
     policy.set_ready_replicas([])
-    assert policy.load_map[replica_url] == 1
+    assert policy.load_map.get(replica_url) == 1
     policy.set_ready_replicas([replica_url])
-    assert policy.load_map[replica_url] == 1
+    assert policy.load_map.get(replica_url) == 1
 
     policy.post_execute_hook(replica_url, request)
 
-    assert policy.load_map[replica_url] == 0
+    assert policy.load_map.get(replica_url) == 0
     policy.set_ready_replicas([])
     assert replica_url not in policy.load_map
 
