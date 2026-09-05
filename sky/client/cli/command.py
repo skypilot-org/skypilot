@@ -3497,6 +3497,14 @@ def start(
           ' in certain manual troubleshooting scenarios; with it set, it is the'
           ' user\'s responsibility to ensure there are no leaked instances and '
           'related resources.'))
+@click.option('--workspace',
+              '-w',
+              type=str,
+              default=None,
+              expose_value=False,
+              callback=flags.apply_workspace_option_callback,
+              help=('Workspace the cluster(s) belong to. Shorthand for '
+                    '`--config active_workspace=<name>`.'))
 @_add_click_options(flags.GRACEFUL_OPTIONS + flags.COMMON_OPTIONS)
 @usage_lib.entrypoint
 def down(
@@ -6422,6 +6430,15 @@ def jobs_queue(verbose: bool,
 @flags.all_option('Cancel all managed jobs for the current user.')
 @flags.yes_option()
 @flags.all_users_option('Cancel all managed jobs from all users.')
+@click.option('--workspace',
+              '-w',
+              type=str,
+              default=None,
+              expose_value=False,
+              callback=flags.apply_workspace_option_callback,
+              help=('Workspace the job(s) belong to. Jobs outside the active '
+                    'workspace are skipped. Shorthand for '
+                    '`--config active_workspace=<name>`.'))
 @usage_lib.entrypoint
 # pylint: disable=redefined-builtin
 def jobs_cancel(
