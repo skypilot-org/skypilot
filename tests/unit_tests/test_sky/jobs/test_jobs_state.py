@@ -870,6 +870,70 @@ class TestGetLatestRecoveryReasons:
         assert state.get_latest_recovery_and_pending_reasons([1], [])[0] == {}
 
 
+class TestGetLatestCancelRequestReasons:
+    """Who-requested-the-cancel lookup for the `details` column."""
+
+    def test_empty_job_ids(self, _mock_managed_jobs_db_conn):
+        assert state.get_cancel_request_reasons([]) == {}
+
+    def test_attributed_request_wins_over_generic_cancelling(
+            self, _mock_managed_jobs_db_conn):
+        early = datetime.datetime(2026, 1, 1, 0, 0, 0)
+        late = datetime.datetime(2026, 1, 1, 0, 5, 0)
+        attributed = ('Cancellation requested by user alice '
+                      '(request ID: 9b6e6396-0000-4000-8000-000000000000)')
+        # The request event is written first; the controller's generic
+        # CANCELLING event lands later and must not shadow it.
+        state.add_job_event(1,
+                            None,
+                            state.ManagedJobStatus.CANCELLING,
+                            attributed,
+                            timestamp=early)
+        state.add_job_event(1,
+                            None,
+                            state.ManagedJobStatus.CANCELLING,
+                            'Job is cancelling',
+                            timestamp=late)
+        state.add_job_event(1,
+                            None,
+                            state.ManagedJobStatus.CANCELLED,
+                            'Job has been cancelled',
+                            timestamp=late)
+        # Job 2 was cancelled without an attributed request (internal cancel).
+        state.add_job_event(2,
+                            None,
+                            state.ManagedJobStatus.CANCELLING,
+                            'Job is cancelling',
+                            timestamp=late)
+        # Job 3 is attributed but not requested.
+        state.add_job_event(3,
+                            None,
+                            state.ManagedJobStatus.CANCELLING,
+                            'Cancellation requested by user bob',
+                            timestamp=late)
+        assert state.get_cancel_request_reasons([1, 2]) == {1: attributed}
+
+    def test_first_attributed_request_wins(self, _mock_managed_jobs_db_conn):
+        # alice's targeted cancel caused the cancellation; bob's fleet-wide
+        # cancel arrived while the job was already CANCELLING and is in the
+        # event log but is not why the job ended.
+        early = datetime.datetime(2026, 1, 1, 0, 0, 0)
+        late = datetime.datetime(2026, 1, 1, 0, 5, 0)
+        state.add_job_event(1,
+                            None,
+                            state.ManagedJobStatus.CANCELLING,
+                            'Cancellation requested by user alice',
+                            timestamp=early)
+        state.add_job_event(1,
+                            None,
+                            state.ManagedJobStatus.CANCELLING,
+                            'Cancellation requested by user bob',
+                            timestamp=late)
+        assert state.get_cancel_request_reasons([1]) == {
+            1: 'Cancellation requested by user alice'
+        }
+
+
 class TestSetRecoveringEventReason:
     """Reason/code selection for the RECOVERING event in set_recovering_async.
 

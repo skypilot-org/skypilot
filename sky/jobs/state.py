@@ -4121,6 +4121,52 @@ def _get_latest_event_reasons(
     return result
 
 
+# Prefix of the CANCELLING job-event reason written when a cancellation is
+# requested, naming who asked and under which API request (see
+# utils.CancelRequestInfo.event_reason):
+#   'Cancellation requested by user alice (request ID: 9b6e6396-...)'
+# The controller writes its own generic CANCELLING event ('Job is cancelling')
+# once it acts on the request, so the queue looks the attributed event up by
+# this prefix rather than taking the latest CANCELLING reason.
+CANCEL_REQUESTED_EVENT_REASON_PREFIX = 'Cancellation requested'
+
+
+def get_cancel_request_reasons(job_ids: List[int]) -> Dict[int, str]:
+    """Return {job_id: reason} naming who requested each job's cancellation.
+
+    The reason is the *first* CANCELLING event whose text starts with
+    ``CANCEL_REQUESTED_EVENT_REASON_PREFIX``, e.g. 'Cancellation requested by
+    user alice (request ID: ...)': the request that caused the cancellation.
+    A later request (e.g. a fleet-wide ``sky jobs cancel --all --all-users``
+    arriving while the job was already CANCELLING) is also recorded in the
+    event log but did not cancel the job. A job cancelled without an
+    attributed request (an old controller, or a controller-internal cancel
+    such as a job group tearing down its auxiliary jobs) has no entry. One
+    batched query so the queue stays off the per-job path.
+    """
+    result: Dict[int, str] = {}
+    if not job_ids:
+        return result
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
+        rows = session.execute(
+            sqlalchemy.select(
+                job_events_table.c.spot_job_id,
+                job_events_table.c.reason,
+            ).where(
+                job_events_table.c.new_status ==
+                ManagedJobStatus.CANCELLING.value,
+                job_events_table.c.spot_job_id.in_(job_ids),
+                job_events_table.c.reason.like(
+                    f'{CANCEL_REQUESTED_EVENT_REASON_PREFIX}%'),
+            ).order_by(job_events_table.c.timestamp.asc())).fetchall()
+    # rows are oldest-first; keep the first attributed request per job.
+    for spot_job_id, reason in rows:
+        if spot_job_id not in result and reason:
+            result[spot_job_id] = reason
+    return result
+
+
 def get_latest_recovery_and_pending_reasons(
         recovering_job_ids: List[int],
         pending_job_ids: List[int]) -> Tuple[Dict[int, str], Dict[int, str]]:

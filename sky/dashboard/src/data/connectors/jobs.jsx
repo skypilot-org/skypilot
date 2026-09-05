@@ -17,14 +17,19 @@ import { trackJobAction } from '@/lib/analytics';
 import { applyEnhancements } from '@/plugins/dataEnhancement';
 
 /**
- * Tooltip for a job's status badge: pending reason for PENDING jobs, and
- * the failure details (which carry the failure attribution and exit code,
+ * Tooltip for a job's status badge: pending reason for PENDING jobs, the
+ * failure details (which carry the failure attribution and exit code,
  * e.g. "Job exited with exit code 7 (user program failure). ...") for
- * FAILED* jobs. Same text as the details column, surfaced on hover.
+ * FAILED* jobs, and who requested the cancellation (e.g. "Cancellation
+ * requested by user alice (request ID: ...)") for CANCELLING/CANCELLED
+ * jobs. Same text as the details column, surfaced on hover.
  */
 function getStatusTooltip(job) {
   if (job.status === 'PENDING' || job.status?.startsWith('FAILED')) {
     return job.details || job.failure_reason || null;
+  }
+  if (job.status === 'CANCELLING' || job.status === 'CANCELLED') {
+    return job.details || null;
   }
   return null;
 }
