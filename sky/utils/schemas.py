@@ -2561,6 +2561,9 @@ def get_config_schema():
                 'type': 'integer',
                 'minimum': 0,
             },
+            'trust_loopback': {
+                'type': 'boolean',
+            },
         }
     }
 
