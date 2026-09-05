@@ -4,10 +4,7 @@
 import dashboardCache from './cache';
 import { MANAGED_JOBS_SUMMARY_ARGS } from '@/data/connectors/constants';
 import { getClusters } from '@/data/connectors/clusters';
-import {
-  getManagedJobs,
-  getManagedJobsWithClientPagination,
-} from '@/data/connectors/jobs';
+import { getManagedJobs } from '@/data/connectors/jobs';
 import {
   getWorkspaces,
   getEnabledCloudsBatch,
@@ -22,18 +19,6 @@ import {
 } from '@/data/connectors/infra';
 import { getSSHNodePools } from '@/data/connectors/ssh-node-pools';
 
-// True when a server-side managed-jobs pagination plugin is loaded.
-// Inlined in this file rather than imported because the same one-line
-// check exists privately in jobs-cache-manager.js and the
-// data/connectors/jobs.jsx connector. Cross-file dedup is a follow-up;
-// the goal here is just to remove the duplication added by this PR.
-function isJobsPaginationPluginAvailable() {
-  return (
-    typeof window !== 'undefined' &&
-    typeof window.__skyJobsPaginationFetch === 'function'
-  );
-}
-
 /**
  * Complete list of all dashboard cache functions organized by page
  */
@@ -41,11 +26,6 @@ export const DASHBOARD_CACHE_FUNCTIONS = {
   // Base functions used across multiple pages (no arguments)
   base: {
     getClusters: { fn: getClusters, args: [] },
-    // For jobs page - uses client-side pagination wrapper
-    getManagedJobs: {
-      fn: getManagedJobsWithClientPagination,
-      args: [{ allUsers: true }],
-    },
     // For infra/users/workspaces pages - shared cache entry.
     // Field-trimmed via MANAGED_JOBS_SUMMARY_ARGS: the untrimmed fetch
     // returns every non-finished job with full inline YAML (tens of MB at
@@ -83,18 +63,10 @@ export const DASHBOARD_CACHE_FUNCTIONS = {
   // Page-specific function requirements
   pages: {
     clusters: ['getClusters', 'getWorkspaces'],
-    // getClusters is intentionally NOT a foreground requirement here. Its
-    // only /jobs consumer is the controller-stopped/launching banner
-    // (components/jobs.jsx), which runs only when the queue endpoint reports
-    // the controller unreachable — and fetchData already skips /status when
-    // it is reachable. Foreground-preloading it made every /jobs load await a
-    // /status -> /api/get round trip (and gate pagination re-fetches via
-    // preloadingComplete) to warm data a healthy page never reads. It is
-    // still warmed by _backgroundPreloadOtherPages (which always adds
-    // getClusters off the infra page), so the banner and Clusters-page
-    // navigation stay fast; a cold banner just falls back to an on-demand
-    // fetch.
-    jobs: ['getManagedJobs', 'getWorkspaces', 'getUsers'],
+    // The controller status banner fetches clusters only when the queue
+    // endpoint reports the controller unreachable, so a healthy jobs page
+    // does not preload it.
+    jobs: ['getWorkspaces', 'getUsers'],
     infra: [
       // Empty - infra page uses progressive loading via fetchData()
       // All infra functions are background-preloaded from other pages
@@ -116,9 +88,6 @@ export const DASHBOARD_CACHE_FUNCTIONS = {
 class CachePreloader {
   constructor() {
     this.isPreloading = false;
-    this.preloadPromises = new Map();
-    this.recentlyPreloaded = new Map(); // Track recently preloaded functions with timestamps
-    this.PRELOAD_GRACE_PERIOD = 5000; // 5 seconds grace period
     this.pluginPages = new Map(); // Dynamically registered plugin page functions
   }
 
@@ -135,14 +104,14 @@ class CachePreloader {
   }
 
   /**
-   * Preload cache for a specific page and background-load other pages
+   * Preload cache for a specific page, with optional speculative page loading.
    * @param {string} currentPage - The page being loaded ('clusters', 'jobs', 'infra', 'workspaces', 'users')
    * @param {Object} [options] - Preload options
-   * @param {boolean} [options.backgroundPreload=true] - Whether to preload other pages in background
+   * @param {boolean} [options.backgroundPreload=false] - Whether to preload other pages in background
    * @param {boolean} [options.force=false] - Whether to force refresh even if cached
    */
   async preloadForPage(currentPage, options) {
-    const { backgroundPreload = true, force = false } = options || {};
+    const { backgroundPreload = false, force = false } = options || {};
 
     if (
       !DASHBOARD_CACHE_FUNCTIONS.pages[currentPage] &&
@@ -185,48 +154,18 @@ class CachePreloader {
         if (force) {
           dashboardCache.invalidate(fn, args);
         }
-        promises.push(
-          dashboardCache.get(fn, args).then((result) => {
-            this._markAsPreloaded(fn, args);
-            return result;
-          })
-        );
+        promises.push(dashboardCache.get(fn, args));
       }
     }
 
     for (const functionName of requiredFunctions) {
-      // Skip the unpaginated full-jobs preload when a server-side
-      // pagination plugin is loaded. Without this skip, mounting /jobs
-      // at scale (e.g. 50k+ jobs) issues a single blocking fetch for
-      // the entire job set — measured at ~26s / ~110 MB on a 50k-row
-      // PostgreSQL backend — that nothing on the page actually reads
-      // (the table reads its own paginated cache via the plugin path).
-      // The blocked executor pool then makes subsequent paginated
-      // page-click fetches feel slow even though each individual
-      // /plugins/api/pagination/jobs call is ~500 ms. The cache key
-      // the wrapper writes here ({allUsers: true} with no pagination
-      // args) doesn't match what the table or the
-      // dashboardCache.get(getManagedJobs, [{...filterOptions, page,
-      // limit}]) call sites read either, so dropping it costs nothing.
-      if (
-        functionName === 'getManagedJobs' &&
-        isJobsPaginationPluginAvailable()
-      ) {
-        continue;
-      }
       if (DASHBOARD_CACHE_FUNCTIONS.base[functionName]) {
         // Base function (no arguments)
         const { fn, args } = DASHBOARD_CACHE_FUNCTIONS.base[functionName];
         if (force) {
           dashboardCache.invalidate(fn, args);
         }
-        promises.push(
-          dashboardCache.get(fn, args).then((result) => {
-            // Mark this function as recently preloaded
-            this._markAsPreloaded(fn, args);
-            return result;
-          })
-        );
+        promises.push(dashboardCache.get(fn, args));
       } else if (functionName === 'getEnabledCloudsBatch') {
         // Dynamic function that requires workspace data
         promises.push(this._loadEnabledCloudsForAllWorkspaces(force));
@@ -346,23 +285,10 @@ class CachePreloader {
     const preloadPromises = Array.from(allOtherFunctions).map(
       async (functionName) => {
         try {
-          // Same skip as in _loadPageData: don't background-preload the
-          // unpaginated full-jobs cache when a server-side pagination
-          // plugin is present. The /jobs page reads its own paginated
-          // cache via the plugin path; nothing else reads the
-          // {allUsers: true} cache key this wrapper writes.
-          if (
-            functionName === 'getManagedJobs' &&
-            isJobsPaginationPluginAvailable()
-          ) {
-            return;
-          }
           if (DASHBOARD_CACHE_FUNCTIONS.base[functionName]) {
             // Base function (no arguments)
             const { fn, args } = DASHBOARD_CACHE_FUNCTIONS.base[functionName];
             await dashboardCache.get(fn, args);
-            // Mark this function as recently preloaded
-            this._markAsPreloaded(fn, args);
           } else if (functionName === 'getEnabledCloudsBatch') {
             // Dynamic function that requires workspace data
             await this._loadEnabledCloudsForAllWorkspaces(false);
@@ -390,7 +316,6 @@ class CachePreloader {
           dashboardCache
             .get(fn, args)
             .then(() => {
-              this._markAsPreloaded(fn, args);
               console.log(
                 `[CachePreloader] Background loaded plugin function for: ${pageName}`
               );
@@ -444,80 +369,17 @@ class CachePreloader {
   }
 
   /**
-   * Check if a function was recently preloaded (within grace period)
-   * @param {Function} fetchFunction - The function to check
-   * @param {Array} [args=[]] - Arguments to check
-   * @returns {boolean} - True if recently preloaded
-   */
-  wasRecentlyPreloaded(fetchFunction, args = []) {
-    const key = this._generateKey(fetchFunction, args);
-    const preloadTime = this.recentlyPreloaded.get(key);
-
-    if (!preloadTime) {
-      return false;
-    }
-
-    const now = Date.now();
-    const isRecent = now - preloadTime < this.PRELOAD_GRACE_PERIOD;
-
-    // Clean up expired entries
-    if (!isRecent) {
-      this.recentlyPreloaded.delete(key);
-    }
-
-    return isRecent;
-  }
-
-  /**
-   * Mark a function as recently preloaded
-   * @private
-   */
-  _markAsPreloaded(fetchFunction, args = []) {
-    const key = this._generateKey(fetchFunction, args);
-    this.recentlyPreloaded.set(key, Date.now());
-  }
-
-  /**
-   * Generate a cache key based on function name and arguments (same as DashboardCache)
-   * @private
-   */
-  _generateKey(fetchFunction, args) {
-    // Use same key generation logic as DashboardCache
-    const functionString = fetchFunction.toString();
-    const functionHash = this._simpleHash(functionString);
-    const argsHash = args.length > 0 ? JSON.stringify(args) : '';
-    return `${functionHash}_${argsHash}`;
-  }
-
-  /**
-   * Simple string hash function (same as DashboardCache)
-   * @private
-   */
-  _simpleHash(str) {
-    let hash = 5381;
-    for (let i = 0; i < str.length; i++) {
-      hash = (hash << 5) + hash + str.charCodeAt(i);
-    }
-    return hash >>> 0;
-  }
-
-  /**
    * Clear all cache and reset preloader state
    */
   clearCache() {
     dashboardCache.clear();
     this.isPreloading = false;
-    this.preloadPromises.clear();
-    this.recentlyPreloaded.clear();
     console.log('[CachePreloader] Cache cleared');
   }
 }
 
 // Create singleton instance
 const cachePreloader = new CachePreloader();
-
-// Set up coordination between cache and preloader
-dashboardCache.setPreloader(cachePreloader);
 
 export { CachePreloader, cachePreloader };
 export default cachePreloader;

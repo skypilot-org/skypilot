@@ -497,6 +497,10 @@ class ManagedJobsServiceImpl(managed_jobsv1_pb2_grpc.ManagedJobsServiceServicer
                 if request.HasField('pool_match') else None,
                 page=request.page if request.HasField('page') else None,
                 limit=request.limit if request.HasField('limit') else None,
+                sort_by=request.sort_by
+                if request.HasField('sort_by') else None,
+                sort_order=request.sort_order
+                if request.HasField('sort_order') else None,
                 user_hashes=user_hashes,
                 statuses=statuses,
                 fields=fields,
