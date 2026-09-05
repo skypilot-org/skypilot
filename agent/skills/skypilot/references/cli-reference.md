@@ -467,6 +467,7 @@ Show statuses of managed jobs.
 - `--since` — Show only jobs submitted within this time window, relative to now (e.g. "30m", "48h", "7d", "2w"). A bare number is seconds. Mutually exclusive with --after.
 - `--after` — Show only jobs submitted at or after this absolute local time (e.g. "2026-01-13" or "2026-01-13 15:30:00"). Mutually exclusive with --since.
 - `--before` — Show only jobs submitted at or before this absolute local time (e.g. "2026-01-13" or "2026-01-13 15:30:00").
+- `--infra` — Show only jobs running on this infrastructure. Format: cloud, cloud/region, cloud/region/zone, k8s/context-name, or ssh/node-pool-name. Examples: aws, aws/us-east-1, aws/us-east-1/us-east-1a, aws/\*/u...
 - `--all-users`, `-u` — Show jobs from all users.
 - `--all`, `-a` — Show all jobs.
 - `--output`, `-o` (default: `table`) — Output format. Choices: table, json. Default: table.

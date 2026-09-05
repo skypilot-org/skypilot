@@ -6193,6 +6193,20 @@ def _parse_datetime_to_epoch(value: str) -> float:
     required=False,
     help=('Show only jobs submitted at or before this absolute local time '
           '(e.g. "2026-01-13" or "2026-01-13 15:30:00").'))
+@click.option(
+    '--infra',
+    default=None,
+    type=str,
+    required=False,
+    help=(
+        'Show only jobs running on this infrastructure. '
+        'Format: cloud, cloud/region, cloud/region/zone, '
+        'k8s/context-name, or ssh/node-pool-name. '
+        'Examples: aws, aws/us-east-1, aws/us-east-1/us-east-1a, '
+        # TODO(zhwu): we have to use `\*` to make sure the docs build
+        # not complaining about the `*`, but this will cause `--help`
+        # to show `\*` instead of `*`.
+        'aws/\\*/us-east-1a, k8s/my-context, ssh/my-nodes.'))
 @flags.all_users_option('Show jobs from all users.')
 @flags.all_option('Show all jobs.')
 @flags.output_format_option()
@@ -6205,6 +6219,7 @@ def jobs_queue(verbose: bool,
                since: Optional[str],
                after: Optional[str],
                before: Optional[str],
+               infra: Optional[str],
                all_users: bool,
                all: bool,
                limit: int,
@@ -6292,6 +6307,12 @@ def jobs_queue(verbose: bool,
 
       sky jobs queue --after 2026-01-01 --before 2026-01-31
 
+    (Tip) To show only jobs on one infrastructure, use ``--infra``:
+
+    .. code-block:: bash
+
+      sky jobs queue --infra k8s/my-context
+
     """
     status_filter = [status for group in statuses for status in group]
     # TODO(kevin): remove in 0.15.0, along with _SKIP_FINISHED_SENTINEL and the
@@ -6352,7 +6373,8 @@ def jobs_queue(verbose: bool,
                 fields=fields,
                 statuses=status_filter,
                 submitted_after=submitted_after,
-                submitted_before=submitted_before)
+                submitted_before=submitted_before,
+                infra_match=infra)
 
         def get_pool_status():
             try:

@@ -9,6 +9,7 @@ import zlib
 
 import click
 
+from sky import exceptions
 from sky import sky_logging
 from sky.backends import backend_utils
 from sky.client import common as client_common
@@ -29,6 +30,7 @@ from sky.utils import common_utils
 from sky.utils import context
 from sky.utils import dag_utils
 from sky.utils import rich_utils
+from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
     import io
@@ -179,6 +181,7 @@ def queue_v2(
     statuses: Optional[List[str]] = None,
     submitted_after: Optional[float] = None,
     submitted_before: Optional[float] = None,
+    infra_match: Optional[str] = None,
 ) -> server_common.RequestId[Tuple[List[responses.ManagedJobRecord], int, Dict[
         str, int], int]]:
     """Gets statuses of managed jobs.
@@ -203,6 +206,9 @@ def queue_v2(
             (seconds).
         submitted_before: Only show jobs submitted at or before this epoch
             time (seconds).
+        infra_match: Only show jobs on this infra, as an ``--infra`` spec:
+            ``cloud``, ``cloud/region`` or ``cloud/region/zone``, with ``*``
+            for any component (e.g. ``k8s/my-context``, ``aws/us-east-1``).
 
     Returns:
         The request ID of the queue request.
@@ -260,6 +266,16 @@ def queue_v2(
             'Filtering managed jobs by submission time is not supported in '
             'your API server; the server will ignore it and show all jobs. '
             'Please upgrade the API server to enable it.')
+    if (infra_match is not None and remote_api_version is not None and
+            remote_api_version <
+            server_constants.MIN_JOBS_INFRA_FILTER_API_VERSION):
+        # An error, not a warning like the window filter above: a server that
+        # drops this field answers with jobs on other infra, which reads as a
+        # filtered list and is not one.
+        with ux_utils.print_exception_no_traceback():
+            raise exceptions.NotSupportedError(
+                'Filtering managed jobs by infra is not supported by your API '
+                'server. Please upgrade the API server to enable it.')
 
     body = payloads.JobsQueueV2Body(
         refresh=refresh,
@@ -273,6 +289,7 @@ def queue_v2(
         statuses=statuses,
         submitted_after=submitted_after,
         submitted_before=submitted_before,
+        infra_match=infra_match,
     )
     path = '/jobs/queue/v2'
     response = server_common.make_authenticated_request(

@@ -2813,6 +2813,7 @@ def dump_managed_job_queue(
     workspace_match: Optional[str] = None,
     name_match: Optional[str] = None,
     pool_match: Optional[str] = None,
+    infra_match: Optional[str] = None,
     page: Optional[int] = None,
     limit: Optional[int] = None,
     user_hashes: Optional[List[Optional[str]]] = None,
@@ -2823,11 +2824,26 @@ def dump_managed_job_queue(
     submitted_after: Optional[float] = None,
     submitted_before: Optional[float] = None,
 ) -> str:
+    # Passed by name: this is called from generated code that pins the
+    # arguments it knows about, and the parameter list has outgrown the point
+    # where positional order is safe to extend.
     return message_utils.encode_payload(
-        get_managed_job_queue(skip_finished, accessible_workspaces, job_ids,
-                              workspace_match, name_match, pool_match, page,
-                              limit, user_hashes, statuses, fields, sort_by,
-                              sort_order, submitted_after, submitted_before))
+        get_managed_job_queue(skip_finished=skip_finished,
+                              accessible_workspaces=accessible_workspaces,
+                              job_ids=job_ids,
+                              workspace_match=workspace_match,
+                              name_match=name_match,
+                              pool_match=pool_match,
+                              infra_match=infra_match,
+                              page=page,
+                              limit=limit,
+                              user_hashes=user_hashes,
+                              statuses=statuses,
+                              fields=fields,
+                              sort_by=sort_by,
+                              sort_order=sort_order,
+                              submitted_after=submitted_after,
+                              submitted_before=submitted_before))
 
 
 def _update_fields(fields: List[str],) -> Tuple[List[str], bool]:
@@ -3024,6 +3040,7 @@ def get_managed_job_queue(
     workspace_match: Optional[str] = None,
     name_match: Optional[str] = None,
     pool_match: Optional[str] = None,
+    infra_match: Optional[str] = None,
     page: Optional[int] = None,
     limit: Optional[int] = None,
     user_hashes: Optional[List[Optional[str]]] = None,
@@ -3044,6 +3061,8 @@ def get_managed_job_queue(
         workspace_match: The workspace name to match.
         name_match: The job name to match.
         pool_match: The pool name to match.
+        infra_match: The `--infra` spec to match (`cloud`, `cloud/region` or
+            `cloud/region/zone`, with `*` for any component).
         page: The page number.
         limit: The limit number.
         user_hashes: The user hashes.
@@ -3071,6 +3090,21 @@ def get_managed_job_queue(
 
     total_no_filter = managed_job_state.get_managed_jobs_total()
 
+    # The values the dashboard's Infra filter offers. Computed over the same
+    # set the counts are, and without `infra_match`, so picking one option
+    # does not hide the others. See `get_infra_options_with_filters`.
+    infra_options = managed_job_state.get_infra_options_with_filters(
+        job_ids=job_ids,
+        accessible_workspaces=accessible_workspaces,
+        workspace_match=workspace_match,
+        name_match=name_match,
+        pool_match=pool_match,
+        user_hashes=user_hashes,
+        skip_finished=skip_finished,
+        submitted_after=submitted_after,
+        submitted_before=submitted_before,
+    )
+
     status_counts = managed_job_state.get_status_count_with_filters(
         fields=fields,
         job_ids=job_ids,
@@ -3078,6 +3112,7 @@ def get_managed_job_queue(
         workspace_match=workspace_match,
         name_match=name_match,
         pool_match=pool_match,
+        infra_match=infra_match,
         user_hashes=user_hashes,
         skip_finished=skip_finished,
         submitted_after=submitted_after,
@@ -3092,6 +3127,7 @@ def get_managed_job_queue(
         workspace_match=workspace_match,
         name_match=name_match,
         pool_match=pool_match,
+        infra_match=infra_match,
         user_hashes=user_hashes,
         statuses=statuses,
         skip_finished=skip_finished,
@@ -3231,7 +3267,8 @@ def get_managed_job_queue(
         'jobs': jobs,
         'total': total,
         'total_no_filter': total_no_filter,
-        'status_counts': status_counts
+        'status_counts': status_counts,
+        'infra_options': infra_options,
     }
 
 
@@ -3320,16 +3357,20 @@ def filter_jobs(
 def load_managed_job_queue(
     payload: str
 ) -> Tuple[List[Dict[str, Any]], int, ManagedJobQueueResultType, int, Dict[
-        str, int]]:
+        str, int], List[str]]:
     """Load job queue from json string."""
     result = message_utils.decode_payload(payload)
     result_type = ManagedJobQueueResultType.DICT
     status_counts: Dict[str, int] = {}
+    # Absent from a controller that predates the field, which is not an error:
+    # the caller falls back to deriving the options from the rows it has.
+    infra_options: List[str] = []
     if isinstance(result, dict):
         jobs: List[Dict[str, Any]] = result['jobs']
         total: int = result['total']
         status_counts = result.get('status_counts', {})
         total_no_filter: int = result.get('total_no_filter', total)
+        infra_options = result.get('infra_options', [])
     else:
         jobs = result
         total = len(jobs)
@@ -3344,7 +3385,8 @@ def load_managed_job_queue(
             # Skip jobs that do not have user_hash info.
             # TODO(cooperc): Remove check before 0.12.0.
             job['user_name'] = all_users_map.get(job['user_hash'])
-    return jobs, total, result_type, total_no_filter, status_counts
+    return jobs, total, result_type, total_no_filter, status_counts, \
+        infra_options
 
 
 def _get_job_status_from_tasks(
@@ -3917,6 +3959,24 @@ def parse_job_cancel_file(content: str) -> Tuple[bool, Optional[int]]:
     return graceful, graceful_timeout
 
 
+# Raised by the controller-side guard below when an infra filter reaches a
+# controller too old to apply it. The API server matches on this to turn the
+# generic non-zero exit into a clean, user-facing error.
+INFRA_FILTER_UNSUPPORTED_MARKER = 'SKYPILOT_INFRA_FILTER_UNSUPPORTED'
+
+# What the user is told when the filter reaches a controller too old to apply
+# it. Deliberately says nothing about versions: the number a controller runs is
+# not something a user can act on. What they can act on is that the controller
+# upgrades itself the next time a managed job is launched on it.
+INFRA_FILTER_UNSUPPORTED_MESSAGE = (
+    'The jobs controller does not support filtering managed jobs by infra. '
+    'Launching your next managed job updates the controller automatically; '
+    'try this filter again after that.')
+
+# The managed jobs version that first accepted `infra_match`.
+INFRA_FILTER_MANAGED_JOBS_VERSION = 24
+
+
 class ManagedJobCodeGen:
     """Code generator for managed job utility functions.
 
@@ -3958,6 +4018,7 @@ class ManagedJobCodeGen:
         workspace_match: Optional[str] = None,
         name_match: Optional[str] = None,
         pool_match: Optional[str] = None,
+        infra_match: Optional[str] = None,
         page: Optional[int] = None,
         limit: Optional[int] = None,
         user_hashes: Optional[List[Optional[str]]] = None,
@@ -3968,7 +4029,17 @@ class ManagedJobCodeGen:
         submitted_after: Optional[float] = None,
         submitted_before: Optional[float] = None,
     ) -> str:
+        marker = INFRA_FILTER_UNSUPPORTED_MARKER
+        message = INFRA_FILTER_UNSUPPORTED_MESSAGE
+        infra_version = INFRA_FILTER_MANAGED_JOBS_VERSION
         code = textwrap.dedent(f"""\
+        # An infra filter a controller cannot apply must be an error, not a
+        # silently wider answer: unlike every other filter here, dropping it
+        # returns jobs on *other* infra -- a result that looks right and is
+        # wrong. Checked on the controller, which is what knows its version.
+        _infra_match = {infra_match!r}
+        if _infra_match is not None and managed_job_version < {infra_version}:
+            raise RuntimeError('{marker}: {message}')
         # Filter out is_primary_in_job_group for older controllers (< 15)
         _fields = {fields!r}
         if managed_job_version < 15 and _fields is not None:
@@ -4020,6 +4091,7 @@ class ManagedJobCodeGen:
                                 fields=_fields)
         elif managed_job_version < 22:
             job_table = utils.dump_managed_job_queue(
+
                                 skip_finished={skip_finished},
                                 accessible_workspaces={accessible_workspaces!r},
                                 job_ids={job_ids!r},
@@ -4033,6 +4105,23 @@ class ManagedJobCodeGen:
                                 fields=_fields,
                                 sort_by={sort_by!r},
                                 sort_order={sort_order!r})
+        elif managed_job_version < {infra_version}:
+            job_table = utils.dump_managed_job_queue(
+                                skip_finished={skip_finished},
+                                accessible_workspaces={accessible_workspaces!r},
+                                job_ids={job_ids!r},
+                                workspace_match={workspace_match!r},
+                                name_match={name_match!r},
+                                pool_match={pool_match!r},
+                                page={page!r},
+                                limit={limit!r},
+                                user_hashes={user_hashes!r},
+                                statuses={statuses!r},
+                                fields=_fields,
+                                sort_by={sort_by!r},
+                                sort_order={sort_order!r},
+                                submitted_after={submitted_after!r},
+                                submitted_before={submitted_before!r})
         else:
             job_table = utils.dump_managed_job_queue(
                                 skip_finished={skip_finished},
@@ -4041,6 +4130,7 @@ class ManagedJobCodeGen:
                                 workspace_match={workspace_match!r},
                                 name_match={name_match!r},
                                 pool_match={pool_match!r},
+                                infra_match={infra_match!r},
                                 page={page!r},
                                 limit={limit!r},
                                 user_hashes={user_hashes!r},
