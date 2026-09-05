@@ -622,6 +622,7 @@ def validate(
     omit_priority_class = _omit(43)
     omit_max_hourly_cost = _omit(44)
     omit_mount_config = _omit(48)
+    omit_mount_cached_env_vars = _omit(58)
 
     for task in dag.tasks:
         if omit_user_specified_yaml:
@@ -651,6 +652,12 @@ def validate(
                 storage.mount_config = None
             logger.debug('`mount_config` is ignored because the server '
                          'does not support it yet.')
+        if omit_mount_cached_env_vars:
+            for storage in task.storage_mounts.values():
+                if storage.mount_cached_config is not None:
+                    storage.mount_cached_config.env_vars = None
+            logger.debug('`mount_cached.env_vars` is ignored because the '
+                         'server does not support it yet.')
         if omit_priority_class:
             for resource in task.resources:
                 if resource.priority_class:
