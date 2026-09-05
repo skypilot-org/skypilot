@@ -120,6 +120,53 @@ class LongConnGeneratorSpec:
 
 
 @dataclasses.dataclass
+class LaunchCancelGeneratorSpec:
+    """Submit paced sky.launch requests; cancel most after an interval.
+
+    Reproduces cancellation-poisoned executor workers (logging RLock
+    orphaned by cancel-time KeyboardInterrupt); see
+    generators/launch_cancel_generator.py for the mechanism.
+    """
+    name: str
+    # Seconds between submissions (per worker).
+    launch_gap_s: float = 15.0
+    # Cycled per cancel-fated launch; landing SIGTERM at varied points in
+    # the launch is the point of the sweep.
+    cancel_intervals_s: List[float] = dataclasses.field(
+        default_factory=lambda: [4, 6, 8, 10, 13, 16, 20, 25, 30, 40])
+    cancel_jitter_s: float = 3.0
+    # Every Nth launch is a probe: never cancelled, must reach a terminal
+    # state within wedge_after_s. 0 disables probes.
+    probe_every: int = 4
+    # Task shape. More nodes = more main-thread k8s API calls per launch
+    # (bigger poison window + clearer wedge fingerprint).
+    num_nodes: int = 8
+    task_cpus: str = '0.25'
+    task_memory: str = '0.5'
+    infra: str = 'k8s'
+    # Backpressure cap on un-terminal launches.
+    max_inflight: int = 12
+    # A tracked launch RUNNING longer than this is a suspected
+    # poisoned-worker wedge.
+    wedge_after_s: float = 420.0
+    # Freeze all activity when a wedge is suspected (preserve the wedged
+    # worker process for py-spy).
+    halt_on_wedge: bool = True
+    # Tear down clusters of terminal launches; delay lets CANCELLED
+    # launches' partial resources settle first.
+    down_after: bool = True
+    down_delay_s: float = 20.0
+    # Generator-local bounds (0 = unbounded; cfg.duration_s still fences).
+    duration_s: float = 0.0
+    max_launches: int = 0
+    poll_s: float = 10.0
+    drain_timeout_s: float = 600.0
+    cleanup_on_stop: bool = True
+    cluster_prefix: str = 'lc'
+    type: str = 'launch_cancel'
+
+
+@dataclasses.dataclass
 class SshBenchOp:
     kind: str  # ssh | sky_logs
     concurrency_per_worker: int = 4
@@ -221,6 +268,30 @@ def _parse_generator(d: Dict[str, Any]) -> GeneratorSpec:
             health_check_interval_s=int(d.get('health_check_interval_s', 30)),
             reconnect_on_drop=bool(d.get('reconnect_on_drop', True)),
         )
+    if t == 'launch_cancel':
+        spec = LaunchCancelGeneratorSpec(name=name)
+        for field in dataclasses.fields(LaunchCancelGeneratorSpec):
+            if field.name in ('name', 'type'):
+                continue
+            if field.name in d:
+                val = d[field.name]
+                if field.name == 'cancel_intervals_s':
+                    val = [float(v) for v in val]
+                elif field.name in ('task_cpus', 'task_memory', 'infra',
+                                    'cluster_prefix'):
+                    val = str(val)
+                elif field.name in ('probe_every', 'num_nodes', 'max_inflight',
+                                    'max_launches'):
+                    val = int(val)
+                elif field.name in ('halt_on_wedge', 'down_after',
+                                    'cleanup_on_stop'):
+                    val = bool(val)
+                else:
+                    val = float(val)
+                setattr(spec, field.name, val)
+        if not spec.cancel_intervals_s:
+            raise ValueError('launch_cancel: cancel_intervals_s is empty')
+        return spec
     if t == 'ssh_bench':
         raw_ops = d.get('ops')
         # Top-level concurrency_per_worker / total_connections act as
