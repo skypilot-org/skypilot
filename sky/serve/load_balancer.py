@@ -4,12 +4,11 @@ import logging
 import os
 import threading
 import traceback
-from typing import Dict, List, Optional, Union
+from typing import Awaitable, Callable, Dict, List, Optional, Union
 
 import aiohttp
 import fastapi
 import httpx
-from starlette import background
 import uvicorn
 
 from sky import sky_logging
@@ -19,6 +18,33 @@ from sky.serve import serve_utils
 from sky.utils import common_utils
 
 logger = sky_logging.init_logger(__name__)
+
+
+class _CleanupStreamingResponse(fastapi.responses.StreamingResponse):
+    """Streaming response that always runs its cleanup callback."""
+
+    def __init__(self, *response_args, cleanup: Callable[[], Awaitable[None]],
+                 **kwargs) -> None:
+        super().__init__(*response_args, **kwargs)
+        self._cleanup = cleanup
+
+    async def __call__(self, scope, receive, send):
+        try:
+            await super().__call__(scope, receive, send)
+        except BaseException:  # pylint: disable=broad-except
+            try:
+                await self._cleanup()
+            except BaseException:  # pylint: disable=broad-except
+                # Preserve the original response error if cleanup also fails.
+                logger.exception(
+                    'Error cleaning up streaming response; preserving the '
+                    'original response error.')
+            raise
+        else:
+            # This covers a client disconnect before the response body
+            # iterator is started, as well as errors and disconnects during
+            # streaming.
+            await self._cleanup()
 
 
 class SkyServeLoadBalancer:
@@ -172,8 +198,20 @@ class SkyServeLoadBalancer:
             encountered if anything goes wrong.
         """
         logger.info(f'Proxy request to {url}')
-        self._load_balancing_policy.pre_execute_hook(url, request)
+        load_released = False
+
+        def release_load() -> None:
+            nonlocal load_released
+            if load_released:
+                return
+            load_released = True
+            self._load_balancing_policy.post_execute_hook(url, request)
+
+        load_incremented = False
+        response_returned = False
         try:
+            self._load_balancing_policy.pre_execute_hook(url, request)
+            load_incremented = True
             # We defer the get of the client here on purpose, for case when the
             # replica is ready in `_proxy_with_retries` but refreshed before
             # entering this function. In that case we will return an error here
@@ -193,20 +231,34 @@ class SkyServeLoadBalancer:
                 timeout=self._stream_timeout_seconds)
             proxy_response = await client.send(proxy_request, stream=True)
 
-            async def background_func():
-                await proxy_response.aclose()
-                self._load_balancing_policy.post_execute_hook(url, request)
+            async def cleanup_response() -> None:
+                try:
+                    await proxy_response.aclose()
+                except Exception:  # pylint: disable=broad-except
+                    logger.exception(
+                        f'Error closing proxied response to {url}.')
+                finally:
+                    release_load()
 
-            return fastapi.responses.StreamingResponse(
+            response = _CleanupStreamingResponse(
                 content=proxy_response.aiter_raw(),
                 status_code=proxy_response.status_code,
                 headers=proxy_response.headers,
-                background=background.BackgroundTask(background_func))
+                cleanup=cleanup_response)
+            response_returned = True
+            return response
         except (httpx.RequestError, httpx.HTTPStatusError) as e:
             logger.error(f'Error when proxy request to {url}: '
                          f'{common_utils.format_exception(e)}'
                          f'\nTraceback: {traceback.format_exc()}')
             return e
+        finally:
+            # If proxying failed before a StreamingResponse was returned, the
+            # response body cleanup cannot run to release the load. This also
+            # covers a replica disappearing from the client pool between
+            # selection and proxying.
+            if load_incremented and not response_returned:
+                release_load()
 
     async def _proxy_with_retries(
             self, request: fastapi.Request) -> fastapi.responses.Response:

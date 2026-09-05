@@ -115,14 +115,19 @@ class LeastLoadPolicy(LoadBalancingPolicy, name='least_load', default=True):
         super().__init__()
         self.load_map: Dict[str, int] = collections.defaultdict(int)
         self.lock = threading.Lock()
+        self._tie_breaker_index = 0
 
     def set_ready_replicas(self, ready_replicas: List[str]) -> None:
-        if set(self.ready_replicas) == set(ready_replicas):
+        ready_replica_set = set(ready_replicas)
+        if set(self.ready_replicas) == ready_replica_set:
             return
         with self.lock:
             self.ready_replicas = ready_replicas
             for r in list(self.load_map.keys()):
-                if r not in ready_replicas:
+                # Keep the accounting for retired replicas until their
+                # in-flight requests finish. Otherwise a late completion can
+                # recreate the entry with a negative load.
+                if r not in ready_replica_set and self.load_map[r] <= 0:
                     del self.load_map[r]
             for replica in ready_replicas:
                 self.load_map[replica] = self.load_map.get(replica, 0)
@@ -132,8 +137,32 @@ class LeastLoadPolicy(LoadBalancingPolicy, name='least_load', default=True):
         if not self.ready_replicas:
             return None
         with self.lock:
-            return min(self.ready_replicas,
-                       key=lambda replica: self.load_map.get(replica, 0))
+            min_load = min(
+                self.load_map.get(replica, 0)
+                for replica in self.ready_replicas)
+            tied_replicas = [
+                replica for replica in self.ready_replicas
+                if self.load_map.get(replica, 0) == min_load
+            ]
+            return self._select_tied_replica(tied_replicas)
+
+    def _select_tied_replica(self, replicas: List[str]) -> str:
+        """Select among tied replicas without favoring the first one.
+
+        The cursor is relative to all ready replicas, so changes to the set
+        of tied replicas do not cause the same endpoint to win repeatedly.
+        """
+        assert replicas and self.ready_replicas, (
+            'Cannot select from empty replica lists.')
+        tied_replicas = set(replicas)
+        for offset in range(len(self.ready_replicas)):
+            index = (self._tie_breaker_index + offset) % len(
+                self.ready_replicas)
+            replica = self.ready_replicas[index]
+            if replica in tied_replicas:
+                self._tie_breaker_index = (index + 1) % len(self.ready_replicas)
+                return replica
+        raise RuntimeError('No tied replica found among ready replicas.')
 
     def pre_execute_hook(self, replica_url: str,
                          request: 'fastapi.Request') -> None:
@@ -145,7 +174,14 @@ class LeastLoadPolicy(LoadBalancingPolicy, name='least_load', default=True):
                           request: 'fastapi.Request') -> None:
         del request  # Unused.
         with self.lock:
-            self.load_map[replica_url] -= 1
+            current_load = self.load_map.get(replica_url)
+            if current_load is None:
+                return
+            current_load = max(0, current_load - 1)
+            if current_load == 0 and replica_url not in self.ready_replicas:
+                del self.load_map[replica_url]
+            else:
+                self.load_map[replica_url] = current_load
 
 
 class InstanceAwareLeastLoadPolicy(LeastLoadPolicy,
@@ -162,20 +198,6 @@ class InstanceAwareLeastLoadPolicy(LeastLoadPolicy,
         self.replica_info: Dict[str, Dict[str, Any]] = {}  # replica_url -> info
         self.target_qps_per_accelerator: Dict[str, float] = {
         }  # accelerator_type -> target_qps
-
-    def set_ready_replicas(self, ready_replicas: List[str]) -> None:
-        if set(self.ready_replicas) == set(ready_replicas):
-            return
-        with self.lock:
-            self.ready_replicas = ready_replicas
-            # Clean up load map for removed replicas
-            for r in list(self.load_map.keys()):
-                if r not in ready_replicas:
-                    del self.load_map[r]
-            # Initialize load for new replicas
-            for replica in ready_replicas:
-                if replica not in self.load_map:
-                    self.load_map[replica] = 0
 
     def set_replica_info(self, replica_info: Dict[str, Dict[str, Any]]) -> None:
         """Set replica information including accelerator types.
@@ -253,10 +275,15 @@ class InstanceAwareLeastLoadPolicy(LeastLoadPolicy,
                 normalized_load = self._get_normalized_load(replica)
                 replica_loads.append((replica, normalized_load))
 
-            # Select replica with minimum normalized load
-            selected_replica = min(replica_loads, key=lambda x: x[1])[0]
+            # Select a minimum-load replica, rotating among ties.
+            min_load = min(load for _, load in replica_loads)
+            tied_replicas = [
+                replica for replica, load in replica_loads if load == min_load
+            ]
+            selected_replica = self._select_tied_replica(tied_replicas)
             logger.debug('Available replicas and loads: %s', replica_loads)
             logger.debug('Selected replica: %s', selected_replica)
             return selected_replica
 
-    # pre_execute_hook and post_execute_hook are inherited from LeastLoadPolicy
+    # set_ready_replicas, pre_execute_hook, and post_execute_hook are inherited
+    # from LeastLoadPolicy.
