@@ -3530,6 +3530,56 @@ async def set_failed_async(
     logger.info(failure_reason)
 
 
+async def set_cleanup_failed_async(job_id: int, cleanup_failure: str):
+    """Record a cleanup failure without changing the job's status.
+
+    Used when the job has already reached a legitimate terminal state
+    (SUCCEEDED / CANCELLED / FAILED / ...) and only the best-effort cleanup
+    afterwards failed. The terminal status is the outcome the user cares
+    about, so it is kept as-is; the cleanup failure (and its
+    resources-may-have-leaked warning) is surfaced through the job's
+    failure_reason and the event log instead of overwriting the status
+    with FAILED_CONTROLLER.
+    """
+    status = await get_status_async(job_id)
+    assert status is not None, job_id
+    await add_job_event_async(job_id, None, status,
+                              f'Cleanup failed: {cleanup_failure}')
+
+    async def _op(session):
+        # Compose the new reason per task row (with a row lock to prevent
+        # race conditions): a task that already recorded a failure keeps
+        # its own reason first — it describes the job's actual outcome;
+        # the cleanup failure is secondary. Rows without a reason are left
+        # NULL so get_failure_reason() keeps surfacing the real failure.
+        # Only when no task has a reason at all (e.g. a SUCCEEDED or
+        # CANCELLED job) is the cleanup failure written to every row.
+        result = await session.execute(
+            sqlalchemy.select(
+                spot_table.c.task_id, spot_table.c.failure_reason).where(
+                    spot_table.c.spot_job_id == job_id).with_for_update())
+        rows = result.fetchall()
+        any_existing = any(reason for _, reason in rows)
+        for row_task_id, existing_reason in rows:
+            if existing_reason:
+                new_reason = (f'{existing_reason}. In addition: '
+                              f'{cleanup_failure}')
+            elif not any_existing:
+                new_reason = cleanup_failure
+            else:
+                continue
+            await session.execute(
+                sqlalchemy.update(spot_table).where(
+                    sqlalchemy.and_(
+                        spot_table.c.spot_job_id == job_id,
+                        spot_table.c.task_id == row_task_id)).values(
+                            {spot_table.c.failure_reason: new_reason}))
+        await session.commit()
+
+    await _retry_session(_op)
+    logger.warning(cleanup_failure)
+
+
 async def update_links_async(job_id: int, task_id: int,
                              links: Dict[str, str]) -> None:
     """Update the links for a managed job task.
