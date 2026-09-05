@@ -1544,10 +1544,14 @@ class CancelRequestInfo:
         who = self.user_name or self.user_hash
         if who is None and self.request_id is None:
             return None
+        # The queue finds this event by its prefix to surface the requester
+        # in the job's `details` (see
+        # managed_job_state.get_cancel_request_reasons).
+        prefix = managed_job_state.CANCEL_REQUESTED_EVENT_REASON_PREFIX
         if who is not None:
-            reason = f'Cancellation requested by user {who}'
+            reason = f'{prefix} by user {who}'
         else:
-            reason = 'Cancellation requested'
+            reason = prefix
         if self.request_id is not None:
             reason += f' (request ID: {self.request_id})'
         return reason
@@ -2924,8 +2928,10 @@ def _format_job_details(*,
                         job: Dict[str, Any],
                         highest_blocking_priority: int,
                         recovery_reason: Optional[str] = None,
-                        pending_reason: Optional[str] = None) -> None:
-    """Add details about schedule state / backoff / recovery / pending."""
+                        pending_reason: Optional[str] = None,
+                        cancel_reason: Optional[str] = None) -> None:
+    """Add details about schedule state / backoff / recovery / pending /
+    who requested a cancellation."""
     state_details = None
     if job['schedule_state'] == 'ALIVE_BACKOFF':
         state_details = 'In backoff, waiting for resources'
@@ -2941,6 +2947,15 @@ def _format_job_details(*,
         job['details'] = f'{state_details} - {job["failure_reason"]}'
     elif state_details:
         job['details'] = state_details
+    elif cancel_reason:
+        # Surface who asked for the cancellation, and under which API
+        # request, e.g. 'Cancellation requested by user alice (request ID:
+        # ...)', so a CANCELLING/CANCELLED job's row and detail page answer
+        # "who cancelled this?" without opening the event table. Takes
+        # precedence over a failure_reason left from before the cancel (e.g.
+        # the preemption a RECOVERING job was recovering from): the cancel is
+        # why the job ended.
+        job['details'] = cancel_reason
     elif job['failure_reason']:
         job['details'] = f'Failure: {job["failure_reason"]}'
     elif recovery_reason:
@@ -3201,6 +3216,7 @@ def get_managed_job_queue(
     # an extra DB round trip. `job['status']` is already stringified above.
     recovery_reasons: Dict[int, str] = {}
     pending_reasons: Dict[int, str] = {}
+    cancel_reasons: Dict[int, str] = {}
     if not fields or 'details' in fields:
         recovering_job_ids = [
             job['job_id'] for job in jobs if job['status'] ==
@@ -3214,6 +3230,17 @@ def get_managed_job_queue(
         recovery_reasons, pending_reasons = (
             managed_job_state.get_latest_recovery_and_pending_reasons(
                 recovering_job_ids, pending_job_ids))
+        # Who requested the cancellation of each cancelled job (the
+        # attributed CANCELLING event written when the cancel request was
+        # handled), so the requester and request ID are visible in `details`
+        # rather than only in the event table.
+        cancelled_job_ids = list({
+            job['job_id'] for job in jobs if job['status'] in (
+                managed_job_state.ManagedJobStatus.CANCELLING.value,
+                managed_job_state.ManagedJobStatus.CANCELLED.value)
+        })
+        cancel_reasons = managed_job_state.get_cancel_request_reasons(
+            cancelled_job_ids)
 
     for job in jobs:
         if not fields or 'details' in fields:
@@ -3221,7 +3248,8 @@ def get_managed_job_queue(
                 job=job,
                 highest_blocking_priority=highest_blocking_priority,
                 recovery_reason=recovery_reasons.get(job['job_id']),
-                pending_reason=pending_reasons.get(job['job_id']))
+                pending_reason=pending_reasons.get(job['job_id']),
+                cancel_reason=cancel_reasons.get(job['job_id']))
 
         # Derive is_job_group from execution column
         job['is_job_group'] = (

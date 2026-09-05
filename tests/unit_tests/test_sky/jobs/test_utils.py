@@ -1099,6 +1099,7 @@ class TestFormatJobDetails:
                  status='RECOVERING',
                  recovery_reason=None,
                  pending_reason=None,
+                 cancel_reason=None,
                  cloud=None):
         job = {
             'schedule_state': schedule_state,
@@ -1109,8 +1110,35 @@ class TestFormatJobDetails:
         jobs_utils._format_job_details(job=job,
                                        highest_blocking_priority=0,
                                        recovery_reason=recovery_reason,
-                                       pending_reason=pending_reason)
+                                       pending_reason=pending_reason,
+                                       cancel_reason=cancel_reason)
         return job['details']
+
+    def test_cancel_reason_surfaced(self):
+        # Who asked for the cancellation shows in the details column verbatim.
+        reason = ('Cancellation requested by user alice '
+                  '(request ID: 9b6e6396-0000-4000-8000-000000000000)')
+        assert self._details(status='CANCELLED',
+                             schedule_state='DONE',
+                             cancel_reason=reason) == reason
+
+    def test_cancel_reason_takes_precedence_over_stale_failure(self):
+        # A job cancelled while recovering keeps the preemption in
+        # failure_reason; the cancel is why it ended, so it wins.
+        assert self._details(
+            status='CANCELLED',
+            schedule_state='DONE',
+            failure_reason='preempted',
+            cancel_reason='Cancellation requested by user alice'
+        ) == 'Cancellation requested by user alice'
+
+    def test_no_cancel_reason_falls_through(self):
+        # An unattributed cancel (old controller, internal cancel) keeps the
+        # existing behaviour.
+        assert self._details(status='CANCELLED',
+                             schedule_state='DONE',
+                             failure_reason='boom') == 'Failure: boom'
+        assert self._details(status='CANCELLED', schedule_state='DONE') is None
 
     def test_recovery_reason_surfaced(self):
         assert self._details(
