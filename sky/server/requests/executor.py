@@ -1212,6 +1212,18 @@ async def _execute_request_coroutine(request: api_requests.Request):
         # Always cancel the context to kill potentially running background
         # routine.
         ctx.cancel()
+        # Close the request's log file handle: nothing else closes it on the
+        # success path or on either cancellation path, so the worker would
+        # keep the fd -- and, once retention GC unlinks the log, the deleted
+        # file's disk blocks -- for the rest of its life.
+        #
+        # Defer the close until the entrypoint has finished instead of doing
+        # it here. On the cancellation paths the entrypoint thread is still
+        # running (it only observes ctx.cancel() at its next poll) and it
+        # shares this context, so closing the handle now would send its
+        # remaining output to the server's stdout and could raise ValueError
+        # on a write that races the close.
+        fut.add_done_callback(lambda _: ctx.cleanup())
 
 
 async def prepare_request_async(

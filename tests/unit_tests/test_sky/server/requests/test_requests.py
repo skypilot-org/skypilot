@@ -189,9 +189,10 @@ async def test_clean_finished_requests_with_retention(isolated_database):
     # Verify old running request was NOT deleted
     assert requests.get_request('old-running-1') is not None
 
-    # Verify log file unlink was called for current, legacy, and debug paths
-    # (3 calls per deleted request: current path + legacy path + debug log)
-    assert mock_unlink.call_count == 3
+    # Verify log file unlink was called for current, legacy, debug, and lock
+    # paths (5 calls per deleted request: current path + legacy path +
+    # debug log + lock file + legacy lock file)
+    assert mock_unlink.call_count == 5
 
     # Verify logging
     mock_logger.info.assert_called_once()
@@ -283,8 +284,9 @@ async def test_clean_finished_requests_with_retention_batch_size_functionality(
     assert call_counts[2] == 5  # Third batch (remaining)
 
     # Verify log file unlink was called for each deleted request
-    # (3 calls per request: current path + legacy path + debug log)
-    assert mock_unlink.call_count == 75
+    # (5 calls per request: current path + legacy path + debug log +
+    # lock file + legacy lock file)
+    assert mock_unlink.call_count == 125
 
     # Verify logging shows correct total
     mock_logger.info.assert_called_once()
@@ -670,13 +672,21 @@ async def test_clean_finished_requests_cleans_both_paths(
                 await requests.clean_finished_requests_with_retention(
                     retention_seconds)
 
-    # Verify that unlink was called for current, legacy, and debug log paths
-    assert len(unlinked_paths) == 3
+    # Verify that unlink was called for the current, legacy and debug log
+    # paths, plus the current and legacy lock paths
+    assert len(unlinked_paths) == 5
 
     # All paths should contain the request ID
     current_path_count = sum(
         1 for p in unlinked_paths if 'legacy-test-req-1.log' in p)
     assert current_path_count == 3  # All paths should have the request ID
+
+    # Both the current-path and legacy-path lock files are removed; nothing
+    # else ever does, and a leftover legacy lock keeps the legacy directory
+    # from being removed as empty.
+    lock_paths = [p for p in unlinked_paths if p.endswith('.lock')]
+    assert len(lock_paths) == 2
+    assert sum(1 for p in lock_paths if str(legacy_log_dir) in p) == 1
 
     # Verify the request was deleted
     assert requests.get_request('legacy-test-req-1') is None

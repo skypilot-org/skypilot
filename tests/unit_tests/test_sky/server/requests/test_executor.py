@@ -5,6 +5,7 @@ import functools
 import os
 import pathlib
 import queue as queue_lib
+import sys
 import threading
 import time
 from typing import List
@@ -24,6 +25,7 @@ from sky.server.requests import preconditions
 from sky.server.requests import process
 from sky.server.requests import requests as requests_lib
 from sky.skylet import constants
+from sky.utils import context
 from sky.utils import context_utils
 
 
@@ -139,6 +141,135 @@ async def test_execute_request_coroutine_ctx_cancelled_on_cancellation(
         await task.task
         # Verify the context is actually cancelled
         mock_ctx.cancel.assert_called()
+
+
+def _quick_success_entrypoint(*args, **kwargs):
+    """A picklable entrypoint that returns immediately."""
+    return 'ok'
+
+
+@pytest.mark.asyncio
+async def test_execute_request_coroutine_closes_log_handle_on_success(
+        isolated_database):
+    """A successfully finished request must close its log file handle.
+
+    Otherwise, once request-retention GC unlinks the (now-orphaned) log
+    file, the worker process keeps the deleted file's disk blocks alive
+    for as long as it keeps running.
+    """
+    request = requests_lib.Request(
+        request_id='test-request-success',
+        name='test-request-name',
+        status=requests_lib.RequestStatus.PENDING,
+        created_at=time.time(),
+        user_id='test-user-id',
+        entrypoint=_quick_success_entrypoint,
+        request_body=payloads.RequestBody(),
+    )
+    await requests_lib.create_if_not_exists_async(request)
+
+    # Use the real Context (not a mock) so redirect_log()/cleanup() actually
+    # run, and capture it via initialize() since the task's contextvar
+    # doesn't propagate back to this coroutine.
+    captured_ctx: List[context.SkyPilotContext] = []
+    real_initialize = context.initialize
+
+    def capturing_initialize(*args, **kwargs):
+        ctx = real_initialize(*args, **kwargs)
+        captured_ctx.append(ctx)
+        return ctx
+
+    with mock.patch('sky.utils.context.initialize',
+                    side_effect=capturing_initialize):
+        task = executor.execute_request_in_coroutine(request)
+        await task.task
+        # The close is deferred to the entrypoint future's done callback, so
+        # give the loop a turn to run it.
+        await asyncio.sleep(0)
+
+    assert len(captured_ctx) == 1
+    assert captured_ctx[0]._log_file_handle is None
+
+
+_LINGERING_STARTED = threading.Event()
+_LINGERING_RELEASE = threading.Event()
+_LINGERING_MARKER = 'written after the coroutine was cancelled'
+
+
+def _lingering_entrypoint(*args, **kwargs):
+    """An entrypoint that outlives the coroutine that scheduled it.
+
+    Stands in for a log tail that has not yet observed ctx.cancel().
+    """
+    del args, kwargs
+    ctx = context.get()
+    assert ctx is not None
+    _LINGERING_STARTED.set()
+    _LINGERING_RELEASE.wait(timeout=30)
+    # Write the way the contextual stdout does, so this lands in the
+    # request's log file for as long as its handle is open.
+    ctx.output_stream(sys.stdout).write(_LINGERING_MARKER + '\n')
+    return 'ok'
+
+
+@pytest.mark.asyncio
+async def test_execute_request_coroutine_defers_log_close_to_entrypoint(
+        isolated_database):
+    """A cancelled request must not close the log handle under its worker.
+
+    The entrypoint runs in a worker thread that shares the request's
+    context and only observes ctx.cancel() at its next poll. Closing the
+    handle when the coroutine unwinds would send the entrypoint's remaining
+    output to the server's own stdout, and a write racing the close can
+    raise ValueError on a closed file.
+    """
+    _LINGERING_STARTED.clear()
+    _LINGERING_RELEASE.clear()
+    request = requests_lib.Request(
+        request_id='test-request-lingering',
+        name='test-request-name',
+        status=requests_lib.RequestStatus.PENDING,
+        created_at=time.time(),
+        user_id='test-user-id',
+        entrypoint=_lingering_entrypoint,
+        request_body=payloads.RequestBody(),
+    )
+    await requests_lib.create_if_not_exists_async(request)
+
+    captured_ctx: List[context.SkyPilotContext] = []
+    real_initialize = context.initialize
+
+    def capturing_initialize(*args, **kwargs):
+        ctx = real_initialize(*args, **kwargs)
+        captured_ctx.append(ctx)
+        return ctx
+
+    with mock.patch('sky.utils.context.initialize',
+                    side_effect=capturing_initialize):
+        task = executor.execute_request_in_coroutine(request)
+        for _ in range(600):
+            if _LINGERING_STARTED.is_set():
+                break
+            await asyncio.sleep(0.05)
+        assert _LINGERING_STARTED.is_set(), 'entrypoint did not start'
+
+        # Client disconnect: the coroutine unwinds while the entrypoint is
+        # still running.
+        await task.cancel()
+        assert len(captured_ctx) == 1
+        ctx = captured_ctx[0]
+        assert ctx._log_file_handle is not None, (
+            'log handle closed while the entrypoint was still running')
+
+        _LINGERING_RELEASE.set()
+        for _ in range(600):
+            if ctx._log_file_handle is None:
+                break
+            await asyncio.sleep(0.05)
+
+    assert ctx._log_file_handle is None, (
+        'log handle not closed after the entrypoint finished')
+    assert _LINGERING_MARKER in request.log_path.read_text()
 
 
 CALLED_FLAG = [False]
