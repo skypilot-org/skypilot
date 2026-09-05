@@ -9,6 +9,8 @@ from typing import (AsyncGenerator, Generator, List, Optional, Set, Tuple,
 
 if TYPE_CHECKING:
     from sky.server import daemons as daemons_lib
+    from sky.server.requests import payloads as payloads_lib
+    from sky.server.requests.payloads import RequestPayload
     from sky.server.requests.requests import Request
     from sky.server.requests.requests import RequestStatus
     from sky.server.requests.requests import RequestTaskFilter
@@ -109,6 +111,35 @@ class RequestBackend(abc.ABC):
             self, req_filter: RequestTaskFilter) -> List[Request]:
         """Async version of query_requests."""
         raise NotImplementedError
+
+    async def query_request_payloads_async(
+            self,
+            req_filter: 'RequestTaskFilter',
+            caller_user_id: Optional[str] = None,
+            omit_unrequested: bool = False,  # pylint: disable=unused-argument
+    ) -> List['RequestPayload']:
+        """Fields-aware fast path for ``/api/status`` display listings.
+
+        Backends that want the fast path -- building display
+        ``RequestPayload``\\ s straight from projected rows, skipping the
+        per-row ``Request.from_row`` decode + ``encode_requests``
+        re-validation -- override this, honoring ``omit_unrequested`` (trim
+        the wire for new clients vs the full legacy wire for older ones).
+        The default ignores ``omit_unrequested`` and falls back to the legacy
+        decode path (``query_requests_async`` + ``encode_requests``), which
+        always emits the full wire, so a backend that does not override it
+        (e.g. an unshipped HA Postgres backend) keeps the current behavior
+        with no regression. This is a concrete, non-abstract method precisely
+        so a backend is not forced to implement it in lockstep with the OSS
+        change.
+        """
+        # Lazy import: sky.server.requests.requests imports this module for the
+        # RequestBackend ABC, so importing it at module top would cycle.
+        # pylint: disable=import-outside-toplevel
+        from sky.server.requests import requests as api_requests
+        decoded = await self.query_requests_async(req_filter)
+        return api_requests.encode_requests(decoded,
+                                            caller_user_id=caller_user_id)
 
     @abc.abstractmethod
     async def delete_requests(self, request_ids: List[str]) -> None:

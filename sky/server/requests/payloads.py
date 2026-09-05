@@ -1032,15 +1032,34 @@ class RequestPayload(BasePayload):
 
     request_id: str
     name: str
-    entrypoint: str
-    request_body: str
+    # The following fields default to their wire-placeholder values so that the
+    # server's fields-aware fast path (requests.get_request_payloads_async) can
+    # OMIT caller-unrequested fields from /api/status responses for clients >=
+    # MIN_OMIT_UNREQUESTED_FIELDS_API_VERSION; such a client reconstructs the
+    # omitted fields from these defaults. The defaults intentionally match the
+    # legacy wire placeholders (the values encode_requests emitted for a
+    # projected/fields-restricted listing) so both old and new clients observe
+    # the same values. Every on-server construction path (Request.from_row,
+    # encode_requests, Request.encode, readable_encode) still sets these fields
+    # explicitly, so these defaults only ever apply to the omit path; a future
+    # partial construction that relies on them would be a bug to surface, not
+    # silence -- but pydantic v2 requires a default for a field to be omittable
+    # from the model constructor, and the client's ``RequestPayload(**dict)``
+    # (sdk.api_status) would otherwise hard-crash on a missing field.
+    entrypoint: str = ''
+    request_body: str = 'null'
     status: str
     created_at: float
     user_id: str
-    return_value: str
-    error: str
-    pid: Optional[int]
-    schedule_type: str
+    # encode_requests always emits orjson(None) == 'null' for these on a
+    # listing.
+    return_value: str = 'null'
+    error: str = 'null'
+    pid: Optional[int] = None
+    # Matches ScheduleType.SHORT.value; a listing that did not request
+    # schedule_type previously received the _update_request_row_fields
+    # placeholder ('short'), so defaulting to 'short' preserves that wire.
+    schedule_type: str = 'short'
     user_name: Optional[str] = None
     # Resources the request operates on.
     cluster_name: Optional[str] = None

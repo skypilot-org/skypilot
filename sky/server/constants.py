@@ -11,7 +11,7 @@ from sky.skylet import runtime_utils
 # based on version info is needed.
 # For more details and code guidelines, refer to:
 # https://docs.skypilot.co/en/latest/developers/CONTRIBUTING.html#backward-compatibility-guidelines
-API_VERSION = 57  # Slurm inline host path volume mounts
+API_VERSION = 58  # /api/status fields-aware fast path (omit unrequested fields)
 
 # The minimum peer API version that the code should still work with.
 # Notes (dev):
@@ -74,6 +74,20 @@ MIN_PREFERRED_WORKSPACE_API_VERSION = 53
 # --since / --after / --before flags). Older servers silently ignore these
 # fields, so the client warns and shows all jobs.
 MIN_JOBS_SUBMITTED_AT_FILTER_API_VERSION = 54
+
+# Servers >= this version may OMIT caller-unrequested RequestPayload fields
+# from /api/status responses via the fields-aware fast path
+# (requests.get_request_payloads_async): when the client requested a specific
+# ``fields`` set, the server builds the display payload straight from the
+# projected DB rows (skipping the per-row Request.from_row decode + the
+# encode_requests re-validation) and only serializes the requested/derived
+# fields (response_model_exclude_unset). Older clients' RequestPayload model
+# still treats the now-defaulted fields as required, so the server only takes
+# the fast path (and the omission) for clients that advertise >= this version;
+# older clients continue to receive every field as before. This mirrors
+# MIN_WAITING_STATUS_API_VERSION / MIN_LAZY_REPLICA_HANDLE_API_VERSION: a
+# server-side wire gate keyed off the client's advertised API version.
+MIN_OMIT_UNREQUESTED_FIELDS_API_VERSION = 58
 
 # Servers >= this version may report the WAITING request status (a request
 # parked off its worker while waiting for a retry/resume condition). Older
