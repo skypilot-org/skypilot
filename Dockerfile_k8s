@@ -73,7 +73,7 @@ RUN ARCH=${TARGETARCH:-$(case "$(uname -m)" in \
     $HOME/.local/bin/uv venv ~/skypilot-runtime --seed --python=3.10 && \
     source ~/skypilot-runtime/bin/activate && \
     $HOME/.local/bin/uv pip install 'skypilot-nightly[remote,kubernetes]' \
-        'ray[default]==2.9.3' 'pycryptodome==3.12.0' && \
+        'ray[default]==2.56.1' 'pycryptodome==3.12.0' && \
     $HOME/.local/bin/uv pip uninstall skypilot-nightly && \
     curl -LO "https://dl.k8s.io/release/v1.33.12/bin/linux/$ARCH/kubectl" && \
     # Install kubectl to user's local bin instead of system path to avoid

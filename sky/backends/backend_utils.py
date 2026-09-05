@@ -185,6 +185,17 @@ _LAUNCH_DOUBLE_CHECK_DELAY = 1
 _RAY_YAML_KEYS_TO_RESTORE_FOR_BACK_COMPATIBILITY = {
     'cluster_name', 'provider', 'auth', 'node_config', 'docker'
 }
+
+# Where a cluster records the Ray version its nodes were set up with. Lives
+# under 'provider' because Ray's cluster schema sets additionalProperties=False
+# at the top level, so a new top-level key would fail `ray up` validation on
+# the clouds still using the Ray autoscaler.
+_RAY_VERSION_KEY = 'sky_ray_version'
+# What a cluster created before that marker existed is running. Every such
+# cluster is on 2.9.3 -- the pinned version had not changed in 2.5 years.
+# TODO(hailong): one-shot migration constant; drop it once no marker-less
+# clusters remain (every cluster launched from this release on carries one).
+_LEGACY_RAY_VERSION = '2.9.3'
 # For these keys, don't use the old yaml's version and instead use the new yaml's.
 #  - zone: The zone field of the old yaml may be '1a,1b,1c' (AWS) while the actual
 #    zone of the launched cluster is '1a'. If we restore, then on capacity errors
@@ -235,6 +246,12 @@ _RAY_YAML_KEYS_TO_REMOVE_FOR_HASH = [
     # The security group name includes a hostname-derived hash
     # (user_and_hostname_hash) that varies across API server restart
     ('provider', 'security_group'),
+    # The Ray version marker appears on a cluster the first time it is
+    # launched by a SkyPilot that writes one. Including it would cost every
+    # pre-existing cluster its `sky launch --fast` skip exactly once, for a
+    # key that records what the cluster already runs. A real version change
+    # still moves the hash, through the install commands themselves.
+    ('provider', _RAY_VERSION_KEY),
 ]
 
 # Filenames in `file_mounts` whose content sha256 should NOT participate in the
@@ -560,6 +577,85 @@ class FileMountHelper(object):
             f'{sudo}chown -h $(whoami) {source}',
         ]
         return ' && '.join(commands)
+
+
+def _ray_version_for_cluster(cluster_name: str,
+                             old_yaml_content: Optional[str]) -> str:
+    """The Ray version to render for this cluster.
+
+    Whether to move to a new Ray is a property of the *cluster*, not of each
+    node. Deciding it per node lets a worker upgrade on its own while the head
+    keeps the old version: the head's `ray status` guard succeeds and skips the
+    install, a worker's cannot (it dials 127.0.0.1, where only the head has a
+    GCS), and the two end up on different Rays.
+
+    So a cluster keeps the version it was set up with, and only moves when the
+    whole cluster is starting from scratch and nothing can disagree.
+    """
+    if old_yaml_content is None:
+        # A new cluster.
+        return constants.SKY_REMOTE_RAY_VERSION
+    status = global_user_state.get_status_from_cluster_name(cluster_name)
+    if status is None or status == status_lib.ClusterStatus.STOPPED:
+        # Nothing is running to disagree with, so the whole cluster can move
+        # together. This is what lets an existing cluster ever pick up a new
+        # Ray: `sky stop` followed by `sky start`.
+        #
+        # Deliberately not INIT: that also covers a cluster whose launch failed
+        # partway, whose nodes may still be running the old Ray. Upgrading
+        # those is how the mismatch gets recreated.
+        return constants.SKY_REMOTE_RAY_VERSION
+    old_config = yaml_utils.safe_load(old_yaml_content)
+    if not isinstance(old_config, dict):
+        return constants.SKY_REMOTE_RAY_VERSION
+    # `provider:` with nothing under it parses to None, not {}.
+    recorded = (old_config.get('provider') or {}).get(_RAY_VERSION_KEY)
+    # Clusters created before the marker existed carry no record, and are all
+    # on the legacy version.
+    return recorded if recorded else _LEGACY_RAY_VERSION
+
+
+def _log_pinned_ray_version(cluster_name: str, ray_version: str,
+                            cloud: clouds.Cloud,
+                            resources: 'resources_lib.Resources',
+                            region: Optional[str]) -> None:
+    """Say why the cluster is not on the Ray this SkyPilot ships.
+
+    How to move it depends on the cloud: `sky stop` + `sky start` is the only
+    in-place path, and a good many clouds -- Kubernetes, Slurm, RunPod, Lambda,
+    and AWS/GCP for spot, among others -- cannot stop at all, so there the
+    version is fixed for the life of the cluster.
+
+    `region` is passed through because asking Kubernetes without one makes it
+    enumerate every allowed context and probe each cluster's API, none of which
+    the STOP answer depends on.
+    """
+    if ray_version == constants.SKY_REMOTE_RAY_VERSION:
+        return
+    preamble = (f'Cluster {cluster_name!r} stays on Ray {ray_version}; this '
+                f'SkyPilot ships {constants.SKY_REMOTE_RAY_VERSION}.')
+    try:
+        cloud.check_features_are_supported(
+            resources, {clouds.CloudImplementationFeatures.STOP}, region)
+    except exceptions.NotSupportedError:
+        # Not actionable in place, and permanent for this cluster, so keep it
+        # out of every launch's output and leave it for whoever is asking why.
+        logger.debug(f'{preamble} {cloud} cannot stop a cluster, so it keeps '
+                     f'that version until it is recreated (`sky down '
+                     f'{cluster_name}`).')
+        return
+    except Exception:  # pylint: disable=broad-except
+        # Deciding the wording is not worth failing a launch over. The check
+        # reaches the cloud on some providers -- Kubernetes probes every
+        # allowed context -- so it can fail for reasons that have nothing to
+        # do with the question being asked.
+        logger.debug(
+            f'{preamble} Could not tell whether {cloud} can stop a '
+            'cluster.',
+            exc_info=True)
+        return
+    logger.info(f'{preamble} Run `sky stop {cluster_name}` and `sky start '
+                f'{cluster_name}` to move the whole cluster to it.')
 
 
 def _replace_yaml_dicts(
@@ -1190,6 +1286,13 @@ def write_cluster_config(
     # Use a tmp file path to avoid incomplete YAML file being re-used in the
     # future.
     tmp_yaml_path = yaml_path + '.tmp'
+    # Read the stored YAML before rendering, not just after (where
+    # _replace_yaml_dicts uses it): an existing cluster has to be rendered with
+    # the Ray version it already runs, or its nodes end up disagreeing.
+    old_yaml_content = global_user_state.get_cluster_yaml_str(yaml_path)
+    ray_version = _ray_version_for_cluster(cluster_name, old_yaml_content)
+    _log_pinned_ray_version(cluster_name, ray_version, cloud, to_provision,
+                            region.name)
     variables = dict(
         resources_vars,
         **{
@@ -1254,9 +1357,17 @@ def write_cluster_config(
             'setup_sky_dirs_commands': constants.SETUP_SKY_DIRS_COMMANDS,
             'ray_skypilot_installation_commands':
                 (constants.RAY_SKYPILOT_INSTALLATION_COMMANDS.replace(
-                    '{sky_wheel_hash}',
-                    wheel_hash).replace('{cloud}',
-                                        str(cloud).lower())),
+                    '{sky_wheel_hash}', wheel_hash).replace(
+                        '{cloud}',
+                        str(cloud).lower()).replace('{ray_version}',
+                                                    ray_version)),
+            # Kubernetes installs Ray from the pod args rather than from
+            # setup_commands, so it needs the same string separately. Built
+            # here, not in Kubernetes.make_deploy_resources_variables, because
+            # only this scope knows which Ray version this cluster is pinned to.
+            'ray_installation_commands':
+                (constants.RAY_INSTALLATION_COMMANDS.replace(
+                    '{ray_version}', ray_version)),
             'skypilot_wheel_installation_commands':
                 constants.SKYPILOT_WHEEL_INSTALLATION_COMMANDS.replace(
                     '{sky_wheel_hash}',
@@ -1282,7 +1393,14 @@ def write_cluster_config(
             # cluster, so that ray autoscaler can access cloud SDK and CLIs
             # on remote
             'sky_activate_python_env': constants.ACTIVATE_SKY_REMOTE_PYTHON_ENV,
-            'ray_version': constants.SKY_REMOTE_RAY_VERSION,
+            # The Ray this cluster is pinned to: what to install.
+            'ray_version': ray_version,
+            # ray_patches_cmd carries its own version check: the patches
+            # shipped in the wheel target SKY_REMOTE_RAY_VERSION, not this
+            # cluster's pinned ray_version, and applying them to a different
+            # Ray is what corrupts it.
+            'ray_patches_cmd': instance_setup.ray_patches_cmd(
+                constants.SKY_REMOTE_RAY_VERSION),
             # Command for waiting ray cluster to be ready on head.
             'ray_head_wait_initialized_command':
                 instance_setup.RAY_HEAD_WAIT_INITIALIZED_COMMAND,
@@ -1366,8 +1484,8 @@ def write_cluster_config(
         return config_dict
     _add_auth_to_cluster_config(cloud, tmp_yaml_path)
 
-    # Restore the old yaml content for backward compatibility.
-    old_yaml_content = global_user_state.get_cluster_yaml_str(yaml_path)
+    # Restore the old yaml content for backward compatibility. old_yaml_content
+    # was read before rendering, since _ray_version_for_cluster needs it too.
     if old_yaml_content is not None and keep_launch_fields_in_existing_config:
         with open(tmp_yaml_path, 'r', encoding='utf-8') as f:
             new_yaml_content = f.read()
@@ -1383,6 +1501,13 @@ def write_cluster_config(
     # correctly. See #8232.
     yaml_config = yaml_utils.read_yaml(tmp_yaml_path)
     config_dict['cluster_name_on_cloud'] = yaml_config['cluster_name']
+
+    # Record the Ray version this cluster is set up with, so a later launch
+    # renders the same one rather than whatever SKY_REMOTE_RAY_VERSION has
+    # become. Written after the restore above, which would otherwise put back
+    # the old 'provider' block wholesale and discard it.
+    yaml_config.setdefault('provider', {})[_RAY_VERSION_KEY] = ray_version
+    yaml_utils.dump_yaml(tmp_yaml_path, yaml_config)
 
     # Make sure to do this before we optimize file mounts. Optimization is
     # non-deterministic, but everything else before this point should be

@@ -16,9 +16,10 @@ logger = sky_logging.init_logger(__name__)
 # Configure environment variables. A docker image can have environment variables
 # set in the Dockerfile with `ENV``. We need to export these variables to the
 # shell environment, so that our ssh session can access them.
-# Filter out RAY_RUNTIME_ENV_HOOK to prevent Ray version conflicts.
-# Docker images with Ray 2.48.0+ set this for UV package manager support,
-# but it causes FAILED_DRIVER errors with SkyPilot's Ray 2.9.3.
+# Filter out RAY_RUNTIME_ENV_HOOK to prevent Ray version conflicts. Docker
+# images with Ray 2.48.0+ set this for UV package manager support, pointing at
+# the image's own Ray rather than the one in SkyPilot's runtime venv, which
+# causes FAILED_DRIVER errors.
 # See: https://github.com/skypilot-org/skypilot/pull/7181
 SETUP_ENV_VARS_CMD = (
     'prefix_cmd() '
@@ -89,7 +90,8 @@ class DockerLoginConfig:
         )
 
 
-# Copied from ray.autoscaler._private.ray_constants
+# Copied from ray._private.ray_constants (both values unchanged as of
+# ray 2.56.1).
 # The default maximum number of bytes to allocate to the object store unless
 # overridden by the user.
 DEFAULT_OBJECT_STORE_MAX_MEMORY_BYTES = 200 * 10**9
