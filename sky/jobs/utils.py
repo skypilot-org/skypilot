@@ -2932,6 +2932,19 @@ def _format_job_details(*,
                         cancel_reason: Optional[str] = None) -> None:
     """Add details about schedule state / backoff / recovery / pending /
     who requested a cancellation."""
+    if cancel_reason:
+        # Surface who asked for the cancellation, and under which API
+        # request, e.g. 'Cancellation requested by user alice (request ID:
+        # ...)', so a CANCELLING/CANCELLED job's row and detail page answer
+        # "who cancelled this?" without opening the event table. Checked
+        # first: a job cancelled while in launch backoff or waiting to launch
+        # keeps that schedule state until the controller finishes cleaning
+        # up, and a job cancelled while recovering keeps the failure_reason
+        # of the preemption it was recovering from. Neither is why the job
+        # is ending; the cancel is.
+        job['details'] = cancel_reason
+        return
+
     state_details = None
     if job['schedule_state'] == 'ALIVE_BACKOFF':
         state_details = 'In backoff, waiting for resources'
@@ -2947,15 +2960,6 @@ def _format_job_details(*,
         job['details'] = f'{state_details} - {job["failure_reason"]}'
     elif state_details:
         job['details'] = state_details
-    elif cancel_reason:
-        # Surface who asked for the cancellation, and under which API
-        # request, e.g. 'Cancellation requested by user alice (request ID:
-        # ...)', so a CANCELLING/CANCELLED job's row and detail page answer
-        # "who cancelled this?" without opening the event table. Takes
-        # precedence over a failure_reason left from before the cancel (e.g.
-        # the preemption a RECOVERING job was recovering from): the cancel is
-        # why the job ended.
-        job['details'] = cancel_reason
     elif job['failure_reason']:
         job['details'] = f'Failure: {job["failure_reason"]}'
     elif recovery_reason:

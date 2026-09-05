@@ -1132,6 +1132,25 @@ class TestFormatJobDetails:
             cancel_reason='Cancellation requested by user alice'
         ) == 'Cancellation requested by user alice'
 
+    def test_cancel_reason_beats_stale_schedule_state(self):
+        # A job cancelled while in launch backoff or waiting to launch keeps
+        # that schedule state until cleanup marks it DONE; the requester must
+        # show through, not the stale scheduling message.
+        reason = 'Cancellation requested by user alice'
+        for schedule_state in ('ALIVE_BACKOFF', 'ALIVE_WAITING', 'WAITING'):
+            assert self._details(status='CANCELLING',
+                                 schedule_state=schedule_state,
+                                 cancel_reason=reason) == reason
+            assert self._details(status='CANCELLING',
+                                 schedule_state=schedule_state,
+                                 failure_reason='no capacity',
+                                 cancel_reason=reason) == reason
+
+    def test_schedule_state_still_shown_without_cancel_reason(self):
+        # Unchanged for jobs that are not being cancelled.
+        assert self._details(status='PENDING', schedule_state='ALIVE_BACKOFF'
+                            ) == 'In backoff, waiting for resources'
+
     def test_no_cancel_reason_falls_through(self):
         # An unattributed cancel (old controller, internal cancel) keeps the
         # existing behaviour.
