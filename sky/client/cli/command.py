@@ -1516,9 +1516,12 @@ def launch(
                                        follow=True)
         cluster_dashboard_url = None
         if not server_common.is_api_server_local():
-            cluster_dashboard_url = server_common.get_dashboard_url(
-                server_common.get_server_url(),
-                starting_page=f'clusters/{handle.get_cluster_name()}')
+            # This URL is only printed as a hint, so mask any basic-auth
+            # password in it. Use `sky dashboard` to open it in a browser.
+            cluster_dashboard_url = server_common.redact_url_password(
+                server_common.get_dashboard_url(
+                    server_common.get_server_url(),
+                    starting_page=f'clusters/{handle.get_cluster_name()}'))
         click.secho(
             ux_utils.command_hint_messages(ux_utils.CommandHintType.CLUSTER_JOB,
                                            job_id, handle.get_cluster_name(),
@@ -6021,8 +6024,10 @@ def jobs_launch(
                                                 controller=False)
         job_dashboard_url = None
         if not server_common.is_api_server_local():
-            job_dashboard_url = server_common.get_dashboard_url(
-                server_common.get_server_url(), starting_page=f'jobs/{job_id}')
+            # Printed as a hint only; mask any basic-auth password.
+            job_dashboard_url = server_common.redact_url_password(
+                server_common.get_dashboard_url(server_common.get_server_url(),
+                                                starting_page=f'jobs/{job_id}'))
         click.secho(
             ux_utils.command_hint_messages(ux_utils.CommandHintType.MANAGED_JOB,
                                            job_id=str(job_id),
@@ -6047,8 +6052,10 @@ def jobs_launch(
             else:
                 starting_page = 'jobs'
                 show_jobs_label = 'Show all jobs:'
-            dashboard_url = server_common.get_dashboard_url(
-                server_common.get_server_url(), starting_page=starting_page)
+            # Printed as a hint only; mask any basic-auth password.
+            dashboard_url = server_common.redact_url_password(
+                server_common.get_dashboard_url(server_common.get_server_url(),
+                                                starting_page=starting_page))
             dashboard_hint = (f'\n{ux_utils.INDENT_SYMBOL}{show_jobs_label}'
                               f'\t\t{ux_utils.BOLD}{dashboard_url}'
                               f'{ux_utils.RESET_BOLD}')
