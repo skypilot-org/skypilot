@@ -141,6 +141,106 @@ def test_check_results_and_enabled_clouds_are_user_scoped(
     ] == ['Slurm']
 
 
+def test_shared_credential_clouds_are_visible_to_every_user(
+        tmp_path, monkeypatch):
+    """Regression test for #10588.
+
+    With Slurm submit-as-user enabled, only Slurm's check result depends on
+    the requesting user. Clouds whose credentials live on the API server
+    (e.g. Kubernetes) must stay visible to users who never ran `sky check`.
+    """
+    _fresh_db(tmp_path, monkeypatch)
+    current_user = [models.User(id='alice-id', name='alice@example.com')]
+    monkeypatch.setattr(global_user_state, '_slurm_submit_as_user_enabled',
+                        lambda: True)
+    monkeypatch.setattr(global_user_state.common_utils, 'get_current_user',
+                        lambda: current_user[0])
+    k8s_result = {'ctx-a': {'enabled': True, 'reason': 'enabled.'}}
+    alice_slurm = {'cluster-a': {'enabled': True, 'reason': 'alice ok'}}
+    global_user_state.set_check_results(
+        {
+            'Kubernetes': k8s_result,
+            'Slurm': alice_slurm
+        },
+        workspace='default',
+        is_full_workspace_run=True)
+    global_user_state.set_enabled_clouds(['Kubernetes', 'Slurm'],
+                                         cloud.CloudCapability.COMPUTE,
+                                         workspace='default')
+
+    # Bob has never run `sky check`: he sees the shared cloud, not Slurm.
+    current_user[0] = models.User(id='bob-id', name='bob@example.com')
+    assert global_user_state.get_cached_check_results('default') == {
+        'Kubernetes': k8s_result
+    }
+    assert [
+        repr(c) for c in global_user_state.get_cached_enabled_clouds(
+            cloud.CloudCapability.COMPUTE, workspace='default')
+    ] == ['Kubernetes']
+
+    # Bob's full run: Slurm is not usable for him. The Slurm result goes to
+    # his row only; the Kubernetes result is shared with everyone.
+    bob_slurm = {'cluster-a': {'enabled': False, 'reason': 'no account'}}
+    global_user_state.set_check_results(
+        {
+            'Kubernetes': k8s_result,
+            'Slurm': bob_slurm
+        },
+        workspace='default',
+        is_full_workspace_run=True)
+    global_user_state.set_enabled_clouds(['Kubernetes'],
+                                         cloud.CloudCapability.COMPUTE,
+                                         workspace='default')
+    assert global_user_state.get_cached_check_results('default') == {
+        'Kubernetes': k8s_result,
+        'Slurm': bob_slurm
+    }
+    assert [
+        repr(c) for c in global_user_state.get_cached_enabled_clouds(
+            cloud.CloudCapability.COMPUTE, workspace='default')
+    ] == ['Kubernetes']
+
+    # Alice keeps her own Slurm result and enablement.
+    current_user[0] = models.User(id='alice-id', name='alice@example.com')
+    assert global_user_state.get_cached_check_results('default') == {
+        'Kubernetes': k8s_result,
+        'Slurm': alice_slurm
+    }
+    assert [
+        repr(c) for c in global_user_state.get_cached_enabled_clouds(
+            cloud.CloudCapability.COMPUTE, workspace='default')
+    ] == ['Kubernetes', 'Slurm']
+
+
+def test_scoped_slurm_run_does_not_touch_shared_row_when_user_scoped(
+        tmp_path, monkeypatch):
+    _fresh_db(tmp_path, monkeypatch)
+    current_user = [models.User(id='alice-id', name='alice@example.com')]
+    monkeypatch.setattr(global_user_state, '_slurm_submit_as_user_enabled',
+                        lambda: True)
+    monkeypatch.setattr(global_user_state.common_utils, 'get_current_user',
+                        lambda: current_user[0])
+    k8s_result = {'ctx-a': {'enabled': True, 'reason': 'enabled.'}}
+    global_user_state.set_check_results({'Kubernetes': k8s_result},
+                                        workspace='default',
+                                        is_full_workspace_run=True)
+
+    current_user[0] = models.User(id='bob-id', name='bob@example.com')
+    bob_slurm = {'cluster-a': {'enabled': True, 'reason': 'bob ok'}}
+    global_user_state.set_check_results({'Slurm': bob_slurm},
+                                        workspace='default',
+                                        is_full_workspace_run=False)
+    assert global_user_state.get_cached_check_results('default') == {
+        'Kubernetes': k8s_result,
+        'Slurm': bob_slurm
+    }
+
+    current_user[0] = models.User(id='alice-id', name='alice@example.com')
+    assert global_user_state.get_cached_check_results('default') == {
+        'Kubernetes': k8s_result
+    }
+
+
 def test_check_results_remain_workspace_scoped_when_submit_user_disabled(
         tmp_path, monkeypatch):
     _fresh_db(tmp_path, monkeypatch)

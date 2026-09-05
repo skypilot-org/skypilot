@@ -2614,16 +2614,27 @@ def get_cluster_names_start_with(starts_with: str) -> List[str]:
     return [row[0] for row in rows]
 
 
+def _get_config_json(key: str, default: Any) -> Any:
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
+        row = session.query(config_table).filter_by(key=key).first()
+    if row is None or row.value is None:
+        return default
+    return json.loads(row.value)
+
+
 @metrics_lib.time_me
 def get_cached_enabled_clouds(cloud_capability: 'cloud.CloudCapability',
                               workspace: str) -> List['clouds.Cloud']:
-    engine = _db_manager.get_engine()
-    with orm.Session(engine) as session:
-        row = session.query(config_table).filter_by(
-            key=_get_enabled_clouds_key(cloud_capability, workspace)).first()
-    ret = []
-    if row:
-        ret = json.loads(row.value)
+    key = _get_enabled_clouds_key(cloud_capability, workspace)
+    ret: List[str] = _get_config_json(key, default=[])
+    if _slurm_submit_as_user_enabled():
+        # Shared-credential clouds come from the workspace row; clouds whose
+        # enablement depends on the requesting user come from that user's row.
+        user_ret: List[str] = _get_config_json(_user_scoped_key(key),
+                                               default=[])
+        ret = ([c for c in ret if not _is_user_scoped_cloud(c)] +
+               [c for c in user_ret if _is_user_scoped_cloud(c)])
     enabled_clouds: List['clouds.Cloud'] = []
     for c in ret:
         try:
@@ -2643,6 +2654,18 @@ def get_cached_enabled_clouds(cloud_capability: 'cloud.CloudCapability',
 def set_enabled_clouds(enabled_clouds: List[str],
                        cloud_capability: 'cloud.CloudCapability',
                        workspace: str) -> None:
+    key = _get_enabled_clouds_key(cloud_capability, workspace)
+    rows = {key: enabled_clouds}
+    if _slurm_submit_as_user_enabled():
+        # Keep the workspace row for shared-credential clouds so users who
+        # have never run `sky check` still see them; only user-scoped clouds
+        # go to the current user's row.
+        rows = {
+            key: [c for c in enabled_clouds if not _is_user_scoped_cloud(c)],
+            _user_scoped_key(key): [
+                c for c in enabled_clouds if _is_user_scoped_cloud(c)
+            ],
+        }
     engine = _db_manager.get_engine()
     with orm.Session(engine) as session:
         if engine.dialect.name == db_utils.SQLAlchemyDialect.SQLITE.value:
@@ -2652,13 +2675,13 @@ def set_enabled_clouds(enabled_clouds: List[str],
             insert_func = postgresql.insert
         else:
             raise ValueError('Unsupported database dialect')
-        insert_stmnt = insert_func(config_table).values(
-            key=_get_enabled_clouds_key(cloud_capability, workspace),
-            value=json.dumps(enabled_clouds))
-        do_update_stmt = insert_stmnt.on_conflict_do_update(
-            index_elements=[config_table.c.key],
-            set_={config_table.c.value: json.dumps(enabled_clouds)})
-        session.execute(do_update_stmt)
+        for row_key, value in rows.items():
+            insert_stmnt = insert_func(config_table).values(
+                key=row_key, value=json.dumps(value))
+            do_update_stmt = insert_stmnt.on_conflict_do_update(
+                index_elements=[config_table.c.key],
+                set_={config_table.c.value: json.dumps(value)})
+            session.execute(do_update_stmt)
         session.commit()
 
 
@@ -2672,25 +2695,33 @@ def _slurm_submit_as_user_enabled() -> bool:
         for config in cluster_configs.values())
 
 
-def _scope_config_key_to_user(key: str) -> str:
-    if not _slurm_submit_as_user_enabled():
-        return key
+# Clouds whose `sky check` result depends on the requesting user rather than
+# on credentials shared by the API server. With Slurm submit-as-user enabled,
+# only these clouds are cached per user; every other cloud keeps the
+# workspace-wide row.
+_USER_SCOPED_CLOUDS = frozenset({'slurm'})
+
+
+def _is_user_scoped_cloud(cloud_repr: str) -> bool:
+    return cloud_repr.lower() in _USER_SCOPED_CLOUDS
+
+
+def _user_scoped_key(key: str) -> str:
     user_id = common_utils.get_current_user().id
     return f'{key}_{user_id}'
 
 
 def _get_enabled_clouds_key(cloud_capability: 'cloud.CloudCapability',
                             workspace: str) -> str:
-    key = (_ENABLED_CLOUDS_KEY_PREFIX + workspace + '_' +
-           cloud_capability.value)
-    return _scope_config_key_to_user(key)
+    return (_ENABLED_CLOUDS_KEY_PREFIX + workspace + '_' +
+            cloud_capability.value)
 
 
 _CHECK_RESULTS_KEY_PREFIX = 'check_results_'
 
 
 def _get_check_results_key(workspace: str) -> str:
-    return _scope_config_key_to_user(f'{_CHECK_RESULTS_KEY_PREFIX}{workspace}')
+    return f'{_CHECK_RESULTS_KEY_PREFIX}{workspace}'
 
 
 @metrics_lib.time_me
@@ -2698,19 +2729,31 @@ def get_cached_check_results(
         workspace: str) -> Dict[str, Dict[str, Dict[str, Any]]]:
     """Return persisted check results for a workspace, or {}.
 
-    With Slurm submit-as-user enabled, results are scoped to the current user.
+    With Slurm submit-as-user enabled, results for user-scoped clouds (Slurm)
+    come from the current user's row; all other clouds are shared.
 
     Shape:
         {cloud_repr: {context_or_empty_str: {"enabled": bool, "reason": str}}}.
     """
-    engine = _db_manager.get_engine()
-    with orm.Session(engine) as session:
-        row = session.query(config_table).filter_by(
-            key=_get_check_results_key(workspace)).first()
-    if row is None or row.value is None:
-        return {}
+    key = _get_check_results_key(workspace)
+    results = _get_check_results_row(key, workspace)
+    if _slurm_submit_as_user_enabled():
+        user_results = _get_check_results_row(_user_scoped_key(key), workspace)
+        results = {
+            **{
+                c: v for c, v in results.items() if not _is_user_scoped_cloud(c)
+            },
+            **{
+                c: v for c, v in user_results.items() if _is_user_scoped_cloud(c)
+            },
+        }
+    return results
+
+
+def _get_check_results_row(
+        key: str, workspace: str) -> Dict[str, Dict[str, Dict[str, Any]]]:
     try:
-        return json.loads(row.value)
+        return _get_config_json(key, default={})
     except (json.JSONDecodeError, TypeError):
         logger.warning(
             f'Corrupt check_results row for workspace {workspace!r}; '
@@ -2727,7 +2770,8 @@ def set_check_results(
 ) -> None:
     """Persist `results` for `workspace`.
 
-    With Slurm submit-as-user enabled, results are scoped to the current user.
+    With Slurm submit-as-user enabled, results for user-scoped clouds (Slurm)
+    are written to the current user's row; all other clouds share one row.
 
     `is_full_workspace_run=True` replaces the entire row (drops clouds /
     contexts not present in `results`).  `False` merges at *context*
@@ -2750,48 +2794,71 @@ def set_check_results(
         raise ValueError('Unsupported database dialect')
 
     key = _get_check_results_key(workspace)
+    rows = {key: results}
+    if _slurm_submit_as_user_enabled():
+        rows = {
+            key: {
+                c: v for c, v in results.items() if not _is_user_scoped_cloud(c)
+            },
+            _user_scoped_key(key): {
+                c: v for c, v in results.items() if _is_user_scoped_cloud(c)
+            },
+        }
     with orm.Session(engine) as session:
-        if is_full_workspace_run:
-            new_value = results
-        else:
-            # Read-modify-write under the default session isolation. This
-            # is NOT race-safe against concurrent scoped writes for
-            # different clouds for the same cache scope: SQLAlchemy
-            # `orm.Session` does not acquire row locks, and under the
-            # default isolation (READ COMMITTED on Postgres, deferred on
-            # SQLite) two interleaved RMW cycles can clobber each
-            # other's per-cloud updates. The blast radius is limited
-            # (one scoped run's leaves get overwritten until the next
-            # write rewrites the row) and the source-of-truth
-            # enabled_clouds_* rows are unaffected, so we accept the
-            # race here rather than serialize through a per-key
-            # advisory lock. If this row ever becomes load-bearing for
-            # correctness, switch to `with_for_update()` (postgres) and
-            # an explicit BEGIN IMMEDIATE (sqlite).
-            row = session.query(config_table).filter_by(key=key).first()
-            existing: Dict[str, Dict[str, Dict[str, Any]]] = {}
-            if row is not None and row.value is not None:
-                try:
-                    existing = json.loads(row.value)
-                except (json.JSONDecodeError, TypeError):
-                    logger.warning(f'Corrupt check_results row for workspace '
-                                   f'{workspace!r}; replacing.')
-                    existing = {}
-            new_value = dict(existing)
-            for cloud_repr, ctx_dict in results.items():
-                existing_for_cloud = new_value.get(cloud_repr)
-                if not isinstance(existing_for_cloud, dict):
-                    existing_for_cloud = {}
-                new_value[cloud_repr] = {**existing_for_cloud, **ctx_dict}
-
-        serialized = json.dumps(new_value)
-        insert_stmnt = insert_func(config_table).values(key=key,
-                                                        value=serialized)
-        do_update_stmt = insert_stmnt.on_conflict_do_update(
-            index_elements=[config_table.c.key],
-            set_={config_table.c.value: serialized})
-        session.execute(do_update_stmt)
+        for row_key, row_results in rows.items():
+            if not is_full_workspace_run and not row_results:
+                # A scoped run that did not probe any cloud in this row has
+                # nothing to merge into it.
+                continue
+            _upsert_check_results_row(session, insert_func, row_key,
+                                      row_results, workspace,
+                                      is_full_workspace_run)
         session.commit()
+
+
+def _upsert_check_results_row(session: orm.Session, insert_func: Any, key: str,
+                              results: Dict[str, Dict[str, Dict[str, Any]]],
+                              workspace: str,
+                              is_full_workspace_run: bool) -> None:
+    if is_full_workspace_run:
+        new_value = results
+    else:
+        # Read-modify-write under the default session isolation. This
+        # is NOT race-safe against concurrent scoped writes for
+        # different clouds for the same cache scope: SQLAlchemy
+        # `orm.Session` does not acquire row locks, and under the
+        # default isolation (READ COMMITTED on Postgres, deferred on
+        # SQLite) two interleaved RMW cycles can clobber each
+        # other's per-cloud updates. The blast radius is limited
+        # (one scoped run's leaves get overwritten until the next
+        # write rewrites the row) and the source-of-truth
+        # enabled_clouds_* rows are unaffected, so we accept the
+        # race here rather than serialize through a per-key
+        # advisory lock. If this row ever becomes load-bearing for
+        # correctness, switch to `with_for_update()` (postgres) and
+        # an explicit BEGIN IMMEDIATE (sqlite).
+        row = session.query(config_table).filter_by(key=key).first()
+        existing: Dict[str, Dict[str, Dict[str, Any]]] = {}
+        if row is not None and row.value is not None:
+            try:
+                existing = json.loads(row.value)
+            except (json.JSONDecodeError, TypeError):
+                logger.warning(f'Corrupt check_results row for workspace '
+                               f'{workspace!r}; replacing.')
+                existing = {}
+        new_value = dict(existing)
+        for cloud_repr, ctx_dict in results.items():
+            existing_for_cloud = new_value.get(cloud_repr)
+            if not isinstance(existing_for_cloud, dict):
+                existing_for_cloud = {}
+            new_value[cloud_repr] = {**existing_for_cloud, **ctx_dict}
+
+    serialized = json.dumps(new_value)
+    insert_stmnt = insert_func(config_table).values(key=key, value=serialized)
+    do_update_stmt = insert_stmnt.on_conflict_do_update(
+        index_elements=[config_table.c.key],
+        set_={config_table.c.value: serialized})
+    session.execute(do_update_stmt)
 
 
 @metrics_lib.time_me
