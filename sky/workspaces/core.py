@@ -1,6 +1,7 @@
 """Workspace management core."""
 
 from dataclasses import dataclass
+import os
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 
 from sky import check as sky_check
@@ -27,6 +28,15 @@ logger = sky_logging.init_logger(__name__)
 
 # Lock for workspace configuration updates to prevent race conditions
 _WORKSPACE_CONFIG_LOCK_TIMEOUT_SECONDS = 60
+
+
+def _reject_authoritative_config_update() -> None:
+    """Reject dashboard/API config writes in Helm-authoritative mode."""
+    if os.environ.get(constants.SKYPILOT_API_SERVER_CONFIG_AUTHORITATIVE,
+                      'false').lower() == 'true':
+        raise ValueError('Cannot update the API server config when '
+                         'apiService.configAuthoritative is enabled. Update '
+                         'apiService.config through Helm instead.')
 
 
 @dataclass
@@ -154,6 +164,8 @@ def _update_workspaces_config(
     Returns:
         The updated workspaces configuration.
     """
+    _reject_authoritative_config_update()
+
     # Distributed config lock: serializes config read-modify-write across worker
     # processes.
     try:
@@ -676,6 +688,8 @@ def update_config(config: Dict[str, Any]) -> Dict[str, Any]:
         FileNotFoundError: If the config file cannot be found.
         PermissionError: If the config file cannot be written.
     """
+    _reject_authoritative_config_update()
+
     # Validate the configuration using the schema
     try:
         common_utils.validate_schema(config, schemas.get_config_schema(),
