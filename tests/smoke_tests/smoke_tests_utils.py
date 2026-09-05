@@ -1027,7 +1027,12 @@ VALIDATE_LAUNCH_OUTPUT = (
     # Reset s to remove any line with FutureWarning
     's=$(echo "$s" | grep -v "FutureWarning") && '
     'echo "$s" && echo "==Validating launching==" && '
-    'echo "$s" | grep -A 1 "Launching on" | grep "is up." && '
+    # -A 5, not -A 1: the provisioner can log warnings between "Launching on"
+    # and "Instance is up.", e.g. when resuming a stopped cluster on AWS whose
+    # instance has not finished shutting down yet ("... is still in STOPPING
+    # state on AWS ... Waiting ..."). What this asserts is that the launch
+    # reported the instance/pod coming up, not that the two lines are adjacent.
+    'echo "$s" | grep -A 5 "Launching on" | grep "is up." && '
     'echo "$s" && echo "==Validating setup output==" && '
     'echo "$s" | grep -A 5 "Setup detached" | grep "Job submitted" && '
     'echo "==Validating running output hints==" && echo "$s" | '
@@ -1088,12 +1093,18 @@ def get_disk_size_and_validate_launch_output(generic_cloud: str):
     """
     if generic_cloud == 'runpod':
         disk_size_param = '--disk-size 20'
-        # Use -A 10 instead of -A 1 for "Launching on" line to handle RunPod raw_response output
+        # Use -A 10 for the "Launching on" line to handle RunPod raw_response output
         # Use -A 100 instead of -A 1 for "Job started. Streaming logs..." to handle RunPod banner output
         validate_launch_output = (VALIDATE_LAUNCH_OUTPUT.replace(
-            'grep -A 1 "Launching on"', 'grep -A 10 "Launching on"').replace(
+            'grep -A 5 "Launching on"', 'grep -A 10 "Launching on"').replace(
                 'grep -A 1 "Job started. Streaming logs..."',
                 'grep -A 100 "Job started. Streaming logs..."'))
+        # The replacements above match VALIDATE_LAUNCH_OUTPUT literally, so they
+        # silently no-op if its grep contexts are ever changed again. Fail loudly
+        # instead, otherwise RunPod quietly loses the wider context it needs.
+        assert 'grep -A 10 "Launching on"' in validate_launch_output
+        assert ('grep -A 100 "Job started. Streaming logs..."'
+                in validate_launch_output)
     else:
         disk_size_param = ''
         validate_launch_output = VALIDATE_LAUNCH_OUTPUT

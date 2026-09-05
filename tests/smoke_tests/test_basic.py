@@ -345,10 +345,13 @@ def test_launch_fast(generic_cloud: str):
             # Second launch to test fast launch - should not reprovision
             f's=$(SKYPILOT_DEBUG=0 sky launch -y -c {name} --fast tests/test_yamls/minimal.yaml) && '
             ' echo "$s" && '
-            # Validate that cluster was not re-launched.
-            '! echo "$s" | grep -A 1 "Launching on" | grep "is up." && '
-            # Validate that setup was not re-run.
-            '! echo "$s" | grep -A 1 "Running setup on" | grep "running setup" && '
+            # Validate that cluster was not re-launched. Assert the marker is
+            # absent from the whole output rather than within a line of
+            # "Launching on": a provisioner warning in between would push it out
+            # of the window and let a reprovision slip through unnoticed.
+            '! echo "$s" | grep -q "is up." && '
+            # Validate that setup was not re-run. Same reasoning as above.
+            '! echo "$s" | grep -q "running setup" && '
             # Validate that the task ran and finished.
             'echo "$s" | grep -A 1 "task run finish" | grep "Job finished (status: SUCCEEDED)"',
             f'sky logs {name} 2 --status',
@@ -983,10 +986,12 @@ def test_launch_fast_with_cluster_changes(generic_cloud: str, tmp_path):
             # Launch again - setup and provisioning should be skipped
             f's=$(SKYPILOT_DEBUG=0 sky launch -y -c {name} --fast tests/test_yamls/minimal.yaml) && '
             ' echo "$s" && '
-            # Validate that cluster was not re-launched.
-            '! echo "$s" | grep -A 1 "Launching on" | grep "is up." && '
-            # Validate that setup was not re-run.
-            '! echo "$s" | grep -A 1 "Running setup on" | grep "running setup" && '
+            # Validate that cluster was not re-launched. Absence of the marker
+            # in the whole output, not within a line of "Launching on" -- see
+            # test_launch_fast.
+            '! echo "$s" | grep -q "is up." && '
+            # Validate that setup was not re-run. Same reasoning as above.
+            '! echo "$s" | grep -q "running setup" && '
             f'sky logs {name} 2 --status',
 
             # Copy current config as a base.
