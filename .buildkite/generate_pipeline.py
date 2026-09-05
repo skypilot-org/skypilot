@@ -245,7 +245,7 @@ def _extract_marked_tests(
     extra_args: List[str],
     exclusive_run: bool = False
 ) -> Dict[str, Tuple[List[str], List[str], List[Optional[str]], List[List[str]],
-                     List[bool], List[Optional[str]]]]:
+                     List[bool], List[Optional[str]], List[bool]]]:
     """Extract test functions and filter clouds using pytest.mark
     from a Python test file.
 
@@ -261,7 +261,8 @@ def _extract_marked_tests(
 
     Returns:
         Dict mapping function_name to tuple of:
-        (clouds, queues, params, extra_args, no_auto_retry_flags)
+        (clouds, queues, params, extra_args, no_auto_retry_flags,
+         concurrency_groups, serve_flags)
     """
     # Args are already in the format pytest expects (cloud names like --lambda)
     cmd = f'pytest {file_path} --collect-only {args}'
@@ -329,6 +330,7 @@ def _extract_marked_tests(
                                      'kubernetes' in default_clouds_to_run)
         benchmark_test = 'benchmark' in marks
         no_auto_retry = 'no_auto_retry' in marks
+        serve_test = 'serve' in marks
 
         # A concurrency_group(name) marker serializes this test globally across
         # all builds and pipelines: the step gets that concurrency_group with a
@@ -386,7 +388,7 @@ def _extract_marked_tests(
             extra_args for _ in range(len(final_clouds_to_include))
         ], [no_auto_retry for _ in range(len(final_clouds_to_include))], [
             test_concurrency_group for _ in range(len(final_clouds_to_include))
-        ])
+        ], [serve_test for _ in range(len(final_clouds_to_include))])
 
     return function_cloud_map
 
@@ -412,6 +414,7 @@ def _generate_pipeline(test_file: str, args: str) -> Dict[str, Any]:
     concurrency_limit = None
     build_id = None
     concurrency_group = None
+    env_file_serve_concurrency_group = None
     if exclusive:
         # Exclusive tests mutate shared server state, so the whole exclusive-only
         # run is serialized to one step at a time. Key the group on the target
@@ -428,9 +431,11 @@ def _generate_pipeline(test_file: str, args: str) -> Dict[str, Any]:
                              DEFAULT_ENV_FILE_CONCURRENCY_LIMIT)
         build_id = os.environ.get('BUILDKITE_BUILD_ID', 'local')
         concurrency_group = f'env-file-smoke-test-{build_id}'
+        tag = hashlib.sha256(env_file.encode()).hexdigest()[:12]
+        env_file_serve_concurrency_group = f'env-file-serve-{tag}'
     for test_function, clouds_queues_param in function_cloud_map.items():
         for (cloud, queue, param, extra_args, no_auto_retry,
-             test_concurrency_group) in zip(*clouds_queues_param):
+             test_concurrency_group, serve_test) in zip(*clouds_queues_param):
             label = f'{test_function} on {cloud}'
             command = f'pytest {test_file}::{test_function} --{cloud}'
             if param:
@@ -461,6 +466,14 @@ def _generate_pipeline(test_file: str, args: str) -> Dict[str, Any]:
                 # and pipelines, so instances of this test serialize org-wide.
                 step['concurrency'] = 1
                 step['concurrency_group'] = test_concurrency_group
+            elif (serve_test and
+                  env_file_serve_concurrency_group is not None and
+                  not exclusive):
+                # An env file points every step at the same API server. SkyServe
+                # tests share that server's controller capacity, so serialize
+                # them across builds targeting the same env file.
+                step['concurrency'] = 1
+                step['concurrency_group'] = env_file_serve_concurrency_group
             elif concurrency_limit is not None:
                 step['concurrency'] = concurrency_limit
                 step['concurrency_group'] = concurrency_group

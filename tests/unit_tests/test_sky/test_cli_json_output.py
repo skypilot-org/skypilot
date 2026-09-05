@@ -540,17 +540,18 @@ class TestQueueJsonOutput:
                                   job_name='train-b',
                                   status=job_lib.JobStatus.SUCCEEDED)
         ]
-        call_count = {'n': 0}
+        records_by_request = {
+            'cluster-a': records_a,
+            'cluster-b': records_b,
+        }
 
-        def mock_stream_and_get(*a, **kw):
-            call_count['n'] += 1
-            if call_count['n'] == 1:
-                return records_a
-            return records_b
+        def mock_stream_and_get(request_id, *a, **kw):
+            return records_by_request[request_id]
 
         monkeypatch.setattr('sky.client.sdk.stream_and_get',
                             mock_stream_and_get)
-        monkeypatch.setattr('sky.client.sdk.queue', lambda *a, **kw: 'mock_req')
+        monkeypatch.setattr('sky.client.sdk.queue',
+                            lambda cluster, *a, **kw: cluster)
         monkeypatch.setattr(
             'sky.client.cli.command._get_cluster_records_and_set_ssh_config',
             lambda *a, **kw: [])
