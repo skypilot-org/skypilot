@@ -1,4 +1,9 @@
 """Unit tests for sky.provision.slurm.utils."""
+import json
+import os
+import shlex
+import subprocess
+import sys
 from unittest import mock
 
 import pytest
@@ -6,6 +11,126 @@ import pytest
 from sky import exceptions
 from sky.adaptors import slurm as slurm_adaptor
 from sky.provision.slurm import utils
+
+
+class TestSrunSshdCommand:
+    """Tests for accelerator environment forwarding through SSH."""
+
+    @pytest.mark.parametrize('openssh_version,expected_setenv', [
+        ('9.0', 'SetEnv=CUDA_VISIBLE_DEVICES=4,5'),
+        ('7.4', None),
+    ])
+    def test_openssh_forwards_accelerator_environment(self, tmp_path,
+                                                      openssh_version,
+                                                      expected_setenv):
+        command = utils.srun_sshd_command(
+            job_id='123',
+            target_node='node-1',
+            unix_user='alice',
+            cluster_name_on_cloud='cluster',
+            is_container_image=False,
+        )
+
+        args = shlex.split(command)
+        assert args[:8] == [
+            'srun', '--quiet', '--unbuffered', '--overlap', '--jobid', '123',
+            '-w', 'node-1'
+        ]
+        assert args[8:10] == ['/bin/bash', '-c']
+        bootstrap = args[10]
+        assert 'CUDA_VISIBLE_DEVICES' in bootstrap
+        assert 'ROCR_VISIBLE_DEVICES' in bootstrap
+        assert 'ZE_AFFINITY_MASK' in bootstrap
+        assert 'GPU_DEVICE_ORDINAL' in bootstrap
+        assert 'SetEnv=$SSHD_SET_ENV' in bootstrap
+        assert 'exec "$@"' in bootstrap
+
+        # Execute the bootstrap with sshd replaced by a version/argv probe.
+        # Modern servers receive one SetEnv directive, while old servers keep
+        # working without it. Unsafe values are never added to either path.
+        probe = tmp_path / 'sshd'
+        probe.write_text(f"""#!{sys.executable}
+import json
+import sys
+if sys.argv[1:] == ['-V']:
+    print('OpenSSH_{openssh_version}', file=sys.stderr)
+else:
+    print(json.dumps(sys.argv[1:]))
+""")
+        probe.chmod(0o755)
+        bootstrap = bootstrap.replace('SSHD=/usr/sbin/sshd',
+                                      f'SSHD={shlex.quote(str(probe))}', 1)
+        env = {
+            **os.environ,
+            'CUDA_VISIBLE_DEVICES': '4,5',
+            'ROCR_VISIBLE_DEVICES': 'unsafe value',
+        }
+        result = subprocess.run(['/bin/bash', '-c', bootstrap],
+                                env=env,
+                                check=True,
+                                capture_output=True,
+                                text=True)
+        sshd_args = json.loads(result.stdout)
+        if expected_setenv is None:
+            assert not any(arg.startswith('SetEnv=') for arg in sshd_args)
+        else:
+            assert sshd_args[-2:] == ['-o', expected_setenv]
+
+    @pytest.mark.parametrize('dropbear_version,expected_flag', [
+        ('2025.89', '-e'),
+        ('2020.81', ''),
+    ])
+    def test_dropbear_forwards_only_accelerator_environment(
+            self, tmp_path, dropbear_version, expected_flag):
+        command = utils.srun_sshd_command(
+            job_id='123',
+            target_node='node-1',
+            unix_user='alice',
+            cluster_name_on_cloud='cluster',
+            is_container_image=True,
+        )
+
+        bootstrap = shlex.split(command)[-1]
+        assert '"$DROPBEAR" -V 2>&1' in bootstrap
+        assert 'DROPBEAR_VERSION_YEAR > 2022' in bootstrap
+        assert 'DROPBEAR_ENV_FLAG=(-e)' in bootstrap
+        assert 'env -i "${DROPBEAR_ENV[@]}" "$DROPBEAR"' in bootstrap
+        assert '"${DROPBEAR_ENV_FLAG[@]}" -F -s -R' in bootstrap
+        assert ('for NAME in CUDA_VISIBLE_DEVICES ROCR_VISIBLE_DEVICES'
+                in bootstrap)
+        assert 'GPU_DEVICE_ORDINAL LD_LIBRARY_PATH' in bootstrap
+
+        probe = tmp_path / 'dropbear'
+        probe.write_text(f"""#!{sys.executable}
+import sys
+print('Dropbear v{dropbear_version}', file=sys.stderr)
+""")
+        probe.chmod(0o755)
+        setup = bootstrap.split('while :; do', 1)[0]
+        setup += ('printf "flag=<%s>\\n" "${DROPBEAR_ENV_FLAG[*]}"; '
+                  'printf "env=<%s>\\n" "${DROPBEAR_ENV[*]}"')
+        env = {
+            key: value
+            for key, value in os.environ.items()
+            if key not in ('CUDA_VISIBLE_DEVICES', 'ROCR_VISIBLE_DEVICES',
+                           'ZE_AFFINITY_MASK', 'GPU_DEVICE_ORDINAL',
+                           'LD_LIBRARY_PATH')
+        }
+        env.update({
+            'PATH': f'{tmp_path}:{env["PATH"]}',
+            'CUDA_VISIBLE_DEVICES': '4,5',
+            'LD_LIBRARY_PATH': '/opt/accelerator/lib',
+            'SLURM_JOB_ID': 'must-not-be-forwarded',
+        })
+        result = subprocess.run(['/bin/bash', '-c', setup],
+                                env=env,
+                                check=True,
+                                capture_output=True,
+                                text=True)
+        assert f'flag=<{expected_flag}>' in result.stdout
+        assert ('env=<CUDA_VISIBLE_DEVICES=4,5 '
+                'LD_LIBRARY_PATH=/opt/accelerator/lib>' in result.stdout)
+        assert 'SLURM_JOB_ID' not in result.stdout
 
 
 class TestFormatSlurmDuration:
