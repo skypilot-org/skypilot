@@ -1670,5 +1670,47 @@ class TestDashboardConfigUrlTemplateValidation(unittest.TestCase):
             config, 'test_config')
 
 
+class TestControllerBucketSchema(unittest.TestCase):
+    """Tests for the `bucket` field of the jobs/serve controller schema."""
+
+    def _validate(self, section, url):
+        jsonschema.validate({section: {
+            'bucket': url
+        }}, schemas.get_config_schema())
+
+    def test_every_store_prefix_is_accepted(self):
+        """Every URL prefix `StoreType` understands must validate.
+
+        `controller_utils.maybe_translate_local_file_mounts_and_sync_up`
+        resolves `jobs.bucket`/`serve.bucket` with
+        `StoreType.get_fields_from_store_url`, so a prefix that resolver
+        accepts must not be rejected by config validation first. Derive the
+        expectation from `StoreType` rather than restating the list, so a
+        newly added store fails here instead of at config-load time.
+        """
+        # pylint: disable-next=import-outside-toplevel
+        from sky.data import storage as storage_lib
+        for store_type in storage_lib.StoreType:
+            if store_type == storage_lib.StoreType.VOLUME:
+                # Not an object store; never a valid controller bucket.
+                continue
+            url = f'{store_type.store_prefix()}my-bucket/sub-path'
+            for section in ('jobs', 'serve'):
+                with self.subTest(store=store_type.value, section=section):
+                    self._validate(section, url)
+
+    def test_non_store_urls_are_rejected(self):
+        invalid_urls = [
+            'ftp://my-bucket/sub-path',
+            'my-bucket/sub-path',
+            's3://',
+        ]
+        for url in invalid_urls:
+            for section in ('jobs', 'serve'):
+                with self.subTest(url=url, section=section):
+                    with self.assertRaises(jsonschema.ValidationError):
+                        self._validate(section, url)
+
+
 if __name__ == "__main__":
     unittest.main()
