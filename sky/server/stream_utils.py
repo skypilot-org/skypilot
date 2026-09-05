@@ -478,12 +478,15 @@ async def _discard_log_after_stream(
         async for chunk in stream:
             yield chunk
     finally:
-        # ``stream`` holds the log file open, and an open fd keeps its blocks
-        # allocated after the unlink.
+        # Close first: ``stream`` holds the log file open, and an open fd keeps
+        # its blocks allocated after the unlink. The unlink runs in a thread
+        # because ~/.sky can be on the state volume, where it is a network
+        # round trip.
         try:
             await stream.aclose()
         finally:
-            lp.get_log_provider().discard_log(request_id)
+            await asyncio.to_thread(lp.get_log_provider().discard_log,
+                                    request_id)
 
 
 def stream_response_for_long_request(
@@ -495,10 +498,14 @@ def stream_response_for_long_request(
 ) -> fastapi.responses.StreamingResponse:
     """Stream the logs of a long request.
 
+    Every caller streams a tail of a log that lives elsewhere -- a cluster
+    job, a managed job, a service -- so the request log is discarded once the
+    response ends. A request whose own log is the artifact, such as a launch
+    or an exec, is not streamed through here: its client reads /api/stream,
+    which never discards.
+
     Args:
-        discard_log_after_stream: Whether to discard the request log once the
-            response ends. Pass False for a request whose log is worth keeping
-            on its own, rather than a tail of a log that lives elsewhere.
+        discard_log_after_stream: Set False to keep the request log.
     """
     return stream_response(
         request_id,

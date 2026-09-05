@@ -90,7 +90,7 @@ class LogProvider(abc.ABC):
         return True
 
     def discard_log(self, request_id: str) -> None:
-        """Delete a request's log file.
+        """Delete a request's execution log, leaving its debug log alone.
 
         Called once the response that streamed the log has ended, for
         requests whose whole output is a tail of a log that lives elsewhere.
