@@ -2326,8 +2326,11 @@ async def job_status(request: fastapi.Request,
 
 
 @app.post('/cancel')
-async def cancel(request: fastapi.Request,
-                 cancel_body: payloads.CancelBody) -> None:
+async def cancel(
+    request: fastapi.Request,
+    cancel_body: payloads.CancelBody = fastapi.Depends(
+        role_filter.reject_all_users_cancel_body),
+) -> None:
     """Cancels jobs on a cluster."""
     await _reject_cluster_write_for_unauthorized(request,
                                                  cancel_body.cluster_name)
@@ -3279,6 +3282,12 @@ async def health(request: fastapi.Request) -> responses.APIHealthResponse:
         # Whether GET /workspaces/config is restricted to admins (so the
         # dashboard can hide the config UI for non-admins when enabled)
         restrict_config_to_admins=rbac.restrict_config_to_admins(),
+        # Whether this caller is barred from `--all-users` on mutating
+        # commands. Resolved per caller (admins are exempt) so the CLI can
+        # reject `-u` up front for down/stop/autostop, which expand the flag
+        # client-side and never send it to the server.
+        restrict_all_users_mutations=role_filter.all_users_mutations_restricted(
+            request),
     )
 
 
