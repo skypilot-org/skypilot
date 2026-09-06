@@ -1843,7 +1843,9 @@ def set_cluster_storage_mounts_metadata(
 
 @metrics_lib.time_me
 def get_cluster_skylet_ssh_tunnel_metadata(
-        cluster_name: str) -> Optional[Tuple[int, int]]:
+    cluster_name: str
+) -> Optional[Union[Tuple[int, int], Tuple[int, int, Optional[float],
+                                           Optional[str]]]]:
     engine = _db_manager.get_engine()
     with orm.Session(engine) as session:
         row = session.query(
@@ -1856,8 +1858,10 @@ def get_cluster_skylet_ssh_tunnel_metadata(
 
 @metrics_lib.time_me
 def set_cluster_skylet_ssh_tunnel_metadata(
-        cluster_name: str,
-        skylet_ssh_tunnel_metadata: Optional[Tuple[int, int]]) -> None:
+    cluster_name: str,
+    skylet_ssh_tunnel_metadata: Optional[Tuple[int, int, Optional[float],
+                                               Optional[str]]]
+) -> None:
     engine = _db_manager.get_engine()
     with orm.Session(engine) as session:
         value = pickle.dumps(
