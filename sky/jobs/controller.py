@@ -3185,6 +3185,45 @@ class ControllerManager:
                     f'Failed to download logs for job {job_id}, '
                     f'task {task_id}: {common_utils.format_exception(e)}')
 
+    async def _record_final_job_status(self, job_id: int,
+                                       cleanup_failure: Optional[str]) -> None:
+        """Make sure the job ends in an accurate terminal state.
+
+        Called at the very end of the job loop, after cleanup and (for
+        cancelled jobs) the CANCELLING -> CANCELLED transition.
+
+        - If the job never reached a terminal state, the controller is
+          genuinely responsible, so fail it with FAILED_CONTROLLER. A
+          cleanup failure, if any, is the failure reason.
+        - If the job already reached a legitimate terminal state
+          (SUCCEEDED / CANCELLED / FAILED / ...), a failed best-effort
+          cleanup must not rewrite that outcome (#10456, #9189): keep the
+          status and record the cleanup failure separately.
+        """
+        job_status = await managed_job_state.get_status_async(job_id)
+        assert job_status is not None
+        if not job_status.is_terminal():
+            # The job can be non-terminal if the controller exited
+            # abnormally, e.g. failed to launch cluster after reaching
+            # the MAX_RETRY, or if cleanup was interrupted before the job
+            # recorded a terminal state.
+            logger.info(f'Previous job status: {job_status.value}')
+            if cleanup_failure is not None:
+                failure_reason = cleanup_failure
+            else:
+                failure_reason = ('Unexpected error occurred. For details, '
+                                  f'run: sky jobs logs --controller {job_id}')
+            await managed_job_state.set_failed_async(
+                job_id,
+                task_id=None,
+                failure_type=managed_job_state.ManagedJobStatus.
+                FAILED_CONTROLLER,
+                failure_reason=failure_reason,
+                override_terminal=cleanup_failure is not None)
+        elif cleanup_failure is not None:
+            await managed_job_state.set_cleanup_failed_async(
+                job_id, cleanup_failure)
+
     # Use context.contextual to enable per-job output redirection and env var
     # isolation.
     @context.contextual_async
@@ -3346,6 +3385,7 @@ class ControllerManager:
                          f'{common_utils.format_exception(e)}')
             raise
         finally:
+            cleanup_failure: Optional[str] = None
             try:
                 await self._cleanup(job_id,
                                     pool=pool,
@@ -3354,17 +3394,15 @@ class ControllerManager:
                 logger.info(f'Cluster of managed job {job_id} has been cleaned '
                             'up.')
             except Exception as e:  # pylint: disable=broad-except
-                failure_reason = (
+                # Do not fail the job here: if the job already reached a
+                # terminal state (or is CANCELLING and about to become
+                # CANCELLED below), stamping FAILED_CONTROLLER would
+                # overwrite the outcome the user cares about (#10456).
+                cleanup_failure = (
                     'Failed to clean up, resources may have leaked: '
                     f'{common_utils.format_exception(e)}. Please check '
                     'whether the job\'s cluster and storage still exist.')
-                await managed_job_state.set_failed_async(
-                    job_id,
-                    task_id=None,
-                    failure_type=managed_job_state.ManagedJobStatus.
-                    FAILED_CONTROLLER,
-                    failure_reason=failure_reason,
-                    override_terminal=True)
+                logger.error(cleanup_failure)
 
             if cancelling:
                 # Since it's set with cancelling
@@ -3375,23 +3413,7 @@ class ControllerManager:
                         job_id=job_id, task_id=task_id,
                         task=dag.tasks[task_id]))
 
-            # We should check job status after 'set_cancelled', otherwise
-            # the job status is not terminal.
-            job_status = await managed_job_state.get_status_async(job_id)
-            assert job_status is not None
-            # The job can be non-terminal if the controller exited
-            # abnormally, e.g. failed to launch cluster after reaching
-            # the MAX_RETRY.
-            if not job_status.is_terminal():
-                logger.info(f'Previous job status: {job_status.value}')
-                await managed_job_state.set_failed_async(
-                    job_id,
-                    task_id=None,
-                    failure_type=managed_job_state.ManagedJobStatus.
-                    FAILED_CONTROLLER,
-                    failure_reason=(
-                        'Unexpected error occurred. For details, '
-                        f'run: sky jobs logs --controller {job_id}'))
+            await self._record_final_job_status(job_id, cleanup_failure)
 
             await scheduler.job_done_async(job_id)
 

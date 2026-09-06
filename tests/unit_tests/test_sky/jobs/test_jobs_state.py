@@ -8,6 +8,7 @@ from unittest import mock
 
 import filelock
 import pytest
+import sqlalchemy
 from sqlalchemy import create_engine
 from sqlalchemy.ext.asyncio import create_async_engine
 
@@ -1487,3 +1488,151 @@ class TestGetLatestRecoveryAndPendingReasons:
                                                                           [1])
         assert recovery == {}
         assert pending == {1: 'Job is in backoff'}
+
+
+class TestSetCleanupFailed:
+    """set_cleanup_failed_async records a cleanup failure without touching a
+    job's terminal status (#10456, #9189)."""
+
+    _CLEANUP_FAILURE = ('Failed to clean up, resources may have leaked: '
+                        'boom. Please check whether the job\'s cluster and '
+                        'storage still exist.')
+
+    async def _seed_running_job(self) -> int:
+        """Create a job and drive it to RUNNING."""
+
+        async def mock_callback(status: str):
+            del status
+
+        job_id = state.set_job_info_without_job_id(name='cleanup-test-job',
+                                                   workspace='ws1',
+                                                   entrypoint='ep',
+                                                   pool=None,
+                                                   pool_hash=None,
+                                                   user_hash='user1')
+        state.set_pending(job_id,
+                          task_id=0,
+                          task_name='task0',
+                          resources_str='{}',
+                          metadata='{}')
+        state.scheduler_set_waiting([job_id], '/tmp/dag.yaml', '/tmp/user.yaml',
+                                    '/tmp/env', None, 100)
+        await state.set_starting_async(job_id, 0, 'run_xyz', time.time(), '{}',
+                                       {}, mock_callback)
+        await state.set_started_async(job_id, 0, time.time(), mock_callback)
+        return job_id
+
+    @pytest.mark.asyncio
+    async def test_succeeded_job_keeps_status(self, _mock_managed_jobs_db_conn):
+        """A SUCCEEDED job stays SUCCEEDED; the failure is still recorded."""
+
+        async def mock_callback(status: str):
+            del status
+
+        job_id = await self._seed_running_job()
+        await state.set_succeeded_async(job_id, 0, time.time(), mock_callback)
+
+        await state.set_cleanup_failed_async(job_id, self._CLEANUP_FAILURE)
+
+        assert state.get_status(job_id) == state.ManagedJobStatus.SUCCEEDED
+        assert state.get_failure_reason(job_id) == self._CLEANUP_FAILURE
+        events = state.get_job_events(job_id)
+        assert any('Cleanup failed' in e['reason'] for e in events)
+
+    @pytest.mark.asyncio
+    async def test_failed_job_appends_reason(self, _mock_managed_jobs_db_conn):
+        """A FAILED job keeps its status and its original failure_reason
+        first; the cleanup failure is appended."""
+
+        async def mock_callback(status: str):
+            del status
+
+        job_id = await self._seed_running_job()
+        await state.set_failed_async(job_id, 0, state.ManagedJobStatus.FAILED,
+                                     'User program exited with code 1',
+                                     mock_callback)
+
+        await state.set_cleanup_failed_async(job_id, self._CLEANUP_FAILURE)
+
+        assert state.get_status(job_id) == state.ManagedJobStatus.FAILED
+        assert state.get_failure_reason(job_id) == (
+            'User program exited with code 1. In addition: '
+            f'{self._CLEANUP_FAILURE}')
+
+    @pytest.mark.asyncio
+    async def test_cancelled_job_keeps_status(self, _mock_managed_jobs_db_conn):
+        """Regression for #10456: a cancelled job whose cleanup failed must
+        end CANCELLED, not FAILED_CONTROLLER.
+
+        Mirrors the controller's finally-block ordering: the CANCELLING ->
+        CANCELLED transition runs first, then the cleanup failure is
+        recorded without overriding the terminal state.
+        """
+
+        async def mock_callback(status: str):
+            del status
+
+        job_id = await self._seed_running_job()
+        await state.set_cancelling_async(job_id, mock_callback)
+        await state.set_cancelled_async(job_id, mock_callback)
+
+        await state.set_cleanup_failed_async(job_id, self._CLEANUP_FAILURE)
+
+        assert state.get_status(job_id) == state.ManagedJobStatus.CANCELLED
+        assert state.get_failure_reason(job_id) == self._CLEANUP_FAILURE
+
+    @pytest.mark.asyncio
+    async def test_pipeline_keeps_failed_task_reason(
+            self, _mock_managed_jobs_db_conn):
+        """A multi-task job's real failure reason must survive the cleanup
+        note: it is appended per row, and rows without a reason stay NULL
+        so get_failure_reason() keeps surfacing the actual failure."""
+
+        async def mock_callback(status: str):
+            del status
+
+        job_id = state.set_job_info_without_job_id(name='pipeline-job',
+                                                   workspace='ws1',
+                                                   entrypoint='ep',
+                                                   pool=None,
+                                                   pool_hash=None,
+                                                   user_hash='user1')
+        for task_id in (0, 1):
+            state.set_pending(job_id,
+                              task_id=task_id,
+                              task_name=f'task{task_id}',
+                              resources_str='{}',
+                              metadata='{}')
+        state.scheduler_set_waiting([job_id], '/tmp/dag.yaml', '/tmp/user.yaml',
+                                    '/tmp/env', None, 100)
+        # Task 0 succeeds, task 1 fails with a meaningful reason.
+        await state.set_starting_async(job_id, 0, 'run_p0', time.time(), '{}',
+                                       {}, mock_callback)
+        await state.set_started_async(job_id, 0, time.time(), mock_callback)
+        await state.set_succeeded_async(job_id, 0, time.time(), mock_callback)
+        await state.set_starting_async(job_id, 1, 'run_p1', time.time(), '{}',
+                                       {}, mock_callback)
+        await state.set_started_async(job_id, 1, time.time(), mock_callback)
+        await state.set_failed_async(job_id, 1, state.ManagedJobStatus.FAILED,
+                                     'User program exited with code 1',
+                                     mock_callback)
+
+        await state.set_cleanup_failed_async(job_id, self._CLEANUP_FAILURE)
+
+        # The surfaced reason keeps the real failure first.
+        assert state.get_failure_reason(job_id) == (
+            'User program exited with code 1. In addition: '
+            f'{self._CLEANUP_FAILURE}')
+        # The succeeded task's row stays NULL: writing the cleanup note
+        # there would shadow the real failure in get_failure_reason(),
+        # which returns the first non-NULL reason ordered by task_id.
+        engine = _mock_managed_jobs_db_conn
+        with engine.connect() as conn:
+            rows = dict(
+                conn.execute(
+                    sqlalchemy.select(state.spot_table.c.task_id,
+                                      state.spot_table.c.failure_reason).
+                    where(state.spot_table.c.spot_job_id == job_id)).fetchall())
+        assert rows[0] is None
+        assert rows[1] == ('User program exited with code 1. In addition: '
+                           f'{self._CLEANUP_FAILURE}')
