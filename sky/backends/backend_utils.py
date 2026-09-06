@@ -2676,6 +2676,10 @@ def _update_cluster_status(
             stream_logs=False,
             require_outputs=True,
             separate_stderr=True)
+        if rc == 255 and isinstance(runner, command_runner.SSHCommandRunner):
+            raise exceptions.ClusterStatusFetchingError(
+                f'Failed to reach cluster {cluster_name!r} for its health '
+                f'probe (SSH exit 255): {stderr.strip()}')
         if rc:
             raise exceptions.CommandError(
                 rc, instance_setup.RAY_STATUS_WITH_SKY_RAY_PORT_COMMAND,
@@ -2781,6 +2785,8 @@ def _update_cluster_status(
                 f'all nodes ({ready_head + ready_workers}/'
                 f'{total_nodes});\noutput:\n{output}\nstderr:\n{stderr}')
 
+        except exceptions.ClusterStatusFetchingError:
+            raise
         except exceptions.FetchClusterInfoError:
             ray_status_details = 'failed to get IPs'
             logger.debug(
@@ -2859,9 +2865,9 @@ def _update_cluster_status(
     # from cloud -> provision layer.
     should_check_ray = (cloud is not None and cloud.uses_ray() and
                         handle.provision_runtime_metadata.has_ray)
-    if (all_nodes_up and (not should_check_ray or
-                          run_ray_status_to_check_ray_cluster_healthy()) and
-            not external_cluster_failures):
+    if (all_nodes_up and not external_cluster_failures and
+        (not should_check_ray or
+         run_ray_status_to_check_ray_cluster_healthy())):
         # NOTE: all_nodes_up calculation is fast due to calling cloud CLI;
         # run_ray_status_to_check_all_nodes_up() is slow due to calling `ray get
         # head-ip/worker-ips`.
