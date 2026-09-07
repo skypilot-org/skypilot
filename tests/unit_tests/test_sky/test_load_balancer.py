@@ -46,6 +46,47 @@ async def _run_response_with_client_disconnect(response, spec_version):
         await response(scope, receive, send)
 
 
+def _make_streaming_response(response_body, aclose_side_effect=None):
+    proxy_response = mock.MagicMock()
+    proxy_response.aiter_raw.return_value = response_body
+    proxy_response.status_code = 200
+    proxy_response.headers = {}
+    proxy_response.aclose = mock.AsyncMock(side_effect=aclose_side_effect)
+    return proxy_response
+
+
+def _configure_multi_replica_clients(lb, replica_urls, failing_url):
+    healthy_responses = []
+
+    def make_proxy_response():
+
+        async def response_body():
+            await asyncio.Event().wait()
+            yield b'unreachable'
+
+        proxy_response = _make_streaming_response(response_body())
+        healthy_responses.append(proxy_response)
+        return proxy_response
+
+    async def send_to_healthy_replica(proxy_request, **kwargs):
+        del proxy_request, kwargs
+        return make_proxy_response()
+
+    clients = {}
+    for replica_url in replica_urls:
+        client = mock.MagicMock()
+        client.build_request.return_value = mock.sentinel.proxy_request
+        if replica_url == failing_url:
+            client.send = mock.AsyncMock(
+                side_effect=httpx.ReadTimeout('timed out'))
+        else:
+            client.send = mock.AsyncMock(side_effect=send_to_healthy_replica)
+        clients[replica_url] = client
+        lb._client_pool[replica_url] = client
+
+    return clients, healthy_responses
+
+
 @pytest.mark.asyncio
 async def test_proxy_error_releases_least_load_accounting():
     lb = _make_load_balancer()
@@ -96,11 +137,7 @@ async def test_streaming_response_releases_least_load_accounting_on_close(
     async def response_body():
         yield b'response'
 
-    proxy_response = mock.MagicMock()
-    proxy_response.aiter_raw.return_value = response_body()
-    proxy_response.status_code = 200
-    proxy_response.headers = {}
-    proxy_response.aclose = mock.AsyncMock()
+    proxy_response = _make_streaming_response(response_body())
     client.send = mock.AsyncMock(return_value=proxy_response)
     lb._client_pool[replica_url] = client
     lb._load_balancing_policy.set_ready_replicas([replica_url])
@@ -143,12 +180,8 @@ async def test_streaming_response_error_releases_least_load_accounting(
         raise httpx.ReadTimeout('timed out')
         yield b'unreachable'
 
-    proxy_response = mock.MagicMock()
-    proxy_response.aiter_raw.return_value = response_body()
-    proxy_response.status_code = 200
-    proxy_response.headers = {}
-    proxy_response.aclose = mock.AsyncMock(
-        side_effect=RuntimeError('aclose failed'))
+    proxy_response = _make_streaming_response(
+        response_body(), aclose_side_effect=RuntimeError('aclose failed'))
     client.send = mock.AsyncMock(return_value=proxy_response)
     lb._client_pool[replica_url] = client
     lb._load_balancing_policy.set_ready_replicas([replica_url])
@@ -187,11 +220,7 @@ async def test_client_disconnect_before_streaming_releases_load_accounting(
         await asyncio.Event().wait()
         yield b'unreachable'
 
-    proxy_response = mock.MagicMock()
-    proxy_response.aiter_raw.return_value = response_body()
-    proxy_response.status_code = 200
-    proxy_response.headers = {}
-    proxy_response.aclose = mock.AsyncMock()
+    proxy_response = _make_streaming_response(response_body())
     client.send = mock.AsyncMock(return_value=proxy_response)
     lb._client_pool[replica_url] = client
     lb._load_balancing_policy.set_ready_replicas([replica_url])
@@ -215,35 +244,8 @@ async def test_proxy_retries_spread_load_after_failure_and_disconnect(
         'http://healthy-replica-2',
     ]
     failing_url = replica_urls[0]
-    healthy_responses = []
-
-    def make_proxy_response():
-
-        async def response_body():
-            await asyncio.Event().wait()
-            yield b'unreachable'
-
-        proxy_response = mock.MagicMock()
-        proxy_response.aiter_raw.return_value = response_body()
-        proxy_response.status_code = 200
-        proxy_response.headers = {}
-        proxy_response.aclose = mock.AsyncMock()
-        healthy_responses.append(proxy_response)
-        return proxy_response
-
-    async def send_to_healthy_replica(proxy_request, **kwargs):
-        del proxy_request, kwargs
-        return make_proxy_response()
-
-    for replica_url in replica_urls:
-        client = mock.MagicMock()
-        client.build_request.return_value = mock.sentinel.proxy_request
-        if replica_url == failing_url:
-            client.send = mock.AsyncMock(
-                side_effect=httpx.ReadTimeout('timed out'))
-        else:
-            client.send = mock.AsyncMock(side_effect=send_to_healthy_replica)
-        lb._client_pool[replica_url] = client
+    _, healthy_responses = _configure_multi_replica_clients(
+        lb, replica_urls, failing_url)
 
     policy = lb._load_balancing_policy
     policy.set_ready_replicas(replica_urls)
@@ -278,37 +280,8 @@ async def test_proxy_stops_retrying_after_client_disconnect_without_leaking_load
         'http://healthy-replica-1',
         'http://healthy-replica-2',
     ]
-    healthy_responses = []
-
-    def make_proxy_response():
-
-        async def response_body():
-            await asyncio.Event().wait()
-            yield b'unreachable'
-
-        proxy_response = mock.MagicMock()
-        proxy_response.aiter_raw.return_value = response_body()
-        proxy_response.status_code = 200
-        proxy_response.headers = {}
-        proxy_response.aclose = mock.AsyncMock()
-        healthy_responses.append(proxy_response)
-        return proxy_response
-
-    async def send_to_healthy_replica(proxy_request, **kwargs):
-        del proxy_request, kwargs
-        return make_proxy_response()
-
-    clients = {}
-    for replica_url in replica_urls:
-        client = mock.MagicMock()
-        client.build_request.return_value = mock.sentinel.proxy_request
-        if replica_url == replica_urls[0]:
-            client.send = mock.AsyncMock(
-                side_effect=httpx.ReadTimeout('timed out'))
-        else:
-            client.send = mock.AsyncMock(side_effect=send_to_healthy_replica)
-        clients[replica_url] = client
-        lb._client_pool[replica_url] = client
+    clients, healthy_responses = _configure_multi_replica_clients(
+        lb, replica_urls, replica_urls[0])
 
     policy = lb._load_balancing_policy
     policy.set_ready_replicas(replica_urls)
