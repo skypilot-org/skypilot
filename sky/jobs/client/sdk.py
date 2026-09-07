@@ -662,14 +662,14 @@ def events(
     if limit is not None and limit < 0:
         raise ValueError(f'limit must be None or non-negative, got {limit}.')
     remote_api_version = versions.get_remote_api_version()
-    # `task` is resolved server-side and was added in API version 58. An
+    # `task` is resolved server-side and was added in API version 59. An
     # older server ignores the field (RequestBody drops unknown keys), which
     # would silently return every task's events. An id needs no resolution,
     # so send it as `task_id`, honored since the endpoint existed; a name
     # cannot be resolved without the server, so say so instead.
     task_id: Optional[int] = None
     if task is not None and (remote_api_version is None or
-                             remote_api_version < 58):
+                             remote_api_version < 59):
         if isinstance(task, int) or task.isdigit():
             task_id = int(task)
             task = None
@@ -677,7 +677,7 @@ def events(
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.APINotSupportedError(
                     'Filtering job events by task name requires an API '
-                    f'server on version 58 or newer (got {remote_api_version}'
+                    f'server on version 59 or newer (got {remote_api_version}'
                     '). Pass the task id instead.')
     # The merge landed without an API_VERSION bump, so 53 does not imply
     # support; 54 is the first version that guarantees it. Checked here rather

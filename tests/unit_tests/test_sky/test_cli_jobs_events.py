@@ -222,29 +222,29 @@ class TestJobsEventsSdk:
         assert body['include_cluster_events'] is True
 
     def test_numeric_task_falls_back_to_task_id_on_old_server(self):
-        # `task` is resolved server-side and only exists from API 58; an id
+        # `task` is resolved server-side and only exists from API 59; an id
         # needs no resolution, so it goes as task_id, honored since the
         # endpoint existed. Silently ignoring the filter is the bug here.
-        body, _ = self._call(57, job_id=42, task='0')
+        body, _ = self._call(58, job_id=42, task='0')
         assert body['task'] is None
         assert body['task_id'] == 0
-        body, _ = self._call(57, job_id=42, task=1)
+        body, _ = self._call(58, job_id=42, task=1)
         assert (body['task'], body['task_id']) == (None, 1)
         # A new server resolves the field itself.
-        body, _ = self._call(58, job_id=42, task='0')
+        body, _ = self._call(59, job_id=42, task='0')
         assert (body['task'], body['task_id']) == ('0', None)
 
     def test_task_name_raises_on_old_server(self):
         raw_events = _unwrap(jobs_sdk.events)
         with mock.patch.object(jobs_sdk.versions,
                                'get_remote_api_version',
-                               return_value=57), \
+                               return_value=58), \
              mock.patch.object(jobs_sdk.server_common,
                                'make_authenticated_request') as mock_request:
             # Typed, so a programmatic caller can detect "server too old"
             # without matching on the message.
             with pytest.raises(jobs_sdk.exceptions.APINotSupportedError,
-                               match='version 58 or newer'):
+                               match='version 59 or newer'):
                 raw_events(job_id=42, task='train')
         mock_request.assert_not_called()
 
