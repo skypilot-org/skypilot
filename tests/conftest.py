@@ -15,6 +15,7 @@ import pytest
 import requests
 from smoke_tests import smoke_tests_utils
 from smoke_tests.docker import docker_utils
+import yaml
 
 from sky import cloud_stores
 from sky import sky_logging
@@ -246,6 +247,14 @@ def pytest_addoption(parser):
               'ensure the tests will not be skipped but no actual effect)'),
     )
     parser.addoption(
+        '--no-jobs-consolidation',
+        action='store_true',
+        default=False,
+        help=('Opt out of the default: managed-jobs smoke tests run with '
+              'the jobs controller in consolidation mode unless this is '
+              'set (see the force_jobs_consolidation fixture).'),
+    )
+    parser.addoption(
         '--serve-consolidation',
         action='store_true',
         default=False,
@@ -352,6 +361,11 @@ def pytest_configure(config):
             raise ValueError(
                 '--remote-server and --postgres are not compatible. '
                 'Postgres backend is not supported with remote server testing.')
+
+    if (config.getoption('--jobs-consolidation') and
+            config.getoption('--no-jobs-consolidation')):
+        raise ValueError('--jobs-consolidation and --no-jobs-consolidation '
+                         'are contradictory; pass at most one.')
 
     pytest.terminate_on_failure = config.getoption('--terminate-on-failure')
 
@@ -1085,3 +1099,103 @@ def prepare_env_file(request):
         # api_login created the file; remove it to avoid polluting the env.
         os.remove(user_hash_file)
         logger.info(f'Removed {user_hash_file} (created during test session)')
+
+
+@pytest.fixture(scope='session', autouse=True)
+def force_jobs_consolidation(request, tmp_path_factory, setup_docker_container):
+    """Run managed-jobs smoke tests with a consolidated jobs controller.
+
+    In consolidation mode the jobs controller runs inside the API server, so
+    there is no controller cluster to provision. Without it, the first
+    managed-jobs test in a fresh environment pays a multi-minute controller
+    cold start inside its own status-wait timeout - the dominant source of
+    first-test flakiness in the suite.
+
+    consolidation_mode is fixed at API server startup
+    (setup_consolidation_mode_on_startup writes a signal file), so a config
+    change only takes effect through a server restart: if the server is not
+    already consolidated, merge jobs.controller.consolidation_mode: true
+    into the user config and restart the API server. The original config
+    file is restored on session teardown (the running server keeps its mode
+    until its next restart).
+
+    Skipped for --remote-server (deploy-mode servers already run
+    consolidated) and under --no-jobs-consolidation (lanes that exercise
+    the controller-cluster path). Coordinated across xdist workers with a
+    filelock and marker file; failures are reported but never fail the
+    session - tests then run against whatever mode the server is in, as
+    before.
+    """
+    del setup_docker_container  # Ordering-only dependency.
+    if (request.config.getoption('--remote-server') or
+            request.config.getoption('--no-jobs-consolidation')):
+        yield
+        return
+
+    has_jobs_tests = False
+    if hasattr(request.session, 'items'):
+        has_jobs_tests = any('test_managed_job' in item.location[0]
+                             for item in request.session.items)
+    if not has_jobs_tests:
+        yield
+        return
+
+    root_tmp_dir = tmp_path_factory.getbasetemp().parent / 'jobs_consolidation'
+    root_tmp_dir.mkdir(parents=True, exist_ok=True)
+    marker = root_tmp_dir / 'ensured.txt'
+    config_path = os.path.expanduser(skypilot_config.get_user_config_path())
+    config_backup: Optional[str] = None
+    made_change = False
+    with filelock.FileLock(str(marker) + '.lock'):
+        if not marker.is_file():
+            try:
+                if smoke_tests_utils.server_side_is_consolidation_mode():
+                    marker.write_text('already-consolidated')
+                else:
+                    print(
+                        'Enabling jobs consolidation mode and restarting '
+                        'the API server (see force_jobs_consolidation).',
+                        file=sys.stderr,
+                        flush=True)
+                    config = {}
+                    if os.path.exists(config_path):
+                        config_backup = config_path + '.bak-consolidation'
+                        shutil.copy(config_path, config_backup)
+                        with open(config_path, 'r', encoding='utf-8') as f:
+                            config = yaml.safe_load(f) or {}
+                    config.setdefault('jobs', {}).setdefault(
+                        'controller', {})['consolidation_mode'] = True
+                    os.makedirs(os.path.dirname(config_path), exist_ok=True)
+                    with open(config_path, 'w', encoding='utf-8') as f:
+                        yaml.safe_dump(config, f)
+                    made_change = True
+                    subprocess.run('sky api stop && sky api start',
+                                   shell=True,
+                                   check=True,
+                                   capture_output=True,
+                                   timeout=600)
+                    if smoke_tests_utils.server_side_is_consolidation_mode():
+                        marker.write_text('enabled')
+                    else:
+                        marker.write_text('failed-to-enable')
+                        print(
+                            'API server did not come up in consolidation '
+                            'mode; managed-jobs tests will use a controller '
+                            'cluster as before.',
+                            file=sys.stderr,
+                            flush=True)
+            except Exception as e:  # pylint: disable=broad-except
+                # One attempt per session; never fail the run over this.
+                marker.write_text(f'error: {e}')
+                print(f'force_jobs_consolidation failed non-fatally: {e}',
+                      file=sys.stderr,
+                      flush=True)
+    yield
+    if made_change:
+        # Restore the pre-session config so later runs on this machine are
+        # unaffected. The running server keeps consolidation mode until it
+        # is next restarted.
+        if config_backup is not None and os.path.exists(config_backup):
+            shutil.move(config_backup, config_path)
+        elif os.path.exists(config_path):
+            os.remove(config_path)
