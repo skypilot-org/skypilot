@@ -1409,6 +1409,36 @@ def get_cluster_events(
 
 
 @db_retries.retry
+def get_latest_cluster_event_reasons(
+    cluster_names: List[str],
+    event_types: List[ClusterEventType],
+) -> Dict[str, str]:
+    """Returns {cluster_name: reason} of the newest matching event per cluster.
+
+    Looks up by the persisted ``name`` column (like get_cluster_events_by_name)
+    in a single query, so callers can annotate many clusters without a
+    per-cluster round trip. Clusters with no matching event are omitted.
+    """
+    if not cluster_names or not event_types:
+        return {}
+    engine = _db_manager.get_engine()
+    type_values = [event_type.value for event_type in event_types]
+    with orm.Session(engine) as session:
+        rows = session.query(
+            cluster_event_table.c.name,
+            cluster_event_table.c.reason,
+        ).filter(
+            cluster_event_table.c.name.in_(cluster_names),
+            cluster_event_table.c.type.in_(type_values),
+        ).order_by(cluster_event_table.c.transitioned_at.desc()).all()
+    reasons: Dict[str, str] = {}
+    for name, reason in rows:
+        if name not in reasons and reason:
+            reasons[name] = reason
+    return reasons
+
+
+@db_retries.retry
 def get_cluster_events_by_name(
     cluster_name: str,
     event_types: List[ClusterEventType],

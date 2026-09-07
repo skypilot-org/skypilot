@@ -617,6 +617,57 @@ def wait(
     return server_common.get_request_id(response=response)
 
 
+@context.contextual
+@usage_lib.entrypoint
+@server_common.check_server_healthy_or_start
+@versions.minimal_api_version(25)
+def events(
+    job_id: int,
+    task_id: Optional[int] = None,
+    limit: Optional[int] = 50,
+    include_cluster_events: bool = False,
+) -> server_common.RequestId[List[Dict[str, Any]]]:
+    """Gets the status-transition events of a managed job.
+
+    Each event records a status the job (or one of its tasks) entered, the
+    time it happened, and the reason when one is known (e.g. why the job is
+    pending, or what triggered a recovery).
+
+    Args:
+        job_id: ID of the managed job.
+        task_id: If set, only events for this task (and job-level events).
+        limit: Maximum number of events to return, newest first. None means
+            no limit.
+        include_cluster_events: Also merge in launch-progress events from the
+            job's underlying cluster (e.g. a Slurm or Kubernetes pending
+            reason) so provisioning milestones are visible in the timeline.
+            Requires API server version 53 or newer; ignored otherwise.
+
+    Returns:
+        The request ID of the events request. The result is a list of event
+        dicts with keys ``spot_job_id``, ``task_id``, ``new_status``,
+        ``code``, ``reason`` and ``timestamp``, ordered newest first.
+    """
+    remote_api_version = versions.get_remote_api_version()
+    if include_cluster_events and (remote_api_version is None or
+                                   remote_api_version < 53):
+        logger.warning('`include_cluster_events` is ignored because the API '
+                       'server does not support it yet.')
+        include_cluster_events = False
+    body = payloads.GetJobEventsBody(
+        job_id=job_id,
+        task_id=task_id,
+        limit=limit,
+        include_cluster_events=include_cluster_events,
+    )
+    response = server_common.make_authenticated_request(
+        'POST',
+        '/jobs/events',
+        json=json.loads(body.model_dump_json()),
+        timeout=(5, None))
+    return server_common.get_request_id(response=response)
+
+
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 def download_logs_streaming(

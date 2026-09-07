@@ -1,6 +1,6 @@
 {
   "skill_name": "skypilot",
-  "description": "Evaluates the 'Before You Start (Agent Bootstrap)' and 'Converting a Slurm Workload' section behavior",
+  "description": "Evaluates the 'Before You Start (Agent Bootstrap)', 'Converting a Slurm Workload' and 'Investigating a Managed Job' section behavior",
   "evals": [
     {
       "id": 1,
@@ -127,6 +127,54 @@
         {
           "text": "Agent does NOT propose a shell for-loop as the primary answer",
           "type": "negative"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "name": "why-is-my-managed-job-pending",
+      "prompt": "My managed job 42 has been PENDING for 20 minutes on our Slurm cluster. Why? SkyPilot is already set up.",
+      "expected_output": "Agent reads `details` from `sky jobs queue -o json`, then runs `sky jobs events 42 --cluster-events -o json` to find the Slurm pending reason (e.g. QOSGrpGRES or Dependency), explains the category (quota / capacity / dependency / held) and what to do about it. It does not poll with sleep.",
+      "assertions": [
+        {
+          "text": "Agent runs `sky jobs queue -o json` (or `sky jobs queue`) and reads the job's details",
+          "type": "required_action"
+        },
+        {
+          "text": "Agent runs `sky jobs events 42` (with `--cluster-events` or `-o json`) to get the timeline / pending reason",
+          "type": "required_action"
+        },
+        {
+          "text": "Agent explains the pending reason in plain terms (quota, capacity, dependency, or held) with a next step",
+          "type": "required_action"
+        },
+        {
+          "text": "Agent does NOT poll with `sleep` + `sky jobs queue`",
+          "type": "negative"
+        },
+        {
+          "text": "Agent does NOT tear down the jobs controller as a first step",
+          "type": "negative"
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "name": "what-happened-to-my-job",
+      "prompt": "Managed job 17 keeps flipping between RUNNING and RECOVERING. Show me what happened.",
+      "expected_output": "Agent runs `sky jobs events 17 -o json` to list the timeline, points out the repeated RECOVERING events and their `reason`, and pulls `sky jobs logs 17 --controller --no-follow` or `sky jobs logs 17 --tail N --no-follow` for detail.",
+      "assertions": [
+        {
+          "text": "Agent runs `sky jobs events 17` to get the status timeline",
+          "type": "required_action"
+        },
+        {
+          "text": "Agent identifies the recurring RECOVERING reason from the events",
+          "type": "required_action"
+        },
+        {
+          "text": "Agent uses `--tail` or `--no-follow` when fetching logs rather than streaming the full log",
+          "type": "required_action"
         }
       ]
     }

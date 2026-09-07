@@ -5,6 +5,7 @@ from sky.jobs.client.sdk import cancel
 from sky.jobs.client.sdk import dashboard
 from sky.jobs.client.sdk import download_logs
 from sky.jobs.client.sdk import download_logs_streaming
+from sky.jobs.client.sdk import events
 from sky.jobs.client.sdk import launch
 from sky.jobs.client.sdk import pool_apply
 from sky.jobs.client.sdk import pool_down
@@ -39,6 +40,7 @@ __all__ = [
     'ManagedJobStatus',
     # Core
     'cancel',
+    'events',
     'launch',
     'queue',
     'queue_v2',

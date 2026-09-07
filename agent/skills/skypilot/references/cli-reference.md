@@ -317,6 +317,19 @@ Opens a dashboard for managed jobs.
 
 - `--config` — Path to a config file or a single key-value pair. To add multiple key-value pairs add multiple flags (e.g. --config nested.key1=val1 --config nested.key2=val2).
 
+### `sky jobs events`
+
+Show the status-transition events of a managed job.
+
+**Options:**
+
+- `--config` — Path to a config file or a single key-value pair. To add multiple key-value pairs add multiple flags (e.g. --config nested.key1=val1 --config nested.key2=val2).
+- `JOB_ID` — integer
+- `--task-id` — Only show events for this task of the job.
+- `--limit`, `-l` (default: `50`) — Number of most recent events to show. 0 shows all.
+- `--cluster-events` — Also include launch-progress events from the job's cluster, e.g. why the cluster is still pending on Slurm or Kubernetes.
+- `--output`, `-o` (default: `table`) — Output format. Choices: table, json. Default: table.
+
 ### `sky jobs launch`
 
 Launch a managed job from a YAML or a command.

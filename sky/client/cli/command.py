@@ -6631,6 +6631,90 @@ def jobs_logs(name: Optional[str], job_id: Optional[int], follow: bool,
             raise
 
 
+def _format_job_event_time(timestamp: Any) -> str:
+    """Render an event timestamp (ISO string or datetime) in local time."""
+    if isinstance(timestamp, str):
+        try:
+            timestamp = datetime.datetime.fromisoformat(
+                timestamp.replace('Z', '+00:00'))
+        except ValueError:
+            return timestamp
+    if isinstance(timestamp, datetime.datetime):
+        if timestamp.tzinfo is not None:
+            timestamp = timestamp.astimezone()
+        return timestamp.strftime('%Y-%m-%d %H:%M:%S')
+    return str(timestamp)
+
+
+@jobs.command('events', cls=_DocumentedCodeCommand)
+@flags.config_option(expose_value=False)
+@click.argument('job_id', required=True, type=int)
+@click.option('--task-id',
+              type=int,
+              default=None,
+              help='Only show events for this task of the job.')
+@click.option('--limit',
+              '-l',
+              type=int,
+              default=50,
+              show_default=True,
+              help='Number of most recent events to show. 0 shows all.')
+@click.option('--cluster-events',
+              is_flag=True,
+              default=False,
+              help=('Also include launch-progress events from the job\'s '
+                    'cluster, e.g. why the cluster is still pending on '
+                    'Slurm or Kubernetes.'))
+@flags.output_format_option()
+@usage_lib.entrypoint
+def jobs_events(job_id: int, task_id: Optional[int], limit: int,
+                cluster_events: bool, output_format: str):
+    """Show the status-transition events of a managed job.
+
+    Events are listed newest first. Each one records the status the job (or
+    one of its tasks) entered, when it happened, and the reason when one is
+    known, such as why the job is pending or what triggered a recovery.
+
+    Pass ``--cluster-events`` to also see provisioning milestones from the
+    job's cluster, such as a Slurm pending reason or a Kubernetes pod
+    waiting on image pull.
+
+    Use ``-o json`` for machine-readable output.
+    """
+    request_id = managed_jobs.events(
+        job_id=job_id,
+        task_id=task_id,
+        limit=None if limit == 0 else limit,
+        include_cluster_events=cluster_events,
+    )
+    events = sdk.stream_and_get(request_id)
+    # The server serializes statuses as plain strings; normalize in case a
+    # same-process caller hands back the enum.
+    for event in events:
+        new_status = event.get('new_status')
+        if isinstance(new_status, ManagedJobStatus):
+            event['new_status'] = new_status.value
+    if output_format == flags.OUTPUT_FORMAT_JSON:
+        click.echo(json.dumps(events, indent=2, default=str))
+        return
+    if not events:
+        click.echo(f'No events found for managed job {job_id}.')
+        return
+    table = log_utils.create_table(['TIME', 'TASK', 'STATUS', 'CODE', 'REASON'])
+    for event in events:
+        task = event.get('task_id')
+        table.add_row([
+            _format_job_event_time(event.get('timestamp')),
+            '-' if task is None else task,
+            event.get('new_status') or '-',
+            event.get('code') or '-',
+            event.get('reason') or '-',
+        ])
+    click.echo(f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
+               f'Events for managed job {job_id}{colorama.Style.RESET_ALL}\n'
+               f'{table}')
+
+
 @jobs.command('dashboard', cls=_DocumentedCodeCommand)
 @flags.config_option(expose_value=False)
 @usage_lib.entrypoint

@@ -1396,3 +1396,33 @@ class TestQueryInstances:
         expected_rounds = 1 + instance._MAX_QUERY_INSTANCES_RETRIES
         assert mock_client.query_jobs.call_count == 7 * expected_rounds
         read_manifest.assert_called_once()
+
+
+class TestRecordPendingReason:
+    """The squeue pending reason is persisted as a launch-progress event."""
+
+    def test_records_reason_with_dedup(self):
+        with mock.patch.object(instance.global_user_state,
+                               'add_cluster_event') as add_event:
+            instance._record_pending_reason(_CLUSTER, 'QOSGrpGRES')
+        add_event.assert_called_once_with(
+            _CLUSTER,
+            new_status=None,
+            reason='Launching (pending: QOSGrpGRES)',
+            event_type=instance.global_user_state.ClusterEventType.
+            LAUNCH_PROGRESS,
+            nop_if_duplicate=True,
+        )
+
+    @pytest.mark.parametrize('reason', [None, ''])
+    def test_skips_empty_reason(self, reason):
+        with mock.patch.object(instance.global_user_state,
+                               'add_cluster_event') as add_event:
+            instance._record_pending_reason(_CLUSTER, reason)
+        add_event.assert_not_called()
+
+    def test_swallows_db_errors(self):
+        with mock.patch.object(instance.global_user_state,
+                               'add_cluster_event',
+                               side_effect=RuntimeError('db down')):
+            instance._record_pending_reason(_CLUSTER, 'Resources')

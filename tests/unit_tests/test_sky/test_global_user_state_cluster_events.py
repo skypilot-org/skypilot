@@ -336,3 +336,27 @@ def test_get_cluster_events_multiple_types_merged_and_ordered(
     assert global_user_state.get_cluster_events(
         cluster_name=None, cluster_hash=cluster_hash, event_type=both,
         limit=2) == ['Launching (pulling)', 'Cluster provisioned']
+
+
+def test_latest_cluster_event_reasons_batched(tmp_path, monkeypatch):
+    _fresh_db(tmp_path, monkeypatch)
+    for name in ('c-a', 'c-b', 'c-c'):
+        _add_cluster(name)
+    progress = global_user_state.ClusterEventType.LAUNCH_PROGRESS
+    global_user_state.add_cluster_event('c-a', None,
+                                        'Launching (pending: Resources)',
+                                        progress)
+    time.sleep(1.1)  # transitioned_at has 1s resolution.
+    global_user_state.add_cluster_event('c-a', None,
+                                        'Launching (pending: QOSGrpGRES)',
+                                        progress)
+    # A different type on c-b must not be picked up.
+    global_user_state.add_cluster_event(
+        'c-b', status_lib.ClusterStatus.INIT, 'init',
+        global_user_state.ClusterEventType.STATUS_CHANGE)
+
+    reasons = global_user_state.get_latest_cluster_event_reasons(
+        ['c-a', 'c-b', 'c-c', 'missing'], [progress])
+    assert reasons == {'c-a': 'Launching (pending: QOSGrpGRES)'}
+    assert global_user_state.get_latest_cluster_event_reasons([],
+                                                              [progress]) == {}

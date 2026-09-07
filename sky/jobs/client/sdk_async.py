@@ -1,7 +1,7 @@
 """Async SDK functions for managed jobs."""
 import asyncio
 import typing
-from typing import Dict, List, Optional, Sequence, Tuple, Union
+from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
 
 from sky import backends
 from sky import sky_logging
@@ -128,6 +128,19 @@ async def wait(
         return await sdk_async._stream_and_get(request_id, stream_logs)  # pylint: disable=protected-access
     else:
         return await sdk_async.get(request_id)
+
+
+@usage_lib.entrypoint
+async def events(
+    job_id: int,
+    task_id: Optional[int] = None,
+    limit: Optional[int] = 50,
+    include_cluster_events: bool = False,
+) -> List[Dict[str, Any]]:
+    """Async version of events() that gets a managed job's events."""
+    request_id = await asyncio.to_thread(sdk.events, job_id, task_id, limit,
+                                         include_cluster_events)
+    return await sdk_async.get(request_id)
 
 
 @usage_lib.entrypoint

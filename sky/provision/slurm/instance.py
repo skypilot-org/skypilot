@@ -15,6 +15,7 @@ import uuid
 import colorama
 
 from sky import exceptions
+from sky import global_user_state
 from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import slurm
@@ -292,6 +293,29 @@ def _wait_for_job_nodes(
 
     raise TimeoutError(f'Job {job_id} did not get nodes allocated within '
                        f'{timeout} seconds. Last state: {last_state}')
+
+
+def _record_pending_reason(cluster_name: str, reason: Optional[str]) -> None:
+    """Persist the squeue pending reason as a cluster launch-progress event.
+
+    The spinner is transient; this makes the reason visible in `sky jobs queue
+    -v` details and `sky jobs events --cluster-events`. Only the reason is
+    recorded (not the pending count) so nop_if_duplicate collapses repeated
+    polls into one event.
+    """
+    if not reason:
+        return
+    try:
+        global_user_state.add_cluster_event(
+            cluster_name,
+            new_status=None,
+            reason=f'Launching (pending: {reason})',
+            event_type=global_user_state.ClusterEventType.LAUNCH_PROGRESS,
+            nop_if_duplicate=True,
+        )
+    except Exception as e:  # pylint: disable=broad-except
+        logger.debug(f'Failed to record pending reason for {cluster_name}: '
+                     f'{e}')
 
 
 def _sky_cluster_home_dir(base_dir: str, cluster_name_on_cloud: str) -> str:
@@ -764,6 +788,7 @@ def _create_virtual_instance(
         if status_msg != last_status_msg:
             rich_utils.force_update_status(status_msg)
             last_status_msg = status_msg
+        _record_pending_reason(cluster_name, reason)
 
     if existing_jobs:
         assert len(existing_jobs) == 1, (
