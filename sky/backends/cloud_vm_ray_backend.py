@@ -1957,9 +1957,27 @@ class RetryingVmProvisioner(object):
 class SSHTunnelInfo:
     port: int
     pid: int
+    started_at: Optional[float] = None
+    hostname: Optional[str] = None
+
+    def get_process(self) -> Optional[psutil.Process]:
+        """Return the original local process, never a reused PID."""
+        if self.started_at is None or self.hostname != socket.gethostname():
+            return None
+        try:
+            process = psutil.Process(self.pid)
+            if (process.create_time() == self.started_at and
+                    process.is_running() and
+                    process.status() != psutil.STATUS_ZOMBIE):
+                return process
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            pass
+        return None
 
 
 def _is_tunnel_healthy(tunnel: SSHTunnelInfo) -> bool:
+    if tunnel.get_process() is None:
+        return False
     try:
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
             s.settimeout(0.5)
@@ -2444,12 +2462,14 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
             self.cluster_name)
         if metadata is None:
             return None
-        return SSHTunnelInfo(port=metadata[0], pid=metadata[1])
+        # Legacy (port, pid) records cannot establish process ownership.
+        return SSHTunnelInfo(*metadata)
 
     def _set_skylet_ssh_tunnel(self, tunnel: Optional[SSHTunnelInfo]) -> None:
         global_user_state.set_cluster_skylet_ssh_tunnel_metadata(
             self.cluster_name,
-            (tunnel.port, tunnel.pid) if tunnel is not None else None)
+            (tunnel.port, tunnel.pid, tunnel.started_at,
+             tunnel.hostname) if tunnel is not None else None)
 
     def close_skylet_ssh_tunnel(self) -> None:
         """Terminate the SSH tunnel process and clear its metadata."""
@@ -2577,11 +2597,11 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
     def _terminate_ssh_tunnel_process(self, tunnel_info: SSHTunnelInfo) -> None:
         """Terminate the SSH tunnel process."""
         try:
-            proc = psutil.Process(tunnel_info.pid)
-            if proc.is_running() and proc.status() != psutil.STATUS_ZOMBIE:
+            proc = tunnel_info.get_process()
+            if proc is not None:
                 logger.debug(
                     f'Terminating SSH tunnel process {tunnel_info.pid}')
-                subprocess_utils.kill_children_processes(proc.pid)
+                subprocess_utils.kill_children_processes(proc)
         except psutil.NoSuchProcess:
             pass
         except Exception as e:  # pylint: disable=broad-except
@@ -2617,7 +2637,10 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
                     f'{e.error_msg}\n{e.detailed_reason}')
                 continue
             tunnel_info = SSHTunnelInfo(port=local_port,
-                                        pid=ssh_tunnel_proc.pid)
+                                        pid=ssh_tunnel_proc.pid,
+                                        started_at=psutil.Process(
+                                            ssh_tunnel_proc.pid).create_time(),
+                                        hostname=socket.gethostname())
             break
 
         try:
