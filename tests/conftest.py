@@ -348,11 +348,6 @@ def pytest_configure(config):
                 '--remote-server and --jobs-consolidation are not compatible. '
                 'Jobs consolidation mode is not supported with remote server testing.'
             )
-        if config.getoption('--postgres'):
-            raise ValueError(
-                '--remote-server and --postgres are not compatible. '
-                'Postgres backend is not supported with remote server testing.')
-
     pytest.terminate_on_failure = config.getoption('--terminate-on-failure')
 
     # Disable parallelism for smoke tests only to save memory in Buildkite.
@@ -807,6 +802,41 @@ def setup_policy_server(request, tmp_path_factory):
                 pathlib.Path(fn).unlink(missing_ok=True)
 
 
+def _postgres_container_name() -> str:
+    return f'{docker_utils.get_container_name()}-pg'
+
+
+def _start_postgres_container(name: str, host_port: int) -> None:
+    """Start a throwaway Postgres the server-under-test container can reach."""
+    # Remove any leftover from a previous run; the data is throwaway.
+    subprocess.run(['docker', 'rm', '-f', name],
+                   check=False,
+                   capture_output=True)
+    subprocess.run([
+        'docker', 'run', '-d', '--name', name, '-e',
+        'POSTGRES_PASSWORD=skypilot', '-e', 'POSTGRES_DB=skypilot', '-p',
+        f'{host_port}:5432', 'postgres:16'
+    ],
+                   check=True)
+    for _ in range(30):
+        ready = subprocess.run([
+            'docker', 'exec', name, 'pg_isready', '-U', 'postgres', '-d',
+            'skypilot'
+        ],
+                               check=False,
+                               capture_output=True)
+        if ready.returncode == 0:
+            logger.info(f'Postgres container {name} is ready')
+            return
+        time.sleep(2)
+    logs = subprocess.run(['docker', 'logs', name],
+                          check=False,
+                          capture_output=True,
+                          text=True)
+    raise Exception(f'Postgres container {name} failed to become ready; '
+                    f'logs:\n{logs.stdout}\n{logs.stderr}')
+
+
 @pytest.fixture(scope='session', autouse=True)
 def setup_docker_container(request):
     """Setup Docker container for remote server testing if --remote-server is specified."""
@@ -895,6 +925,21 @@ def setup_docker_container(request):
                     f'Successfully built Docker image {docker_utils.IMAGE_NAME}'
                 )
 
+        # Back the server under test with Postgres when --postgres is set: a
+        # sibling postgres container, reached from the server container via the
+        # host gateway. The connection URI is injected as an env var so the
+        # server boots on Postgres from the start (the db url cannot be
+        # changed on a running server).
+        extra_env = None
+        if request.config.getoption('--postgres'):
+            pg_port = docker_utils.get_postgres_host_port()
+            extra_env = {
+                'SKYPILOT_DB_CONNECTION_URI':
+                    (f'postgresql://postgres:skypilot@host.docker.internal:'
+                     f'{pg_port}/skypilot')
+            }
+            _start_postgres_container(_postgres_container_name(), pg_port)
+
         # Start new container
         logger.info(
             f'Starting Docker container {docker_utils.get_container_name()}...')
@@ -906,7 +951,8 @@ def setup_docker_container(request):
             api_server_container_port=46580,
             metrics_host_port=docker_utils.get_metrics_host_port(),
             metrics_container_port=9090,
-            username=default_user)
+            username=default_user,
+            extra_env=extra_env)
 
         logger.info(f'Container {docker_utils.get_container_name()} started')
 
@@ -966,6 +1012,11 @@ def setup_docker_container(request):
             subprocess.run(['docker', 'rm',
                             docker_utils.get_container_name()],
                            check=False)
+            if request.config.getoption('--postgres'):
+                subprocess.run(
+                    ['docker', 'rm', '-f',
+                     _postgres_container_name()],
+                    check=False)
             try:
                 os.remove(counter_file)
             except OSError:

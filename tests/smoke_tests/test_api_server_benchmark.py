@@ -1,14 +1,71 @@
 """Benchmark tests for SkyPilot API server."""
+import os
+import pathlib
+import shutil
 import subprocess
+import tempfile
 import threading
 import time
 
+from load_tests import loop_lag_harness
 import psutil
 import pytest
 import requests
 from smoke_tests import metrics_utils
 from smoke_tests import smoke_tests_utils
 from smoke_tests.docker import docker_utils
+
+from sky.skylet import constants
+
+# Identity used to bootstrap the benchmark's own service-account token. The
+# server admits an external-proxy identity from this header whenever no
+# built-in auth scheme is configured, which is the case for the test image.
+_BENCHMARK_IDENTITY_HEADER = 'X-Auth-Request-Email'
+_BENCHMARK_IDENTITY = 'loop-lag-benchmark@example.com'
+
+# A bucket boundary of sky_apiserver_event_loop_lag_seconds. A tick this late
+# means a callback held the loop for a quarter of a second, which is long
+# enough to be user-visible on every concurrent request.
+_LAG_THRESHOLD_SECONDS = 0.25
+
+# The flood's request mix. Every entry is read-only and does its work on the
+# request path. Deliberately excluded: endpoints whose handler calls
+# executor.schedule_request_async (GET /workspaces, POST /status and the rest
+# of the async API) -- those return as soon as the request is enqueued, so the
+# benchmark would time the enqueue rather than the work, and 30k of them per
+# scenario would bury the request queue and its DB.
+_FLOOD_REQUESTS = [
+    # async handler, so it runs on the event loop itself, and does almost
+    # nothing: this is the middleware's own cost with nothing behind it.
+    loop_lag_harness.RequestSpec(path='/api/health'),
+    # Sync handlers. FastAPI runs those in the default threadpool -- the same
+    # pool log tailing reads through -- and each does real DB and RBAC work,
+    # so the mix loads both sides of the server rather than just the loop.
+    loop_lag_harness.RequestSpec(path='/users'),
+    loop_lag_harness.RequestSpec(path='/users/role'),
+    loop_lag_harness.RequestSpec(path='/users/me/workspace'),
+]
+
+# Request rates for the two scenarios. The authenticated path does three DB
+# operations per request on a bounded thread pool, so these are high enough to
+# keep that pool busy without turning the benchmark into a DB throughput test.
+_FLOOD_QPS = 100.0
+_STARVATION_FLOOD_QPS = 50.0
+# Concurrent `sky jobs logs -f` streams to hold open. Each one borrows a
+# worker from the request thread executor for the life of the stream
+# (jobs/server/server.py calls check_request_thread_executor_available before
+# running the tail in a coroutine), so this is real pressure on the pool the
+# flood's requests also need -- exhaustion of it is what returns 503. It does
+# not touch the separate auth executor, which the token middleware uses for
+# three finite DB calls and releases before any body streams.
+_HELD_STREAMS = 32
+
+# Generous by design: this bounds "the server still answers" under held-open
+# streams, not the latency the server should aim for.
+_STARVATION_P99_LIMIT_SECONDS = 2.0
+
+_ARTIFACT_DIR = pathlib.Path(
+    os.environ.get('SKYPILOT_BENCHMARK_ARTIFACT_DIR', '/tmp/skypilot-loop-lag'))
 
 
 @pytest.mark.benchmark
@@ -86,3 +143,333 @@ def test_api_server_memory(generic_cloud: str):
     assert total_peak_gb <= 14, (
         f'API server peak memory too high: {total_peak_gb:.2f} GB (limit: 14 GB)'
     )
+
+
+def _pin_server_container_and_wait_healthy() -> None:
+    """Give the server container fixed resources and wait for it to come back.
+
+    The CPU pin also fixes the uvicorn worker count: in deploy mode the server
+    starts one worker per CPU it can see, and that count is read from the
+    cgroup limit this sets.
+    """
+    container_name = docker_utils.get_container_name()
+    subprocess.run([
+        'docker', 'update', '--cpus', '4', '--memory', '16g', '--memory-swap',
+        '16g', container_name
+    ],
+                   check=True)
+    subprocess.run(['docker', 'restart', container_name], check=True)
+
+    health_url = f'{smoke_tests_utils.get_api_server_url()}/api/health'
+    for _ in range(40):
+        try:
+            response = requests.get(health_url, timeout=5)
+            if response.ok and response.json().get('status') == 'healthy':
+                return
+        except Exception:  # pylint: disable=broad-except
+            pass
+        time.sleep(2)
+    raise RuntimeError('API server container not healthy after restart')
+
+
+def _mint_service_account_token(api_url: str) -> str:
+    """Create a token the benchmark can authenticate its own load with.
+
+    Returned once by the server and never retrievable again, so it is used
+    directly rather than stored.
+    """
+    response = requests.post(
+        f'{api_url}/users/service-account-tokens',
+        headers={_BENCHMARK_IDENTITY_HEADER: _BENCHMARK_IDENTITY},
+        json={
+            'token_name': f'loop-lag-bench-{int(time.time())}',
+            'expires_in_days': 0,
+        },
+        timeout=60)
+    response.raise_for_status()
+    token = response.json()['token']
+    assert token.startswith('sky_'), token[:8]
+    return token
+
+
+def _launch_log_producer(api_url: str) -> str:
+    """Start a job that keeps printing, so there is a real log to tail.
+
+    The held streams are `sky jobs logs -f` against this job. Tailing a real
+    job is the request a user actually makes; the server's own log is served
+    by a special-cased path that never touches the request executor.
+
+    Launched against `api_url` -- the server under test -- rather than
+    whatever endpoint the CLI defaults to. Two reasons, and the first one is
+    correctness: a job submitted to a different server is invisible to this
+    one, so the tail returns "No running managed job found" while
+    `sky jobs queue` cheerfully reports it RUNNING elsewhere. The second is
+    that this server runs in deploy mode, which auto-enables jobs
+    consolidation, so the controller lives inside the server process instead
+    of on a separate provisioned cluster.
+
+    Always on Kubernetes, whatever cloud the rest of the run uses: the job is
+    scaffolding for the log stream, not part of what is being measured, and
+    the lane's local kind cluster starts it in seconds for nothing. It is
+    also what most deployments run.
+    """
+    env = {**os.environ, constants.SKY_API_SERVER_URL_ENV_VAR: api_url}
+    job_name = f'loop-lag-log-{int(time.time())}'
+    with tempfile.NamedTemporaryFile('w', suffix='.yaml',
+                                     delete=False) as task_file:
+        task_file.write(
+            'run: |\n'
+            '  while true; do echo "loop-lag benchmark $(date +%s)"; '
+            'sleep 1; done\n')
+        task_path = task_file.name
+    try:
+        subprocess.run([
+            'sky', 'jobs', 'launch', '-n', job_name, '--infra', 'kubernetes',
+            '--cpus', '2+', '--memory', '4+', task_path, '-y', '-d'
+        ],
+                       check=True,
+                       env=env)
+        # The tail has nothing to follow until the job is actually running,
+        # and a stream that opens against a pending job ends immediately --
+        # which the harness would (correctly) call an invalid trial.
+        deadline = time.time() + 900
+        while time.time() < deadline:
+            status = subprocess.run(
+                ['sky', 'jobs', 'queue'],
+                check=False,
+                capture_output=True,
+                text=True,
+                env=env,
+            ).stdout
+            if any(job_name in line and 'RUNNING' in line
+                   for line in status.splitlines()):
+                # Print it: when a later tail cannot find this job, the only
+                # question is what the queue said here, and capture_output
+                # otherwise swallows it.
+                print(f'log producer reached RUNNING on {api_url}:\n{status}')
+                # Give the job a moment to write something to tail.
+                time.sleep(5)
+                return job_name
+            time.sleep(10)
+        raise RuntimeError(
+            f'job {job_name} did not reach RUNNING in 15 minutes; last '
+            f'queue output:\n{status}')
+    finally:
+        os.unlink(task_path)
+
+
+def _preflight_requests(api_url: str, auth: loop_lag_harness.Auth) -> None:
+    """Check every endpoint in the mix answers 200 before measuring.
+
+    The scenarios assert that every request came back 200, so one endpoint
+    that 403s or 404s fails the benchmark with a status-count mismatch that
+    says nothing about the event loop. Ask each one once, up front, and name
+    the endpoint that is wrong.
+    """
+    for spec in _FLOOD_REQUESTS:
+        response = requests.request(spec.method,
+                                    f'{api_url}{spec.path}',
+                                    headers=auth.headers,
+                                    timeout=60)
+        if response.status_code != 200:
+            pytest.fail(
+                f'{spec.method} {spec.path} returned '
+                f'{response.status_code}, so the flood would fail on '
+                f'status counts rather than on lag: {response.text[:300]}')
+    print(
+        f'preflight: {len(_FLOOD_REQUESTS)} endpoints in the mix all answer 200'
+    )
+
+
+def _publish(result: loop_lag_harness.RunResult, name: str) -> pathlib.Path:
+    """Write the run artifact and hand it to Buildkite when running under it."""
+    # TODO(kevin): move to a pipeline-level artifact_paths declaration if that
+    # turns out simpler than shelling out per test.
+    path = result.write(_ARTIFACT_DIR / f'{name}.json')
+    if shutil.which('buildkite-agent') is not None:
+        upload = subprocess.run(
+            ['buildkite-agent', 'artifact', 'upload', path.name],
+            cwd=str(path.parent),
+            check=False)
+        if upload.returncode != 0:
+            print(f'buildkite-agent could not upload {path}; the file is still '
+                  'on the agent')
+    print(f'Event loop lag artifact for {name}: {path}')
+    # Draw the distribution into the build log: the shape (one mode or two,
+    # and how heavy the slow one is) is the part a reader wants, and this way
+    # it is on screen without downloading the artifact.
+    for chart in loop_lag_harness.format_run_charts(result.to_dict()):
+        if chart:
+            print(chart)
+    return path
+
+
+def _require_valid(result: loop_lag_harness.RunResult, name: str) -> None:
+    """Stop with an unambiguous message when the run measured nothing.
+
+    An invalid run and a regression demand opposite responses -- fix the
+    environment versus revert the change -- so they must not read alike.
+    """
+    if result.status is loop_lag_harness.Status.INVALID:
+        pytest.fail(f'{name}: INVALID measurement, not a regression: '
+                    f'{result.invalid_reason}')
+
+
+def _valid_trials(result: loop_lag_harness.RunResult) -> list:
+    return [
+        trial for trial in result.trials
+        if trial['status'] == loop_lag_harness.Status.OK.value
+    ]
+
+
+@pytest.mark.benchmark
+@pytest.mark.remote_server
+# The scenarios need a Kubernetes cluster regardless of how the run is
+# triggered: the log-producer job launches there. The benchmark mark still
+# routes this to its own dedicated agent.
+@pytest.mark.kubernetes
+def test_api_server_event_loop_lag():
+    """Assert the server's event loop stays responsive under authenticated load.
+
+    Two scenarios, both authenticated with a service-account token so every
+    request goes through the token middleware's DB lookups:
+
+    1. A steady flood, which surfaces any blocking call left on the loop.
+    2. The same flood while N `sky jobs logs -f` streams are held open
+       against a real running job, so the request thread executor is under
+       the pressure a user's log tails actually create while authenticated
+       requests keep arriving.
+    """
+    if not smoke_tests_utils.is_docker_remote_api_server():
+        pytest.skip('Skipping test in shared remote api server environment as '
+                    'the resource might not be dedicated to this case')
+    if psutil.cpu_count() < 4:
+        pytest.fail('No enough CPU on host to run the benchmark, consider '
+                    'skipping the test for this environment')
+    if psutil.virtual_memory().total / (1024**3) < 16:
+        pytest.fail('No enough memory on host to run the benchmark, consider '
+                    'skipping the test for this environment')
+
+    _pin_server_container_and_wait_healthy()
+
+    api_url = smoke_tests_utils.get_api_server_url()
+    metrics_url = f'{smoke_tests_utils.get_metrics_server_url()}/metrics'
+    auth = loop_lag_harness.Auth(headers={
+        'Authorization': f'Bearer {_mint_service_account_token(api_url)}'
+    })
+
+    _preflight_requests(api_url, auth)
+
+    flood = loop_lag_harness.HarnessConfig(
+        name='authenticated-flood',
+        base_url=api_url,
+        metrics_url=metrics_url,
+        requests=_FLOOD_REQUESTS,
+        target_qps=_FLOOD_QPS,
+        lag_threshold_seconds=_LAG_THRESHOLD_SECONDS,
+    )
+    flood_result = loop_lag_harness.run(flood, auth)
+    _publish(flood_result, 'authenticated-flood')
+    _require_valid(flood_result, 'authenticated-flood')
+
+    for trial in _valid_trials(flood_result):
+        # Without this the lag assertions below pass on a server that answered
+        # every request 401 or 503 -- and a 503 is exactly what an exhausted
+        # auth executor returns, so the failure mode this benchmark exists for
+        # would read as a clean run.
+        assert trial['failure_count'] == 0, (
+            f'trial {trial["index"]}: {trial["failure_count"]} of '
+            f'{trial["completed_requests"]} authenticated requests failed; '
+            f'statuses: {trial["status_counts"]}')
+        assert set(trial['status_counts']) == {
+            '200'
+        }, (f'trial {trial["index"]}: expected only 200s, got '
+            f'{trial["status_counts"]}')
+        assert trial['lag_observations_above_threshold'] == 0, (
+            f'trial {trial["index"]}: {trial["lag_observations_above_threshold"]:.0f} '
+            f'event loop tick(s) landed above {_LAG_THRESHOLD_SECONDS}s under '
+            f'{_FLOOD_QPS} req/s of authenticated load; bucket deltas: '
+            f'{trial["lag_bucket_deltas"]}')
+        # lag_max_peak_seconds is reported, not asserted: the gauge behind it
+        # is a 30s tumbling window whose boundary does not line up with the
+        # trial, so a sample taken at trial start can carry a peak from
+        # before the trial began. The histogram delta above is the exact
+        # record of the ticks that happened inside this trial.
+        print(f'trial {trial["index"]}: peak lag gauge '
+              f'{trial["lag_max_peak_seconds"]:.3f}s (window may predate the '
+              f'trial), {trial["lag_gauge_samples"]} samples')
+
+    job_name = _launch_log_producer(api_url)
+    try:
+        starvation = loop_lag_harness.HarnessConfig(
+            name='held-stream-pressure',
+            base_url=api_url,
+            metrics_url=metrics_url,
+            requests=_FLOOD_REQUESTS,
+            target_qps=_STARVATION_FLOOD_QPS,
+            lag_threshold_seconds=_LAG_THRESHOLD_SECONDS,
+            streams=loop_lag_harness.StreamSpec(
+                path='/jobs/logs',
+                count=_HELD_STREAMS,
+                method='POST',
+                # What `sky jobs logs -f` sends. Unlike a server-log tail,
+                # this takes the real request path: the handler borrows a
+                # worker from the request thread executor and holds it for
+                # the life of the stream, which is the pool the auth lookups
+                # on the flood requests compete for.
+                json_body={
+                    'name': job_name,
+                    'follow': True,
+                    'tail': 10,
+                }),
+        )
+        starvation_result = loop_lag_harness.run(starvation, auth)
+    finally:
+        subprocess.run(['sky', 'jobs', 'cancel', '-n', job_name, '-y'],
+                       check=False,
+                       capture_output=True)
+    _publish(starvation_result, 'held-stream-pressure')
+    _require_valid(starvation_result, 'held-stream-pressure')
+
+    assert starvation_result.streams_opened == _HELD_STREAMS, (
+        f'only {starvation_result.streams_opened}/{_HELD_STREAMS} streams '
+        f'opened ({starvation_result.streams_failed} failed); the scenario '
+        'did not put the server under the load it claims to')
+    # Opening is not holding: a stream the server closed leaves the opened
+    # count untouched while the concurrency disappears. Per-trial validity
+    # covers this too, but assert it here so the run-level number is checked
+    # even if every trial were somehow excluded.
+    assert starvation_result.streams_live_at_end == _HELD_STREAMS, (
+        f'{_HELD_STREAMS - starvation_result.streams_live_at_end} of '
+        f'{_HELD_STREAMS} streams closed before the run ended; the server was '
+        'not held at the concurrency this scenario measures. They ended '
+        f'with: {starvation_result.stream_end_reasons}; the server had sent '
+        f'them: {starvation_result.stream_end_samples}')
+
+    for trial in _valid_trials(starvation_result):
+        assert set(trial['status_counts']) == {
+            '200'
+        }, (f'trial {trial["index"]}: expected only 200s while streams were '
+            f'held open, got {trial["status_counts"]}')
+        assert trial['failure_count'] == 0, (
+            f'trial {trial["index"]}: {trial["failure_count"]} of '
+            f'{trial["completed_requests"]} requests failed while '
+            f'{_HELD_STREAMS} streams were held open; statuses: '
+            f'{trial["status_counts"]}')
+        assert trial['lag_observations_above_threshold'] == 0, (
+            f'trial {trial["index"]}: '
+            f'{trial["lag_observations_above_threshold"]:.0f} event loop '
+            f'tick(s) landed above {_LAG_THRESHOLD_SECONDS}s with '
+            f'{_HELD_STREAMS} streams held open; bucket deltas: '
+            f'{trial["lag_bucket_deltas"]}')
+        assert trial['latency_p99'] < _STARVATION_P99_LIMIT_SECONDS, (
+            f'trial {trial["index"]}: p99 {trial["latency_p99"]:.3f}s exceeds '
+            f'{_STARVATION_P99_LIMIT_SECONDS}s with {_HELD_STREAMS} streams '
+            'held open')
+        # Reported rather than asserted, for the same reason as the flood: the
+        # gauge's 30s window can still be showing the cost of opening the 32
+        # streams when the first trial samples it, which is real but is not
+        # something that happened during the trial.
+        print(f'trial {trial["index"]}: peak lag gauge '
+              f'{trial["lag_max_peak_seconds"]:.3f}s with {_HELD_STREAMS} '
+              f'streams held (window may predate the trial)')

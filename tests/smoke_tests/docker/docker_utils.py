@@ -1,7 +1,9 @@
 import hashlib
 import logging
 import os
+import shlex
 import subprocess
+from typing import Dict, Optional
 
 IMAGE_NAME = 'sky-remote-test-image'
 CONTAINER_NAME_PREFIX = 'sky-remote-test'
@@ -43,6 +45,11 @@ def get_metrics_host_port() -> int:
     return get_api_server_host_port() + 1
 
 
+def get_postgres_host_port() -> int:
+    """Get the host port for the Postgres container backing the test server."""
+    return get_api_server_host_port() + 2
+
+
 def get_api_server_endpoint_inside_docker() -> str:
     """Get the API server endpoint inside a Docker container."""
     host = 'host.docker.internal' if is_inside_docker() else '0.0.0.0'
@@ -56,12 +63,14 @@ def get_metrics_endpoint_inside_docker() -> str:
     return f'http://{host}:{metrics_port}'
 
 
-def create_and_setup_new_container(target_container_name: str,
-                                   api_server_host_port: int,
-                                   api_server_container_port: int,
-                                   metrics_host_port: int,
-                                   metrics_container_port: int,
-                                   username: str) -> str:
+def create_and_setup_new_container(
+        target_container_name: str,
+        api_server_host_port: int,
+        api_server_container_port: int,
+        metrics_host_port: int,
+        metrics_container_port: int,
+        username: str,
+        extra_env: Optional[Dict[str, str]] = None) -> str:
     """Create a new Docker container and copy files/directories from current container.
 
     Args:
@@ -71,10 +80,16 @@ def create_and_setup_new_container(target_container_name: str,
         metrics_host_port: Port on host machine to bind
         metrics_container_port: Port in container to expose
         username: Username in the container
+        extra_env: Extra environment variables for the container. Set before
+            the entrypoint runs `sky api start`, so the server boots with them
+            (e.g. SKYPILOT_DB_CONNECTION_URI to back the server with Postgres).
 
     Returns:
         ID of the newly created container
     """
+    extra_env_args = []
+    for key, value in (extra_env or {}).items():
+        extra_env_args.extend(['-e', f'{key}={value}'])
     logger = logging.getLogger(__name__)
 
     # Common path definitions
@@ -96,6 +111,8 @@ def create_and_setup_new_container(target_container_name: str,
 
     if is_inside_docker():
         # Run the new container directly
+        extra_env_str = ''.join(f'-e {shlex.quote(f"{key}={value}")} '
+                                for key, value in (extra_env or {}).items())
         run_cmd = (f'docker run -d '
                    f'--cpus=4 '
                    f'--name {target_container_name} '
@@ -106,6 +123,7 @@ def create_and_setup_new_container(target_container_name: str,
                    f'-e LAUNCHED_BY_DOCKER_CONTAINER=1 '
                    f'-e SKYPILOT_DISABLE_USAGE_COLLECTION=1 '
                    f'-e SKY_API_SERVER_METRICS_ENABLED=true '
+                   f'{extra_env_str}'
                    f'{IMAGE_NAME}')
 
         subprocess.check_call(run_cmd, shell=True)
@@ -152,9 +170,10 @@ def create_and_setup_new_container(target_container_name: str,
         ]
 
         docker_cmd.extend([
-            *[f'-v={v}' for v in volumes], '-e', f'USERNAME={username}', '-e',
-            'SKYPILOT_DISABLE_USAGE_COLLECTION=1', '-e',
-            'SKY_API_SERVER_METRICS_ENABLED=true', '-p',
+            *[f'-v={v}' for v in volumes],
+            '--add-host=host.docker.internal:host-gateway', '-e',
+            f'USERNAME={username}', '-e', 'SKYPILOT_DISABLE_USAGE_COLLECTION=1',
+            '-e', 'SKY_API_SERVER_METRICS_ENABLED=true', *extra_env_args, '-p',
             f'{api_server_host_port}:{api_server_container_port}', '-p',
             f'{metrics_host_port}:{metrics_container_port}', IMAGE_NAME
         ])
