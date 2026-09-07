@@ -311,5 +311,5 @@ class InstanceAwareLeastLoadPolicy(LeastLoadPolicy,
             logger.debug('Selected replica: %s', selected_replica)
             return selected_replica
 
-    # set_ready_replicas, pre_execute_hook, and post_execute_hook are inherited
-    # from LeastLoadPolicy.
+    # set_ready_replicas, begin_request, pre_execute_hook, and
+    # post_execute_hook are inherited from LeastLoadPolicy.
