@@ -2035,6 +2035,9 @@ def get_config_schema():
                         }
                     }
                 },
+                'managed_firewall_rules': {
+                    'type': 'boolean'
+                },
                 'force_enable_external_ips': {
                     'type': 'boolean'
                 },
