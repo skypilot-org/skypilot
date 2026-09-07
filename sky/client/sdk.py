@@ -1257,7 +1257,7 @@ def tail_logs(
         json=json.loads(body.model_dump_json()),
         stream=True,
         timeout=(client_common.API_SERVER_REQUEST_CONNECTION_TIMEOUT_SECONDS,
-                 None))
+                 client_common.API_SERVER_REQUEST_STREAM_READ_TIMEOUT_SECONDS))
     request_id: server_common.RequestId[int] = server_common.get_request_id(
         response)
     if preload_content:
@@ -1317,7 +1317,7 @@ def tail_provision_logs(cluster_name: str,
         params=params,
         stream=True,
         timeout=(client_common.API_SERVER_REQUEST_CONNECTION_TIMEOUT_SECONDS,
-                 None))
+                 client_common.API_SERVER_REQUEST_STREAM_READ_TIMEOUT_SECONDS))
     # Check for HTTP errors before streaming the response
     if response.status_code != 200:
         with ux_utils.print_exception_no_traceback():
@@ -2538,7 +2538,7 @@ def stream_and_get(
         params=params,
         retry=False,
         timeout=(client_common.API_SERVER_REQUEST_CONNECTION_TIMEOUT_SECONDS,
-                 None),
+                 client_common.API_SERVER_REQUEST_STREAM_READ_TIMEOUT_SECONDS),
         stream=True)
     if response.status_code in [404, 400]:
         # ``response`` is a streaming request; on some pooled connections the
