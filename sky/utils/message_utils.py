@@ -61,42 +61,35 @@ def decode_payload(
         A tuple of (bool, Any). The bool indicates whether it is a payload
         string. The Any is the decoded payload, which is a str, dict or list.
     """
-    original_str = payload_str
     matched = _PAYLOAD_PATTERN.findall(payload_str)
     if not matched:
         if raise_for_mismatch:
-            raise ValueError(f'Invalid payload string: \n{original_str}')
+            raise ValueError(f'Invalid payload string: \n{payload_str}')
         else:
-            return False, original_str
+            return False, payload_str
 
     for payload_type_str, body_str in matched:
         if payload_type is None or payload_type == payload_type_str:
             if raise_for_mismatch:
                 return json.loads(body_str)
             try:
-                return True, json.loads(body_str)
+                decoded = json.loads(body_str)
             except (ValueError, RecursionError):
-                # `raise_for_mismatch=False` asks "is this one of ours?", and
-                # for a body we cannot parse the answer is no. The log
-                # streamer classifies every line of a task's output this way,
-                # and that output is arbitrary text which can be
-                # payload-SHAPED by coincidence -- a task that echoes one of
-                # these tags is enough. Raising there escapes the streaming
-                # generator and truncates the response mid-body, so one such
-                # line silently cuts off the rest of the log. Hand the line
-                # back as content instead; it is what the task printed.
-                #
-                # Broad on purpose: the contract is that NO parse failure
-                # escapes, and enumerating the ways `json.loads` fails is a
-                # losing game. Bad syntax raises JSONDecodeError (a
-                # ValueError); deeply nested input exceeds the recursion
-                # limit; and since 3.11 an integer of more than
-                # `sys.get_int_max_str_digits()` digits raises a plain
-                # ValueError. A line of brackets or a long digit string is
-                # no less likely to come out of a task than a line of prose.
-                return False, original_str
+                # A question, so it must answer rather than raise: the log
+                # streamer asks it of every line a task wrote, and task
+                # output can be payload-shaped by accident. Raising escaped
+                # the streaming generator and truncated the log. Broad on
+                # purpose -- bad syntax, the recursion limit and the integer
+                # digit limit are only the failures we know of.
+                return False, payload_str
+            # Valid JSON is still not necessarily ours. Only a str can be a
+            # control frame; `Control.decode` raises TypeError on anything
+            # else, and its callers do not catch that.
+            if not isinstance(decoded, str):
+                return False, payload_str
+            return True, decoded
 
     if raise_for_mismatch:
-        raise ValueError(f'Invalid payload string: \n{original_str}')
+        raise ValueError(f'Invalid payload string: \n{payload_str}')
     else:
-        return False, original_str
+        return False, payload_str

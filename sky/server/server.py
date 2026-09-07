@@ -2978,6 +2978,17 @@ async def stream(
                 # GeneratorExit is propagating, so we explicitly do
                 # not run the flush() yield below.
                 raise
+            except Exception:  # pylint: disable=broad-except
+                # An upstream failure still deserves an openable file: close
+                # the gzip member with what we have, then let the error
+                # propagate. Without this the saved file is a header with no
+                # trailer, which no tool will open -- strictly worse than a
+                # short log, because it hides the part that did arrive.
+                if saw_payload:
+                    tail_bytes = compressor.flush()
+                    if tail_bytes:
+                        yield tail_bytes
+                raise
             # Natural EOF only — emit the gzip trailer if we actually
             # produced anything; otherwise the response stays empty so
             # the SDK's bytes_written==0 fallback fires.

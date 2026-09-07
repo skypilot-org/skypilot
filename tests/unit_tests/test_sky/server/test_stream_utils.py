@@ -324,3 +324,75 @@ def test_no_parse_failure_escapes_the_classifier(monkeypatch, exc):
 
     assert is_payload is False
     assert decoded == _PAYLOAD_SHAPED_LINE
+
+
+def test_a_valid_but_non_string_payload_is_not_ours():
+    """`<sky-payload>123</sky-payload>` parses, and is still task output.
+
+    Only a str can be a control frame: `Control.decode` does `in` on it and
+    raises TypeError otherwise, which `decode_rich_status` does not catch and
+    `read_provision_status_from_log` guards only for OSError/ValueError. So
+    the crash lands in the client.
+    """
+    line = '<sky-payload>123</sky-payload>'
+
+    is_payload, decoded = message_utils.decode_payload(line,
+                                                       raise_for_mismatch=False)
+
+    assert is_payload is False
+    assert decoded == line
+
+
+def test_a_type_mismatch_returns_the_whole_line():
+    """The loop variable used to shadow the parameter, so this returned the
+    matched fragment rather than the line the task wrote."""
+    line = 'noise <sky-payload type="x">{"a": 1}</sky-payload> tail'
+
+    is_payload, decoded = message_utils.decode_payload(line,
+                                                       payload_type='y',
+                                                       raise_for_mismatch=False)
+
+    assert is_payload is False
+    assert decoded == line
+
+
+@pytest.mark.asyncio
+async def test_a_non_utf8_byte_does_not_lose_the_log(tmp_path):
+    """A task writes bytes, not text -- one cat of a binary file is enough.
+
+    A strict decode raised out of the generator before the buffer was ever
+    flushed, so the whole log was lost, not just the offending line.
+    """
+    log = tmp_path / 'rid.log'
+    log.write_bytes(b'before\n' + b'weird \xff byte\n' + b'after\n')
+
+    for plain in (True, False):
+        chunks = [
+            chunk async for chunk in stream_utils.log_streamer(
+                None, log, plain_logs=plain, follow=False)
+        ]
+        streamed = ''.join(chunks)
+
+        assert 'before' in streamed, f'plain_logs={plain}'
+        assert 'after' in streamed, f'plain_logs={plain}: the log was lost'
+
+
+@pytest.mark.asyncio
+async def test_a_failure_mid_stream_is_reported_not_swallowed(monkeypatch):
+    """The boundary exists for the trigger nobody has thought of yet.
+
+    Two have been found by being reported, each silent: the response ended
+    mid-body with nothing logged. Whatever the third turns out to be, the
+    reader should see that the log stopped and why.
+    """
+
+    async def _boom(*args, **kwargs):
+        raise RuntimeError('some future trigger')
+        yield  # pylint: disable=unreachable
+
+    monkeypatch.setattr(stream_utils, '_log_stream_chunks', _boom)
+
+    chunks = [chunk async for chunk in stream_utils.log_streamer(None, None)]
+
+    assert 'Log streaming stopped' in ''.join(chunks)
+    assert 'some future trigger' in ''.join(chunks)

@@ -41,7 +41,7 @@ async def _yield_log_file_with_payloads_skipped(
         if not line:
             return
         is_payload, line_str = message_utils.decode_payload(
-            line.decode('utf-8'), raise_for_mismatch=False)
+            line.decode('utf-8', errors='replace'), raise_for_mismatch=False)
         if is_payload:
             continue
 
@@ -163,6 +163,41 @@ async def wait_for_request_to_start(
 
 
 async def log_streamer(
+    request_id: Optional[str],
+    log_path: Optional[pathlib.Path] = None,
+    plain_logs: bool = False,
+    tail: Optional[int] = None,
+    follow: bool = True,
+    cluster_name: Optional[str] = None,
+    polling_interval: float = DEFAULT_POLL_INTERVAL
+) -> AsyncGenerator[str, None]:
+    """Streams the logs of a request, and never dies silently doing it.
+
+    Everything below reads bytes a task wrote, and a task writes whatever it
+    likes. An exception raised on one line used to escape this generator: the
+    response then ended mid-body with nothing logged and nothing said, so the
+    reader saw a log that simply stopped -- and a `?compress=gz` download
+    saved a gzip with no trailer, which will not open at all. Two such
+    triggers have been found by being reported; this boundary is what makes
+    the third one visible instead of silent.
+    """
+    try:
+        async for chunk in _log_stream_chunks(request_id, log_path, plain_logs,
+                                              tail, follow, cluster_name,
+                                              polling_interval):
+            yield chunk
+    except (asyncio.CancelledError, GeneratorExit):  # pylint: disable=try-except-raise
+        # The client went away. Not an error, and PEP 525 forbids yielding
+        # while a GeneratorExit propagates, so this must not fall through to
+        # the handler below.
+        raise
+    except Exception as e:  # pylint: disable=broad-except
+        logger.exception(f'Log streaming for {request_id} failed')
+        yield ('\n[SkyPilot] Log streaming stopped: '
+               f'{type(e).__name__}: {e}\n')
+
+
+async def _log_stream_chunks(
     request_id: Optional[str],
     log_path: Optional[pathlib.Path] = None,
     plain_logs: bool = False,
@@ -308,7 +343,7 @@ async def _tail_log_file(
         if not file_chunk:
             # Process any remaining incomplete line
             if incomplete_line:
-                line_str = incomplete_line.decode('utf-8')
+                line_str = incomplete_line.decode('utf-8', errors='replace')
                 if plain_logs:
                     is_payload, line_str = message_utils.decode_payload(
                         line_str, raise_for_mismatch=False)
@@ -445,7 +480,7 @@ async def _tail_log_file(
         # Process all complete lines in this chunk
         for line_bytes in lines_bytes:
             # Reconstruct line with newline (since split removed it)
-            line_str = line_bytes.decode('utf-8') + '\n'
+            line_str = line_bytes.decode('utf-8', errors='replace') + '\n'
 
             if plain_logs:
                 is_payload, line_str = message_utils.decode_payload(
