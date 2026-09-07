@@ -124,10 +124,14 @@ class LeastLoadPolicy(LoadBalancingPolicy, name='least_load', default=True):
         with self.lock:
             self.ready_replicas = ready_replicas
             for r in list(self.load_map.keys()):
-                # Keep the accounting for retired replicas until their
-                # in-flight requests finish. Otherwise a late completion can
-                # recreate the entry with a negative load.
-                if r not in ready_replica_set and self.load_map[r] <= 0:
+                # Delete retired replicas immediately. A late completion is
+                # ignored by post_execute_hook() instead of recreating the
+                # entry. This favors avoiding phantom load if a URL is reused
+                # over preserving accounting across a readiness flap. A URL
+                # that re-enters before an old request finishes can still be
+                # affected by that late completion; stable replica identity
+                # would be needed to eliminate that ambiguity.
+                if r not in ready_replica_set:
                     del self.load_map[r]
             for replica in ready_replicas:
                 self.load_map[replica] = self.load_map.get(replica, 0)
@@ -176,6 +180,8 @@ class LeastLoadPolicy(LoadBalancingPolicy, name='least_load', default=True):
         with self.lock:
             current_load = self.load_map.get(replica_url)
             if current_load is None:
+                # Do not recreate an entry for a completion from a retired
+                # replica.
                 return
             current_load = max(0, current_load - 1)
             if current_load == 0 and replica_url not in self.ready_replicas:

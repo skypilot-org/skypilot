@@ -347,7 +347,7 @@ async def test_missing_client_releases_least_load_accounting():
     assert policy.load_map.get(replica_url) == 0
 
 
-def test_retired_replica_load_is_removed_after_inflight_request_finishes():
+def test_late_completion_does_not_recreate_retired_replica_load():
     policy = load_balancing_policies.LeastLoadPolicy()
     replica_url = 'http://replica'
     request = _make_request()
@@ -355,14 +355,10 @@ def test_retired_replica_load_is_removed_after_inflight_request_finishes():
     policy.set_ready_replicas([replica_url])
     policy.pre_execute_hook(replica_url, request)
     policy.set_ready_replicas([])
-    assert policy.load_map.get(replica_url) == 1
-    policy.set_ready_replicas([replica_url])
-    assert policy.load_map.get(replica_url) == 1
+    assert replica_url not in policy.load_map
 
     policy.post_execute_hook(replica_url, request)
 
-    assert policy.load_map.get(replica_url) == 0
-    policy.set_ready_replicas([])
     assert replica_url not in policy.load_map
 
 
