@@ -1,6 +1,5 @@
 """Async SDK functions for managed jobs."""
 import asyncio
-import functools
 import typing
 from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
 
@@ -142,12 +141,12 @@ async def events(
 ) -> List[Dict[str, Any]]:
     """Async version of events() that gets a managed job's events."""
     request_id = await asyncio.to_thread(
-        functools.partial(sdk.events,
-                          job_id,
-                          task,
-                          limit,
-                          include_cluster_events,
-                          explicitly_requested=explicitly_requested))
+        sdk.events,
+        job_id,
+        task,
+        limit,
+        include_cluster_events,
+        explicitly_requested=explicitly_requested)
     return await sdk_async.get(request_id)
 
 

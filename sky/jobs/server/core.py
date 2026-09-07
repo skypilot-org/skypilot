@@ -2028,9 +2028,13 @@ def get_job_events(
 
     if limit is None:
         return _newest_first(events + converted)
-    # The job's own transitions win the budget: one launch can produce more
-    # cluster events than `limit`, and dropping the oldest rows would hide
-    # the PENDING -> STARTING -> RUNNING sequence the timeline is read for.
-    # The job events were already limited by the query above.
-    room = max(limit - len(events), 0)
+    # Neither source may be starved. One launch can produce more cluster
+    # events than `limit`, and dropping the oldest rows would hide the
+    # PENDING -> STARTING -> RUNNING sequence the timeline is read for; but a
+    # job with many recoveries can fill the budget with its own transitions,
+    # and the launch reason the user is waiting on is usually the newest row
+    # of all. So the cluster side keeps a floor of half the budget (at least
+    # one row), and the trailing cut then trims the oldest job events.
+    cluster_floor = min(max(limit // 2, 1), len(converted))
+    room = max(limit - len(events), cluster_floor)
     return _newest_first(events + _newest_first(converted)[:room])[:limit]

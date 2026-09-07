@@ -366,3 +366,61 @@ def test_limit_never_starves_the_job_own_timeline(monkeypatch):
     # Still newest-first overall.
     stamps = [event['timestamp'].timestamp() for event in result]
     assert stamps == sorted(stamps, reverse=True)
+
+
+def test_limit_never_starves_the_cluster_events(monkeypatch):
+    """A job with many recoveries must not hide the current launch reason.
+
+    The mirror of test_limit_never_starves_the_job_own_timeline: when the
+    job's own transitions can fill the whole budget, the newest row of all
+    is usually the launch reason the user is waiting on, so the cluster side
+    keeps a floor.
+    """
+    job_events = [
+        _job_event(f'transition {i}',
+                   managed_job_state.ManagedJobStatus.RECOVERING, 100 + i)
+        for i in range(5)
+    ]
+    monkeypatch.setattr(managed_job_state, 'get_job_events',
+                        lambda **kwargs: list(reversed(job_events)))
+    monkeypatch.setattr(managed_job_state, 'get_managed_job_tasks',
+                        lambda job_id: [_task()])
+    monkeypatch.setattr(managed_job_utils, 'generate_managed_job_cluster_name',
+                        lambda name, job_id: f'{name}-{job_id}')
+    monkeypatch.setattr(global_user_state,
+                        'get_cluster_events_by_name',
+                        lambda name, event_types, limit=None: [{
+                            'reason': 'Launching (pending: Resources)',
+                            'transitioned_at': 500
+                        }])
+
+    result = core.get_job_events(job_id=1, limit=5, include_cluster_events=True)
+    reasons = [event['reason'] for event in result]
+    assert len(result) == 5
+    # The newest event of all survives, and it is reported first.
+    assert reasons[0] == 'Launching (pending: Resources)'
+    # The oldest job transition is what gives up its slot.
+    assert 'transition 0' not in reasons
+    assert 'transition 4' in reasons
+
+
+def test_limit_one_returns_the_newest_event_of_either_source(monkeypatch):
+    job_events = [
+        _job_event('Job is starting',
+                   managed_job_state.ManagedJobStatus.STARTING, 100)
+    ]
+    monkeypatch.setattr(managed_job_state, 'get_job_events',
+                        lambda **kwargs: list(job_events))
+    monkeypatch.setattr(managed_job_state, 'get_managed_job_tasks',
+                        lambda job_id: [_task()])
+    monkeypatch.setattr(managed_job_utils, 'generate_managed_job_cluster_name',
+                        lambda name, job_id: f'{name}-{job_id}')
+    monkeypatch.setattr(global_user_state,
+                        'get_cluster_events_by_name',
+                        lambda name, event_types, limit=None: [{
+                            'reason': 'Launching (pending: Resources)',
+                            'transitioned_at': 500
+                        }])
+
+    result = core.get_job_events(job_id=1, limit=1, include_cluster_events=True)
+    assert [e['reason'] for e in result] == ['Launching (pending: Resources)']

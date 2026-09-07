@@ -241,7 +241,10 @@ class TestJobsEventsSdk:
                                return_value=57), \
              mock.patch.object(jobs_sdk.server_common,
                                'make_authenticated_request') as mock_request:
-            with pytest.raises(ValueError, match='version 58 or newer'):
+            # Typed, so a programmatic caller can detect "server too old"
+            # without matching on the message.
+            with pytest.raises(jobs_sdk.exceptions.APINotSupportedError,
+                               match='version 58 or newer'):
                 raw_events(job_id=42, task='train')
         mock_request.assert_not_called()
 

@@ -9,6 +9,7 @@ import zlib
 
 import click
 
+from sky import exceptions
 from sky import sky_logging
 from sky.backends import backend_utils
 from sky.client import common as client_common
@@ -674,7 +675,7 @@ def events(
             task = None
         else:
             with ux_utils.print_exception_no_traceback():
-                raise ValueError(
+                raise exceptions.APINotSupportedError(
                     'Filtering job events by task name requires an API '
                     f'server on version 58 or newer (got {remote_api_version}'
                     '). Pass the task id instead.')
