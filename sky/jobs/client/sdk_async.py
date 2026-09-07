@@ -133,13 +133,15 @@ async def wait(
 @usage_lib.entrypoint
 async def events(
     job_id: int,
-    task_id: Optional[int] = None,
+    task: Optional[Union[str, int]] = None,
     limit: Optional[int] = 50,
     include_cluster_events: bool = False,
+    warn_if_unsupported: bool = False,
 ) -> List[Dict[str, Any]]:
     """Async version of events() that gets a managed job's events."""
-    request_id = await asyncio.to_thread(sdk.events, job_id, task_id, limit,
-                                         include_cluster_events)
+    request_id = await asyncio.to_thread(sdk.events, job_id, task, limit,
+                                         include_cluster_events,
+                                         warn_if_unsupported)
     return await sdk_async.get(request_id)
 
 

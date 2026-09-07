@@ -6,6 +6,8 @@ underlying cluster in the managed-job timeline.
 """
 import datetime
 
+import pytest
+
 from sky import global_user_state
 from sky.jobs import state as managed_job_state
 from sky.jobs import utils as managed_job_utils
@@ -109,11 +111,13 @@ def test_merge_orders_newest_first_and_truncates(monkeypatch):
         'Launching (1 pod(s) pending due to Pulling)',
         'Launching (Kubernetes cluster is autoscaling)',
     ]
-    # Merged cluster events are tagged as STARTING-phase events.
+    # Merged cluster events are tagged as STARTING-phase events, and carry
+    # the task whose cluster produced them (this used to be hard-coded None,
+    # which made a job group's tasks indistinguishable in the timeline).
     pulling = next(e for e in result if 'Pulling' in e['reason'])
     assert pulling['new_status'] == managed_job_state.ManagedJobStatus.STARTING
     assert pulling['spot_job_id'] == 1
-    assert pulling['task_id'] is None
+    assert pulling['task_id'] == 0
 
 
 def test_pool_jobs_skip_merge(monkeypatch):
@@ -240,3 +244,83 @@ def test_pipeline_uses_per_task_cluster_name(monkeypatch):
 
     # Per-task cluster names, not the shared DAG name 'pipe-1'.
     assert queried_names == ['pipe-0-1', 'pipe-1-1']
+
+
+def test_merged_cluster_events_carry_their_task_id(monkeypatch):
+    """A job group's cluster events must not all report task_id None.
+
+    Otherwise the CLI's TASK column is wrong for every merged row and the
+    events of two tasks are indistinguishable.
+    """
+    job_events = [
+        _job_event('Job is starting',
+                   managed_job_state.ManagedJobStatus.STARTING, 100)
+    ]
+    monkeypatch.setattr(managed_job_state, 'get_job_events',
+                        lambda **kwargs: list(job_events))
+    monkeypatch.setattr(
+        managed_job_state, 'get_managed_job_tasks', lambda job_id: [
+            _task(task_name='grp-0', task_id=0),
+            _task(task_name='grp-1', task_id=1),
+        ])
+    c0 = managed_job_utils.generate_managed_job_cluster_name('grp-0', 1)
+    c1 = managed_job_utils.generate_managed_job_cluster_name('grp-1', 1)
+    by_cluster = {
+        c0: [{
+            'reason': 'Launching (pending: Resources)',
+            'transitioned_at': 110
+        }],
+        c1: [{
+            'reason': 'Launching (pending: Priority)',
+            'transitioned_at': 120
+        }],
+    }
+    monkeypatch.setattr(
+        global_user_state,
+        'get_cluster_events_by_name',
+        lambda name, event_types, limit=None: by_cluster.get(name, []))
+
+    events = core.get_job_events(job_id=1,
+                                 limit=None,
+                                 include_cluster_events=True)
+    merged = {
+        event['reason']: event['task_id']
+        for event in events
+        if 'pending:' in event['reason']
+    }
+    assert merged == {
+        'Launching (pending: Resources)': 0,
+        'Launching (pending: Priority)': 1,
+    }
+
+
+class TestResolveTaskId:
+    """A task name or id is resolved the way `sky jobs logs` accepts it."""
+
+    @staticmethod
+    def _tasks(monkeypatch):
+        monkeypatch.setattr(
+            managed_job_state, 'get_managed_job_tasks', lambda job_id: [
+                _task(task_name='train', task_id=0),
+                _task(task_name='eval', task_id=1),
+            ])
+
+    def test_name_and_id(self, monkeypatch):
+        self._tasks(monkeypatch)
+        assert core._resolve_task_id(1, 'eval') == 1
+        assert core._resolve_task_id(1, 0) == 0
+        # A numeric string is an id, matching the CLI's documented behavior.
+        assert core._resolve_task_id(1, '1') == 1
+
+    def test_unknown_name_or_id_raises(self, monkeypatch):
+        self._tasks(monkeypatch)
+        with pytest.raises(ValueError, match="'nope' not found"):
+            core._resolve_task_id(1, 'nope')
+        with pytest.raises(ValueError, match='Task 9 not found'):
+            core._resolve_task_id(1, 9)
+
+    def test_missing_job_raises(self, monkeypatch):
+        monkeypatch.setattr(managed_job_state, 'get_managed_job_tasks',
+                            lambda job_id: [])
+        with pytest.raises(ValueError, match='Managed job 7 not found'):
+            core._resolve_task_id(7, 'train')

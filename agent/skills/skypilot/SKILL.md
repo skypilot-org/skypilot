@@ -109,7 +109,7 @@ Use `-o json` with status/query commands to get structured JSON output instead o
 | `sky jobs launch task.yaml` | Launch a managed job (auto lifecycle + recovery) |
 | `sky jobs queue -o json` | Show all managed jobs and their status |
 | `sky jobs logs JOB_ID` | Stream logs from a managed job |
-| `sky jobs events JOB_ID -o json` | Status-transition history of a managed job (why pending, recoveries) |
+| `sky jobs events JOB_ID [TASK] -o json` | Status-transition history of a managed job (why pending, recoveries) |
 | `sky jobs cancel JOB_ID` | Cancel a managed job |
 
 **SkyServe** — model serving with autoscaling:
@@ -440,7 +440,7 @@ When the user asks "what is my job doing" or "why is it pending/failing", run
 these in order and stop as soon as the question is answered:
 
 1. `sky jobs queue -v -o json` — read `status`, `details`, `failure_reason` (`-v` adds the `details` field)
-2. `sky jobs events JOB_ID -o json` — the status timeline with reasons; add `--cluster-events` to see why the cluster is still pending (e.g. a Slurm `QOSGrpGRES` or `Dependency` reason)
+2. `sky jobs events JOB_ID -o json` — the status timeline with reasons, including why the cluster is still pending (e.g. a Slurm `QOSGrpGRES` or `Dependency` reason). Add a task to narrow it: `sky jobs events JOB_ID train`
 3. `sky jobs logs JOB_ID --tail 100 --no-follow` — recent task output; `--controller` for provisioning/recovery logs
 
 See [Job Investigation](references/job-investigation.md) for how to read `details`, the event timeline, and Slurm pending reasons.

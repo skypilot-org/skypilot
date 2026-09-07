@@ -9,8 +9,8 @@ table output.
 | Question | Command | Look at |
 |----------|---------|---------|
 | What state is job N in, and why? | `sky jobs queue -v -o json` | `status`, `details`, `failure_reason`, `schedule_state`, `recovery_count` |
-| What has happened to job N over time? | `sky jobs events N -o json` | `new_status`, `reason`, `timestamp` (newest first) |
-| Why is job N still provisioning / pending on the cluster? | `sky jobs events N --cluster-events -o json` | `reason` lines starting with `Launching (` |
+| What has happened to job N over time? | `sky jobs events N -o json` | `new_status`, `reason`, `timestamp` (newest first); cluster provisioning events are included by default |
+| Why is job N still provisioning / pending on the cluster? | `sky jobs events N -o json` | `reason` lines starting with `Launching (` |
 | What did job N print recently? | `sky jobs logs N --tail 100 --no-follow` | stdout/stderr of the task |
 | What did the controller do (provision, recover, retry)? | `sky jobs logs N --controller --no-follow` | controller log |
 | Wait until job N finishes | `sky jobs logs N` (blocks) | exit when the job ends |
@@ -30,13 +30,14 @@ current state. Common shapes:
 | `In backoff, waiting for resources` | Provisioning failed and is retrying | `sky jobs logs N --controller --no-follow` shows the last failure |
 | `Recovering: <reason>` | Cluster was lost or the task crashed (e.g. OOMKilled) | Fix the cause; recovery is automatic |
 | `Failure: <reason>` | Terminal failure | Read the reason; `sky jobs logs N --no-follow` for the task output |
-| `Launching (pending: <Slurm reason>)` | Job is STARTING and Slurm has not allocated nodes yet (same text appears in `sky jobs events N --cluster-events`) | See "Slurm pending reasons" below |
+| `Launching (pending: <Slurm reason>)` | Job is STARTING and Slurm has not allocated nodes yet (same text appears in `sky jobs events N`) | See "Slurm pending reasons" below |
 
 ## Slurm pending reasons
 
-When a managed job runs on Slurm, `sky jobs events N --cluster-events`
-carries the `squeue` reason while the allocation is pending. The common
-codes:
+When a managed job runs on Slurm, `sky jobs events N` carries the `squeue`
+reason while the allocation is pending (cluster events are merged in by
+default; `--no-cluster-events` shows only the job's own transitions). The
+common codes:
 
 | Reason | Category | What to do |
 |--------|----------|------------|
@@ -54,7 +55,12 @@ Events are newest first. A healthy job reads (bottom to top)
 - Many `RECOVERING` events with the same `reason` mean a persistent
   problem (bad node, OOM, quota); the controller keeps retrying but will
   not fix it.
-- A long gap between `STARTING` and `RUNNING` is provisioning time; add
-  `--cluster-events` to see what the cluster was waiting on.
-- `code` is a short machine-readable tag when the controller knows one;
-  `reason` is the human text.
+- A long gap between `STARTING` and `RUNNING` is provisioning time; the
+  merged cluster events say what the cluster was waiting on.
+- `reason` is the human text. `-o json` also carries `code`, a short tag set
+  only for a few enterprise failure categories, and `task_id`, which tells
+  apart the tasks of a job group.
+
+Pass a task to narrow the timeline: `sky jobs events N train` or
+`sky jobs events N 0`, exactly like `sky jobs logs`. Job-level events are
+always included.

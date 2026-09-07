@@ -6649,25 +6649,24 @@ def _format_job_event_time(timestamp: Any) -> str:
 @jobs.command('events', cls=_DocumentedCodeCommand)
 @flags.config_option(expose_value=False)
 @click.argument('job_id', required=True, type=int)
-@click.option('--task-id',
-              type=int,
-              default=None,
-              help='Only show events for this task of the job.')
+@click.argument('task', required=False, type=str, default=None)
 @click.option('--limit',
               '-l',
               type=click.IntRange(min=0),
               default=50,
               show_default=True,
-              help='Number of most recent events to show. 0 shows all.')
-@click.option('--cluster-events',
-              is_flag=True,
-              default=False,
-              help=('Also include launch-progress events from the job\'s '
-                    'cluster, e.g. why the cluster is still pending on '
-                    'Slurm or Kubernetes.'))
+              help=('Number of most recent events to show, after merging '
+                    'every source. 0 shows all.'))
+@click.option('--cluster-events/--no-cluster-events',
+              default=True,
+              show_default=True,
+              help=('Include launch-progress events from the job\'s cluster, '
+                    'e.g. why the cluster is still pending on Slurm or '
+                    'Kubernetes. Requires an API server on version 54 or '
+                    'newer.'))
 @flags.output_format_option()
 @usage_lib.entrypoint
-def jobs_events(job_id: int, task_id: Optional[int], limit: int,
+def jobs_events(job_id: int, task: Optional[str], limit: int,
                 cluster_events: bool, output_format: str):
     """Show the status-transition events of a managed job.
 
@@ -6675,17 +6674,39 @@ def jobs_events(job_id: int, task_id: Optional[int], limit: int,
     one of its tasks) entered, when it happened, and the reason when one is
     known, such as why the job is pending or what triggered a recovery.
 
-    Pass ``--cluster-events`` to also see provisioning milestones from the
-    job's cluster, such as a Slurm pending reason or a Kubernetes pod
-    waiting on image pull.
+    TASK can be a task ID (integer) or task name; numeric values are treated
+    as task IDs. Job-level events are always included. If not specified,
+    events for all tasks are shown.
+
+    Provisioning milestones from the job's cluster are merged in by default,
+    which is where a Slurm pending reason or a Kubernetes image-pull wait
+    shows up. Pass ``--no-cluster-events`` for the job's own status
+    transitions only.
 
     Use ``-o json`` for machine-readable output.
+
+    Examples:
+
+    \b
+    # Every event of job 42, cluster progress included
+    sky jobs events 42
+    \b
+    # Only the job's own status transitions
+    sky jobs events 42 --no-cluster-events
+    \b
+    # Events of the task named 'train' in job 42
+    sky jobs events 42 train
     """
+    # The remote API version is not known until the server is contacted, so
+    # the SDK decides whether the merge is supported; tell it whether the
+    # user asked for it explicitly, which sets the log level of the notice.
+    source = click.get_current_context().get_parameter_source('cluster_events')
     request_id = managed_jobs.events(
         job_id=job_id,
-        task_id=task_id,
+        task=task,
         limit=None if limit == 0 else limit,
         include_cluster_events=cluster_events,
+        warn_if_unsupported=(source is not click.core.ParameterSource.DEFAULT),
     )
     events = sdk.stream_and_get(request_id)
     # The server serializes statuses as plain strings; normalize in case a
@@ -6700,14 +6721,16 @@ def jobs_events(job_id: int, task_id: Optional[int], limit: int,
     if not events:
         click.echo(f'No events found for managed job {job_id}.')
         return
-    table = log_utils.create_table(['TIME', 'TASK', 'STATUS', 'CODE', 'REASON'])
+    # `code` is omitted: it is only ever set for a few enterprise failure
+    # categories, so the column would be empty for almost every job. It is
+    # still in the JSON output.
+    table = log_utils.create_table(['TIME', 'TASK', 'STATUS', 'REASON'])
     for event in events:
-        task = event.get('task_id')
+        task_id = event.get('task_id')
         table.add_row([
             _format_job_event_time(event.get('timestamp')),
-            '-' if task is None else task,
+            '-' if task_id is None else task_id,
             event.get('new_status') or '-',
-            event.get('code') or '-',
             event.get('reason') or '-',
         ])
     click.echo(f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'

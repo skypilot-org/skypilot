@@ -623,9 +623,10 @@ def wait(
 @versions.minimal_api_version(25)
 def events(
     job_id: int,
-    task_id: Optional[int] = None,
+    task: Optional[Union[str, int]] = None,
     limit: Optional[int] = 50,
     include_cluster_events: bool = False,
+    warn_if_unsupported: bool = False,
 ) -> server_common.RequestId[List[Dict[str, Any]]]:
     """Gets the status-transition events of a managed job.
 
@@ -635,7 +636,8 @@ def events(
 
     Args:
         job_id: ID of the managed job.
-        task_id: If set, only events for this task (and job-level events).
+        task: If set, only events for this task (and job-level events). An
+            int is a task id, a str a task name, as in `sky jobs logs`.
         limit: Maximum number of events to return, newest first. None means
             no limit.
         include_cluster_events: Also merge in launch-progress events from the
@@ -644,6 +646,10 @@ def events(
             Requires API server version 54 or newer; ignored otherwise. An
             older server silently drops the field rather than failing, hence
             the client-side check.
+        warn_if_unsupported: Log a warning, rather than a debug line, when
+            include_cluster_events cannot be honored. Set this when the
+            caller asked for the merge explicitly (e.g. a CLI flag) so the
+            message is not noise for callers taking the default.
 
     Returns:
         The request ID of the events request. The result is a list of event
@@ -654,15 +660,21 @@ def events(
         raise ValueError(f'limit must be None or non-negative, got {limit}.')
     remote_api_version = versions.get_remote_api_version()
     # The merge landed without an API_VERSION bump, so 53 does not imply
-    # support; 54 is the first version that guarantees it.
+    # support; 54 is the first version that guarantees it. Checked here rather
+    # than in the caller: the remote version is only known once the server has
+    # been contacted, which the decorator above has just done.
     if include_cluster_events and (remote_api_version is None or
                                    remote_api_version < 54):
-        logger.warning('`include_cluster_events` is ignored because the API '
-                       'server does not support it yet.')
+        message = ('Cluster events are not available: the API server is '
+                   'older than version 54. Showing job events only.')
+        if warn_if_unsupported:
+            logger.warning(message)
+        else:
+            logger.debug(message)
         include_cluster_events = False
     body = payloads.GetJobEventsBody(
         job_id=job_id,
-        task_id=task_id,
+        task=task,
         limit=limit,
         include_cluster_events=include_cluster_events,
     )

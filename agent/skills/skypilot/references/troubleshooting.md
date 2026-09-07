@@ -715,11 +715,11 @@ file_mounts:
 | `Waiting for higher priority jobs to launch` | Higher-priority jobs are ahead | Raise `priority` in the task YAML if needed |
 | `In backoff, waiting for resources` | Provisioning keeps failing | `sky jobs logs <job_id> --controller --no-follow` shows the last error |
 | STARTING with no cluster events, first job ever | Jobs controller itself is being provisioned | Wait; `sky status -o json` shows the controller cluster |
-| `Launching (pending: <reason>)` in `sky jobs events <job_id> --cluster-events` | Slurm has not allocated nodes (quota, capacity, dependency, held) | See [Job Investigation](job-investigation.md#slurm-pending-reasons) |
+| `Launching (pending: <reason>)` in `sky jobs events <job_id>` | Slurm has not allocated nodes (quota, capacity, dependency, held) | See [Job Investigation](job-investigation.md#slurm-pending-reasons) |
 
 ```bash
 sky jobs queue -v -o json
-sky jobs events <job_id> --cluster-events -o json
+sky jobs events <job_id> -o json
 sky jobs logs <job_id> --controller --no-follow
 
 # Only if the controller itself is wedged (status INIT for a long time):

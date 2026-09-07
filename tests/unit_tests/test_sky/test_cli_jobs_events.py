@@ -59,10 +59,13 @@ class TestJobsEventsCli:
                ] == ['Launching (pending: QOSGrpGRES)', 'Job is submitted']
         # Enum statuses are serialized to plain strings.
         assert parsed[1]['new_status'] == 'PENDING'
+        # Cluster events are merged by default; that is where the Slurm
+        # pending reason lives.
         mock_events.assert_called_once_with(job_id=42,
-                                            task_id=None,
+                                            task=None,
                                             limit=50,
-                                            include_cluster_events=False)
+                                            include_cluster_events=True,
+                                            warn_if_unsupported=False)
 
     def test_table_output_shows_reason_and_status(self):
         result, _ = self._invoke(['42'])
@@ -70,16 +73,41 @@ class TestJobsEventsCli:
         assert 'Events for managed job 42' in result.output
         assert 'QOSGrpGRES' in result.output
         assert 'PENDING' in result.output
-        assert 'SUBMITTED' in result.output
+        # `code` is not a column any more: it is set for a few enterprise
+        # failure categories only, so it would be empty for nearly every job.
+        assert 'SUBMITTED' not in result.output
+        assert 'CODE' not in result.output
 
-    def test_flags_are_forwarded(self):
-        result, mock_events = self._invoke(
-            ['42', '--task-id', '1', '--limit', '0', '--cluster-events'])
+    def test_task_is_positional_like_jobs_logs(self):
+        # `sky jobs logs JOB_ID [TASK]` takes the task positionally and
+        # accepts a name or an id; events matches that.
+        result, mock_events = self._invoke(['42', 'train'])
+        assert result.exit_code == 0, result.output
+        assert mock_events.call_args.kwargs['task'] == 'train'
+        result, mock_events = self._invoke(['42', '1', '--limit', '0'])
         assert result.exit_code == 0, result.output
         mock_events.assert_called_once_with(job_id=42,
-                                            task_id=1,
+                                            task='1',
                                             limit=None,
-                                            include_cluster_events=True)
+                                            include_cluster_events=True,
+                                            warn_if_unsupported=False)
+
+    def test_no_cluster_events_opts_out(self):
+        result, mock_events = self._invoke(['42', '--no-cluster-events'])
+        assert result.exit_code == 0, result.output
+        assert mock_events.call_args.kwargs['include_cluster_events'] is False
+
+    def test_explicit_flag_asks_the_sdk_to_warn(self):
+        # The remote API version is unknown before the server is contacted,
+        # so the SDK owns the support check; the CLI only reports whether the
+        # user asked for the merge explicitly.
+        _, mock_events = self._invoke(['42'])
+        assert mock_events.call_args.kwargs['warn_if_unsupported'] is False
+        _, mock_events = self._invoke(['42', '--cluster-events'])
+        assert mock_events.call_args.kwargs['warn_if_unsupported'] is True
+        _, mock_events = self._invoke(['42', '--no-cluster-events'])
+        assert mock_events.call_args.kwargs['include_cluster_events'] is False
+        assert mock_events.call_args.kwargs['warn_if_unsupported'] is True
 
     def test_no_events(self):
         result, _ = self._invoke(['7'], events=[])
@@ -144,16 +172,16 @@ class TestJobsEventsSdk:
     def test_posts_body(self):
         body, mock_warning = self._call(999,
                                         job_id=42,
-                                        task_id=1,
+                                        task='train',
                                         limit=None,
                                         include_cluster_events=True)
         # RequestBody adds common envelope fields; check ours only.
         assert {
             k: body[k]
-            for k in ('job_id', 'task_id', 'limit', 'include_cluster_events')
+            for k in ('job_id', 'task', 'limit', 'include_cluster_events')
         } == {
             'job_id': 42,
-            'task_id': 1,
+            'task': 'train',
             'limit': None,
             'include_cluster_events': True,
         }
@@ -168,8 +196,22 @@ class TestJobsEventsSdk:
         mock_request.assert_not_called()
 
     def test_cluster_events_dropped_on_old_server(self):
-        body, mock_warning = self._call(52,
+        # 53 does not imply support: the merge landed without a bump.
+        for version in (52, 53):
+            body, mock_warning = self._call(version,
+                                            job_id=42,
+                                            include_cluster_events=True)
+            assert body['include_cluster_events'] is False, version
+            # Taking the default: a debug line, not a warning.
+            mock_warning.assert_not_called()
+        body, _ = self._call(54, job_id=42, include_cluster_events=True)
+        assert body['include_cluster_events'] is True
+
+    def test_explicit_request_warns_on_old_server(self):
+        body, mock_warning = self._call(53,
                                         job_id=42,
-                                        include_cluster_events=True)
+                                        include_cluster_events=True,
+                                        warn_if_unsupported=True)
         assert body['include_cluster_events'] is False
         mock_warning.assert_called_once()
+        assert 'older than version 54' in mock_warning.call_args.args[0]
