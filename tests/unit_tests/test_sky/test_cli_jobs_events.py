@@ -3,6 +3,7 @@ import json
 from unittest import mock
 
 from click import testing as cli_testing
+import pytest
 
 from sky.client import sdk
 from sky.client.cli import command
@@ -84,6 +85,12 @@ class TestJobsEventsCli:
         assert result.exit_code == 0, result.output
         assert 'No events found for managed job 7' in result.output
 
+    def test_negative_limit_is_rejected(self):
+        result, mock_events = self._invoke(['7', '--limit', '-1'])
+        assert result.exit_code != 0
+        assert 'limit' in result.output.lower()
+        mock_events.assert_not_called()
+
 
 class TestJobsEventsSdk:
     """sky.jobs.events request body and version gating."""
@@ -123,6 +130,14 @@ class TestJobsEventsSdk:
             'include_cluster_events': True,
         }
         mock_warning.assert_not_called()
+
+    def test_negative_limit_is_rejected_before_the_request(self):
+        raw_events = _unwrap(jobs_sdk.events)
+        with mock.patch.object(jobs_sdk.server_common,
+                               'make_authenticated_request') as mock_request:
+            with pytest.raises(ValueError, match='non-negative'):
+                raw_events(job_id=42, limit=-5)
+        mock_request.assert_not_called()
 
     def test_cluster_events_dropped_on_old_server(self):
         body, mock_warning = self._call(52,

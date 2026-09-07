@@ -6655,7 +6655,7 @@ def _format_job_event_time(timestamp: Any) -> str:
               help='Only show events for this task of the job.')
 @click.option('--limit',
               '-l',
-              type=int,
+              type=click.IntRange(min=0),
               default=50,
               show_default=True,
               help='Number of most recent events to show. 0 shows all.')

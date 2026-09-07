@@ -1424,15 +1424,29 @@ def get_latest_cluster_event_reasons(
     engine = _db_manager.get_engine()
     type_values = [event_type.value for event_type in event_types]
     with orm.Session(engine) as session:
-        rows = session.query(
-            cluster_event_table.c.name,
-            cluster_event_table.c.reason,
+        # Latest transitioned_at per cluster in SQL, so the read does not
+        # grow with a cluster's event history.
+        latest = session.query(
+            cluster_event_table.c.name.label('name'),
+            sqlalchemy.func.max(
+                cluster_event_table.c.transitioned_at).label('latest_at'),
         ).filter(
             cluster_event_table.c.name.in_(cluster_names),
             cluster_event_table.c.type.in_(type_values),
-        ).order_by(cluster_event_table.c.transitioned_at.desc()).all()
+        ).group_by(cluster_event_table.c.name).subquery()
+        rows = session.query(
+            cluster_event_table.c.name,
+            cluster_event_table.c.reason,
+        ).join(
+            latest,
+            sqlalchemy.and_(
+                cluster_event_table.c.name == latest.c.name,
+                cluster_event_table.c.transitioned_at == latest.c.latest_at,
+            ),
+        ).filter(cluster_event_table.c.type.in_(type_values)).all()
     reasons: Dict[str, str] = {}
     for name, reason in rows:
+        # Two events in the same second: keep the first non-empty reason.
         if name not in reasons and reason:
             reasons[name] = reason
     return reasons

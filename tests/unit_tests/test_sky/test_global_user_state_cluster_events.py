@@ -358,5 +358,10 @@ def test_latest_cluster_event_reasons_batched(tmp_path, monkeypatch):
     reasons = global_user_state.get_latest_cluster_event_reasons(
         ['c-a', 'c-b', 'c-c', 'missing'], [progress])
     assert reasons == {'c-a': 'Launching (pending: QOSGrpGRES)'}
+    # A STATUS_CHANGE on c-b is picked up when that type is requested too.
+    both = global_user_state.get_latest_cluster_event_reasons(
+        ['c-a', 'c-b'],
+        [progress, global_user_state.ClusterEventType.STATUS_CHANGE])
+    assert both == {'c-a': 'Launching (pending: QOSGrpGRES)', 'c-b': 'init'}
     assert global_user_state.get_latest_cluster_event_reasons([],
                                                               [progress]) == {}

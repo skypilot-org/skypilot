@@ -2926,33 +2926,36 @@ def _cluster_handle_not_required(fields: List[str]) -> bool:
     return not any(field in fields for field in _CLUSTER_HANDLE_FIELDS)
 
 
-def _get_launch_reasons_by_job(jobs: List[Dict[str, Any]]) -> Dict[int, str]:
-    """{job_id: latest LAUNCH_PROGRESS reason} for STARTING, non-pool jobs.
+def _get_launch_reasons_by_task(
+        jobs: List[Dict[str, Any]]) -> Dict[Tuple[int, Optional[int]], str]:
+    """{(job_id, task_id): latest LAUNCH_PROGRESS reason} for STARTING tasks.
 
-    The cluster name is derived from the task name and job id, the same way
-    the controller names it (pool jobs share a cluster and are skipped, as in
-    the job-events merge). Best-effort: never raises.
+    Keyed per task: in a job group each task launches its own cluster, and a
+    RUNNING sibling must not inherit a STARTING task's reason. The cluster
+    name is derived from the task name and job id the way the controller
+    names it; pool tasks share a cluster and are skipped, as in the
+    job-events merge. Best-effort: never raises.
     """
-    cluster_name_by_job: Dict[int, str] = {}
+    cluster_name_by_task: Dict[Tuple[int, Optional[int]], str] = {}
     for job in jobs:
         if (job.get('status') !=
                 managed_job_state.ManagedJobStatus.STARTING.value or
                 job.get('pool') is not None or not job.get('task_name')):
             continue
-        cluster_name_by_job[job['job_id']] = (generate_managed_job_cluster_name(
-            job['task_name'], job['job_id']))
-    if not cluster_name_by_job:
+        cluster_name_by_task[(job['job_id'], job.get('task_id'))] = (
+            generate_managed_job_cluster_name(job['task_name'], job['job_id']))
+    if not cluster_name_by_task:
         return {}
     try:
         reasons = global_user_state.get_latest_cluster_event_reasons(
-            list(dict.fromkeys(cluster_name_by_job.values())),
+            list(dict.fromkeys(cluster_name_by_task.values())),
             [global_user_state.ClusterEventType.LAUNCH_PROGRESS])
     except Exception as e:  # pylint: disable=broad-except
         logger.debug(f'Failed to read launch-progress reasons: {e}')
         return {}
     return {
-        job_id: reasons[name]
-        for job_id, name in cluster_name_by_job.items()
+        key: reasons[name]
+        for key, name in cluster_name_by_task.items()
         if name in reasons
     }
 
@@ -3244,7 +3247,7 @@ def get_managed_job_queue(
     # an extra DB round trip. `job['status']` is already stringified above.
     recovery_reasons: Dict[int, str] = {}
     pending_reasons: Dict[int, str] = {}
-    launch_reasons: Dict[int, str] = {}
+    launch_reasons: Dict[Tuple[int, Optional[int]], str] = {}
     if not fields or 'details' in fields:
         recovering_job_ids = [
             job['job_id'] for job in jobs if job['status'] ==
@@ -3261,7 +3264,7 @@ def get_managed_job_queue(
         # STARTING jobs: the latest launch-progress event of the cluster being
         # provisioned (e.g. 'Launching (pending: QOSGrpGRES)' on Slurm), so
         # `details` answers why the job has not started yet.
-        launch_reasons = _get_launch_reasons_by_job(jobs)
+        launch_reasons = _get_launch_reasons_by_task(jobs)
 
     for job in jobs:
         if not fields or 'details' in fields:
@@ -3270,7 +3273,8 @@ def get_managed_job_queue(
                 highest_blocking_priority=highest_blocking_priority,
                 recovery_reason=recovery_reasons.get(job['job_id']),
                 pending_reason=pending_reasons.get(job['job_id']),
-                launch_reason=launch_reasons.get(job['job_id']))
+                launch_reason=launch_reasons.get(
+                    (job['job_id'], job.get('task_id'))))
 
         # Derive is_job_group from execution column
         job['is_job_group'] = (

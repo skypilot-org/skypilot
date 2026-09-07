@@ -648,6 +648,8 @@ def events(
         dicts with keys ``spot_job_id``, ``task_id``, ``new_status``,
         ``code``, ``reason`` and ``timestamp``, ordered newest first.
     """
+    if limit is not None and limit < 0:
+        raise ValueError(f'limit must be None or non-negative, got {limit}.')
     remote_api_version = versions.get_remote_api_version()
     if include_cluster_events and (remote_api_version is None or
                                    remote_api_version < 53):
