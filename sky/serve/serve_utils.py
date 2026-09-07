@@ -17,6 +17,8 @@ import traceback
 import typing
 from typing import (Any, Callable, DefaultDict, Deque, Dict, Iterator, List,
                     Mapping, Optional, Set, TextIO, Type, Union)
+from urllib.parse import urlsplit
+from urllib.parse import urlunsplit
 import uuid
 
 import colorama
@@ -33,6 +35,7 @@ from sky.jobs import state as managed_job_state
 from sky.serve import constants
 from sky.serve import serve_state
 from sky.serve import spot_placer
+from sky.server import common as server_common
 from sky.skylet import constants as skylet_constants
 from sky.skylet import job_lib
 from sky.utils import annotations
@@ -74,6 +77,31 @@ def redact_request_fields(fields: Mapping[str, Any]) -> Dict[str, Any]:
               if _SENSITIVE_REQUEST_FIELD_PATTERN.search(str(key)) else value)
         for key, value in fields.items()
     }
+
+
+_HTTP_URL_PATTERN = re.compile(r'https?://[^\s\'\"]+')
+
+
+def redact_urls(text: str) -> str:
+    """Remove query strings and fragments from HTTP URLs in text.
+
+    This is used for exception messages, which can contain an httpx request
+    URL even when the request itself was not logged.
+    """
+
+    def _redact_url(match: re.Match[str]) -> str:
+        url = match.group(0)
+        suffix = ''
+        while url and url[-1] in '.,;:!?)]}':
+            suffix = url[-1] + suffix
+            url = url[:-1]
+        url = server_common.redact_url_password(url)
+        parsed = urlsplit(url)
+        redacted = urlunsplit(
+            (parsed.scheme, parsed.netloc, parsed.path, '', ''))
+        return redacted + suffix
+
+    return _HTTP_URL_PATTERN.sub(_redact_url, text)
 
 
 # Retry settings for cross-pod controller HTTP calls. The DB row update of
