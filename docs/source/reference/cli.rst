@@ -86,6 +86,11 @@ Managed jobs CLI
    :prog: sky jobs logs
    :nested: full
 
+.. _sky-job-events:
+.. click:: sky.client.cli.command:jobs_events
+   :prog: sky jobs events
+   :nested: full
+
 Pool CLI
 ^^^^^^^^
 

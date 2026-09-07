@@ -641,7 +641,9 @@ def events(
         include_cluster_events: Also merge in launch-progress events from the
             job's underlying cluster (e.g. a Slurm or Kubernetes pending
             reason) so provisioning milestones are visible in the timeline.
-            Requires API server version 53 or newer; ignored otherwise.
+            Requires API server version 54 or newer; ignored otherwise. An
+            older server silently drops the field rather than failing, hence
+            the client-side check.
 
     Returns:
         The request ID of the events request. The result is a list of event
@@ -651,8 +653,10 @@ def events(
     if limit is not None and limit < 0:
         raise ValueError(f'limit must be None or non-negative, got {limit}.')
     remote_api_version = versions.get_remote_api_version()
+    # The merge landed without an API_VERSION bump, so 53 does not imply
+    # support; 54 is the first version that guarantees it.
     if include_cluster_events and (remote_api_version is None or
-                                   remote_api_version < 53):
+                                   remote_api_version < 54):
         logger.warning('`include_cluster_events` is ignored because the API '
                        'server does not support it yet.')
         include_cluster_events = False

@@ -1,4 +1,5 @@
 """Tests for `sky jobs events` and the sky.jobs.events SDK wrapper."""
+import datetime
 import json
 from unittest import mock
 
@@ -90,6 +91,33 @@ class TestJobsEventsCli:
         assert result.exit_code != 0
         assert 'limit' in result.output.lower()
         mock_events.assert_not_called()
+
+
+class TestFormatJobEventTime:
+    """Production hands this datetimes; strings are only the fallback."""
+
+    def test_naive_datetime_is_rendered_as_is(self):
+        # SQLite returns naive datetimes (local wall clock).
+        naive = datetime.datetime(2026, 9, 7, 10, 0, 5)
+        assert command._format_job_event_time(naive) == '2026-09-07 10:00:05'
+
+    def test_aware_datetime_is_converted_to_local(self):
+        # Postgres returns tz-aware datetimes; render in the local zone.
+        aware = datetime.datetime(2026,
+                                  9,
+                                  7,
+                                  10,
+                                  0,
+                                  5,
+                                  tzinfo=datetime.timezone.utc)
+        expected = aware.astimezone().strftime('%Y-%m-%d %H:%M:%S')
+        assert command._format_job_event_time(aware) == expected
+
+    def test_iso_string_and_garbage_fall_back(self):
+        assert command._format_job_event_time(
+            '2026-09-07T10:00:05') == '2026-09-07 10:00:05'
+        assert command._format_job_event_time('not a time') == 'not a time'
+        assert command._format_job_event_time(None) == 'None'
 
 
 class TestJobsEventsSdk:

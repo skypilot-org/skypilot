@@ -152,6 +152,13 @@ Managed jobs SDK
   :noindex:
 
 
+``sky.jobs.events``
+^^^^^^^^^^^^^^^^^^^
+
+.. autofunction:: sky.jobs.events
+  :noindex:
+
+
 Volumes SDK
 ------------
 

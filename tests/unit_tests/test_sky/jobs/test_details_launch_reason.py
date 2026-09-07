@@ -8,6 +8,8 @@ def _job(status='STARTING', **kwargs):
     job = {
         'job_id': 1,
         'task_id': 0,
+        'last_recovered_at': 0,
+        'submitted_at': 0,
         'status': status,
         'schedule_state': 'ALIVE',
         'failure_reason': None,
@@ -58,9 +60,10 @@ def _jobs():
 def test_launch_reasons_derive_cluster_name_for_starting_non_pool_jobs():
     expected = managed_job_utils.generate_managed_job_cluster_name('train', 1)
     with mock.patch.object(managed_job_utils.global_user_state,
-                           'get_latest_cluster_event_reasons',
-                           return_value={expected: 'Launching (pending: x)'
-                                        }) as get_reasons:
+                           'get_latest_cluster_events',
+                           return_value={
+                               expected: ('Launching (pending: x)', 100)
+                           }) as get_reasons:
         reasons = managed_job_utils._get_launch_reasons_by_task(_jobs())
     # Only job 1 qualifies: 2 is a pool job, 3 is not STARTING, 4 has no
     # task name.
@@ -80,10 +83,10 @@ def test_launch_reasons_are_per_task_in_a_job_group():
     c0 = managed_job_utils.generate_managed_job_cluster_name('grp-0', 7)
     c2 = managed_job_utils.generate_managed_job_cluster_name('grp-2', 7)
     with mock.patch.object(managed_job_utils.global_user_state,
-                           'get_latest_cluster_event_reasons',
+                           'get_latest_cluster_events',
                            return_value={
-                               c0: 'Launching (pending: Resources)',
-                               c2: 'Launching (pending: Priority)',
+                               c0: ('Launching (pending: Resources)', 100),
+                               c2: ('Launching (pending: Priority)', 100),
                            }) as get_reasons:
         reasons = managed_job_utils._get_launch_reasons_by_task(jobs)
     names, _ = get_reasons.call_args.args
@@ -97,14 +100,47 @@ def test_launch_reasons_are_per_task_in_a_job_group():
 
 def test_launch_reasons_skip_lookup_when_no_starting_jobs():
     with mock.patch.object(managed_job_utils.global_user_state,
-                           'get_latest_cluster_event_reasons') as get_reasons:
+                           'get_latest_cluster_events') as get_reasons:
         assert not managed_job_utils._get_launch_reasons_by_task(
             [_job(status='RUNNING')])
     get_reasons.assert_not_called()
 
 
+def test_launch_reasons_ignore_events_from_an_earlier_attempt():
+    # The cluster name is reused across recovery attempts: an event older
+    # than the current attempt's start must not be shown as its reason.
+    cluster = managed_job_utils.generate_managed_job_cluster_name('train', 1)
+    fresh = _job(job_id=1,
+                 task_id=0,
+                 status='STARTING',
+                 task_name='train',
+                 last_recovered_at=500,
+                 submitted_at=100)
+    with mock.patch.object(managed_job_utils.global_user_state,
+                           'get_latest_cluster_events',
+                           return_value={cluster: ('stale reason', 499)}):
+        assert not managed_job_utils._get_launch_reasons_by_task([fresh])
+    with mock.patch.object(managed_job_utils.global_user_state,
+                           'get_latest_cluster_events',
+                           return_value={cluster: ('current reason', 501)}):
+        assert managed_job_utils._get_launch_reasons_by_task([fresh]) == {
+            (1, 0): 'current reason'
+        }
+    # No recovery yet: submission time is the attempt start.
+    first = _job(job_id=1,
+                 task_id=0,
+                 status='STARTING',
+                 task_name='train',
+                 last_recovered_at=None,
+                 submitted_at=300)
+    with mock.patch.object(managed_job_utils.global_user_state,
+                           'get_latest_cluster_events',
+                           return_value={cluster: ('before submit', 299)}):
+        assert not managed_job_utils._get_launch_reasons_by_task([first])
+
+
 def test_launch_reasons_swallow_db_errors():
     with mock.patch.object(managed_job_utils.global_user_state,
-                           'get_latest_cluster_event_reasons',
+                           'get_latest_cluster_events',
                            side_effect=RuntimeError('db')):
         assert not managed_job_utils._get_launch_reasons_by_task(_jobs())

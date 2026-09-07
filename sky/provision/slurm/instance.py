@@ -318,6 +318,40 @@ def _record_pending_reason(cluster_name: str, reason: Optional[str]) -> None:
                      f'{e}')
 
 
+def _make_pending_callback(
+    cluster_name: str,) -> Callable[[str, Optional[str], Optional[int]], None]:
+    """Callback for the pending phase of a Slurm allocation.
+
+    Refreshes the launch spinner and records the squeue reason as a cluster
+    event. Both are change-gated: the wait loop polls every few seconds, and
+    the spinner message embeds the pending count (which moves far more often
+    than the reason), so the two need separate memories.
+    """
+    last_status_msg: Optional[str] = None
+    last_recorded_reason: Optional[str] = None
+
+    def _on_pending(state: str, reason: Optional[str],
+                    pending_count: Optional[int]) -> None:
+        nonlocal last_status_msg, last_recorded_reason
+        del state  # unused
+        parts = []
+        if reason:
+            parts.append(f'pending: {reason}')
+        if pending_count is not None and pending_count > 0:
+            word = 'other' if pending_count == 1 else 'others'
+            parts.append(f'{pending_count} {word} pending')
+        msg = f'Launching ({", ".join(parts)})' if parts else 'Launching'
+        status_msg = ux_utils.spinner_message(msg, cluster_name=cluster_name)
+        if status_msg != last_status_msg:
+            rich_utils.force_update_status(status_msg)
+            last_status_msg = status_msg
+        if reason != last_recorded_reason:
+            _record_pending_reason(cluster_name, reason)
+            last_recorded_reason = reason
+
+    return _on_pending
+
+
 def _sky_cluster_home_dir(base_dir: str, cluster_name_on_cloud: str) -> str:
     """Returns the SkyPilot cluster's home directory path on the Slurm cluster.
 
@@ -768,27 +802,7 @@ def _create_virtual_instance(
                  f'job to be allocated on partition {partition}')
 
     num_nodes = config.count
-    last_status_msg = None
-
-    def _on_pending(state: str, reason: Optional[str],
-                    pending_count: Optional[int]) -> None:
-        nonlocal last_status_msg
-        del state  # unused
-        parts = []
-        if reason:
-            parts.append(f'pending: {reason}')
-        if pending_count is not None and pending_count > 0:
-            word = 'other' if pending_count == 1 else 'others'
-            parts.append(f'{pending_count} {word} pending')
-        if parts:
-            msg = f'Launching ({", ".join(parts)})'
-        else:
-            msg = 'Launching'
-        status_msg = ux_utils.spinner_message(msg, cluster_name=cluster_name)
-        if status_msg != last_status_msg:
-            rich_utils.force_update_status(status_msg)
-            last_status_msg = status_msg
-        _record_pending_reason(cluster_name, reason)
+    on_pending = _make_pending_callback(cluster_name)
 
     if existing_jobs:
         assert len(existing_jobs) == 1, (
@@ -801,7 +815,7 @@ def _create_virtual_instance(
 
         # Wait for nodes to be allocated (job might be in PENDING state)
         _wait_for_job_nodes(client, job_id, provision_timeout, partition,
-                            _on_pending)
+                            on_pending)
         nodes, _ = client.get_job_nodes(job_id)
         # Reset spinner since nodes are now allocated
         rich_utils.force_update_status(
@@ -1247,7 +1261,7 @@ touch {sky_cluster_home_dir}/.hushlogin
                  f'with {num_nodes} nodes')
 
     _wait_for_job_nodes(client, job_id, provision_timeout, partition,
-                        _on_pending)
+                        on_pending)
     nodes, _ = client.get_job_nodes(job_id)
     # Reset spinner since nodes are now allocated
     rich_utils.force_update_status(

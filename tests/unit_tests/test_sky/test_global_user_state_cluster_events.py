@@ -338,30 +338,40 @@ def test_get_cluster_events_multiple_types_merged_and_ordered(
         limit=2) == ['Launching (pulling)', 'Cluster provisioned']
 
 
-def test_latest_cluster_event_reasons_batched(tmp_path, monkeypatch):
+def test_latest_cluster_events_batched(tmp_path, monkeypatch):
     _fresh_db(tmp_path, monkeypatch)
     for name in ('c-a', 'c-b', 'c-c'):
         _add_cluster(name)
     progress = global_user_state.ClusterEventType.LAUNCH_PROGRESS
-    global_user_state.add_cluster_event('c-a', None,
+    # Explicit transitioned_at: no sleeping for the 1s timestamp resolution.
+    global_user_state.add_cluster_event('c-a',
+                                        None,
                                         'Launching (pending: Resources)',
-                                        progress)
-    time.sleep(1.1)  # transitioned_at has 1s resolution.
-    global_user_state.add_cluster_event('c-a', None,
+                                        progress,
+                                        transitioned_at=1000)
+    global_user_state.add_cluster_event('c-a',
+                                        None,
                                         'Launching (pending: QOSGrpGRES)',
-                                        progress)
-    # A different type on c-b must not be picked up.
+                                        progress,
+                                        transitioned_at=2000)
+    # A different type on c-b must not be picked up by a progress-only query.
     global_user_state.add_cluster_event(
-        'c-b', status_lib.ClusterStatus.INIT, 'init',
-        global_user_state.ClusterEventType.STATUS_CHANGE)
+        'c-b',
+        status_lib.ClusterStatus.INIT,
+        'init',
+        global_user_state.ClusterEventType.STATUS_CHANGE,
+        transitioned_at=1500)
 
-    reasons = global_user_state.get_latest_cluster_event_reasons(
+    events = global_user_state.get_latest_cluster_events(
         ['c-a', 'c-b', 'c-c', 'missing'], [progress])
-    assert reasons == {'c-a': 'Launching (pending: QOSGrpGRES)'}
-    # A STATUS_CHANGE on c-b is picked up when that type is requested too.
-    both = global_user_state.get_latest_cluster_event_reasons(
+    assert events == {'c-a': ('Launching (pending: QOSGrpGRES)', 2000)}
+    # Both types requested: c-b's status change is returned with its stamp.
+    both = global_user_state.get_latest_cluster_events(
         ['c-a', 'c-b'],
         [progress, global_user_state.ClusterEventType.STATUS_CHANGE])
-    assert both == {'c-a': 'Launching (pending: QOSGrpGRES)', 'c-b': 'init'}
-    assert global_user_state.get_latest_cluster_event_reasons([],
-                                                              [progress]) == {}
+    assert both == {
+        'c-a': ('Launching (pending: QOSGrpGRES)', 2000),
+        'c-b': ('init', 1500),
+    }
+    assert not global_user_state.get_latest_cluster_events([], [progress])
+    assert not global_user_state.get_latest_cluster_events(['c-a'], [])

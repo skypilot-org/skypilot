@@ -134,10 +134,10 @@
       "id": 6,
       "name": "why-is-my-managed-job-pending",
       "prompt": "My managed job 42 has been PENDING for 20 minutes on our Slurm cluster. Why? SkyPilot is already set up.",
-      "expected_output": "Agent reads `details` from `sky jobs queue -o json`, then runs `sky jobs events 42 --cluster-events -o json` to find the Slurm pending reason (e.g. QOSGrpGRES or Dependency), explains the category (quota / capacity / dependency / held) and what to do about it. It does not poll with sleep.",
+      "expected_output": "Agent reads `details` from `sky jobs queue -v -o json`, then runs `sky jobs events 42 --cluster-events -o json` to find the Slurm pending reason (e.g. QOSGrpGRES or Dependency), explains the category (quota / capacity / dependency / held) and what to do about it. It does not poll with sleep.",
       "assertions": [
         {
-          "text": "Agent runs `sky jobs queue -o json` (or `sky jobs queue`) and reads the job's details",
+          "text": "Agent runs `sky jobs queue -v -o json` (`-v` is required for the `details` field) and reads the job's details",
           "type": "required_action"
         },
         {

@@ -2873,11 +2873,19 @@ def _update_fields(fields: List[str],) -> Tuple[List[str], bool]:
         if 'failure_reason' not in new_fields:
             new_fields.append('failure_reason')
         # Needed to derive the cluster name of STARTING jobs for the
-        # launch-progress reason lookup.
+        # launch-progress reason lookup, key it per task, and ignore events
+        # left by an earlier attempt. Selected even when the caller (e.g. the
+        # dashboard) did not ask for them.
         if 'task_name' not in new_fields:
             new_fields.append('task_name')
         if 'pool' not in new_fields:
             new_fields.append('pool')
+        if 'task_id' not in new_fields:
+            new_fields.append('task_id')
+        if 'last_recovered_at' not in new_fields:
+            new_fields.append('last_recovered_at')
+        if 'submitted_at' not in new_fields:
+            new_fields.append('submitted_at')
     if 'user_yaml' in new_fields:
         if 'original_user_yaml_path' not in new_fields:
             new_fields.append('original_user_yaml_path')
@@ -2934,30 +2942,47 @@ def _get_launch_reasons_by_task(
     RUNNING sibling must not inherit a STARTING task's reason. The cluster
     name is derived from the task name and job id the way the controller
     names it; pool tasks share a cluster and are skipped, as in the
-    job-events merge. Best-effort: never raises.
+    job-events merge.
+
+    A managed job's cluster name is reused across recovery attempts, and
+    launch-progress events are retained for days, so an event older than the
+    current attempt is dropped rather than shown as the current reason (e.g.
+    a stale image-pull reason after failover to a cloud that records no
+    launch progress). Best-effort: never raises.
     """
     cluster_name_by_task: Dict[Tuple[int, Optional[int]], str] = {}
+    attempt_start_by_task: Dict[Tuple[int, Optional[int]], float] = {}
     for job in jobs:
         if (job.get('status') !=
                 managed_job_state.ManagedJobStatus.STARTING.value or
                 job.get('pool') is not None or not job.get('task_name')):
             continue
-        cluster_name_by_task[(job['job_id'], job.get('task_id'))] = (
-            generate_managed_job_cluster_name(job['task_name'], job['job_id']))
+        key = (job['job_id'], job.get('task_id'))
+        cluster_name_by_task[key] = generate_managed_job_cluster_name(
+            job['task_name'], job['job_id'])
+        # last_recovered_at is 0/None before the first recovery; fall back to
+        # submission time, and to 0 (no filtering) when neither is known.
+        attempt_start = job.get('last_recovered_at') or job.get('submitted_at')
+        attempt_start_by_task[key] = attempt_start or 0
     if not cluster_name_by_task:
         return {}
     try:
-        reasons = global_user_state.get_latest_cluster_event_reasons(
+        events = global_user_state.get_latest_cluster_events(
             list(dict.fromkeys(cluster_name_by_task.values())),
             [global_user_state.ClusterEventType.LAUNCH_PROGRESS])
     except Exception as e:  # pylint: disable=broad-except
         logger.debug(f'Failed to read launch-progress reasons: {e}')
         return {}
-    return {
-        key: reasons[name]
-        for key, name in cluster_name_by_task.items()
-        if name in reasons
-    }
+    reasons: Dict[Tuple[int, Optional[int]], str] = {}
+    for key, name in cluster_name_by_task.items():
+        event = events.get(name)
+        if event is None:
+            continue
+        reason, transitioned_at = event
+        if transitioned_at < attempt_start_by_task[key]:
+            continue
+        reasons[key] = reason
+    return reasons
 
 
 def _format_job_details(*,
