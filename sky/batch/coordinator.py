@@ -147,7 +147,8 @@ class BatchCoordinator:
                  output_formats_dict: List[Dict[str, Any]],
                  activate_env: str = '',
                  job_id: Optional[int] = None,
-                 is_resume: bool = False):
+                 is_resume: bool = False,
+                 resume_from: Optional[int] = None):
         self.dataset_path = dataset_path
         self.output_path = output_path
         self.batch_size = batch_size
@@ -155,6 +156,7 @@ class BatchCoordinator:
         self.serialized_fn = serialized_fn
         self.activate_env = activate_env
         self._is_resume = is_resume
+        self._resume_from = resume_from
 
         self._input_format_dict = input_format_dict
         self._output_formats_dict = output_formats_dict
@@ -187,12 +189,29 @@ class BatchCoordinator:
         # Cancellation flag for inline (controller) mode.
         self._cancelled = False
 
+        # Root job ID for temp file paths.  When resuming from a
+        # previous job, all runs in the chain share the same temp
+        # directory so that reduce_results() can merge all batch files.
+        self._root_job_id: Optional[int] = None
+
         # Register SIGTERM handler for graceful cancellation.
         signal.signal(signal.SIGTERM, self._handle_sigterm)
 
     # ------------------------------------------------------------------
     # Main entry point
     # ------------------------------------------------------------------
+
+    @property
+    def _run_id(self) -> str:
+        """Job ID used for temp file paths.
+
+        When resuming from a previous job, all runs in the chain share
+        the root job's temp directory so ``reduce_results()`` sees every
+        batch file regardless of which run produced it.
+        """
+        if self._root_job_id is not None:
+            return str(self._root_job_id)
+        return str(self._managed_job_id)
 
     def run(self) -> None:
         """Main entry point.  Returns on success, raises on failure."""
@@ -202,6 +221,8 @@ class BatchCoordinator:
 
             if self._is_resume:
                 self._resume_from_db()
+            elif self._resume_from is not None:
+                self._resume_from_previous_job()
             else:
                 self._count_and_split()
                 if not self.batches:
@@ -216,8 +237,12 @@ class BatchCoordinator:
                 self._reduce_results_and_cleanup()
                 return
 
+            if self._cancelled:
+                raise RuntimeError('Cancelled before dispatch')
             self._discover_workers()
             self._shutdown_stale_workers()
+            if self._cancelled:
+                raise RuntimeError('Cancelled before dispatch')
             self._dispatch_all()
             self._reduce_results_and_cleanup()
             logger.info('Batch job completed successfully.')
@@ -279,6 +304,118 @@ class BatchCoordinator:
         logger.info(f'Created {len(self.batches)} batches '
                     f'(total_items: {total_items}, '
                     f'batch_size: {self.batch_size})')
+
+    # ------------------------------------------------------------------
+    # Cross-job resume from a previous cancelled job
+    # ------------------------------------------------------------------
+
+    def _resume_from_previous_job(self) -> None:
+        """Resume from a previously cancelled batch job.
+
+        Reads batch_state records from the previous job, marks COMPLETED
+        batches as pre-completed, and queues all others (FAILED,
+        DISPATCHED, PENDING) for dispatch.
+        """
+        assert self._resume_from is not None
+        prev_job_id = self._resume_from
+
+        # 1. Validate previous job exists and is a batch job.
+        if not managed_job_state.is_batch_job(prev_job_id):
+            raise RuntimeError(f'Job {prev_job_id} is not a batch job. '
+                               f'--resume-from requires a batch job ID.')
+
+        # 2. Validate previous job is CANCELLED.
+        prev_status = managed_job_state.get_status(prev_job_id)
+        if prev_status is None:
+            raise RuntimeError(f'Job {prev_job_id} not found.')
+        if prev_status == managed_job_state.ManagedJobStatus.SUCCEEDED:
+            raise RuntimeError(
+                f'Job {prev_job_id} already SUCCEEDED — nothing to resume.')
+        if not prev_status.is_terminal():
+            raise RuntimeError(
+                f'Job {prev_job_id} is still {prev_status.value}. '
+                f'Cancel it first with: sky jobs cancel {prev_job_id}')
+        if prev_status not in (managed_job_state.ManagedJobStatus.CANCELLED,
+                               managed_job_state.ManagedJobStatus.FAILED):
+            raise RuntimeError(
+                f'Job {prev_job_id} ended with {prev_status.value}. '
+                f'Cannot resume from this state.')
+
+        # 3. Read previous job's batch states.
+        prev_batches = managed_job_state.get_batch_states(prev_job_id)
+        if not prev_batches:
+            raise RuntimeError(f'No batch records found for job {prev_job_id}.')
+
+        # 4. Resolve root_job_id for temp file paths (follow chain).
+        prev_config = managed_job_state.get_batch_job_config(prev_job_id)
+        if prev_config and prev_config.get('batch_root_job_id'):
+            self._root_job_id = prev_config['batch_root_job_id']
+        else:
+            self._root_job_id = prev_job_id
+
+        # 5. Validate batch_size matches.
+        if prev_batches:
+            first_batch = prev_batches[0]
+            prev_batch_size = first_batch['end_idx'] - first_batch[
+                'start_idx'] + 1
+            if prev_batch_size != self.batch_size:
+                last_batch = prev_batches[-1]
+                last_batch_size = (last_batch['end_idx'] -
+                                   last_batch['start_idx'] + 1)
+                if last_batch_size == self.batch_size:
+                    pass
+                else:
+                    raise RuntimeError(
+                        f'batch_size changed (was {prev_batch_size}, '
+                        f'now {self.batch_size}). Cannot resume with '
+                        f'different batch_size — start a new run.')
+
+        # 6. Warn if input/output format differs.
+        if prev_config:
+            prev_input = prev_config.get('batch_input_format')
+            if (prev_input and prev_input != self._input_format_dict):
+                logger.warning(
+                    'InputReader config differs from job %d. '
+                    'Proceeding anyway — batch boundaries are '
+                    'inherited from the original run.', prev_job_id)
+            prev_output = prev_config.get('batch_output_formats')
+            if (prev_output and prev_output != self._output_formats_dict):
+                logger.warning(
+                    'OutputWriter config differs from job %d. '
+                    'Output format changes may cause issues during '
+                    'reduce_results(). Proceeding anyway.', prev_job_id)
+
+        # 7. Classify batches and build new state.
+        self.batches = []
+        self.pending_batches = collections.deque()
+        self.completed_count = 0
+        statuses: List[str] = []
+
+        completed = 0
+        failed = 0
+        unrun = 0
+        for rec in prev_batches:
+            self.batches.append([rec['start_idx'], rec['end_idx']])
+            if rec['status'] == 'COMPLETED':
+                statuses.append('COMPLETED')
+                self.completed_count += 1
+                completed += 1
+            else:
+                statuses.append('PENDING')
+                self.pending_batches.append(rec['batch_idx'])
+                if rec['status'] == 'FAILED':
+                    failed += 1
+                else:
+                    unrun += 1
+
+        # 8. Save batch states with pre-completed status.
+        managed_job_state.save_batch_states_with_status(self._managed_job_id,
+                                                        self.batches, statuses)
+
+        logger.info(
+            f'Resuming from job {prev_job_id} (root: {self._root_job_id}): '
+            f'{completed} completed (skipping), '
+            f'{failed} failed + {unrun} un-run (dispatching)')
 
     # ------------------------------------------------------------------
     # DB persistence for HA recovery
@@ -378,6 +515,8 @@ class BatchCoordinator:
             deadline = time.monotonic() + timeout
 
             while not workers and time.monotonic() < deadline:
+                if self._cancelled:
+                    raise RuntimeError('Cancelled during worker discovery')
                 time.sleep(5)
                 workers = self._get_ready_workers()
                 if not workers:
@@ -459,7 +598,7 @@ class BatchCoordinator:
 
     def _generate_worker_startup_code(self) -> str:
         """Generate code to start the long-running worker service."""
-        job_id = str(self._managed_job_id)
+        job_id = self._run_id
         activate = self.activate_env.strip()
         activate_line = f'{activate} &&' if activate else ''
         sky_runtime = skylet_constants.SKY_REMOTE_PYTHON_ENV
@@ -828,13 +967,13 @@ class BatchCoordinator:
 
     def _reduce_results_and_cleanup(self) -> None:
         """Reduce per-batch results into the final output and clean up."""
-        job_id = str(self._managed_job_id)
+        run_id = self._run_id
         logger.info('Reducing results...')
         for fmt in self._output_formats:
             logger.info(f'Handling output format: {type(fmt).__name__}')
-            fmt.reduce_results(job_id)
+            fmt.reduce_results(run_id)
             logger.info(f'Results written to {fmt.path}')
-            fmt.cleanup(job_id)
+            fmt.cleanup(run_id)
             logger.info(f'Cleaned up temp files for {fmt.path}')
 
     # ------------------------------------------------------------------
@@ -846,7 +985,7 @@ class BatchCoordinator:
         output_formats = getattr(self, '_output_formats', [])
         if not output_formats:
             return
-        job_id = str(self._managed_job_id)
+        job_id = self._run_id
         logger.info(
             '\n'
             '============================================================\n'
