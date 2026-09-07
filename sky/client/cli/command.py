@@ -6656,9 +6656,9 @@ def _format_job_event_time(timestamp: Any) -> str:
               default=50,
               show_default=True,
               help=('Number of most recent events to show, after merging '
-                    'every source. The job\'s own status transitions always '
-                    'keep their place; the rest of the budget goes to the '
-                    'newest cluster events. 0 shows all.'))
+                    'every source. Neither the job\'s own transitions nor '
+                    'the cluster\'s launch progress can be crowded out '
+                    'entirely. 0 shows all.'))
 @click.option('--cluster-events/--no-cluster-events',
               default=True,
               show_default=True,
