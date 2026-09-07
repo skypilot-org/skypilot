@@ -463,8 +463,12 @@ def _execute_dag(
                 stages.remove(Stage.DOWN)
             if idle_minutes_to_autostop >= 0:
                 if down:
-                    requested_features.add(
-                        clouds.CloudImplementationFeatures.AUTODOWN)
+                    if not _is_launched_by_jobs_controller:
+                        requested_features.add(
+                            clouds.CloudImplementationFeatures.AUTODOWN)
+                    # Managed-job worker autodown is a best-effort leak
+                    # failsafe. It must not constrain cloud selection; support
+                    # is checked against the launched resources below.
                 else:
                     requested_features.add(
                         clouds.CloudImplementationFeatures.AUTOSTOP)
@@ -643,13 +647,39 @@ def _execute_dag(
             if idle_minutes_to_autostop is not None:
                 assert isinstance(backend, backends.CloudVmRayBackend)
                 assert isinstance(handle, backends.CloudVmRayResourceHandle)
-                backend.set_autostop(handle,
-                                     idle_minutes_to_autostop,
-                                     wait_for,
-                                     down,
-                                     hook=hook,
-                                     hook_timeout=hook_timeout,
-                                     hooks=hooks_payload)
+                set_autostop = True
+                if down and _is_launched_by_jobs_controller:
+                    launched_resources = (
+                        handle.launched_resources.assert_launchable())
+                    cloud = launched_resources.cloud
+                    assert cloud is not None
+                    try:
+                        cloud.check_features_are_supported(
+                            launched_resources,
+                            {clouds.CloudImplementationFeatures.AUTODOWN})
+                    except exceptions.NotSupportedError as e:
+                        # Worker autodown only guards against controller
+                        # failure; normal job completion tears down the
+                        # cluster. Do not reject or move an otherwise valid
+                        # worker solely to install this failsafe.
+                        set_autostop = False
+                        job_logger.debug(
+                            'Skipping managed-job worker autodown on '
+                            f'{cloud}: {common_utils.format_exception(e)}')
+                if set_autostop:
+                    backend.set_autostop(handle,
+                                         idle_minutes_to_autostop,
+                                         wait_for,
+                                         down,
+                                         hook=hook,
+                                         hook_timeout=hook_timeout,
+                                         hooks=hooks_payload)
+                elif hooks_payload is not None:
+                    # Autodown may be unsupported, but lifecycle hooks are
+                    # independent and still need to be persisted.
+                    kwargs = _compute_set_autostop_args_for_hooks_only_relaunch(
+                        handle.cluster_name, hooks_payload)
+                    backend.set_autostop(handle, **kwargs)
             elif hooks_payload is not None:
                 # Hooks can fire on preemption/down independent of
                 # autostop — persist them even when autostop is disabled.
