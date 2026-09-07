@@ -132,6 +132,12 @@ EMERGENCY_RECOVERY_BACKOFF_CAP_SECONDS = 30 * 60
 # the cluster forever.
 EMERGENCY_RECOVERY_RESET_WINDOW_SECONDS = 6 * 60 * 60
 
+# A job's final cleanup and bookkeeping retry transient DB errors in place,
+# backing off between attempts, until this budget is spent.
+JOB_FINALIZE_DB_RETRY_BACKOFF_BASE_SECONDS = 10
+JOB_FINALIZE_DB_RETRY_BACKOFF_CAP_SECONDS = 5 * 60
+JOB_FINALIZE_DB_RETRY_BUDGET_SECONDS = 60 * 60
+
 # Prefix used for service-account tokens issued to managed jobs that opt in
 # to api_server_access. The expired-token-cleanup daemon uses this prefix to
 # identify managed-job tokens that should be swept once their TTL passes.
