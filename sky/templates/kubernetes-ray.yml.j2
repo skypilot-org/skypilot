@@ -300,6 +300,9 @@ available_node_types:
             {% if k8s_kueue_local_queue_name %}
             kueue.x-k8s.io/queue-name: {{k8s_kueue_local_queue_name}}
             kueue.x-k8s.io/pod-group-name: {{cluster_name_on_cloud}}
+            {% if priority_class is not none %}
+            kueue.x-k8s.io/priority-class: {{priority_class|tojson}}
+            {% endif %}
             {% endif %}
         annotations:
           {% if k8s_rdma_networks is defined and k8s_rdma_networks is not none %}
