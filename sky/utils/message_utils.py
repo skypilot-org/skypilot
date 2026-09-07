@@ -61,21 +61,38 @@ def decode_payload(
         A tuple of (bool, Any). The bool indicates whether it is a payload
         string. The Any is the decoded payload, which is a str, dict or list.
     """
+    original_str = payload_str
     matched = _PAYLOAD_PATTERN.findall(payload_str)
     if not matched:
         if raise_for_mismatch:
-            raise ValueError(f'Invalid payload string: \n{payload_str}')
+            raise ValueError(f'Invalid payload string: \n{original_str}')
         else:
-            return False, payload_str
+            return False, original_str
 
-    for payload_type_str, payload_str in matched:
+    for payload_type_str, body_str in matched:
         if payload_type is None or payload_type == payload_type_str:
             if raise_for_mismatch:
-                return json.loads(payload_str)
-            else:
-                return True, json.loads(payload_str)
+                return json.loads(body_str)
+            try:
+                return True, json.loads(body_str)
+            except (json.JSONDecodeError, RecursionError):
+                # `raise_for_mismatch=False` asks "is this one of ours?", and
+                # for a body we cannot parse the answer is no. The log
+                # streamer classifies every line of a task's output this way,
+                # and that output is arbitrary text which can be
+                # payload-SHAPED by coincidence -- a task that echoes one of
+                # these tags is enough. Raising there escapes the streaming
+                # generator and truncates the response mid-body, so one such
+                # line silently cuts off the rest of the log. Hand the line
+                # back as content instead; it is what the task printed.
+                #
+                # RecursionError as well as JSONDecodeError: `json.loads`
+                # exceeds the recursion limit on deeply nested input rather
+                # than reporting bad syntax, and a line of brackets is no
+                # less likely to come out of a task than a line of prose.
+                return False, original_str
 
     if raise_for_mismatch:
-        raise ValueError(f'Invalid payload string: \n{payload_str}')
+        raise ValueError(f'Invalid payload string: \n{original_str}')
     else:
-        return False, payload_str
+        return False, original_str

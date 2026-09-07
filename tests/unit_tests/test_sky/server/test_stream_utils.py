@@ -1,4 +1,6 @@
 """Tests for request log streaming."""
+import json
+
 import aiofiles
 import pytest
 
@@ -242,3 +244,78 @@ async def test_a_deleted_log_ends_the_stream_with_a_message(tmp_path):
 
     assert len(chunks) == 1
     assert 'no longer available' in chunks[0]
+
+
+# A line a task printed that happens to carry our own tags, with a body that
+# is not JSON. Nothing stops a task from echoing these -- a test fixture, a
+# log-processing tool, or a task that cats another SkyPilot log.
+_PAYLOAD_SHAPED_LINE = ('epoch 3 <sky-payload type="x">'
+                        '<rich_update>Waiting...</rich_update></sky-payload>')
+
+
+def test_a_payload_shaped_task_line_is_not_a_payload():
+    """`raise_for_mismatch=False` asks a question; it must answer, not raise.
+
+    The body is unparseable, so the honest answer is "not ours", and the line
+    must come back whole -- it is the task's own output.
+    """
+    is_payload, decoded = message_utils.decode_payload(_PAYLOAD_SHAPED_LINE,
+                                                       raise_for_mismatch=False)
+
+    assert is_payload is False
+    assert decoded == _PAYLOAD_SHAPED_LINE
+
+
+def test_a_strict_caller_still_rejects_an_unparseable_payload():
+    """The other callers parse SkyPilot's own protocol output from remote
+    commands, where an unparseable body IS an error. Only the classifying
+    path was loosened.
+    """
+    with pytest.raises(json.JSONDecodeError):
+        message_utils.decode_payload(_PAYLOAD_SHAPED_LINE)
+
+
+@pytest.mark.asyncio
+async def test_one_payload_shaped_line_does_not_truncate_the_stream(tmp_path):
+    """The regression: it cut the log off, it did not just mangle a line.
+
+    Classifying every line used to raise on this one, and the exception
+    escaped the streaming generator -- so the response ended mid-body and
+    everything after the line was silently lost. Downloads are where it bit:
+    a tail of the last N lines usually skips past it, a whole-file read
+    cannot.
+    """
+    log = tmp_path / 'rid.log'
+    log.write_text('before\n' + _PAYLOAD_SHAPED_LINE + '\nafter\n')
+
+    chunks = [
+        chunk async for chunk in stream_utils.log_streamer(
+            None, log, plain_logs=True, follow=False)
+    ]
+    streamed = ''.join(chunks)
+
+    assert 'before' in streamed
+    assert 'after' in streamed, 'the stream stopped at the payload-shaped line'
+    assert _PAYLOAD_SHAPED_LINE in streamed, 'the task wrote it; show it'
+
+
+def test_no_parse_failure_escapes_the_classifier(monkeypatch):
+    """Bad syntax is not the only way `json.loads` fails.
+
+    Deeply nested input raises RecursionError instead of JSONDecodeError, and
+    a line of brackets is no less likely to come out of a task than a line of
+    prose. The depth at which that happens is interpreter-specific, so the
+    failure is injected rather than provoked with a magic number -- what is
+    being pinned is that NO parse failure escapes, not one exception type.
+    """
+
+    def _boom(_):
+        raise RecursionError('maximum recursion depth exceeded')
+
+    monkeypatch.setattr(json, 'loads', _boom)
+
+    is_payload, decoded = message_utils.decode_payload(_PAYLOAD_SHAPED_LINE,
+                                                       raise_for_mismatch=False)
+
+    assert is_payload is False
+    assert decoded == _PAYLOAD_SHAPED_LINE
