@@ -3,7 +3,7 @@ import collections
 import random
 import threading
 import typing
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 from sky import sky_logging
 
@@ -72,6 +72,12 @@ class LoadBalancingPolicy:
     # compatible with all frameworks.
     def _select_replica(self, request: 'fastapi.Request') -> Optional[str]:
         raise NotImplementedError
+
+    def begin_request(self, replica_url: str,
+                      request: 'fastapi.Request') -> Callable[[], None]:
+        """Begin request accounting and return a release callback."""
+        del replica_url, request
+        return lambda: None
 
     def pre_execute_hook(self, replica_url: str,
                          request: 'fastapi.Request') -> None:
@@ -149,6 +155,20 @@ class LeastLoadPolicy(LoadBalancingPolicy, name='least_load', default=True):
                 if self.load_map.get(replica, 0) == min_load
             ]
             return self._select_tied_replica(tied_replicas)
+
+    def begin_request(self, replica_url: str,
+                      request: 'fastapi.Request') -> Callable[[], None]:
+        self.pre_execute_hook(replica_url, request)
+        load_released = False
+
+        def release_load() -> None:
+            nonlocal load_released
+            if load_released:
+                return
+            load_released = True
+            self.post_execute_hook(replica_url, request)
+
+        return release_load
 
     def _select_tied_replica(self, replicas: List[str]) -> str:
         """Select among tied replicas without favoring the first one.
