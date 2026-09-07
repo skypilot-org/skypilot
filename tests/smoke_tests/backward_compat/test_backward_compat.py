@@ -112,6 +112,12 @@ class TestBackwardCompatibility:
                           check=False).returncode != 0:
             raise Exception('uv not found')
 
+        # Repository to clone the base version from. Overridable for CI
+        # harnesses whose base ref only exists on a fork/mirror.
+        base_clone_url = os.environ.get(
+            'SKY_BACKCOMPAT_BASE_CLONE_URL',
+            'https://github.com/skypilot-org/skypilot.git')
+
         # Clone base SkyPilot version
         if self.BASE_SKY_DIR.exists():
             self._run_cmd(f'rm -rf {self.BASE_SKY_DIR}')
@@ -128,9 +134,7 @@ class TestBackwardCompatibility:
 
             if self._is_git_sha(base_branch):
                 # For git SHA, clone first, fetch the specific commit, then checkout
-                self._run_cmd(
-                    f'git clone https://github.com/skypilot-org/skypilot.git {self.BASE_SKY_DIR}'
-                )
+                self._run_cmd(f'git clone {base_clone_url} {self.BASE_SKY_DIR}')
                 self._run_cmd(
                     f'cd {self.BASE_SKY_DIR} && '
                     f'git fetch -v --prune -- origin {base_branch} && '
@@ -139,8 +143,7 @@ class TestBackwardCompatibility:
                 # For branch names, use -b flag
                 self._run_cmd(
                     f'git clone -b {base_branch} '
-                    f'https://github.com/skypilot-org/skypilot.git {self.BASE_SKY_DIR}',
-                )
+                    f'{base_clone_url} {self.BASE_SKY_DIR}',)
 
         # Create and set up virtual environments using uv
         for env_dir in [self.BASE_ENV_DIR, self.CURRENT_ENV_DIR]:
@@ -173,6 +176,14 @@ class TestBackwardCompatibility:
             # pins `kubernetes<36.0.0`.
             'uv pip install "kubernetes<36.0.0"')
 
+        # Extra packages the API server under test needs beyond SkyPilot
+        # itself (e.g. server plugins listed in ~/.sky/plugins.yaml, which
+        # would otherwise fail server startup with an import error). Each
+        # hook is a shell command run with the corresponding env activated.
+        base_extra_install = os.environ.get('SKY_BACKCOMPAT_BASE_EXTRA_INSTALL')
+        if base_extra_install:
+            self._run_cmd(f'{self.ACTIVATE_BASE} && {base_extra_install}')
+
         # Hot-patch old env with me-south-1 fix (PR #9240 + #9244).
         # Old SkyPilot versions lack ConnectionError/ReadTimeoutError handling
         # in _get_availability_zones(), causing ThreadPool crashes when
@@ -204,6 +215,11 @@ class TestBackwardCompatibility:
             # note above.
             'uv pip install --prerelease=allow "azure-cli>=2.65.0,<2.87.0" && '
             'uv pip install -e .[all]',)
+
+        current_extra_install = os.environ.get(
+            'SKY_BACKCOMPAT_CURRENT_EXTRA_INSTALL')
+        if current_extra_install:
+            self._run_cmd(f'{self.ACTIVATE_CURRENT} && {current_extra_install}')
 
         base_sky_api_version = subprocess.run(
             f'{self.ACTIVATE_BASE} && python -c "'
