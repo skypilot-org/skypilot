@@ -299,18 +299,23 @@ async def test_one_payload_shaped_line_does_not_truncate_the_stream(tmp_path):
     assert _PAYLOAD_SHAPED_LINE in streamed, 'the task wrote it; show it'
 
 
-def test_no_parse_failure_escapes_the_classifier(monkeypatch):
+@pytest.mark.parametrize('exc', [
+    ValueError('Exceeds the limit (4300 digits) for integer string conversion'),
+    RecursionError('maximum recursion depth exceeded'),
+])
+def test_no_parse_failure_escapes_the_classifier(monkeypatch, exc):
     """Bad syntax is not the only way `json.loads` fails.
 
-    Deeply nested input raises RecursionError instead of JSONDecodeError, and
-    a line of brackets is no less likely to come out of a task than a line of
-    prose. The depth at which that happens is interpreter-specific, so the
-    failure is injected rather than provoked with a magic number -- what is
-    being pinned is that NO parse failure escapes, not one exception type.
+    Deeply nested input exceeds the recursion limit, and since 3.11 an integer
+    longer than `sys.get_int_max_str_digits()` raises a plain ValueError -- a
+    long digit string is no less likely to come out of a task than a line of
+    prose. Both thresholds are interpreter- and configuration-specific, so the
+    failure is injected rather than provoked with a magic number: what is
+    pinned is that NO parse failure escapes, not any one exception type.
     """
 
     def _boom(_):
-        raise RecursionError('maximum recursion depth exceeded')
+        raise exc
 
     monkeypatch.setattr(json, 'loads', _boom)
 

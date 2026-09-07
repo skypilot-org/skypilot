@@ -75,7 +75,7 @@ def decode_payload(
                 return json.loads(body_str)
             try:
                 return True, json.loads(body_str)
-            except (json.JSONDecodeError, RecursionError):
+            except (ValueError, RecursionError):
                 # `raise_for_mismatch=False` asks "is this one of ours?", and
                 # for a body we cannot parse the answer is no. The log
                 # streamer classifies every line of a task's output this way,
@@ -86,10 +86,14 @@ def decode_payload(
                 # line silently cuts off the rest of the log. Hand the line
                 # back as content instead; it is what the task printed.
                 #
-                # RecursionError as well as JSONDecodeError: `json.loads`
-                # exceeds the recursion limit on deeply nested input rather
-                # than reporting bad syntax, and a line of brackets is no
-                # less likely to come out of a task than a line of prose.
+                # Broad on purpose: the contract is that NO parse failure
+                # escapes, and enumerating the ways `json.loads` fails is a
+                # losing game. Bad syntax raises JSONDecodeError (a
+                # ValueError); deeply nested input exceeds the recursion
+                # limit; and since 3.11 an integer of more than
+                # `sys.get_int_max_str_digits()` digits raises a plain
+                # ValueError. A line of brackets or a long digit string is
+                # no less likely to come out of a task than a line of prose.
                 return False, original_str
 
     if raise_for_mismatch:
