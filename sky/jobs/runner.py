@@ -45,6 +45,7 @@ class ManagedJobRunner(Protocol):
         workspace_match: Optional[str],
         name_match: Optional[str],
         pool_match: Optional[str],
+        infra_match: Optional[str],
         page: Optional[int],
         limit: Optional[int],
         user_hashes: Optional[List[Optional[str]]],
@@ -55,8 +56,8 @@ class ManagedJobRunner(Protocol):
         submitted_after: Optional[float],
         submitted_before: Optional[float],
     ) -> Tuple[List[Dict[str, Any]], int,
-               'managed_job_utils.ManagedJobQueueResultType', int, Dict[str,
-                                                                        int]]:
+               'managed_job_utils.ManagedJobQueueResultType', int, Dict[
+                   str, int], List[str]]:
         ...
 
     def cancel_managed_jobs(

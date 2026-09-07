@@ -3,6 +3,8 @@
 import asyncio
 import contextlib
 import datetime
+import shlex
+import textwrap
 import time
 from unittest import mock
 
@@ -12,6 +14,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.ext.asyncio import create_async_engine
 
 from sky.jobs import state
+from sky.jobs import utils as jobs_utils
 from sky.skylet import constants
 
 
@@ -1487,3 +1490,273 @@ class TestGetLatestRecoveryAndPendingReasons:
                                                                           [1])
         assert recovery == {}
         assert pending == {1: 'Job is in backoff'}
+
+
+@pytest.fixture
+def _seed_infra_jobs(_mock_managed_jobs_db_conn):
+    """Seed RUNNING jobs spread across clouds, regions and zones.
+
+    `gke-lookalike` differs from `gke` only where the latter has an underscore,
+    so a spec typed with that underscore can tell a literal match apart from a
+    LIKE wildcard.
+    """
+
+    async def mock_callback(status: str):
+        pass
+
+    infras = {
+        'slurm-gpu': ('Slurm', 'prod-gpu', None),
+        'slurm-cpu': ('Slurm', 'prod-cpu', None),
+        'gke': ('Kubernetes', 'gke_sky-dev_us-central1-c_alpha', None),
+        'gke-lookalike':
+            ('Kubernetes', 'gkeXsky-dev_us-central1-c_alpha', None),
+        'nested-ctx': ('Kubernetes', 'team/ctx', None),
+        'aws': ('AWS', 'us-east-1', 'us-east-1a'),
+        'ssh-pool': ('SSH', 'ssh-my-pool', None),
+    }
+
+    async def create_job_states():
+        ids = {}
+        for key, (cloud, region, zone) in infras.items():
+            job_id = state.set_job_info_without_job_id(name=f'job-{key}',
+                                                       workspace='ws1',
+                                                       entrypoint='ep',
+                                                       pool=None,
+                                                       pool_hash=None,
+                                                       user_hash='user1')
+            state.set_pending(job_id,
+                              task_id=0,
+                              task_name='task0',
+                              resources_str='{}',
+                              metadata='{}')
+            state.scheduler_set_waiting([job_id], f'/tmp/dag-{key}.yaml',
+                                        f'/tmp/user-{key}.yaml',
+                                        f'/tmp/env-{key}', None, 100)
+            await state.set_starting_async(job_id, 0, f'run-{key}', 100.0, '{}',
+                                           {}, mock_callback)
+            await state.set_started_async(job_id, 0, 100.0, mock_callback)
+            state.set_job_infra(job_id, cloud=cloud, region=region, zone=zone)
+            ids[key] = job_id
+
+        # A job that never launched: no cloud, no region, no zone.
+        job_id = state.set_job_info_without_job_id(name='job-unplaced',
+                                                   workspace='ws1',
+                                                   entrypoint='ep',
+                                                   pool=None,
+                                                   pool_hash=None,
+                                                   user_hash='user1')
+        state.set_pending(job_id,
+                          task_id=0,
+                          task_name='task0',
+                          resources_str='{}',
+                          metadata='{}')
+        ids['unplaced'] = job_id
+        return ids
+
+    loop = asyncio.new_event_loop()
+    try:
+        return loop.run_until_complete(create_job_states())
+    finally:
+        loop.close()
+
+
+class TestInfraFilter:
+    """`infra_match`: the `--infra` spec, pushed down to SQL."""
+
+    def _names(self, jobs):
+        return sorted({job['job_name'] for job in jobs})
+
+    def _match(self, spec):
+        jobs, total = state.get_managed_jobs_with_filters(infra_match=spec)
+        return self._names(jobs), total
+
+    def test_bare_cloud(self, _seed_infra_jobs):
+        names, total = self._match('slurm')
+        assert names == ['job-slurm-cpu', 'job-slurm-gpu']
+        assert total == 2
+
+    def test_k8s_alias_matches_kubernetes(self, _seed_infra_jobs):
+        by_alias, _ = self._match('k8s')
+        by_name, _ = self._match('kubernetes')
+        assert by_alias == by_name
+        assert 'job-gke' in by_alias
+
+    def test_cloud_and_region(self, _seed_infra_jobs):
+        assert self._match('slurm/prod-gpu')[0] == ['job-slurm-gpu']
+
+    def test_region_matches_by_prefix(self, _seed_infra_jobs):
+        # Half-typed, as the dashboard filter box is typed into.
+        assert self._match('slurm/prod')[0] == [
+            'job-slurm-cpu', 'job-slurm-gpu'
+        ]
+
+    def test_region_is_a_prefix_not_a_substring(self, _seed_infra_jobs):
+        # `gpu` names no region here: it only appears mid-string.
+        assert self._match('slurm/gpu')[0] == []
+
+    def test_zone_is_its_own_component(self, _seed_infra_jobs):
+        assert self._match('aws/us-east-1/us-east-1a')[0] == ['job-aws']
+        assert self._match('aws/us-east-1/us-west-2b')[0] == []
+
+    def test_wildcard_widens_one_component(self, _seed_infra_jobs):
+        assert self._match('slurm/*')[0] == ['job-slurm-cpu', 'job-slurm-gpu']
+        assert self._match('*/prod-gpu')[0] == ['job-slurm-gpu']
+        # A wildcard widens a component, not the whole spec.
+        assert self._match('aws/*')[0] == ['job-aws']
+
+    def test_kubernetes_context_keeps_its_slash(self, _seed_infra_jobs):
+        assert self._match('k8s/team/ctx')[0] == ['job-nested-ctx']
+
+    def test_ssh_pool_is_named_without_its_prefix(self, _seed_infra_jobs):
+        # `from_str` re-attaches the `ssh-` the context is stored under.
+        assert self._match('ssh/my-pool')[0] == ['job-ssh-pool']
+
+    def test_underscore_is_literal_not_a_wildcard(self, _seed_infra_jobs):
+        # Without LIKE escaping this would also match `gkeXsky-dev...`.
+        assert self._match('k8s/gke_sky-dev')[0] == ['job-gke']
+
+    def test_case_insensitive_on_both_sides(self, _seed_infra_jobs):
+        assert self._match('SLURM/PROD-GPU')[0] == ['job-slurm-gpu']
+
+    def test_unplaced_job_matches_no_infra(self, _seed_infra_jobs):
+        # A job that never launched has no cloud, so it cannot be on one.
+        for spec in ('slurm', 'kubernetes', '*/prod-gpu'):
+            assert 'job-unplaced' not in self._match(spec)[0]
+
+    def test_no_filter_returns_everything(self, _seed_infra_jobs):
+        assert self._match(None)[1] == 8
+
+    def test_total_counts_only_the_matches(self, _seed_infra_jobs):
+        # The point of pushing the filter down: `total` is the filtered total,
+        # so the page count the dashboard renders is the matching one.
+        jobs, total = state.get_managed_jobs_with_filters(infra_match='slurm',
+                                                          page=1,
+                                                          limit=1)
+        assert len(jobs) == 1
+        assert total == 2
+
+    def test_status_counts_inherit_the_filter(self, _seed_infra_jobs):
+        # Shared query builder, so the status pills narrow with the table.
+        assert state.get_status_count_with_filters(infra_match='slurm') == {
+            'RUNNING': 2
+        }
+
+    def test_malformed_spec_is_rejected(self, _seed_infra_jobs):
+        with pytest.raises(ValueError, match='Invalid infra format'):
+            state.get_managed_jobs_with_filters(infra_match='aws//us-east-1')
+
+
+class TestInfraOptions:
+    """The values the dashboard's Infra filter offers, computed in SQL.
+
+    They have to be `--infra` specs, because that is what the filter is
+    matched as, and they have to describe the whole selected queue rather
+    than one page of it -- that is the reason they are computed here at all.
+    """
+
+    def test_names_every_infra_in_the_queue(self, _seed_infra_jobs):
+        assert state.get_infra_options_with_filters() == [
+            'aws/us-east-1',
+            'kubernetes/gkeXsky-dev_us-central1-c_alpha',
+            'kubernetes/gke_sky-dev_us-central1-c_alpha',
+            'kubernetes/team/ctx',
+            'slurm/prod-cpu',
+            'slurm/prod-gpu',
+            'ssh/my-pool',
+        ]
+
+    def test_every_option_round_trips_as_a_filter(self, _seed_infra_jobs):
+        # The point of the pairing: an option handed straight back as the
+        # filter has to select a non-empty result.
+        for option in state.get_infra_options_with_filters():
+            jobs, total = state.get_managed_jobs_with_filters(
+                infra_match=option)
+            assert jobs, option
+            assert total > 0, option
+
+    def test_ssh_pool_is_named_without_its_prefix(self, _seed_infra_jobs):
+        # `ssh-my-pool` is the stored context; `ssh/my-pool` is what a user
+        # types, and what `InfraInfo.from_str` turns back into the context.
+        options = state.get_infra_options_with_filters()
+        assert 'ssh/my-pool' in options
+        assert 'ssh/ssh-my-pool' not in options
+
+    def test_a_zone_never_narrows_an_option(self, _seed_infra_jobs):
+        # The AWS job has a zone, but the option stops at the region: the
+        # region matches by prefix, so a zone would only select less.
+        assert 'aws/us-east-1' in state.get_infra_options_with_filters()
+        assert 'aws/us-east-1/us-east-1a' not in (
+            state.get_infra_options_with_filters())
+
+    def test_unplaced_job_contributes_nothing(self, _seed_infra_jobs):
+        # `job-unplaced` never launched, so it has no infra to offer.
+        assert all(option for option in state.get_infra_options_with_filters())
+        assert len(state.get_infra_options_with_filters()) == 7
+
+    def test_other_filters_narrow_the_options(self, _seed_infra_jobs):
+        # An option always names a non-empty result, so a filter that
+        # excludes an infra has to drop it from the list too.
+        assert state.get_infra_options_with_filters(name_match='job-slurm') == [
+            'slurm/prod-cpu', 'slurm/prod-gpu'
+        ]
+
+    def test_an_inaccessible_workspace_hides_its_infra(self, _seed_infra_jobs):
+        assert state.get_infra_options_with_filters(
+            accessible_workspaces=['other-ws']) == []
+
+
+class TestInfraFilterCodegenCompatibility:
+    """The generated queue code against a controller that predates `infra_match`.
+
+    The kwarg cannot be passed to a controller whose `dump_managed_job_queue`
+    has no such parameter -- it raises TypeError there and breaks the queue for
+    every caller, not just the ones filtering. So the branch that passes it has
+    to be keyed on the same version the guard is.
+    """
+
+    def _run_branch(self, built: str, version: int):
+        """Execute the version branch of the generated code with a stub.
+
+        `built` is the shell command the codegen returns, so the Python source
+        is its last token. Returns the kwargs the generated code would hand
+        the controller.
+        """
+        code = shlex.split(built)[-1]
+        start = code.index('_infra_match = ')
+        end = code.index('print(job_table')
+        branch = textwrap.dedent(code[start:end])
+        captured = {}
+
+        class _Utils:
+
+            @staticmethod
+            def dump_managed_job_queue(**kwargs):
+                captured.update(kwargs)
+                return '{}'
+
+        exec(  # pylint: disable=exec-used
+            branch, {
+                'utils': _Utils,
+                'managed_job_version': version
+            })
+        return captured
+
+    def test_old_controller_is_not_handed_the_kwarg(self):
+        code = jobs_utils.ManagedJobCodeGen.get_job_table()
+        one_older = jobs_utils.INFRA_FILTER_MANAGED_JOBS_VERSION - 1
+        kwargs = self._run_branch(code, one_older)
+        assert 'infra_match' not in kwargs, (
+            f'a v{one_older} controller would get a kwarg it does not accept')
+
+    def test_new_controller_is_handed_the_kwarg(self):
+        code = jobs_utils.ManagedJobCodeGen.get_job_table(infra_match='aws')
+        kwargs = self._run_branch(code,
+                                  jobs_utils.INFRA_FILTER_MANAGED_JOBS_VERSION)
+        assert kwargs['infra_match'] == 'aws'
+
+    def test_old_controller_refuses_an_infra_filter(self):
+        code = jobs_utils.ManagedJobCodeGen.get_job_table(infra_match='aws')
+        one_older = jobs_utils.INFRA_FILTER_MANAGED_JOBS_VERSION - 1
+        with pytest.raises(RuntimeError,
+                           match=jobs_utils.INFRA_FILTER_UNSUPPORTED_MARKER):
+            self._run_branch(code, one_older)
