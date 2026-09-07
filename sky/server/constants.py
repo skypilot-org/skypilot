@@ -43,6 +43,12 @@ MIN_API_ACCESS_API_VERSION = 42
 # Minimum API version that supports the SSH redirect first-frame protocol.
 MIN_SSH_REDIRECT_PROTOCOL_VERSION = 47
 
+# Minimum server API version that supports filtering the managed jobs queue by
+# infra (`infra_match`, surfaced as the CLI `--infra` flag and the dashboard's
+# Infra filter). An older server drops the field and answers with jobs on every
+# infra, so the client refuses to ask rather than mislabel that as filtered.
+MIN_JOBS_INFRA_FILTER_API_VERSION = 58
+
 # Minimum API version that supports Sky Batch (sky.batch module).
 MIN_BATCH_API_VERSION = 49
 
