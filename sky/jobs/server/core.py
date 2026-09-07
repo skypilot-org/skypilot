@@ -2006,8 +2006,8 @@ def get_job_events(
     # transitioned_at is a UTC epoch, so fromtimestamp(tz=...) yields the
     # correct instant in whichever timezone the job events use.
     tz = events[0]['timestamp'].tzinfo if events else None
-    for cluster_event, cluster_task_id in cluster_events:
-        events.append({
+    converted = [
+        {
             'spot_job_id': job_id,
             'task_id': cluster_task_id,
             # These happen while the job is launching its cluster.
@@ -2016,11 +2016,21 @@ def get_job_events(
             'reason': cluster_event['reason'],
             'timestamp': datetime.datetime.fromtimestamp(
                 cluster_event['transitioned_at'], tz=tz),
-        })
+        } for cluster_event, cluster_task_id in cluster_events
+    ]
 
     # Every event's 'timestamp' is a datetime (job events from the DB, cluster
     # events converted above). datetime.timestamp() gives a comparable epoch.
-    events.sort(key=lambda event: event['timestamp'].timestamp(), reverse=True)
-    if limit is not None:
-        events = events[:limit]
-    return events
+    def _newest_first(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        return sorted(rows,
+                      key=lambda event: event['timestamp'].timestamp(),
+                      reverse=True)
+
+    if limit is None:
+        return _newest_first(events + converted)
+    # The job's own transitions win the budget: one launch can produce more
+    # cluster events than `limit`, and dropping the oldest rows would hide
+    # the PENDING -> STARTING -> RUNNING sequence the timeline is read for.
+    # The job events were already limited by the query above.
+    room = max(limit - len(events), 0)
+    return _newest_first(events + _newest_first(converted)[:room])[:limit]

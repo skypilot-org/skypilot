@@ -6656,7 +6656,9 @@ def _format_job_event_time(timestamp: Any) -> str:
               default=50,
               show_default=True,
               help=('Number of most recent events to show, after merging '
-                    'every source. 0 shows all.'))
+                    'every source. The job\'s own status transitions always '
+                    'keep their place; the rest of the budget goes to the '
+                    'newest cluster events. 0 shows all.'))
 @click.option('--cluster-events/--no-cluster-events',
               default=True,
               show_default=True,
@@ -6706,7 +6708,7 @@ def jobs_events(job_id: int, task: Optional[str], limit: int,
         task=task,
         limit=None if limit == 0 else limit,
         include_cluster_events=cluster_events,
-        warn_if_unsupported=(source is not click.core.ParameterSource.DEFAULT),
+        explicitly_requested=(source is not click.core.ParameterSource.DEFAULT),
     )
     events = sdk.stream_and_get(request_id)
     # The server serializes statuses as plain strings; normalize in case a
@@ -6721,18 +6723,27 @@ def jobs_events(job_id: int, task: Optional[str], limit: int,
     if not events:
         click.echo(f'No events found for managed job {job_id}.')
         return
-    # `code` is omitted: it is only ever set for a few enterprise failure
-    # categories, so the column would be empty for almost every job. It is
-    # still in the JSON output.
-    table = log_utils.create_table(['TIME', 'TASK', 'STATUS', 'REASON'])
+    # CODE is the machine-readable failure category (e.g. USER_JOB_FAILURE on
+    # a FAILED event) and is null for every event of a job that never failed,
+    # so the column appears only when something set it. It is always in the
+    # JSON output.
+    show_code = any(event.get('code') for event in events)
+    columns = ['TIME', 'TASK', 'STATUS']
+    if show_code:
+        columns.append('CODE')
+    columns.append('REASON')
+    table = log_utils.create_table(columns)
     for event in events:
         task_id = event.get('task_id')
-        table.add_row([
+        row = [
             _format_job_event_time(event.get('timestamp')),
             '-' if task_id is None else task_id,
             event.get('new_status') or '-',
-            event.get('reason') or '-',
-        ])
+        ]
+        if show_code:
+            row.append(event.get('code') or '-')
+        row.append(event.get('reason') or '-')
+        table.add_row(row)
     click.echo(f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
                f'Events for managed job {job_id}{colorama.Style.RESET_ALL}\n'
                f'{table}')

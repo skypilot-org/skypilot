@@ -57,9 +57,11 @@ Events are newest first. A healthy job reads (bottom to top)
   not fix it.
 - A long gap between `STARTING` and `RUNNING` is provisioning time; the
   merged cluster events say what the cluster was waiting on.
-- `reason` is the human text. `-o json` also carries `code`, a short tag set
-  only for a few enterprise failure categories, and `task_id`, which tells
-  apart the tasks of a job group.
+- `reason` is the human text. `code` is the machine-readable failure
+  category, e.g. `USER_JOB_FAILURE` on a FAILED event, which separates the
+  user's program failing from an infrastructure failure; the table shows the
+  column only when some event has one. `-o json` always carries `code` and
+  `task_id`, which tells apart the tasks of a job group.
 
 Pass a task to narrow the timeline: `sky jobs events N train` or
 `sky jobs events N 0`, exactly like `sky jobs logs`. Job-level events are

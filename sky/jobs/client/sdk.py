@@ -29,6 +29,7 @@ from sky.utils import common_utils
 from sky.utils import context
 from sky.utils import dag_utils
 from sky.utils import rich_utils
+from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
     import io
@@ -626,7 +627,8 @@ def events(
     task: Optional[Union[str, int]] = None,
     limit: Optional[int] = 50,
     include_cluster_events: bool = False,
-    warn_if_unsupported: bool = False,
+    *,
+    explicitly_requested: bool = False,
 ) -> server_common.RequestId[List[Dict[str, Any]]]:
     """Gets the status-transition events of a managed job.
 
@@ -646,10 +648,10 @@ def events(
             Requires API server version 54 or newer; ignored otherwise. An
             older server silently drops the field rather than failing, hence
             the client-side check.
-        warn_if_unsupported: Log a warning, rather than a debug line, when
-            include_cluster_events cannot be honored. Set this when the
-            caller asked for the merge explicitly (e.g. a CLI flag) so the
-            message is not noise for callers taking the default.
+        explicitly_requested: Whether the caller chose
+            include_cluster_events rather than taking the default. A server
+            too old to honor it is then reported as a warning instead of a
+            debug line, so the notice is not noise for default callers.
 
     Returns:
         The request ID of the events request. The result is a list of event
@@ -659,6 +661,23 @@ def events(
     if limit is not None and limit < 0:
         raise ValueError(f'limit must be None or non-negative, got {limit}.')
     remote_api_version = versions.get_remote_api_version()
+    # `task` is resolved server-side and was added in API version 58. An
+    # older server ignores the field (RequestBody drops unknown keys), which
+    # would silently return every task's events. An id needs no resolution,
+    # so send it as `task_id`, honored since the endpoint existed; a name
+    # cannot be resolved without the server, so say so instead.
+    task_id: Optional[int] = None
+    if task is not None and (remote_api_version is None or
+                             remote_api_version < 58):
+        if isinstance(task, int) or task.isdigit():
+            task_id = int(task)
+            task = None
+        else:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    'Filtering job events by task name requires an API '
+                    f'server on version 58 or newer (got {remote_api_version}'
+                    '). Pass the task id instead.')
     # The merge landed without an API_VERSION bump, so 53 does not imply
     # support; 54 is the first version that guarantees it. Checked here rather
     # than in the caller: the remote version is only known once the server has
@@ -667,7 +686,7 @@ def events(
                                    remote_api_version < 54):
         message = ('Cluster events are not available: the API server is '
                    'older than version 54. Showing job events only.')
-        if warn_if_unsupported:
+        if explicitly_requested:
             logger.warning(message)
         else:
             logger.debug(message)
@@ -675,6 +694,7 @@ def events(
     body = payloads.GetJobEventsBody(
         job_id=job_id,
         task=task,
+        task_id=task_id,
         limit=limit,
         include_cluster_events=include_cluster_events,
     )

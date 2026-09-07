@@ -104,12 +104,16 @@ def test_merge_orders_newest_first_and_truncates(monkeypatch):
         global_user_state.ClusterEventType.STATUS_CHANGE,
         global_user_state.ClusterEventType.LAUNCH_PROGRESS,
     })
-    # Newest first, truncated to limit=3 (drops the oldest 'Job is starting').
+    # Newest first, capped at limit=3. The job's own two transitions keep
+    # their place and the remaining slot goes to the newest cluster event:
+    # a launch can emit more cluster events than the limit, and losing the
+    # job's status sequence to them is the worse failure (see
+    # test_limit_never_starves_the_job_own_timeline).
     reasons = [e['reason'] for e in result]
     assert reasons == [
         'Job has started',
         'Launching (1 pod(s) pending due to Pulling)',
-        'Launching (Kubernetes cluster is autoscaling)',
+        'Job is starting',
     ]
     # Merged cluster events are tagged as STARTING-phase events, and carry
     # the task whose cluster produced them (this used to be hard-coded None,
@@ -324,3 +328,41 @@ class TestResolveTaskId:
                             lambda job_id: [])
         with pytest.raises(ValueError, match='Managed job 7 not found'):
             core._resolve_task_id(7, 'train')
+
+
+def test_limit_never_starves_the_job_own_timeline(monkeypatch):
+    """A chatty launch must not push PENDING/STARTING out of the window.
+
+    The merged list is capped at `limit`, and the cluster side can produce
+    more events than that on its own; the job's transitions are the sequence
+    the timeline is read for, so they keep their place.
+    """
+    job_events = [
+        _job_event('Job submitted to queue',
+                   managed_job_state.ManagedJobStatus.PENDING, 100),
+        _job_event('Job is starting',
+                   managed_job_state.ManagedJobStatus.STARTING, 110),
+    ]
+    monkeypatch.setattr(managed_job_state, 'get_job_events',
+                        lambda **kwargs: list(job_events))
+    monkeypatch.setattr(managed_job_state, 'get_managed_job_tasks',
+                        lambda job_id: [_task()])
+    # 20 cluster events, all newer than the job's own two.
+    monkeypatch.setattr(global_user_state,
+                        'get_cluster_events_by_name',
+                        lambda name, event_types, limit=None: [{
+                            'reason': f'Launching (step {i})',
+                            'transitioned_at': 200 + i
+                        } for i in range(20)][:limit or 20])
+
+    result = core.get_job_events(job_id=1, limit=5, include_cluster_events=True)
+    assert len(result) == 5
+    reasons = [event['reason'] for event in result]
+    # Both job events survive; the rest of the budget goes to the newest
+    # cluster events.
+    assert 'Job submitted to queue' in reasons
+    assert 'Job is starting' in reasons
+    assert sum(1 for r in reasons if r.startswith('Launching')) == 3
+    # Still newest-first overall.
+    stamps = [event['timestamp'].timestamp() for event in result]
+    assert stamps == sorted(stamps, reverse=True)

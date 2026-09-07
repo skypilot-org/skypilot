@@ -31,7 +31,7 @@ _EVENTS = [
         'spot_job_id': 42,
         'task_id': None,
         'new_status': job_state.ManagedJobStatus.PENDING,
-        'code': 'SUBMITTED',
+        'code': None,
         'reason': 'Job is submitted',
         'timestamp': '2026-09-07T10:00:00+00:00',
     },
@@ -65,7 +65,7 @@ class TestJobsEventsCli:
                                             task=None,
                                             limit=50,
                                             include_cluster_events=True,
-                                            warn_if_unsupported=False)
+                                            explicitly_requested=False)
 
     def test_table_output_shows_reason_and_status(self):
         result, _ = self._invoke(['42'])
@@ -73,9 +73,7 @@ class TestJobsEventsCli:
         assert 'Events for managed job 42' in result.output
         assert 'QOSGrpGRES' in result.output
         assert 'PENDING' in result.output
-        # `code` is not a column any more: it is set for a few enterprise
-        # failure categories only, so it would be empty for nearly every job.
-        assert 'SUBMITTED' not in result.output
+        # CODE appears only when an event carries one; these two do not.
         assert 'CODE' not in result.output
 
     def test_task_is_positional_like_jobs_logs(self):
@@ -90,7 +88,7 @@ class TestJobsEventsCli:
                                             task='1',
                                             limit=None,
                                             include_cluster_events=True,
-                                            warn_if_unsupported=False)
+                                            explicitly_requested=False)
 
     def test_no_cluster_events_opts_out(self):
         result, mock_events = self._invoke(['42', '--no-cluster-events'])
@@ -102,12 +100,28 @@ class TestJobsEventsCli:
         # so the SDK owns the support check; the CLI only reports whether the
         # user asked for the merge explicitly.
         _, mock_events = self._invoke(['42'])
-        assert mock_events.call_args.kwargs['warn_if_unsupported'] is False
+        assert mock_events.call_args.kwargs['explicitly_requested'] is False
         _, mock_events = self._invoke(['42', '--cluster-events'])
-        assert mock_events.call_args.kwargs['warn_if_unsupported'] is True
+        assert mock_events.call_args.kwargs['explicitly_requested'] is True
         _, mock_events = self._invoke(['42', '--no-cluster-events'])
         assert mock_events.call_args.kwargs['include_cluster_events'] is False
-        assert mock_events.call_args.kwargs['warn_if_unsupported'] is True
+        assert mock_events.call_args.kwargs['explicitly_requested'] is True
+
+    def test_code_column_appears_only_for_events_that_have_one(self):
+        # OSS stamps USER_JOB_FAILURE on FAILED/FAILED_SETUP events; that is
+        # the signal separating a user-program failure from an infra one.
+        failed = [{
+            'spot_job_id': 42,
+            'task_id': 0,
+            'new_status': 'FAILED',
+            'code': 'USER_JOB_FAILURE',
+            'reason': 'Job failed: exit code 1',
+            'timestamp': '2026-09-07T10:00:05+00:00',
+        }]
+        result, _ = self._invoke(['42'], events=failed)
+        assert result.exit_code == 0, result.output
+        assert 'CODE' in result.output
+        assert 'USER_JOB_FAILURE' in result.output
 
     def test_no_events(self):
         result, _ = self._invoke(['7'], events=[])
@@ -207,11 +221,35 @@ class TestJobsEventsSdk:
         body, _ = self._call(54, job_id=42, include_cluster_events=True)
         assert body['include_cluster_events'] is True
 
+    def test_numeric_task_falls_back_to_task_id_on_old_server(self):
+        # `task` is resolved server-side and only exists from API 58; an id
+        # needs no resolution, so it goes as task_id, honored since the
+        # endpoint existed. Silently ignoring the filter is the bug here.
+        body, _ = self._call(57, job_id=42, task='0')
+        assert body['task'] is None
+        assert body['task_id'] == 0
+        body, _ = self._call(57, job_id=42, task=1)
+        assert (body['task'], body['task_id']) == (None, 1)
+        # A new server resolves the field itself.
+        body, _ = self._call(58, job_id=42, task='0')
+        assert (body['task'], body['task_id']) == ('0', None)
+
+    def test_task_name_raises_on_old_server(self):
+        raw_events = _unwrap(jobs_sdk.events)
+        with mock.patch.object(jobs_sdk.versions,
+                               'get_remote_api_version',
+                               return_value=57), \
+             mock.patch.object(jobs_sdk.server_common,
+                               'make_authenticated_request') as mock_request:
+            with pytest.raises(ValueError, match='version 58 or newer'):
+                raw_events(job_id=42, task='train')
+        mock_request.assert_not_called()
+
     def test_explicit_request_warns_on_old_server(self):
         body, mock_warning = self._call(53,
                                         job_id=42,
                                         include_cluster_events=True,
-                                        warn_if_unsupported=True)
+                                        explicitly_requested=True)
         assert body['include_cluster_events'] is False
         mock_warning.assert_called_once()
         assert 'older than version 54' in mock_warning.call_args.args[0]
