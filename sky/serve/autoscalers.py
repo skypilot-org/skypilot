@@ -230,19 +230,42 @@ class Autoscaler:
                                           target_num_replicas))
 
     @classmethod
-    def from_spec(cls, service_name: str,
-                  spec: 'service_spec.SkyServiceSpec') -> 'Autoscaler':
+    def from_spec(cls,
+                  service_name: str,
+                  spec: 'service_spec.SkyServiceSpec',
+                  version: int = constants.INITIAL_VERSION) -> 'Autoscaler':
+        """Builds an autoscaler for a service, starting at ``version``.
+
+        ``version`` should be the service's currently running version. It
+        defaults to ``INITIAL_VERSION`` for a brand-new service. On a controller
+        restart or after an update the service is already past the initial
+        version, and the autoscaler must be told so: otherwise it keeps
+        ``latest_version`` at the initial value while the replica manager
+        launches replicas at the real (higher) version. The autoscaler then
+        never recognizes those replicas as current and churns them -- scaling
+        the "latest" version up and the freshly launched replicas straight back
+        down, even at 0 RPS. See issue #8562.
+        """
         # TODO(MaoZiming): use NAME to get the class.
         if spec.pool:
-            return QueueLengthAutoscaler(service_name, spec)
+            autoscaler: 'Autoscaler' = QueueLengthAutoscaler(service_name, spec)
         elif spec.use_ondemand_fallback:
-            return FallbackRequestRateAutoscaler(service_name, spec)
+            autoscaler = FallbackRequestRateAutoscaler(service_name, spec)
         elif isinstance(spec.target_qps_per_replica, dict):
             # Use instance-aware autoscaler
             # when target_qps_per_replica is a dict
-            return InstanceAwareRequestRateAutoscaler(service_name, spec)
+            autoscaler = InstanceAwareRequestRateAutoscaler(service_name, spec)
         else:
-            return RequestRateAutoscaler(service_name, spec)
+            autoscaler = RequestRateAutoscaler(service_name, spec)
+
+        # Align the version bookkeeping with the running version. The
+        # concrete autoscalers above are always constructed at
+        # INITIAL_VERSION (see Autoscaler.__init__), so mirror the invariant
+        # that latest_version_ever_ready is one below latest_version; the
+        # autoscaler re-observes actual readiness on its next loop.
+        autoscaler.latest_version = version
+        autoscaler.latest_version_ever_ready = version - 1
+        return autoscaler
 
     def get_decision_interval(self) -> int:
         """Get the decision interval for the autoscaler.
