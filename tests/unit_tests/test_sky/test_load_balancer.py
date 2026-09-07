@@ -64,7 +64,7 @@ async def test_proxy_error_releases_least_load_accounting():
 
 
 @pytest.mark.asyncio
-async def test_pre_execute_error_preserves_least_load_accounting():
+async def test_begin_request_error_preserves_least_load_accounting():
     lb = _make_load_balancer()
     replica_url = 'http://replica'
     request = _make_request()
@@ -72,13 +72,13 @@ async def test_pre_execute_error_preserves_least_load_accounting():
     policy.set_ready_replicas([replica_url])
     policy.pre_execute_hook(replica_url, request)
 
-    def raise_before_increment(replica_url_arg, request_arg):
+    def raise_begin_request(replica_url_arg, request_arg):
         del replica_url_arg, request_arg
-        raise RuntimeError('pre-execute failed')
+        raise RuntimeError('begin request failed')
 
-    policy.pre_execute_hook = raise_before_increment
+    policy.begin_request = raise_begin_request
 
-    with pytest.raises(RuntimeError, match='pre-execute failed'):
+    with pytest.raises(RuntimeError, match='begin request failed'):
         await lb._proxy_request_to(replica_url, request)
 
     assert policy.load_map.get(replica_url) == 1
