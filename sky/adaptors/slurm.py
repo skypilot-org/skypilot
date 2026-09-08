@@ -980,6 +980,57 @@ class SlurmClient:
             })
         return rows
 
+    def get_job_accounting(self, job_id: str) -> List[Dict[str, str]]:
+        """Accounting records for ``job_id``: what happened, and when.
+
+        This is the only source for a job Slurm has already forgotten --
+        squeue drops it MinJobAge after it finishes (5 minutes by default) --
+        and the only one that carries the exit code and the original submit
+        line.
+
+        One row per record, and there can be several:
+
+        - a **job array** id returns one row per element, each with its own
+          eligible/start time, so a caller passing a base id groups by the
+          returned JobID rather than expecting one record;
+        - a **requeued** job returns one row per attempt, which is what ``-D``
+          is for. Without it only the latest survives, and since a requeue
+          *resets* Submit, the job would appear to have been submitted at the
+          moment of its last attempt. SkyPilot passes --no-requeue for its
+          own allocations precisely because requeue is expected on jobs it
+          does not control, which is the population this read serves.
+
+        Empty when accounting is not configured (no slurmdbd), which is a
+        cluster shape rather than an error: the caller says the history is
+        unavailable instead of reporting that nothing happened.
+        """
+        fields = ('job_id', 'state', 'reason', 'submit', 'eligible', 'start',
+                  'end', 'exit_code', 'derived_exit_code', 'restarts',
+                  'submit_line')
+        fmt = ('JobID,State,Reason,Submit,Eligible,Start,End,ExitCode,'
+               'DerivedExitCode,Restarts,SubmitLine')
+        # -X: the job, not its steps. -D: every attempt, see above. -P with
+        # -n: pipe-separated and unheadered, so the parse needs no column
+        # arithmetic.
+        cmd = f'sacct -j {job_id} -X -D -P -n --format={fmt}'
+        rc, stdout, stderr = self._run_slurm_cmd(cmd)
+        if rc != 0:
+            logger.debug(f'sacct for job {job_id} failed: '
+                         f'{(stderr or stdout).strip()[:200]}')
+            return []
+        rows = []
+        for line in stdout.strip().splitlines():
+            # SubmitLine is the last field and can itself contain anything,
+            # pipes included, so the split is bounded and the remainder is
+            # the command line.
+            parts = line.split('|', len(fields) - 1)
+            if len(parts) != len(fields):
+                continue
+            row = dict(zip(fields, (p.strip() for p in parts)))
+            if row['job_id']:
+                rows.append(row)
+        return rows
+
     def get_pending_job_count(self,
                               partition: str,
                               exclude_job_id: Optional[str] = None) -> int:
