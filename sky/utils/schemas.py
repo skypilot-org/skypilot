@@ -1518,11 +1518,15 @@ _SLURM_QUOTA_SCHEMA = {
     'required': [],
     'additionalProperties': True,
     'properties': {
+        # Non-empty: an empty value would still be emitted as a bare
+        # `--qos=` / `--account=` directive and be rejected by sbatch.
         'queue': {
             'type': 'string',
+            'minLength': 1,
         },
         'account': {
             'type': 'string',
+            'minLength': 1,
         },
     },
 }

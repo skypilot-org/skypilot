@@ -645,6 +645,45 @@ class TestWorkspaceSchema(unittest.TestCase):
         }
         jsonschema.validate(instance=config, schema=self.workspaces_schema)
 
+    def test_slurm_quota_rejects_empty_values(self):
+        """An empty queue/account would become a bare `--qos=` / `--account=`."""
+        for cloud_config in (
+            {
+                'quota': {
+                    'queue': ''
+                }
+            },
+            {
+                'quota': {
+                    'account': ''
+                }
+            },
+            {
+                'cluster_configs': {
+                    'c': {
+                        'partition_configs': {
+                            'p': {
+                                'quota': {
+                                    'queue': ''
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+        ):
+            with self.assertRaises(jsonschema.exceptions.ValidationError,
+                                   msg=f'{cloud_config!r} should be rejected'):
+                jsonschema.validate(instance={'slurm': cloud_config},
+                                    schema=schemas.get_config_schema())
+            with self.assertRaises(jsonschema.exceptions.ValidationError,
+                                   msg=f'{cloud_config!r} should be rejected'):
+                jsonschema.validate(
+                    instance={'my-workspace': {
+                        'slurm': cloud_config
+                    }},
+                    schema=self.workspaces_schema)
+
     def test_workspace_slurm_rejects_global_only_properties(self):
         invalid_configs = [
             {
