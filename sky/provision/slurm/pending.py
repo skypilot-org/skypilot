@@ -156,6 +156,9 @@ def parse_dependency(expression: str) -> Dict[str, Any]:
     return parsed
 
 
+# Slurm's non-epoch timestamp form, e.g. '2026-09-08T04:05:47'.
+_ISO_TIME_RE = re.compile(r'^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2}:\d{2})$')
+
 CATEGORY_QUOTA = 'quota'
 CATEGORY_RESOURCES = 'resources'
 CATEGORY_HELD = 'held'
@@ -608,7 +611,7 @@ def _classify_resources(job: Dict[str, Any], code: str,
 
 
 def _format_epoch(value: Optional[str]) -> Optional[str]:
-    """An epoch string as a readable time, or None when it is not one.
+    """A Slurm timestamp as a readable time, or None when it is not one.
 
     None rather than the raw value, because the caller interpolates this into
     a sentence about when something happens. Slurm answers `Unknown` for a
@@ -616,6 +619,12 @@ def _format_epoch(value: Optional[str]) -> Optional[str]:
     it is split out -- and "It becomes eligible at Unknown." is worse than not
     saying it. Fields that carry the scheduler's own spelling through
     untouched are shaped elsewhere (`slurm_jobs.core.shape_job`).
+
+    The reads ask for epoch seconds (`SLURM_TIME_FORMAT=%s`), which is what
+    the first branch handles. A Slurm build old enough to ignore that answers
+    in ISO form in the *cluster's* local timezone, unlabelled; that is shown
+    as it came rather than converted, since nothing here knows which
+    timezone it is.
     """
     if value is None:
         return None
@@ -623,7 +632,8 @@ def _format_epoch(value: Optional[str]) -> Optional[str]:
         stamp = datetime.datetime.fromtimestamp(int(value),
                                                 tz=datetime.timezone.utc)
     except (TypeError, ValueError):
-        return None
+        iso = _ISO_TIME_RE.match(value)
+        return f'{iso.group(1)} {iso.group(2)}' if iso else None
     return stamp.strftime('%Y-%m-%d %H:%M:%S UTC')
 
 

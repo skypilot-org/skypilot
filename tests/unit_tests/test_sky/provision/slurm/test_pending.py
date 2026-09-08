@@ -466,6 +466,18 @@ def test_begin_time_slurm_has_not_computed_says_nothing_about_when():
     assert 'StartTime=now' in out['action']
 
 
+def test_a_begin_time_that_is_not_epoch_is_shown_as_it_came():
+    """The reads ask for epoch seconds; a Slurm build old enough to ignore
+    that answers in ISO form, in the cluster's local timezone with nothing
+    saying which. Showing it verbatim beats both dropping it and converting
+    it against this host's timezone."""
+    out = sp.classify_pending(
+        _job('BeginTime'), sp.PendingEvidence(begin_time='2026-09-08T04:05:47'))
+    assert '2026-09-08 04:05:47' in out['summary']
+    # No timezone is claimed for it, unlike the epoch form.
+    assert 'UTC' not in out['summary']
+
+
 def test_dependency_waiting_with_known_state():
     job = _job('Dependency', dependency='afterok:5122(unfulfilled)')
     ev = sp.PendingEvidence(dependency_states={'5122': 'RUNNING'})
