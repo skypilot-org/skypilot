@@ -419,8 +419,12 @@ async def test_a_failure_before_any_output_keeps_the_empty_signal(monkeypatch):
 
     `sky jobs logs --sync-down` falls back to rsync on bytes_written == 0, so
     a marker line here would suppress the fallback and save a one-line log in
-    place of the real one. The failure must still reach the server log, which
-    is what `logger.exception` in the boundary is for.
+    place of the real one.
+
+    It has to end CLEANLY, not raise: the SDK reads with `iter_content` and no
+    except, so an aborted chunked response throws ChunkedEncodingError before
+    that check is reached. `logger.exception` is what keeps the failure
+    visible.
     """
 
     async def _boom(*args, **kwargs):
@@ -429,6 +433,6 @@ async def test_a_failure_before_any_output_keeps_the_empty_signal(monkeypatch):
 
     monkeypatch.setattr(stream_utils, '_log_stream_chunks', _boom)
 
-    with pytest.raises(RuntimeError, match='before the first chunk'):
-        async for _ in stream_utils.log_streamer(None, None):
-            pass
+    chunks = [chunk async for chunk in stream_utils.log_streamer(None, None)]
+
+    assert not chunks, 'anything here suppresses the sync-down fallback'

@@ -197,12 +197,15 @@ async def log_streamer(
     except Exception as e:  # pylint: disable=broad-except
         logger.exception(f'Log streaming for {request_id} failed')
         if not yielded_any:
-            # An empty response is a signal, not an absence: the SDK falls
-            # back to sync-down on bytes_written == 0, and a marker line
-            # would suppress that and hand the user a one-line log instead of
-            # the real one. The log line above is what makes this visible;
-            # that silence was the actual complaint.
-            raise
+            # End the response cleanly and empty rather than re-raising.
+            # An empty stream is a signal: the SDK falls back to sync-down on
+            # bytes_written == 0. Re-raising aborts the chunked response
+            # instead, and `iter_content` then throws ChunkedEncodingError
+            # before that check is ever reached -- measured, not assumed --
+            # so the caller crashes rather than falling back. A marker line
+            # would equally suppress the signal. `logger.exception` above is
+            # what keeps this visible, and silence was the complaint.
+            return
         yield ('\n[SkyPilot] Log streaming stopped: '
                f'{type(e).__name__}: {e}\n')
 
