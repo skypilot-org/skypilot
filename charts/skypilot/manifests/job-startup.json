@@ -1,0 +1,861 @@
+{
+  "uid": "skypilot-job-startup",
+  "title": "SkyPilot Job Startup & Demand",
+  "schemaVersion": 39,
+  "version": 1,
+  "editable": true,
+  "tags": [
+    "skypilot",
+    "managed-jobs"
+  ],
+  "timezone": "browser",
+  "refresh": "30s",
+  "time": {
+    "from": "now-7d",
+    "to": "now"
+  },
+  "timepicker": {
+    "hidden": true
+  },
+  "templating": {
+    "list": [
+      {
+        "name": "workspace",
+        "label": "Workspace",
+        "type": "query",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "prometheus"
+        },
+        "query": "label_values({__name__=~\"sky_managed_job_wait_7d_tasks|sky_managed_job_waiting_tasks\"}, workspace)",
+        "definition": "label_values({__name__=~\"sky_managed_job_wait_7d_tasks|sky_managed_job_waiting_tasks\"}, workspace)",
+        "refresh": 1,
+        "includeAll": true,
+        "allValue": ".*",
+        "multi": true,
+        "current": {
+          "text": "All",
+          "value": "$__all"
+        },
+        "sort": 1
+      },
+      {
+        "name": "user",
+        "label": "User",
+        "type": "query",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "prometheus"
+        },
+        "query": "label_values({__name__=~\"sky_managed_job_wait_7d_tasks|sky_managed_job_waiting_tasks\"}, user)",
+        "definition": "label_values({__name__=~\"sky_managed_job_wait_7d_tasks|sky_managed_job_waiting_tasks\"}, user)",
+        "refresh": 1,
+        "includeAll": true,
+        "allValue": ".*",
+        "multi": true,
+        "current": {
+          "text": "All",
+          "value": "$__all"
+        },
+        "sort": 1
+      },
+      {
+        "name": "cloud",
+        "label": "Cloud",
+        "type": "query",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "prometheus"
+        },
+        "query": "label_values({__name__=~\"sky_managed_job_wait_7d_tasks|sky_managed_job_waiting_tasks\"}, cloud)",
+        "definition": "label_values({__name__=~\"sky_managed_job_wait_7d_tasks|sky_managed_job_waiting_tasks\"}, cloud)",
+        "refresh": 1,
+        "includeAll": true,
+        "allValue": ".*",
+        "multi": true,
+        "current": {
+          "text": "All",
+          "value": "$__all"
+        },
+        "sort": 1
+      },
+      {
+        "name": "gpu",
+        "label": "Requested GPU",
+        "type": "query",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "prometheus"
+        },
+        "query": "label_values({__name__=~\"sky_managed_job_wait_7d_tasks|sky_managed_job_waiting_tasks\"}, gpu)",
+        "definition": "label_values({__name__=~\"sky_managed_job_wait_7d_tasks|sky_managed_job_waiting_tasks\"}, gpu)",
+        "refresh": 1,
+        "includeAll": true,
+        "allValue": ".*",
+        "multi": true,
+        "current": {
+          "text": "All",
+          "value": "$__all"
+        },
+        "sort": 1
+      },
+      {
+        "name": "team",
+        "label": "Team",
+        "type": "query",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "prometheus"
+        },
+        "query": "label_values({__name__=~\"sky_managed_job_wait_7d_tasks|sky_managed_job_waiting_tasks\"}, team)",
+        "definition": "label_values({__name__=~\"sky_managed_job_wait_7d_tasks|sky_managed_job_waiting_tasks\"}, team)",
+        "refresh": 1,
+        "includeAll": true,
+        "allValue": ".*",
+        "multi": true,
+        "current": {
+          "text": "All",
+          "value": "$__all"
+        },
+        "sort": 1
+      },
+      {
+        "name": "project",
+        "label": "Project",
+        "type": "query",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "prometheus"
+        },
+        "query": "label_values({__name__=~\"sky_managed_job_wait_7d_tasks|sky_managed_job_waiting_tasks\"}, project)",
+        "definition": "label_values({__name__=~\"sky_managed_job_wait_7d_tasks|sky_managed_job_waiting_tasks\"}, project)",
+        "refresh": 1,
+        "includeAll": true,
+        "allValue": ".*",
+        "multi": true,
+        "current": {
+          "text": "All",
+          "value": "$__all"
+        },
+        "sort": 1
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "title": "Submission \u2192 first run \u00b7 p50",
+      "type": "stat",
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 6,
+        "h": 5
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "description": "",
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(0.5, sum by (le) (max by (workspace,user,cloud,gpu,team,project,outcome,phase,le) (sky_managed_job_wait_7d_seconds_bucket{workspace=~\"$workspace\",user=~\"$user\",cloud=~\"$cloud\",gpu=~\"$gpu\",team=~\"$team\",project=~\"$project\",outcome=\"started\",phase=\"total\"} and on(job,instance) (time() - sky_managed_job_wait_snapshot_timestamp_seconds < 180))))",
+          "instant": true,
+          "range": false,
+          "format": "time_series",
+          "legendFormat": "__auto"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "decimals": 1,
+          "noValue": "No data"
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto"
+      }
+    },
+    {
+      "id": 2,
+      "title": "Submission \u2192 first run \u00b7 p95",
+      "type": "stat",
+      "gridPos": {
+        "x": 6,
+        "y": 0,
+        "w": 6,
+        "h": 5
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "description": "",
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(0.95, sum by (le) (max by (workspace,user,cloud,gpu,team,project,outcome,phase,le) (sky_managed_job_wait_7d_seconds_bucket{workspace=~\"$workspace\",user=~\"$user\",cloud=~\"$cloud\",gpu=~\"$gpu\",team=~\"$team\",project=~\"$project\",outcome=\"started\",phase=\"total\"} and on(job,instance) (time() - sky_managed_job_wait_snapshot_timestamp_seconds < 180))))",
+          "instant": true,
+          "range": false,
+          "format": "time_series",
+          "legendFormat": "__auto"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "decimals": 1,
+          "noValue": "No data"
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto"
+      }
+    },
+    {
+      "id": 3,
+      "title": "Currently waiting to first run",
+      "type": "stat",
+      "gridPos": {
+        "x": 12,
+        "y": 0,
+        "w": 6,
+        "h": 5
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "description": "",
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "(sum(max by (workspace,user,cloud,gpu,team,project) (sky_managed_job_waiting_tasks{workspace=~\"$workspace\",user=~\"$user\",cloud=~\"$cloud\",gpu=~\"$gpu\",team=~\"$team\",project=~\"$project\"} and on(job,instance) (time() - sky_managed_job_wait_snapshot_timestamp_seconds < 180))) or vector(0)) and on() (max(sky_managed_job_wait_snapshot_timestamp_seconds) > time() - 180)",
+          "instant": true,
+          "range": false,
+          "format": "time_series",
+          "legendFormat": "__auto"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 1,
+          "noValue": "No data"
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto"
+      }
+    },
+    {
+      "id": 4,
+      "title": "Oldest known current wait",
+      "type": "stat",
+      "gridPos": {
+        "x": 18,
+        "y": 0,
+        "w": 6,
+        "h": 5
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "description": "",
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max(max by (workspace,user,cloud,gpu,team,project) (sky_managed_job_oldest_wait_seconds{workspace=~\"$workspace\",user=~\"$user\",cloud=~\"$cloud\",gpu=~\"$gpu\",team=~\"$team\",project=~\"$project\"} and on(job,instance) (time() - sky_managed_job_wait_snapshot_timestamp_seconds < 180)))",
+          "instant": true,
+          "range": false,
+          "format": "time_series",
+          "legendFormat": "__auto"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "decimals": 1,
+          "noValue": "No data"
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto"
+      }
+    },
+    {
+      "id": 5,
+      "title": "Started tasks \u00b7 7d submissions",
+      "type": "stat",
+      "gridPos": {
+        "x": 0,
+        "y": 5,
+        "w": 6,
+        "h": 5
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "description": "",
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "(sum(max by (workspace,user,cloud,gpu,team,project,outcome) (sky_managed_job_wait_7d_tasks{workspace=~\"$workspace\",user=~\"$user\",cloud=~\"$cloud\",gpu=~\"$gpu\",team=~\"$team\",project=~\"$project\",outcome=\"started\"} and on(job,instance) (time() - sky_managed_job_wait_snapshot_timestamp_seconds < 180))) or vector(0)) and on() (max(sky_managed_job_wait_snapshot_timestamp_seconds) > time() - 180)",
+          "instant": true,
+          "range": false,
+          "format": "time_series",
+          "legendFormat": "__auto"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 1,
+          "noValue": "No data"
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto"
+      }
+    },
+    {
+      "id": 6,
+      "title": "Cancelled before first run \u00b7 7d",
+      "type": "stat",
+      "gridPos": {
+        "x": 6,
+        "y": 5,
+        "w": 6,
+        "h": 5
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "description": "",
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "(sum(max by (workspace,user,cloud,gpu,team,project,outcome) (sky_managed_job_wait_7d_tasks{workspace=~\"$workspace\",user=~\"$user\",cloud=~\"$cloud\",gpu=~\"$gpu\",team=~\"$team\",project=~\"$project\",outcome=\"cancelled_before_start\"} and on(job,instance) (time() - sky_managed_job_wait_snapshot_timestamp_seconds < 180))) or vector(0)) and on() (max(sky_managed_job_wait_snapshot_timestamp_seconds) > time() - 180)",
+          "instant": true,
+          "range": false,
+          "format": "time_series",
+          "legendFormat": "__auto"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 1,
+          "noValue": "No data"
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto"
+      }
+    },
+    {
+      "id": 7,
+      "title": "Failed before first run \u00b7 7d",
+      "type": "stat",
+      "gridPos": {
+        "x": 12,
+        "y": 5,
+        "w": 6,
+        "h": 5
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "description": "",
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "(sum(max by (workspace,user,cloud,gpu,team,project,outcome) (sky_managed_job_wait_7d_tasks{workspace=~\"$workspace\",user=~\"$user\",cloud=~\"$cloud\",gpu=~\"$gpu\",team=~\"$team\",project=~\"$project\",outcome=\"failed_before_start\"} and on(job,instance) (time() - sky_managed_job_wait_snapshot_timestamp_seconds < 180))) or vector(0)) and on() (max(sky_managed_job_wait_snapshot_timestamp_seconds) > time() - 180)",
+          "instant": true,
+          "range": false,
+          "format": "time_series",
+          "legendFormat": "__auto"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 1,
+          "noValue": "No data"
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto"
+      }
+    },
+    {
+      "id": 8,
+      "title": "Snapshot age \u00b7 must be < 3 minutes",
+      "type": "stat",
+      "gridPos": {
+        "x": 18,
+        "y": 5,
+        "w": 6,
+        "h": 5
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "description": "A stale or missing snapshot makes the other panels show no data. Zero waiting is only shown with a fresh snapshot.",
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "time() - max(sky_managed_job_wait_snapshot_timestamp_seconds)",
+          "instant": true,
+          "range": false,
+          "format": "time_series",
+          "legendFormat": "__auto"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "decimals": 1,
+          "noValue": "No data",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 180
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto"
+      }
+    },
+    {
+      "id": 9,
+      "title": "p95 startup by requested GPU",
+      "type": "bargauge",
+      "gridPos": {
+        "x": 0,
+        "y": 10,
+        "w": 12,
+        "h": 7
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "description": "",
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(0.95, sum by (le,gpu) (max by (workspace,user,cloud,gpu,team,project,outcome,phase,le) (sky_managed_job_wait_7d_seconds_bucket{workspace=~\"$workspace\",user=~\"$user\",cloud=~\"$cloud\",gpu=~\"$gpu\",team=~\"$team\",project=~\"$project\",outcome=\"started\",phase=\"total\"} and on(job,instance) (time() - sky_managed_job_wait_snapshot_timestamp_seconds < 180))))",
+          "instant": true,
+          "range": false,
+          "format": "time_series",
+          "legendFormat": "{{gpu}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "decimals": 1,
+          "noValue": "No data"
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto"
+      }
+    },
+    {
+      "id": 10,
+      "title": "p95 by startup phase",
+      "type": "bargauge",
+      "gridPos": {
+        "x": 12,
+        "y": 10,
+        "w": 12,
+        "h": 7
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "description": "Controller: submission to first STARTING. Launch: first STARTING to first RUNNING, including capacity acquisition, provisioning, image pulls, setup and retries. Phase percentiles are not additive.",
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(0.95, sum by (le,phase) (max by (workspace,user,cloud,gpu,team,project,outcome,phase,le) (sky_managed_job_wait_7d_seconds_bucket{workspace=~\"$workspace\",user=~\"$user\",cloud=~\"$cloud\",gpu=~\"$gpu\",team=~\"$team\",project=~\"$project\",outcome=\"started\",phase=~\"controller|launch\"} and on(job,instance) (time() - sky_managed_job_wait_snapshot_timestamp_seconds < 180))))",
+          "instant": true,
+          "range": false,
+          "format": "time_series",
+          "legendFormat": "{{phase}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "decimals": 1,
+          "noValue": "No data"
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto"
+      }
+    },
+    {
+      "id": 11,
+      "title": "Submission outcomes by user \u00b7 7d",
+      "type": "bargauge",
+      "gridPos": {
+        "x": 0,
+        "y": 17,
+        "w": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "description": "",
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (user,outcome) (max by (workspace,user,cloud,gpu,team,project,outcome) (sky_managed_job_wait_7d_tasks{workspace=~\"$workspace\",user=~\"$user\",cloud=~\"$cloud\",gpu=~\"$gpu\",team=~\"$team\",project=~\"$project\"} and on(job,instance) (time() - sky_managed_job_wait_snapshot_timestamp_seconds < 180)))",
+          "instant": true,
+          "range": false,
+          "format": "time_series",
+          "legendFormat": "{{user}} \u00b7 {{outcome}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 1,
+          "noValue": "No data"
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto"
+      }
+    },
+    {
+      "id": 12,
+      "title": "p95 startup by team / project",
+      "type": "bargauge",
+      "gridPos": {
+        "x": 12,
+        "y": 17,
+        "w": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "description": "Only persisted resource labels are used. Unknown means attribution is unavailable; job names and log contents are not used to guess.",
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(0.95, sum by (le,team,project) (max by (workspace,user,cloud,gpu,team,project,outcome,phase,le) (sky_managed_job_wait_7d_seconds_bucket{workspace=~\"$workspace\",user=~\"$user\",cloud=~\"$cloud\",gpu=~\"$gpu\",team=~\"$team\",project=~\"$project\",outcome=\"started\",phase=\"total\"} and on(job,instance) (time() - sky_managed_job_wait_snapshot_timestamp_seconds < 180))))",
+          "instant": true,
+          "range": false,
+          "format": "time_series",
+          "legendFormat": "{{team}} / {{project}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "decimals": 1,
+          "noValue": "No data"
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto"
+      }
+    },
+    {
+      "id": 13,
+      "title": "Longest waits \u00b7 up to 20 tasks",
+      "type": "table",
+      "gridPos": {
+        "x": 0,
+        "y": 25,
+        "w": 24,
+        "h": 9
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "description": "Global top 20 emitted per snapshot, then dashboard filters apply. Includes started/cancelled/failed tasks from the seven-day submission cohort and current waiting tasks of any age. Open the job to inspect logs.",
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "topk(20, max by (workspace,user,cloud,gpu,team,project,job_id,task_id,outcome) (sky_managed_job_wait_outlier_seconds{workspace=~\"$workspace\",user=~\"$user\",cloud=~\"$cloud\",gpu=~\"$gpu\",team=~\"$team\",project=~\"$project\"} and on(job,instance) (time() - sky_managed_job_wait_snapshot_timestamp_seconds < 180)))",
+          "instant": true,
+          "range": false,
+          "format": "table",
+          "legendFormat": "__auto"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "decimals": 1,
+          "noValue": "No data"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "job_id"
+            },
+            "properties": [
+              {
+                "id": "links",
+                "value": [
+                  {
+                    "title": "Inspect job",
+                    "url": "/dashboard/jobs/${__data.fields.job_id}",
+                    "targetBlank": true
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "showHeader": true,
+        "sortBy": [
+          {
+            "displayName": "Value",
+            "desc": true
+          }
+        ]
+      },
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true,
+              "__name__": true
+            },
+            "renameByName": {
+              "Value": "Wait (seconds)"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": 14,
+      "title": "Timing gaps \u00b7 recent or active tasks",
+      "type": "bargauge",
+      "gridPos": {
+        "x": 0,
+        "y": 34,
+        "w": 12,
+        "h": 7
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "description": "Missing submission/start/end/acceptance events or invalid chronology. These observations are excluded from the affected duration calculation.",
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (reason) (max by (workspace,user,cloud,gpu,team,project,reason) (sky_managed_job_wait_missing_tasks{workspace=~\"$workspace\",user=~\"$user\",cloud=~\"$cloud\",gpu=~\"$gpu\",team=~\"$team\",project=~\"$project\"} and on(job,instance) (time() - sky_managed_job_wait_snapshot_timestamp_seconds < 180)))",
+          "instant": true,
+          "range": false,
+          "format": "time_series",
+          "legendFormat": "{{reason}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 1,
+          "noValue": "No data"
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto"
+      }
+    },
+    {
+      "id": 15,
+      "title": "How to read this dashboard",
+      "type": "text",
+      "gridPos": {
+        "x": 12,
+        "y": 34,
+        "w": 12,
+        "h": 7
+      },
+      "options": {
+        "mode": "markdown",
+        "content": "**Fixed rolling seven-day submission cohort.** The time picker does not change it. Retries retain the first submission time. Counts are tasks, not GPUs. CPU tasks are included unless filtered out.\n\nStartup measures **time until user code first runs**, not pure GPU scheduling delay. Current waiting includes older tasks. Cancelled/failed-before-start tasks are reported separately from successful starts.\n\nBuckets are rolling gauges: use `histogram_quantile` directly, never `rate` or `increase`. Retain job events for at least seven days. Missing data is explicit. Historical project attribution cannot be reconstructed reliably. User is the SkyPilot user hash."
+      }
+    }
+  ]
+}
