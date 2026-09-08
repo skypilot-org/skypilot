@@ -692,6 +692,9 @@ def _create_virtual_instance(
     provider_config = config.provider_config
     partition = slurm_utils.get_partition_from_config(provider_config)
     client = _make_slurm_client(provider_config)
+    submit_user = provider_config.get('slurm_user')
+    if submit_user is not None:
+        client.validate_submit_user(region, submit_user)
 
     slurm_cluster = slurm_utils.get_slurm_cluster_from_config(provider_config)
 

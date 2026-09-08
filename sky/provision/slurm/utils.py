@@ -158,6 +158,28 @@ def get_submit_user(cluster_name: str) -> Optional[str]:
     if not enabled:
         return None
 
+    user = common_utils.get_current_user()
+    mapping = skypilot_config.get_nested(('slurm', 'username_map'),
+                                         default_value={})
+    cluster_config = skypilot_config.get_nested(
+        ('slurm', 'cluster_configs', cluster_name), default_value={})
+    cluster_mapping = cluster_config.get('username_map', {})
+    submit_user = cluster_mapping.get(user.name, mapping.get(user.name))
+    if submit_user is None and user.is_service_account():
+        submit_user = cluster_config.get('default_service_account_user')
+        if submit_user is None:
+            raise ValueError(
+                f'No Unix user configured for service account {user.name!r} '
+                f'on Slurm cluster {cluster_name!r}. Ask an administrator to '
+                'set slurm.username_map or the cluster-level '
+                'default_service_account_user.')
+    if submit_user is not None:
+        if _SLURM_USER_PATTERN.fullmatch(submit_user) is None:
+            raise ValueError(
+                f'Invalid Unix user {submit_user!r} configured for SkyPilot '
+                f'user {user.name!r} on Slurm cluster {cluster_name!r}.')
+        return submit_user
+
     user_name = common_utils.get_current_user_name()
     submit_user = user_name.split('@', 1)[0]
     if _SLURM_USER_PATTERN.fullmatch(submit_user) is None:
