@@ -15,6 +15,7 @@ from sky import exceptions
 from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import slurm
+from sky.provision.slurm import pending as pending_lib
 from sky.skylet import constants
 from sky.skylet import runtime_utils
 from sky.utils import annotations
@@ -1296,6 +1297,108 @@ def slurm_cluster_names() -> List[str]:
         List[str]: The configured and allowed Slurm cluster names.
     """
     return clouds.Slurm.existing_allowed_clusters()
+
+
+def _client_for(cluster: str) -> Optional['slurm.SlurmClient']:
+    """A client for ``cluster``, or None when it is not configured.
+
+    None rather than an exception: an ssh_config lookup of a host that is not
+    there returns a dict with only ``hostname``, so building the client dies
+    on the missing ``user`` and the caller is handed a KeyError to report.
+    """
+    try:
+        ssh_config_dict = get_slurm_ssh_config().lookup(cluster)
+        if 'user' not in ssh_config_dict:
+            logger.debug(f'Slurm cluster {cluster!r} is not in ~/.slurm/config')
+            return None
+        slurm_user = get_submit_user(cluster)
+        return slurm.SlurmClient(
+            ssh_config_dict['hostname'],
+            int(ssh_config_dict.get('port', 22)),
+            ssh_config_dict['user'],
+            get_identity_file(ssh_config_dict),
+            ssh_proxy_command=ssh_config_dict.get('proxycommand', None),
+            ssh_proxy_jump=ssh_config_dict.get('proxyjump', None),
+            identities_only=get_identities_only(ssh_config_dict),
+            slurm_user=slurm_user,
+        )
+    except Exception as e:  # pylint: disable=broad-except
+        logger.debug(f'Could not build a Slurm client for {cluster!r}: {e}')
+        return None
+
+
+def explain_pending_job(cluster: str, job_id: str) -> Optional[Dict[str, Any]]:
+    """Why ``job_id`` on ``cluster`` has not started, or None.
+
+    None when the job is not pending, is not known to Slurm any more, carries
+    no reason yet, or the cluster cannot be reached -- all normal outcomes for
+    a caller that is asking opportunistically.
+
+    Evidence is gathered per category rather than always: the reads a
+    dependency needs are not the reads a resource wait needs, and paying for
+    both would double the cost of every answer. Each read is best-effort; one
+    that fails leaves its field unset and the classification says what it
+    could not read (see ``pending``).
+    """
+    client = _client_for(cluster)
+    if client is None:
+        return None
+    try:
+        details = client.get_pending_job_details(job_id)
+    except Exception as e:  # pylint: disable=broad-except
+        logger.debug(f'Could not read Slurm job {job_id} on {cluster}: {e}')
+        return None
+    if not details or details.get('state', '').upper() != 'PENDING':
+        return None
+
+    job = {
+        'job_id': job_id,
+        'state': 'PENDING',
+        'reason': details.get('reason', ''),
+        'partition': details.get('partition', ''),
+        'dependency': details.get('dependency', ''),
+        'priority': details.get('priority'),
+        'qos': details.get('qos', ''),
+        'num_nodes': details.get('num_nodes') or 1,
+        'gpus_per_node': 0,
+        'start_time': details.get('start_time'),
+    }
+    code = pending_lib.pending_reason_code(job)
+    if not code:
+        return None
+    category = pending_lib.pending_category(code)
+    evidence = pending_lib.PendingEvidence()
+
+    if category == pending_lib.CATEGORY_HELD:
+        evidence.begin_time = details.get('start_time')
+    elif category == pending_lib.CATEGORY_DEPENDENCY:
+        parsed = pending_lib.parse_dependency(str(job['dependency'] or ''))
+        if parsed['job_ids']:
+            try:
+                evidence.dependency_states = client.get_job_states(
+                    parsed['job_ids'])
+            except Exception as e:  # pylint: disable=broad-except
+                logger.debug(f'Could not read dependency states for '
+                             f'{job_id}: {e}')
+    elif category == pending_lib.CATEGORY_RESOURCES:
+        partitions = pending_lib.partitions_of(job['partition'])
+        try:
+            node_infos = _get_slurm_node_info_list(slurm_cluster_name=cluster)
+            evidence.partition_nodes = pending_lib.partition_node_counts(
+                node_infos, partitions, busy_nodes=set())
+        except Exception as e:  # pylint: disable=broad-except
+            logger.debug(f'Could not read node info for {cluster}: {e}')
+        try:
+            evidence.pending_ahead = pending_lib.pending_ahead(
+                client.get_pending_queue(), job)
+        except Exception as e:  # pylint: disable=broad-except
+            logger.debug(f'Could not read the pending queue for '
+                         f'{cluster}: {e}')
+    # The quota branch needs the accounting database's QoS definitions, which
+    # this read has no access to; the classification says the cap is unknown
+    # rather than naming one.
+
+    return pending_lib.classify_pending(job, evidence)
 
 
 def slurm_node_info(

@@ -893,6 +893,93 @@ class SlurmClient:
 
         return output if output != 'None' else None
 
+    def get_pending_job_details(self, job_id: str) -> Dict[str, str]:
+        """The fields that explain why a job is not running, in one call.
+
+        ``get_job_reason`` answers with the reason alone, which is all the
+        launch spinner needs. Explaining the reason needs more: the partition
+        it is queued in, the dependency expression Slurm has not satisfied
+        yet, and its scheduling priority relative to the queue. One squeue
+        invocation returns all of them, so asking costs the same round trip as
+        asking for the reason did.
+
+        Empty dict when the job is unknown -- Slurm forgets a finished job
+        after MinJobAge, which is a normal outcome rather than an error.
+        """
+        fields = ('state', 'reason', 'partition', 'dependency', 'priority',
+                  'gres', 'num_nodes', 'qos', 'start_time')
+        # %E is the *unsatisfied* dependency list, annotated per entry
+        # ('afterok:5122(unfulfilled)'); Slurm drops an entry once it is met,
+        # so this shrinks as the job unblocks. %Q is the integer priority,
+        # not the normalized float %p.
+        fmt = SEP.join(('%T', '%R', '%P', '%E', '%Q', '%b', '%D', '%q', '%S'))
+        cmd = f'squeue -h --jobs {job_id} --states all -o "{fmt}"'
+        rc, stdout, _ = self._run_slurm_cmd(cmd)
+        if rc != 0:
+            return {}
+        line = stdout.strip().splitlines()
+        if not line:
+            return {}
+        # SEP is the literal four characters '\x1f': squeue passes the format
+        # through and the shell does not expand it either, so the separator
+        # arrives verbatim -- same as every other split in this file.
+        parts = line[0].split(SEP)
+        if len(parts) != len(fields):
+            logger.debug(f'Unexpected squeue field count for job {job_id}: '
+                         f'{len(parts)} != {len(fields)}')
+            return {}
+        details = dict(zip(fields, (p.strip() for p in parts)))
+        return {k: v for k, v in details.items() if v and v != 'N/A'}
+
+    def get_job_states(self, job_ids: Sequence[str]) -> Dict[str, str]:
+        """State of each of ``job_ids``, in one call.
+
+        For explaining a dependency: the ids come from the job's own
+        dependency expression, and what a caller wants to know is whether each
+        one is still queued, running, or gone. An id Slurm has forgotten is
+        absent from the result rather than reported as unknown -- the caller
+        can tell those apart and says so differently.
+        """
+        if not job_ids:
+            return {}
+        joined = ','.join(job_ids)
+        cmd = f'squeue -h --jobs {joined} --states all -o "%i{SEP}%T"'
+        rc, stdout, _ = self._run_slurm_cmd(cmd)
+        if rc != 0:
+            return {}
+        states = {}
+        for line in stdout.strip().splitlines():
+            parts = line.split(SEP)
+            if len(parts) == 2 and parts[0].strip():
+                states[parts[0].strip()] = parts[1].strip()
+        return states
+
+    def get_pending_queue(self) -> List[Dict[str, str]]:
+        """Every pending job with its partition and scheduling priority.
+
+        This is what "how many jobs are ahead of mine" needs: the count of
+        *pending* jobs in a partition says nothing on its own, since Slurm
+        runs the queue by priority rather than by arrival. One row per pending
+        job, and the caller compares priorities.
+        """
+        cmd = ('squeue -h --states=pending '
+               f'-o "%i{SEP}%P{SEP}%Q{SEP}%T"')
+        rc, stdout, _ = self._run_slurm_cmd(cmd)
+        if rc != 0:
+            return []
+        rows = []
+        for line in stdout.strip().splitlines():
+            parts = line.split(SEP)
+            if len(parts) != 4:
+                continue
+            rows.append({
+                'job_id': parts[0].strip(),
+                'partition': parts[1].strip(),
+                'priority': parts[2].strip(),
+                'state': parts[3].strip(),
+            })
+        return rows
+
     def get_pending_job_count(self,
                               partition: str,
                               exclude_job_id: Optional[str] = None) -> int:
