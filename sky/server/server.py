@@ -2561,11 +2561,16 @@ async def hook_logs(
     )
     task = executor.execute_request_in_coroutine(request_task)
     background_tasks.add_task(task.cancel)
+    # Keep this request's log. Unlike the other log-tail endpoints, the
+    # client of this one (``sdk.tail_hook_logs``) does not read the body
+    # streamed here -- it re-reads the same log through /api/stream. A log
+    # discarded when this response ends would leave that read with nothing.
     return stream_utils.stream_response_for_long_request(
         request_id=request.state.request_id,
         logs_path=request_task.log_path,
         background_tasks=background_tasks,
         kill_request_on_disconnect=False,
+        discard_log_after_stream=False,
     )
 
 
