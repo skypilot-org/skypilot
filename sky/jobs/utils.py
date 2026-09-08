@@ -2394,8 +2394,11 @@ def stream_logs_by_id(
             # the table before the managed job state is updated by the
             # controller. In this case, we should skip the logging, and wait for
             # the next round of status check.
-            if (handle is None or managed_job_status !=
-                    managed_job_state.ManagedJobStatus.RUNNING):
+            if handle is None and not follow:
+                # Snapshot mode must not wait for a worker to be provisioned.
+                return '', exceptions.JobExitCode.SUCCEEDED
+            if (handle is None or (follow and managed_job_status !=
+                                   managed_job_state.ManagedJobStatus.RUNNING)):
                 status_str = ''
                 if (managed_job_status is not None and managed_job_status !=
                         managed_job_state.ManagedJobStatus.RUNNING):
@@ -2448,8 +2451,9 @@ def stream_logs_by_id(
                 assert latest_task_id is not None, (job_id, latest_task_id)
                 task_id = latest_task_id
                 continue
-            assert (managed_job_status ==
-                    managed_job_state.ManagedJobStatus.RUNNING)
+            if follow:
+                assert (managed_job_status ==
+                        managed_job_state.ManagedJobStatus.RUNNING)
             assert isinstance(handle, backends.CloudVmRayResourceHandle), handle
             status_display.stop()
             returncode = None
@@ -2476,6 +2480,11 @@ def stream_logs_by_id(
                                       follow=follow,
                                       tail=tail_param,
                                       tail_offset=tail_offset))
+            if not follow:
+                # A snapshot performs at most one worker-log read. In
+                # particular, do not query remote job status or enter recovery
+                # polling after the requested bytes have been returned.
+                break
             if returncode in [rc.value for rc in exceptions.JobExitCode]:
                 # If the log tailing exits with a known exit code we can safely
                 # break the loop because it indicates the tailing process
@@ -2499,9 +2508,6 @@ def stream_logs_by_id(
                 assert task_id is not None, job_id
 
                 if job_status != job_lib.JobStatus.CANCELLED:
-                    if not follow:
-                        break
-
                     # Logs for retrying failed tasks.
                     if (job_status
                             in job_lib.JobStatus.user_code_failure_states()):
