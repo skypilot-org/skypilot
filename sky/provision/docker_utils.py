@@ -423,12 +423,15 @@ class DockerInitializer:
             'exec 200>/var/tmp/sky_apt.lock; '
             'flock -x -w 120 200 || exit 1; '
             'export DEBIAN_FRONTEND=noninteractive; '
+            'packages="rsync curl wget patch openssh-server python3-pip fuse"; '
+            'if dpkg-query -W -f=\'${Status}\\n\' ${packages} 2>&1 | '
+            'grep -qv "^install ok installed$"; then '
             'apt-get -yq update && '
             # Our mount script will install gcsfuse without fuse package.
             # We need to install fuse package first to enable storage mount.
             # The dpkg option is to suppress the prompt for fuse installation.
             'apt-get -o DPkg::Options::=--force-confnew install -y '
-            'rsync curl wget patch openssh-server python3-pip fuse\'')
+            '${packages}; fi\'')
         self._run(cmd, run_env='docker')
 
         # Copy local authorized_keys to docker container.
