@@ -540,10 +540,20 @@ async def _tail_log_file(
                     # launch request, stop tailing provision logs
                     if len(req_tasks) == 0:
                         break
-            if current_time - last_heartbeat_time >= _HEARTBEAT_INTERVAL:
-                # Currently just used to keep the connection busy, refer to
-                # https://github.com/skypilot-org/skypilot/issues/5750 for
-                # more details.
+            if (not plain_logs and
+                    current_time - last_heartbeat_time >= _HEARTBEAT_INTERVAL):
+                # Keeps the connection busy; see
+                # https://github.com/skypilot-org/skypilot/issues/5750.
+                #
+                # Rich clients only. A plain consumer does not decode these,
+                # so the frame lands in its log verbatim -- one line of
+                # `<sky-payload>"<heartbeat>..."` at the top of a downloaded
+                # `.log.gz`, and another per 30s of silence after that. The
+                # filter below cannot catch it: it strips lines read from the
+                # FILE, and this one is generated here. Plain gets no
+                # heartbeat rather than a fake log line; see the TODO below,
+                # which wants a byte that is invisible in a log file, and
+                # there is no such byte.
                 buffer.append(
                     message_utils.encode_payload(
                         rich_utils.Control.HEARTBEAT.encode('')))
