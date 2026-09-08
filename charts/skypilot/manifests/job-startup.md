@@ -35,9 +35,9 @@ wrapper; updating the dashboard alone does not install the metrics.
 
 Snapshots refresh through the existing background collector wrapper. A failing
 or hung query retains its original snapshot timestamp. Panels discard snapshots
-older than two minutes and deduplicate API replicas before aggregation. A fresh
+older than three minutes and deduplicate API replicas before aggregation. A fresh
 empty cohort can display zero; missing/stale collection cannot.
 
-After deploying both server code and chart, verify the snapshot age is below two
+After deploying both server code and chart, verify the snapshot age is below three
 minutes and compare sampled outliers with task events in the jobs dashboard.
 Check a retried task, a cancelled-before-start task and a currently waiting task.

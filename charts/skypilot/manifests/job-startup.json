@@ -160,7 +160,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "histogram_quantile(0.5, sum by (le) (max by (workspace,user,cloud,gpu,team,project,outcome,phase,le) (sky_managed_job_wait_7d_seconds_bucket{workspace=~\"$workspace\",user=~\"$user\",cloud=~\"$cloud\",gpu=~\"$gpu\",team=~\"$team\",project=~\"$project\",outcome=\"started\",phase=\"total\"} and on(job,instance) (time() - sky_managed_job_wait_snapshot_timestamp_seconds < 120))))",
+          "expr": "histogram_quantile(0.5, sum by (le) (max by (workspace,user,cloud,gpu,team,project,outcome,phase,le) (sky_managed_job_wait_7d_seconds_bucket{workspace=~\"$workspace\",user=~\"$user\",cloud=~\"$cloud\",gpu=~\"$gpu\",team=~\"$team\",project=~\"$project\",outcome=\"started\",phase=\"total\"} and on(job,instance) (time() - sky_managed_job_wait_snapshot_timestamp_seconds < 180))))",
           "instant": true,
           "range": false,
           "format": "time_series",
@@ -207,7 +207,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "histogram_quantile(0.95, sum by (le) (max by (workspace,user,cloud,gpu,team,project,outcome,phase,le) (sky_managed_job_wait_7d_seconds_bucket{workspace=~\"$workspace\",user=~\"$user\",cloud=~\"$cloud\",gpu=~\"$gpu\",team=~\"$team\",project=~\"$project\",outcome=\"started\",phase=\"total\"} and on(job,instance) (time() - sky_managed_job_wait_snapshot_timestamp_seconds < 120))))",
+          "expr": "histogram_quantile(0.95, sum by (le) (max by (workspace,user,cloud,gpu,team,project,outcome,phase,le) (sky_managed_job_wait_7d_seconds_bucket{workspace=~\"$workspace\",user=~\"$user\",cloud=~\"$cloud\",gpu=~\"$gpu\",team=~\"$team\",project=~\"$project\",outcome=\"started\",phase=\"total\"} and on(job,instance) (time() - sky_managed_job_wait_snapshot_timestamp_seconds < 180))))",
           "instant": true,
           "range": false,
           "format": "time_series",
@@ -254,7 +254,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "(sum(max by (workspace,user,cloud,gpu,team,project) (sky_managed_job_waiting_tasks{workspace=~\"$workspace\",user=~\"$user\",cloud=~\"$cloud\",gpu=~\"$gpu\",team=~\"$team\",project=~\"$project\"} and on(job,instance) (time() - sky_managed_job_wait_snapshot_timestamp_seconds < 120))) or vector(0)) and on() (max(sky_managed_job_wait_snapshot_timestamp_seconds) > time() - 120)",
+          "expr": "(sum(max by (workspace,user,cloud,gpu,team,project) (sky_managed_job_waiting_tasks{workspace=~\"$workspace\",user=~\"$user\",cloud=~\"$cloud\",gpu=~\"$gpu\",team=~\"$team\",project=~\"$project\"} and on(job,instance) (time() - sky_managed_job_wait_snapshot_timestamp_seconds < 180))) or vector(0)) and on() (max(sky_managed_job_wait_snapshot_timestamp_seconds) > time() - 180)",
           "instant": true,
           "range": false,
           "format": "time_series",
@@ -301,7 +301,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "max(max by (workspace,user,cloud,gpu,team,project) (sky_managed_job_oldest_wait_seconds{workspace=~\"$workspace\",user=~\"$user\",cloud=~\"$cloud\",gpu=~\"$gpu\",team=~\"$team\",project=~\"$project\"} and on(job,instance) (time() - sky_managed_job_wait_snapshot_timestamp_seconds < 120)))",
+          "expr": "max(max by (workspace,user,cloud,gpu,team,project) (sky_managed_job_oldest_wait_seconds{workspace=~\"$workspace\",user=~\"$user\",cloud=~\"$cloud\",gpu=~\"$gpu\",team=~\"$team\",project=~\"$project\"} and on(job,instance) (time() - sky_managed_job_wait_snapshot_timestamp_seconds < 180)))",
           "instant": true,
           "range": false,
           "format": "time_series",
@@ -348,7 +348,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "(sum(max by (workspace,user,cloud,gpu,team,project,outcome) (sky_managed_job_wait_7d_tasks{workspace=~\"$workspace\",user=~\"$user\",cloud=~\"$cloud\",gpu=~\"$gpu\",team=~\"$team\",project=~\"$project\",outcome=\"started\"} and on(job,instance) (time() - sky_managed_job_wait_snapshot_timestamp_seconds < 120))) or vector(0)) and on() (max(sky_managed_job_wait_snapshot_timestamp_seconds) > time() - 120)",
+          "expr": "(sum(max by (workspace,user,cloud,gpu,team,project,outcome) (sky_managed_job_wait_7d_tasks{workspace=~\"$workspace\",user=~\"$user\",cloud=~\"$cloud\",gpu=~\"$gpu\",team=~\"$team\",project=~\"$project\",outcome=\"started\"} and on(job,instance) (time() - sky_managed_job_wait_snapshot_timestamp_seconds < 180))) or vector(0)) and on() (max(sky_managed_job_wait_snapshot_timestamp_seconds) > time() - 180)",
           "instant": true,
           "range": false,
           "format": "time_series",
@@ -395,7 +395,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "(sum(max by (workspace,user,cloud,gpu,team,project,outcome) (sky_managed_job_wait_7d_tasks{workspace=~\"$workspace\",user=~\"$user\",cloud=~\"$cloud\",gpu=~\"$gpu\",team=~\"$team\",project=~\"$project\",outcome=\"cancelled_before_start\"} and on(job,instance) (time() - sky_managed_job_wait_snapshot_timestamp_seconds < 120))) or vector(0)) and on() (max(sky_managed_job_wait_snapshot_timestamp_seconds) > time() - 120)",
+          "expr": "(sum(max by (workspace,user,cloud,gpu,team,project,outcome) (sky_managed_job_wait_7d_tasks{workspace=~\"$workspace\",user=~\"$user\",cloud=~\"$cloud\",gpu=~\"$gpu\",team=~\"$team\",project=~\"$project\",outcome=\"cancelled_before_start\"} and on(job,instance) (time() - sky_managed_job_wait_snapshot_timestamp_seconds < 180))) or vector(0)) and on() (max(sky_managed_job_wait_snapshot_timestamp_seconds) > time() - 180)",
           "instant": true,
           "range": false,
           "format": "time_series",
@@ -442,7 +442,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "(sum(max by (workspace,user,cloud,gpu,team,project,outcome) (sky_managed_job_wait_7d_tasks{workspace=~\"$workspace\",user=~\"$user\",cloud=~\"$cloud\",gpu=~\"$gpu\",team=~\"$team\",project=~\"$project\",outcome=\"failed_before_start\"} and on(job,instance) (time() - sky_managed_job_wait_snapshot_timestamp_seconds < 120))) or vector(0)) and on() (max(sky_managed_job_wait_snapshot_timestamp_seconds) > time() - 120)",
+          "expr": "(sum(max by (workspace,user,cloud,gpu,team,project,outcome) (sky_managed_job_wait_7d_tasks{workspace=~\"$workspace\",user=~\"$user\",cloud=~\"$cloud\",gpu=~\"$gpu\",team=~\"$team\",project=~\"$project\",outcome=\"failed_before_start\"} and on(job,instance) (time() - sky_managed_job_wait_snapshot_timestamp_seconds < 180))) or vector(0)) and on() (max(sky_managed_job_wait_snapshot_timestamp_seconds) > time() - 180)",
           "instant": true,
           "range": false,
           "format": "time_series",
@@ -473,7 +473,7 @@
     },
     {
       "id": 8,
-      "title": "Snapshot age \u00b7 must be < 2 minutes",
+      "title": "Snapshot age \u00b7 must be < 3 minutes",
       "type": "stat",
       "gridPos": {
         "x": 18,
@@ -510,7 +510,7 @@
               },
               {
                 "color": "red",
-                "value": 120
+                "value": 180
               }
             ]
           }
@@ -549,7 +549,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "histogram_quantile(0.95, sum by (le,gpu) (max by (workspace,user,cloud,gpu,team,project,outcome,phase,le) (sky_managed_job_wait_7d_seconds_bucket{workspace=~\"$workspace\",user=~\"$user\",cloud=~\"$cloud\",gpu=~\"$gpu\",team=~\"$team\",project=~\"$project\",outcome=\"started\",phase=\"total\"} and on(job,instance) (time() - sky_managed_job_wait_snapshot_timestamp_seconds < 120))))",
+          "expr": "histogram_quantile(0.95, sum by (le,gpu) (max by (workspace,user,cloud,gpu,team,project,outcome,phase,le) (sky_managed_job_wait_7d_seconds_bucket{workspace=~\"$workspace\",user=~\"$user\",cloud=~\"$cloud\",gpu=~\"$gpu\",team=~\"$team\",project=~\"$project\",outcome=\"started\",phase=\"total\"} and on(job,instance) (time() - sky_managed_job_wait_snapshot_timestamp_seconds < 180))))",
           "instant": true,
           "range": false,
           "format": "time_series",
@@ -596,7 +596,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "histogram_quantile(0.95, sum by (le,phase) (max by (workspace,user,cloud,gpu,team,project,outcome,phase,le) (sky_managed_job_wait_7d_seconds_bucket{workspace=~\"$workspace\",user=~\"$user\",cloud=~\"$cloud\",gpu=~\"$gpu\",team=~\"$team\",project=~\"$project\",outcome=\"started\",phase=~\"controller|launch\"} and on(job,instance) (time() - sky_managed_job_wait_snapshot_timestamp_seconds < 120))))",
+          "expr": "histogram_quantile(0.95, sum by (le,phase) (max by (workspace,user,cloud,gpu,team,project,outcome,phase,le) (sky_managed_job_wait_7d_seconds_bucket{workspace=~\"$workspace\",user=~\"$user\",cloud=~\"$cloud\",gpu=~\"$gpu\",team=~\"$team\",project=~\"$project\",outcome=\"started\",phase=~\"controller|launch\"} and on(job,instance) (time() - sky_managed_job_wait_snapshot_timestamp_seconds < 180))))",
           "instant": true,
           "range": false,
           "format": "time_series",
@@ -643,7 +643,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum by (user,outcome) (max by (workspace,user,cloud,gpu,team,project,outcome) (sky_managed_job_wait_7d_tasks{workspace=~\"$workspace\",user=~\"$user\",cloud=~\"$cloud\",gpu=~\"$gpu\",team=~\"$team\",project=~\"$project\"} and on(job,instance) (time() - sky_managed_job_wait_snapshot_timestamp_seconds < 120)))",
+          "expr": "sum by (user,outcome) (max by (workspace,user,cloud,gpu,team,project,outcome) (sky_managed_job_wait_7d_tasks{workspace=~\"$workspace\",user=~\"$user\",cloud=~\"$cloud\",gpu=~\"$gpu\",team=~\"$team\",project=~\"$project\"} and on(job,instance) (time() - sky_managed_job_wait_snapshot_timestamp_seconds < 180)))",
           "instant": true,
           "range": false,
           "format": "time_series",
@@ -690,7 +690,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "histogram_quantile(0.95, sum by (le,team,project) (max by (workspace,user,cloud,gpu,team,project,outcome,phase,le) (sky_managed_job_wait_7d_seconds_bucket{workspace=~\"$workspace\",user=~\"$user\",cloud=~\"$cloud\",gpu=~\"$gpu\",team=~\"$team\",project=~\"$project\",outcome=\"started\",phase=\"total\"} and on(job,instance) (time() - sky_managed_job_wait_snapshot_timestamp_seconds < 120))))",
+          "expr": "histogram_quantile(0.95, sum by (le,team,project) (max by (workspace,user,cloud,gpu,team,project,outcome,phase,le) (sky_managed_job_wait_7d_seconds_bucket{workspace=~\"$workspace\",user=~\"$user\",cloud=~\"$cloud\",gpu=~\"$gpu\",team=~\"$team\",project=~\"$project\",outcome=\"started\",phase=\"total\"} and on(job,instance) (time() - sky_managed_job_wait_snapshot_timestamp_seconds < 180))))",
           "instant": true,
           "range": false,
           "format": "time_series",
@@ -737,7 +737,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "topk(20, max by (workspace,user,cloud,gpu,team,project,job_id,task_id,outcome) (sky_managed_job_wait_outlier_seconds{workspace=~\"$workspace\",user=~\"$user\",cloud=~\"$cloud\",gpu=~\"$gpu\",team=~\"$team\",project=~\"$project\"} and on(job,instance) (time() - sky_managed_job_wait_snapshot_timestamp_seconds < 120)))",
+          "expr": "topk(20, max by (workspace,user,cloud,gpu,team,project,job_id,task_id,outcome) (sky_managed_job_wait_outlier_seconds{workspace=~\"$workspace\",user=~\"$user\",cloud=~\"$cloud\",gpu=~\"$gpu\",team=~\"$team\",project=~\"$project\"} and on(job,instance) (time() - sky_managed_job_wait_snapshot_timestamp_seconds < 180)))",
           "instant": true,
           "range": false,
           "format": "table",
@@ -813,7 +813,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum by (reason) (max by (workspace,user,cloud,gpu,team,project,reason) (sky_managed_job_wait_missing_tasks{workspace=~\"$workspace\",user=~\"$user\",cloud=~\"$cloud\",gpu=~\"$gpu\",team=~\"$team\",project=~\"$project\"} and on(job,instance) (time() - sky_managed_job_wait_snapshot_timestamp_seconds < 120)))",
+          "expr": "sum by (reason) (max by (workspace,user,cloud,gpu,team,project,reason) (sky_managed_job_wait_missing_tasks{workspace=~\"$workspace\",user=~\"$user\",cloud=~\"$cloud\",gpu=~\"$gpu\",team=~\"$team\",project=~\"$project\"} and on(job,instance) (time() - sky_managed_job_wait_snapshot_timestamp_seconds < 180)))",
           "instant": true,
           "range": false,
           "format": "time_series",
