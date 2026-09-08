@@ -1400,12 +1400,22 @@ export function ManagedJobsTable({
           0
         );
 
+        // Compute total duration across all tasks, matching the CLI's
+        // aggregated row in format_job_table. A task that has not started
+        // yet contributes 0; one that has started keeps accruing, so a
+        // group with work still in flight ticks up.
+        const totalDuration = tasks.reduce(
+          (sum, t) => sum + (t.job_duration || 0),
+          0
+        );
+
         aggregates.set(jobId, {
           aggregatedStatus,
           statusTooltip,
           resourcesDisplay,
           resourcesTooltip,
           totalRecoveries,
+          totalDuration,
         });
       }
     });
@@ -1804,9 +1814,17 @@ export function ManagedJobsTable({
             Duration{getSortDirection('job_duration')}
           </TableHead>
         ),
-        renderCell: (item) => (
-          <TableCell>{formatDuration(item.job_duration)}</TableCell>
-        ),
+        renderCell: (item, ctx) => {
+          const { renderMode, aggregates } = ctx || {};
+
+          if (renderMode === 'groupParent') {
+            return (
+              <TableCell>{formatDuration(aggregates?.totalDuration)}</TableCell>
+            );
+          }
+
+          return <TableCell>{formatDuration(item.job_duration)}</TableCell>;
+        },
       },
       {
         id: 'status',
