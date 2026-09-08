@@ -824,6 +824,13 @@ class Rclone:
                         secret_access_key = {secret_access_key}
                         acl = private
                         """)
+                if region is not None:
+                    # Pin the profile to the bucket's region so rclone uses
+                    # the region-specific endpoint. Without this, rclone
+                    # defaults to us-east-1 and requests to buckets in opt-in
+                    # regions (e.g., eu-south-2) fail with
+                    # IllegalLocationConstraintException. See #9540.
+                    config += f'region = {region}\n'
             elif self is Rclone.RcloneStores.GCS:
                 config = textwrap.dedent(f"""\
                     [{rclone_profile_name}]
