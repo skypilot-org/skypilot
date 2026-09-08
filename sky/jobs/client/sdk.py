@@ -637,7 +637,11 @@ def wait(
 @context.contextual
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
-@versions.minimal_api_version(25)
+# 26, not 25: /jobs/events was added while the version was already 25 and
+# without bumping it, so a server reporting 25 may predate the route and
+# would answer 404 instead of the error this decorator exists to raise. 26 is
+# the first version every build of which has it.
+@versions.minimal_api_version(26)
 def events(
     job_id: int,
     task: Optional[Union[str, int]] = None,
