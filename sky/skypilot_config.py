@@ -1058,6 +1058,13 @@ _QUEUE_NAME_KEYS: List[Tuple[str, ...]] = [
     ('kueue', 'local_queue_name'),
 ]
 
+# Slurm names its queue (the sbatch `--qos`) and account under `quota`; the
+# `sbatch_options.qos` / `sbatch_options.account` spellings are merged
+# separately by `sky/clouds/slurm.py` and only apply when no `quota.*` value
+# is set at any scope.
+_SLURM_QUEUE_NAME_KEYS: List[Tuple[str, ...]] = [('quota', 'queue')]
+_SLURM_ACCOUNT_KEYS: List[Tuple[str, ...]] = [('quota', 'account')]
+
 _NAMESPACE_KEYS: List[Tuple[str, ...]] = [('namespace',)]
 
 # Hooks invoked at the end of `update_api_server_config_no_lock`, after the
@@ -1165,19 +1172,46 @@ def register_config_post_save_hook(fn: ConfigPostSaveHook) -> None:
         _CONFIG_POST_SAVE_HOOKS.append(fn)
 
 
-def _get_effective_k8s_config_value(
+def _region_scope_prefixes(
+        cloud: str,
+        region: Optional[str],
+        partition: Optional[str] = None) -> List[Tuple[str, ...]]:
+    """Key prefixes for one cloud's config subtree, most specific first.
+
+    Kubernetes and SSH scope per-context values under ``context_configs``;
+    Slurm scopes per-cluster values under ``cluster_configs`` with a further
+    ``partition_configs`` level below it.
+    """
+    prefixes: List[Tuple[str, ...]] = []
+    if region is not None:
+        if cloud == 'slurm':
+            if partition is not None:
+                prefixes.append((cloud, 'cluster_configs', region,
+                                 'partition_configs', partition))
+            prefixes.append((cloud, 'cluster_configs', region))
+        else:
+            prefixes.append((cloud, 'context_configs', region))
+    prefixes.append((cloud,))
+    return prefixes
+
+
+def _get_effective_scoped_config_value(
         cloud: str,
         property_keys: List[Tuple[str, ...]],
         region: Optional[str] = None,
         workspace: Optional[str] = None,
-        override_configs: Optional[Dict[str, Any]] = None) -> Optional[str]:
-    """Generic Kubernetes config-value resolver.
+        override_configs: Optional[Dict[str, Any]] = None,
+        partition: Optional[str] = None) -> Optional[str]:
+    """Generic scoped config-value resolver.
 
-    Resolution precedence (most specific first):
+    Resolution precedence (most specific first), where ``<scope>`` walks the
+    prefixes from ``_region_scope_prefixes`` (``context_configs.<region>``
+    for Kubernetes / SSH; ``cluster_configs.<region>.partition_configs
+    .<partition>`` then ``cluster_configs.<region>`` for Slurm):
 
-    1. ``workspaces.<workspace>.<cloud>.context_configs.<region>.<property>``
+    1. ``workspaces.<workspace>.<cloud>.<scope>.<property>``
     2. ``workspaces.<workspace>.<cloud>.<property>``
-    3. ``<cloud>.context_configs.<region>.<property>``
+    3. ``<cloud>.<scope>.<property>``
     4. ``<cloud>.<property>``
     5. ``None`` — caller is responsible for any default.
 
@@ -1189,6 +1223,7 @@ def _get_effective_k8s_config_value(
     """
     if workspace is None:
         workspace = get_active_workspace()
+    prefixes = _region_scope_prefixes(cloud, region, partition)
 
     # `override_configs` are cloud-level; looking up relative to a scope
     # (rather than prefixing the scope into `keys`) ensures they apply at
@@ -1209,38 +1244,61 @@ def _get_effective_k8s_config_value(
                 scope_config.get_nested(keys=(),
                                         default_value={},
                                         override_configs=override_configs))
-        if region is not None:
+        for prefix in prefixes:
             for property_key in property_keys:
-                value = scope_config.get_nested(
-                    keys=(cloud, 'context_configs', region) + property_key,
-                    default_value=None)
+                value = scope_config.get_nested(keys=prefix + property_key,
+                                                default_value=None)
                 if value is not None:
                     return value
-        for property_key in property_keys:
-            value = scope_config.get_nested(keys=(cloud,) + property_key,
-                                            default_value=None)
-            if value is not None:
-                return value
     return None
 
 
-def get_effective_queue_name(
-        cloud: str,
-        region: Optional[str] = None,
+def get_effective_queue_name(cloud: str,
+                             region: Optional[str] = None,
+                             workspace: Optional[str] = None,
+                             override_configs: Optional[Dict[str, Any]] = None,
+                             partition: Optional[str] = None) -> Optional[str]:
+    """Returns the effective queue name from config.
+
+    For Kubernetes this is the Kueue local queue, spelled either
+    ``kueue.local_queue_name`` or ``quota.queue``. Scope precedence
+    (workspace > global; context > cloud) takes priority over spelling;
+    within the same scope, ``quota.queue`` wins over
+    ``kueue.local_queue_name`` when both are set.
+
+    For Slurm this is the QOS the job is submitted with (``sbatch --qos``),
+    spelled ``quota.queue``, scoped workspace > global and partition >
+    cluster > cloud. ``partition`` selects the ``partition_configs`` level.
+    """
+    if cloud == 'slurm':
+        property_keys = _SLURM_QUEUE_NAME_KEYS
+    else:
+        property_keys = _QUEUE_NAME_KEYS
+    return _get_effective_scoped_config_value(cloud=cloud,
+                                              property_keys=property_keys,
+                                              region=region,
+                                              workspace=workspace,
+                                              override_configs=override_configs,
+                                              partition=partition)
+
+
+def get_effective_slurm_account(
+        cluster: Optional[str] = None,
+        partition: Optional[str] = None,
         workspace: Optional[str] = None,
         override_configs: Optional[Dict[str, Any]] = None) -> Optional[str]:
-    """Returns the effective Kueue local queue name from config.
+    """Returns the effective Slurm account (``sbatch --account``) from config.
 
-    Supports two equivalent spellings, ``kueue.local_queue_name`` and
-    ``quota.queue``. Scope precedence (workspace > global; context > cloud)
-    takes priority over spelling; within the same scope, ``quota.queue``
-    wins over ``kueue.local_queue_name`` when both are set.
+    Spelled ``slurm.quota.account``, scoped workspace > global and
+    partition > cluster > cloud, the same walk as
+    :func:`get_effective_queue_name` for Slurm.
     """
-    return _get_effective_k8s_config_value(cloud=cloud,
-                                           property_keys=_QUEUE_NAME_KEYS,
-                                           region=region,
-                                           workspace=workspace,
-                                           override_configs=override_configs)
+    return _get_effective_scoped_config_value(cloud='slurm',
+                                              property_keys=_SLURM_ACCOUNT_KEYS,
+                                              region=cluster,
+                                              workspace=workspace,
+                                              override_configs=override_configs,
+                                              partition=partition)
 
 
 def get_effective_namespace(
@@ -1258,11 +1316,11 @@ def get_effective_namespace(
     4. ``<cloud>.namespace``
     5. ``None`` — caller is responsible for the kubeconfig-default fallback.
     """
-    return _get_effective_k8s_config_value(cloud=cloud,
-                                           property_keys=_NAMESPACE_KEYS,
-                                           region=region,
-                                           workspace=workspace,
-                                           override_configs=override_configs)
+    return _get_effective_scoped_config_value(cloud=cloud,
+                                              property_keys=_NAMESPACE_KEYS,
+                                              region=region,
+                                              workspace=workspace,
+                                              override_configs=override_configs)
 
 
 def register_queue_name_key(key: Tuple[str, ...]) -> None:

@@ -2336,3 +2336,172 @@ class TestResolveSkyBaseDir:
         assert result == '/home/alice'
         mock_get_config.assert_called_once()
         client.get_env.assert_not_called()
+
+
+class TestSlurmQuotaConfig:
+    """`slurm.quota.{queue,account}` land in sbatch_options as qos/account."""
+
+    def _sbatch_options(self, tmp_path, config, overrides=None):
+        # pylint: disable=protected-access
+        return TestSbatchOptionsPrecedence(
+        )._load_config_and_get_sbatch_options(
+            tmp_path, config, cluster_config_overrides=overrides)
+
+    def test_queue_sets_qos(self, tmp_path):
+        result = self._sbatch_options(tmp_path, {
+            'slurm': {
+                'quota': {
+                    'queue': 'normal'
+                },
+            },
+        })
+        assert result == {'qos': 'normal'}
+
+    def test_account_sets_account(self, tmp_path):
+        result = self._sbatch_options(tmp_path, {
+            'slurm': {
+                'quota': {
+                    'queue': 'high',
+                    'account': 'pre-training'
+                },
+            },
+        })
+        assert result == {'qos': 'high', 'account': 'pre-training'}
+
+    def test_quota_wins_over_sbatch_options_at_any_scope(self, tmp_path):
+        """A cloud-level `quota.queue` beats a partition-level sbatch qos.
+
+        Short-form spellings are dropped so the job never carries two
+        directives for the same option.
+        """
+        result = self._sbatch_options(
+            tmp_path, {
+                'slurm': {
+                    'quota': {
+                        'queue': 'quota-qos',
+                        'account': 'quota-account',
+                    },
+                    'sbatch_options': {
+                        'A': 'short-account',
+                        'constraint': 'skylake',
+                    },
+                    'cluster_configs': {
+                        'mycluster': {
+                            'partition_configs': {
+                                'gpu': {
+                                    'sbatch_options': {
+                                        'qos': 'partition-qos',
+                                        'q': 'short-qos',
+                                    },
+                                },
+                            },
+                        },
+                    },
+                },
+            })
+        assert result == {
+            'qos': 'quota-qos',
+            'account': 'quota-account',
+            'constraint': 'skylake',
+        }
+
+    def test_sbatch_options_kept_without_quota(self, tmp_path):
+        result = self._sbatch_options(
+            tmp_path, {
+                'slurm': {
+                    'sbatch_options': {
+                        'qos': 'sbatch-qos',
+                        'account': 'sbatch-account',
+                    },
+                },
+            })
+        assert result == {'qos': 'sbatch-qos', 'account': 'sbatch-account'}
+
+    def test_workspace_routes_to_its_queue(self, tmp_path):
+        """A workspace pin outranks every global scope, partition included."""
+        config = {
+            'slurm': {
+                'quota': {
+                    'queue': 'global-qos'
+                },
+                'cluster_configs': {
+                    'mycluster': {
+                        'partition_configs': {
+                            'gpu': {
+                                'quota': {
+                                    'queue': 'global-partition-qos',
+                                    'account': 'global-partition-account',
+                                },
+                            },
+                        },
+                    },
+                },
+            },
+            'workspaces': {
+                'pre-training': {
+                    'slurm': {
+                        'quota': {
+                            'queue': 'pretraining-qos',
+                            'account': 'pre-training',
+                        },
+                    },
+                },
+                'other': {},
+            },
+        }
+        with skypilot_config.local_active_workspace_ctx('pre-training'):
+            result = self._sbatch_options(tmp_path, config)
+        assert result == {'qos': 'pretraining-qos', 'account': 'pre-training'}
+
+        with skypilot_config.local_active_workspace_ctx('other'):
+            result = self._sbatch_options(tmp_path, config)
+        assert result == {
+            'qos': 'global-partition-qos',
+            'account': 'global-partition-account',
+        }
+
+    def test_task_override_at_partition_scope(self, tmp_path):
+        result = self._sbatch_options(
+            tmp_path, {
+                'slurm': {
+                    'cluster_configs': {
+                        'mycluster': {
+                            'partition_configs': {
+                                'gpu': {
+                                    'quota': {
+                                        'queue': 'server-qos'
+                                    },
+                                },
+                            },
+                        },
+                    },
+                },
+            },
+            overrides={
+                'slurm': {
+                    'cluster_configs': {
+                        'mycluster': {
+                            'partition_configs': {
+                                'gpu': {
+                                    'quota': {
+                                        'queue': 'task-qos'
+                                    },
+                                },
+                            },
+                        },
+                    },
+                },
+            })
+        assert result == {'qos': 'task-qos'}
+
+    def test_task_override_at_cloud_scope(self, tmp_path):
+        result = self._sbatch_options(tmp_path, {'slurm': {}},
+                                      overrides={
+                                          'slurm': {
+                                              'quota': {
+                                                  'queue': 'task-qos',
+                                                  'account': 'task-account',
+                                              },
+                                          },
+                                      })
+        assert result == {'qos': 'task-qos', 'account': 'task-account'}
