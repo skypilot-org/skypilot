@@ -4143,6 +4143,10 @@ def get_cancel_request_reasons(job_ids: List[int]) -> Dict[int, str]:
     attributed request (an old controller, or a controller-internal cancel
     such as a job group tearing down its auxiliary jobs) has no entry. One
     batched query so the queue stays off the per-job path.
+
+    These events are exempt from job-event retention
+    (cleanup_job_events_with_retention_async), so the requester stays with
+    the job for as long as the job record does.
     """
     result: Dict[int, str] = {}
     if not job_ids:
@@ -4198,10 +4202,24 @@ async def cleanup_job_events_with_retention_async(
     cutoff_time = datetime.datetime.now() - datetime.timedelta(
         hours=retention_hours)
 
+    # The attributed cancel-request event ('Cancellation requested by user
+    # ...', see get_cancel_request_reasons) is the record of who cancelled a
+    # job and is surfaced in the job's details for as long as the job itself
+    # is kept, so it is exempt from retention: one small row per cancelled
+    # job. Spelled out NULL-safely, since NOT (a AND b) over a NULL reason
+    # would keep every CANCELLING event with no reason.
+    cancel_prefix = f'{CANCEL_REQUESTED_EVENT_REASON_PREFIX}%'
+    not_cancel_request = sqlalchemy.or_(
+        job_events_table.c.new_status.is_(None),
+        job_events_table.c.new_status != ManagedJobStatus.CANCELLING.value,
+        job_events_table.c.reason.is_(None),
+        sqlalchemy.not_(job_events_table.c.reason.like(cancel_prefix)),
+    )
+
     async with sql_async.AsyncSession(engine) as session:
         result = await session.execute(
             sqlalchemy.delete(job_events_table).where(
-                job_events_table.c.timestamp < cutoff_time))
+                job_events_table.c.timestamp < cutoff_time, not_cancel_request))
         count = result.rowcount
         if count > 0:
             logger.debug(f'Deleted {count} job events older than '

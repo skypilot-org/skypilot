@@ -934,6 +934,64 @@ class TestGetLatestCancelRequestReasons:
         }
 
 
+class TestJobEventRetentionKeepsCancelRequests:
+    """The attributed cancel-request event outlives job-event retention."""
+
+    @pytest.mark.asyncio
+    async def test_cancel_request_event_survives_cleanup(
+            self, _mock_managed_jobs_db_conn):
+        old = datetime.datetime.now() - datetime.timedelta(days=60)
+        recent = datetime.datetime.now()
+        attributed = ('Cancellation requested by user alice '
+                      '(request ID: 9b6e6396-0000-4000-8000-000000000000)')
+        state.add_job_event(1,
+                            None,
+                            state.ManagedJobStatus.CANCELLING,
+                            attributed,
+                            timestamp=old)
+        # Everything else past the cutoff goes, including the controller's
+        # generic CANCELLING event, a CANCELLING event with no reason at all,
+        # and the terminal CANCELLED event.
+        state.add_job_event(1,
+                            None,
+                            state.ManagedJobStatus.CANCELLING,
+                            'Job is cancelling',
+                            timestamp=old)
+        state.add_job_event(1,
+                            None,
+                            state.ManagedJobStatus.CANCELLING,
+                            None,
+                            timestamp=old)
+        state.add_job_event(1,
+                            None,
+                            state.ManagedJobStatus.CANCELLED,
+                            'Job has been cancelled',
+                            timestamp=old)
+        state.add_job_event(2,
+                            0,
+                            state.ManagedJobStatus.RUNNING,
+                            'Job has started',
+                            timestamp=old)
+        state.add_job_event(3,
+                            0,
+                            state.ManagedJobStatus.RUNNING,
+                            'Job has started',
+                            timestamp=recent)
+
+        await state.cleanup_job_events_with_retention_async(30 * 24)
+
+        remaining = sorted(
+            (e['spot_job_id'], e['new_status'].value, e['reason'])
+            for job_id in (1, 2, 3)
+            for e in state.get_job_events(job_id))
+        assert remaining == [
+            (1, 'CANCELLING', attributed),
+            (3, 'RUNNING', 'Job has started'),
+        ]
+        # And the requester is still what the queue surfaces.
+        assert state.get_cancel_request_reasons([1]) == {1: attributed}
+
+
 class TestSetRecoveringEventReason:
     """Reason/code selection for the RECOVERING event in set_recovering_async.
 
