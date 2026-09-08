@@ -923,10 +923,12 @@ def deploy_single_cluster(cluster_name,
             curl -fsSL -o get_helm.sh https://raw.githubusercontent.com/helm/helm/master/scripts/get-helm-3 &&
             chmod 700 get_helm.sh &&
             ./get_helm.sh &&
-            helm repo add nvidia https://helm.ngc.nvidia.com/nvidia && helm repo update &&
+            helm repo add nvidia https://helm.ngc.nvidia.com/nvidia || true &&
+            helm repo update nvidia &&
             kubectl create namespace gpu-operator --kubeconfig ~/.kube/config || true &&
             sudo -A ln -s /sbin/ldconfig /sbin/ldconfig.real || true &&
-            helm install gpu-operator -n gpu-operator --create-namespace nvidia/gpu-operator \\
+            helm upgrade --install gpu-operator -n gpu-operator --create-namespace nvidia/gpu-operator \\
+            --kubeconfig ~/.kube/config \\
             --set 'toolkit.env[0].name=CONTAINERD_CONFIG' \\
             --set 'toolkit.env[0].value=/var/lib/rancher/k3s/agent/etc/containerd/config.toml' \\
             --set 'toolkit.env[1].name=CONTAINERD_SOCKET' \\
@@ -936,10 +938,21 @@ def deploy_single_cluster(cluster_name,
             --set 'devicePlugin.env[0].name=DP_DISABLE_HEALTHCHECKS' \\
             --set 'devicePlugin.env[0].value=all' &&
             echo 'Waiting for GPU operator installation...' &&
-            while ! kubectl describe nodes --kubeconfig ~/.kube/config | grep -q 'nvidia.com/gpu:' || ! kubectl describe nodes --kubeconfig ~/.kube/config | grep -q 'nvidia.com/gpu.product'; do
-                echo 'Waiting for GPU operator...'
-                sleep 5
+            GPU_READY='' &&
+            for i in $(seq 1 60); do
+                NODES=$(kubectl describe nodes --kubeconfig ~/.kube/config 2>/dev/null)
+                if echo "$NODES" | grep -q 'nvidia.com/gpu:' && \\
+                   echo "$NODES" | grep -q 'nvidia.com/gpu.product'; then
+                    GPU_READY='ready' && break
+                fi
+                echo 'Waiting for GPU operator...' >&2
+                sleep 10
             done
+            if [ -z "$GPU_READY" ]; then
+                echo 'GPU operator did not become ready.' >&2
+                kubectl get pods -n gpu-operator --kubeconfig ~/.kube/config >&2 || true
+                exit 1
+            fi
             echo 'GPU operator installed successfully.'
         """
         result = deploy_utils.run_remote(head_node,
@@ -948,8 +961,11 @@ def deploy_single_cluster(cluster_name,
                                          ssh_key,
                                          use_ssh_config=head_use_ssh_config)
         if result is None:
-            logger.error(f'{colorama.Fore.RED}Failed to install GPU Operator.'
-                         f'{RESET_ALL}')
+            logger.error(
+                f'{colorama.Fore.RED}Failed to install GPU Operator. The '
+                f'cluster will still work, but GPUs will not be schedulable '
+                f'until the operator is installed manually. Run `kubectl get '
+                f'pods -n gpu-operator` on the head node to debug.{RESET_ALL}')
         else:
             success_message('GPU Operator installed.')
 
