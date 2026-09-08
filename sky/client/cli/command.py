@@ -6674,13 +6674,12 @@ def _format_job_event_time(timestamp: Any) -> str:
 @click.argument('task', required=False, type=str, default=None)
 @click.option('--limit',
               '-l',
-              type=click.IntRange(min=0),
+              type=int,
               default=50,
-              show_default=True,
               help=('Number of most recent events to show, after merging '
-                    'every source. Neither the job\'s own transitions nor '
-                    'the cluster\'s launch progress can be crowded out '
-                    'entirely. 0 shows all.'))
+                    'every source; default 50, 0 shows all. Neither the '
+                    'job\'s own transitions nor the cluster\'s launch '
+                    'progress can be crowded out entirely.'))
 @click.option('--cluster-events/--no-cluster-events',
               default=True,
               show_default=True,
@@ -6721,6 +6720,13 @@ def jobs_events(job_id: int, task: Optional[str], limit: int,
     # Events of the task named 'train' in job 42
     sky jobs events 42 train
     """
+    if limit < 0:
+        # Validated here rather than with click.IntRange, which would render
+        # the option as 'INTEGER RANGE  [default: 50; x>=0]' -- every other
+        # numeric option in this CLI is a plain INTEGER whose default is part
+        # of the help sentence.
+        raise click.UsageError('--limit must be 0 or greater; 0 shows all '
+                               'events.')
     # The remote API version is not known until the server is contacted, so
     # the SDK decides whether the merge is supported; tell it whether the
     # user asked for it explicitly, which sets the log level of the notice.

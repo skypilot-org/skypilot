@@ -129,10 +129,21 @@ class TestJobsEventsCli:
         assert 'No events found for managed job 7' in result.output
 
     def test_negative_limit_is_rejected(self):
+        """Validated in the command rather than by click.IntRange, so the
+        option renders as a plain INTEGER like every other numeric option
+        here -- which means the check has to be tested, not assumed."""
         result, mock_events = self._invoke(['7', '--limit', '-1'])
         assert result.exit_code != 0
-        assert 'limit' in result.output.lower()
+        assert '--limit must be 0 or greater' in result.output
         mock_events.assert_not_called()
+
+    def test_the_help_does_not_advertise_a_click_range(self):
+        """`INTEGER RANGE  [default: 50; x>=0]` is click's rendering for
+        IntRange, and nothing else in this CLI looks like that."""
+        result, _ = self._invoke(['--help'])
+        assert 'INTEGER RANGE' not in result.output
+        assert 'x>=0' not in result.output
+        assert 'default 50' in result.output
 
 
 class TestFormatJobEventTime:
