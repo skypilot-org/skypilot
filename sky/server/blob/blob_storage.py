@@ -6,7 +6,7 @@ import abc
 import contextlib
 import os
 import pathlib
-from typing import Generator, List, Optional, Tuple
+from typing import Dict, Generator, List, Optional, Tuple
 
 from sky import sky_logging
 from sky.skylet import constants
@@ -118,6 +118,15 @@ class BlobStorage(abc.ABC):
     def download_tmp_dir(self, user_hash: str) -> str:
         """Return a staging directory for log downloads for a user."""
         raise NotImplementedError
+
+    def local_disk_roots(self) -> Dict[str, str]:
+        """Returns {name: path} for directories this backend writes locally.
+
+        Consumed by the server's local-disk accounting, which needs to know
+        which trees on the node's own disk grow with file-mount traffic.
+        Backends that keep everything on shared storage return nothing.
+        """
+        return {}
 
     def download_tmp_base_dir(self) -> Optional[str]:
         """Return the base directory for download tmp cleanup.

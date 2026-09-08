@@ -26,6 +26,7 @@ from sky import skypilot_config
 from sky.adaptors import kubernetes as kubernetes_adaptor
 from sky.metrics import utils as metrics_utils
 from sky.server import constants as server_constants
+from sky.server import local_disk
 from sky.skylet import runtime_utils
 from sky.utils import annotations
 from sky.utils import common
@@ -507,6 +508,141 @@ _SQLITE_DB_SIZE_COLLECTOR = _wrap_collector(SqliteDBSizeCollector())
 
 try:
     prom.REGISTRY.register(_SQLITE_DB_SIZE_COLLECTOR)  # for non-multiprocess
+except ValueError:
+    pass
+
+_LOCAL_DISK_USED_HELP = (
+    'Disk used by one of the trees the API server writes to its own local '
+    'disk, by root. Counted in allocated blocks with hard links counted '
+    'once, matching what du -- and therefore a container runtime\'s '
+    'ephemeral-storage accounting -- reports. A series appears only for a '
+    'root that exists on this host. Blocks held by a file that was unlinked '
+    'while still open are invisible to a directory walk and so are missing '
+    'from this value.')
+
+_LOCAL_DISK_FILES_HELP = (
+    'Distinct regular files under one of the API server\'s local roots, '
+    'hard links counted once. Worth watching alongside bytes: the cost of '
+    'the periodic du a container runtime runs to account for ephemeral '
+    'storage scales with file count, not with size.')
+
+_LOCAL_DISK_TRUNCATED_HELP = (
+    '1 when the last walk of this root hit its entry or time bound and '
+    'stopped early, making that root\'s reported size and file count lower '
+    'bounds; 0 otherwise.')
+
+_LOCAL_DISK_SCAN_DURATION_HELP = (
+    'Wall-clock seconds the last walk of all local roots took. Runs off the '
+    'scrape path, so this is a cost signal rather than scrape latency.')
+
+_LOCAL_DISK_FS_SIZE_HELP = (
+    'Total size of a filesystem hosting at least one of the API server\'s '
+    'local roots, by mount point.')
+
+_LOCAL_DISK_FS_AVAIL_HELP = (
+    'Space available to a non-root writer on a filesystem hosting at least '
+    'one of the API server\'s local roots, by mount point. On Kubernetes '
+    'this is the headroom to the kubelet\'s node-level eviction threshold, '
+    'which is what actually stops the server writing -- unlike the '
+    'per-container budget below, it is exact.')
+
+_LOCAL_DISK_BUDGET_HELP = (
+    'The container\'s own ephemeral-storage budget in bytes, from the limit '
+    'if one is declared and otherwise the request. No series is emitted when '
+    'neither is exposed to the container, which is the common case: the '
+    'field cannot be read from the kernel, since ephemeral-storage is not a '
+    'cgroup controller, so it has to be injected (Kubernetes: a '
+    'resourceFieldRef env var).')
+
+_LOCAL_DISK_HEADROOM_HELP = (
+    'Bytes left against sky_apiserver_local_disk_budget_bytes, and absent '
+    'for the same reason that is. An upper bound: the measured roots cover '
+    'what the server writes, not every byte the platform charges to this '
+    'container.')
+
+
+class LocalDiskUsageCollector:
+    """Collector for the API server's own local disk footprint.
+
+    The trees behind these series grow with traffic and have no size bound
+    of their own, so on a node with finite local disk the server can fill
+    it. Without this, the earliest available signal is a node-level
+    filesystem alert, which cannot say which pod is responsible and has
+    only the gap between its own threshold and the eviction threshold as
+    lead time -- a few percentage points, which at multi-GB-per-minute fill
+    rates is under a minute. Per-root series make the growth attributable
+    and let an alert trigger on rate rather than on level.
+
+    Measurement only: nothing here bounds or refuses writes.
+
+    A walk of a few hundred thousand files costs well under a second on
+    local disk, but the roots are on whatever the deployment mounted, so
+    ResilientCollector keeps it off the scrape path and each root's walk
+    carries its own entry and time bound.
+    """
+
+    def describe(self):
+        yield prom_core.GaugeMetricFamily('sky_apiserver_local_disk_used_bytes',
+                                          _LOCAL_DISK_USED_HELP,
+                                          labels=['root'])
+
+    def collect(self):
+        snapshot = local_disk.scan()
+
+        used = prom_core.GaugeMetricFamily(
+            'sky_apiserver_local_disk_used_bytes',
+            _LOCAL_DISK_USED_HELP,
+            labels=['root'])
+        files = prom_core.GaugeMetricFamily('sky_apiserver_local_disk_files',
+                                            _LOCAL_DISK_FILES_HELP,
+                                            labels=['root'])
+        truncated = prom_core.GaugeMetricFamily(
+            'sky_apiserver_local_disk_scan_truncated',
+            _LOCAL_DISK_TRUNCATED_HELP,
+            labels=['root'])
+        for root, usage in snapshot.roots.items():
+            used.add_metric([root], usage.used_bytes)
+            files.add_metric([root], usage.files)
+            truncated.add_metric([root], 1 if usage.truncated else 0)
+        yield used
+        yield files
+        yield truncated
+
+        fs_size = prom_core.GaugeMetricFamily(
+            'sky_apiserver_local_disk_fs_size_bytes',
+            _LOCAL_DISK_FS_SIZE_HELP,
+            labels=['mountpoint'])
+        fs_avail = prom_core.GaugeMetricFamily(
+            'sky_apiserver_local_disk_fs_avail_bytes',
+            _LOCAL_DISK_FS_AVAIL_HELP,
+            labels=['mountpoint'])
+        for mountpoint, fs in snapshot.filesystems.items():
+            fs_size.add_metric([mountpoint], fs.size_bytes)
+            fs_avail.add_metric([mountpoint], fs.avail_bytes)
+        yield fs_size
+        yield fs_avail
+
+        yield prom_core.GaugeMetricFamily(
+            'sky_apiserver_local_disk_scan_duration_seconds',
+            _LOCAL_DISK_SCAN_DURATION_HELP,
+            value=snapshot.duration_seconds)
+
+        budget = prom_core.GaugeMetricFamily(
+            'sky_apiserver_local_disk_budget_bytes', _LOCAL_DISK_BUDGET_HELP)
+        headroom = prom_core.GaugeMetricFamily(
+            'sky_apiserver_local_disk_headroom_bytes',
+            _LOCAL_DISK_HEADROOM_HELP)
+        if snapshot.budget_bytes is not None:
+            budget.add_metric([], snapshot.budget_bytes)
+            headroom.add_metric([], snapshot.headroom_bytes)
+        yield budget
+        yield headroom
+
+
+_LOCAL_DISK_USAGE_COLLECTOR = _wrap_collector(LocalDiskUsageCollector())
+
+try:
+    prom.REGISTRY.register(_LOCAL_DISK_USAGE_COLLECTOR)  # non-multiprocess
 except ValueError:
     pass
 
@@ -1045,6 +1181,7 @@ def metrics() -> fastapi.Response:
         registry.register(_BURN_RATE_COLLECTOR)
         registry.register(_SQLITE_DB_SIZE_COLLECTOR)
         registry.register(_WORKSPACE_USAGE_COLLECTOR)
+        registry.register(_LOCAL_DISK_USAGE_COLLECTOR)
         registry.register(_COLLECTOR_HEALTH_COLLECTOR)
         registry.register(_SERVER_START_TIME_COLLECTOR)
         if _MANAGED_JOBS_COLLECTOR is not None:
