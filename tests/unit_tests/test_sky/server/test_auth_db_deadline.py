@@ -27,6 +27,8 @@ These tests pin the containment behavior:
   error still propagates unchanged.
 """
 
+# pylint: disable=protected-access,redefined-outer-name,missing-class-docstring
+
 import asyncio
 import os
 import time
@@ -83,7 +85,8 @@ def mock_request():
 def call_next_sentinel():
     """call_next that records whether the request reached the router."""
 
-    async def call_next(_request):
+    async def call_next(request):
+        del request  # unused
         call_next.reached = True
         return fastapi.responses.JSONResponse({'message': 'success'})
 
