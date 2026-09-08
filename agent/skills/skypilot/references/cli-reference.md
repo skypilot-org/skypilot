@@ -326,7 +326,7 @@ Show the status-transition events of a managed job.
 - `--config` — Path to a config file or a single key-value pair. To add multiple key-value pairs add multiple flags (e.g. --config nested.key1=val1 --config nested.key2=val2).
 - `JOB_ID` — integer
 - `TASK` — text
-- `--limit`, `-l` (default: `50`) — Number of most recent events to show, after merging every source. Neither the job's own transitions nor the cluster's launch progress can be crowded out entirely. 0 shows all.
+- `--limit`, `-l` (default: `50`) — Number of most recent events to show, after merging every source; default 50, 0 shows all. Neither the job's own transitions nor the cluster's launch progress can be crowded out entirely.
 - `--cluster-events`, `--no-cluster-events` — Include launch-progress events from the job's cluster, e.g. why the cluster is still pending on Slurm or Kubernetes. Requires an API server on version 54 or newer.
 - `--output`, `-o` (default: `table`) — Output format. Choices: table, json. Default: table.
 
