@@ -335,6 +335,26 @@ def _wrap_collector(collector) -> ResilientCollector:
     return wrapped
 
 
+_multiproc_collector: Optional[ResilientCollector] = None
+_multiproc_collector_lock = threading.Lock()
+
+
+def _get_multiproc_collector() -> ResilientCollector:
+    """Process-wide wrapper for the multiprocess merge.
+
+    The merge reads every per-pid file under ``PROMETHEUS_MULTIPROC_DIR``
+    and is CPU-bound under the GIL, so wrapping it keeps concurrent
+    scrapes from each running their own copy. Built lazily because
+    ``MultiProcessCollector()`` raises unless that directory is set.
+    """
+    global _multiproc_collector
+    with _multiproc_collector_lock:
+        if _multiproc_collector is None:
+            _multiproc_collector = _wrap_collector(
+                multiprocess.MultiProcessCollector(None))
+        return _multiproc_collector
+
+
 class BurnRateCollector:
     """Collector for SkyPilot cluster burn rate metrics.
     This collector calculates the total hourly burn rate (in USD) of all
@@ -494,6 +514,46 @@ _COLLECTOR_HEALTH_COLLECTOR = CollectorHealthCollector()
 
 try:
     prom.REGISTRY.register(_COLLECTOR_HEALTH_COLLECTOR)
+except ValueError:
+    pass
+
+_START_TIME_HELP = (
+    'Unix timestamp when the API server started. Compute uptime as '
+    'time() - sky_apiserver_start_time_seconds.')
+
+
+class ServerStartTimeCollector:
+    """Exports the API server start time, the uptime source.
+
+    prometheus_client's built-in process_start_time_seconds is unavailable
+    under the multiprocess collector (default collectors are not
+    aggregated). Custom collectors are only scraped from the main server
+    process (the metrics server runs in it), so that process's own creation
+    time is the server boot time. The boot-check request row (which debug
+    dumps use for uptime) is deliberately not used here: the row survives
+    server restarts (schedule_on_boot_check_async ignores
+    RequestAlreadyExistsError), so its created_at reflects the boot that
+    first inserted it, not the current one.
+    """
+
+    def __init__(self):
+        self._start_time = psutil.Process(os.getpid()).create_time()
+
+    def describe(self):
+        yield prom_core.GaugeMetricFamily('sky_apiserver_start_time_seconds',
+                                          _START_TIME_HELP)
+
+    def collect(self):
+        metric = prom_core.GaugeMetricFamily('sky_apiserver_start_time_seconds',
+                                             _START_TIME_HELP)
+        metric.add_metric([], self._start_time)
+        yield metric
+
+
+_SERVER_START_TIME_COLLECTOR = _wrap_collector(ServerStartTimeCollector())
+
+try:
+    prom.REGISTRY.register(_SERVER_START_TIME_COLLECTOR)
 except ValueError:
     pass
 
@@ -981,11 +1041,12 @@ def metrics() -> fastapi.Response:
     if os.environ.get('PROMETHEUS_MULTIPROC_DIR'):
         # In multiprocess mode, we need to collect metrics from all processes.
         registry = prom.CollectorRegistry()
-        multiprocess.MultiProcessCollector(registry)
+        registry.register(_get_multiproc_collector())
         registry.register(_BURN_RATE_COLLECTOR)
         registry.register(_SQLITE_DB_SIZE_COLLECTOR)
         registry.register(_WORKSPACE_USAGE_COLLECTOR)
         registry.register(_COLLECTOR_HEALTH_COLLECTOR)
+        registry.register(_SERVER_START_TIME_COLLECTOR)
         if _MANAGED_JOBS_COLLECTOR is not None:
             registry.register(_MANAGED_JOBS_COLLECTOR)
         for c in _plugin_collectors:
@@ -1091,8 +1152,8 @@ def _handle_federation_result(context: str, route: str, result: object,
         logger.error(
             f'Failed to get metrics for context {context} (route {route}): '
             f'timed out after {_PER_CONTEXT_TIMEOUT_SECONDS}s '
-            f'({stats.summary()}); kubectl port-forward + /federate exceeded '
-            f'the per-context budget; series for this cluster are omitted from '
+            f'({stats.summary()}); the federation attempt exceeded the '
+            f'per-context budget; series for this cluster are omitted from '
             f'this scrape')
         return
     if isinstance(result, Exception):
@@ -1151,10 +1212,36 @@ async def gpu_metrics() -> fastapi.Response:
             )) for context, stats in zip(remote_contexts, stats_list)
     ]
 
+    # Slurm clusters federate through their login node (see
+    # get_metrics_for_slurm_cluster); only clusters with a configured
+    # prometheus_url participate. Their series ride the same scrape,
+    # stamped cluster="slurm/<name>", under the same per-context budget:
+    # the budget is passed down so the SSH invocation is hard-killed at
+    # the same instant wait_for() gives up on it. There is no port-forward
+    # phase on this path, so its stats omit that phase.
+    slurm_clusters = metrics_utils.get_slurm_metrics_clusters()
+    slurm_contexts = [
+        metrics_utils.SLURM_CONTEXT_PREFIX + name for name in slurm_clusters
+    ]
+    slurm_stats = [
+        metrics_utils.FederationStats(has_port_forward=False)
+        for _ in slurm_clusters
+    ]
+    tasks += [
+        asyncio.create_task(
+            asyncio.wait_for(
+                metrics_utils.get_metrics_for_slurm_cluster(
+                    name, stats=stats, timeout=_PER_CONTEXT_TIMEOUT_SECONDS),
+                timeout=_PER_CONTEXT_TIMEOUT_SECONDS,
+            )) for name, stats in zip(slurm_clusters, slurm_stats)
+    ]
+    result_contexts = remote_contexts + slurm_contexts
+    stats_list = stats_list + slurm_stats
+
     results = await asyncio.gather(*tasks, return_exceptions=True)
 
     for i, result in enumerate(results):
-        _handle_federation_result(remote_contexts[i], 'gpu-metrics', result,
+        _handle_federation_result(result_contexts[i], 'gpu-metrics', result,
                                   stats_list[i], all_metrics)
 
     combined_metrics = '\n\n'.join(all_metrics)

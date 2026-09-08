@@ -247,7 +247,12 @@ def _get_loaded_config_path() -> List[Optional[str]]:
 def _set_loaded_config_path(
         path: Optional[Union[str, List[Optional[str]]]]) -> None:
     if not path:
+        # Store the empty case as None rather than the serialized string
+        # 'null': the latter travels to the API server on every request that
+        # carries a config override, where json.loads() turns it back into
+        # None instead of a list.
         _get_config_context().config_path = None
+        return
     if isinstance(path, str):
         path = [path]
     _get_config_context().config_path = json.dumps(path)
@@ -926,7 +931,13 @@ def override_skypilot_config(
     if override_config_path_serialized is None:
         override_config_path = []
     else:
+        # A client may serialize the absence of a config path as the JSON
+        # string 'null', which json.loads() turns into None. Normalize it the
+        # same way _get_loaded_config_path() does, so the value stays a list
+        # for the concatenation below.
         override_config_path = json.loads(override_config_path_serialized)
+        if override_config_path is None:
+            override_config_path = []
 
     disallowed_diff_keys = []
     for key in constants.SKIPPED_CLIENT_OVERRIDE_KEYS:

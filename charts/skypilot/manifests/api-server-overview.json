@@ -212,6 +212,101 @@
         "type": "prometheus",
         "uid": "prometheus"
       },
+      "description": "Percent of time at least one API server metrics target was scrapeable (Prometheus \"up\"). \"range\" covers the dashboard time range; \"30d\" is the fixed trailing-30-day number from the sky:apiserver_availability:ratio_30d recording rule and shows no data until that rule group is installed (see the API server metrics setup docs; requires TSDB retention >= 30d). Both measure reachability of the metrics endpoint, so a starved /metrics port can lower this while the API itself still serves requests; for a stricter SLO, probe /api/health instead. For time-since-restart, use: time() - sky_apiserver_start_time_seconds.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "decimals": 3,
+          "mappings": [],
+          "max": 100,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red"
+              },
+              {
+                "color": "yellow",
+                "value": 99
+              },
+              {
+                "color": "green",
+                "value": 99.9
+              }
+            ]
+          },
+          "unit": "percent"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 3,
+        "x": 6,
+        "y": 0
+      },
+      "id": 35,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "horizontal",
+        "percentChangeColorMode": "standard",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showPercentChange": false,
+        "textMode": "value_and_name",
+        "wideLayout": true,
+        "text": {
+          "titleSize": 12,
+          "valueSize": 26
+        }
+      },
+      "pluginVersion": "12.0.1",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "exemplar": false,
+          "expr": "avg_over_time((max(up{job=~\"skypilot-api(-server)?(-metrics)?\"} or up{app=~\"$app\", app!=\"\"}))[$__range:]) * 100",
+          "instant": true,
+          "legendFormat": "range",
+          "range": false,
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "exemplar": false,
+          "expr": "sky:apiserver_availability:ratio_30d * 100",
+          "instant": true,
+          "legendFormat": "30d",
+          "range": false,
+          "refId": "B"
+        }
+      ],
+      "title": "Server Availability",
+      "transparent": true,
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -268,8 +363,8 @@
       },
       "gridPos": {
         "h": 5,
-        "w": 9,
-        "x": 6,
+        "w": 8,
+        "x": 9,
         "y": 0
       },
       "id": 11,
@@ -392,8 +487,8 @@
       },
       "gridPos": {
         "h": 5,
-        "w": 9,
-        "x": 15,
+        "w": 7,
+        "x": 17,
         "y": 0
       },
       "id": 12,
@@ -529,7 +624,7 @@
       },
       "gridPos": {
         "h": 8,
-        "w": 8,
+        "w": 6,
         "x": 0,
         "y": 5
       },
@@ -627,8 +722,8 @@
       },
       "gridPos": {
         "h": 8,
-        "w": 8,
-        "x": 8,
+        "w": 6,
+        "x": 6,
         "y": 5
       },
       "id": 2,
@@ -721,8 +816,8 @@
       },
       "gridPos": {
         "h": 8,
-        "w": 8,
-        "x": 16,
+        "w": 6,
+        "x": 12,
         "y": 5
       },
       "id": 3,
@@ -755,6 +850,105 @@
         }
       ],
       "title": "Request duration",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "barWidthFactor": 0.6,
+            "drawStyle": "line",
+            "fillOpacity": 18,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green"
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "unit": "reqps"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 6,
+        "x": 18,
+        "y": 5
+      },
+      "id": 33,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "hideZeros": false,
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "pluginVersion": "12.0.1",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "sum(rate(sky_apiserver_requests_by_user_total{app=\"$app\"}[2m])) by (user)",
+          "hide": false,
+          "instant": false,
+          "legendFormat": "{{user}}",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "RPS by User",
       "type": "timeseries"
     },
     {
@@ -2672,10 +2866,24 @@
       "type": "timeseries"
     },
     {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 77
+      },
+      "id": 34,
+      "panels": [],
+      "title": "Scheduling & Provisioning",
+      "type": "row"
+    },
+    {
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
       },
+      "description": "Time from request creation to its first execution start, by request name. Includes queue wait and scheduling preconditions; observed once per request at its first execution start, so retry backoff after that start is excluded. Companion to Queue Wait (sky_apiserver_queue_wait_seconds), which measures per-enqueue queue residency only.",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -2690,7 +2898,7 @@
             "barAlignment": 0,
             "barWidthFactor": 0.6,
             "drawStyle": "line",
-            "fillOpacity": 18,
+            "fillOpacity": 20,
             "gradientMode": "none",
             "hideFrom": {
               "legend": false,
@@ -2700,7 +2908,7 @@
             "insertNulls": false,
             "lineInterpolation": "linear",
             "lineWidth": 1,
-            "pointSize": 5,
+            "pointSize": 1,
             "scaleDistribution": {
               "type": "linear"
             },
@@ -2727,17 +2935,17 @@
               }
             ]
           },
-          "unit": "reqps"
+          "unit": "s"
         },
         "overrides": []
       },
       "gridPos": {
         "h": 8,
-        "w": 8,
-        "x": 16,
-        "y": 5
+        "w": 10,
+        "x": 0,
+        "y": 78
       },
-      "id": 33,
+      "id": 36,
       "options": {
         "legend": {
           "calcs": [],
@@ -2754,20 +2962,130 @@
       "pluginVersion": "12.0.1",
       "targets": [
         {
+          "editorMode": "code",
+          "expr": "histogram_quantile(0.95, sum by(le, name) (rate(sky_apiserver_request_pending_seconds_bucket{app=\"$app\"}[5m])))",
+          "interval": "",
+          "legendFormat": "{{name}}",
+          "range": true,
+          "refId": "A",
           "datasource": {
             "type": "prometheus",
             "uid": "prometheus"
-          },
-          "editorMode": "code",
-          "expr": "sum(rate(sky_apiserver_requests_by_user_total{app=\"$app\"}[2m])) by (user)",
-          "hide": false,
-          "instant": false,
-          "legendFormat": "{{user}}",
-          "range": true,
-          "refId": "A"
+          }
         }
       ],
-      "title": "RPS by User",
+      "title": "Request Pending P95",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "description": "Wall-clock time of provisioning attempts (one cloud/region attempt each), from provision start to instances running. Windows are 1h because provisioning events are sparse.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "barWidthFactor": 0.6,
+            "drawStyle": "line",
+            "fillOpacity": 20,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 1,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green"
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 10,
+        "x": 10,
+        "y": 78
+      },
+      "id": 37,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "hideZeros": false,
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "pluginVersion": "12.0.1",
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "histogram_quantile(0.95, sum by(le, cloud, result) (rate(sky_provision_duration_seconds_bucket{app=\"$app\"}[1h])))",
+          "interval": "",
+          "legendFormat": "p95 {{cloud}} ({{result}})",
+          "range": true,
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          }
+        },
+        {
+          "editorMode": "code",
+          "expr": "sum by(cloud, result) (rate(sky_provision_duration_seconds_sum{app=\"$app\"}[1h])) / sum by(cloud, result) (rate(sky_provision_duration_seconds_count{app=\"$app\"}[1h]))",
+          "interval": "",
+          "legendFormat": "avg {{cloud}} ({{result}})",
+          "range": true,
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          }
+        }
+      ],
+      "title": "Provision Duration (compute acquisition)",
       "type": "timeseries"
     }
   ],

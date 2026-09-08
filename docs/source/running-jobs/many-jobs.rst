@@ -241,6 +241,14 @@ With the above setup, you can now scale out to run many jobs in parallel.
 
 To run many jobs at once, we will launch the jobs as :ref:`SkyPilot managed jobs <managed-jobs>`. We can control the hyperparameter environment variables independently for each managed job.
 
+.. tip::
+
+  This section covers jobs that differ from each other, e.g., a hyperparameter
+  sweep with one configuration per job. If every job instead runs the same
+  command on a different slice of the work, use
+  :code:`sky jobs launch --num-jobs N` to submit them all in one command — see
+  :ref:`below <many-jobs-num-jobs>`.
+
 You can use normal loops in bash or Python to iterate over possible hyperparameters:
 
 .. tab-set::
@@ -371,9 +379,107 @@ Then, submit all jobs by iterating over the config files and calling ``sky jobs 
   done
 
 
-Best practices for scaling
---------------------------
+.. _many-jobs-num-jobs:
 
-The number of managed jobs that can run in parallel depends on the available memory. With the default API server size (8 GiB), up to ~400 jobs can run in parallel. Increasing memory increases capacity proportionally, up to 2000 jobs. See :ref:`resource planning for managed jobs <consolidation-mode-resource-planning>` for a full capacity table.
+With ``--num-jobs``
+~~~~~~~~~~~~~~~~~~~
 
-If you are using a :ref:`remote jobs controller <jobs-controller-remote>`, see :ref:`jobs-controller-sizing` for scaling guidance.
+The loops above hand each job its own hyperparameters. Many workloads instead
+run the **same command in every job**, with each job taking a different slice of
+the work — the pattern Slurm covers with job arrays (``sbatch --array``).
+Typical cases:
+
+- **Batch inference and embedding generation**: each job processes a shard of the dataset.
+- **Evaluations**: each job runs a slice of the benchmark suite.
+- **Data processing**: tokenization, feature extraction, or transcoding, one shard per job.
+- **Seed replicates and simulation ensembles**: the same run repeated with a different random seed, to measure variance.
+- **Sweep agents**: identical workers that each pull their next configuration from a sweep controller (see :ref:`below <many-jobs-wandb-sweep>`).
+
+For these, no loop is needed: pass :code:`--num-jobs` and SkyPilot submits them
+all from a single YAML.
+
+.. code-block:: console
+
+  $ sky jobs launch --num-jobs 10 batch-job.yaml
+
+Each job is given ``$SKYPILOT_JOB_RANK`` (0 to N-1) and ``$SKYPILOT_NUM_JOBS``,
+which the task uses to select its slice:
+
+.. code-block:: yaml
+
+  # batch-job.yaml
+  name: batch-inference
+
+  resources:
+    accelerators: L4:1
+
+  run: |
+    python infer.py \
+      --shard-index $SKYPILOT_JOB_RANK \
+      --num-shards $SKYPILOT_NUM_JOBS
+
+These are ordinary managed jobs — one cluster each, each recovered on its own if
+preempted — exactly as if you had run ``sky jobs launch`` ten times. See
+:ref:`num-jobs` for details.
+
+.. tip::
+
+  :code:`--num-jobs` can run a sweep too, if the task maps its own rank to a
+  configuration (e.g., indexing into a list of hyperparameters). Use the
+  :ref:`loops above <many-jobs-scale-out>` when you want each job's parameters
+  visible in its name and launch command; use :code:`--num-jobs` when the task
+  can work out its own assignment.
+
+
+.. _many-jobs-wandb-sweep:
+
+Example: W&B sweep agents
+^^^^^^^^^^^^^^^^^^^^^^^^^
+
+A `W&B sweep <https://docs.wandb.ai/guides/sweeps>`__ is a natural fit: the
+sweep controller hands each agent its next hyperparameter configuration, so
+every job runs an identical command and no rank is needed at all.
+
+First, create the sweep locally to get a sweep ID:
+
+.. code-block:: console
+
+  $ wandb sweep sweep.yaml
+  ...
+  Created sweep with ID: abc123
+  Run sweep agent with: wandb agent my-entity/my-project/abc123
+
+Then wrap the agent in a SkyPilot YAML:
+
+.. code-block:: yaml
+
+  # sweep-agent.yaml
+  name: sweep-agent
+
+  envs:
+    WANDB_API_KEY:  # Required, passed via --env
+    SWEEP_ID:       # Required, passed via --env
+
+  resources:
+    accelerators: V100:4
+
+  setup: |
+    pip install wandb
+    # ... install your training code and its dependencies ...
+
+  run: |
+    wandb agent $SWEEP_ID
+
+And launch as many agents as you want running in parallel:
+
+.. code-block:: bash
+
+  sky jobs launch --num-jobs 10 sweep-agent.yaml \
+    --env WANDB_API_KEY \
+    --env SWEEP_ID=my-entity/my-project/abc123
+
+Each of the 10 agents pulls configurations from W&B until the sweep is
+exhausted, so the number of jobs controls how much of the sweep runs in
+parallel, independently of how many configurations the sweep contains.
+
+

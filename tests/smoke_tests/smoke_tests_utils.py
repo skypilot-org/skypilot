@@ -813,6 +813,14 @@ def run_one_test(test: Test, check_sky_status: bool = True) -> None:
     if test.env:
         env_dict.update(test.env)
 
+    # The test's overall exit status. Tracked separately from any single
+    # `proc` because a command may be a callable, which has no process
+    # behind it: a test whose first command is a callable would otherwise
+    # reach the reporting block below with `proc` unbound and die with
+    # `UnboundLocalError`, masking the real failure in the pytest summary.
+    returncode = 0
+    command = None
+
     with override_sky_config(test, env_dict, config_dict=test.config_dict):
         for command in test.commands:
             if callable(command):
@@ -828,7 +836,7 @@ def run_one_test(test: Test, check_sky_status: bool = True) -> None:
                     test.echo(error_in_callable)
                     write(error_in_callable + '\n')
                     flush()
-                    proc.returncode = 1
+                    returncode = 1
                     break
                 continue
             write(f'+ {command}\n')
@@ -851,18 +859,18 @@ def run_one_test(test: Test, check_sky_status: bool = True) -> None:
                 flush()
                 # Kill the current process.
                 proc.terminate()
-                proc.returncode = 1  # None if we don't set it.
+                returncode = 1  # proc.returncode is None if we don't set it.
                 break
 
-            if proc.returncode:
+            returncode = proc.returncode
+            if returncode:
                 break
 
         style = colorama.Style
         fore = colorama.Fore
-        outcome = (
-            f'{fore.RED}Failed{style.RESET_ALL} (returned {proc.returncode})'
-            if proc.returncode else f'{fore.GREEN}Passed{style.RESET_ALL}')
-        reason = f'\nReason: {command}' if proc.returncode else ''
+        outcome = (f'{fore.RED}Failed{style.RESET_ALL} (returned {returncode})'
+                   if returncode else f'{fore.GREEN}Passed{style.RESET_ALL}')
+        reason = f'\nReason: {command}' if returncode else ''
         msg = (f'{outcome}.'
                f'{reason}')
         if log_to_stdout:
@@ -872,7 +880,7 @@ def run_one_test(test: Test, check_sky_status: bool = True) -> None:
             test.echo(msg)
             write(msg)
 
-        if proc.returncode:
+        if returncode:
             # Fetch controller logs for failed jobs
             script_path = os.path.join(os.path.dirname(__file__), 'scripts',
                                        'fetch_failed_job_logs.sh')
@@ -917,7 +925,7 @@ def run_one_test(test: Test, check_sky_status: bool = True) -> None:
                     write(f'Server log file not found: {log_path}')
                 write('=== End of Sky API Server Log ===')
 
-        if (proc.returncode == 0 or
+        if (returncode == 0 or
                 pytest.terminate_on_failure) and test.teardown is not None:
             subprocess_utils.run(
                 test.teardown,
@@ -928,7 +936,7 @@ def run_one_test(test: Test, check_sky_status: bool = True) -> None:
                 env=env_dict,
             )
 
-        if proc.returncode:
+        if returncode:
             if log_to_stdout:
                 raise Exception(f'test failed')
             else:

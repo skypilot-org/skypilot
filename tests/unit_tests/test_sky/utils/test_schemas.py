@@ -606,6 +606,80 @@ class TestWorkspaceSchema(unittest.TestCase):
                 jsonschema.validate(instance=config,
                                     schema=self.workspaces_schema)
 
+    def test_workspace_slurm_sbatch_options(self):
+        config = {
+            'my-workspace': {
+                'slurm': {
+                    'disabled': False,
+                    'allowed_clusters': ['my-cluster'],
+                    'sbatch_options': {
+                        'account': 'workspace-account',
+                    },
+                    'cluster_configs': {
+                        'my-cluster': {
+                            'sbatch_options': {
+                                'qos': 'workspace-qos',
+                            },
+                            'partition_configs': {
+                                'gpu': {
+                                    'sbatch_options': {
+                                        'constraint': 'h100',
+                                    },
+                                },
+                            },
+                        },
+                    },
+                },
+            },
+        }
+        jsonschema.validate(instance=config, schema=self.workspaces_schema)
+
+    def test_workspace_slurm_rejects_global_only_properties(self):
+        invalid_configs = [
+            {
+                'my-workspace': {
+                    'slurm': {
+                        'provision_timeout': 600,
+                    },
+                },
+            },
+            {
+                'my-workspace': {
+                    'slurm': {
+                        'cluster_configs': {
+                            'my-cluster': {
+                                'workdir': '/shared/workspace',
+                            },
+                        },
+                    },
+                },
+            },
+            {
+                'my-workspace': {
+                    'slurm': {
+                        'cluster_configs': {
+                            'my-cluster': {
+                                'partition_configs': {
+                                    'gpu': {
+                                        'pricing': {
+                                            'on_demand': 1.0,
+                                        },
+                                    },
+                                },
+                            },
+                        },
+                    },
+                },
+            },
+        ]
+        for config in invalid_configs:
+            with self.assertRaises(
+                    jsonschema.exceptions.ValidationError,
+                    msg=f'Unsupported workspace Slurm config {config!r} '
+                    'should be rejected'):
+                jsonschema.validate(instance=config,
+                                    schema=self.workspaces_schema)
+
 
 class TestKubernetesSchema(unittest.TestCase):
     """Tests for the kubernetes schema in schemas.py."""

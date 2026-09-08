@@ -15,6 +15,7 @@ from prometheus_client import CollectorRegistry
 from prometheus_client import CONTENT_TYPE_LATEST
 from prometheus_client import core as prom_core
 from prometheus_client import generate_latest
+from prometheus_client import multiprocess
 import prometheus_client as prom
 import pytest
 
@@ -325,8 +326,8 @@ async def test_metrics_endpoint_with_multiprocess():
     with patch.dict(os.environ, {'PROMETHEUS_MULTIPROC_DIR': '/tmp/prom'}):
         with patch('sky.server.metrics.prom.CollectorRegistry') as \
                 mock_registry, \
-             patch('sky.server.metrics.multiprocess.'
-                   'MultiProcessCollector') as mock_collector, \
+             patch('sky.server.metrics._get_multiproc_collector') as \
+                mock_multiproc, \
              patch('sky.server.metrics.generate_latest') as mock_gen:
 
             mock_registry_instance = MagicMock()
@@ -337,7 +338,8 @@ async def test_metrics_endpoint_with_multiprocess():
 
             assert isinstance(response, fastapi.Response)
             mock_registry.assert_called_once()
-            mock_collector.assert_called_once_with(mock_registry_instance)
+            mock_registry_instance.register.assert_any_call(
+                mock_multiproc.return_value)
             mock_gen.assert_called_once_with(mock_registry_instance)
 
 
@@ -1268,6 +1270,21 @@ def test_collector_health_active_flips_on_staleness():
                 'sky_apiserver_metrics_collector_active'] == 0.0)
         finally:
             wrapped.release.set()
+
+
+def test_multiproc_collector_wrapped_once_and_shared(tmp_path):
+    """The multiprocess merge is wrapped, and shared across scrapes."""
+    with patch.object(metrics, '_multiproc_collector', None), \
+         patch.object(metrics, '_resilient_collectors', []), \
+         patch.dict(os.environ,
+                    {'PROMETHEUS_MULTIPROC_DIR': str(tmp_path)}):
+        first = metrics._get_multiproc_collector()
+        second = metrics._get_multiproc_collector()
+
+        assert first is second
+        assert isinstance(first, metrics.ResilientCollector)
+        assert isinstance(first._wrapped, multiprocess.MultiProcessCollector)
+        assert metrics._resilient_collectors == [first]
 
 
 def test_wrap_collector_dedupes_health_names():

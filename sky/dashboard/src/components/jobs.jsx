@@ -82,6 +82,7 @@ import {
   useTableColumns,
   usePluginComponents,
   useMergedTableColumns,
+  usePluginTableFilters,
 } from '@/plugins/PluginProvider';
 import {
   FilterDropdown,
@@ -211,6 +212,7 @@ export const JOB_FILTER_SCHEMA = [
   { key: 'user', label: 'User', kind: 'text' },
   { key: 'workspace', label: 'Workspace', kind: 'text' },
   { key: 'pool', label: 'Pool', kind: 'text' },
+  { key: 'infra', label: 'Infra', kind: 'text' },
   { key: 'labels', label: 'Labels', kind: 'kv', multi: 'repeat' },
 ];
 
@@ -226,6 +228,31 @@ const JOB_VIEW_SCHEMA = [
   { key: 'owner', default: 'mine' },
   { key: 'status', default: '' },
 ];
+
+// The `--infra` spec for a job row, i.e. what the Infra filter box has to be
+// submitted as.
+//
+// The box is parsed server-side by `InfraInfo.from_str`, so a suggestion has
+// to be in that syntax. The string the Infra column renders (`AWS
+// (us-east-1)`) is not: it parses to a cloud named `aws (us-east-1)`, which
+// matches no job, so offering it would hand back a filter that empties the
+// table. Mirrors `InfraInfo.to_str()` -- cloud lowercased, and the `ssh-`
+// prefix dropped from an SSH node pool's context, which `from_str` puts back.
+export function jobInfraSpec(job) {
+  const cloud = (job?.cloud || '').trim();
+  if (!cloud) {
+    return null;
+  }
+  const cloudSpec = cloud.toLowerCase();
+  let region = (job?.region || '').trim();
+  if (!region || region === '-') {
+    return cloudSpec;
+  }
+  if (cloudSpec === 'ssh' && region.startsWith('ssh-')) {
+    region = region.slice('ssh-'.length);
+  }
+  return `${cloudSpec}/${region}`;
+}
 
 const STATUS_GROUP_NAMES = Object.keys(statusGroups);
 
@@ -250,11 +277,6 @@ export function deriveStatusView(statusParam) {
     activeTab: statusGroupName || (selectedStatuses.length > 0 ? null : 'all'),
   };
 }
-
-const PROPERTY_OPTIONS = JOB_FILTER_SCHEMA.map(({ key, label }) => ({
-  label,
-  value: key,
-}));
 
 // Properties that may hold several chips; the rest replace, so the page can
 // never show more filters than the URL is able to carry.
@@ -346,9 +368,17 @@ export function ManagedJobs() {
   const jobsRefreshRef = React.useRef(null);
   const poolsRefreshRef = React.useRef(null);
   const [poolsData, setPoolsData] = useState([]);
+  // Plugins may register extra filter properties for this table (e.g. the
+  // pagination plugin's Slurm Account/QOS filters) — registration is
+  // reactive, typically arriving with the plugin's first data response.
+  const pluginFilterProps = usePluginTableFilters('jobs');
+  const filterSchema = React.useMemo(
+    () => [...JOB_FILTER_SCHEMA, ...pluginFilterProps],
+    [pluginFilterProps]
+  );
   // Filters and the shareable view state both live in the URL, keyed by name.
   const { filters, setFilters, view, setView } = useUrlFilterState(
-    JOB_FILTER_SCHEMA,
+    filterSchema,
     JOB_VIEW_SCHEMA
   );
   const [valueList, setValueList] = useState({
@@ -356,6 +386,7 @@ export function ManagedJobs() {
     user: [],
     workspace: [],
     pool: [],
+    infra: [],
     labels: [],
   });
   const [preloadingComplete, setPreloadingComplete] = useState(false);
@@ -463,7 +494,10 @@ export function ManagedJobs() {
         />
         <div className="w-full sm:w-auto max-w-xl">
           <FilterDropdown
-            propertyList={PROPERTY_OPTIONS}
+            propertyList={filterSchema.map(({ key, label }) => ({
+              label,
+              value: key,
+            }))}
             valueList={valueList}
             setFilters={setFilters}
             addFilter={addFilter}
@@ -499,6 +533,11 @@ export function ManagedJobs() {
           refreshDataRef={poolsRefreshRef}
         />
       </div>
+
+      {/* Extension point for jobs not managed by SkyPilot (e.g. foreign
+          Slurm jobs surfaced by the GPU Manager plugin). Renders nothing
+          when no plugin fills it. */}
+      <PluginSlot name="jobs.page.external-section" />
     </>
   );
 }
@@ -526,13 +565,47 @@ function BatchProgressBar({ completed, total }) {
   );
 }
 
+// External (non-managed) rows merged in by the server carry
+// is_external + external_cluster/external_job_id; their detail pages
+// live under /slurm-jobs instead of /jobs.
+function externalJobHref(item) {
+  return `/slurm-jobs/${encodeURIComponent(item.external_cluster)}/${encodeURIComponent(item.external_job_id)}`;
+}
+
+function ExternalPill() {
+  return (
+    <span
+      className="inline-flex items-center flex-shrink-0 ml-2 px-2 rounded-full border border-gray-200 bg-gray-100 text-gray-600 text-xs font-medium"
+      style={{ paddingTop: 1, paddingBottom: 1, lineHeight: 1.4 }}
+      title="This workload is launched and managed outside of SkyPilot"
+    >
+      External
+    </span>
+  );
+}
+
+// A Slurm job id lives in the CLUSTER's id space, not SkyPilot's — the raw
+// number can collide with a managed job id in the same column. Muted so the
+// two id spaces cannot be conflated; the tooltip names the owner.
+function ExternalJobId({ item, href }) {
+  return (
+    <NonCapitalizedTooltip
+      content={`External ID managed by Slurm cluster ${item.external_cluster}`}
+    >
+      <Link href={href} className="text-gray-400 underline decoration-dotted">
+        {item.external_job_id}
+      </Link>
+    </NonCapitalizedTooltip>
+  );
+}
+
 function JobNameLink({ href, name }) {
+  // max-w (not fixed w): the box shrinks to the name so a trailing badge
+  // sits next to the text instead of parking at the 240px edge after a
+  // short name; long names still truncate at 240px.
   return (
     <NonCapitalizedTooltip content={name}>
-      <Link
-        href={href}
-        className="text-blue-600 block min-w-[200px] max-w-[240px] truncate"
-      >
+      <Link href={href} className="text-blue-600 block max-w-[240px] truncate">
         {name}
       </Link>
     </NonCapitalizedTooltip>
@@ -558,6 +631,9 @@ export function ManagedJobsTable({
     key: 'id',
     direction: 'descending',
   });
+  // Plugin-registered filter properties (see ManagedJobs): their values are
+  // forwarded to the data provider verbatim as {property: key, value}.
+  const pluginFilterProps = usePluginTableFilters('jobs');
   const [loading, setLocalLoading] = useState(false);
   const [isInitialLoad, setIsInitialLoad] = useState(true);
   const [currentPage, setCurrentPage] = useState(() => {
@@ -601,6 +677,10 @@ export function ManagedJobsTable({
     [setView]
   );
   const [statusCounts, setStatusCounts] = useState({});
+  // Per-cluster failures from the external (Slurm) jobs sweep; non-empty
+  // means external rows may be incomplete or stale. Dismissible warning.
+  const [externalFetchErrors, setExternalFetchErrors] = useState([]);
+  const [externalErrorsDismissed, setExternalErrorsDismissed] = useState('');
   const [moreMenuOpen, setMoreMenuOpen] = useState(false);
   const moreMenuRef = useRef(null);
   const [controllerStopped, setControllerStopped] = useState(false);
@@ -657,6 +737,14 @@ export function ManagedJobsTable({
 
   // Local state for jobs data (replacing useJobsData hook)
   const [data, setData] = useState([]);
+  // The Infra values the server computed across everything the other filters
+  // select. Empty when it did not send any (an older API server or jobs
+  // controller), and the page then falls back to the rows it has.
+  const [serverInfraOptions, setServerInfraOptions] = useState([]);
+  // Set when the jobs controller refused the infra filter because it is too
+  // old to apply it. The server errors rather than answering unfiltered, so
+  // there are no rows to show and the page has to say why.
+  const [infraFilterUnsupported, setInfraFilterUnsupported] = useState(null);
   const [totalCount, setTotalCount] = useState(0);
   const [totalNoFilter, setTotalNoFilter] = useState(0);
   const [hookControllerStopped, setHookControllerStopped] = useState(false);
@@ -761,6 +849,18 @@ export function ManagedJobsTable({
           userMatch: effectiveUserMatch,
           workspaceMatch: getFilterValue('workspace'),
           poolMatch: getFilterValue('pool'),
+          // Matched server-side, against the cloud/region/zone columns on the
+          // job table, so `total`, the page count and the status counts all
+          // describe the filtered set.
+          infraMatch: getFilterValue('infra'),
+          // Values of plugin-registered filter properties, keyed by their
+          // schema key — the plugin's fetch function interprets them.
+          pluginFilters: pluginFilterProps
+            .map((f) => {
+              const value = getFilterValue(f.label.toLowerCase());
+              return value ? { property: f.key, value } : null;
+            })
+            .filter(Boolean),
           statuses: computedStatuses.length > 0 ? computedStatuses : undefined,
           page: currentPage,
           limit: pageSize,
@@ -779,15 +879,26 @@ export function ManagedJobsTable({
           if (response.controllerStopped) {
             setHookControllerStopped(true);
             setData([]);
+            setServerInfraOptions([]);
+            // The table is empty because the controller is down, not because a
+            // filter was refused. Leaving the refusal up would explain the
+            // empty table with a reason that no longer applies.
+            setInfraFilterUnsupported(null);
             setTotalCount(0);
             setTotalNoFilter(0);
             setStatusCounts({});
+            // No rows are shown, so a Slurm-sweep failure banner from a
+            // previous fetch would hang over an empty table.
+            setExternalFetchErrors([]);
           } else {
             setHookControllerStopped(false);
+            setInfraFilterUnsupported(null);
             setData(response.jobs || []);
+            setServerInfraOptions(response.infraOptions || []);
             setTotalCount(response.total || 0);
             setTotalNoFilter(response.totalNoFilter || response.total || 0);
             setStatusCounts(response.statusCounts || {});
+            setExternalFetchErrors(response.externalFetchErrors || []);
             // Controller is reachable: clear any stale banner state from a
             // previous fetch and skip the cluster-status lookup below.
             setControllerStopped(false);
@@ -852,6 +963,10 @@ export function ManagedJobsTable({
           setTotalNoFilter(0);
           setStatusCounts({});
           setControllerStopped(false);
+          setExternalFetchErrors([]);
+          setInfraFilterUnsupported(
+            err?.infraFilterUnsupported ? err.message : null
+          );
           setIsInitialLoad(false);
         }
       } finally {
@@ -871,6 +986,7 @@ export function ManagedJobsTable({
       sortOrder,
       userScope,
       currentUser,
+      pluginFilterProps,
     ]
   );
 
@@ -1030,6 +1146,7 @@ export function ManagedJobsTable({
     const users = new Set();
     const workspaces = new Set();
     const pools = new Set();
+    const infras = new Set();
     const labels = new Set();
 
     data.forEach((job) => {
@@ -1037,6 +1154,11 @@ export function ManagedJobsTable({
       if (job.user) users.add(job.user);
       if (job.workspace) workspaces.add(job.workspace);
       if (job.pool) pools.add(job.pool);
+      // An `--infra` spec, not the rendered `infra` / `full_infra` cell:
+      // the box is matched server-side by `InfraInfo.from_str`, and a
+      // display string does not parse. See `jobInfraSpec`.
+      const infraSpec = jobInfraSpec(job);
+      if (infraSpec) infras.add(infraSpec);
 
       // Extract labels - add only key:value pairs
       const jobLabels = job.labels || {};
@@ -1079,6 +1201,12 @@ export function ManagedJobsTable({
       user: Array.from(users).sort(),
       workspace: Array.from(workspaces).sort(),
       pool: Array.from(pools).sort(),
+      // The server's list covers the whole filtered queue; the page-derived
+      // one only covers the current page, and is the fallback for a server
+      // that does not send one.
+      infra: serverInfraOptions.length
+        ? [...serverInfraOptions].sort()
+        : Array.from(infras).sort(),
       labels: Array.from(labels).sort(),
     });
 
@@ -1101,7 +1229,7 @@ export function ManagedJobsTable({
           : prev.workspace,
       }));
     });
-  }, [data, poolsData, setValueList]);
+  }, [data, poolsData, serverInfraOptions, setValueList]);
 
   const requestSort = React.useCallback(
     (key) => {
@@ -1209,7 +1337,15 @@ export function ManagedJobsTable({
   const groupedJobs = React.useMemo(() => {
     const groups = new Map();
     paginatedData.forEach((job) => {
-      const jobId = job.id;
+      // External rows never form job groups; key them by their globally
+      // unique task_job_id so equal Slurm ids across clusters (or a
+      // Slurm id matching a managed id) can't collapse into one group.
+      // Fall back to a prefixed id if a producer ever omits task_job_id,
+      // so such rows degrade to per-id groups instead of one undefined
+      // group rendering as a bogus JobGroup.
+      const jobId = job.is_external
+        ? (job.task_job_id ?? `external:${job.id}`)
+        : job.id;
       if (!groups.has(jobId)) {
         groups.set(jobId, []);
       }
@@ -1264,12 +1400,22 @@ export function ManagedJobsTable({
           0
         );
 
+        // Compute total duration across all tasks, matching the CLI's
+        // aggregated row in format_job_table. A task that has not started
+        // yet contributes 0; one that has started keeps accruing, so a
+        // group with work still in flight ticks up.
+        const totalDuration = tasks.reduce(
+          (sum, t) => sum + (t.job_duration || 0),
+          0
+        );
+
         aggregates.set(jobId, {
           aggregatedStatus,
           statusTooltip,
           resourcesDisplay,
           resourcesTooltip,
           totalRecoveries,
+          totalDuration,
         });
       }
     });
@@ -1491,20 +1637,28 @@ export function ManagedJobsTable({
             );
           }
 
-          // Single task
+          // Single task. A row may carry its own detail link; external
+          // rows without one derive it from their identity fields, and
+          // everything else links to the managed-job detail page.
+          const detailHref =
+            item.detail_href ||
+            (item.is_external ? externalJobHref(item) : `/jobs/${item.id}`);
+          const idLink = item.is_external ? (
+            <ExternalJobId item={item} href={detailHref} />
+          ) : (
+            <Link href={detailHref} className="text-blue-600">
+              {item.id}
+            </Link>
+          );
           return (
             <TableCell>
               {hasAnyJobGroups ? (
                 <div className="flex items-center">
                   <span className="w-6 mr-1" aria-hidden="true" />
-                  <Link href={`/jobs/${item.id}`} className="text-blue-600">
-                    {item.id}
-                  </Link>
+                  {idLink}
                 </div>
               ) : (
-                <Link href={`/jobs/${item.id}`} className="text-blue-600">
-                  {item.id}
-                </Link>
+                idLink
               )}
             </TableCell>
           );
@@ -1568,11 +1722,16 @@ export function ManagedJobsTable({
             );
           }
 
-          // Single task
+          // Single task. Same link resolution as the ID column: a
+          // row-provided detail link wins, external rows derive theirs.
+          const detailHref =
+            item.detail_href ||
+            (item.is_external ? externalJobHref(item) : `/jobs/${item.id}`);
           return (
             <TableCell className="whitespace-nowrap">
               <div className="flex items-center">
-                <JobNameLink href={`/jobs/${item.id}`} name={item.name} />
+                <JobNameLink href={detailHref} name={item.name} />
+                {item.is_external && <ExternalPill />}
                 {isBatch && <BatchBadge className="ml-2" />}
               </div>
             </TableCell>
@@ -1616,12 +1775,16 @@ export function ManagedJobsTable({
         renderCell: (item) =>
           shouldShowWorkspace ? (
             <TableCell>
-              <Link
-                href="/workspaces"
-                className="text-gray-700 hover:text-blue-600 hover:underline"
-              >
-                {item.workspace || 'default'}
-              </Link>
+              {item.is_external ? (
+                <span className="text-gray-400">—</span>
+              ) : (
+                <Link
+                  href="/workspaces"
+                  className="text-gray-700 hover:text-blue-600 hover:underline"
+                >
+                  {item.workspace || 'default'}
+                </Link>
+              )}
             </TableCell>
           ) : null,
       },
@@ -1651,9 +1814,17 @@ export function ManagedJobsTable({
             Duration{getSortDirection('job_duration')}
           </TableHead>
         ),
-        renderCell: (item) => (
-          <TableCell>{formatDuration(item.job_duration)}</TableCell>
-        ),
+        renderCell: (item, ctx) => {
+          const { renderMode, aggregates } = ctx || {};
+
+          if (renderMode === 'groupParent') {
+            return (
+              <TableCell>{formatDuration(aggregates?.totalDuration)}</TableCell>
+            );
+          }
+
+          return <TableCell>{formatDuration(item.job_duration)}</TableCell>;
+        },
       },
       {
         id: 'status',
@@ -1796,7 +1967,7 @@ export function ManagedJobsTable({
             className="sortable whitespace-nowrap"
             onClick={() => requestSort('cluster')}
           >
-            Requested Resources{getSortDirection('cluster')}
+            Resources{getSortDirection('cluster')}
           </TableHead>
         ),
         renderCell: (item, ctx) => {
@@ -1899,9 +2070,14 @@ export function ManagedJobsTable({
             return <TableCell>-</TableCell>;
           }
 
-          // Use task_job_id for group children to avoid conflicts
+          // Use task_job_id for group children to avoid conflicts, and for
+          // external rows always: their raw id is the Slurm cluster's id
+          // space, so equal ids across clusters (or against a managed id)
+          // would co-expand on plain item.id.
           const rowId =
-            ctx?.renderMode === 'groupChild' ? item.task_job_id : item.id;
+            ctx?.renderMode === 'groupChild' || item.is_external
+              ? item.task_job_id
+              : item.id;
 
           return (
             <TableCell>
@@ -1925,6 +2101,23 @@ export function ManagedJobsTable({
         renderHeader: () => <TableHead>Logs</TableHead>,
         renderCell: (item, ctx) => {
           const { renderMode, jobId } = ctx || {};
+
+          if (item.is_external) {
+            // External Slurm rows: logs live on their detail page.
+            return (
+              <TableCell>
+                <div className="flex items-center space-x-2">
+                  <Link
+                    href={externalJobHref(item)}
+                    title="View logs"
+                    className="text-sky-blue hover:text-sky-blue-bright font-medium inline-flex items-center h-8"
+                  >
+                    <FileSearchIcon className="w-4 h-4" />
+                  </Link>
+                </div>
+              </TableCell>
+            );
+          }
 
           // For group parent, use jobId; otherwise use item.id
           const logJobId = renderMode === 'groupParent' ? jobId : item.id;
@@ -2293,6 +2486,44 @@ export function ManagedJobsTable({
         </div>
       </div>
 
+      {/* Slurm sweep failures: external rows may be incomplete or stale.
+          Dismiss is keyed on the message text so a NEW failure re-surfaces
+          the warning while the same one stays dismissed. */}
+      {externalFetchErrors.length > 0 &&
+        (() => {
+          const errorText = externalFetchErrors
+            .map((f) => `${f.cluster}: ${f.error}`)
+            .join(' · ');
+          if (errorText === externalErrorsDismissed) return null;
+          return (
+            <div className="mb-3 flex items-start justify-between rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+              <div>
+                <div>
+                  Failed to fetch Slurm jobs from{' '}
+                  {externalFetchErrors.length === 1 ? 'cluster' : 'clusters'}{' '}
+                  {externalFetchErrors.map((f) => f.cluster).join(', ')} — their
+                  jobs may be missing or stale.
+                </div>
+                {externalFetchErrors.map((f) => (
+                  <div
+                    key={f.cluster}
+                    className="mt-1 font-mono text-xs text-amber-700"
+                  >
+                    {f.cluster}: {f.error}
+                  </div>
+                ))}
+              </div>
+              <button
+                onClick={() => setExternalErrorsDismissed(errorText)}
+                className="ml-3 flex-shrink-0 font-medium text-amber-800 hover:text-amber-900"
+                title="Dismiss"
+              >
+                ×
+              </button>
+            </div>
+          );
+        })()}
+
       {/* Mobile-specific controller stopped message outside table */}
       {isMobile &&
         controllerStopped &&
@@ -2328,6 +2559,12 @@ export function ManagedJobsTable({
             </div>
           </div>
         )}
+
+      {infraFilterUnsupported && (
+        <div className="mb-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+          {infraFilterUnsupported}
+        </div>
+      )}
 
       <Card className="overflow-hidden">
         <div className="overflow-x-auto relative">
@@ -2491,10 +2728,19 @@ export function ManagedJobsTable({
                       )}
                       {!controllerStopped &&
                         !controllerLaunching &&
-                        (userScope === 'mine' &&
-                        currentUser &&
-                        activeTab === 'all' &&
-                        everyoneTotal > 0 ? (
+                        (infraFilterUnsupported ? (
+                          <div className="flex flex-col items-center space-y-2 max-w-md text-center">
+                            <p className="text-gray-700">
+                              Cannot filter these jobs by infra.
+                            </p>
+                            <p className="text-sm text-gray-500">
+                              {infraFilterUnsupported}
+                            </p>
+                          </div>
+                        ) : userScope === 'mine' &&
+                          currentUser &&
+                          activeTab === 'all' &&
+                          everyoneTotal > 0 ? (
                           <div className="flex flex-col items-center space-y-2 max-w-md">
                             <p className="text-gray-700">
                               You haven&apos;t submitted any managed jobs yet.
@@ -3115,9 +3361,9 @@ function PoolsTable({ refreshInterval, setLoading, refreshDataRef }) {
     return <SharedInfraBadges replicaInfo={replicaInfo} />;
   };
 
-  // Number of columns in the pools table header (Pool, Jobs, Workers,
+  // Number of columns in the pools table header (Pool, User, Jobs, Workers,
   // Worker Details, Worker Resources) — used for the empty-state colSpan.
-  const poolColumnCount = 5;
+  const poolColumnCount = 6;
 
   return (
     <Card>
@@ -3130,6 +3376,12 @@ function PoolsTable({ refreshInterval, setLoading, refreshDataRef }) {
                 onClick={() => requestSort('name')}
               >
                 Pool{getSortDirection('name')}
+              </TableHead>
+              <TableHead
+                className="sortable whitespace-nowrap w-32"
+                onClick={() => requestSort('user')}
+              >
+                User{getSortDirection('user')}
               </TableHead>
               <TableHead
                 className="sortable whitespace-nowrap w-40"
@@ -3156,7 +3408,7 @@ function PoolsTable({ refreshInterval, setLoading, refreshDataRef }) {
             {loading && isInitialLoad ? (
               <TableRow>
                 <TableCell
-                  colSpan={5}
+                  colSpan={poolColumnCount}
                   className="text-center py-6 text-gray-500"
                 >
                   <div className="flex justify-center items-center">
@@ -3175,6 +3427,16 @@ function PoolsTable({ refreshInterval, setLoading, refreshDataRef }) {
                     >
                       {pool.name}
                     </Link>
+                  </TableCell>
+                  <TableCell>
+                    {pool.user ? (
+                      <UserDisplay
+                        username={pool.user}
+                        userHash={pool.user_hash}
+                      />
+                    ) : (
+                      '-'
+                    )}
                   </TableCell>
                   <TableCell>
                     <div className="flex items-center gap-2 flex-wrap">

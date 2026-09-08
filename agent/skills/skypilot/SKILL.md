@@ -1,6 +1,6 @@
 ---
 name: skypilot
-description: "Use when launching cloud VMs, Kubernetes pods, or Slurm jobs for GPU/TPU/CPU workloads, training or fine-tuning models on cloud GPUs, deploying inference servers (vllm, TGI, etc.) with autoscaling, writing or debugging SkyPilot task YAML files, using spot/preemptible instances for cost savings, comparing GPU prices across clouds, managing compute across 25+ clouds, Kubernetes, Slurm, and on-prem clusters with failover between them, troubleshooting resource availability or SkyPilot errors, or optimizing cost and GPU availability."
+description: "Use when launching cloud VMs, Kubernetes pods, or Slurm jobs for GPU/TPU/CPU workloads, training or fine-tuning models on cloud GPUs, deploying inference servers (vllm, TGI, etc.) with autoscaling, writing or debugging SkyPilot task YAML files, using spot/preemptible instances for cost savings, comparing GPU prices across clouds, managing compute across 25+ clouds, Kubernetes, Slurm, and on-prem clusters with failover between them, troubleshooting resource availability or SkyPilot errors, optimizing cost and GPU availability, or migrating an existing Slurm workload (converting sbatch scripts, salloc sessions, job arrays or srun invocations into SkyPilot task YAMLs, and mapping Slurm commands, directives and SLURM_* environment variables to their SkyPilot equivalents)."
 ---
 
 # SkyPilot Skill
@@ -392,6 +392,32 @@ sky logs exp-vm-01 $job_id --status && sky logs exp-vm-01 $job_id --tail 50
 sky queue exp-vm-01 -o json
 ```
 
+### Converting a Slurm Workload
+
+When the user has an existing `sbatch` script, `salloc` workflow, or asks how a
+Slurm command maps to SkyPilot, **read
+[Migrating from Slurm](references/migrating-from-slurm.md) before writing any
+YAML.** The mapping has non-obvious parts that are easy to get wrong:
+
+- `--time` does **not** map to `autostop` — autostop is unsupported on Slurm.
+  Use `config.slurm.sbatch_options.time`.
+- A bare `srun <cmd>` should usually be **dropped**, not translated: `run`
+  already executes on every node. Only MPI/PMIx launchers keep `srun`, and
+  then they need `--overlap` and a rank-0 guard.
+- `--account` / `--qos` / `--exclusive` and other unmodeled directives go
+  through `config.slurm.sbatch_options`, which passes them to `sbatch`
+  verbatim.
+- `sbatch --array` maps to `sky jobs launch --num-jobs` with
+  `$SKYPILOT_JOB_RANK`, not to a shell loop.
+
+Validate the result with `sky launch --dryrun <yaml>` — note there is no
+`--dryrun` on `sky jobs launch`, so dry-run via `sky launch` even when the
+final command will be `sky jobs launch`.
+
+Do not assume the user wants to leave Slurm. SkyPilot submits to an existing
+Slurm cluster through its login node; migrating *to Kubernetes* is a separate
+question, and the constraints differ.
+
 ## Agent Feedback Loop
 
 When using SkyPilot programmatically, follow this loop:
@@ -444,5 +470,6 @@ For detailed reference documentation:
 - [YAML Specification](references/yaml-spec.md) — Complete task YAML schema, file mounts, environment variables
 - [Python SDK](references/python-sdk.md) — Programmatic API and SDK usage
 - [Advanced Patterns](references/advanced-patterns.md) — Multi-cloud, distributed training, production patterns
+- [Migrating from Slurm](references/migrating-from-slurm.md) — Converting `sbatch` scripts to task YAMLs, Slurm command/env-var mapping, Slurm-specific constraints
 - [Troubleshooting](references/troubleshooting.md) — Error diagnosis and solutions
 - [Examples](references/examples.md) — Copy-paste task YAML examples

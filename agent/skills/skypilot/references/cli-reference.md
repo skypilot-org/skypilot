@@ -467,6 +467,7 @@ Show statuses of managed jobs.
 - `--since` — Show only jobs submitted within this time window, relative to now (e.g. "30m", "48h", "7d", "2w"). A bare number is seconds. Mutually exclusive with --after.
 - `--after` — Show only jobs submitted at or after this absolute local time (e.g. "2026-01-13" or "2026-01-13 15:30:00"). Mutually exclusive with --since.
 - `--before` — Show only jobs submitted at or before this absolute local time (e.g. "2026-01-13" or "2026-01-13 15:30:00").
+- `--infra` — Show only jobs running on this infrastructure. Format: cloud, cloud/region, cloud/region/zone, k8s/context-name, or ssh/node-pool-name. Examples: aws, aws/us-east-1, aws/us-east-1/us-east-1a, aws/\*/u...
 - `--all-users`, `-u` — Show jobs from all users.
 - `--all`, `-a` — Show all jobs.
 - `--output`, `-o` (default: `table`) — Output format. Choices: table, json. Default: table.
@@ -649,8 +650,10 @@ List volumes managed by SkyPilot.
 **Options:**
 
 - `--config` — Path to a config file or a single key-value pair. To add multiple key-value pairs add multiple flags (e.g. --config nested.key1=val1 --config nested.key2=val2).
+- `NAMES` — text
 - `--verbose`, `-v` — Show all information in full.
 - `--refresh`, `-r` — Refresh volume state from cloud APIs before listing. Without this flag, cached data is returned which is updated periodically by the background daemon.
+- `--output`, `-o` (default: `table`) — Output format. Choices: table, json. Default: table.
 
 ## API Server Commands
 

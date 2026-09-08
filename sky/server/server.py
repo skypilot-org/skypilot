@@ -18,6 +18,7 @@ import resource
 import shlex
 import shutil
 import socket
+import stat
 import struct
 import subprocess
 import sys
@@ -28,7 +29,6 @@ import typing
 from typing import Any, Dict, List, Literal, Optional, Set, Tuple, Type
 import uuid
 import zipfile
-import zlib
 
 import aiofiles
 import anyio
@@ -96,7 +96,9 @@ from sky.usage import usage_lib
 from sky.users import permission
 from sky.users import rbac
 from sky.users import server as users_rest
+from sky.users import token_service
 from sky.utils import admin_policy_utils
+from sky.utils import asyncio_utils
 from sky.utils import command_runner
 from sky.utils import common as common_lib
 from sky.utils import common_utils
@@ -509,13 +511,27 @@ class BearerTokenMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
             return _bearer_auth_401_response(
                 {'detail': 'Service account authentication disabled'})
 
-        try:
-            # Import here to avoid circular imports
-            # pylint: disable=import-outside-toplevel
-            from sky.users.token_service import token_service
+        service = token_service.token_service
 
-            # Verify and decode JWT token
-            payload = token_service.verify_token(sa_token)
+        try:
+            # Load the signing secret off the event loop and under the same
+            # deadline as the lookups below. On the first
+            # service-account-authenticated request of a process this reads
+            # the database, and every other DB call in this handler is
+            # bounded for the reasons db_lookup's docstring gives.
+            #
+            # Gated, because after that first request this is an `is not None`
+            # check. The auth executor rejects rather than queues once its 32
+            # slots are in flight, so dispatching a no-op would let a request
+            # needing no database work be turned away with a worker-exhausted
+            # 503 -- on the scarcest resource in exactly the degraded-database
+            # conditions this path has to survive.
+            if not service.secret_loaded():
+                await db_lookup.call_with_deadline(service.ensure_secret_loaded)
+
+            # Verify and decode JWT token. Pure CPU work now that the secret
+            # is loaded.
+            payload = service.verify_token(sa_token)
 
             if payload is None:
                 logger.warning('Service account token verification failed')
@@ -618,6 +634,12 @@ class BearerTokenMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
             logger.error(f'Concurrent worker exhausted during service account '
                          f'auth: {e}')
             return db_lookup.worker_exhausted_response()
+        except token_service.JWTSecretUnavailableError as e:
+            # Above the catch-all on purpose: a 401 would tell the caller its
+            # token is bad and send it off to rotate credentials, when the
+            # token is fine and the database is not.
+            logger.error(f'Service account auth unavailable: {e}')
+            return db_lookup.jwt_secret_unavailable_response()
         except Exception as e:  # pylint: disable=broad-except
             logger.error(f'Service account authentication failed: {e}',
                          exc_info=True)
@@ -813,6 +835,27 @@ async def cleanup_clients_tmp():
                          f'{common_utils.format_exception(e)}')
 
 
+def _record_sky_logs_metrics(sky_logs_dir: str, top_level_entries: int,
+                             removed: int, duration: float) -> None:
+    """Publish the ~/sky_logs retention instruments for one sweep."""
+    if not metrics_utils.METRICS_ENABLED:
+        return
+    pid = str(os.getpid())
+    metrics_utils.SKY_APISERVER_SKY_LOGS_TOP_LEVEL_ENTRIES.labels(
+        pid=pid).set(top_level_entries)
+    metrics_utils.SKY_APISERVER_SKY_LOGS_PRUNE_DURATION_SECONDS.labels(
+        pid=pid).set(duration)
+    metrics_utils.SKY_APISERVER_SKY_LOGS_PRUNED_ENTRIES_TOTAL.inc(removed)
+    try:
+        fs = os.statvfs(sky_logs_dir)
+    except OSError as e:
+        logger.debug(f'Failed to stat the filesystem hosting {sky_logs_dir}: '
+                     f'{e}')
+        return
+    metrics_utils.SKY_APISERVER_SKY_LOGS_FS_USED_BYTES.labels(pid=pid).set(
+        (fs.f_blocks - fs.f_bfree) * fs.f_frsize)
+
+
 def _prune_sky_logs(cutoff: float) -> int:
     """Remove ~/sky_logs artifacts older than cutoff; returns count removed.
 
@@ -822,6 +865,7 @@ def _prune_sky_logs(cutoff: float) -> int:
     of age so /provision_logs keeps serving live clusters; once the cluster
     is terminated its logs fall back to the age-based retention.
     """
+    start_time = time.time()
     sky_logs_dir = os.path.expanduser(constants.SKY_LOGS_DIRECTORY)
     if not os.path.isdir(sky_logs_dir):
         return 0
@@ -830,12 +874,20 @@ def _prune_sky_logs(cutoff: float) -> int:
         for path in global_user_state.get_all_cluster_provision_log_paths()
     }
     removed = 0
+    top_level_entries = 0
+    # os.stat releases the GIL during the stat syscall; DirEntry.stat() and
+    # is_dir() on Python 3.10 do not (fixed in 3.11.0, python/cpython#89175).
+    # On a high-latency filesystem (e.g. ~/sky_logs on NFS at ~1ms per stat),
+    # a DirEntry-based walk over tens of thousands of entries becomes one long
+    # GIL critical section that starves every other thread in the process.
+    # Safe to use the DirEntry methods again once the minimum Python is 3.11.
     for entry in os.scandir(sky_logs_dir):
+        top_level_entries += 1
         if not entry.name.startswith('sky-') or entry.name in protected_dirs:
             continue
         try:
-            if (entry.is_dir(follow_symlinks=False) and
-                    entry.stat().st_mtime < cutoff):
+            st = os.stat(entry.path, follow_symlinks=False)
+            if stat.S_ISDIR(st.st_mode) and st.st_mtime < cutoff:
                 shutil.rmtree(entry.path, ignore_errors=True)
                 removed += 1
         except OSError:
@@ -846,20 +898,27 @@ def _prune_sky_logs(cutoff: float) -> int:
     if os.path.isdir(file_uploads_dir):
         for entry in os.scandir(file_uploads_dir):
             try:
-                if (entry.is_file(follow_symlinks=False) and
-                        entry.stat().st_mtime < cutoff):
+                st = os.stat(entry.path, follow_symlinks=False)
+                if stat.S_ISREG(st.st_mode) and st.st_mtime < cutoff:
                     os.remove(entry.path)
                     removed += 1
             except OSError:
                 pass
+    _record_sky_logs_metrics(sky_logs_dir, top_level_entries, removed,
+                             time.time() - start_time)
     return removed
 
 
 async def cleanup_sky_logs():
     """Hourly GC of expired per-operation ~/sky_logs artifacts."""
+    await asyncio_utils.sleep_startup_jitter('sky_logs cleanup daemon')
     while True:
         try:
-            skypilot_config.reload_config()
+            # reload_config() does a blocking file read and, with the
+            # Postgres backend, a synchronous SELECT on the config DB.
+            # Run it off the event loop so it can't stall the other
+            # background daemons sharing this loop.
+            await asyncio.to_thread(skypilot_config.reload_config)
             retention_hours = skypilot_config.get_nested(
                 ('api_server', 'logs_retention_hours'),
                 server_constants.DEFAULT_LOGS_RETENTION_HOURS)
@@ -1694,6 +1753,44 @@ async def _prepare_client_mount_dir(user_hash: str,
     return client_file_mounts_dir
 
 
+def _publish_chunk(zip_file_path: pathlib.Path, final_path: pathlib.Path,
+                   chunk_dir: Optional[pathlib.Path],
+                   total_chunks: int) -> Set[str]:
+    """Publishes a received chunk and reports which chunks are still missing.
+
+    Call this in a worker thread: the rename and the directory listing are
+    both synchronous, and the upload directory can live on a shared
+    filesystem (NFS/EFS) where a single operation costs milliseconds to
+    seconds. On the event loop that blocks every other request served by the
+    same worker for as long as the filesystem takes.
+
+    Args:
+        zip_file_path: The writer-unique temporary file holding the chunk.
+        final_path: The name to publish the chunk under.
+        chunk_dir: Directory holding the parts of a multi-chunk upload, or
+            None for a single-chunk upload, which has nothing to wait for.
+        total_chunks: The total number of chunks of this upload.
+
+    Returns:
+        The names of the chunks that have not been published yet, empty if
+        the upload is complete.
+    """
+    os.rename(str(zip_file_path), str(final_path))
+    if chunk_dir is None:
+        return set()
+    # A single directory read gives the state of the whole upload. Skip tmp
+    # files (e.g. ``part0.tmp.<hex>``) that may belong to in-flight
+    # concurrent writers: only published ``part{N}`` names count toward
+    # completion.
+    existing = set()
+    with os.scandir(chunk_dir) as entries:
+        for entry in entries:
+            name = entry.name
+            if name.startswith('part') and name[len('part'):].isdigit():
+                existing.add(name)
+    return set(f'part{i}' for i in range(total_chunks)) - existing
+
+
 async def _receive_and_assemble_chunks(
     base_dir: pathlib.Path,
     zip_name: str,
@@ -1734,6 +1831,8 @@ async def _receive_and_assemble_chunks(
     # a same blob does not interleave with each other.
     if total_chunks == 1:
         await anyio.Path(base_dir).mkdir(parents=True, exist_ok=True)
+        # No parts directory: a single-chunk upload has nothing to wait for.
+        chunk_dir = None
         final_path = base_dir / f'{zip_name}.zip'
         zip_file_path = base_dir / f'{zip_name}.tmp.{uuid.uuid4().hex}.zip'
     else:
@@ -1748,41 +1847,30 @@ async def _receive_and_assemble_chunks(
                 await f.write(chunk)
     except starlette.requests.ClientDisconnect as e:
         # Client disconnected, remove the zip file.
-        zip_file_path.unlink(missing_ok=True)
+        await asyncio.to_thread(zip_file_path.unlink, missing_ok=True)
         raise fastapi.HTTPException(
             status_code=400,
             detail='Client disconnected, please try again.') from e
     except Exception as e:
         logger.error(f'Error uploading zip file: {zip_file_path}')
         # Client disconnected, remove the zip file.
-        zip_file_path.unlink(missing_ok=True)
+        await asyncio.to_thread(zip_file_path.unlink, missing_ok=True)
         raise fastapi.HTTPException(
             status_code=500,
             detail=('Error uploading zip file: '
                     f'{common_utils.format_exception(e)}'))
 
-    def get_missing_chunks(total_chunks: int) -> Set[str]:
-        existing = set()
-        for p in chunk_dir.glob('part*'):
-            # Filter out tmp files (e.g. ``part0.tmp.<hex>``) that may
-            # belong to in-flight concurrent writers.  Only renamed
-            # final names ``part{N}`` count toward completion.
-            name = p.name
-            suffix = name[len('part'):] if name.startswith('part') else ''
-            if suffix.isdigit():
-                existing.add(name)
-        return set(f'part{i}' for i in range(total_chunks)) - existing
-
-    # Rename the writer-unique tmp file to its final name.
-    os.rename(str(zip_file_path), str(final_path))
+    # Rename the writer-unique tmp file to its final name and find out
+    # whether that completed the upload.
+    missing_chunks = await asyncio.to_thread(_publish_chunk, zip_file_path,
+                                             final_path, chunk_dir,
+                                             total_chunks)
     zip_file_path = final_path
 
-    if total_chunks > 1:
-        missing_chunks = get_missing_chunks(total_chunks)
-        if missing_chunks:
-            return payloads.UploadZipFileResponse(
-                status=responses.UploadStatus.UPLOADING.value,
-                missing_chunks=missing_chunks)
+    if missing_chunks:
+        return payloads.UploadZipFileResponse(
+            status=responses.UploadStatus.UPLOADING.value,
+            missing_chunks=missing_chunks)
     logger.info(f'Uploaded chunk: {zip_file_path}')
     if assemble:
         await _finalize_chunked_upload(base_dir=base_dir,
@@ -2473,11 +2561,16 @@ async def hook_logs(
     )
     task = executor.execute_request_in_coroutine(request_task)
     background_tasks.add_task(task.cancel)
+    # Keep this request's log. Unlike the other log-tail endpoints, the
+    # client of this one (``sdk.tail_hook_logs``) does not read the body
+    # streamed here -- it re-reads the same log through /api/stream. A log
+    # discarded when this response ends would leave that read with nothing.
     return stream_utils.stream_response_for_long_request(
         request_id=request.state.request_id,
         logs_path=request_task.log_path,
         background_tasks=background_tasks,
         kill_request_on_disconnect=False,
+        discard_log_after_stream=False,
     )
 
 
@@ -2862,42 +2955,7 @@ async def stream(
         # downloaded file is a real .log.gz that double-clicks open
         # on macOS / extracts trivially with `gunzip` on Linux.
         media_type = 'application/gzip'
-        # zlib.MAX_WBITS | 16 = gzip wrapper.
-        compressor = zlib.compressobj(6, zlib.DEFLATED, 16 + zlib.MAX_WBITS)
-
-        async def gzipped():
-            # Track whether we ever observed a non-empty source chunk so
-            # the empty-stream signal (used by the SDK to fall back to
-            # the rsync path for terminal jobs) survives gzip framing.
-            # The gzip header alone is ~10 bytes; we suppress it
-            # entirely for an empty source by skipping the trailing
-            # flush() in that case.
-            saw_payload = False
-            try:
-                async for chunk in content:
-                    if isinstance(chunk, str):
-                        chunk_bytes = chunk.encode('utf-8')
-                    else:
-                        chunk_bytes = chunk
-                    if chunk_bytes:
-                        saw_payload = True
-                        compressed = compressor.compress(chunk_bytes)
-                        if compressed:
-                            yield compressed
-            except (asyncio.CancelledError, GeneratorExit):  # pylint: disable=try-except-raise
-                # Client disconnect: PEP 525 forbids yielding while a
-                # GeneratorExit is propagating, so we explicitly do
-                # not run the flush() yield below.
-                raise
-            # Natural EOF only — emit the gzip trailer if we actually
-            # produced anything; otherwise the response stays empty so
-            # the SDK's bytes_written==0 fallback fires.
-            if saw_payload:
-                tail_bytes = compressor.flush()
-                if tail_bytes:
-                    yield tail_bytes
-
-        out_content: Any = gzipped()
+        out_content: Any = stream_utils.gzip_stream(content)
     else:
         out_content = content
 
@@ -3983,10 +4041,37 @@ def _init_or_restore_server_user_hash():
         apply_user_hash(user_hash)
         return
 
-    # Initial deployment, generate a user hash and save it to the db.
-    user_hash = common_utils.get_user_hash()
-    global_user_state.set_system_config(_SERVER_USER_HASH_KEY, user_hash)
+    # Initial deployment. Insert-if-absent and apply whatever is live
+    # afterwards: replicas starting together would otherwise each generate a
+    # hash and the last write would win, leaving them disagreeing on the
+    # server id they have already applied locally.
+    user_hash = global_user_state.get_or_set_system_config(
+        _SERVER_USER_HASH_KEY, common_utils.get_user_hash())
     apply_user_hash(user_hash)
+
+
+def _bootstrap_jwt_secret() -> None:
+    """Best-effort pre-fork bootstrap of the JWT signing secret.
+
+    Runs in the parent process before uvicorn forks its workers, so generation
+    happens exactly once and before any request exists rather than racing on
+    the first service-account request. Workers do not inherit the cache, so
+    each still reads the row lazily; that makes this an optimisation, not a
+    correctness requirement.
+
+    Hence best-effort. Unlike the database errors that already stop startup one
+    line above, a corrupt `jwt_secret` row is a service-account-auth problem,
+    and letting it abort startup would take the dashboard and every interactive
+    user down with it -- in a crashloop.
+    """
+    try:
+        token_service.token_service.ensure_secret_loaded()
+    except Exception:  # pylint: disable=broad-except
+        logger.error(
+            'Could not bootstrap the JWT signing secret at startup. Service '
+            'account authentication will retry on its first request; nothing '
+            'else is affected.',
+            exc_info=True)
 
 
 if __name__ == '__main__':
@@ -4050,6 +4135,8 @@ if __name__ == '__main__':
     # Restore the server user hash
     logger.info('Initializing server user hash')
     _init_or_restore_server_user_hash()
+    logger.info('Initializing JWT signing secret')
+    _bootstrap_jwt_secret()
     # Set up consolidation mode signal file. Needs global user state DB access
     # to check for existing controller clusters. Placed after user hash restore
     # to avoid accidentally using the wrong server hash.

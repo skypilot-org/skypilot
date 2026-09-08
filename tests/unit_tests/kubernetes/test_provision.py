@@ -15,10 +15,12 @@ from sky.adaptors import kubernetes
 from sky.backends import cloud_vm_ray_backend
 from sky.provision import common as provision_common
 from sky.provision.kubernetes import config as config_lib
+from sky.provision.kubernetes import constants as k8s_constants
 from sky.provision.kubernetes import instance
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.provision.kubernetes.instance import logger
 from sky.utils import subprocess_utils
+from sky.utils import volume as volume_utils
 
 
 def _remove_colorama_escape_codes(error_output):
@@ -128,6 +130,60 @@ def test_create_pods_raises_on_more_pods_than_requested(monkeypatch):
     config = _make_provision_config(count=2)
     with pytest.raises(RuntimeError, match='resource leak'):
         instance._create_pods('us', cluster_on_cloud, cluster_on_cloud, config)
+
+
+def test_inject_ephemeral_volumes():
+    pod_spec = {
+        'spec': {
+            'containers': [{
+                'name': 'ray-node',
+                'volumeMounts': [{
+                    'name': 'config',
+                    'mountPath': '/etc/config',
+                }],
+            }],
+            'volumes': [{
+                'name': 'config',
+                'configMap': {
+                    'name': 'config',
+                },
+            }],
+        },
+    }
+    volume_info = volume_utils.VolumeInfo(
+        name='scratch',
+        path='/scratch',
+        volume_name_on_cloud='scratch-pvc',
+        volume_id_on_cloud='pvc-id',
+    )
+
+    instance.inject_ephemeral_volumes(pod_spec, [volume_info])
+    instance.inject_ephemeral_volumes(pod_spec, [volume_info])
+
+    assert pod_spec['spec']['volumes'] == [
+        {
+            'name': 'config',
+            'configMap': {
+                'name': 'config',
+            },
+        },
+        {
+            'name': 'scratch',
+            'persistentVolumeClaim': {
+                'claimName': 'scratch-pvc',
+            },
+        },
+    ]
+    assert pod_spec['spec']['containers'][0]['volumeMounts'] == [
+        {
+            'name': 'config',
+            'mountPath': '/etc/config',
+        },
+        {
+            'name': 'scratch',
+            'mountPath': '/scratch',
+        },
+    ]
 
 
 def test_out_of_cpus(monkeypatch):
@@ -4901,3 +4957,44 @@ class TestGetMissingNodeReason:
 
     def test_unexpected_error_is_swallowed(self):
         assert self._reason({'node-1': RuntimeError('boom')}) is None
+
+
+def _cluster_info_with(provider_config):
+    """A ClusterInfo with one head pod, enough to drive get_command_runners."""
+    return provision_common.ClusterInfo(
+        instances={
+            'pod-head': [
+                provision_common.InstanceInfo(instance_id='pod-head',
+                                              internal_ip='10.0.0.1',
+                                              external_ip=None,
+                                              tags={})
+            ]
+        },
+        head_instance_id='pod-head',
+        provider_name='kubernetes',
+        provider_config=provider_config,
+    )
+
+
+def test_command_runners_target_the_execution_context():
+    """`kubectl exec` has to reach the pod that is actually running, so a
+    recorded placement -- not the context the cluster was submitted to --
+    is what the runners address."""
+    runners = instance.get_command_runners(
+        _cluster_info_with({
+            'context': 'ctx-manager',
+            'namespace': 'ns',
+            k8s_constants.PROVIDER_EXECUTION_CONTEXT_KEY: 'ctx-worker',
+        }))
+    assert [r.context for r in runners] == ['ctx-worker']
+
+
+def test_command_runners_fall_back_to_the_submitting_context():
+    """With nothing recorded -- every cluster today -- the runners address
+    the context the cluster was provisioned against, exactly as before."""
+    runners = instance.get_command_runners(
+        _cluster_info_with({
+            'context': 'ctx-a',
+            'namespace': 'ns',
+        }))
+    assert [r.context for r in runners] == ['ctx-a']

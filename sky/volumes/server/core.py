@@ -191,6 +191,16 @@ def volume_refresh(volume_names: Optional[List[str]] = None) -> None:
             current_error = latest_volume.get('error_message')
             current_usedby_pods = latest_volume.get('usedby_pods', [])
             current_usedby_clusters = latest_volume.get('usedby_clusters', [])
+            current_resize_status = latest_volume.get('resize_status')
+            current_resize_target = latest_volume.get('resize_target_size')
+            current_resize_message = latest_volume.get('resize_message')
+            observed = cloud_to_observed.get(cloud, {}).get(volume_name)
+            new_resize_status = (observed.resize_status
+                                 if observed is not None else None)
+            new_resize_target = (observed.resize_target_size
+                                 if observed is not None else None)
+            new_resize_message = (observed.resize_message
+                                  if observed is not None else None)
 
             # Determine new status and error_message
             if volume_error:
@@ -209,8 +219,14 @@ def volume_refresh(volume_names: Optional[List[str]] = None) -> None:
             usedby_changed = (
                 set(current_usedby_pods) != set(usedby_pods) or
                 set(current_usedby_clusters) != set(usedby_clusters))
+            resize_changed = (
+                current_resize_status !=
+                (new_resize_status.value if new_resize_status else None) or
+                current_resize_target != new_resize_target or
+                current_resize_message != new_resize_message)
 
-            if status_changed or error_changed or usedby_changed:
+            if (status_changed or error_changed or usedby_changed or
+                    resize_changed):
                 logger.info(f'Update volume {volume_name} status to '
                             f'{new_status.value}'
                             f'{", error: " + new_error if new_error else ""}')
@@ -219,7 +235,10 @@ def volume_refresh(volume_names: Optional[List[str]] = None) -> None:
                     status=new_status,
                     error_message=new_error,
                     usedby_pods=usedby_pods,
-                    usedby_clusters=usedby_clusters)
+                    usedby_clusters=usedby_clusters,
+                    resize_status=new_resize_status,
+                    resize_target_size=new_resize_target,
+                    resize_message=new_resize_message)
             volume_config = latest_volume.get('handle')
             if volume_config is None:
                 continue
@@ -235,9 +254,7 @@ def volume_refresh(volume_names: Optional[List[str]] = None) -> None:
             # The observed state was read before the lock, so it is merged into
             # the handle just re-read under it, not into the copy it was fetched
             # with.
-            if _apply_observed_state(
-                    volume_config,
-                    cloud_to_observed.get(cloud, {}).get(volume_name)):
+            if _apply_observed_state(volume_config, observed):
                 need_refresh = True
             if need_refresh:
                 global_user_state.update_volume_config(volume_name,
@@ -247,6 +264,7 @@ def volume_refresh(volume_names: Optional[List[str]] = None) -> None:
 def volume_list(
     is_ephemeral: Optional[bool] = None,
     refresh: bool = False,
+    volume_names: Optional[List[str]] = None,
 ) -> List[responses.VolumeRecord]:
     """Gets volumes from the database.
 
@@ -256,6 +274,11 @@ def volume_list(
     Args:
         is_ephemeral: Whether to include ephemeral volumes.
         refresh: If True, refresh volume state from cloud APIs before returning.
+        volume_names: If given, return only these volumes, and scope a
+            `refresh` to them rather than re-probing the whole table. Narrows
+            within the caller's accessible workspaces and never past them, so
+            naming a volume the caller cannot read still returns nothing. Names
+            with no volume are ignored, the same as an empty listing.
 
     Returns:
         [
@@ -295,13 +318,21 @@ def volume_list(
         # calls by the (context, namespace) pairs of the volumes it is handed,
         # so narrowing the set narrows the calls. The daemon in
         # sky/server/daemons.py still refreshes the whole table.
-        volume_refresh(volume_names=[
-            volume['name'] for volume in global_user_state.get_volumes(
-                workspaces_filter=accessible_workspaces)
-        ])
+        # Requested names narrow this again. The lookup applies every filter
+        # it is given, so naming a volume outside the accessible workspaces
+        # reconciles nothing -- which would otherwise confirm it exists.
+        # Ephemeral volumes are excluded here rather than inside
+        # volume_refresh, which drops them anyway: handing them over only
+        # lengthens the IN list.
+        volume_refresh(volume_names=global_user_state.get_volume_names(
+            is_ephemeral=False,
+            workspaces_filter=accessible_workspaces,
+            volume_names=volume_names))
     with rich_utils.safe_status(ux_utils.spinner_message('Listing volumes')):
         volumes = global_user_state.get_volumes(
-            is_ephemeral=is_ephemeral, workspaces_filter=accessible_workspaces)
+            is_ephemeral=is_ephemeral,
+            workspaces_filter=accessible_workspaces,
+            volume_names=volume_names)
         all_users = global_user_state.get_all_users()
         user_map = {user.id: user.name for user in all_users}
 
@@ -336,6 +367,21 @@ def volume_list(
                 'error_may_resolve':
                     volume_utils.volume_error_may_resolve(error_message),
                 'creation_yaml': volume.get('creation_yaml'),
+                # Only set while a resize is in flight: the size above is the
+                # capacity the volume has now, which is not what was asked for
+                # until the resize lands.
+                'resize_status': volume.get('resize_status'),
+                'resize_target_size': volume.get('resize_target_size'),
+                # Built here, not stored, so every surface says the same thing.
+                'resize_message': volume_utils.resize_display_message(
+                    volume.get('resize_status'),
+                    volume.get('resize_message'),
+                    # Seeing a cluster on the volume means it is certainly
+                    # mounted, which is what decides the advice for a resize
+                    # waiting on the node.
+                    known_in_use=bool(
+                        volume.get('usedby_pods') or
+                        volume.get('usedby_clusters'))),
                 'type': config.type,
                 'cloud': config.cloud,
                 'region': config.region,
@@ -520,7 +566,19 @@ def volume_apply(
                 creation_yaml=creation_yaml,
                 error_message=initial_error,
             )
-        logger.info(f'Created volume {name} on cloud {cloud}')
+        # Report the status that was just recorded, not the fact that the API
+        # call returned. Creating the backing resource is not the same as it
+        # being mountable: an Immediate-binding storage class provisions the
+        # PersistentVolume asynchronously, so a launch against the volume right
+        # now would be refused with VolumeNotReadyError. Saying "Created" and
+        # nothing else sends the user straight into that.
+        if initial_status == status_lib.VolumeStatus.NOT_READY:
+            reason = f' {initial_error}' if initial_error else ''
+            logger.info(f'Created volume {name} on cloud {cloud}. It is not '
+                        f'ready to be mounted yet.{reason}\n'
+                        f'Check its status with: sky volumes ls {name} -r')
+        else:
+            logger.info(f'Created volume {name} on cloud {cloud}')
 
 
 def _same_backend_resource(a: models.VolumeConfig,

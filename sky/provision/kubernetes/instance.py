@@ -31,6 +31,7 @@ from sky.utils import status_lib
 from sky.utils import subprocess_utils
 from sky.utils import timeline
 from sky.utils import ux_utils
+from sky.utils import volume as volume_utils
 from sky.utils.db import db_utils
 
 if TYPE_CHECKING:
@@ -2132,13 +2133,39 @@ def _configure_runtime_class(pod_spec: Dict[str,
         spec['runtimeClassName'] = 'nvidia'
 
 
+def inject_ephemeral_volumes(
+        pod_spec: Dict[str, Any],
+        ephemeral_volumes: List[volume_utils.VolumeInfo]) -> None:
+    """Add provisioned ephemeral volumes to a Kubernetes pod spec."""
+    containers = pod_spec['spec']['containers']
+    if not containers:
+        raise ValueError('Cannot mount ephemeral volumes without a container.')
+    volumes = pod_spec['spec'].setdefault('volumes', [])
+    volume_mounts = containers[0].setdefault('volumeMounts', [])
+    for ephemeral_volume in ephemeral_volumes:
+        volume_entry = {
+            'name': ephemeral_volume.name,
+            'persistentVolumeClaim': {
+                'claimName': ephemeral_volume.volume_name_on_cloud,
+            },
+        }
+        if volume_entry not in volumes:
+            volumes.append(volume_entry)
+        volume_mount = {
+            'name': ephemeral_volume.name,
+            'mountPath': ephemeral_volume.path,
+        }
+        if volume_mount not in volume_mounts:
+            volume_mounts.append(volume_mount)
+
+
 @timeline.event
 def _create_pods(region: str, cluster_name: str, cluster_name_on_cloud: str,
                  config: common.ProvisionConfig) -> common.ProvisionRecord:
     """Create pods based on the config."""
     provider_config = config.provider_config
     namespace = kubernetes_utils.get_namespace_from_config(provider_config)
-    context = kubernetes_utils.get_context_from_config(provider_config)
+    context = kubernetes_utils.get_control_context_from_config(provider_config)
     pod_spec = copy.deepcopy(config.node_config)
     create_pods_start = datetime.datetime.now(datetime.timezone.utc)
 
@@ -2167,22 +2194,7 @@ def _create_pods(region: str, cluster_name: str, cluster_name_on_cloud: str,
 
     ephemeral_volumes = provider_config.get('ephemeral_volume_infos')
     if ephemeral_volumes:
-        for ephemeral_volume in ephemeral_volumes:
-            # Update the volumes and volume mounts in the pod spec
-            if 'volumes' not in pod_spec['spec']:
-                pod_spec['spec']['volumes'] = []
-            pod_spec['spec']['volumes'].append({
-                'name': ephemeral_volume.name,
-                'persistentVolumeClaim': {
-                    'claimName': ephemeral_volume.volume_name_on_cloud,
-                },
-            })
-            if 'volumeMounts' not in pod_spec['spec']['containers'][0]:
-                pod_spec['spec']['containers'][0]['volumeMounts'] = []
-            pod_spec['spec']['containers'][0]['volumeMounts'].append({
-                'name': ephemeral_volume.name,
-                'mountPath': ephemeral_volume.path,
-            })
+        inject_ephemeral_volumes(pod_spec, ephemeral_volumes)
 
     # Docker sidecar cache volume injection: if a SkyPilot volume was
     # specified for the enable_docker cache, look up the PVC name. The actual
@@ -2721,7 +2733,7 @@ def terminate_instances(
 ) -> None:
     """See sky/provision/__init__.py"""
     namespace = kubernetes_utils.get_namespace_from_config(provider_config)
-    context = kubernetes_utils.get_context_from_config(provider_config)
+    context = kubernetes_utils.get_control_context_from_config(provider_config)
     pods = kubernetes_utils.filter_pods(namespace, context,
                                         ray_tag_filter(cluster_name_on_cloud),
                                         None)
@@ -2769,7 +2781,7 @@ def cleanup_cluster_resources(
         provider_config: Provider configuration dictionary
     """
     namespace = kubernetes_utils.get_namespace_from_config(provider_config)
-    context = kubernetes_utils.get_context_from_config(provider_config)
+    context = kubernetes_utils.get_control_context_from_config(provider_config)
     _delete_cluster_services(cluster_name_on_cloud, namespace, context)
 
 
@@ -2838,7 +2850,8 @@ def get_cluster_info(
     del region  # unused
     assert provider_config is not None
     namespace = kubernetes_utils.get_namespace_from_config(provider_config)
-    context = kubernetes_utils.get_context_from_config(provider_config)
+    context = kubernetes_utils.get_execution_context_from_config(
+        provider_config)
 
     running_pods = kubernetes_utils.filter_pods(
         namespace, context, ray_tag_filter(cluster_name_on_cloud), ['Running'])
@@ -2971,6 +2984,32 @@ class NodeHealthInfo:
     def __init__(self, issue: str, pods: List[str]):
         self.issue = issue
         self.pods = pods
+
+
+# Lead-ins the reason builders below emit before they know *why* a pod is
+# unhealthy. pod_reason_identifies_cause() parses what those two functions
+# write, so it lives beside them and must stay in sync.
+_POD_NOT_READY_PREFIX = 'pod not ready ('
+_TERMINATION_FALLBACK = 'Terminated unexpectedly'
+_CONTAINER_ERRORS_MARKER = 'Container errors:'
+
+
+def pod_reason_identifies_cause(reason: Optional[str]) -> bool:
+    """Whether a per-pod reason names an actual cause, or only that it is sick.
+
+    A node that stops heartbeating leaves its pod status stale, so a refresh
+    during the outage can only report "not ready"; once it is back the same
+    code names the real cause. Callers use this to tell the two apart.
+    """
+    if not reason:
+        return False
+    if reason.startswith(_POD_NOT_READY_PREFIX):
+        # Container detail, when found, is appended after '; '.
+        return '; ' in reason
+    if reason.startswith(_TERMINATION_FALLBACK):
+        return _CONTAINER_ERRORS_MARKER in reason
+    # Evicted, Preempted by Kueue, etc. already name the cause.
+    return True
 
 
 def _get_pod_health_issues(pod: Any) -> Optional[str]:
@@ -3123,7 +3162,8 @@ def get_node_health_for_cluster(
         Dict mapping node_name -> NodeHealthInfo for unhealthy nodes.
     """
     namespace = kubernetes_utils.get_namespace_from_config(provider_config)
-    context = kubernetes_utils.get_context_from_config(provider_config)
+    context = kubernetes_utils.get_execution_context_from_config(
+        provider_config)
     is_ssh = context.startswith('ssh-') if context else False
     identity = 'SSH Node Pool' if is_ssh else 'Kubernetes cluster'
     label_selector = (f'{constants.TAG_SKYPILOT_CLUSTER_NAME}='
@@ -3187,7 +3227,8 @@ def get_missing_node_reason(node_names: List[str],
         A human-readable reason, or None when every node is present and
         healthy (or none could be checked).
     """
-    context = kubernetes_utils.get_context_from_config(provider_config)
+    context = kubernetes_utils.get_execution_context_from_config(
+        provider_config)
     unique_names = sorted({name for name in node_names if name})
     if not unique_names:
         return None
@@ -3292,7 +3333,11 @@ def _get_pod_termination_reason(pod: Any, cluster_name: str) -> str:
                 if reason is None:
                     # just in-case reason is None, have default for debugging
                     reason = f'exit({exit_code})'
-                container_reasons.append(reason)
+                # An OOM with no memory limit is a node-level OOM, not the
+                # container overrunning its own cap; the hints differ.
+                container_reasons.append(
+                    kubernetes_utils.annotate_oom_reason(
+                        reason, pod, container_status.name))
                 if terminated.finished_at is not None:
                     latest_timestamp = max(latest_timestamp,
                                            terminated.finished_at)
@@ -3443,7 +3488,8 @@ def _first_pod_failure_reason(
     name a cause. Best-effort -- per_pod_fn is expected to never raise.
     """
     namespace = kubernetes_utils.get_namespace_from_config(provider_config)
-    context = kubernetes_utils.get_context_from_config(provider_config)
+    context = kubernetes_utils.get_execution_context_from_config(
+        provider_config)
     for pod_name in pod_names:
         reason = per_pod_fn(context, namespace, pod_name)
         if reason is not None:
@@ -3497,7 +3543,8 @@ def emit_autostop_event_best_effort(provider_config: Dict[str, Any],
     """
     try:
         namespace = kubernetes_utils.get_namespace_from_config(provider_config)
-        context = kubernetes_utils.get_context_from_config(provider_config)
+        context = kubernetes_utils.get_control_context_from_config(
+            provider_config)
         k8s_client = kubernetes.kubernetes.client
         now = datetime.datetime.now(datetime.timezone.utc)
         # The event references the head pod, whose name is exactly
@@ -3550,7 +3597,8 @@ def get_cluster_autostop_event(
     """
     try:
         namespace = kubernetes_utils.get_namespace_from_config(provider_config)
-        context = kubernetes_utils.get_context_from_config(provider_config)
+        context = kubernetes_utils.get_control_context_from_config(
+            provider_config)
         events = kubernetes.core_api(context).list_namespaced_event(
             namespace,
             field_selector=f'reason={AUTOSTOP_EVENT_REASON}',
@@ -4007,7 +4055,7 @@ def query_instances(
 
     assert provider_config is not None
     namespace = kubernetes_utils.get_namespace_from_config(provider_config)
-    context = kubernetes_utils.get_context_from_config(provider_config)
+    context = kubernetes_utils.get_control_context_from_config(provider_config)
     is_ssh = context.startswith('ssh-') if context else False
     identity = 'SSH Node Pool' if is_ssh else 'Kubernetes cluster'
     label_selector = (f'{constants.TAG_SKYPILOT_CLUSTER_NAME}='
@@ -4099,7 +4147,7 @@ def get_command_runners(
     instances = cluster_info.instances
     namespace = kubernetes_utils.get_namespace_from_config(
         cluster_info.provider_config)
-    context = kubernetes_utils.get_context_from_config(
+    context = kubernetes_utils.get_execution_context_from_config(
         cluster_info.provider_config)
 
     runners: List[command_runner.CommandRunner] = []

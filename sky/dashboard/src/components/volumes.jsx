@@ -42,7 +42,12 @@ import {
 import { ErrorDisplay } from '@/components/elements/ErrorDisplay';
 import Link from 'next/link';
 import { useRouter } from 'next/router';
-import { TimestampWithTooltip, LastUpdatedTimestamp } from '@/components/utils';
+import {
+  TimestampWithTooltip,
+  LastUpdatedTimestamp,
+  NonCapitalizedTooltip as Tooltip,
+  formatSize,
+} from '@/components/utils';
 import { StatusBadge } from '@/components/elements/StatusBadge';
 import {
   TruncatedDetails,
@@ -691,10 +696,33 @@ export function VolumesTable({
     setCurrentPage(1); // Reset to first page when changing page size
   };
 
-  const formatSize = (size) => {
-    if (size == null) return '-';
-    if (size >= 1024) return `${+(size / 1024).toFixed(1)}Ti`;
-    return `${size}Gi`;
+  // A volume reports the capacity it actually has, so a resize that has not
+  // landed yet is invisible in the size alone. Show where it is heading, with
+  // the server's explanation of what it is waiting for -- the same text the
+  // details column shows, when that one is free.
+  const renderSize = (volume) => {
+    const size = formatSize(volume.size);
+    if (!volume.resize_status || volume.resize_target_size == null) {
+      return size;
+    }
+    // Both sizes are whole GiB, so a resize smaller than that -- or one whose
+    // new space has landed while the state has not cleared -- would render an
+    // arrow pointing at the size it already shows. The reason still reaches
+    // the user through the details column.
+    if (Number(volume.resize_target_size) <= Number(volume.size)) {
+      return size;
+    }
+    const target = formatSize(volume.resize_target_size);
+    return (
+      <Tooltip content={volume.resize_message}>
+        {/* nowrap: the column is narrow, and a size broken across three lines
+            reads worse than a wider column. */}
+        <span className="whitespace-nowrap">
+          {size}
+          <span className="text-gray-500"> &rarr; {target}</span>
+        </span>
+      </Tooltip>
+    );
   };
 
   const formatTimestamp = (timestamp) => {
@@ -712,8 +740,15 @@ export function VolumesTable({
   // Volumes are usable most of the time, so a column of dashes would be noise.
   // Judge over the whole dataset, not the current page or filter, so the column
   // does not come and go while paging.
+  //
+  // One cell, so a volume with both an error and a resize shows the error: it
+  // is the one that says the volume is unusable. The volume's own page has
+  // room and shows both -- deliberately, not by oversight.
+  const volumeDetails = (volume) =>
+    volume.error_message || volume.resize_message || null;
+
   const anyVolumeHasDetails = useMemo(
-    () => data.some((volume) => volume.error_message),
+    () => data.some((volume) => volumeDetails(volume)),
     [data]
   );
 
@@ -766,7 +801,7 @@ export function VolumesTable({
       id: 'size',
       order: 30,
       renderHeader: () => sortableHeader('Size', 'size'),
-      renderCell: (volume) => <TableCell>{formatSize(volume.size)}</TableCell>,
+      renderCell: (volume) => <TableCell>{renderSize(volume)}</TableCell>,
     },
     {
       id: 'user_name',
@@ -815,9 +850,9 @@ export function VolumesTable({
             renderHeader: () => <TableHead>Details</TableHead>,
             renderCell: (volume) => (
               <TableCell>
-                {volume.error_message ? (
+                {volumeDetails(volume) ? (
                   <TruncatedDetails
-                    text={volume.error_message}
+                    text={volumeDetails(volume)}
                     rowId={volume.name}
                     expandedRowId={expandedRowId}
                     setExpandedRowId={setExpandedRowId}
@@ -942,9 +977,9 @@ export function VolumesTable({
                     </TableRow>
                     {/* A volume can become ready while its reason is
                         expanded, taking the column with it. */}
-                    {expandedRowId === volume.name && volume.error_message && (
+                    {expandedRowId === volume.name && volumeDetails(volume) && (
                       <ExpandedDetailsRow
-                        text={volume.error_message}
+                        text={volumeDetails(volume)}
                         colSpan={totalColSpan}
                         innerRef={expandedRowRef}
                       />

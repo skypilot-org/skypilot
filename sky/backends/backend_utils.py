@@ -3015,6 +3015,7 @@ def _update_cluster_status(
         #   once the container is running again, so a snapshot that raced the
         #   restart misses it -> re-read the pods' current+previous states.
         # Bounded: only on an abnormal k8s cluster with no status reason.
+        recovered_cause = False
         if not status_reason and isinstance(launched_resources.cloud,
                                             clouds.Kubernetes):
             try:
@@ -3027,6 +3028,9 @@ def _update_cluster_status(
                             ray_config['provider'], pod_names) or
                         k8s_instance.get_cluster_failure_reason_from_pods(
                             ray_config['provider'], pod_names) or '')
+                    # Lands in status_reason, not node_statuses, so the
+                    # supersede check below cannot see it otherwise.
+                    recovered_cause = bool(status_reason)
             except Exception as e:  # pylint: disable=broad-except
                 logger.debug('Failed to get pod failure reason for '
                              f'{cluster_name!r}: {e}')
@@ -3210,9 +3214,18 @@ def _update_cluster_status(
             hint = kubernetes_utils.match_kubernetes_failure_hint_text(
                 log_message)
             if hint:
-                log_message += f' {hint}'
-        # Do not add event if the cluster is already in INIT status.
-        if status != status_lib.ClusterStatus.INIT:
+                # Own line so the remedy reads separately from the cause.
+                log_message += f'\n{hint}'
+        # A refresh during a node outage sees stale pod status and can only
+        # record a generic reason; the guard below would then freeze that in.
+        # add_cluster_event() dedups, so a stable cause is recorded once.
+        identified_cause = False
+        if isinstance(launched_resources.cloud, clouds.Kubernetes):
+            identified_cause = recovered_cause or any(
+                k8s_instance.pod_reason_identifies_cause(pod_reason)
+                for _, pod_reason in node_statuses.values())
+        # Skip if already INIT, unless this refresh explained why.
+        if (status != status_lib.ClusterStatus.INIT or identified_cause):
             global_user_state.add_cluster_event(
                 cluster_name,
                 status_lib.ClusterStatus.INIT,

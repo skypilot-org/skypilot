@@ -1,7 +1,7 @@
 """SDK functions for volumes."""
 import json
 import typing
-from typing import List, Optional
+from typing import Dict, List, Optional, Union
 
 from sky import sky_logging
 from sky.adaptors import common as adaptors_common
@@ -124,22 +124,37 @@ def validate(volume: volume_lib.Volume) -> None:
 @server_common.check_server_healthy_or_start
 @annotations.client_api
 def ls(
-    refresh: bool = False
+    refresh: bool = False,
+    names: Optional[List[str]] = None,
 ) -> server_common.RequestId[List[responses.VolumeRecord]]:
-    """Lists all volumes.
+    """Lists volumes.
 
     Args:
         refresh: If True, refresh volume state from cloud APIs before returning.
             This makes the call slower but returns the most up-to-date data.
             If False (default), return cached data from the database which is
             updated periodically by the background daemon.
+        names: If given, list only these volumes, and narrow a `refresh` to
+            them instead of re-probing every volume. An API server older than
+            this argument ignores it: it returns every volume, and a `refresh`
+            re-probes the whole table rather than the named subset. The result
+            is still correct but the call is no cheaper, and callers that need
+            exactly the named volumes must narrow the result themselves.
 
     Returns:
         The request ID of the list request.
     """
-    params = {}
+    params: Dict[str, Union[str, List[str]]] = {}
     if refresh:
         params['refresh'] = 'true'
+    if names:
+        # Repeated `names=` query params; a server that predates this one
+        # ignores them and returns every volume. Note this is the only
+        # list-valued param here: `requests` expands a list into repeated
+        # params, but make_authenticated_request_async str()s each value, so
+        # an async caller would send "['a']" and needs to join the names
+        # itself.
+        params['names'] = list(names)
     response = server_common.make_authenticated_request(
         'GET',
         '/volumes',

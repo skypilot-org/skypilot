@@ -15,6 +15,17 @@ provider:
   cluster: "{{slurm_cluster}}"
   partition: "{{slurm_partition}}"
   provision_timeout: {{provision_timeout}}
+  sky_base_dir: {{sky_base_dir | tojson}}
+{% if image_id is not none %}
+  # Container-ness is read from this persisted field (see
+  # provision/slurm/instance.py::get_command_runners); it must not be probed
+  # over the shared filesystem, where NFS caching can hide the file.
+  # It renders from the same deploy variable as node_config.image_id below
+  # (docker: prefix already stripped by extract_docker_image); snapshot
+  # restore validates the manifest's image_id against node_config.image_id,
+  # so the two must stay identical.
+  container_image: {{image_id | tojson}}
+{% endif %}
 {% if slurm_user is defined and slurm_user is not none %}
   slurm_user: {{slurm_user | tojson}}
 {% endif %}
