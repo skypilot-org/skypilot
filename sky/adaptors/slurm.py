@@ -1018,10 +1018,11 @@ class SlurmClient:
             })
         return rows
 
-    def get_job_accounting(self,
-                           job_id: str,
-                           timeout: Optional[int] = JOB_READ_TIMEOUT_SECONDS
-                          ) -> List[Dict[str, str]]:
+    def get_job_accounting(
+        self,
+        job_id: str,
+        timeout: Optional[int] = ACCOUNTING_READ_TIMEOUT_SECONDS
+    ) -> List[Dict[str, str]]:
         """Accounting records for ``job_id``: what happened, and when.
 
         This is the only source for a job Slurm has already forgotten --
@@ -1054,7 +1055,7 @@ class SlurmClient:
         self,
         job_name: str,
         since: int,
-        timeout: Optional[int] = JOB_READ_TIMEOUT_SECONDS
+        timeout: Optional[int] = ACCOUNTING_READ_TIMEOUT_SECONDS
     ) -> List[Dict[str, str]]:
         """Accounting records of every job named ``job_name``.
 

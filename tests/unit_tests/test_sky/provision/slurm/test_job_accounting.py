@@ -5,6 +5,7 @@ every surprise this parse has to handle came from there: a base array id
 answering with one row per element, `Unknown` where a timestamp is expected,
 and a submit line that contains the separator.
 """
+import inspect
 import re
 import time
 from unittest import mock
@@ -123,3 +124,28 @@ def test_a_job_name_is_quoted():
     client = _client('')
     client.get_job_accounting_by_name('weird name; rm -rf /', since=0)
     assert "'weird name; rm -rf /'" in _cmd(client)
+
+
+def test_every_per_job_read_is_bounded_by_default():
+    """Each read's default bound, pinned. These are the reads that run on the
+    `sky jobs events` request path, and an unbounded one there is what an
+    unresponsive login node turns into a hung request -- which has happened
+    once already, to `query_jobs`. Accounting keeps the longer budget because
+    slurmdbd answers it, not slurmctld's in-memory queue.
+    """
+    expected = {
+        'get_job_accounting': slurm.ACCOUNTING_READ_TIMEOUT_SECONDS,
+        'get_job_accounting_by_name': slurm.ACCOUNTING_READ_TIMEOUT_SECONDS,
+    }
+    for name, want in expected.items():
+        sig = inspect.signature(getattr(slurm.SlurmClient, name))
+        got = sig.parameters['timeout'].default
+        assert got == want, f'{name}: {got} != {want}'
+    # The queue reads take no timeout argument; they hard-code the shorter
+    # bound at the call, so assert that instead.
+    src = inspect.getsource(slurm.SlurmClient.get_pending_job_details)
+    assert 'JOB_READ_TIMEOUT_SECONDS' in src
+    src = inspect.getsource(slurm.SlurmClient.get_pending_queue)
+    assert 'JOB_READ_TIMEOUT_SECONDS' in src
+    src = inspect.getsource(slurm.SlurmClient.get_job_states)
+    assert 'JOB_READ_TIMEOUT_SECONDS' in src
