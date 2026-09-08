@@ -1,4 +1,5 @@
 """Tests for request log streaming."""
+import gzip
 import json
 
 import aiofiles
@@ -437,9 +438,18 @@ async def test_a_failure_before_any_output_keeps_the_empty_signal(monkeypatch):
 
     monkeypatch.setattr(stream_utils, '_log_stream_chunks', _boom)
 
+    logged = []
+    monkeypatch.setattr(stream_utils.logger, 'exception',
+                        lambda msg, *a, **k: logged.append(msg))
+
     chunks = [chunk async for chunk in stream_utils.log_streamer(None, None)]
 
     assert not chunks, 'anything here suppresses the sync-down fallback'
+    # Returning empty is only defensible because the failure is recorded.
+    # Asserted on `logger.exception` itself rather than on captured output, so
+    # quieting it to debug -- which would restore the silence this boundary
+    # exists to remove -- fails here.
+    assert logged, 'an empty response with no log entry is the old silence'
 
 
 @pytest.mark.asyncio
@@ -461,3 +471,63 @@ async def test_a_404_is_still_a_404(monkeypatch):
             pass
 
     assert excinfo.value.status_code == 404
+
+
+async def _collect_gzip(agen):
+    return b''.join([chunk async for chunk in agen])
+
+
+@pytest.mark.asyncio
+async def test_a_failed_download_still_opens():
+    """The artifact from the bug report: a `.log.gz` that will not open.
+
+    The trailer is written on a natural EOF, so a stream that ended on an
+    exception saved a gzip header and nothing else -- a file no tool reads,
+    which hides even the part that did arrive.
+    """
+
+    async def _half_then_boom():
+        yield 'first half\n'
+        raise RuntimeError('boom mid-stream')
+
+    with pytest.raises(RuntimeError):
+        body = await _collect_gzip(stream_utils.gzip_stream(_half_then_boom()))
+
+    # The bytes that did arrive are a complete gzip member, so the saved file
+    # opens. Collected again because the raise above discards the partial.
+    body = b''
+    agen = stream_utils.gzip_stream(_half_then_boom())
+    try:
+        async for chunk in agen:
+            body += chunk
+    except RuntimeError:
+        pass
+
+    assert body, 'nothing was written at all'
+    assert gzip.decompress(body).decode() == 'first half\n'
+
+
+@pytest.mark.asyncio
+async def test_an_empty_stream_stays_empty_through_gzip():
+    """Not even a header: `bytes_written == 0` is the sync-down signal, and a
+    10-byte gzip header would read as content and suppress it.
+    """
+
+    async def _nothing():
+        return
+        yield  # pylint: disable=unreachable
+
+    assert await _collect_gzip(stream_utils.gzip_stream(_nothing())) == b''
+
+
+@pytest.mark.asyncio
+async def test_a_complete_stream_round_trips():
+    """The control: the ordinary path must still produce a readable file."""
+
+    async def _two_lines():
+        yield 'one\n'
+        yield 'two\n'
+
+    body = await _collect_gzip(stream_utils.gzip_stream(_two_lines()))
+
+    assert gzip.decompress(body).decode() == 'one\ntwo\n'
