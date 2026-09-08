@@ -67,6 +67,7 @@ from sky.server import config as server_config
 from sky.server import constants as server_constants
 from sky.server import csp_utils
 from sky.server import daemons
+from sky.server import download_utils
 from sky.server import loop_stall
 from sky.server import metrics
 from sky.server import middleware_utils
@@ -2372,22 +2373,12 @@ async def logs(
     )
 
 
-def _download_user_id(request: fastapi.Request,
-                      body: payloads.RequestBody) -> str:
-    user_id = (request.state.auth_user.id
-               if request.state.auth_user is not None else body.user_hash)
-    if (not user_id or user_id in ('.', '..') or '/' in user_id or
-            '\\' in user_id):
-        raise fastapi.HTTPException(status_code=400, detail='Invalid user ID')
-    return user_id
-
-
 @app.post('/download_logs')
 async def download_logs(
         request: fastapi.Request,
         cluster_jobs_body: payloads.ClusterJobsDownloadLogsBody) -> None:
     """Downloads the logs of a job."""
-    user_hash = _download_user_id(request, cluster_jobs_body)
+    user_hash = download_utils.download_user_id(request, cluster_jobs_body)
     logs_dir_on_api_server = pathlib.Path(
         bs.get_blob_storage().download_tmp_dir(user_hash))
     logs_dir_on_api_server.expanduser().mkdir(parents=True, exist_ok=True)
@@ -2409,7 +2400,7 @@ async def download_logs(
 async def download(download_body: payloads.DownloadBody,
                    request: fastapi.Request) -> None:
     """Downloads a folder from the cluster to the local machine."""
-    user_hash = _download_user_id(request, download_body)
+    user_hash = download_utils.download_user_id(request, download_body)
     logs_dir_on_api_server = common.api_server_user_logs_dir_prefix(user_hash)
     download_tmp = bs.get_blob_storage().download_tmp_dir(user_hash)
     allowed_roots = [

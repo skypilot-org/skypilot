@@ -8,6 +8,8 @@ import fastapi
 import pytest
 
 from sky import models
+from sky.jobs.server import server as jobs_server
+from sky.serve.server import server as serve_server
 from sky.server import server
 from sky.server.requests import payloads
 from sky.skylet import constants
@@ -146,3 +148,66 @@ async def test_download_separate_staging_root(download_env, tmp_path):
     with zipfile.ZipFile(response.path) as archive:
         assert archive.read(archive.namelist()[0]) == b'staged log'
     await response.background()
+
+
+_STAGING_HANDLERS = [
+    (server.download_logs, payloads.ClusterJobsDownloadLogsBody,
+     dict(cluster_name='test', job_ids=None)),
+    (jobs_server.download_logs, payloads.JobsDownloadLogsBody,
+     dict(name=None, job_id=1)),
+    (jobs_server.pool_download_logs, payloads.JobsPoolDownloadLogsBody,
+     dict(pool_name='test', local_dir='', targets=None)),
+    (serve_server.download_logs, payloads.ServeDownloadLogsBody,
+     dict(service_name='test', local_dir='', targets=None)),
+]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('handler,body_type,kwargs', _STAGING_HANDLERS)
+@pytest.mark.parametrize('authenticated', [True, False])
+async def test_staging_then_download(download_env, handler, body_type, kwargs,
+                                     authenticated):
+    request, roots, _ = download_env
+    request.state.request_id = 'staging-test'
+    if not authenticated:
+        request.state.auth_user = None
+    expected_user = 'alice' if authenticated else 'bob'
+    staging_body = body_type(**kwargs,
+                             env_vars={constants.USER_ID_ENV_VAR: 'bob'})
+    with mock.patch.object(server.executor,
+                           'schedule_request_async',
+                           new_callable=mock.AsyncMock) as schedule:
+        await handler(request, staging_body)
+    staged_dir = pathlib.Path(staging_body.local_dir)
+    assert staged_dir == roots[expected_user] or roots[
+        expected_user] in staged_dir.parents
+    assert schedule.call_args.kwargs['request_body'] is staging_body
+    assert schedule.call_args.kwargs['auth_user'] == request.state.auth_user
+    # Populate the selected destination without contacting a remote cluster.
+    staged_log = staged_dir / 'staged.log'
+    staged_log.write_text('downloaded logs')
+    response = await server.download(body(staged_log, 'bob'), request)
+    with zipfile.ZipFile(response.path) as archive:
+        assert archive.read(archive.namelist()[0]) == b'downloaded logs'
+    await response.background()
+    if authenticated:
+        with pytest.raises(fastapi.HTTPException) as exc:
+            await server.download(body(roots['bob'] / 'run.log', 'bob'),
+                                  request)
+        assert exc.value.status_code == 400
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('handler,body_type,kwargs', _STAGING_HANDLERS)
+async def test_staging_rejects_anonymous_path_component(download_env, handler,
+                                                        body_type, kwargs):
+    request, _, _ = download_env
+    request.state.auth_user = None
+    staging_body = body_type(**kwargs,
+                             env_vars={constants.USER_ID_ENV_VAR: '../bob'})
+    with mock.patch.object(server.bs.get_blob_storage(),
+                           'download_tmp_dir') as staging:
+        with pytest.raises(fastapi.HTTPException) as exc:
+            await handler(request, staging_body)
+    assert exc.value.status_code == 400
+    staging.assert_not_called()
