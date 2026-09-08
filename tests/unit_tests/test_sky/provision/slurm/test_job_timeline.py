@@ -11,6 +11,7 @@ from unittest import mock
 
 import pytest
 
+from sky.adaptors import slurm
 from sky.provision.slurm import utils
 
 _CLUSTER = 'dev-slurm'
@@ -202,7 +203,8 @@ def test_without_accounting_a_queued_job_still_gets_an_answer(client):
         })
     with mock.patch.object(utils, 'explain_pending_job', explain):
         entries = _timeline()
-    client.query_jobs.assert_called_once_with(_NAME, ['pending'])
+    client.query_jobs.assert_called_once_with(
+        _NAME, ['pending'], timeout=slurm.JOB_READ_TIMEOUT_SECONDS)
     assert [e['event'] for e in entries] == ['pending']
     assert 'A QoS limit is holding it.' in entries[0]['text']
 
@@ -291,3 +293,52 @@ def test_the_deadline_reaches_the_diagnosis(client):
     with mock.patch.object(utils, 'explain_pending_job', explain):
         utils.job_timeline(_CLUSTER, _NAME, _SUBMIT - 60, deadline=deadline)
     assert explain.call_args.kwargs['deadline'] == deadline
+
+
+def test_the_squeue_fallback_is_bounded(client):
+    """It runs on a request path, and it is the *likely* branch: a job whose
+    accounting record has not landed yet is exactly when someone asks why it
+    has not started. Unbounded, one unresponsive login node hangs the
+    request no matter what the budget says."""
+    client.get_job_accounting_by_name.return_value = []
+    client.query_jobs.return_value = []
+    _timeline()
+    assert client.query_jobs.call_args.kwargs['timeout'] == (
+        slurm.JOB_READ_TIMEOUT_SECONDS)
+
+
+def test_the_budget_stops_the_loop_between_pending_jobs(client):
+    """explain_pending_job always pays for the reason itself before its own
+    deadline check can skip anything, so a second id costs another read's
+    budget however little is left. Without the check in the loop both ids
+    are explained."""
+    client.get_job_accounting_by_name.return_value = [
+        _record(job_id='17213',
+                state='PENDING',
+                eligible='Unknown',
+                start='Unknown',
+                end=''),
+        _record(job_id='17214',
+                state='PENDING',
+                eligible='Unknown',
+                start='Unknown',
+                end=''),
+    ]
+    seen = []
+
+    def _explain(cluster, job_id, deadline=None):
+        del cluster, deadline
+        seen.append(job_id)
+        # The first explanation spends what was left of the budget.
+        time.sleep(0.25)
+        return {'category': 'resources', 'summary': 'Waiting.', 'action': None}
+
+    with mock.patch.object(utils, 'explain_pending_job', _explain):
+        entries = utils.job_timeline(_CLUSTER,
+                                     _NAME,
+                                     _SUBMIT - 60,
+                                     deadline=time.monotonic() + 0.2)
+    assert seen == ['17213']
+    # What it did manage to explain is still reported.
+    assert [e['event'] for e in entries if e['event'] == 'pending'
+           ] == ['pending']

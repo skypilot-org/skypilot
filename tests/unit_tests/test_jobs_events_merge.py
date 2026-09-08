@@ -671,12 +671,15 @@ def test_the_slurm_reads_share_one_budget_across_allocations(monkeypatch):
 
     # A budget the first allocation is made to overrun, rather than a
     # mutation mid-loop: the deadline is computed once, which is the point.
-    monkeypatch.setattr(core, '_SLURM_TIMELINE_BUDGET_SECONDS', 0.05)
+    # The margin is wide because the fragile direction is the *first* check:
+    # jitter between computing the deadline and reaching the loop would
+    # otherwise skip every allocation and leave `calls` empty.
+    monkeypatch.setattr(core, '_SLURM_TIMELINE_BUDGET_SECONDS', 0.2)
 
     def _slow(cluster, job_name, since, deadline=None):
         del cluster, job_name, since, deadline
         calls.append(time.monotonic())
-        time.sleep(0.06)
+        time.sleep(0.25)
         return []
 
     monkeypatch.setattr(core.slurm_provision_utils, 'job_timeline', _slow)

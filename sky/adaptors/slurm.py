@@ -49,14 +49,22 @@ _INVENTORY_TIMEOUT_SECONDS = 60
 # through as text rather than guessing an offset for.
 _EPOCH_TIME_ENV = 'SLURM_TIME_FORMAT=%s'
 
-# Wall-clock bound for the per-job reads that explain or reconstruct one
+# Wall-clock bounds for the per-job reads that explain or reconstruct one
 # job's history. Unlike the inventory sweep these run on request paths
 # (`sky jobs events`), where an unanswered read must not hold the caller: on
 # expiry the SSH process is killed and subprocess.TimeoutExpired is raised,
 # and every caller degrades to saying what it could not read. Public because
 # a caller that composes several of these reads bounds its own work against
-# the same figure.
+# the same figures.
+#
+# Accounting keeps a longer budget than the queue reads: it is answered by
+# slurmdbd rather than by slurmctld's in-memory queue, and on a busy one a
+# read that would have succeeded in 15s is worth more than a timeline
+# abandoned at 10. A caller that composes several reads bounds the total
+# itself, so the longer budget costs latency only on the slow clusters that
+# need it.
 JOB_READ_TIMEOUT_SECONDS = 10
+ACCOUNTING_READ_TIMEOUT_SECONDS = 20
 
 # Regex pattern to extract partition names from scontrol output
 # Matches PartitionName=<name> and captures until the next field
@@ -495,6 +503,7 @@ class SlurmClient:
         self,
         job_name: Optional[str] = None,
         state_filters: Optional[List[str]] = None,
+        timeout: Optional[int] = None,
     ) -> List[str]:
         """Query Slurm jobs by state and optional name.
 
@@ -502,6 +511,9 @@ class SlurmClient:
             job_name: Optional job name to filter by.
             state_filters: List of job states to filter by
                 (e.g., ['running', 'pending']). If None, returns all jobs.
+            timeout: Bounds the read, for a caller on a request path. The
+                default leaves the runner's own behaviour untouched, which is
+                what the provisioner has while it waits for an allocation.
 
         Returns:
             List of job IDs matching the filters.
@@ -513,7 +525,7 @@ class SlurmClient:
         if job_name is not None:
             cmd += f' --name {job_name}'
 
-        rc, stdout, stderr = self._run_slurm_cmd(cmd)
+        rc, stdout, stderr = self._run_slurm_cmd(cmd, timeout=timeout)
         subprocess_utils.handle_returncode(rc,
                                            cmd,
                                            'Failed to query Slurm jobs.',

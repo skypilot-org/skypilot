@@ -1636,12 +1636,20 @@ def job_timeline(cluster: str,
         # and a job that has not started is the one most in need of an
         # answer, so a cluster without slurmdbd is not left silent.
         try:
-            pending_ids = client.query_jobs(job_name, ['pending'])
+            pending_ids = client.query_jobs(
+                job_name, ['pending'], timeout=slurm.JOB_READ_TIMEOUT_SECONDS)
         except Exception as e:  # pylint: disable=broad-except
             logger.debug(f'Could not look up pending Slurm jobs named '
                          f'{job_name!r} on {cluster}: {e}')
     now = int(time.time())
     for job_id in pending_ids:
+        # Between allocations as well as within one: `explain_pending_job`
+        # always pays for the reason itself before the deadline can stop
+        # anything, so a second id would spend a whole read's budget again.
+        if deadline is not None and time.monotonic() >= deadline:
+            logger.debug(f'Out of time to explain the rest of the pending '
+                         f'Slurm jobs on {cluster}')
+            break
         explained = explain_pending_job(cluster, job_id, deadline=deadline)
         if explained is None:
             continue
