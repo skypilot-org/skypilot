@@ -2372,12 +2372,22 @@ async def logs(
     )
 
 
+def _download_user_id(request: fastapi.Request,
+                      body: payloads.RequestBody) -> str:
+    user_id = (request.state.auth_user.id
+               if request.state.auth_user is not None else body.user_hash)
+    if (not user_id or user_id in ('.', '..') or '/' in user_id or
+            '\\' in user_id):
+        raise fastapi.HTTPException(status_code=400, detail='Invalid user ID')
+    return user_id
+
+
 @app.post('/download_logs')
 async def download_logs(
         request: fastapi.Request,
         cluster_jobs_body: payloads.ClusterJobsDownloadLogsBody) -> None:
     """Downloads the logs of a job."""
-    user_hash = cluster_jobs_body.env_vars[constants.USER_ID_ENV_VAR]
+    user_hash = _download_user_id(request, cluster_jobs_body)
     logs_dir_on_api_server = pathlib.Path(
         bs.get_blob_storage().download_tmp_dir(user_hash))
     logs_dir_on_api_server.expanduser().mkdir(parents=True, exist_ok=True)
@@ -2399,26 +2409,25 @@ async def download_logs(
 async def download(download_body: payloads.DownloadBody,
                    request: fastapi.Request) -> None:
     """Downloads a folder from the cluster to the local machine."""
-    folder_paths = [
-        pathlib.Path(folder_path) for folder_path in download_body.folder_paths
-    ]
-    user_hash = download_body.env_vars[constants.USER_ID_ENV_VAR]
+    user_hash = _download_user_id(request, download_body)
     logs_dir_on_api_server = common.api_server_user_logs_dir_prefix(user_hash)
     download_tmp = bs.get_blob_storage().download_tmp_dir(user_hash)
-    for folder_path in folder_paths:
-        folder_str = str(folder_path)
-        expanded_str = str(runtime_utils.expanduser_path(folder_path))
-        if not (folder_str.startswith(str(logs_dir_on_api_server)) or
-                folder_str.startswith(download_tmp) or expanded_str.startswith(
-                    runtime_utils.expanduser(download_tmp))):
+    allowed_roots = [
+        runtime_utils.expanduser_path(pathlib.Path(root)).resolve()
+        for root in (logs_dir_on_api_server, download_tmp)
+    ]
+    folder_paths = []
+    for folder_path in download_body.folder_paths:
+        resolved_path = runtime_utils.expanduser_path(
+            pathlib.Path(folder_path)).resolve()
+        if not any(resolved_path == root or root in resolved_path.parents
+                   for root in allowed_roots):
             raise fastapi.HTTPException(
-                status_code=400,
-                detail=
-                f'Invalid folder path: {folder_path}; {logs_dir_on_api_server}')
-
-        if not runtime_utils.expanduser_path(folder_path).resolve().exists():
+                status_code=400, detail=f'Invalid folder path: {folder_path}')
+        if not resolved_path.exists():
             raise fastapi.HTTPException(
                 status_code=404, detail=f'Folder not found: {folder_path}')
+        folder_paths.append(resolved_path)
 
     # Create a temporary zip file
     log_id = str(uuid.uuid4().hex)
@@ -2429,10 +2438,7 @@ async def download(download_body: payloads.DownloadBody,
     try:
 
         def _zip_files_and_folders(folder_paths, zip_path):
-            folders = [
-                str(runtime_utils.expanduser_path(folder_path).resolve())
-                for folder_path in folder_paths
-            ]
+            folders = [str(folder_path) for folder_path in folder_paths]
             # Check for optional query parameter to control zip entry structure
             relative = request.query_params.get('relative', 'home')
             if relative == 'items':
