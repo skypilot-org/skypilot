@@ -531,6 +531,14 @@ _LOCAL_DISK_TRUNCATED_HELP = (
     'stopped early, making that root\'s reported size and file count lower '
     'bounds; 0 otherwise.')
 
+_LOCAL_DISK_ROOT_CHARGED_HELP = (
+    '1 when bytes written under this root count against the container\'s own '
+    'ephemeral-storage budget, 0 when the platform charges them elsewhere -- '
+    'a persistent volume or a memory-backed tmpfs mounted into the tree. '
+    'Only the roots marked 1 go into '
+    'sky_apiserver_local_disk_headroom_bytes, so this is what makes that '
+    'number reproducible from the per-root series.')
+
 _LOCAL_DISK_SCAN_DURATION_HELP = (
     'Wall-clock seconds the last walk of all local roots took. Runs off the '
     'scrape path, so this is a cost signal rather than scrape latency.')
@@ -542,9 +550,10 @@ _LOCAL_DISK_FS_SIZE_HELP = (
 _LOCAL_DISK_FS_AVAIL_HELP = (
     'Space available to a non-root writer on a filesystem hosting at least '
     'one of the API server\'s local roots, by mount point. On Kubernetes '
-    'this is the headroom to the kubelet\'s node-level eviction threshold, '
-    'which is what actually stops the server writing -- unlike the '
-    'per-container budget below, it is exact.')
+    'the value for the filesystem behind the container\'s writable layer is '
+    'the headroom to the kubelet\'s node-level eviction threshold, which is '
+    'what actually stops the server writing -- unlike the per-container '
+    'budget below, it is exact.')
 
 _LOCAL_DISK_BUDGET_HELP = (
     'The container\'s own ephemeral-storage budget in bytes, from the limit '
@@ -556,9 +565,10 @@ _LOCAL_DISK_BUDGET_HELP = (
 
 _LOCAL_DISK_HEADROOM_HELP = (
     'Bytes left against sky_apiserver_local_disk_budget_bytes, and absent '
-    'for the same reason that is. An upper bound: the measured roots cover '
-    'what the server writes, not every byte the platform charges to this '
-    'container.')
+    'for the same reason that is. Counts only the roots whose '
+    'sky_apiserver_local_disk_root_charged_to_ephemeral is 1. An upper '
+    'bound: those roots cover what the server writes, not every byte the '
+    'platform charges to this container.')
 
 
 class LocalDiskUsageCollector:
@@ -600,13 +610,20 @@ class LocalDiskUsageCollector:
             'sky_apiserver_local_disk_scan_truncated',
             _LOCAL_DISK_TRUNCATED_HELP,
             labels=['root'])
+        charged = prom_core.GaugeMetricFamily(
+            'sky_apiserver_local_disk_root_charged_to_ephemeral',
+            _LOCAL_DISK_ROOT_CHARGED_HELP,
+            labels=['root'])
         for root, usage in snapshot.roots.items():
             used.add_metric([root], usage.used_bytes)
             files.add_metric([root], usage.files)
             truncated.add_metric([root], 1 if usage.truncated else 0)
+            charged.add_metric(
+                [root], 1 if snapshot.is_charged_to_ephemeral(root) else 0)
         yield used
         yield files
         yield truncated
+        yield charged
 
         fs_size = prom_core.GaugeMetricFamily(
             'sky_apiserver_local_disk_fs_size_bytes',

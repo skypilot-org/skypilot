@@ -14,7 +14,7 @@ holding them, so the growth is visible while there is still time to act.
 
 Measurement only: nothing here refuses, caps or sheds work.
 
-Two notes on matching what the platform sees:
+Three notes on matching what the platform sees:
 
 * Sizes are counted in allocated blocks, not apparent size, and hard links
   are counted once, because that is what ``du`` reports and ``du`` is what
@@ -22,6 +22,11 @@ Two notes on matching what the platform sees:
 * A file that has been unlinked while a process still holds it open keeps
   its blocks but is invisible to any directory walk, so a leaked descriptor
   makes these numbers an undercount.
+* Not every root is charged to the container. A deployment can mount a
+  persistent volume partway into the tree -- the same directory is local in
+  one layout and shared in another -- and those bytes belong to the volume's
+  budget, not this container's. Each filesystem is classified, and only the
+  charged roots are compared against the budget.
 """
 import dataclasses
 import os
@@ -54,12 +59,15 @@ EPHEMERAL_STORAGE_REQUEST_ENV_VAR = (
 DEFAULT_SCAN_TIMEOUT_SECONDS = 20.0
 DEFAULT_SCAN_MAX_ENTRIES = 2_000_000
 
-# How often the deadline is re-checked while draining a single directory.
-_DEADLINE_CHECK_EVERY = 4096
-
 # Bytes per st_blocks unit, fixed by POSIX regardless of the filesystem's
 # own block size.
 _BLOCK_SIZE = 512
+
+# Substring identifying a Kubernetes local scratch volume in the source
+# path a bind mount reports. Such a volume lives on the node's own disk
+# and is charged to the pod's ephemeral storage, unlike a persistent
+# volume mounted at the same kind of path.
+_EPHEMERAL_VOLUME_MARKER = 'kubernetes.io~empty-dir'
 
 
 @dataclasses.dataclass
@@ -69,6 +77,10 @@ class RootUsage:
     used_bytes: int
     files: int
     truncated: bool
+    # Mount point of the filesystem holding this root, so a root can be
+    # joined to its entry in Snapshot.filesystems. None if it could not
+    # be determined.
+    mountpoint: Optional[str] = None
 
 
 @dataclasses.dataclass
@@ -77,6 +89,9 @@ class FilesystemUsage:
     mountpoint: str
     size_bytes: int
     avail_bytes: int
+    # Whether bytes written here count against the container's own
+    # ephemeral-storage budget. See _charged_to_ephemeral().
+    charged_to_ephemeral: bool
 
 
 @dataclasses.dataclass
@@ -89,13 +104,25 @@ class Snapshot:
 
     @property
     def used_bytes(self) -> int:
-        """Total across the measured roots.
+        """Total across the roots charged to this container.
 
-        A lower bound on what the platform attributes to this container:
-        the roots cover what the server writes, not the whole writable
-        layer.
+        Roots on a filesystem the platform does not charge to this
+        container -- a persistent volume, a memory-backed tmpfs -- are
+        excluded, so this stays comparable to ``budget_bytes``. Still a
+        lower bound: the roots cover what the server writes, not the whole
+        writable layer.
         """
-        return sum(r.used_bytes for r in self.roots.values())
+        return sum(usage.used_bytes
+                   for name, usage in self.roots.items()
+                   if self.is_charged_to_ephemeral(name))
+
+    def is_charged_to_ephemeral(self, name: str) -> bool:
+        """Whether root *name* counts against ``budget_bytes``."""
+        root = self.roots.get(name)
+        if root is None or root.mountpoint is None:
+            return False
+        filesystem = self.filesystems.get(root.mountpoint)
+        return filesystem is not None and filesystem.charged_to_ephemeral
 
     @property
     def headroom_bytes(self) -> Optional[int]:
@@ -185,6 +212,11 @@ def _scan_root(path: str, deadline: float, max_entries: int) -> RootUsage:
 
     stack: List[str] = [path]
     while stack:
+        if time.monotonic() >= deadline:
+            # A tree of empty directories never reaches the per-entry check
+            # below, so the deadline is enforced here too.
+            truncated = True
+            break
         current = stack.pop()
         try:
             scandir = os.scandir(current)
@@ -197,8 +229,7 @@ def _scan_root(path: str, deadline: float, max_entries: int) -> RootUsage:
                 if entries >= max_entries:
                     truncated = True
                     break
-                if (entries % _DEADLINE_CHECK_EVERY == 0 and
-                        time.monotonic() >= deadline):
+                if time.monotonic() >= deadline:
                     truncated = True
                     break
                 try:
@@ -247,9 +278,68 @@ def _mountpoint(path: str) -> Optional[str]:
         current = parent
 
 
+def _mount_sources() -> Dict[str, str]:
+    """Returns {mount point: source path inside its device}, or {} if unknown.
+
+    The source path is mountinfo's fourth field, which for a bind mount is
+    the subtree of the backing device that was mounted -- the only place a
+    container can see what kind of volume it was handed.
+    """
+    sources: Dict[str, str] = {}
+    try:
+        with open('/proc/self/mountinfo', 'r', encoding='utf-8') as f:
+            for line in f:
+                fields = line.split()
+                if len(fields) < 5:
+                    continue
+                # id parent major:minor source mount-point ...; both paths
+                # octal-escape the characters that would break the split.
+                sources[_unescape_mount_path(fields[4])] = _unescape_mount_path(
+                    fields[3])
+    except OSError as e:
+        logger.debug(f'Could not read /proc/self/mountinfo: {e}')
+        return {}
+    return sources
+
+
+def _unescape_mount_path(path: str) -> str:
+    for escaped, literal in ((r'\040', ' '), (r'\011', '\t'), (r'\012', '\n'),
+                             (r'\134', '\\')):
+        path = path.replace(escaped, literal)
+    return path
+
+
+def _charged_to_ephemeral(mountpoint: str, sources: Dict[str, str],
+                          container_root_device: Optional[int]) -> bool:
+    """Whether writes under *mountpoint* count against the ephemeral budget.
+
+    A positive test, matching what a container runtime charges to a
+    container's ephemeral storage: its writable layer, and local
+    scratch volumes. Anything else -- a persistent volume, a
+    memory-backed tmpfs -- is not charged, and counting it would subtract
+    another volume's bytes from this container's budget.
+
+    Deliberately conservative in the direction that avoids false
+    exhaustion: an unrecognised mount is treated as not charged.
+    """
+    try:
+        if os.stat(mountpoint).st_dev == container_root_device:
+            # The container's own writable layer.
+            return True
+    except OSError:
+        return False
+    source = sources.get(mountpoint)
+    return source is not None and _EPHEMERAL_VOLUME_MARKER in source
+
+
 def _filesystem_usage(paths: List[str]) -> Dict[str, FilesystemUsage]:
     """Returns space stats for the distinct filesystems holding *paths*."""
     out: Dict[str, FilesystemUsage] = {}
+    sources = _mount_sources()
+    try:
+        container_root_device: Optional[int] = os.stat('/').st_dev
+    except OSError:
+        container_root_device = None
     for path in paths:
         mountpoint = _mountpoint(path)
         if mountpoint is None or mountpoint in out:
@@ -264,7 +354,9 @@ def _filesystem_usage(paths: List[str]) -> Dict[str, FilesystemUsage]:
             size_bytes=stats.f_blocks * stats.f_frsize,
             # f_bavail, not f_bfree: the space actually available to a
             # non-root writer, which is what fills up first.
-            avail_bytes=stats.f_bavail * stats.f_frsize)
+            avail_bytes=stats.f_bavail * stats.f_frsize,
+            charged_to_ephemeral=_charged_to_ephemeral(mountpoint, sources,
+                                                       container_root_device))
     return out
 
 
@@ -283,7 +375,9 @@ def scan(
             # measured emptiness.
             continue
         measured.append((name, path))
-        roots[name] = _scan_root(path, deadline, max_entries)
+        usage = _scan_root(path, deadline, max_entries)
+        usage.mountpoint = _mountpoint(path)
+        roots[name] = usage
     return Snapshot(roots=roots,
                     filesystems=_filesystem_usage(
                         [path for _, path in measured]),

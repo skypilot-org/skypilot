@@ -177,3 +177,89 @@ def test_local_roots_includes_the_blob_backend_and_not_shared_sky_logs():
     # extracted file mounts under the clients dir.
     assert 'api_server_clients' in roots
     assert not any('sky_logs' in name for name in roots)
+
+
+def test_only_charged_roots_count_against_the_budget(roots, monkeypatch):
+    """A persistent volume mounted into the tree is not this pod's problem.
+
+    The chart mounts a PVC at ~/.sky/api_server/clients under one upgrade
+    strategy and over all of ~/.sky under another, so the same root is
+    local in one layout and shared in the next. Counting the shared bytes
+    would subtract another volume's usage from this container's budget and
+    report exhaustion that is not there.
+    """
+    present, other = roots
+    _write(str(present / 'a.log'), 256 * 1024)
+    _write(str(other / 'b.log'), 8 * 1024 * 1024)
+
+    def fake_charged(mountpoint, sources):
+        del sources
+        return mountpoint == str(present)
+
+    # One mount point per root, so each can be classified on its own.
+    monkeypatch.setattr(local_disk, '_mountpoint', lambda path: path)
+    monkeypatch.setattr(local_disk, '_charged_to_ephemeral', fake_charged)
+    monkeypatch.setenv(local_disk.EPHEMERAL_STORAGE_LIMIT_ENV_VAR, str(1024**3))
+
+    snapshot = local_disk.scan()
+
+    assert snapshot.is_charged_to_ephemeral('present') is True
+    assert snapshot.is_charged_to_ephemeral('other') is False
+    # 'other' holds 8 MB and must not appear in the total.
+    assert snapshot.used_bytes == snapshot.roots['present'].used_bytes
+    assert snapshot.used_bytes < 8 * 1024 * 1024
+    assert snapshot.headroom_bytes == 1024**3 - snapshot.used_bytes
+    # Both roots still report their own size; only the aggregate is scoped.
+    assert snapshot.roots['other'].used_bytes >= 8 * 1024 * 1024
+
+    charged = {
+        s.labels['root']: s.value
+        for s in _families(metrics.LocalDiskUsageCollector())
+        ['sky_apiserver_local_disk_root_charged_to_ephemeral'].samples
+    }
+    assert charged == {'present': 1.0, 'other': 0.0}
+
+
+def test_charging_follows_the_device_then_the_mount_source(tmp_path):
+    mountpoint = str(tmp_path)
+    device = os.stat(mountpoint).st_dev
+
+    # Same device as the container's writable layer.
+    assert local_disk._charged_to_ephemeral(mountpoint, {}, device) is True
+
+    # A different device, but a local scratch volume by its mount source.
+    scratch = {
+        mountpoint: ('/var/lib/kubelet/pods/abc/volumes/'
+                     f'{local_disk._EPHEMERAL_VOLUME_MARKER}/sky-ephemeral')
+    }
+    assert local_disk._charged_to_ephemeral(mountpoint, scratch,
+                                            device + 1) is True
+
+    # A different device and an unrecognised source: a persistent volume as
+    # far as this container can tell, so not charged. Erring this way misses
+    # a warning rather than raising a false one.
+    pvc = {mountpoint: '/nfs-export/tenant/api_server/clients'}
+    assert local_disk._charged_to_ephemeral(mountpoint, pvc,
+                                            device + 1) is False
+    assert local_disk._charged_to_ephemeral(mountpoint, {}, device + 1) is False
+
+
+def test_charging_a_path_that_is_not_there(tmp_path):
+    assert local_disk._charged_to_ephemeral(str(tmp_path / 'gone'), {},
+                                            None) is False
+
+
+def test_deadline_is_enforced_on_a_small_tree(roots):
+    """A slow filesystem must not outrun the timeout on a small tree.
+
+    Before this, the deadline was only re-checked every few thousand
+    entries, so a handful of files on a filesystem with millisecond stat
+    latency ran to completion and reported an untruncated result.
+    """
+    present, _ = roots
+    for i in range(4):
+        _write(str(present / f'{i}.log'), 1024)
+
+    snapshot = local_disk.scan(timeout_seconds=-1.0)
+
+    assert snapshot.roots['present'].truncated is True
