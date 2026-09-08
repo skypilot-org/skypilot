@@ -1,4 +1,5 @@
 """Slurm utilities for SkyPilot."""
+import collections
 import json
 import math
 import os
@@ -21,6 +22,7 @@ from sky.skylet import runtime_utils
 from sky.utils import annotations
 from sky.utils import common_utils
 from sky.utils import gpu_names
+from sky.utils import log_utils
 from sky.utils import subprocess_utils
 from sky.utils.db import kv_cache
 
@@ -1327,7 +1329,10 @@ def _client_for(cluster: str) -> Optional['slurm.SlurmClient']:
         return None
 
 
-def explain_pending_job(cluster: str, job_id: str) -> Optional[Dict[str, Any]]:
+def explain_pending_job(
+        cluster: str,
+        job_id: str,
+        deadline: Optional[float] = None) -> Optional[Dict[str, Any]]:
     """Why ``job_id`` on ``cluster`` has not started, or None.
 
     None when the job is not pending, is not known to Slurm any more, carries
@@ -1339,7 +1344,17 @@ def explain_pending_job(cluster: str, job_id: str) -> Optional[Dict[str, Any]]:
     both would double the cost of every answer. Each read is best-effort; one
     that fails leaves its field unset and the classification says what it
     could not read (see ``pending``).
+
+    ``deadline`` (a ``time.monotonic()`` value) stops the evidence gathering
+    once it passes, so a caller on a request path can bound the whole answer
+    rather than the individual reads. The reason is already known by then;
+    what is skipped is the evidence that would have sharpened it, and the
+    classification degrades to saying so.
     """
+
+    def _out_of_time() -> bool:
+        return deadline is not None and time.monotonic() >= deadline
+
     client = _client_for(cluster)
     if client is None:
         return None
@@ -1373,7 +1388,7 @@ def explain_pending_job(cluster: str, job_id: str) -> Optional[Dict[str, Any]]:
         evidence.begin_time = details.get('start_time')
     elif category == pending_lib.CATEGORY_DEPENDENCY:
         parsed = pending_lib.parse_dependency(str(job['dependency'] or ''))
-        if parsed['job_ids']:
+        if parsed['job_ids'] and not _out_of_time():
             try:
                 evidence.dependency_states = client.get_job_states(
                     parsed['job_ids'])
@@ -1383,14 +1398,26 @@ def explain_pending_job(cluster: str, job_id: str) -> Optional[Dict[str, Any]]:
     elif category == pending_lib.CATEGORY_RESOURCES:
         partitions = pending_lib.partitions_of(job['partition'])
         try:
-            node_infos = _get_slurm_node_info_list(slurm_cluster_name=cluster)
-            evidence.partition_nodes = pending_lib.partition_node_counts(
-                node_infos, partitions, busy_nodes=set())
+            # One sinfo, not `slurm_node_info`: that one also runs
+            # `scontrol show node` over the whole cluster and derives GPU
+            # counts, none of which the node tally uses, and it is bounded
+            # for the inventory sweep rather than for a request.
+            if not _out_of_time():
+                evidence.partition_nodes = pending_lib.partition_node_counts(
+                    [{
+                        'node_name': node.node,
+                        'partition': node.partition,
+                        'node_state': node.state,
+                    } for node in client.info_nodes(
+                        timeout=slurm.JOB_READ_TIMEOUT_SECONDS)],
+                    partitions,
+                    busy_nodes=set())
         except Exception as e:  # pylint: disable=broad-except
             logger.debug(f'Could not read node info for {cluster}: {e}')
         try:
-            evidence.pending_ahead = pending_lib.pending_ahead(
-                client.get_pending_queue(), job)
+            if not _out_of_time():
+                evidence.pending_ahead = pending_lib.pending_ahead(
+                    client.get_pending_queue(), job)
         except Exception as e:  # pylint: disable=broad-except
             logger.debug(f'Could not read the pending queue for '
                          f'{cluster}: {e}')
@@ -1399,6 +1426,234 @@ def explain_pending_job(cluster: str, job_id: str) -> Optional[Dict[str, Any]]:
     # rather than naming one.
 
     return pending_lib.classify_pending(job, evidence)
+
+
+# Slurm states that mean the allocation is over. sacct reports a *projected*
+# Start and End for a job that has not reached one of these, so a timeline
+# reading those fields regardless would announce an end that has not
+# happened. 'CANCELLED by 1000' is one of these states, hence the prefix
+# match.
+_TERMINAL_STATE_PREFIXES = ('COMPLETED', 'FAILED', 'CANCELLED', 'TIMEOUT',
+                            'NODE_FAIL', 'PREEMPTED', 'BOOT_FAIL',
+                            'OUT_OF_MEMORY', 'DEADLINE', 'REVOKED',
+                            'SPECIAL_EXIT')
+
+# What each of the two waits can be blocked on. Slurm does not keep the
+# reason for a wait that is over -- its Reason column holds at most the last
+# non-resource one -- but which *side* of Eligible a wait fell on narrows it
+# to one of these two sets, which is the question a user actually asks.
+_BEFORE_ELIGIBLE = 'a dependency, a hold or a begin time'
+_AFTER_ELIGIBLE = 'resources, priority or a quota limit'
+
+
+def _epoch(value: Optional[str]) -> Optional[int]:
+    """A Slurm timestamp as epoch seconds, or None.
+
+    The reads ask for epoch seconds, so anything else is either Slurm's own
+    `Unknown` (a time it has not computed) or the ISO form from a build that
+    ignored the request. Neither can be turned into an instant here -- the
+    ISO form carries no timezone -- and an entry needs a real one to be
+    ordered against SkyPilot's own events, so both are dropped.
+    """
+    try:
+        return int(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return None
+
+
+def _waited(start: Optional[int], end: Optional[int]) -> str:
+    """How long the gap was, or '' when there was none to speak of."""
+    if start is None or end is None or end <= start:
+        return ''
+    return log_utils.readable_time_duration(start, end, absolute=True)
+
+
+def _entry(event: str, at: int, text: str) -> Dict[str, Any]:
+    return {'event': event, 'at': at, 'text': f'Slurm {text}'}
+
+
+def _allocation_entries(record: Dict[str, str], attempt: int,
+                        attempts: int) -> List[Dict[str, Any]]:
+    """The events one sacct record accounts for, oldest first.
+
+    ``attempt``/``attempts`` count the records that share this record's job
+    id, which is what a requeue produces: it keeps the id and ``-D`` returns
+    one record per try, so without the numbering two sets of waits would
+    appear under the same name. Records with *different* ids are separate
+    allocations (a relaunch reusing the cluster name) and are told apart by
+    the id itself.
+    """
+    job_id = record.get('job_id') or '<unknown>'
+    label = f'allocation {job_id}'
+    if attempts > 1:
+        label = f'{label} (attempt {attempt} of {attempts})'
+    state = (record.get('state') or '').upper()
+    terminal = state.startswith(_TERMINAL_STATE_PREFIXES)
+    submit = _epoch(record.get('submit'))
+    eligible = _epoch(record.get('eligible'))
+    start = _epoch(record.get('start'))
+    end = _epoch(record.get('end'))
+    reason = record.get('reason') or ''
+    if reason.lower() in ('none', 'unknown'):
+        reason = ''
+
+    entries: List[Dict[str, Any]] = []
+    if submit is None:
+        # Without a submit time there is no interval to report, and nothing
+        # to order the rest of the record against.
+        return entries
+
+    partition = record.get('partition')
+    where = f' to partition {partition}' if partition else ''
+    try:
+        restarts = int(record.get('restarts') or 0)
+    except ValueError:
+        restarts = 0
+    requeued = ''
+    if restarts:
+        times = 'once' if restarts == 1 else f'{restarts} times'
+        requeued = f'; Slurm has requeued it {times}'
+    entries.append(
+        _entry('submitted', submit, f'{label} submitted{where}{requeued}'))
+
+    recorded = f'; Slurm recorded the reason as {reason}' if reason else ''
+    if eligible is not None:
+        waited = _waited(submit, eligible)
+        if waited:
+            text = (f'{label} became eligible to run after {waited} blocked '
+                    f'on {_BEFORE_ELIGIBLE}{recorded}')
+        else:
+            text = f'{label} was eligible to run as soon as it was submitted'
+        entries.append(_entry('eligible', eligible, text))
+    elif terminal:
+        # Eligible is the literal 'Unknown' for a job cancelled while still
+        # blocked -- measured on a held job and a dependency-blocked one
+        # alike. That is a fact worth stating outright, not a missing value
+        # to paper over.
+        entries.append(
+            _entry(
+                'never_eligible', end if end is not None else submit,
+                f'{label} never became eligible to run: blocked on '
+                f'{_BEFORE_ELIGIBLE} from submission until it ended'
+                f'{recorded}'))
+
+    if start is not None and not state.startswith('PENDING'):
+        waited = _waited(eligible if eligible is not None else submit, start)
+        if waited:
+            text = (f'{label} started after waiting {waited} for '
+                    f'{_AFTER_ELIGIBLE}')
+        else:
+            text = f'{label} started as soon as it became eligible'
+        nodes = record.get('nodes')
+        if nodes and nodes.lower() not in ('none', 'none assigned'):
+            text += f'; nodes: {nodes}'
+        entries.append(_entry('started', start, text))
+
+    if terminal and end is not None:
+        text = f'{label} ended: {state}'
+        exit_code = record.get('exit_code')
+        # 0:0 on a state that is not COMPLETED says nothing (a cancelled job
+        # reports it too), and on COMPLETED it is implied.
+        if exit_code and exit_code != '0:0':
+            text += f' (exit {exit_code})'
+        ran = _waited(start, end)
+        if ran:
+            text += f', after running {ran}'
+        entries.append(_entry('ended', end, text))
+    return entries
+
+
+def job_timeline(cluster: str,
+                 job_name: str,
+                 since: int,
+                 deadline: Optional[float] = None) -> List[Dict[str, Any]]:
+    """The Slurm side of an allocation's history, oldest first.
+
+    ``job_name`` is what the allocation was submitted under -- for a
+    SkyPilot cluster, its ``cluster_name_on_cloud`` -- and ``since`` (epoch
+    seconds) bounds how far back to look, because sacct's window for a
+    name-based query would otherwise start at 00:00:00 today.
+
+    Each entry is ``{'event', 'at', 'text'}``: a kind, an instant, and one
+    sentence. The two intervals are the point of it,
+
+        submit -> eligible   blocked on a dependency, a hold or a begin time
+        eligible -> start    blocked on resources, priority or a quota
+
+    because Slurm keeps the timestamps of a finished wait but not its reason,
+    while which side of `Eligible` the wait fell on is enough to name the
+    cause. An allocation that is still pending has no interval to report yet,
+    so it gets the live diagnosis from ``explain_pending_job`` instead.
+
+    ``deadline`` (a ``time.monotonic()`` value) bounds the whole answer for a
+    caller on a request path. The accounting read is what the timeline is
+    made of, so it always runs; past the deadline the live diagnosis -- three
+    further reads, and the one part that is also reachable on its own -- is
+    skipped.
+
+    Empty when the cluster is not configured, a read fails or times out, or
+    accounting is unavailable (no slurmdbd). Every one of those means "this
+    could not be read" rather than "nothing happened", which is why the
+    result is merged into a larger timeline instead of presented as one.
+    """
+    client = _client_for(cluster)
+    if client is None:
+        return []
+    try:
+        records = client.get_job_accounting_by_name(job_name, since)
+    except Exception as e:  # pylint: disable=broad-except
+        logger.debug(f'Could not read Slurm accounting for {job_name!r} on '
+                     f'{cluster}: {e}')
+        records = []
+
+    # Records are grouped by job id, not counted as one run: several records
+    # under one id are a requeue's attempts, while several ids are separate
+    # allocations that happen to share the name.
+    totals: Dict[str, int] = collections.Counter(
+        record.get('job_id', '') for record in records)
+    seen: Dict[str, int] = collections.defaultdict(int)
+    entries: List[Dict[str, Any]] = []
+    for record in records:
+        job_id = record.get('job_id', '')
+        seen[job_id] += 1
+        entries.extend(_allocation_entries(record, seen[job_id],
+                                           totals[job_id]))
+
+    pending_ids = [
+        record['job_id']
+        for record in records
+        if (record.get('state') or '').upper().startswith('PENDING')
+    ]
+    if deadline is not None and time.monotonic() >= deadline:
+        # The accounting read spent the budget. Say what it found and leave
+        # the diagnosis to a caller that asks for it directly.
+        if pending_ids:
+            logger.debug(f'Out of time to explain pending Slurm jobs '
+                         f'{pending_ids} on {cluster}')
+        return sorted(entries, key=lambda entry: entry['at'])
+    if not records:
+        # Nothing from accounting: squeue still knows a queued allocation,
+        # and a job that has not started is the one most in need of an
+        # answer, so a cluster without slurmdbd is not left silent.
+        try:
+            pending_ids = client.query_jobs(job_name, ['pending'])
+        except Exception as e:  # pylint: disable=broad-except
+            logger.debug(f'Could not look up pending Slurm jobs named '
+                         f'{job_name!r} on {cluster}: {e}')
+    now = int(time.time())
+    for job_id in pending_ids:
+        explained = explain_pending_job(cluster, job_id, deadline=deadline)
+        if explained is None:
+            continue
+        summary = explained['summary']
+        text = f'allocation {job_id} is pending: {summary}'
+        if explained.get('action'):
+            text = f'{text} {explained["action"]}'
+        entries.append(_entry('pending', now, text))
+
+    # Stable, so two entries sharing an instant keep the order they were
+    # built in (submitted before eligible).
+    return sorted(entries, key=lambda entry: entry['at'])
 
 
 def slurm_node_info(

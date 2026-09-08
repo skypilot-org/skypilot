@@ -5,10 +5,12 @@ what the gatherer does when a read fails or a cluster is not there, since it
 runs on a path where an unanswerable question must not become an exception.
 """
 import subprocess
+import time
 from unittest import mock
 
 import pytest
 
+from sky.adaptors import slurm
 from sky.provision.slurm import pending
 from sky.provision.slurm import utils
 
@@ -63,23 +65,20 @@ def test_a_pending_job_with_no_reason_yet_is_none(client):
     assert utils.explain_pending_job(_CLUSTER, _JOB) is None
 
 
+def _node(name, partition, state):
+    return slurm.NodeInfo(node=name,
+                          state=state,
+                          gres='',
+                          cpus=8,
+                          memory_gb=64.0,
+                          partition=partition)
+
+
 def test_resources_reads_node_counts_and_the_queue(client):
-    node_infos = [
-        {
-            'node_name': 'gpu-1',
-            'partition': 'h200',
-            'node_state': 'alloc'
-        },
-        {
-            'node_name': 'gpu-2',
-            'partition': 'h200',
-            'node_state': 'drain'
-        },
-        {
-            'node_name': 'cpu-1',
-            'partition': 'cpu',
-            'node_state': 'idle'
-        },
+    client.info_nodes.return_value = [
+        _node('gpu-1', 'h200', 'alloc'),
+        _node('gpu-2', 'h200', 'drain'),
+        _node('cpu-1', 'cpu', 'idle'),
     ]
     client.get_pending_queue.return_value = [
         {
@@ -95,11 +94,13 @@ def test_resources_reads_node_counts_and_the_queue(client):
             'state': 'PENDING'
         },
     ]
-    with mock.patch.object(utils,
-                           '_get_slurm_node_info_list',
-                           return_value=node_infos):
-        out = utils.explain_pending_job(_CLUSTER, _JOB)
+    out = utils.explain_pending_job(_CLUSTER, _JOB)
     assert out['category'] == pending.CATEGORY_RESOURCES
+    # One sinfo, bounded. The full inventory helper also runs
+    # `scontrol show node` cluster-wide and derives GPU counts, none of which
+    # the tally uses, and its budget is sized for the inventory sweep.
+    assert client.info_nodes.call_args.kwargs['timeout'] == (
+        slurm.JOB_READ_TIMEOUT_SECONDS)
     # Only the h200 nodes count, and drain is not idle.
     assert out['evidence']['partition_nodes']['total'] == 2
     assert out['evidence']['partition_nodes']['idle'] == 0
@@ -111,10 +112,8 @@ def test_resources_reads_node_counts_and_the_queue(client):
 def test_a_failed_node_read_still_answers(client):
     """The reason is known even when the node counts are not; the summary says
     what it could not read rather than the call failing."""
-    with mock.patch.object(utils,
-                           '_get_slurm_node_info_list',
-                           side_effect=RuntimeError('sinfo timed out')):
-        out = utils.explain_pending_job(_CLUSTER, _JOB)
+    client.info_nodes.side_effect = RuntimeError('sinfo timed out')
+    out = utils.explain_pending_job(_CLUSTER, _JOB)
     assert out['category'] == pending.CATEGORY_RESOURCES
     assert out['evidence']['partition_nodes'] is None
     assert 'Waiting for free resources' in out['summary']
@@ -155,3 +154,26 @@ def test_a_timed_out_details_read_is_none(client):
     client.get_pending_job_details.side_effect = subprocess.TimeoutExpired(
         'squeue', 10)
     assert utils.explain_pending_job(_CLUSTER, _JOB) is None
+
+
+def test_a_spent_budget_answers_from_the_reason_alone(client):
+    """Past the deadline the reason is already known; what is skipped is the
+    evidence that would have sharpened it, and the summary says so."""
+    client.info_nodes.return_value = []
+    out = utils.explain_pending_job(_CLUSTER,
+                                    _JOB,
+                                    deadline=time.monotonic() - 1)
+    assert out['category'] == pending.CATEGORY_RESOURCES
+    client.info_nodes.assert_not_called()
+    client.get_pending_queue.assert_not_called()
+    assert out['evidence']['partition_nodes'] is None
+
+
+def test_a_spent_budget_skips_the_dependency_read(client):
+    client.get_pending_job_details.return_value = _details(
+        reason='Dependency', dependency='afterok:5122(unfulfilled)')
+    out = utils.explain_pending_job(_CLUSTER,
+                                    _JOB,
+                                    deadline=time.monotonic() - 1)
+    assert out['category'] == pending.CATEGORY_DEPENDENCY
+    client.get_job_states.assert_not_called()

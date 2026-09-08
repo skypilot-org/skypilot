@@ -6683,10 +6683,10 @@ def _format_job_event_time(timestamp: Any) -> str:
 @click.option('--cluster-events/--no-cluster-events',
               default=True,
               show_default=True,
-              help=('Include launch-progress events from the job\'s cluster, '
-                    'e.g. why the cluster is still pending on Slurm or '
-                    'Kubernetes. Requires an API server on version 54 or '
-                    'newer.'))
+              help=('Include what the infrastructure did while the job '
+                    'waited: the cluster\'s launch progress, and on Slurm '
+                    'the allocation\'s queue history and wait times. '
+                    'Requires an API server on version 54 or newer.'))
 @flags.output_format_option()
 @usage_lib.entrypoint
 def jobs_events(job_id: int, task: Optional[str], limit: int,
@@ -6703,8 +6703,10 @@ def jobs_events(job_id: int, task: Optional[str], limit: int,
 
     Provisioning milestones from the job's cluster are merged in by default,
     which is where a Slurm pending reason or a Kubernetes image-pull wait
-    shows up. Pass ``--no-cluster-events`` for the job's own status
-    transitions only.
+    shows up. On Slurm the allocation's own queue history comes with them:
+    how long it waited to become eligible, how long it then waited for
+    resources, and how it ended. Pass ``--no-cluster-events`` for the job's
+    own status transitions only.
 
     Use ``-o json`` for machine-readable output.
 

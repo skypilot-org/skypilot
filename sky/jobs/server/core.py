@@ -16,6 +16,7 @@ import colorama
 from pydantic import SecretStr as _SecretStr
 
 from sky import backends
+from sky import clouds
 from sky import core
 from sky import exceptions
 from sky import execution
@@ -38,6 +39,7 @@ from sky.jobs import state as managed_job_state
 from sky.jobs import utils as managed_job_utils
 from sky.metrics import utils as metrics_lib
 from sky.provision import common as provision_common
+from sky.provision.slurm import utils as slurm_provision_utils
 from sky.schemas.api import responses
 from sky.serve import serve_state
 from sky.serve import serve_utils
@@ -2019,6 +2021,114 @@ def _resolve_task_id(job_id: int, task: Union[str, int]) -> int:
                      f'Tasks: {names}.')
 
 
+# How long the Slurm side of a job-events request may take in total. Two
+# reads' worth: enough for the accounting read plus one diagnosis on a
+# healthy login node, and short enough that an unresponsive one does not turn
+# a status request into a minute of waiting.
+_SLURM_TIMELINE_BUDGET_SECONDS = 20
+
+
+def _slurm_allocations(
+    clusters: List[Tuple[str, Optional[int]]]
+) -> List[Tuple[str, str, Optional[int]]]:
+    """``(slurm cluster, sbatch job name, task id)`` per Slurm-backed cluster.
+
+    A Slurm-backed SkyPilot cluster is one long-running ``sbatch`` allocation
+    named after its ``cluster_name_on_cloud``, submitted to the Slurm cluster
+    the resources' ``region`` names (see ``provision/slurm/instance.py``).
+    Both facts live on the cluster record, which teardown removes -- so an
+    allocation is resolvable only while its cluster exists, which is the
+    window in which "why is this not running yet" gets asked. A job whose
+    cluster is gone keeps its own transitions and the durations they carry.
+    """
+    allocations: List[Tuple[str, str, Optional[int]]] = []
+    for cluster_name, task_id in clusters:
+        try:
+            record = global_user_state.get_cluster_from_name(
+                cluster_name, include_user_info=False)
+        except Exception as e:  # pylint: disable=broad-except
+            logger.debug(f'Failed to read cluster {cluster_name!r}: {e}')
+            continue
+        handle = record.get('handle') if record is not None else None
+        resources = getattr(handle, 'launched_resources', None)
+        if resources is None or not isinstance(resources.cloud, clouds.Slurm):
+            continue
+        name_on_cloud = getattr(handle, 'cluster_name_on_cloud', None)
+        if resources.region and name_on_cloud:
+            allocations.append((resources.region, name_on_cloud, task_id))
+    return allocations
+
+
+def _job_submitted_at(job_id: int) -> int:
+    """When the job first entered the queue, as epoch seconds.
+
+    This bounds how far back a name-based ``sacct`` query looks. A job with no
+    recorded submit time falls back to a fortnight, which reaches further than
+    any allocation still resolvable through a live cluster record.
+    """
+    stamps = [
+        task.get('submitted_at')
+        for task in managed_job_state.get_managed_job_tasks(job_id)
+    ]
+    known = [int(stamp) for stamp in stamps if stamp]
+    return min(known) if known else int(time.time()) - 14 * 24 * 3600
+
+
+def _slurm_timeline_events(
+        job_id: int, clusters: List[Tuple[str, Optional[int]]],
+        tz: Optional[datetime.tzinfo]) -> List[Dict[str, Any]]:
+    """Slurm's own account of the job's allocations, as event rows.
+
+    What it adds over the launch-progress events: the *durations* of the two
+    waits Slurm imposes, which no SkyPilot-side event records, plus the
+    allocation's final state and exit code.
+
+    The rows carry no ``new_status``. A cluster event happens while the
+    managed job is STARTING and is reported as such; these are the
+    scheduler's facts about an allocation rather than a transition of the
+    job, and claiming a status change at that instant would be wrong. Every
+    other field matches the job events they merge with, so no consumer has to
+    know they are here.
+    """
+    allocations = _slurm_allocations(clusters)
+    if not allocations:
+        return []
+    since = _job_submitted_at(job_id)
+    # One budget for the whole merge, not per read. `sky jobs events` is a
+    # SHORT request, and a login node that accepts the connection but never
+    # answers would otherwise cost one read timeout per read, multiplied by
+    # the number of allocations. The reads keep their own timeouts, so the
+    # true ceiling is this plus whichever read is in flight when it passes.
+    deadline = time.monotonic() + _SLURM_TIMELINE_BUDGET_SECONDS
+    rows: List[Dict[str, Any]] = []
+    for slurm_cluster, job_name, task_id in allocations:
+        if time.monotonic() >= deadline:
+            logger.debug(f'Out of time to read the Slurm timeline of job '
+                         f'{job_id}; {job_name!r} on {slurm_cluster} and any '
+                         'later allocation are skipped')
+            break
+        try:
+            entries = slurm_provision_utils.job_timeline(slurm_cluster,
+                                                         job_name,
+                                                         since,
+                                                         deadline=deadline)
+        except Exception as e:  # pylint: disable=broad-except
+            # Best-effort, like the cluster-event merge: an unreachable login
+            # node must not fail the request.
+            logger.debug(f'Failed to read the Slurm timeline of job {job_id} '
+                         f'(allocation {job_name!r} on {slurm_cluster}): {e}')
+            continue
+        rows.extend({
+            'spot_job_id': job_id,
+            'task_id': task_id,
+            'new_status': None,
+            'code': None,
+            'reason': entry['text'],
+            'timestamp': datetime.datetime.fromtimestamp(entry['at'], tz=tz),
+        } for entry in entries)
+    return rows
+
+
 @usage_lib.entrypoint
 def get_job_events(
     job_id: int,
@@ -2035,10 +2145,13 @@ def get_job_events(
         task: Optional task name or id to filter by, resolved here. Takes
             precedence over task_id. A name that matches no task raises.
         limit: Optional limit on number of task events to return (default 10).
-        include_cluster_events: When True, merge launch-progress events from
-            the job's underlying cluster (e.g. image pulling) into the
-            timeline so provisioning milestones between STARTING and RUNNING
-            are visible.
+        include_cluster_events: When True, merge what the infrastructure did
+            while the job waited into the timeline, so the milestones between
+            STARTING and RUNNING are visible: the cluster's launch-progress
+            events (e.g. image pulling), and, for a job running on Slurm, the
+            allocation's own history from ``sacct`` -- how long it waited to
+            become eligible, how long it then waited for resources, and how
+            it ended.
 
     Returns:
         List of task event records, ordered newest first.
@@ -2086,7 +2199,7 @@ def get_job_events(
     # transitioned_at is a UTC epoch, so fromtimestamp(tz=...) yields the
     # correct instant in whichever timezone the job events use.
     tz = events[0]['timestamp'].tzinfo if events else None
-    converted = [
+    converted: List[Dict[str, Any]] = [
         {
             'spot_job_id': job_id,
             'task_id': cluster_task_id,
@@ -2098,6 +2211,18 @@ def get_job_events(
                 cluster_event['transitioned_at'], tz=tz),
         } for cluster_event, cluster_task_id in cluster_events
     ]
+    # The Slurm timeline is the same kind of row -- what the infrastructure
+    # did while the job waited -- so it shares the cluster events' share of
+    # the budget below rather than competing for the job's own.
+    try:
+        converted.extend(_slurm_timeline_events(job_id, clusters, tz))
+    except Exception as e:  # pylint: disable=broad-except
+        # The guard belongs here rather than around the read alone: resolving
+        # the allocations and the job's submit time are database reads of
+        # their own, and by this point the request already has its job events
+        # to return.
+        logger.debug(f'Failed to merge the Slurm timeline of job {job_id}: '
+                     f'{e}')
 
     # Every event's 'timestamp' is a datetime (job events from the DB, cluster
     # events converted above). datetime.timestamp() gives a comparable epoch.
@@ -2108,13 +2233,22 @@ def get_job_events(
 
     if limit is None:
         return _newest_first(events + converted)
-    # Neither source may be starved. One launch can produce more cluster
-    # events than `limit`, and dropping the oldest rows would hide the
+    # Neither source may be starved. One launch can produce more infra rows
+    # than `limit`, and dropping the oldest would hide the
     # PENDING -> STARTING -> RUNNING sequence the timeline is read for; but a
     # job with many recoveries can fill the budget with its own transitions,
-    # and the launch reason the user is waiting on is usually the newest row
-    # of all. So the cluster side keeps a floor of half the budget (at least
-    # one row), and the trailing cut then trims the oldest job events.
-    cluster_floor = min(max(limit // 2, 1), len(converted))
-    room = max(limit - len(events), cluster_floor)
-    return _newest_first(events + _newest_first(converted)[:room])[:limit]
+    # and what the reader is waiting on is usually on the infra side. So the
+    # job's own events take the budget first, the infra side is guaranteed a
+    # share of what is left, and recency settles the remainder.
+    floor = min(max(limit // 2, 1), len(converted))
+    room = max(limit - len(events), floor)
+    candidates = _newest_first(converted)[:room]
+    # The share has to be *reserved*, not merely offered as a candidate: the
+    # final cut is by recency, and a Slurm timeline is older than a recent
+    # transition by nature -- submitted/eligible/started all happen early --
+    # so a job with a full budget of newer events would hide it entirely.
+    # Capped so the job's own newest row never loses its slot; at limit=1
+    # that leaves the single row to whichever source is newest.
+    reserved = min(floor, len(candidates), limit - (1 if events else 0))
+    rest = _newest_first(events + candidates[reserved:])
+    return _newest_first(candidates[:reserved] + rest[:limit - reserved])

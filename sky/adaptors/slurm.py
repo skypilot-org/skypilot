@@ -4,8 +4,10 @@ import base64
 import binascii
 import ipaddress
 import logging
+import math
 import re
 import shlex
+import time
 from typing import Dict, List, NamedTuple, Optional, Sequence, Tuple
 
 from sky.adaptors import common
@@ -38,6 +40,23 @@ _JOB_STEP_NOT_FOUND_REGEX = re.compile(
 # expiry the SSH process is killed and subprocess.TimeoutExpired is raised,
 # which the aggregation callers degrade to an empty per-cluster result.
 _INVENTORY_TIMEOUT_SECONDS = 60
+
+# Slurm renders every timestamp in the *cluster's* local timezone by default,
+# with nothing in the output saying which one that is -- a reader on another
+# host cannot convert it. Asking for `%s` returns epoch seconds instead, so
+# the answer carries no timezone at all. Honored by squeue and sacct alike;
+# a build old enough to ignore it returns the ISO form, which callers pass
+# through as text rather than guessing an offset for.
+_EPOCH_TIME_ENV = 'SLURM_TIME_FORMAT=%s'
+
+# Wall-clock bound for the per-job reads that explain or reconstruct one
+# job's history. Unlike the inventory sweep these run on request paths
+# (`sky jobs events`), where an unanswered read must not hold the caller: on
+# expiry the SSH process is killed and subprocess.TimeoutExpired is raised,
+# and every caller degrades to saying what it could not read. Public because
+# a caller that composes several of these reads bounds its own work against
+# the same figure.
+JOB_READ_TIMEOUT_SECONDS = 10
 
 # Regex pattern to extract partition names from scontrol output
 # Matches PartitionName=<name> and captures until the next field
@@ -608,14 +627,17 @@ class SlurmClient:
             stream_logs=False)
         return stdout
 
-    def info_nodes(self) -> List[NodeInfo]:
+    def info_nodes(self, timeout: Optional[int] = None) -> List[NodeInfo]:
         """Get Slurm node information.
 
         Returns node names, states, GRES (generic resources like GPUs),
         CPUs, memory (MB), and partitions.
+
+        ``timeout`` bounds the read for callers on a request path; the
+        default leaves the runner's own behaviour untouched.
         """
         cmd = _INFO_NODES_CMD
-        rc, stdout, stderr = self._run_slurm_cmd(cmd)
+        rc, stdout, stderr = self._run_slurm_cmd(cmd, timeout=timeout)
         subprocess_utils.handle_returncode(
             rc,
             cmd,
@@ -913,8 +935,10 @@ class SlurmClient:
         # so this shrinks as the job unblocks. %Q is the integer priority,
         # not the normalized float %p.
         fmt = SEP.join(('%T', '%R', '%P', '%E', '%Q', '%b', '%D', '%q', '%S'))
-        cmd = f'squeue -h --jobs {job_id} --states all -o "{fmt}"'
-        rc, stdout, _ = self._run_slurm_cmd(cmd)
+        cmd = (f'{_EPOCH_TIME_ENV} squeue -h --jobs {job_id} '
+               f'--states all -o "{fmt}"')
+        rc, stdout, _ = self._run_slurm_cmd(cmd,
+                                            timeout=JOB_READ_TIMEOUT_SECONDS)
         if rc != 0:
             return {}
         line = stdout.strip().splitlines()
@@ -944,7 +968,8 @@ class SlurmClient:
             return {}
         joined = ','.join(job_ids)
         cmd = f'squeue -h --jobs {joined} --states all -o "%i{SEP}%T"'
-        rc, stdout, _ = self._run_slurm_cmd(cmd)
+        rc, stdout, _ = self._run_slurm_cmd(cmd,
+                                            timeout=JOB_READ_TIMEOUT_SECONDS)
         if rc != 0:
             return {}
         states = {}
@@ -964,7 +989,8 @@ class SlurmClient:
         """
         cmd = ('squeue -h --states=pending '
                f'-o "%i{SEP}%P{SEP}%Q{SEP}%T"')
-        rc, stdout, _ = self._run_slurm_cmd(cmd)
+        rc, stdout, _ = self._run_slurm_cmd(cmd,
+                                            timeout=JOB_READ_TIMEOUT_SECONDS)
         if rc != 0:
             return []
         rows = []
@@ -980,7 +1006,10 @@ class SlurmClient:
             })
         return rows
 
-    def get_job_accounting(self, job_id: str) -> List[Dict[str, str]]:
+    def get_job_accounting(self,
+                           job_id: str,
+                           timeout: Optional[int] = JOB_READ_TIMEOUT_SECONDS
+                          ) -> List[Dict[str, str]]:
         """Accounting records for ``job_id``: what happened, and when.
 
         This is the only source for a job Slurm has already forgotten --
@@ -1004,18 +1033,53 @@ class SlurmClient:
         cluster shape rather than an error: the caller says the history is
         unavailable instead of reporting that nothing happened.
         """
+        # -j is also what puts the whole history in scope: sacct's default
+        # start time is 00:00:00 today for every other selector, and the
+        # epoch when a job id is given.
+        return self._job_accounting(f'-j {shlex.quote(job_id)}', timeout)
+
+    def get_job_accounting_by_name(
+        self,
+        job_name: str,
+        since: int,
+        timeout: Optional[int] = JOB_READ_TIMEOUT_SECONDS
+    ) -> List[Dict[str, str]]:
+        """Accounting records of every job named ``job_name``.
+
+        For a caller that knows the name it submitted under but not the id
+        Slurm assigned: SkyPilot names a Slurm allocation after the cluster's
+        ``cluster_name_on_cloud``, so a cluster resolves to its allocation
+        without a lookup of its own. Names are not unique -- a relaunch under
+        the same cluster name is a second allocation -- and every match is
+        returned, newest last, for the caller to group.
+
+        ``since`` (epoch seconds) is required because ``--name`` leaves
+        sacct's default start time at 00:00:00 *today*: without a window a
+        job submitted yesterday is simply missing from the answer. It is
+        passed to sacct **relatively** ("30 minutes ago"), which keeps the two
+        hosts' clocks from having to agree on a timezone.
+        """
+        minutes = max(1, math.ceil((time.time() - since) / 60)) + 1
+        selector = (f'--name={shlex.quote(job_name)} '
+                    f'-S now-{minutes}minutes')
+        return self._job_accounting(selector, timeout)
+
+    def _job_accounting(self, selector: str,
+                        timeout: Optional[int]) -> List[Dict[str, str]]:
+        """The shared sacct read behind the two accounting queries above."""
         fields = ('job_id', 'state', 'reason', 'submit', 'eligible', 'start',
                   'end', 'exit_code', 'derived_exit_code', 'restarts',
-                  'submit_line')
+                  'partition', 'nodes', 'submit_line')
         fmt = ('JobID,State,Reason,Submit,Eligible,Start,End,ExitCode,'
-               'DerivedExitCode,Restarts,SubmitLine')
+               'DerivedExitCode,Restarts,Partition,NodeList,SubmitLine')
         # -X: the job, not its steps. -D: every attempt, see above. -P with
         # -n: pipe-separated and unheadered, so the parse needs no column
         # arithmetic.
-        cmd = f'sacct -j {job_id} -X -D -P -n --format={fmt}'
-        rc, stdout, stderr = self._run_slurm_cmd(cmd)
+        cmd = (f'{_EPOCH_TIME_ENV} sacct {selector} -X -D -P -n '
+               f'--format={fmt}')
+        rc, stdout, stderr = self._run_slurm_cmd(cmd, timeout=timeout)
         if rc != 0:
-            logger.debug(f'sacct for job {job_id} failed: '
+            logger.debug(f'sacct ({selector}) failed: '
                          f'{(stderr or stdout).strip()[:200]}')
             return []
         rows = []

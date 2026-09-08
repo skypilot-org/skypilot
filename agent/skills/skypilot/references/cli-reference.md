@@ -327,7 +327,7 @@ Show the status-transition events of a managed job.
 - `JOB_ID` — integer
 - `TASK` — text
 - `--limit`, `-l` (default: `50`) — Number of most recent events to show, after merging every source; default 50, 0 shows all. Neither the job's own transitions nor the cluster's launch progress can be crowded out entirely.
-- `--cluster-events`, `--no-cluster-events` — Include launch-progress events from the job's cluster, e.g. why the cluster is still pending on Slurm or Kubernetes. Requires an API server on version 54 or newer.
+- `--cluster-events`, `--no-cluster-events` — Include what the infrastructure did while the job waited: the cluster's launch progress, and on Slurm the allocation's queue history and wait times. Requires an API server on version 54 or newer.
 - `--output`, `-o` (default: `table`) — Output format. Choices: table, json. Default: table.
 
 ### `sky jobs launch`

@@ -5,9 +5,12 @@ which surfaces provisioning milestones (e.g. image pulling) from the job's
 underlying cluster in the managed-job timeline.
 """
 import datetime
+import time
+import types
 
 import pytest
 
+from sky import clouds
 from sky import global_user_state
 from sky.jobs import state as managed_job_state
 from sky.jobs import utils as managed_job_utils
@@ -424,3 +427,289 @@ def test_limit_one_returns_the_newest_event_of_either_source(monkeypatch):
 
     result = core.get_job_events(job_id=1, limit=1, include_cluster_events=True)
     assert [e['reason'] for e in result] == ['Launching (pending: Resources)']
+
+
+def _slurm_handle(name_on_cloud='sky-my-task-1-a1b2', region='dev-slurm'):
+    """A cluster record's handle, as far as the Slurm resolution reads it."""
+    resources = types.SimpleNamespace(cloud=clouds.Slurm(), region=region)
+    return types.SimpleNamespace(cluster_name_on_cloud=name_on_cloud,
+                                 launched_resources=resources)
+
+
+def _other_handle():
+    resources = types.SimpleNamespace(cloud=clouds.Kubernetes(),
+                                      region='my-context')
+    return types.SimpleNamespace(cluster_name_on_cloud='sky-my-task-1-a1b2',
+                                 launched_resources=resources)
+
+
+def _entry(event, at, text):
+    return {'event': event, 'at': at, 'text': text}
+
+
+def test_only_slurm_backed_clusters_resolve_to_an_allocation(monkeypatch):
+    records = {
+        'slurm-cluster': {
+            'handle': _slurm_handle()
+        },
+        'k8s-cluster': {
+            'handle': _other_handle()
+        },
+        'gone-cluster': None,
+    }
+    monkeypatch.setattr(global_user_state, 'get_cluster_from_name',
+                        lambda name, **kwargs: records.get(name))
+    allocations = core._slurm_allocations([('slurm-cluster', 0),
+                                           ('k8s-cluster', 1),
+                                           ('gone-cluster', 2)])
+    # The Slurm cluster name comes from the resources' region, and the sbatch
+    # job name from cluster_name_on_cloud.
+    assert allocations == [('dev-slurm', 'sky-my-task-1-a1b2', 0)]
+
+
+def test_a_cluster_read_that_fails_is_skipped(monkeypatch):
+
+    def _boom(name, **kwargs):
+        del kwargs
+        raise RuntimeError(f'db is down ({name})')
+
+    monkeypatch.setattr(global_user_state, 'get_cluster_from_name', _boom)
+    assert core._slurm_allocations([('slurm-cluster', 0)]) == []
+
+
+def _patch_slurm(monkeypatch, entries, handle=None, capture=None):
+    monkeypatch.setattr(
+        global_user_state, 'get_cluster_from_name',
+        lambda name, **kwargs: {'handle': handle or _slurm_handle()})
+
+    def _timeline(cluster, job_name, since, deadline=None):
+        if capture is not None:
+            capture.append((cluster, job_name, since, deadline))
+        return list(entries)
+
+    monkeypatch.setattr(core.slurm_provision_utils, 'job_timeline', _timeline)
+
+
+def test_slurm_entries_join_the_timeline_without_claiming_a_status(monkeypatch):
+    job_events = [
+        _job_event('Job has started',
+                   managed_job_state.ManagedJobStatus.RUNNING, 300)
+    ]
+    monkeypatch.setattr(managed_job_state, 'get_job_events',
+                        lambda **kwargs: list(job_events))
+    monkeypatch.setattr(managed_job_state, 'get_managed_job_tasks',
+                        lambda job_id: [dict(_task(), submitted_at=50)])
+    monkeypatch.setattr(global_user_state, 'get_cluster_events_by_name',
+                        lambda *args, **kwargs: [])
+    _patch_slurm(monkeypatch, [
+        _entry('submitted', 100, 'Slurm allocation 17213 submitted'),
+        _entry('started', 200, 'Slurm allocation 17213 started'),
+    ])
+
+    result = core.get_job_events(job_id=1, include_cluster_events=True)
+    assert [event['reason'] for event in result] == [
+        'Job has started',
+        'Slurm allocation 17213 started',
+        'Slurm allocation 17213 submitted',
+    ]
+    slurm_rows = [e for e in result if e['reason'].startswith('Slurm ')]
+    for row in slurm_rows:
+        # Unlike a cluster event, these are not transitions of the job, so
+        # they assert no status at that instant.
+        assert row['new_status'] is None
+        assert row['code'] is None
+        assert row['spot_job_id'] == 1
+        assert row['task_id'] == 0
+
+
+def test_the_accounting_window_starts_at_the_job_submission(monkeypatch):
+    monkeypatch.setattr(managed_job_state, 'get_job_events',
+                        lambda **kwargs: [])
+    monkeypatch.setattr(
+        managed_job_state, 'get_managed_job_tasks', lambda job_id: [
+            dict(_task(task_id=0), submitted_at=1500),
+            dict(_task(task_id=1), submitted_at=900),
+        ])
+    monkeypatch.setattr(global_user_state, 'get_cluster_events_by_name',
+                        lambda *args, **kwargs: [])
+    calls = []
+    _patch_slurm(monkeypatch, [], capture=calls)
+
+    core.get_job_events(job_id=1, include_cluster_events=True)
+    # The earliest task's submission, so a pipeline's first allocation is
+    # still inside sacct's window.
+    assert [since for _, _, since, _ in calls] == [900, 900]
+    # Both allocations are read against one budget, not one each.
+    assert len({deadline for *_, deadline in calls}) == 1
+
+
+def test_a_job_with_no_submit_time_still_gets_a_window(monkeypatch):
+    monkeypatch.setattr(managed_job_state, 'get_managed_job_tasks',
+                        lambda job_id: [dict(_task(), submitted_at=None)])
+    since = core._job_submitted_at(1)
+    # A fortnight, which reaches past any cluster still in the database.
+    assert 13 * 24 * 3600 < time.time() - since < 15 * 24 * 3600
+
+
+def test_a_slurm_read_that_fails_leaves_the_job_events_intact(monkeypatch):
+    job_events = [
+        _job_event('Job is starting',
+                   managed_job_state.ManagedJobStatus.STARTING, 100)
+    ]
+    monkeypatch.setattr(managed_job_state, 'get_job_events',
+                        lambda **kwargs: list(job_events))
+    monkeypatch.setattr(managed_job_state, 'get_managed_job_tasks',
+                        lambda job_id: [dict(_task(), submitted_at=50)])
+    monkeypatch.setattr(global_user_state, 'get_cluster_events_by_name',
+                        lambda *args, **kwargs: [])
+    monkeypatch.setattr(global_user_state, 'get_cluster_from_name',
+                        lambda name, **kwargs: {'handle': _slurm_handle()})
+
+    def _boom(cluster, job_name, since, deadline=None):
+        del cluster, job_name, since, deadline
+        raise RuntimeError('login node is unreachable')
+
+    monkeypatch.setattr(core.slurm_provision_utils, 'job_timeline', _boom)
+    assert core.get_job_events(job_id=1,
+                               include_cluster_events=True) == job_events
+
+
+def test_slurm_entries_share_the_cluster_events_budget(monkeypatch):
+    """Both are 'what the infrastructure did'; neither may starve the job's
+    own transitions, and one limit governs the pair."""
+    job_events = [
+        _job_event('Job has started',
+                   managed_job_state.ManagedJobStatus.RUNNING, 900)
+    ]
+    monkeypatch.setattr(managed_job_state, 'get_job_events',
+                        lambda **kwargs: list(job_events))
+    monkeypatch.setattr(managed_job_state, 'get_managed_job_tasks',
+                        lambda job_id: [dict(_task(), submitted_at=50)])
+    monkeypatch.setattr(
+        global_user_state, 'get_cluster_events_by_name',
+        lambda *args, **kwargs: [{
+            'reason': f'Launching (pending: Resources) {i}',
+            'transitioned_at': 100 + i,
+        } for i in range(5)])
+    _patch_slurm(
+        monkeypatch,
+        [_entry('submitted', 200 + i, f'Slurm entry {i}') for i in range(5)])
+
+    result = core.get_job_events(job_id=1, limit=3, include_cluster_events=True)
+    assert len(result) == 3
+    # The job's own newest event survives, and the infra rows fill the rest.
+    assert result[0]['reason'] == 'Job has started'
+    assert all(
+        event['reason'].startswith('Slurm entry') for event in result[1:])
+
+
+def test_the_floor_holds_when_the_job_events_are_all_newer(monkeypatch):
+    """The floor has to *reserve* a slot, not just widen the candidate pool.
+    A Slurm timeline is older than the job's recent transitions by nature --
+    submitted/eligible/started all happen early -- so a job with a full
+    budget of its own newer events would otherwise hide the whole timeline,
+    which is exactly what the reader asked for."""
+    job_events = [
+        _job_event('Job is restarting',
+                   managed_job_state.ManagedJobStatus.STARTING, 600 + i)
+        for i in range(3)
+    ]
+    monkeypatch.setattr(managed_job_state, 'get_job_events',
+                        lambda **kwargs: list(job_events))
+    monkeypatch.setattr(managed_job_state, 'get_managed_job_tasks',
+                        lambda job_id: [dict(_task(), submitted_at=50)])
+    monkeypatch.setattr(global_user_state, 'get_cluster_events_by_name',
+                        lambda *args, **kwargs: [])
+    _patch_slurm(monkeypatch,
+                 [_entry('started', 500, 'Slurm allocation 17213 started')])
+
+    result = core.get_job_events(job_id=1, limit=3, include_cluster_events=True)
+    assert len(result) == 3
+    assert result[-1]['reason'] == 'Slurm allocation 17213 started'
+
+
+def test_limit_one_prefers_the_newest_even_when_it_is_the_job_s_own(
+        monkeypatch):
+    """The mirror of test_limit_one_returns_the_newest_event_of_either_source:
+    the reserved infra share must never cost the job's own newest row, or a
+    single-row view would show an old launch line instead of the transition
+    that just happened."""
+    job_events = [
+        _job_event('Job has started',
+                   managed_job_state.ManagedJobStatus.RUNNING, 500)
+    ]
+    monkeypatch.setattr(managed_job_state, 'get_job_events',
+                        lambda **kwargs: list(job_events))
+    monkeypatch.setattr(managed_job_state, 'get_managed_job_tasks',
+                        lambda job_id: [_task()])
+    monkeypatch.setattr(global_user_state,
+                        'get_cluster_events_by_name',
+                        lambda name, event_types, limit=None: [{
+                            'reason': 'Launching (pending: Resources)',
+                            'transitioned_at': 100
+                        }])
+
+    result = core.get_job_events(job_id=1, limit=1, include_cluster_events=True)
+    assert [event['reason'] for event in result] == ['Job has started']
+
+
+def test_the_slurm_reads_share_one_budget_across_allocations(monkeypatch):
+    """Per-read timeouts do not bound a pipeline: an unresponsive login node
+    would cost them once per allocation."""
+    monkeypatch.setattr(managed_job_state, 'get_job_events',
+                        lambda **kwargs: [])
+    monkeypatch.setattr(
+        managed_job_state, 'get_managed_job_tasks', lambda job_id: [
+            dict(_task(task_id=0), submitted_at=50),
+            dict(_task(task_id=1), submitted_at=50),
+        ])
+    monkeypatch.setattr(global_user_state, 'get_cluster_events_by_name',
+                        lambda *args, **kwargs: [])
+    calls = []
+    monkeypatch.setattr(global_user_state, 'get_cluster_from_name',
+                        lambda name, **kwargs: {'handle': _slurm_handle()})
+
+    # A budget the first allocation is made to overrun, rather than a
+    # mutation mid-loop: the deadline is computed once, which is the point.
+    monkeypatch.setattr(core, '_SLURM_TIMELINE_BUDGET_SECONDS', 0.05)
+
+    def _slow(cluster, job_name, since, deadline=None):
+        del cluster, job_name, since, deadline
+        calls.append(time.monotonic())
+        time.sleep(0.06)
+        return []
+
+    monkeypatch.setattr(core.slurm_provision_utils, 'job_timeline', _slow)
+    core.get_job_events(job_id=1, include_cluster_events=True)
+    # The second allocation is not attempted once the budget is gone.
+    assert len(calls) == 1
+
+
+def test_a_failure_resolving_the_allocations_is_not_an_error(monkeypatch):
+    """The guard has to cover the whole merge: resolving the allocations and
+    the job's submit time are database reads of their own, and the request
+    already has its job events by then."""
+    job_events = [
+        _job_event('Job is starting',
+                   managed_job_state.ManagedJobStatus.STARTING, 100)
+    ]
+    monkeypatch.setattr(managed_job_state, 'get_job_events',
+                        lambda **kwargs: list(job_events))
+    calls = {'n': 0}
+
+    def _tasks(job_id):
+        del job_id
+        calls['n'] += 1
+        # The first call builds the cluster list; the second, inside the
+        # Slurm merge, is the one that fails.
+        if calls['n'] > 1:
+            raise RuntimeError('connection pool exhausted')
+        return [dict(_task(), submitted_at=50)]
+
+    monkeypatch.setattr(managed_job_state, 'get_managed_job_tasks', _tasks)
+    monkeypatch.setattr(global_user_state, 'get_cluster_events_by_name',
+                        lambda *args, **kwargs: [])
+    monkeypatch.setattr(global_user_state, 'get_cluster_from_name',
+                        lambda name, **kwargs: {'handle': _slurm_handle()})
+    assert core.get_job_events(job_id=1,
+                               include_cluster_events=True) == job_events
