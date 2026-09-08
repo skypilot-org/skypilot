@@ -1,8 +1,10 @@
-"""Tests for log streaming of a request that parks mid-execution."""
+"""Tests for request log streaming."""
 import aiofiles
 import pytest
 
+from sky.server import constants as server_constants
 from sky.server import stream_utils
+from sky.server.requests import log_provider
 from sky.server.requests import requests as requests_lib
 from sky.utils import message_utils
 from sky.utils import rich_utils
@@ -161,3 +163,82 @@ async def test_parked_message_repeats_after_any_status_change(
 
     inits = [m for c, m in controls if c is rich_utils.Control.INIT]
     assert inits == [f'[dim]{msg}[/dim]'] * 2, inits
+
+
+class _RecordingLogProvider(log_provider.LocalLogProvider):
+    """Records discards, in order, into a shared event list."""
+
+    def __init__(self, events):
+        self.events = events
+
+    def discard_log(self, request_id: str) -> None:
+        self.events.append(f'discarded {request_id}')
+
+
+def _record_discards(monkeypatch, events):
+    provider = _RecordingLogProvider(events)
+    monkeypatch.setattr(log_provider, 'get_log_provider', lambda: provider)
+
+
+async def _stream(events, *chunks):
+    try:
+        for chunk in chunks:
+            yield chunk
+    finally:
+        events.append('closed')
+
+
+@pytest.mark.asyncio
+async def test_a_discarded_log_is_dropped_once_the_stream_ends(monkeypatch):
+    events = []
+    _record_discards(monkeypatch, events)
+
+    chunks = [
+        chunk async for chunk in stream_utils._discard_log_after_stream(
+            _stream(events, 'hello\n'), 'rid')
+    ]
+
+    assert chunks == ['hello\n']
+    assert events == ['closed', 'discarded rid']
+
+
+@pytest.mark.asyncio
+async def test_a_discarded_log_is_dropped_when_the_client_disconnects(
+        monkeypatch):
+    """A client that walks away mid-tail must not leave its copy behind.
+
+    The stream is closed before the discard: an open fd keeps the log's
+    blocks allocated after the unlink.
+    """
+    events = []
+    _record_discards(monkeypatch, events)
+
+    gen = stream_utils._discard_log_after_stream(
+        _stream(events, 'hello\n', 'world\n'), 'rid')
+    assert await gen.__anext__() == 'hello\n'
+    await gen.aclose()
+
+    assert events == ['closed', 'discarded rid']
+
+
+def test_discard_log_removes_the_request_log(monkeypatch, tmp_path):
+    monkeypatch.setattr(server_constants, 'REQUEST_LOG_PATH_PREFIX',
+                        str(tmp_path))
+    log_path = tmp_path / 'rid.log'
+    log_path.write_text('hello\n')
+
+    log_provider.LocalLogProvider().discard_log('rid')
+
+    assert not log_path.exists()
+
+
+@pytest.mark.asyncio
+async def test_a_deleted_log_ends_the_stream_with_a_message(tmp_path):
+    """The response has already started, so this cannot be a 404."""
+    chunks = [
+        chunk
+        async for chunk in stream_utils.log_streamer(None, tmp_path / 'rid.log')
+    ]
+
+    assert len(chunks) == 1
+    assert 'no longer available' in chunks[0]

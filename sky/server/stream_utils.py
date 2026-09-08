@@ -204,21 +204,45 @@ async def log_streamer(
             header = f'\n==> {log_file_path} <==\n\n'
             yield header
 
-            async with aiofiles.open(log_file_path, 'rb') as f:
-                async for chunk in _tail_log_file(f, request_id, plain_logs,
-                                                  tail, follow, cluster_name,
-                                                  polling_interval):
-                    yield chunk
+            async for chunk in _stream_log_file(log_file_path, request_id,
+                                                plain_logs, tail, follow,
+                                                cluster_name, polling_interval):
+                yield chunk
 
     # api server request logs (if request_id is provided) or
     # head node provision logs (if cluster_name is provided)
     else:
         assert log_path is not None, (request_id, cluster_name)
-        async with aiofiles.open(log_path, 'rb') as f:
-            async for chunk in _tail_log_file(f, request_id, plain_logs, tail,
-                                              follow, cluster_name,
-                                              polling_interval):
-                yield chunk
+        async for chunk in _stream_log_file(log_path, request_id, plain_logs,
+                                            tail, follow, cluster_name,
+                                            polling_interval):
+            yield chunk
+
+
+async def _stream_log_file(
+    log_path: pathlib.Path,
+    request_id: Optional[str] = None,
+    plain_logs: bool = False,
+    tail: Optional[int] = None,
+    follow: bool = True,
+    cluster_name: Optional[str] = None,
+    polling_interval: float = DEFAULT_POLL_INTERVAL
+) -> AsyncGenerator[str, None]:
+    """Opens one log file and streams it, or says it is gone."""
+    try:
+        log_file = await aiofiles.open(log_path, 'rb')
+    except FileNotFoundError:
+        # The response has already started, so this cannot be a 404.
+        yield (f'Log {log_path.name} is no longer available on the API '
+               'server.\n')
+        return
+    try:
+        async for chunk in _tail_log_file(log_file, request_id, plain_logs,
+                                          tail, follow, cluster_name,
+                                          polling_interval):
+            yield chunk
+    finally:
+        await log_file.close()
 
 
 async def _tail_log_file(
@@ -439,19 +463,57 @@ async def _tail_log_file(
         yield chunk
 
 
+async def _discard_log_after_stream(
+        stream: AsyncGenerator[str, None],
+        request_id: str) -> AsyncGenerator[str, None]:
+    """Yields from ``stream``, then discards the request's log.
+
+    For a log tail the request log only bridges the tail and this response,
+    and holds a full copy of the tailed log.
+    """
+    # log_provider imports this module, so this cannot be a top-level import.
+    # pylint: disable=import-outside-toplevel
+    from sky.server.requests import log_provider as lp
+    try:
+        async for chunk in stream:
+            yield chunk
+    finally:
+        # Close first: ``stream`` holds the log file open, and an open fd keeps
+        # its blocks allocated after the unlink. The unlink runs in a thread
+        # because ~/.sky can be on the state volume, where it is a network
+        # round trip.
+        try:
+            await stream.aclose()
+        finally:
+            await asyncio.to_thread(lp.get_log_provider().discard_log,
+                                    request_id)
+
+
 def stream_response_for_long_request(
     request_id: str,
     logs_path: pathlib.Path,
     background_tasks: fastapi.BackgroundTasks,
     kill_request_on_disconnect: bool = True,
+    discard_log_after_stream: bool = True,
 ) -> fastapi.responses.StreamingResponse:
-    """Stream the logs of a long request."""
+    """Stream the logs of a long request.
+
+    Every caller streams a tail of a log that lives elsewhere -- a cluster
+    job, a managed job, a service -- so the request log is discarded once the
+    response ends. A request whose own log is the artifact, such as a launch
+    or an exec, is not streamed through here: its client reads /api/stream,
+    which never discards.
+
+    Args:
+        discard_log_after_stream: Set False to keep the request log.
+    """
     return stream_response(
         request_id,
         logs_path,
         background_tasks,
         polling_interval=LONG_REQUEST_POLL_INTERVAL,
         kill_request_on_disconnect=kill_request_on_disconnect,
+        discard_log_after_stream=discard_log_after_stream,
     )
 
 
@@ -461,6 +523,7 @@ def stream_response(
     background_tasks: fastapi.BackgroundTasks,
     polling_interval: float = DEFAULT_POLL_INTERVAL,
     kill_request_on_disconnect: bool = True,
+    discard_log_after_stream: bool = False,
 ) -> fastapi.responses.StreamingResponse:
 
     if kill_request_on_disconnect:
@@ -477,10 +540,13 @@ def stream_response(
     # Route through LogProvider.
     # pylint: disable=import-outside-toplevel
     from sky.server.requests import log_provider as lp
+    stream = lp.get_log_provider().log_stream(request_id=request_id,
+                                              log_path=logs_path,
+                                              polling_interval=polling_interval)
+    if discard_log_after_stream:
+        stream = _discard_log_after_stream(stream, request_id)
     return fastapi.responses.StreamingResponse(
-        lp.get_log_provider().log_stream(request_id=request_id,
-                                         log_path=logs_path,
-                                         polling_interval=polling_interval),
+        stream,
         media_type='text/plain',
         headers={
             'Cache-Control': 'no-cache, no-transform',

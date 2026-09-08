@@ -49,6 +49,11 @@ def _sbatch_log_path(base_dir: str, job_id: str) -> str:
 
 
 POLL_INTERVAL_SECONDS = 2
+# A Slurm status query opens one SSH command per state, so keep this lower than
+# the Kubernetes equivalent. The retry is only used when an entire status
+# round returns no jobs and no stopped snapshot is found.
+_MAX_QUERY_INSTANCES_RETRIES = 2
+_QUERY_INSTANCES_RETRY_INTERVAL_SECONDS = 0.5
 # Default KillWait is 30 seconds, so we add some buffer time here.
 _JOB_TERMINATION_TIMEOUT_SECONDS = 60
 # How long to give the batch script's TERM trap to run cleanup and exit
@@ -1284,7 +1289,7 @@ def query_instances(
     retry_if_missing: bool = False,
 ) -> Dict[str, Tuple[Optional[status_lib.ClusterStatus], Optional[str]]]:
     """See sky/provision/__init__.py"""
-    del cluster_name, retry_if_missing  # Unused for Slurm
+    del cluster_name  # Unused for Slurm
     assert provider_config is not None, (cluster_name_on_cloud, provider_config)
 
     client = _make_slurm_client(provider_config)
@@ -1306,57 +1311,77 @@ def query_instances(
         'node_fail': None,
     }
 
-    statuses: Dict[str, Tuple[Optional[status_lib.ClusterStatus],
-                              Optional[str]]] = {}
-    for state, sky_status in status_map.items():
-        jobs = client.query_jobs(
-            cluster_name_on_cloud,
-            [state],
-        )
+    attempts = 0
+    snapshot_checked = False
+    while True:
+        statuses: Dict[str, Tuple[Optional[status_lib.ClusterStatus],
+                                  Optional[str]]] = {}
+        found_any_job = False
+        for state, sky_status in status_map.items():
+            jobs = client.query_jobs(
+                cluster_name_on_cloud,
+                [state],
+            )
+            found_any_job = found_any_job or bool(jobs)
 
-        for job_id in jobs:
-            if state in ('pending', 'failed', 'node_fail', 'cancelled',
-                         'completed'):
-                reason = client.get_job_reason(job_id)
-                if non_terminated_only and sky_status is None:
-                    # TODO(kevin): For better UX, we should also find out
-                    # which node(s) exactly that failed if it's a node_fail
-                    # state.
-                    logger.debug(f'Job {job_id} is terminated, but '
-                                 'query_instances is called with '
-                                 f'non_terminated_only=True. State: {state}, '
-                                 f'Reason: {reason}')
-                    continue
-                statuses[job_id] = (sky_status, reason)
-            else:
-                nodes, _ = client.get_job_nodes(job_id)
-                for node in nodes:
-                    instance_id = slurm_utils.instance_id(job_id, node)
-                    statuses[instance_id] = (sky_status, None)
+            for job_id in jobs:
+                if state in ('pending', 'failed', 'node_fail', 'cancelled',
+                             'completed'):
+                    reason = client.get_job_reason(job_id)
+                    if non_terminated_only and sky_status is None:
+                        # TODO(kevin): For better UX, we should also find out
+                        # which node(s) exactly that failed if it's a node_fail
+                        # state.
+                        logger.debug(f'Job {job_id} is terminated, but '
+                                     'query_instances is called with '
+                                     f'non_terminated_only=True. State: '
+                                     f'{state}, Reason: {reason}')
+                        continue
+                    statuses[job_id] = (sky_status, reason)
+                else:
+                    nodes, _ = client.get_job_nodes(job_id)
+                    for node in nodes:
+                        instance_id = slurm_utils.instance_id(job_id, node)
+                        statuses[instance_id] = (sky_status, None)
 
-        # TODO(kevin): Query sacct too to get more historical job info.
-        # squeue only includes completed jobs that finished in the last
-        # MinJobAge seconds (default 300s). Or could be earlier if it
-        # reaches MaxJobCount first (default 10_000).
+            # TODO(kevin): Query sacct too to get more historical job info.
+            # squeue only includes completed jobs that finished in the last
+            # MinJobAge seconds (default 300s). Or could be earlier if it
+            # reaches MaxJobCount first (default 10_000).
 
-    non_terminated_statuses = {
-        instance_id: status_and_reason
-        for instance_id, status_and_reason in statuses.items()
-        if status_and_reason[0] is not None
-    }
-    if non_terminated_statuses:
-        return non_terminated_statuses
-    login_node_runner = _make_login_node_runner(provider_config)
-    sky_base_dir = _resolve_sky_base_dir(client, provider_config)
-    snapshot_dir = _snapshot_dir(sky_base_dir, cluster_name_on_cloud)
-    manifest = _read_snapshot_manifest(login_node_runner, snapshot_dir)
-    if manifest is not None:
-        return {
-            f'snapshot-rank-{rank}': (status_lib.ClusterStatus.STOPPED, None)
-            for rank in range(len(manifest['nodes']))
+        non_terminated_statuses = {
+            instance_id: status_and_reason
+            for instance_id, status_and_reason in statuses.items()
+            if status_and_reason[0] is not None
         }
+        if non_terminated_statuses:
+            return non_terminated_statuses
 
-    return statuses
+        if not snapshot_checked:
+            # A snapshot is the stopped steady state. Check it before retrying
+            # so stopped clusters do not pay for additional Slurm queries.
+            login_node_runner = _make_login_node_runner(provider_config)
+            sky_base_dir = _resolve_sky_base_dir(client, provider_config)
+            snapshot_dir = _snapshot_dir(sky_base_dir, cluster_name_on_cloud)
+            manifest = _read_snapshot_manifest(login_node_runner, snapshot_dir)
+            snapshot_checked = True
+            if manifest is not None:
+                return {
+                    f'snapshot-rank-{rank}':
+                    (status_lib.ClusterStatus.STOPPED, None)
+                    for rank in range(len(manifest['nodes']))
+                }
+
+        if (found_any_job or not retry_if_missing or
+                attempts >= _MAX_QUERY_INSTANCES_RETRIES):
+            return statuses
+
+        attempts += 1
+        logger.debug(
+            f'No Slurm jobs found for {cluster_name_on_cloud}; retrying '
+            f'{attempts}/{_MAX_QUERY_INSTANCES_RETRIES} after '
+            f'{_QUERY_INSTANCES_RETRY_INTERVAL_SECONDS} seconds.')
+        time.sleep(_QUERY_INSTANCES_RETRY_INTERVAL_SECONDS)
 
 
 def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,

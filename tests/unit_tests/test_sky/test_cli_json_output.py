@@ -303,6 +303,52 @@ class TestJobsQueueJsonOutput:
         assert 'deprecated' not in result.output.lower()
 
 
+class TestJobsQueueInfraFilter:
+    """`--infra` on `sky jobs queue`: the spec reaches the server verbatim.
+
+    The CLI does not parse it -- the server does, with the same
+    ``InfraInfo.from_str`` a launch uses -- so what matters here is that the
+    flag arrives as typed and that its absence sends nothing.
+    """
+
+    def _install(self, monkeypatch):
+        """Mock the queue call and capture the kwargs it receives."""
+        captured = {}
+
+        def fake_queue(**kw):
+            captured.update(kw)
+            return ('req-1', mock.MagicMock(v2=lambda: True))
+
+        monkeypatch.setattr('sky.client.cli.utils.get_managed_job_queue',
+                            fake_queue)
+        monkeypatch.setattr('sky.jobs.pool_status', lambda **kw: None)
+        monkeypatch.setattr('sky.client.sdk.stream_and_get', lambda *a, **kw:
+                            ([], 0, {}, 0))
+        return captured
+
+    def test_spec_reaches_the_server_verbatim(self, monkeypatch):
+        captured = self._install(monkeypatch)
+        result = cli_testing.CliRunner().invoke(command.jobs_queue,
+                                                ['--infra', 'slurm/prod-gpu'])
+        assert result.exit_code == 0, result.output
+        assert captured['infra_match'] == 'slurm/prod-gpu'
+
+    def test_kubernetes_context_keeps_its_slashes(self, monkeypatch):
+        # A k8s context is the whole string after `k8s/` and may contain `/`,
+        # so the CLI must not split or normalise it.
+        captured = self._install(monkeypatch)
+        result = cli_testing.CliRunner().invoke(command.jobs_queue,
+                                                ['--infra', 'k8s/team/ctx'])
+        assert result.exit_code == 0, result.output
+        assert captured['infra_match'] == 'k8s/team/ctx'
+
+    def test_no_infra_sends_nothing(self, monkeypatch):
+        captured = self._install(monkeypatch)
+        result = cli_testing.CliRunner().invoke(command.jobs_queue, [])
+        assert result.exit_code == 0, result.output
+        assert captured['infra_match'] is None
+
+
 class TestJobsQueueTimeRangeFilter:
     """Tests for --since / --after / --before on `sky jobs queue`."""
 
