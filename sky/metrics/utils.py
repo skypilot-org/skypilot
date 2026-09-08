@@ -316,6 +316,14 @@ SKY_APISERVER_WEBSOCKET_SSH_LATENCY_SECONDS = prom.Histogram(
 # server's kubectl port-forward, or a plugin-supplied value when a hook routes
 # the connection elsewhere. Two or three values in practice, so no cardinality
 # concern.
+#
+# A redirect hook that hands the session off labels it SSH_PATH_REDIRECTED here
+# and records no turnaround -- this server never touches the stream, so it has
+# nothing to time. A plugin that terminates the stream itself instead calls
+# run_websocket_proxy() with its own `path`, and that sample lands in whichever
+# process runs the proxy. So an empty histogram alongside redirected sessions is
+# expected rather than a fault, which is what SKY_APISERVER_SSH_SESSIONS_TOTAL
+# below exists to make legible.
 SKY_APISERVER_SSH_BACKEND_TURNAROUND_SECONDS = prom.Histogram(
     'sky_apiserver_ssh_backend_turnaround_seconds',
     ('Round trip from the API server to the SSH backend and back, measured by '
