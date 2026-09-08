@@ -1404,28 +1404,38 @@ class TestRecordPendingReason:
     def test_records_reason_with_dedup(self):
         with mock.patch.object(instance.global_user_state,
                                'add_cluster_event') as add_event:
-            instance._record_pending_reason(_CLUSTER, 'QOSGrpGRES')
+            instance._record_pending_reason(_CLUSTER, 'QOSGrpGRES', 'h200')
         add_event.assert_called_once_with(
             _CLUSTER,
             new_status=None,
-            reason='Launching (pending: QOSGrpGRES)',
+            reason='Launching (pending: QOSGrpGRES; partition: h200)',
             event_type=instance.global_user_state.ClusterEventType.
             LAUNCH_PROGRESS,
             nop_if_duplicate=True,
         )
 
+    def test_records_without_a_partition(self):
+        """The partition is optional: a reader has to cope with the shape that
+        carries no partition, since events written before this existed do
+        not."""
+        with mock.patch.object(instance.global_user_state,
+                               'add_cluster_event') as add_event:
+            instance._record_pending_reason(_CLUSTER, 'Resources', None)
+        assert (add_event.call_args.kwargs['reason'] ==
+                'Launching (pending: Resources)')
+
     @pytest.mark.parametrize('reason', [None, ''])
     def test_skips_empty_reason(self, reason):
         with mock.patch.object(instance.global_user_state,
                                'add_cluster_event') as add_event:
-            instance._record_pending_reason(_CLUSTER, reason)
+            instance._record_pending_reason(_CLUSTER, reason, 'h200')
         add_event.assert_not_called()
 
     def test_swallows_db_errors(self):
         with mock.patch.object(instance.global_user_state,
                                'add_cluster_event',
                                side_effect=RuntimeError('db down')):
-            instance._record_pending_reason(_CLUSTER, 'Resources')
+            instance._record_pending_reason(_CLUSTER, 'Resources', 'h200')
 
 
 class TestPendingCallback:
@@ -1440,10 +1450,13 @@ class TestPendingCallback:
             on_pending('PENDING', 'Resources', 3)
             on_pending('PENDING', 'Resources', 2)
             on_pending('PENDING', 'Resources', None)
-            assert record.call_args_list == [mock.call(_CLUSTER, 'Resources')]
+            assert record.call_args_list == [
+                mock.call(_CLUSTER, 'Resources', None)
+            ]
             # A new reason records again.
             on_pending('PENDING', 'Priority', None)
-            assert record.call_args_list[-1] == mock.call(_CLUSTER, 'Priority')
+            assert record.call_args_list[-1] == mock.call(
+                _CLUSTER, 'Priority', None)
             assert record.call_count == 2
 
     def test_spinner_reflects_reason_and_count(self):
@@ -1471,6 +1484,6 @@ class TestPendingCallback:
             on_pending('PENDING', 'Resources', None)
             on_pending('PENDING', None, None)
         assert record.call_args_list == [
-            mock.call(_CLUSTER, 'Resources'),
-            mock.call(_CLUSTER, None),
+            mock.call(_CLUSTER, 'Resources', None),
+            mock.call(_CLUSTER, None, None),
         ]

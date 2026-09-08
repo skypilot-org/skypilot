@@ -295,21 +295,32 @@ def _wait_for_job_nodes(
                        f'{timeout} seconds. Last state: {last_state}')
 
 
-def _record_pending_reason(cluster_name: str, reason: Optional[str]) -> None:
+def _record_pending_reason(cluster_name: str, reason: Optional[str],
+                           partition: Optional[str]) -> None:
     """Persist the squeue pending reason as a cluster launch-progress event.
 
     The spinner is transient; this makes the reason visible in `sky jobs queue
     -v` details and `sky jobs events --cluster-events`. Only the reason is
     recorded (not the pending count) so nop_if_duplicate collapses repeated
     polls into one event.
+
+    The partition rides along because a reader has no other way to get it: by
+    the time anyone looks at the event the allocation may be gone, and Slurm's
+    reason code alone ('Resources') cannot say *where* the job was waiting.
+    Deliberately not recorded: node counts. They are a snapshot, and a
+    "3 idle nodes" claim still sitting in the event log an hour later is worse
+    than no claim -- a reader that wants counts should ask for them now.
     """
     if not reason:
         return
+    detail = f'pending: {reason}'
+    if partition:
+        detail += f'; partition: {partition}'
     try:
         global_user_state.add_cluster_event(
             cluster_name,
             new_status=None,
-            reason=f'Launching (pending: {reason})',
+            reason=f'Launching ({detail})',
             event_type=global_user_state.ClusterEventType.LAUNCH_PROGRESS,
             nop_if_duplicate=True,
         )
@@ -319,7 +330,9 @@ def _record_pending_reason(cluster_name: str, reason: Optional[str]) -> None:
 
 
 def _make_pending_callback(
-    cluster_name: str,) -> Callable[[str, Optional[str], Optional[int]], None]:
+    cluster_name: str,
+    partition: Optional[str] = None,
+) -> Callable[[str, Optional[str], Optional[int]], None]:
     """Callback for the pending phase of a Slurm allocation.
 
     Refreshes the launch spinner and records the squeue reason as a cluster
@@ -346,7 +359,7 @@ def _make_pending_callback(
             rich_utils.force_update_status(status_msg)
             last_status_msg = status_msg
         if reason != last_recorded_reason:
-            _record_pending_reason(cluster_name, reason)
+            _record_pending_reason(cluster_name, reason, partition)
             last_recorded_reason = reason
 
     return _on_pending
@@ -802,7 +815,7 @@ def _create_virtual_instance(
                  f'job to be allocated on partition {partition}')
 
     num_nodes = config.count
-    on_pending = _make_pending_callback(cluster_name)
+    on_pending = _make_pending_callback(cluster_name, partition)
 
     if existing_jobs:
         assert len(existing_jobs) == 1, (
