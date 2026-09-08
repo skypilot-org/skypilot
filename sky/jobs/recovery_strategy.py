@@ -49,6 +49,19 @@ if typing.TYPE_CHECKING:
 
 logger = sky_logging.init_logger(__name__)
 
+# Launch failures that retrying cannot fix: the launch never got as far as
+# asking for resources, and trying again does not change the answer. These fail
+# the job with FAILED_PRECHECKS instead of entering the retry loop, so a job
+# does not sit there re-attempting something only an operator can resolve.
+PRECHECK_FAILURES = (
+    exceptions.InvalidClusterNameError,
+    exceptions.NoCloudAccessError,
+    exceptions.ResourcesMismatchError,
+    exceptions.StorageSpecError,
+    exceptions.StorageError,
+    exceptions.VolumeNotReadyError,
+)
+
 # Waiting time for job from INIT/PENDING to RUNNING
 # 10 * JOB_STARTED_STATUS_CHECK_GAP_SECONDS = 10 * 5 = 50 seconds
 MAX_JOB_CHECKING_RETRY = 10
@@ -280,6 +293,14 @@ class StrategyExecutor:
         # into pluggable strategy methods (e.g. check_status() returning a
         # uniform result), the controller could own a single generic loop
         # and this override would be unnecessary.
+
+        Contract for implementations: if the strategy owns the loop and
+        invokes ``on_recovery`` (JobGroups pass their networking refresh
+        here), it must handle ``exceptions.ClusterSetUpError`` from it the
+        way ``JobController._monitor_one_task`` does: mark the task
+        FAILED_SETUP with the exception message and return False. Letting
+        it escape gets swallowed into the group's monitor results with no
+        terminal state set for the task.
 
         Returns:
             None: fall back to OSS default monitor.
@@ -540,7 +561,7 @@ class StrategyExecutor:
         if self.pool is None:
             managed_job_utils.terminate_cluster(self.cluster_name)
 
-    def _refresh_priority_from_persisted_dag(self) -> None:
+    async def _refresh_priority_from_persisted_dag(self) -> None:
         """Re-read the persisted job DAG and apply any updated priority.
 
         A managed job's priority can be changed out of band after submission
@@ -551,7 +572,8 @@ class StrategyExecutor:
         task — envs, file mounts, name — is preserved.
         """
         try:
-            content = file_content_utils.get_job_dag_content(self.job_id)
+            content = await asyncio.to_thread(
+                file_content_utils.get_job_dag_content, self.job_id)
             if content is None:
                 return
             fresh_dag = dag_utils.load_dag_from_yaml_str(content)
@@ -825,7 +847,7 @@ class StrategyExecutor:
         # change takes effect on this relaunch (the controller caches the DAG
         # in memory for its lifetime).
         if recovery:
-            self._refresh_priority_from_persisted_dag()
+            await self._refresh_priority_from_persisted_dag()
         # TODO(zhwu): handle the failure during `preparing sky runtime`.
         retry_cnt = 0
         backoff = common_utils.Backoff(self.RETRY_INIT_GAP_SECONDS)
@@ -1090,11 +1112,7 @@ class StrategyExecutor:
                         logger.error('The pool no longer exists: '
                                      f'{common_utils.format_exception(e)}')
                         raise
-                    except (exceptions.InvalidClusterNameError,
-                            exceptions.NoCloudAccessError,
-                            exceptions.ResourcesMismatchError,
-                            exceptions.StorageSpecError,
-                            exceptions.StorageError) as e:
+                    except PRECHECK_FAILURES as e:
                         logger.error('Failure happened before provisioning. '
                                      f'{common_utils.format_exception(e)}')
                         if raise_on_failure:

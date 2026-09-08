@@ -35,7 +35,7 @@ setup: |
     git clone https://github.com/romilbhardwaj/pytorch-distributed-resnet.git
     cd pytorch-distributed-resnet && pip3 install -r requirements.txt
     mkdir -p data  && mkdir -p saved_models && cd data && \
-    wget -c --quiet https://www.cs.toronto.edu/~kriz/cifar-10-python.tar.gz
+    wget -c --quiet https://storage.googleapis.com/skypilot-example-data/datasets/cifar-10-python.tar.gz || wget -c --quiet https://www.cs.toronto.edu/~kriz/cifar-10-python.tar.gz
     tar -xvzf cifar-10-python.tar.gz
     mkdir -p /checkpoints/torch_ddp_resnet/
 

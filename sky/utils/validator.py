@@ -4,6 +4,8 @@ The main motivation behind extending the existing JSON Schema validator is to
 allow for case-insensitive enum matching since this is currently not supported
 by the JSON Schema specification.
 """
+import functools
+
 import jsonschema
 
 
@@ -21,7 +23,10 @@ def case_sensitive_enum(validator, enums, instance, schema):
             f'{instance!r} is not one of {enums!r}')
 
 
-# Move this to a function to delay initialization
+# Move this to a function to delay initialization. Cached because
+# jsonschema.validators.extend() rebuilds the validator class on every call,
+# which dominates the cost of validate_schema().
+@functools.lru_cache(maxsize=1)
 def get_schema_validator():
     """Get the schema validator class, initializing it only when needed."""
     return jsonschema.validators.extend(

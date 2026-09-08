@@ -59,12 +59,10 @@ import { trackWorkspaceAction } from '@/lib/analytics';
 import {
   CLOUD_CANONICALIZATIONS,
   CLUSTER_NOT_UP_ERROR,
+  MANAGED_JOBS_SUMMARY_ARGS,
 } from '@/data/connectors/constants';
 import { getClusters } from '@/data/connectors/clusters';
-import {
-  getManagedJobs,
-  MANAGED_JOBS_SUMMARY_ARGS,
-} from '@/data/connectors/jobs';
+import { getManagedJobs } from '@/data/connectors/jobs';
 import Link from 'next/link';
 
 // Workspace-aware API functions - use cached global data and filter by workspace

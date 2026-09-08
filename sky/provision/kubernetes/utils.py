@@ -37,6 +37,7 @@ from sky.utils import common_utils
 from sky.utils import config_utils
 from sky.utils import env_options
 from sky.utils import gpu_names
+from sky.utils import infra_utils
 from sky.utils import kubernetes_enums
 from sky.utils import plugin_extensions
 from sky.utils import schemas
@@ -118,12 +119,17 @@ class KubernetesHighPerformanceNetworkType(enum.Enum):
     NONE = 'none'
 
     def get_network_env_vars(self,
-                             acc_type: Optional[str] = None) -> Dict[str, str]:
+                             acc_type: Optional[str] = None,
+                             pod_local_rdma: bool = False) -> Dict[str, str]:
         """Get network environment variables for this cluster type.
 
         Args:
             acc_type: The canonical accelerator type requested (e.g. 'GB200').
                 Used by OCI to pick a shape-specific NCCL profile.
+            pod_local_rdma: The pod receives its own RDMA devices (SR-IOV
+                virtual functions) instead of sharing the node's. Profiles that
+                name the host's physical functions have to widen their HCA
+                list, since those names do not exist in such a pod.
         """
         if self == KubernetesHighPerformanceNetworkType.NEBIUS:
             # Nebius cluster with InfiniBand - use InfiniBand optimizations
@@ -159,6 +165,19 @@ class KubernetesHighPerformanceNetworkType(enum.Enum):
             # any of these via task `envs:`.
             # Refer to the examples https://github.com/oracle-quickstart/oci-hpc-oke/tree/main/manifests/nccl-tests/kueue for more details. # pylint: disable=line-too-long
             acc = (acc_type or '').upper()
+            # The Grace profiles below name the host's physical functions
+            # exactly. A pod holding SR-IOV virtual functions never sees those
+            # names, so the list has to widen to the family prefix. This is the
+            # only NCCL difference between Oracle's two reference manifests for
+            # the same shape, and it fails silently: NCCL finds no matching
+            # device and falls back to TCP rather than erroring.
+            #
+            # Widening hands NIC selection to the device plugin: the pod holds
+            # only the VFs its SriovNetworkNodePolicy chose to create, so the
+            # prefix cannot reach a PF the exact list was excluding. A policy
+            # that also exposes non-fabric NICs would need `NCCL_IB_HCA`
+            # narrowed again through task `envs:`.
+            pf_names_visible = not pod_local_rdma
             if acc == 'GB200':
                 # GB200 NVL72 runs Quantum-2 InfiniBand plus rack-scale
                 # multi-node NVLink (MNNVL) and NVLink SHARP (NVLS) -- a
@@ -174,7 +193,8 @@ class KubernetesHighPerformanceNetworkType(enum.Enum):
                     # Required for MNNVL to work.
                     'NCCL_CUMEM_ENABLE': '1',
                     'NCCL_NET_PLUGIN': 'sys',
-                    'NCCL_IB_HCA': 'mlx5_0,mlx5_1,mlx5_3,mlx5_4',
+                    'NCCL_IB_HCA': ('mlx5_0,mlx5_1,mlx5_3,mlx5_4'
+                                    if pf_names_visible else 'mlx5'),
                     # NVLink SHARP in-network reductions.
                     'NCCL_NVLS_ENABLE': '1',
                     'NCCL_SOCKET_IFNAME': 'eth0',
@@ -193,11 +213,17 @@ class KubernetesHighPerformanceNetworkType(enum.Enum):
                     'NCCL_CUMEM_ENABLE': '1',
                     'NCCL_NET_PLUGIN': 'none',
                     'NCCL_IB_HCA': ('=mlx5_0,mlx5_1,mlx5_2,mlx5_3,'
-                                    'mlx5_5,mlx5_6,mlx5_7,mlx5_8'),
+                                    'mlx5_5,mlx5_6,mlx5_7,mlx5_8'
+                                    if pf_names_visible else 'mlx5'),
                     'NCCL_NVLS_ENABLE': '1',
                     'NCCL_SOCKET_IFNAME': 'eth0',
                     # GPU-to-CPU (C2C) GPUDirect over the Grace link.
                     'NCCL_NET_GDR_C2C': '1',
+                    # With NET_GDR_C2C on, NCCL's GDR cutoff is PATH_P2C, and
+                    # a GPU whose NIC sits one PCIe host bridge away falls
+                    # outside it -- GDR silently off. PHB widens the cutoff by
+                    # exactly that one level; nothing else changes.
+                    'NCCL_NET_GDR_LEVEL': 'PHB',
                     'NCCL_IB_GID_INDEX': '3',
                     'NCCL_IB_TC': '41',
                     'NCCL_IB_SL': '0',
@@ -2047,6 +2073,73 @@ def _iter_terminated_states(cs):
             yield term
 
 
+# Docs section for the config that caps a pod's memory at its request.
+SET_POD_RESOURCE_LIMITS_DOC_URL = (
+    'https://docs.skypilot.co/en/latest/reference/config.html'
+    '#kubernetes-set-pod-resource-limits')
+
+# Appended to an OOMKilled reason when the killed container declared no memory
+# limit. Produced by the reason builders here and in
+# sky/provision/kubernetes/instance.py, and matched by KUBERNETES_FAILURE_HINTS
+# below. The marker is the only channel those two ends share: the hint lookup
+# only ever sees a reason string, never the pod (e.g. the managed-jobs details
+# column formats a reason read back from the jobs database), so the
+# distinction has to travel in the text.
+NO_MEMORY_LIMIT_MARKER = 'no memory limit set'
+
+
+def _find_container(pod: 'kubernetes_models.V1Pod',
+                    container_name: Optional[str]) -> Optional[Any]:
+    """The named container from the pod *spec*, or None if it is not there."""
+    spec = getattr(pod, 'spec', None)
+    for container in (getattr(spec, 'containers', None) or []):
+        if getattr(container, 'name', None) == container_name:
+            return container
+    return None
+
+
+def _container_memory_limit(container: Any) -> Optional[str]:
+    """The memory limit `container` declares, or None if it declares none.
+
+    Reads the pod *spec*, not its status: a container with no
+    ``resources.limits.memory`` is unbounded, so its own cgroup can never
+    OOM-kill it.
+    """
+    resources = getattr(container, 'resources', None)
+    limits = getattr(resources, 'limits', None) or {}
+    return limits.get('memory')
+
+
+def is_unbounded_oom(reason: Optional[str], pod: 'kubernetes_models.V1Pod',
+                     container_name: Optional[str]) -> bool:
+    """Whether an OOM kill hit a container that had no memory limit.
+
+    A container that OOMs *with* a limit exceeded a cap it asked for, and the
+    fix is to ask for more. One that OOMs *without* a limit was never capped:
+    it grew until the node ran out of memory and the kernel reclaimed it, which
+    can take other pods on that node down too. Same `OOMKilled` reason, two
+    different failures, two different fixes -- hence the distinction.
+
+    False when the container is not in the pod spec: we cannot confirm it was
+    unbounded, and a confidently wrong node-level hint is worse than the
+    generic OOM one.
+    """
+    if reason != 'OOMKilled':
+        return False
+    container = _find_container(pod, container_name)
+    if container is None:
+        return False
+    return _container_memory_limit(container) is None
+
+
+def annotate_oom_reason(reason: Optional[str], pod: 'kubernetes_models.V1Pod',
+                        container_name: Optional[str]) -> str:
+    """Tag `reason` with NO_MEMORY_LIMIT_MARKER if it is an unbounded OOM."""
+    if not is_unbounded_oom(reason, pod, container_name):
+        return reason or ''
+    return f'{reason} ({NO_MEMORY_LIMIT_MARKER})'
+
+
 def get_condensed_pod_reason(pod: 'kubernetes_models.V1Pod') -> str:
     """Condense a pod failure into a single-line user-facing summary.
 
@@ -2099,7 +2192,10 @@ def get_condensed_pod_reason(pod: 'kubernetes_models.V1Pod') -> str:
             for term in _iter_terminated_states(cs):
                 if term.exit_code != 0:
                     if term.reason:
-                        return f'{term.reason} (exit code {term.exit_code})'
+                        detail = f'exit code {term.exit_code}'
+                        if is_unbounded_oom(term.reason, pod, cs.name):
+                            detail += f', {NO_MEMORY_LIMIT_MARKER}'
+                        return f'{term.reason} ({detail})'
                     return f'Terminated with exit code {term.exit_code}'
 
     return 'Terminated unexpectedly'
@@ -2136,6 +2232,12 @@ KUBERNETES_FAILURE_HINTS: List[Tuple[List[str], str]] = [
     (['ImagePullBackOff', 'ErrImagePull'],
      'To fix: Verify the image tag exists and registry credentials are configured.'
     ),
+    # NO_MEMORY_LIMIT_MARKER must precede 'OOMKilled': an unbounded-OOM reason
+    # contains both, and the first match wins.
+    ([NO_MEMORY_LIMIT_MARKER],
+     'The container had no memory limit and the node ran out of memory. '
+     'To fix: set `kubernetes.set_pod_resource_limits`: '
+     f'{SET_POD_RESOURCE_LIMITS_DOC_URL}'),
     (['OOMKilled'],
      'The container ran out of memory. To fix: Increase the memory request with '
      '`resources.memory` in your task YAML; if `kubernetes.'
@@ -4444,6 +4546,16 @@ def get_kubernetes_node_info(
     number of GPUs available on the node and the number of free GPUs on the
     node.
 
+    `total` reports the node's physical accelerator count
+    (`status.capacity`, which keeps devices the device plugin has marked
+    unhealthy) with `accelerator_allocatable` (`status.allocatable`, what
+    the scheduler may actually place on) alongside. The two only diverge
+    when the device plugin has withdrawn devices — e.g. after an XID error
+    or a lost kubelet registration — and `accelerator_count -
+    accelerator_allocatable` is exactly the withdrawn count. Deriving the
+    total from allocatable instead would shrink a node's reported size in
+    lockstep with such failures, making them invisible.
+
     If the user does not have sufficient permissions to list pods in all
     namespaces, the function will return free GPUs as -1.
 
@@ -4503,12 +4615,14 @@ def get_kubernetes_node_info(
     else:
         label_keys = lf.get_label_keys()
 
-    # Check if all nodes have no accelerators to avoid fetching pods
+    # Check if all nodes have no accelerators to avoid fetching pods.
+    # Capacity is checked as well as allocatable so a node whose devices are
+    # all temporarily withdrawn by the device plugin still counts as an
+    # accelerator node.
     has_accelerator_nodes = False
     for node in nodes:
-        accelerator_count = get_node_accelerator_count(context,
-                                                       node.status.allocatable)
-        if accelerator_count > 0:
+        if (get_node_accelerator_count(context, node.status.allocatable) > 0 or
+                get_node_accelerator_count(context, node.status.capacity) > 0):
             has_accelerator_nodes = True
             break
 
@@ -4571,8 +4685,16 @@ def get_kubernetes_node_info(
                         node_ip = address.address
                         break
 
-        accelerator_count = get_node_accelerator_count(context,
-                                                       node.status.allocatable)
+        accelerator_allocatable = get_node_accelerator_count(
+            context, node.status.allocatable)
+        # The physical count: status.capacity keeps devices the device plugin
+        # has marked unhealthy and withdrawn from scheduling, while
+        # status.allocatable drops them. max() is defensive — capacity should
+        # never be below allocatable, but a node mid-transition must not
+        # report fewer total accelerators than it can schedule.
+        accelerator_count = max(
+            get_node_accelerator_count(context, node.status.capacity),
+            accelerator_allocatable)
 
         # Parse CPU and memory from node capacity
         cpu_count = None
@@ -4621,7 +4743,10 @@ def get_kubernetes_node_info(
             node_info_dict[node.metadata.name] = models.KubernetesNodeInfo(
                 name=node.metadata.name,
                 accelerator_type=accelerator_name,
-                total={'accelerator_count': 0},
+                total={
+                    'accelerator_count': 0,
+                    'accelerator_allocatable': 0
+                },
                 free={'accelerators_available': 0},
                 ip_address=node_ip,
                 cpu_count=cpu_count,
@@ -4641,7 +4766,13 @@ def get_kubernetes_node_info(
             accelerators_available = -1
         else:
             allocated_qty = allocated_qty_by_node[node.metadata.name]
-            accelerators_available = accelerator_count - allocated_qty
+            # Available is measured against allocatable, not capacity —
+            # withdrawn devices cannot be scheduled and must not be counted
+            # as free. Clamped at 0: pods admitted before a withdrawal can
+            # keep more devices than remain allocatable, and a negative value
+            # would collide with the -1 "no permission to list pods" sentinel.
+            accelerators_available = max(
+                0, accelerator_allocatable - allocated_qty)
 
         # Exclude multi-host TPUs from being processed.
         # TODO(Doyoung): Remove the logic when adding support for
@@ -4653,7 +4784,10 @@ def get_kubernetes_node_info(
         node_info_dict[node.metadata.name] = models.KubernetesNodeInfo(
             name=node.metadata.name,
             accelerator_type=accelerator_name,
-            total={'accelerator_count': int(accelerator_count)},
+            total={
+                'accelerator_count': int(accelerator_count),
+                'accelerator_allocatable': int(accelerator_allocatable)
+            },
             free={'accelerators_available': int(accelerators_available)},
             ip_address=node_ip,
             cpu_count=cpu_count,
@@ -4848,6 +4982,14 @@ def set_autodown_annotations(handle: 'backends.CloudVmRayResourceHandle',
 
 
 def get_context_from_config(provider_config: Dict[str, Any]) -> Optional[str]:
+    """The context recorded for this cluster at provision time.
+
+    This is the cluster's *control* context. Prefer the explicit
+    get_control_context_from_config / get_execution_context_from_config at
+    new call sites, so that a reader of the code (and of a future
+    multi-cluster placement change) can tell which of the two a call site
+    meant; they are the same string for every cluster today.
+    """
     context = provider_config.get('context')
     assert isinstance(context, str)
     if context == kubernetes.in_cluster_context_name():
@@ -4855,6 +4997,83 @@ def get_context_from_config(provider_config: Dict[str, Any]) -> Optional[str]:
         # to use in-cluster auth by setting the context to None.
         context = None
     return context
+
+
+def get_control_context_from_config(
+        provider_config: Dict[str, Any]) -> Optional[str]:
+    """The context holding the objects SkyPilot created for this cluster.
+
+    Identical to get_context_from_config; a distinct name so a call site can
+    say that the submitting cluster is what it means, rather than leaving that
+    to be inferred. See get_execution_context_from_config for why the two can
+    differ.
+    """
+    return get_context_from_config(provider_config)
+
+
+def get_execution_context_from_config(
+        provider_config: Dict[str, Any]) -> Optional[str]:
+    """The context this cluster's pods actually run on.
+
+    SkyPilot has a single notion of "the context" for a cluster: the one
+    written to `provider.context` at provision time and read back through
+    get_context_from_config. That works because the cluster SkyPilot submits
+    to is the cluster the pods run on.
+
+    A multi-cluster admission layer breaks that identity: the pods can be
+    admitted somewhere other than where they were submitted. The submitting
+    cluster keeps the objects SkyPilot created (and the API server it talks
+    to), while the pods run wherever there was room. Two questions then have
+    two answers:
+
+    - the *control* context -- where SkyPilot submitted, and so where
+      everything it writes on the cluster's behalf goes;
+    - the *execution* context -- where the pods run, and so what to exec
+      into, and read logs and events from.
+
+    Unless a provisioner records the placement under
+    `constants.PROVIDER_EXECUTION_CONTEXT_KEY`, this falls back to the
+    control context, which is the right answer whenever a cluster runs where
+    it was submitted -- that is, for every cluster today.
+
+    This resolves the context and nothing else. The namespace still comes
+    from get_namespace_from_config, and any object a caller addresses by name
+    is still named as the submitting cluster named it -- the head Deployment
+    get_command_runners targets, for one. Whoever first resolves a real
+    placement owns those too: a context alone is not enough to reach a pod in
+    a cluster that holds different objects.
+    """
+    recorded = provider_config.get(
+        kubernetes_constants.PROVIDER_EXECUTION_CONTEXT_KEY)
+    if recorded is None:
+        return get_control_context_from_config(provider_config)
+    if recorded == kubernetes.in_cluster_context_name():
+        # Mirrors get_context_from_config: the in-cluster context name is not
+        # a kubeconfig entry, and passing it on would defeat in-cluster auth.
+        return None
+    return recorded
+
+
+def set_execution_context_in_config(provider_config: Dict[str, Any],
+                                    context: Optional[str]) -> None:
+    """Record the context a cluster's pods run on in its provider config.
+
+    A no-op for a cluster with no context, so that the fallback in
+    get_execution_context_from_config stays in charge rather than a null
+    placement being pinned.
+
+    Note the value is recorded raw, exactly as `provider.context` holds it:
+    the in-cluster context name is mapped to None on read, by the same
+    accessor that maps `provider.context`.
+
+    Mutating the provider config is all this does. Whether a later reader
+    sees the placement depends on the caller persisting that config -- into
+    the cluster record, for a provisioner writing it at launch.
+    """
+    if context is None:
+        return
+    provider_config[
+        kubernetes_constants.PROVIDER_EXECUTION_CONTEXT_KEY] = context
 
 
 def get_skypilot_pods(context: Optional[str] = None) -> List[Any]:
@@ -5380,11 +5599,10 @@ def should_exclude_pod_from_gpu_allocation(pod) -> bool:
 def get_cleaned_context_and_cloud_str(
         context: Optional[str]) -> Tuple[Optional[str], str]:
     """Return the cleaned context and relevant cloud string from a context."""
-    cloud_str = 'kubernetes'
-    if context is not None and context.startswith('ssh-'):
-        cloud_str = 'ssh'
-        context = context[len('ssh-'):]
-    return context, cloud_str
+    # Lives in infra_utils so that low-level modules which cannot import this
+    # one (command_runner, which this module's import chain depends on) can
+    # resolve a context the same way. Re-exported here for existing callers.
+    return infra_utils.get_cleaned_context_and_cloud_str(context)
 
 
 def get_pvc_events(context: Optional[str],

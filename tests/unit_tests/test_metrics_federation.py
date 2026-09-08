@@ -94,6 +94,19 @@ def test_federation_stats_summary_never_raises_on_missing_bytes():
     assert 'wire=unknown' in out
 
 
+def test_federation_stats_summary_without_port_forward_phase():
+    # Slurm federation runs curl on the login node over SSH: there is no
+    # port-forward phase, so the breakdown must not report one as
+    # 'incomplete'.
+    stats = metrics_utils.FederationStats(has_port_forward=False)
+    assert stats.summary() == 'federate=incomplete'
+    stats.federate_seconds = 0.5
+    stats.body_bytes = 2 * 1024 * 1024
+    out = stats.summary()
+    assert out.startswith('federate=0.50s, body=2.0MiB')
+    assert 'port_forward' not in out
+
+
 # --- _handle_federation_result() classification ---
 
 

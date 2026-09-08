@@ -129,41 +129,6 @@ export function computeJobGroupStatus(tasks) {
   return 'SUCCEEDED';
 }
 
-/**
- * Shared fetch args for the cross-page managed-jobs summary cache entry
- * (the `getManagedJobsForOtherPages` preload key, also read directly by the
- * infra/users/workspaces pages).
- *
- * Every reader and the preloader MUST use this exact object so the cache key
- * (function name + JSON.stringify(args), see lib/cache.js) stays shared.
- *
- * `fields` is the union of what those consumers actually read (plus the
- * request fields the connector transform derives them from: `infra` and
- * `resources_str_full` come from cloud/region/cluster_resources*). Without
- * the trim, this fetch returns every non-finished job with its full inline
- * YAML — tens of MB at 10k+ pending jobs — and each visit both writes that
- * blob into the API server's requests DB and reads it back out through a
- * per-process serialized reader, which is measurably what makes the
- * dashboard's critical-path /api/get calls (and hence perceived page load)
- * slow under concurrent use.
- */
-export const MANAGED_JOBS_SUMMARY_ARGS = Object.freeze({
-  allUsers: true,
-  skipFinished: true,
-  fields: Object.freeze([
-    'job_id',
-    'job_name',
-    'status',
-    'user_hash',
-    'workspace',
-    'cloud',
-    'region',
-    'accelerators',
-    'cluster_resources',
-    'cluster_resources_full',
-  ]),
-});
-
 export async function getManagedJobs(options = {}) {
   try {
     const {
@@ -175,6 +140,7 @@ export async function getManagedJobs(options = {}) {
       userMatch,
       workspaceMatch,
       poolMatch,
+      infraMatch,
       page,
       limit,
       statuses,
@@ -191,6 +157,7 @@ export async function getManagedJobs(options = {}) {
     if (userMatch !== undefined) body.user_match = userMatch;
     if (workspaceMatch !== undefined) body.workspace_match = workspaceMatch;
     if (poolMatch !== undefined) body.pool_match = poolMatch;
+    if (infraMatch !== undefined) body.infra_match = infraMatch;
     if (page !== undefined) body.page = page;
     if (limit !== undefined) body.limit = limit;
     if (statuses !== undefined && statuses.length > 0) body.statuses = statuses;
@@ -219,6 +186,9 @@ export async function getManagedJobs(options = {}) {
     }
     const fetchedData = await apiClient.get(`/api/get?request_id=${id}`);
     let errorMessage = fetchedData.statusText;
+    // Recorded rather than thrown from inside the parse below: a throw there
+    // lands in that block's own catch and is reported as a parse failure.
+    let infraFilterUnsupported = null;
     if (fetchedData.status === 500) {
       try {
         const data = await fetchedData.json();
@@ -228,6 +198,16 @@ export async function getManagedJobs(options = {}) {
             // Handle specific error types
             if (error.type && error.type === CLUSTER_NOT_UP_ERROR) {
               return { jobs: [], total: 0, controllerStopped: true };
+            } else if (
+              error.type === NOT_SUPPORTED_ERROR &&
+              infraMatch !== undefined
+            ) {
+              // Only the infra filter can be refused here, and only by a
+              // controller too old to apply it. Carry that out so the page can
+              // say so, rather than fall back to an unfiltered table -- which
+              // is the one thing this filter must never show.
+              infraFilterUnsupported =
+                error.message || 'Filtering by infra is not supported.';
             } else {
               errorMessage = error.message || String(data.detail.error);
             }
@@ -244,6 +224,11 @@ export async function getManagedJobs(options = {}) {
         errorMessage = String(parseError);
       }
     }
+    if (infraFilterUnsupported) {
+      const unsupported = new Error(infraFilterUnsupported);
+      unsupported.infraFilterUnsupported = true;
+      throw unsupported;
+    }
     // Handle all error status codes (4xx, 5xx, etc.)
     if (!fetchedData.ok) {
       const msg = `API request to get managed jobs result failed with status ${fetchedData.status}, error: ${errorMessage}`;
@@ -258,6 +243,11 @@ export async function getManagedJobs(options = {}) {
       : (parsed?.total ?? managedJobs.length);
     const totalNoFilter = parsed?.total_no_filter || total;
     const statusCounts = parsed?.status_counts || {};
+    // The distinct `--infra` specs across everything the other filters select,
+    // computed server-side because the queue is paginated. Absent from a server
+    // or jobs controller that predates the field, in which case the page falls
+    // back to deriving the options from the rows it has.
+    const infraOptions = parsed?.infra_options || [];
 
     // Process jobs data
     const jobData = managedJobs.map((job) => {
@@ -336,6 +326,8 @@ export async function getManagedJobs(options = {}) {
         resources_str_full: job.cluster_resources_full || cluster_resources,
         cloud: cloud,
         region: job.region,
+        // Zone; for Slurm this is the partition the job was scheduled to.
+        zone: job.zone && job.zone !== '-' ? job.zone : null,
         infra: infra,
         full_infra: full_infra,
         recoveries: job.recovery_count,
@@ -350,6 +342,7 @@ export async function getManagedJobs(options = {}) {
         submitted_at: job.submitted_at
           ? new Date(job.submitted_at * 1000)
           : null,
+        started_at: job.start_at ? new Date(job.start_at * 1000) : null,
         events: events,
         dag_yaml: job.user_yaml,
         entrypoint: job.entrypoint,
@@ -387,6 +380,7 @@ export async function getManagedJobs(options = {}) {
       totalNoFilter,
       controllerStopped: false,
       statusCounts,
+      infraOptions,
     };
   } catch (error) {
     console.error('Error fetching managed job data:', error);

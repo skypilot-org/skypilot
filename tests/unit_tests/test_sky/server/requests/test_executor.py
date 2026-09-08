@@ -20,6 +20,7 @@ from sky.server import daemons as server_daemons
 from sky.server.requests import continue_condition as continue_condition_lib
 from sky.server.requests import executor
 from sky.server.requests import payloads
+from sky.server.requests import preconditions
 from sky.server.requests import process
 from sky.server.requests import requests as requests_lib
 from sky.skylet import constants
@@ -175,6 +176,117 @@ async def test_api_cancel_race_condition(isolated_database):
     updated = requests_lib.get_request('race-cancel-before')
     assert updated is not None
     assert updated.status == requests_lib.RequestStatus.CANCELLED
+
+
+def _make_pending_request(request_id: str) -> requests_lib.Request:
+    return requests_lib.Request(request_id=request_id,
+                                name='test-request',
+                                entrypoint=dummy_entrypoint,
+                                request_body=payloads.RequestBody(),
+                                status=requests_lib.RequestStatus.PENDING,
+                                created_at=0.0,
+                                user_id='test-user')
+
+
+@pytest.mark.asyncio
+async def test_enqueue_failure_marks_request_failed(isolated_database):
+    """A failed queue put must leave the request FAILED, not PENDING."""
+    req = _make_pending_request('enqueue-fails')
+    assert await requests_lib.create_if_not_exists_async(req) is True
+
+    queue = mock.Mock()
+    queue.put_async = mock.AsyncMock(side_effect=RuntimeError('put failed'))
+    with mock.patch.object(executor, '_get_queue', return_value=queue):
+        with pytest.raises(RuntimeError, match='put failed'):
+            await executor.schedule_prepared_request(req)
+
+    updated = requests_lib.get_request('enqueue-fails')
+    assert updated is not None
+    assert updated.status == requests_lib.RequestStatus.FAILED
+    error = updated.get_error()
+    assert error is not None
+    assert 'put failed' in str(error['object'])
+
+
+@pytest.mark.asyncio
+async def test_enqueue_cancellation_marks_request_failed(isolated_database):
+    """A cancelled queue put must not strand the request in PENDING."""
+    req = _make_pending_request('enqueue-cancelled')
+    assert await requests_lib.create_if_not_exists_async(req) is True
+
+    queue = mock.Mock()
+    queue.put_async = mock.AsyncMock(side_effect=asyncio.CancelledError())
+    with mock.patch.object(executor, '_get_queue', return_value=queue):
+        with pytest.raises(asyncio.CancelledError):
+            await executor.schedule_prepared_request(req)
+
+    updated = requests_lib.get_request('enqueue-cancelled')
+    assert updated is not None
+    assert updated.status == requests_lib.RequestStatus.FAILED
+
+
+@pytest.mark.parametrize('claimed_status', [
+    requests_lib.RequestStatus.RUNNING,
+    requests_lib.RequestStatus.WAITING,
+])
+@pytest.mark.asyncio
+async def test_enqueue_failure_does_not_clobber_claimed_request(
+        isolated_database, claimed_status):
+    """A row claimed by a worker before the failure mark is left untouched.
+
+    The queue put may commit and still raise (e.g. a timeout racing the
+    commit); a worker can then dequeue and claim the request -- and even park
+    it WAITING for a retry -- before the failure path runs. The failure mark
+    must not overwrite the claimed run.
+    """
+    req = _make_pending_request('enqueue-claimed')
+    assert await requests_lib.create_if_not_exists_async(req) is True
+
+    async def claim_then_fail(input_tuple):
+        del input_tuple
+        with requests_lib.update_request('enqueue-claimed') as claimed:
+            assert claimed is not None
+            claimed.status = claimed_status
+        raise RuntimeError('put failed after commit')
+
+    queue = mock.Mock()
+    queue.put_async = mock.AsyncMock(side_effect=claim_then_fail)
+    with mock.patch.object(executor, '_get_queue', return_value=queue):
+        with pytest.raises(RuntimeError, match='put failed after commit'):
+            await executor.schedule_prepared_request(req)
+
+    updated = requests_lib.get_request('enqueue-claimed')
+    assert updated is not None
+    assert updated.status == claimed_status
+
+
+class _AlwaysMetPrecondition(preconditions.Precondition):
+
+    async def check(self):
+        return True, None
+
+
+@pytest.mark.asyncio
+async def test_enqueue_failure_with_precondition_marks_request_failed(
+        isolated_database):
+    """The terminal-state guard must also cover the precondition path."""
+    req = _make_pending_request('enqueue-fails-precondition')
+    assert await requests_lib.create_if_not_exists_async(req) is True
+
+    queue = mock.Mock()
+    queue.put_async = mock.AsyncMock(side_effect=RuntimeError('put failed'))
+    with mock.patch.object(executor, '_get_queue', return_value=queue):
+        before = set(preconditions.background_tasks)
+        await executor.schedule_prepared_request(
+            req, precondition=_AlwaysMetPrecondition(req.request_id))
+        new_tasks = preconditions.background_tasks - before
+        assert len(new_tasks) == 1
+        with pytest.raises(RuntimeError, match='put failed'):
+            await next(iter(new_tasks))
+
+    updated = requests_lib.get_request('enqueue-fails-precondition')
+    assert updated is not None
+    assert updated.status == requests_lib.RequestStatus.FAILED
 
 
 @pytest.mark.asyncio
@@ -716,11 +828,13 @@ async def test_request_worker_retry_execution_retryable_error(
 class _PauseHarness:
     """Bundles the worker, queue, and request id for pause/watch tests."""
 
-    def __init__(self, worker, request_id, queue_items, sleep_calls):
+    def __init__(self, worker, request_id, queue_items, sleep_calls, queued):
         self.worker = worker
         self.request_id = request_id
         self.queue_items = queue_items
         self.sleep_calls = sleep_calls
+        # Set on every requeue; the async-path tests wait on it.
+        self.queued = queued
 
     def run(self, condition, retry_wait_seconds=30):
         """Drive handle_task_result with an ExecutionPausedError."""
@@ -754,6 +868,8 @@ def pause_harness(isolated_database, monkeypatch):
     queue_items = []
     backing = queue_lib.Queue()
 
+    queued = threading.Event()
+
     class MockRequestQueue:
 
         def get(self):
@@ -765,6 +881,9 @@ def pause_harness(isolated_database, monkeypatch):
         def put(self, item):
             queue_items.append(item)
             backing.put(item)
+            # Signals the async-path tests, whose requeue happens on the
+            # shared request event loop after handle_task_result returned.
+            queued.set()
 
     request_queue = MockRequestQueue()
     monkeypatch.setattr(executor, '_get_queue',
@@ -783,7 +902,7 @@ def pause_harness(isolated_database, monkeypatch):
         config=server_config.WorkerConfig(garanteed_parallelism=1,
                                           burstable_parallelism=0,
                                           num_db_connections_per_worker=0))
-    return _PauseHarness(worker, request_id, queue_items, sleep_calls)
+    return _PauseHarness(worker, request_id, queue_items, sleep_calls, queued)
 
 
 class _RecordingCondition(continue_condition_lib.ContinueCondition):
@@ -797,7 +916,12 @@ class _RecordingCondition(continue_condition_lib.ContinueCondition):
         self._verdict = verdict
         self.calls = []
 
-    def wait(self, *, is_cancelled, fallback_wait_seconds) -> bool:
+    def wait(self,
+             *,
+             is_cancelled,
+             fallback_wait_seconds,
+             update_status_msg=None) -> bool:
+        del update_status_msg  # This condition reports no reason.
         self.calls.append({
             'is_cancelled': is_cancelled(),
             'fallback_wait_seconds': fallback_wait_seconds,
@@ -870,6 +994,320 @@ def test_pause_base_condition_dropped_if_cancelled_during_wait(
     assert pause_harness.queue_items == []
 
 
+class _ReportingCondition(continue_condition_lib.ContinueCondition):
+    """A condition that pushes fresh reasons while parked."""
+
+    def __init__(self, reasons, before_report=None):
+        self._reasons = reasons
+        self._before_report = before_report
+        self.got_updater = None
+
+    def wait(self,
+             *,
+             is_cancelled,
+             fallback_wait_seconds,
+             update_status_msg=None) -> bool:
+        del is_cancelled, fallback_wait_seconds
+        self.got_updater = update_status_msg
+        if self._before_report is not None:
+            self._before_report()
+        for reason in self._reasons:
+            assert update_status_msg is not None
+            update_status_msg(reason)
+        return True
+
+
+def test_pause_status_msg_refreshed_while_parked(pause_harness):
+    """A parked request's status message follows the condition's latest reason.
+
+    A pause can last hours (e.g. waiting on queue admission), so the message
+    the client is shown must not be frozen at the one written when the request
+    parked. The scheduler owns the formatting, so the refreshed message carries
+    the same suffix as the initial one.
+    """
+    condition = _ReportingCondition(
+        reasons=['Pending (Queue: q, Position: 4)', 'Pending (Queue: q)'])
+
+    pause_harness.run(condition, retry_wait_seconds=30)
+
+    assert condition.got_updater is not None
+    updated = requests_lib.get_request(pause_harness.request_id,
+                                       fields=['status_msg'])
+    # The last reason wins, formatted exactly like the initial message.
+    assert updated.status_msg == 'Pending (Queue: q) (waiting to resume)'
+
+
+def test_pause_status_msg_refresh_skipped_once_not_waiting(pause_harness):
+    """A late refresh must not resurrect a parked message.
+
+    The wait runs concurrently with cancellation (and with the resume that
+    follows it), so a reason arriving after the request left WAITING must be
+    dropped rather than overwrite the newer state's message.
+    """
+
+    def cancel():
+        with requests_lib.update_request(pause_harness.request_id) as request:
+            request.status = requests_lib.RequestStatus.CANCELLED
+            request.status_msg = 'cancelled by user'
+
+    condition = _ReportingCondition(reasons=['Pending (Queue: q, Position: 4)'],
+                                    before_report=cancel)
+
+    pause_harness.run(condition, retry_wait_seconds=30)
+
+    updated = requests_lib.get_request(pause_harness.request_id,
+                                       fields=['status_msg'])
+    assert updated.status_msg == 'cancelled by user'
+
+
+def test_pause_status_msg_reason_truncated(pause_harness):
+    """A long reason is truncated but keeps the suffix readable."""
+    condition = _ReportingCondition(reasons=['x' * 500])
+
+    pause_harness.run(condition, retry_wait_seconds=30)
+
+    updated = requests_lib.get_request(pause_harness.request_id,
+                                       fields=['status_msg'])
+    assert updated.status_msg.endswith('... (waiting to resume)')
+    assert len(updated.status_msg) < 250
+
+
+class _LegacyWaitCondition:
+    """A duck-typed condition whose wait() predates update_status_msg."""
+
+    def __init__(self):
+        self.calls = []
+
+    def wait(self, *, is_cancelled, fallback_wait_seconds) -> bool:
+        self.calls.append(fallback_wait_seconds)
+        del is_cancelled
+        return True
+
+
+class _KwargsWaitCondition:
+    """A duck-typed condition that absorbs unknown kwargs."""
+
+    def __init__(self):
+        self.kwargs = []
+
+    def wait(self, *, is_cancelled, fallback_wait_seconds, **kwargs) -> bool:
+        del is_cancelled, fallback_wait_seconds
+        self.kwargs.append(sorted(kwargs))
+        return True
+
+
+def test_pause_tolerates_condition_wait_without_the_new_kwarg(pause_harness):
+    """A condition from a separately versioned package still waits normally.
+
+    The continue-condition contract is duck-typed, so an implementation whose
+    wait() predates update_status_msg must keep parking the request rather than
+    failing the call and degrading to a fixed-backoff retry loop.
+    """
+    condition = _LegacyWaitCondition()
+
+    request_element = pause_harness.run(condition, retry_wait_seconds=30)
+
+    assert condition.calls == [30]
+    assert pause_harness.queue_items == [request_element]
+
+
+def test_pause_passes_the_new_kwarg_to_a_kwargs_absorbing_wait(pause_harness):
+    """A wait() with **kwargs is given the updater rather than skipped."""
+    condition = _KwargsWaitCondition()
+
+    pause_harness.run(condition, retry_wait_seconds=30)
+
+    assert condition.kwargs == [['update_status_msg']]
+
+
+class _AsyncRecordingCondition(continue_condition_lib.ContinueCondition):
+    """A condition whose wait_async() returns a fixed verdict.
+
+    Records what the executor drives it with, so tests can assert the async
+    contract: awaitable callbacks, and the coroutine running off the monitor
+    thread on the shared request event loop.
+    """
+
+    def __init__(self, verdict: bool, reasons=()):
+        self._verdict = verdict
+        self._reasons = reasons
+        self.calls = []
+        self.done = threading.Event()
+
+    def wait(self, **kwargs) -> bool:
+        raise AssertionError(
+            'sync wait() must not run for an async-capable condition')
+
+    async def wait_async(self,
+                         *,
+                         is_cancelled,
+                         fallback_wait_seconds,
+                         update_status_msg=None) -> bool:
+        self.calls.append({
+            'is_cancelled': await is_cancelled(),
+            'fallback_wait_seconds': fallback_wait_seconds,
+            'thread': threading.current_thread(),
+        })
+        for reason in self._reasons:
+            assert update_status_msg is not None
+            await update_status_msg(reason)
+        self.done.set()
+        return self._verdict
+
+
+def test_pause_async_condition_reschedules(pause_harness):
+    """An async condition's True verdict requeues the request.
+
+    Also pins down the contract: the coroutine runs off the monitor thread,
+    and is_cancelled is awaitable there.
+    """
+    condition = _AsyncRecordingCondition(verdict=True)
+
+    request_element = pause_harness.run(condition, retry_wait_seconds=30)
+
+    assert pause_harness.queued.wait(timeout=10)
+    assert pause_harness.queue_items == [request_element]
+    assert condition.calls == [{
+        'is_cancelled': False,
+        'fallback_wait_seconds': 30,
+        'thread': mock.ANY,
+    }]
+    assert condition.calls[0]['thread'] is not threading.current_thread()
+    updated = requests_lib.get_request(pause_harness.request_id,
+                                       fields=['status'])
+    assert updated.status == requests_lib.RequestStatus.WAITING
+
+
+def test_pause_async_condition_dropped_when_wait_returns_false(pause_harness):
+    """An async condition's False verdict drops the request (no reschedule)."""
+    condition = _AsyncRecordingCondition(verdict=False)
+
+    pause_harness.run(condition)
+
+    assert condition.done.wait(timeout=10)
+    # The requeue (if any, wrongly) would follow right after the verdict on
+    # the same coroutine; give it a beat before asserting it never happened.
+    assert not pause_harness.queued.wait(timeout=0.2)
+    assert pause_harness.queue_items == []
+
+
+def test_pause_async_status_msg_refreshed_while_parked(pause_harness):
+    """A reason pushed through the awaitable updater lands on the request."""
+    condition = _AsyncRecordingCondition(
+        verdict=True, reasons=['Pending (Queue: q, Position: 4)'])
+
+    pause_harness.run(condition, retry_wait_seconds=30)
+
+    assert pause_harness.queued.wait(timeout=10)
+    updated = requests_lib.get_request(pause_harness.request_id,
+                                       fields=['status_msg'])
+    assert updated.status_msg == (
+        'Pending (Queue: q, Position: 4) (waiting to resume)')
+
+
+class _GatedAsyncCondition(continue_condition_lib.ContinueCondition):
+    """A wait_async() that stays parked until the test releases it."""
+
+    def __init__(self):
+        self.release = threading.Event()
+
+    async def wait_async(self,
+                         *,
+                         is_cancelled,
+                         fallback_wait_seconds,
+                         update_status_msg=None) -> bool:
+        del is_cancelled, fallback_wait_seconds, update_status_msg
+        await asyncio.get_running_loop().run_in_executor(
+            None, self.release.wait)
+        return True
+
+
+def test_pause_async_wait_does_not_hold_the_monitor_thread(pause_harness):
+    """handle_task_result returns while the async wait is still parked.
+
+    This is the point of wait_async: parked requests can outnumber executor
+    workers by orders of magnitude, so the wait must not keep the per-request
+    monitor thread alive for its duration.
+    """
+    condition = _GatedAsyncCondition()
+
+    # Returns immediately; on a thread-blocking wait this would deadlock
+    # until the (never-released) gate.
+    request_element = pause_harness.run(condition, retry_wait_seconds=30)
+
+    assert pause_harness.queue_items == []
+    condition.release.set()
+    assert pause_harness.queued.wait(timeout=10)
+    assert pause_harness.queue_items == [request_element]
+
+
+class _FailingAsyncCondition(continue_condition_lib.ContinueCondition):
+    """A wait_async() that dies mid-wait."""
+
+    async def wait_async(self, **kwargs) -> bool:
+        del kwargs
+        raise RuntimeError('probe exploded')
+
+
+def test_pause_async_wait_failure_falls_back_to_fixed_wait(pause_harness):
+    """A failing wait_async degrades to one fixed backoff, then reschedules.
+
+    Same policy as the sync path: a broken probe must not drop the request.
+    """
+    condition = _FailingAsyncCondition()
+
+    request_element = pause_harness.run(condition, retry_wait_seconds=0)
+
+    assert pause_harness.queued.wait(timeout=10)
+    assert pause_harness.queue_items == [request_element]
+
+
+class _NonCoroutineWaitAsyncCondition(continue_condition_lib.ContinueCondition):
+    """A condition whose wait_async attribute is not a coroutine function."""
+
+    def __init__(self):
+        self.sync_calls = 0
+
+    def wait_async(self, **kwargs) -> bool:
+        raise AssertionError('a non-coroutine wait_async must be ignored')
+
+    def wait(self,
+             *,
+             is_cancelled,
+             fallback_wait_seconds,
+             update_status_msg=None) -> bool:
+        del is_cancelled, fallback_wait_seconds, update_status_msg
+        self.sync_calls += 1
+        return True
+
+
+def test_pause_non_coroutine_wait_async_uses_sync_path(pause_harness):
+    """Only a real coroutine function opts into the waiter loop.
+
+    A plain callable named wait_async cannot be awaited; degrading it to the
+    fallback wait would silently discard the condition's wait() policy, so
+    the executor must keep the thread-based path instead.
+    """
+    condition = _NonCoroutineWaitAsyncCondition()
+
+    request_element = pause_harness.run(condition, retry_wait_seconds=30)
+
+    assert condition.sync_calls == 1
+    assert pause_harness.queue_items == [request_element]
+
+
+@pytest.mark.parametrize(('reason', 'suffix', 'expected'), [
+    ('Pending (Queue: q)', 'waiting to resume',
+     'Pending (Queue: q) (waiting to resume)'),
+    ('multi\nline   reason', 'retrying in 5s',
+     'multi line reason (retrying in 5s)'),
+    ('', 'waiting to resume', 'Waiting to resume'),
+])
+def test_waiting_status_msg_formatting(reason, suffix, expected):
+    """Whitespace is collapsed, and an empty reason leaves just the suffix."""
+    assert executor._waiting_status_msg(reason, suffix) == expected
+
+
 def test_pause_marks_executor_free_before_wait(pause_harness, monkeypatch):
     """The freed worker process is accounted for before the pause wait runs.
 
@@ -891,8 +1329,12 @@ def test_pause_marks_executor_free_before_wait(pause_harness, monkeypatch):
 
     class _GaugeWatchingCondition(continue_condition_lib.ContinueCondition):
 
-        def wait(self, *, is_cancelled, fallback_wait_seconds) -> bool:
-            del is_cancelled, fallback_wait_seconds
+        def wait(self,
+                 *,
+                 is_cancelled,
+                 fallback_wait_seconds,
+                 update_status_msg=None) -> bool:
+            del is_cancelled, fallback_wait_seconds, update_status_msg
             inc_count_at_wait.append(gauge.inc.call_count)
             return True
 
@@ -1451,3 +1893,38 @@ def test_saturating_request_executor_does_not_block_auth():
             except Exception:  # pylint: disable=broad-except
                 pass
         _reset_thread_executors()
+
+
+def test_maybe_observe_request_pending_first_execution_only():
+    """Pending-time metric observes first executions only.
+
+    The retry/pause requeue path sets WAITING (and clears pid) before
+    re-enqueueing, so a WAITING request at execution start is a
+    re-execution and must not re-observe its age; a PENDING request is
+    the first start and must observe exactly once.
+    """
+
+    def make_request(status):
+        return requests_lib.Request(
+            request_id='pending-metric-test',
+            name='test-request',
+            status=status,
+            created_at=time.time() - 5,
+            user_id='test-user',
+            entrypoint=dummy_entrypoint,
+            request_body=payloads.RequestBody(),
+            schedule_type=requests_lib.ScheduleType.SHORT)
+
+    with mock.patch.object(executor.metrics_utils,
+                           'observe_request_pending') as observe:
+        executor._maybe_observe_request_pending(  # pylint: disable=protected-access
+            make_request(requests_lib.RequestStatus.PENDING))
+        assert observe.call_count == 1
+        name, schedule_type, pending_seconds = observe.call_args[0]
+        assert name == 'test-request'
+        assert schedule_type == requests_lib.ScheduleType.SHORT.value
+        assert pending_seconds >= 5
+
+        executor._maybe_observe_request_pending(  # pylint: disable=protected-access
+            make_request(requests_lib.RequestStatus.WAITING))
+        assert observe.call_count == 1

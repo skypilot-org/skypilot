@@ -97,8 +97,16 @@ def cleanup_storage(yaml_content: str) -> bool:
         # FAILED_CLEANUP, ha_recovery_for_consolidation_mode respawns the
         # controller, the controller re-reads the same yaml and crashes on
         # the same stale entry — forever.
+        # Only construct the storages that teardown_ephemeral_storage()
+        # below will actually delete (persistent=False). Constructing a
+        # persistent storage here is not just unnecessary, it is harmful:
+        # construct() auto-creates missing buckets, so if the user deletes
+        # their bucket after the service finishes, this cleanup would
+        # silently re-create and leak it.
         for storage_name in list(task.storage_mounts.keys()):
             storage = task.storage_mounts[storage_name]
+            if storage.persistent:
+                continue
             try:
                 storage.construct()
             except exceptions.StorageBucketGetError as e:

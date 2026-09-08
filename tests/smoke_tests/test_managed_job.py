@@ -106,6 +106,23 @@ def test_managed_jobs_basic(generic_cloud: str):
             # --since and --after are mutually exclusive (rejected client-side).
             's=$(sky jobs queue --since 1h --after 2020-01-01 2>&1) || true; '
             'echo "$s"; echo "$s" | grep -i "mutually exclusive"',
+            # Infra filtering, matched server-side against the cloud/region
+            # recorded for each job: the cloud both jobs ran on keeps them,
+            # and a cloud nothing ran on drops them. `nonexistent-cloud`
+            # parses as a cloud name and simply matches no row -- an
+            # unmatched filter is an empty queue, not an error.
+            f's=$(sky jobs queue --infra {generic_cloud}); echo "$s"; '
+            f'echo "$s" | grep {name}-1 && echo "$s" | grep {name}-2',
+            # The negative case has to prove the queue answered before it
+            # concludes anything from an absent name: an error prints neither
+            # job either, so `! grep` alone would pass on a broken filter.
+            f's=$(sky jobs queue --infra nonexistent-cloud); echo "$s"; '
+            f'echo "$s" | grep -q "Managed jobs" && '
+            f'! echo "$s" | grep {name}-1 && ! echo "$s" | grep {name}-2',
+            # A malformed spec is rejected rather than silently ignored --
+            # a dropped infra filter would answer with jobs on other infra.
+            's=$(sky jobs queue --infra "aws//us-east-1" 2>&1) || true; '
+            'echo "$s"; echo "$s" | grep -i "invalid infra format"',
         ],
         # TODO(zhwu): Change to f'sky jobs cancel -y -n {name}-1 -n {name}-2' when
         # canceling multiple job names is supported.
@@ -1538,23 +1555,25 @@ def test_managed_jobs_storage(generic_cloud: str):
             'azure': storage_lib.StoreType.AZURE,
             'nebius': storage_lib.StoreType.NEBIUS,
         }
-        # A remote API server may have only a subset of storage clouds
-        # enabled (e.g. the shared GKE API server only enables AWS), and
+        # An API server may have only a subset of storage clouds enabled, and
         # specifying a store whose cloud is disabled on the server fails the
-        # job at FAILED_PRECHECKS. Only pin stores whose cloud is enabled on
-        # the server.
-        if smoke_tests_utils.is_remote_server_test():
-            enabled_storage_cloud_names = {
-                str(cloud).lower()
-                for cloud in smoke_tests_utils.get_enabled_cloud_storages()
-            }
-            pinned_stores = {
-                store_str: store_type
-                for store_str, store_type in pinned_stores.items()
-                if store_type.to_cloud().lower() in enabled_storage_cloud_names
-            }
-            assert pinned_stores, ('No object store enabled on the API server: '
-                                   f'{enabled_storage_cloud_names}')
+        # job at FAILED_PRECHECKS. Only pin stores whose cloud is enabled.
+        #
+        # This applies to a local API server too, not just a remote one: the
+        # set of enabled storage clouds is a property of the server, not of how
+        # the test reaches it. Gating this filter on remote-server runs left
+        # local runs pinning stores that the server could not serve.
+        enabled_storage_cloud_names = {
+            str(cloud).lower()
+            for cloud in smoke_tests_utils.get_enabled_cloud_storages()
+        }
+        pinned_stores = {
+            store_str: store_type
+            for store_str, store_type in pinned_stores.items()
+            if store_type.to_cloud().lower() in enabled_storage_cloud_names
+        }
+        assert pinned_stores, ('No object store enabled on the API server: '
+                               f'{enabled_storage_cloud_names}')
         # For Azure, the bucket lands in the configured storage account when
         # the API server shares the client config, or in the default per-user
         # account (AzureBlobStore's default region) when a remote API server
@@ -1835,12 +1854,25 @@ def test_managed_jobs_inline_env(generic_cloud: str):
                 job_name=name,
                 job_status=[sky.ManagedJobStatus.SUCCEEDED],
                 timeout=55),
-            f'JOB_ROW=$(sky jobs queue -v | grep {name} | head -n1) && '
-            f'echo "$JOB_ROW" && echo "$JOB_ROW" | grep -E "DONE|ALIVE" | grep "SUCCEEDED" && '
+            # Dump the queue before matching in it: when the row is
+            # missing, the grep alone leaves no evidence of what the queue
+            # actually returned.
+            'QUEUE=$(sky jobs queue -v) && echo "$QUEUE" && '
+            # Anchor on a table row (starts with the job id). The captured
+            # output also carries the request's log, streamed from the server,
+            # and a log line that happens to mention the job name would
+            # otherwise win the `head -n1` -- which is how this assertion fails
+            # on a server whose plugins log about the job.
+            f'JOB_ROW=$(echo "$QUEUE" | grep -E "^[0-9]+[[:space:]].*{name}" | head -n1) && '
+            f'echo "JOB_ROW=$JOB_ROW" && echo "$JOB_ROW" | grep -E "DONE|ALIVE" | grep "SUCCEEDED" && '
             f'JOB_ID=$(echo "$JOB_ROW" | awk \'{{print $1}}\') && '
             f'echo "JOB_ID=$JOB_ID" && '
             # Test that logs are still available after the job finishes.
-            'unset SKYPILOT_DEBUG; s=$(sky jobs logs $JOB_ID --refresh) && echo "$s" && echo "$s" | grep "hello world" && '
+            # Scope SKYPILOT_DEBUG to this command: `unset SKYPILOT_DEBUG;`
+            # sat outside the && chain, so an earlier failure skipped the
+            # unset and the head -n2 assertion below then failed on debug
+            # lines rather than reporting the real failure.
+            's=$(SKYPILOT_DEBUG=0 sky jobs logs $JOB_ID --refresh) && echo "$s" && echo "$s" | grep "hello world" && '
             # Make sure we skip the unnecessary logs.
             'echo "$s" | head -n2 | grep "Waiting for"',
         ],
@@ -2950,6 +2982,69 @@ def test_job_group_basic(generic_cloud: str):
 
 @pytest.mark.managed_jobs
 @pytest.mark.kubernetes
+def test_job_group_inter_connection_false(generic_cloud: str):
+    """JobGroup with inter_connection: false skips all networking machinery.
+
+    Tasks must start without the peer-hostname wait and succeed; the
+    networking wait banner must not appear in the task logs.
+    """
+    name = smoke_tests_utils.get_cluster_name()
+    yaml_path = _render_job_group_yaml(
+        'tests/test_job_groups/smoke_inter_connection_false.yaml', name,
+        generic_cloud)
+
+    get_job_id_cmd = (f'sky jobs queue | grep {name} | head -1 | '
+                      f'awk \'{{print $1}}\'')
+    test = smoke_tests_utils.Test(
+        'job_group_inter_connection_false',
+        [
+            f'sky jobs launch {yaml_path} -y -d',
+            smoke_tests_utils.
+            get_cmd_wait_until_managed_job_status_contains_matching_job_name(
+                job_name=name,
+                job_status=[sky.ManagedJobStatus.SUCCEEDED],
+                timeout=360),
+            f'sky jobs logs $({get_job_id_cmd}) --no-follow | '
+            f'grep "JOB-A-DONE"',
+            # No networking machinery: the wait banner must not appear.
+            f'! sky jobs logs $({get_job_id_cmd}) --no-follow | '
+            f'grep "Waiting for network setup"',
+        ],
+        f'sky jobs cancel -y -n {name}',
+        env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
+        timeout=15 * 60,
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.managed_jobs
+@pytest.mark.kubernetes
+def test_job_group_inter_connection_non_k8s_pin_error(generic_cloud: str):
+    """inter_connection: true + a non-Kubernetes infra pin fails at
+    submission with an error naming the contradicting job, without
+    launching anything."""
+    name = smoke_tests_utils.get_cluster_name()
+    yaml_path = _render_job_group_yaml(
+        'tests/test_job_groups/smoke_inter_connection_pin_error.yaml', name,
+        generic_cloud)
+
+    test = smoke_tests_utils.Test(
+        'job_group_inter_connection_non_k8s_pin_error',
+        [
+            f'sky jobs launch {yaml_path} -y 2>&1 | '
+            f'grep "pins non-Kubernetes infra"',
+            # Nothing was submitted.
+            f'! sky jobs queue | grep {name}',
+        ],
+        f'sky jobs cancel -y -n {name} || true',
+        env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
+        timeout=5 * 60,
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.managed_jobs
+@pytest.mark.kubernetes
 def test_job_group_cancelled_logs(generic_cloud: str):
     """Test that logs are accessible for all tasks after a job group is cancelled."""
     name = smoke_tests_utils.get_cluster_name()
@@ -3063,6 +3158,99 @@ def test_job_group_networking_custom_image(generic_cloud: str, image_id: str):
         f'sky jobs cancel -y -n {name}',
         env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
         timeout=15 * 60,
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.managed_jobs
+@pytest.mark.kubernetes
+def test_job_group_networking_recovery():
+    """In-group networking re-establishes after a task is preempted.
+
+    Deletes one task's pod mid-run and asserts, via epoch-tagged connect
+    logs from both tasks, that after recovery (a) the surviving peer
+    reaches the recovered task's new pod, and (b) the recovered task's
+    fresh pod gets networking set up again and reaches its peer.
+    """
+    name = smoke_tests_utils.get_cluster_name()
+    # Task names become the managed cluster names (and the
+    # `skypilot-cluster-name` pod annotation the deletion command greps),
+    # so they must be unique per test run in a shared namespace.
+    suffix = name.replace('-', '')[-8:]
+    srv_task = f'srv{suffix}'
+    png_task = f'png{suffix}'
+    yaml_path = _render_job_group_yaml(
+        'tests/test_job_groups/smoke_networking_recovery.yaml',
+        name,
+        'kubernetes',
+        suffix=suffix)
+
+    get_job_id_cmd = (f'sky jobs queue | grep {name} | head -1 | '
+                      f'awk \'{{print $1}}\'')
+    delete_server_pod_cmd = (
+        'kubectl get pods -l skypilot-cluster-name --no-headers '
+        '-o custom-columns="NAME:.metadata.name,'
+        'CLUSTER:.metadata.annotations.skypilot-cluster-name" | '
+        f'grep -- "{srv_task}-" | grep -v -- "-cloud-cmd" | '
+        'awk \'{print $1}\' | head -1 | xargs kubectl delete pod')
+
+    def wait_connect_after(task: str, epoch_file: str, timeout: int) -> str:
+        """Poll a task's logs for a CONNECT_OK whose epoch is newer than
+        the recorded pod-deletion epoch (pre-deletion lines don't count)."""
+        return (
+            f'DEL=$(cat {epoch_file}); END=$(($(date +%s) + {timeout})); '
+            f'until sky jobs logs $({get_job_id_cmd}) {task} --no-follow | '
+            'grep -o "epoch=[0-9]*" | cut -d= -f2 | '
+            'awk -v t="$DEL" \'$1 > t\' | grep -q .; do '
+            'if [ $(date +%s) -gt $END ]; then '
+            f'echo "Timed out waiting for post-recovery connect from {task}"; '
+            'exit 1; fi; sleep 15; done; '
+            f'echo "{task} reconnected post-recovery"')
+
+    epoch_file = f'/tmp/{name}-del-epoch'
+    test = smoke_tests_utils.Test(
+        'job_group_networking_recovery',
+        [
+            smoke_tests_utils.launch_cluster_for_cloud_cmd('kubernetes', name),
+            f'sky jobs launch {yaml_path} -y -d',
+            smoke_tests_utils.
+            get_cmd_wait_until_managed_job_status_contains_matching_job_name(
+                job_name=name,
+                job_status=[sky.ManagedJobStatus.RUNNING],
+                timeout=300),
+            # Initial connectivity before the preemption, so the recovery
+            # assertions below measure re-establishment, not first setup.
+            (f'END=$(($(date +%s) + 240)); '
+             f'until sky jobs logs $({get_job_id_cmd}) {png_task} '
+             '--no-follow | grep -q CONNECT_OK; do '
+             'if [ $(date +%s) -gt $END ]; then '
+             'echo "Timed out waiting for initial connectivity"; exit 1; fi; '
+             'sleep 10; done'),
+            # Record the deletion epoch, then preempt the server task's pod.
+            f'date +%s | tee {epoch_file}',
+            smoke_tests_utils.run_cloud_cmd_on_cluster(
+                name, cmd=delete_server_pod_cmd),
+            smoke_tests_utils.
+            get_cmd_wait_until_managed_job_status_contains_matching_job_name(
+                job_name=name,
+                job_status=[sky.ManagedJobStatus.RECOVERING],
+                timeout=managed_jobs_utils.JOB_STATUS_CHECK_GAP_SECONDS * 3,
+                gap_seconds=2),
+            smoke_tests_utils.
+            get_cmd_wait_until_managed_job_status_contains_matching_job_name(
+                job_name=name,
+                job_status=[sky.ManagedJobStatus.RUNNING],
+                timeout=300),
+            # Surviving peer reaches the recovered task's NEW pod.
+            wait_connect_after(png_task, epoch_file, timeout=300),
+            # Recovered task's fresh pod got networking set up again
+            # (its wait script passed and it resolves its peer).
+            wait_connect_after(srv_task, epoch_file, timeout=300),
+        ],
+        (f'sky jobs cancel -y -n {name}; '
+         f'{smoke_tests_utils.down_cluster_for_cloud_cmd(name)}'),
+        env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
+        timeout=30 * 60,
     )
     smoke_tests_utils.run_one_test(test)
 
@@ -3271,8 +3459,12 @@ def test_job_group_primary_auxiliary(generic_cloud: str):
                 # transitioning when we check
                 f's=$({smoke_tests_utils.GET_JOB_QUEUE} | grep -A 2 {name}); '
                 f'echo "$s"; echo "$s" | grep replay-buffer | grep -E "CANCELLING|CANCELLED"',
-                # Verify logs show the termination delay message
-                f'sky jobs logs --controller -n {name} --no-follow | '
+                # Verify logs show the termination delay message. Resolve the
+                # job id first: `-n` errors out on an API server that retains
+                # an older same-named job from a previous run of this test.
+                f'JOB_ID=$(sky jobs queue | grep {name} | head -1 | '
+                f'awk \'{{print $1}}\'); '
+                f'sky jobs logs --controller "$JOB_ID" --no-follow | '
                 f'grep -E "Waiting.*before terminating|Terminating auxiliary"',
             ],
             f'sky jobs cancel -y -n {name}',
@@ -3393,25 +3585,36 @@ def test_managed_job_node_names_single_node(generic_cloud: str):
             task.set_resources(
                 sky.Resources(infra=generic_cloud,
                               **smoke_tests_utils.LOW_RESOURCE_PARAM))
+            job_id = None
             try:
-                sky.stream_and_get(sky.jobs.launch(task, name=name))
+                # Track the job by id, not name: an API server shared across
+                # runs may retain an older SUCCEEDED job with the same name.
+                job_ids, _ = sky.stream_and_get(sky.jobs.launch(task,
+                                                                name=name))
+                assert job_ids, 'jobs.launch returned no job ids'
+                job_id = job_ids[0]
                 # Wait for job to be running and node_names to be populated
                 # Use longer timeout to account for controller startup
-                job = smoke_tests_utils.wait_for_managed_job_status_sdk(
-                    name, [sky.ManagedJobStatus.SUCCEEDED], timeout=400)
+                smoke_tests_utils.wait_for_managed_job_status_sdk(
+                    job_id=job_id,
+                    target_statuses=[sky.ManagedJobStatus.SUCCEEDED],
+                    timeout=400)
                 # Give time for node_names to be populated after launch
                 time.sleep(10)
                 # Re-fetch to get updated node_names
                 jobs_list = sky.get(
                     sky.jobs.queue_v2(refresh=False,
-                                      fields=['job_name', 'node_names']))[0]
-                job = [j for j in jobs_list if j['job_name'] == name][0]
-                node_names = job['node_names']
+                                      job_ids=[job_id],
+                                      fields=['job_id', 'node_names']))[0]
+                node_names = jobs_list[0]['node_names']
                 assert node_names, (f'node_names should not be empty, '
                                     f'got: {node_names}')
                 print(f'node_names: {node_names}')
             finally:
-                sky.jobs.cancel(name=name)
+                if job_id is not None:
+                    sky.jobs.cancel(job_ids=[job_id])
+                else:
+                    sky.jobs.cancel(name=name)
 
 
 @pytest.mark.managed_jobs
@@ -3427,20 +3630,28 @@ def test_managed_job_node_names_multi_node(generic_cloud: str):
             task.set_resources(
                 sky.Resources(infra=generic_cloud,
                               **smoke_tests_utils.LOW_RESOURCE_PARAM))
+            job_id = None
             try:
-                sky.stream_and_get(sky.jobs.launch(task, name=name))
+                # Track the job by id, not name: an API server shared across
+                # runs may retain an older SUCCEEDED job with the same name.
+                job_ids, _ = sky.stream_and_get(sky.jobs.launch(task,
+                                                                name=name))
+                assert job_ids, 'jobs.launch returned no job ids'
+                job_id = job_ids[0]
                 # Wait for job to be running
                 # Use longer timeout to account for controller startup
-                job = smoke_tests_utils.wait_for_managed_job_status_sdk(
-                    name, [sky.ManagedJobStatus.SUCCEEDED], timeout=400)
+                smoke_tests_utils.wait_for_managed_job_status_sdk(
+                    job_id=job_id,
+                    target_statuses=[sky.ManagedJobStatus.SUCCEEDED],
+                    timeout=400)
                 # Give time for node_names to be populated after launch
                 time.sleep(10)
                 # Re-fetch to get updated node_names
                 jobs_list = sky.get(
                     sky.jobs.queue_v2(refresh=False,
-                                      fields=['job_name', 'node_names']))[0]
-                job = [j for j in jobs_list if j['job_name'] == name][0]
-                node_names = job['node_names']
+                                      job_ids=[job_id],
+                                      fields=['job_id', 'node_names']))[0]
+                node_names = jobs_list[0]['node_names']
                 assert node_names, (f'node_names should not be empty, '
                                     f'got: {node_names}')
                 nodes = node_names.split(',')
@@ -3448,7 +3659,10 @@ def test_managed_job_node_names_multi_node(generic_cloud: str):
                                          f'got {len(nodes)}: {nodes}')
                 print(f'node_names: {node_names} ({len(nodes)} nodes)')
             finally:
-                sky.jobs.cancel(name=name)
+                if job_id is not None:
+                    sky.jobs.cancel(job_ids=[job_id])
+                else:
+                    sky.jobs.cancel(name=name)
 
 
 @pytest.mark.managed_jobs
@@ -3953,3 +4167,465 @@ def test_managed_jobs_emergency_recovery(generic_cloud: str):
         timeout=30 * 60,
     )
     smoke_tests_utils.run_one_test(test)
+
+
+# ---------- Managed job with a volume that is not ready ----------
+@pytest.mark.managed_jobs
+@pytest.mark.kubernetes
+# See test_auto_mount_not_ready_on_kubernetes in test_cluster_job.py: the
+# StorageClass fixture needs cluster-admin kubectl co-located with the API
+# server.
+@pytest.mark.no_remote_server
+def test_managed_job_volume_not_ready():
+    """Submitting a managed job against a not-ready volume is refused outright.
+
+    A volume declared on the task is resolved while the request is still being
+    validated (`resolve_and_validate_volumes` in the jobs server), so the job is
+    never recorded and there is no status for it to reach -- the submission
+    itself fails, exactly as it does for a cluster.
+
+    That is what separates it from an auto-mounted volume, which the controller
+    only resolves when it launches the job cluster, and which therefore does end
+    in FAILED_PRECHECKS. See test_managed_job_auto_mount_not_ready.
+
+    The volume is on a class whose driver refuses the claim, bound Immediately so
+    the refusal is recorded before the job is submitted. It has to be a real
+    rejection: a volume that is merely being provisioned is also not ready, and
+    is deliberately not refused.
+    """
+    name = smoke_tests_utils.get_cluster_name()
+    create_sc_cmd = smoke_tests_utils.create_rejecting_storage_class_cmd(
+        name, binding_mode='Immediate')
+    if create_sc_cmd is None:
+        pytest.skip('No CSI driver on this cluster with a known way to refuse '
+                    'a claim; see _REJECTED_BY_PROVISIONER.')
+    volume_name = f'{name}-nr'
+    volume_yaml = textwrap.dedent(f"""\
+        name: {volume_name}
+        type: k8s-pvc
+        size: 1Gi
+        config:
+          access_mode: ReadWriteMany
+          storage_class_name: {smoke_tests_utils.rejecting_storage_class_name(name)}
+    """)
+    task_yaml = textwrap.dedent(f"""\
+        resources:
+          cpus: 0.1+
+        volumes:
+          /mnt/data: {volume_name}
+        run: echo should not run
+    """)
+    with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w',
+                                     delete=False) as vol_f, \
+         tempfile.NamedTemporaryFile(suffix='.yaml', mode='w',
+                                     delete=False) as task_f:
+        vol_f.write(volume_yaml)
+        vol_f.flush()
+        task_f.write(task_yaml)
+        task_f.flush()
+        test = smoke_tests_utils.Test(
+            'managed_job_volume_not_ready',
+            [
+                create_sc_cmd,
+                f'sky volumes apply -y {smoke_tests_utils.AGENT_K8S_INFRA} '
+                f'{vol_f.name}',
+                # The driver's answer reaches the record on the status
+                # refresh's schedule; until then the reason recorded is that the
+                # volume is being provisioned, which is deliberately not
+                # refused.
+                smoke_tests_utils.wait_until_volume_is_rejected_cmd(volume_name
+                                                                   ),
+                f'! sky jobs launch -n {name} '
+                f'{smoke_tests_utils.AGENT_K8S_INFRA} '
+                f'{smoke_tests_utils.LOW_RESOURCE_ARG} {task_f.name} -y -d '
+                f'> {name}-refused.log 2>&1; '
+                f'cat {name}-refused.log && '
+                f'grep -q "not ready" {name}-refused.log && '
+                f'grep -q "{volume_name}" {name}-refused.log',
+                # Refused while validating, so no job was ever recorded.
+                f'! sky jobs queue -a 2>/dev/null | grep -q "{name}"',
+            ],
+            smoke_tests_utils.chain_teardown(
+                f'sky jobs cancel -y -n {name} || true',
+                f'sky volumes delete {volume_name} -y || true',
+                smoke_tests_utils.delete_rejecting_storage_class_cmd(name),
+                f'rm -f {name}-refused.log'),
+            env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
+            timeout=20 * 60,
+        )
+        smoke_tests_utils.run_one_test(test)
+
+
+# ---------- Managed job with a not-ready auto-mount volume ----------
+@pytest.mark.managed_jobs
+@pytest.mark.kubernetes
+# See test_auto_mount_not_ready_on_kubernetes in test_cluster_job.py: the
+# StorageClass fixture needs cluster-admin kubectl co-located with the API
+# server.
+@pytest.mark.no_remote_server
+def test_managed_job_auto_mount_not_ready():
+    """The auto-mount path is separate from a volume declared on the task, so
+    it needs its own check that a managed job stops instead of retrying.
+
+    The volume is on a class whose driver refuses the claim, bound Immediately so
+    the refusal is recorded before any launch -- a real rejection, since a volume
+    that is merely being provisioned is also not ready and is deliberately not
+    refused.
+
+    Consolidation mode only. With a separate controller cluster, `auto_mounts`
+    applies to the controller's own launch too -- it is provisioned through the
+    same code path -- so a broken volume stops `sky jobs launch` before any job
+    exists to reach FAILED_PRECHECKS. In consolidation mode the API server is
+    the controller, so the job cluster's launch is the first one the volume can
+    affect, which is what this is testing.
+    """
+    if not smoke_tests_utils.server_side_is_consolidation_mode():
+        pytest.skip('Needs consolidation mode: with a separate controller, a '
+                    'broken auto-mount volume blocks the controller launch '
+                    'rather than the job.')
+
+    name = smoke_tests_utils.get_cluster_name()
+    create_sc_cmd = smoke_tests_utils.create_rejecting_storage_class_cmd(
+        name, binding_mode='Immediate')
+    if create_sc_cmd is None:
+        pytest.skip('No CSI driver on this cluster with a known way to refuse '
+                    'a claim; see _REJECTED_BY_PROVISIONER.')
+    volume_name = f'{name}-am'
+    volume_yaml = textwrap.dedent(f"""\
+        name: {volume_name}
+        type: k8s-pvc
+        size: 1Gi
+        config:
+          access_mode: ReadWriteMany
+          storage_class_name: {smoke_tests_utils.rejecting_storage_class_name(name)}
+    """)
+    task_yaml = textwrap.dedent("""\
+        resources:
+          cpus: 0.1+
+        run: echo should not run
+    """)
+    config_dict = {
+        'kubernetes': {
+            'auto_mounts': [{
+                'volume_name': volume_name,
+                'mount_paths': ['/mnt/auto'],
+            }],
+        },
+    }
+    with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w',
+                                     delete=False) as vol_f, \
+         tempfile.NamedTemporaryFile(suffix='.yaml', mode='w',
+                                     delete=False) as task_f, \
+         tempfile.NamedTemporaryFile(suffix='.yaml', mode='w',
+                                     delete=False) as cfg_f:
+        vol_f.write(volume_yaml)
+        vol_f.flush()
+        task_f.write(task_yaml)
+        task_f.flush()
+        yaml_utils.dump_yaml(cfg_f.name, config_dict)
+        cfg_f.flush()
+        test = smoke_tests_utils.Test(
+            'managed_job_auto_mount_not_ready',
+            [
+                create_sc_cmd,
+                # Create the volume without auto_mounts in scope, so this step
+                # cannot be tripped up by the entry it is about to become.
+                smoke_tests_utils.with_config(
+                    f'sky volumes apply -y '
+                    f'{smoke_tests_utils.AGENT_K8S_INFRA} {vol_f.name}',
+                    '/dev/null'),
+                # The driver's answer reaches the record on the status
+                # refresh's schedule; until then the reason recorded is that the
+                # volume is being provisioned, which is deliberately not
+                # refused.
+                smoke_tests_utils.wait_until_volume_is_rejected_cmd(volume_name
+                                                                   ),
+                f'sky jobs launch -n {name} '
+                f'{smoke_tests_utils.AGENT_K8S_INFRA} '
+                f'{smoke_tests_utils.LOW_RESOURCE_ARG} {task_f.name} -y -d',
+                # FAILED_PRECHECKS rather than a retry outcome is the point:
+                # the retry path ends in FAILED_NO_RESOURCE or the ceiling.
+                smoke_tests_utils.
+                get_cmd_wait_until_managed_job_status_contains_matching_job_name(
+                    job_name=name,
+                    job_status=[sky.ManagedJobStatus.FAILED_PRECHECKS],
+                    timeout=300),
+                f'logs=$(sky jobs logs --controller -n {name} --no-follow); '
+                f'echo "$logs"; echo "$logs" | grep -i "not ready"; '
+                f'echo "$logs" | grep "{volume_name}"',
+            ],
+            smoke_tests_utils.chain_teardown(
+                f'sky jobs cancel -y -n {name}',
+                f'sky volumes delete {volume_name} -y || true',
+                smoke_tests_utils.delete_rejecting_storage_class_cmd(name)),
+            env={
+                skypilot_config.ENV_VAR_GLOBAL_CONFIG: cfg_f.name,
+            },
+            timeout=20 * 60,
+        )
+        smoke_tests_utils.run_one_test(test)
+
+
+# ---------- Managed job over a volume the backend refuses mid-launch ----------
+@pytest.mark.managed_jobs
+@pytest.mark.kubernetes
+# See test_managed_job_auto_mount_not_ready: the StorageClass fixture needs
+# cluster-admin kubectl co-located with the API server.
+@pytest.mark.no_remote_server
+@pytest.mark.parametrize('attach_via', ['task', 'auto_mounts'])
+def test_managed_job_volume_refused_after_it_breaks(attach_via):
+    """A job must stop once its volume is known to be unusable, not retry.
+
+    Unlike test_managed_job_volume_not_ready, the volume here is fine when the
+    job is submitted: a WaitForFirstConsumer claim is not shown to the driver
+    until a pod asks for it. The job's own first launch is what gets it
+    rejected. So this covers what a submit-time check cannot -- the volume has
+    to be judged again on the relaunch -- for both ways of attaching it.
+
+    FAILED_PRECHECKS is the assertion, and the whole point: the retry path burns
+    hundreds of attempts over hours, and the storage backend's answer does not
+    change in between.
+    """
+    if not smoke_tests_utils.server_side_is_consolidation_mode():
+        pytest.skip('Needs consolidation mode: with a separate controller the '
+                    'volume table is not readable from where the job cluster '
+                    'is provisioned, so the volume cannot be judged there.')
+    # Both cases would otherwise share this name -- get_cluster_name() keys off
+    # the test function -- and with it the volume and the cluster-scoped storage
+    # class, whenever the run does not serialize its Kubernetes tests.
+    attach_id = attach_via.split('_')[0]
+    name = f'{smoke_tests_utils.get_cluster_name()}-{attach_id}'
+    create_sc_cmd = smoke_tests_utils.create_rejecting_storage_class_cmd(name)
+    if create_sc_cmd is None:
+        pytest.skip('No CSI driver on this cluster with a known way to refuse '
+                    'a claim; see _REJECTED_BY_PROVISIONER.')
+    volume_name = f'{name}-rej'
+    volume_yaml = textwrap.dedent(f"""\
+        name: {volume_name}
+        type: k8s-pvc
+        size: 1Gi
+        config:
+          access_mode: ReadWriteMany
+          storage_class_name: {smoke_tests_utils.rejecting_storage_class_name(name)}
+    """)
+    attached_on_task = attach_via == 'task'
+    task_yaml = textwrap.dedent(f"""\
+        resources:
+          cpus: 0.1+
+        volumes:
+          /mnt/data: {volume_name}
+        run: echo should not run
+    """) if attached_on_task else textwrap.dedent("""\
+        resources:
+          cpus: 0.1+
+        run: echo should not run
+    """)
+    config_dict = {}
+    if not attached_on_task:
+        config_dict = {
+            'kubernetes': {
+                'auto_mounts': [{
+                    'volume_name': volume_name,
+                    'mount_paths': ['/mnt/auto'],
+                }],
+            },
+        }
+    with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w',
+                                     delete=False) as vol_f, \
+         tempfile.NamedTemporaryFile(suffix='.yaml', mode='w',
+                                     delete=False) as task_f, \
+         tempfile.NamedTemporaryFile(suffix='.yaml', mode='w',
+                                     delete=False) as cfg_f:
+        vol_f.write(volume_yaml)
+        vol_f.flush()
+        task_f.write(task_yaml)
+        task_f.flush()
+        yaml_utils.dump_yaml(cfg_f.name, config_dict)
+        cfg_f.flush()
+        test = smoke_tests_utils.Test(
+            f'managed_job_volume_refused_after_it_breaks_{attach_via}',
+            [
+                create_sc_cmd,
+                # Created without the config in scope, so this step cannot be
+                # tripped up by the auto_mounts entry it is about to become.
+                smoke_tests_utils.with_config(
+                    f'sky volumes apply -y '
+                    f'{smoke_tests_utils.AGENT_K8S_INFRA} {vol_f.name}',
+                    '/dev/null'),
+                # The premise: the volume is submittable. If this ever reports
+                # NOT_READY the job would be refused at submission instead, and
+                # this would be covering test_managed_job_volume_not_ready.
+                f'vols=$(sky volumes ls) && echo "$vols" && '
+                f'echo "$vols" | grep {volume_name} | grep READY',
+                f'sky jobs launch -n {name} '
+                f'{smoke_tests_utils.AGENT_K8S_INFRA} '
+                f'{smoke_tests_utils.LOW_RESOURCE_ARG} {task_f.name} -y -d',
+                # Generous: the volume flips to NOT_READY on the status
+                # refresh's own schedule, so the attempt that gets refused may
+                # not be the second one.
+                smoke_tests_utils.
+                get_cmd_wait_until_managed_job_status_contains_matching_job_name(
+                    job_name=name,
+                    job_status=[sky.ManagedJobStatus.FAILED_PRECHECKS],
+                    timeout=900),
+                f'logs=$(sky jobs logs --controller -n {name} --no-follow); '
+                f'echo "$logs"; echo "$logs" | grep -i "not ready"; '
+                f'echo "$logs" | grep "{volume_name}"',
+            ],
+            smoke_tests_utils.chain_teardown(
+                f'sky jobs cancel -y -n {name} || true',
+                f'sky volumes delete {volume_name} -y || true',
+                smoke_tests_utils.delete_rejecting_storage_class_cmd(name)),
+            env={
+                skypilot_config.ENV_VAR_GLOBAL_CONFIG: cfg_f.name,
+            },
+            timeout=30 * 60,
+        )
+        smoke_tests_utils.run_one_test(test)
+
+
+# ---------- Managed job with every way of attaching a volume ----------
+@pytest.mark.managed_jobs
+@pytest.mark.kubernetes
+# The RWX StorageClass lookup reads the cluster with the agent's kubectl, which
+# a remote server's agent does not have.
+@pytest.mark.no_remote_server
+def test_managed_job_volume_mix():
+    """The three ways a volume reaches a job's pod, in one job.
+
+    The cluster-launch equivalent is test_volume_mix_on_kubernetes. Worth
+    covering separately because a job's volumes travel a different route to the
+    launch: the ones named on the task are resolved when the job is submitted
+    and carried to the controller, while `auto_mounts` is resolved where the job
+    cluster is provisioned.
+
+    Consolidation mode only, because of that last part. With a separate
+    controller cluster the launch runs against the controller's own state DB,
+    which does not hold the volume table, so every auto_mounts entry is skipped
+    and the volume is silently not mounted -- CI showed the job failing on a
+    missing /mnt/auto, with the pod spec carrying only the other two volumes.
+    """
+    if not smoke_tests_utils.server_side_is_consolidation_mode():
+        pytest.skip('Needs consolidation mode: auto_mounts is resolved where '
+                    'the job cluster is provisioned, and a separate '
+                    'controller cannot read the volume table, so the '
+                    'auto-mounted volume would be skipped rather than '
+                    'mounted.')
+    name = smoke_tests_utils.get_cluster_name()
+    persistent_volume = f'{name}-p'
+    auto_volume = f'{name}-a'
+    host_path = f'/tmp/skypilot-job-volume-mix-{name}'
+    rwx_storage_class = smoke_tests_utils.rwx_storage_class_name()
+    if rwx_storage_class is not None:
+        auto_volume_kind = f'ReadWriteMany PVC on {rwx_storage_class}'
+        auto_volume_yaml = textwrap.dedent(f"""\
+            name: {auto_volume}
+            type: k8s-pvc
+            size: 1Gi
+            config:
+              access_mode: ReadWriteMany
+              storage_class_name: {rwx_storage_class}
+        """)
+    else:
+        # hostPath is the other type auto_mounts accepts and needs no storage
+        # backend, so the rest of the test still runs without RWX.
+        auto_volume_kind = 'hostPath (no RWX StorageClass on this cluster)'
+        auto_volume_yaml = textwrap.dedent(f"""\
+            name: {auto_volume}
+            type: k8s-hostpath
+            config:
+              host_path: {host_path}
+        """)
+    persistent_volume_yaml = textwrap.dedent(f"""\
+        name: {persistent_volume}
+        type: k8s-pvc
+        size: 1Gi
+        config:
+          access_mode: ReadWriteOnce
+    """)
+    task_yaml = textwrap.dedent(f"""\
+        resources:
+          cpus: 0.1+
+        volumes:
+          /mnt/persist: {persistent_volume}
+          /mnt/eph:
+            size: 1Gi
+        run: |
+          set -e
+          for d in /mnt/persist /mnt/eph /mnt/auto; do
+            echo "$d ok" > $d/probe
+            cat $d/probe
+          done
+          echo all three mounted
+    """)
+    config_dict = {
+        'kubernetes': {
+            'auto_mounts': [{
+                'volume_name': auto_volume,
+                'mount_paths': ['/mnt/auto'],
+            }],
+        },
+    }
+    with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w',
+                                     delete=False) as pers_f, \
+         tempfile.NamedTemporaryFile(suffix='.yaml', mode='w',
+                                     delete=False) as auto_f, \
+         tempfile.NamedTemporaryFile(suffix='.yaml', mode='w',
+                                     delete=False) as task_f, \
+         tempfile.NamedTemporaryFile(suffix='.yaml', mode='w',
+                                     delete=False) as cfg_f:
+        pers_f.write(persistent_volume_yaml)
+        pers_f.flush()
+        auto_f.write(auto_volume_yaml)
+        auto_f.flush()
+        task_f.write(task_yaml)
+        task_f.flush()
+        yaml_utils.dump_yaml(cfg_f.name, config_dict)
+        cfg_f.flush()
+        test = smoke_tests_utils.Test(
+            'managed_job_volume_mix',
+            [
+                # Which volume type the auto-mount leg used, so a green run says
+                # whether the RWX path was exercised.
+                f'echo "auto-mount volume: {auto_volume_kind}"',
+                # Created without the config in scope, so these steps cannot be
+                # tripped up by the auto_mounts entry.
+                smoke_tests_utils.with_config(
+                    f'sky volumes apply -y '
+                    f'{smoke_tests_utils.AGENT_K8S_INFRA} {pers_f.name}',
+                    '/dev/null'),
+                smoke_tests_utils.with_config(
+                    f'sky volumes apply -y '
+                    f'{smoke_tests_utils.AGENT_K8S_INFRA} {auto_f.name}',
+                    '/dev/null'),
+                # An RWX class binds Immediately, so the volume above is
+                # still being provisioned and cannot be mounted yet.
+                smoke_tests_utils.get_cmd_wait_until_volume_is_ready(auto_volume
+                                                                    ),
+                smoke_tests_utils.get_cmd_wait_until_volume_is_ready(
+                    persistent_volume),
+                f'sky jobs launch -n {name} '
+                f'{smoke_tests_utils.AGENT_K8S_INFRA} '
+                f'{smoke_tests_utils.LOW_RESOURCE_ARG} {task_f.name} -y -d',
+                smoke_tests_utils.
+                get_cmd_wait_until_managed_job_status_contains_matching_job_name(
+                    job_name=name,
+                    job_status=[sky.ManagedJobStatus.SUCCEEDED],
+                    timeout=900),
+                # SUCCEEDED is the assertion that all three mounted: the task
+                # runs under `set -e` and writes to each mount path, so a
+                # missing one fails the job. Reading the run output back would
+                # add nothing -- and a finished job's log needs its id, which
+                # cannot be scraped from `sky jobs queue` while SKYPILOT_DEBUG
+                # is on, since the debug lines carry the job's name too.
+            ],
+            smoke_tests_utils.chain_teardown(
+                f'sky jobs cancel -y -n {name} || true',
+                f'sky volumes delete {persistent_volume} {auto_volume} -y '
+                f'|| true'),
+            env={
+                skypilot_config.ENV_VAR_GLOBAL_CONFIG: cfg_f.name,
+            },
+            timeout=30 * 60,
+        )
+        smoke_tests_utils.run_one_test(test)

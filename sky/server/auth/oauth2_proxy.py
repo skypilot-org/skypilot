@@ -12,13 +12,14 @@ import aiohttp
 import fastapi
 import starlette.middleware.base
 
+from sky import exceptions
 from sky import global_user_state
 from sky import models
 from sky import sky_logging
 from sky.server import constants as server_constants
 from sky.server import middleware_utils
+from sky.server.auth import db_lookup
 from sky.server.auth import loopback
-from sky.users import permission
 from sky.utils import common_utils
 
 logger = sky_logging.init_logger(__name__)
@@ -159,14 +160,24 @@ class OAuth2ProxyMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
                                 'return user info, check your oauth2-proxy'
                                 'setup.'
                         })
-                newly_added = global_user_state.add_or_update_user(auth_user)
-                if newly_added:
-                    # Offload the blocking config reload + role seed to a
-                    # worker thread so this async middleware doesn't block the
-                    # event loop. The reload lets a runtime `rbac.default_role`
-                    # change take effect for this new user without a restart.
-                    await asyncio.to_thread(permission.seed_new_user_role,
-                                            auth_user.id)
+                # Bounded and off the loop, matching the same call in
+                # `server.py`'s auth-proxy middleware. It is a database upsert:
+                # run inline, a slow database stalls this worker's event loop
+                # for every request, not just this login.
+                try:
+                    newly_added = await db_lookup.call_with_deadline(
+                        global_user_state.add_or_update_user, auth_user)
+                except asyncio.TimeoutError:
+                    logger.error('oauth2-proxy user upsert timed out')
+                    return db_lookup.db_timeout_response()
+                except exceptions.ConcurrentWorkerExhaustedError as e:
+                    logger.error(f'Concurrent worker exhausted during '
+                                 f'oauth2-proxy user upsert: {e}')
+                    return db_lookup.worker_exhausted_response()
+                failed = await db_lookup.ensure_role_for_authenticated_user(
+                    auth_user.id, newly_added)
+                if failed is not None:
+                    return failed
                 request.state.auth_user = auth_user
                 return await call_next(request)
             elif auth_response.status == http.HTTPStatus.UNAUTHORIZED:

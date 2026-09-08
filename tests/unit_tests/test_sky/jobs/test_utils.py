@@ -1452,6 +1452,7 @@ class TestStreamLogsByIdExternalStoreFallback:
 
         fake_reader = MagicMock()
         fake_reader.read_cluster_job_logs.return_value = None
+        fake_reader.read_managed_job_logs.return_value = None
         self._patch_logs(monkeypatch, fake_reader)
         monkeypatch.setattr(jobs_utils, 'generate_managed_job_cluster_name',
                             lambda name, jid: f'sky-managed-{jid}-{name}')
@@ -1460,6 +1461,50 @@ class TestStreamLogsByIdExternalStoreFallback:
 
         fake_reader.read_cluster_job_logs.assert_called_once()
         assert 'external log store' in msg
+
+    def test_managed_job_addressing_fallback(self, monkeypatch):
+        # The cluster-addressed read finds nothing (e.g. a runtime whose
+        # forwarded records carry the managed-job identity instead of an
+        # on-cluster job id); the reader is then consulted by (job_id,
+        # task_id) and its success is reported like a streamed log.
+        task_info = [(0, 'mytask', managed_job_state.ManagedJobStatus.SUCCEEDED,
+                      None, None)]
+        self._patch_terminal_job(monkeypatch, task_info)
+
+        fake_reader = MagicMock()
+        fake_reader.read_cluster_job_logs.return_value = None
+        fake_reader.read_managed_job_logs.return_value = 0
+        self._patch_logs(monkeypatch, fake_reader)
+        monkeypatch.setattr(jobs_utils, 'generate_managed_job_cluster_name',
+                            lambda name, jid: f'sky-managed-{jid}-{name}')
+
+        _, code = jobs_utils.stream_logs_by_id(5, follow=False, tail=None)
+
+        # task_name rides along: a managed job id is unique only within one API
+        # server, so a reader needs it to narrow a store shared by several
+        # deployments.
+        fake_reader.read_managed_job_logs.assert_called_once_with(
+            5, 0, task_name='mytask', follow=False, tail=0)
+        assert code == exceptions.JobExitCode.from_managed_job_status(
+            managed_job_state.ManagedJobStatus.SUCCEEDED)
+
+    def test_managed_job_addressing_not_consulted_on_cluster_hit(
+            self, monkeypatch):
+        # A successful cluster-addressed read must not trigger a second,
+        # managed-job-addressed store query.
+        task_info = [(0, 'mytask', managed_job_state.ManagedJobStatus.SUCCEEDED,
+                      None, None)]
+        self._patch_terminal_job(monkeypatch, task_info)
+
+        fake_reader = MagicMock()
+        fake_reader.read_cluster_job_logs.return_value = 0
+        self._patch_logs(monkeypatch, fake_reader)
+        monkeypatch.setattr(jobs_utils, 'generate_managed_job_cluster_name',
+                            lambda name, jid: f'sky-managed-{jid}-{name}')
+
+        jobs_utils.stream_logs_by_id(5, follow=False, tail=None)
+
+        fake_reader.read_managed_job_logs.assert_not_called()
 
     def test_reader_exception_is_logged_and_falls_through(self, monkeypatch):
         # A reader error must not crash sky jobs logs; it falls through to the
@@ -1650,3 +1695,104 @@ class TestCancelJobsByIdWorkspaceScoping:
         msg = jobs_utils.cancel_jobs_by_id([5], current_workspace='ws-a')
         assert 'not in the active workspace' in msg
         assert 'terminal' not in msg
+
+
+class TestParkedLaunchReason:
+    """The fallback explanation for a job whose launch parked.
+
+    A parked launch ends its rich status, so the provisioning headline relayed
+    into the controller log disappears and `sky jobs launch` is left saying only
+    "Waiting for task to start". The parked request still carries the reason.
+    """
+
+    def _patch(self,
+               monkeypatch,
+               *,
+               task_name='task',
+               requests=None,
+               raises=None):
+        monkeypatch.setattr(jobs_utils.managed_job_state, 'get_task_name',
+                            lambda job_id, task_id: task_name)
+
+        def get_request_tasks(req_filter):
+            if raises is not None:
+                raise raises
+            self.filter = req_filter
+            return requests or []
+
+        monkeypatch.setattr(jobs_utils.requests_lib, 'get_request_tasks',
+                            get_request_tasks)
+
+    def test_returns_the_parked_requests_message(self, monkeypatch):
+        parked = MagicMock()
+        parked.status_msg = ('Pending (Queue: q, Position: 0, needs memory) '
+                             '(waiting to resume)')
+        self._patch(monkeypatch, requests=[parked])
+
+        assert jobs_utils._parked_launch_reason(7, 0) == parked.status_msg
+        # Scoped to a parked launch of THIS job's cluster: a WAITING request of
+        # another kind, or another job's, must not be shown as this job's
+        # reason.
+        assert self.filter.status == [
+            jobs_utils.requests_lib.RequestStatus.WAITING
+        ]
+        assert self.filter.include_request_names == ['sky.launch']
+        assert self.filter.cluster_names == [
+            jobs_utils.generate_managed_job_cluster_name('task', 7)
+        ]
+
+    def test_no_parked_request_means_no_reason(self, monkeypatch):
+        self._patch(monkeypatch, requests=[])
+        assert jobs_utils._parked_launch_reason(7, 0) is None
+
+    def test_empty_message_is_not_reported(self, monkeypatch):
+        parked = MagicMock()
+        parked.status_msg = ''
+        self._patch(monkeypatch, requests=[parked])
+        assert jobs_utils._parked_launch_reason(7, 0) is None
+
+    def test_unknown_task_means_no_reason(self, monkeypatch):
+        self._patch(monkeypatch, task_name=None)
+        assert jobs_utils._parked_launch_reason(7, 0) is None
+
+    def test_lookup_failure_is_swallowed(self, monkeypatch):
+        """Log streaming must not break where the request DB is unreadable.
+
+        This runs wherever the log stream runs -- the API server under
+        consolidation, the controller host otherwise -- so an unavailable or
+        differently-shaped request store has to degrade to today's behavior
+        (no appended line), never to an error in the middle of following a job.
+        """
+        self._patch(monkeypatch, raises=RuntimeError('no requests db here'))
+        assert jobs_utils._parked_launch_reason(7, 0) is None
+
+
+class TestWaitingLineFallback:
+    """The detail line shown under "Waiting for task to start"."""
+
+    def test_live_headline_wins(self):
+        """A live provisioning headline is shown as before."""
+        assert jobs_utils._waiting_line_detail(
+            '[bold cyan]Preparing SkyPilot runtime[/]  hint',
+            'Pending (Queue: q) (waiting to resume)',
+        ) == 'Preparing SkyPilot runtime'
+
+    def test_parked_reason_fills_the_gap(self):
+        """With no live status, the parked reason takes its place.
+
+        The headline comes from rich-status payloads relayed into the controller
+        log, and parking ends that status -- so without this the line degrades
+        to "Waiting for task to start" with nothing after it.
+        """
+        assert jobs_utils._waiting_line_detail(
+            None, 'Pending (Queue: q, Position: 0)'
+        ) == 'Pending (Queue: q, Position: 0)'
+
+    def test_a_headline_less_provision_message_still_falls_back(self):
+        """A relayed message with no [bold cyan] headline counts as none."""
+        assert jobs_utils._waiting_line_detail(
+            'no markup here', 'Pending (Queue: q)') == 'Pending (Queue: q)'
+
+    def test_nothing_to_show(self):
+        """Neither available renders the plain waiting line."""
+        assert jobs_utils._waiting_line_detail(None, None) is None

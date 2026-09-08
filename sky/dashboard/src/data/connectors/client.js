@@ -211,9 +211,12 @@ export const apiClient = {
     }
   },
 
-  get: async (path) => {
+  get: async (path, options = {}) => {
     const baseUrl = window.location.origin;
     const fullUrl = `${baseUrl}${ENDPOINT}${path}`;
-    return await fetch(fullUrl, { headers: withVersionHeader({}) });
+    return await fetch(fullUrl, {
+      headers: withVersionHeader({}),
+      signal: options.signal,
+    });
   },
 };

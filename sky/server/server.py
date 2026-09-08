@@ -18,6 +18,7 @@ import resource
 import shlex
 import shutil
 import socket
+import stat
 import struct
 import subprocess
 import sys
@@ -67,6 +68,7 @@ from sky.server import config as server_config
 from sky.server import constants as server_constants
 from sky.server import csp_utils
 from sky.server import daemons
+from sky.server import loop_stall
 from sky.server import metrics
 from sky.server import middleware_utils
 from sky.server import plugins
@@ -75,6 +77,7 @@ from sky.server import stream_utils
 from sky.server import version_check
 from sky.server import versions
 from sky.server import websocket_utils
+from sky.server.auth import db_lookup
 from sky.server.auth import loopback
 from sky.server.auth import oauth2_proxy
 from sky.server.auth import sessions as auth_sessions
@@ -94,7 +97,9 @@ from sky.usage import usage_lib
 from sky.users import permission
 from sky.users import rbac
 from sky.users import server as users_rest
+from sky.users import token_service
 from sky.utils import admin_policy_utils
+from sky.utils import asyncio_utils
 from sky.utils import command_runner
 from sky.utils import common as common_lib
 from sky.utils import common_utils
@@ -169,7 +174,27 @@ def _bearer_auth_401_response(content):
         content=content)
 
 
-def _try_set_basic_auth_user(request: fastapi.Request):
+def _find_basic_auth_user(username: str,
+                          password: str) -> Optional[models.User]:
+    """Look up and verify a basic-auth user. Sync: DB query + bcrypt verify.
+
+    Runs on the auth thread executor — both the DB lookup and the
+    (CPU-heavy) password hash verification would otherwise block the
+    request event loop.
+    """
+    users = global_user_state.get_user_by_name(username)
+    for user in users:
+        if not user.name or not user.password:
+            continue
+        username_encoded = username.encode('utf8')
+        db_username_encoded = user.name.encode('utf8')
+        if (username_encoded == db_username_encoded and
+                common.crypt_ctx.verify(password, user.password)):
+            return user
+    return None
+
+
+async def _try_set_basic_auth_user(request: fastapi.Request):
     auth_header = request.headers.get('authorization')
     if not auth_header or not auth_header.lower().startswith('basic '):
         return
@@ -182,19 +207,18 @@ def _try_set_basic_auth_user(request: fastapi.Request):
     except Exception:  # pylint: disable=broad-except
         return
 
-    users = global_user_state.get_user_by_name(username)
-    if not users:
+    try:
+        user = await db_lookup.call_with_deadline(_find_basic_auth_user,
+                                                  username, password)
+    except (asyncio.TimeoutError, exceptions.ConcurrentWorkerExhaustedError):
+        # Best-effort only: this path serves /api/health, which must stay
+        # available during a DB incident. Proceed unauthenticated instead
+        # of failing the probe.
+        logger.warning('Basic auth lookup unavailable on health path; '
+                       'proceeding unauthenticated')
         return
-
-    for user in users:
-        if not user.name or not user.password:
-            continue
-        username_encoded = username.encode('utf8')
-        db_username_encoded = user.name.encode('utf8')
-        if (username_encoded == db_username_encoded and
-                common.crypt_ctx.verify(password, user.password)):
-            request.state.auth_user = user
-            break
+    if user is not None:
+        request.state.auth_user = user
 
 
 @middleware_utils.websocket_aware
@@ -213,10 +237,23 @@ class RBACMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
             return await call_next(request)
 
         permission_service = permission.permission_service
-        # Check the role permission
-        if permission_service.check_endpoint_permission(auth_user.id,
-                                                        request.url.path,
-                                                        request.method):
+        # Check the role permission. Offload to the bounded auth thread
+        # executor under a deadline: the check acquires the casbin enforcer
+        # read lock (and reads the DB on a cache miss), so running it on
+        # the loop lets a slow DB or a concurrent policy reload stall every
+        # request on this worker. Fails closed: a timeout is a retryable
+        # 503, never an allow.
+        try:
+            blocked = await db_lookup.call_with_deadline(
+                permission_service.check_endpoint_permission, auth_user.id,
+                request.url.path, request.method)
+        except asyncio.TimeoutError:
+            logger.error('RBAC check timed out, path: %s', request.url.path)
+            return db_lookup.db_timeout_response()
+        except exceptions.ConcurrentWorkerExhaustedError as e:
+            logger.error(f'Concurrent worker exhausted during RBAC check: {e}')
+            return db_lookup.worker_exhausted_response()
+        if blocked:
             return fastapi.responses.JSONResponse(
                 status_code=403, content={'detail': 'Forbidden'})
 
@@ -356,7 +393,7 @@ class BasicAuthMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
 
         if request.url.path.startswith('/api/health'):
             # Try to set the auth user from basic auth
-            _try_set_basic_auth_user(request)
+            await _try_set_basic_auth_user(request)
             return await call_next(request)
 
         auth_header = request.headers.get('authorization')
@@ -375,25 +412,40 @@ class BasicAuthMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
         except Exception:  # pylint: disable=broad-except
             return _basic_auth_401_response('Invalid basic auth')
 
-        users = global_user_state.get_user_by_name(username)
-        if not users:
+        # Offload the DB lookup + bcrypt verification to the bounded auth
+        # thread executor under a deadline, so a slow DB (or the CPU-heavy
+        # hash verification) cannot stall the request event loop or hold
+        # executor threads indefinitely. Both failure modes convert to a
+        # 503 here: app-level exception handlers wrap the router only, so
+        # an exception raised in a middleware surfaces as a bare 500,
+        # which clients do not retry.
+        try:
+            user = await db_lookup.call_with_deadline(_find_basic_auth_user,
+                                                      username, password)
+        except asyncio.TimeoutError:
+            logger.error('Basic auth DB lookup timed out, path: %s',
+                         request.url.path)
+            return db_lookup.db_timeout_response()
+        except exceptions.ConcurrentWorkerExhaustedError as e:
+            logger.error(f'Concurrent worker exhausted during basic auth: {e}')
+            return db_lookup.worker_exhausted_response()
+        if user is None:
             return _basic_auth_401_response('Invalid credentials')
-
-        valid_user = False
-        for user in users:
-            if not user.name or not user.password:
-                continue
-            username_encoded = username.encode('utf8')
-            db_username_encoded = user.name.encode('utf8')
-            if (username_encoded == db_username_encoded and
-                    common.crypt_ctx.verify(password, user.password)):
-                valid_user = True
-                request.state.auth_user = user
-                break
-        if not valid_user:
-            return _basic_auth_401_response('Invalid credentials')
+        request.state.auth_user = user
 
         return await call_next(request)
+
+
+# Minimum seconds between persisted last_used_at updates per service-account
+# token. The update is an UPDATE on the token's single DB row, so Postgres
+# row-level locking serializes it across the whole deployment; with an
+# unthrottled per-request write, a high-concurrency SDK fleet sharing one
+# token queues on that row lock, each waiter pinning an auth-executor thread
+# and a sync DB connection, until the auth executor exhausts and unrelated
+# requests fail with retryable 503s. last_used_at is an audit/freshness
+# field, so interval granularity is sufficient; each server process writes at
+# most once per interval per token.
+_SA_LAST_USED_UPDATE_INTERVAL_SECONDS = 60
 
 
 @middleware_utils.websocket_aware
@@ -460,13 +512,27 @@ class BearerTokenMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
             return _bearer_auth_401_response(
                 {'detail': 'Service account authentication disabled'})
 
-        try:
-            # Import here to avoid circular imports
-            # pylint: disable=import-outside-toplevel
-            from sky.users.token_service import token_service
+        service = token_service.token_service
 
-            # Verify and decode JWT token
-            payload = token_service.verify_token(sa_token)
+        try:
+            # Load the signing secret off the event loop and under the same
+            # deadline as the lookups below. On the first
+            # service-account-authenticated request of a process this reads
+            # the database, and every other DB call in this handler is
+            # bounded for the reasons db_lookup's docstring gives.
+            #
+            # Gated, because after that first request this is an `is not None`
+            # check. The auth executor rejects rather than queues once its 32
+            # slots are in flight, so dispatching a no-op would let a request
+            # needing no database work be turned away with a worker-exhausted
+            # 503 -- on the scarcest resource in exactly the degraded-database
+            # conditions this path has to survive.
+            if not service.secret_loaded():
+                await db_lookup.call_with_deadline(service.ensure_secret_loaded)
+
+            # Verify and decode JWT token. Pure CPU work now that the secret
+            # is loaded.
+            payload = service.verify_token(sa_token)
 
             if payload is None:
                 logger.warning('Service account token verification failed')
@@ -492,19 +558,15 @@ class BearerTokenMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
             # JWT carries a freshly-generated token_id; only the hash is
             # consistent between the live JWT and the live DB row.
             incoming_hash = hashlib.sha256(sa_token.encode()).hexdigest()
-            # Offload the sync DB lookups to the bounded auth thread executor so
-            # a slow/locked DB cannot stall the request event loop (this runs on
-            # the loop for every service-account-authenticated request).
-            # Using a dedicated executor (not asyncio's shared default thread
-            # pool) avoids saturating that pool under DB slowness; when it is
-            # exhausted it raises ConcurrentWorkerExhaustedError, which the
-            # app-level handler turns into a 503 so the client retries. The auth
-            # executor is kept separate from the request executor so long-lived
-            # streaming requests cannot starve authentication.
-            loop = asyncio.get_running_loop()
-            auth_executor = executor.get_auth_thread_executor()
-            token_row = await loop.run_in_executor(
-                auth_executor,
+            # Offload the sync DB lookups to the bounded auth thread executor
+            # under a deadline, so a slow/locked DB cannot stall the request
+            # event loop (this runs on the loop for every
+            # service-account-authenticated request) nor hold executor
+            # threads for as long as the DB layer allows. The auth executor
+            # is kept separate from the request executor so long-lived
+            # streaming requests cannot starve authentication; timeouts and
+            # executor exhaustion are converted to retryable 503s below.
+            token_row = await db_lookup.call_with_deadline(
                 global_user_state.get_service_account_token_by_hash,
                 incoming_hash)
             if token_row is None:
@@ -521,25 +583,37 @@ class BearerTokenMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
                     {'detail': 'Service account token has expired'})
 
             # Verify user still exists in database
-            user_info = await loop.run_in_executor(auth_executor,
-                                                   global_user_state.get_user,
-                                                   user_id)
+            user_info = await db_lookup.call_with_deadline(
+                global_user_state.get_user, user_id)
             if user_info is None:
                 logger.warning(
                     f'Service account user {user_id} no longer exists')
                 return _bearer_auth_401_response(
                     {'detail': 'Service account user no longer exists'})
 
-            # Update last used timestamp for token tracking. Use the
-            # DB row's token_id (not the JWT's): after rotation the JWT
-            # carries a different token_id than the DB row.
-            try:
-                await loop.run_in_executor(
-                    auth_executor,
-                    global_user_state.update_service_account_token_last_used,
-                    token_row['token_id'])
-            except Exception as e:  # pylint: disable=broad-except
-                logger.debug(f'Failed to update token last used time: {e}')
+            # Update last used timestamp for token tracking, skipped while
+            # the row's last_used_at is fresher than
+            # _SA_LAST_USED_UPDATE_INTERVAL_SECONDS (see the constant for
+            # why an unthrottled per-request write is dangerous). This
+            # pre-check filters the steady state for free (the row is
+            # already in hand); the interval is ALSO passed to the update,
+            # whose WHERE clause re-checks staleness atomically, so the
+            # in-flight requests that all read a stale timestamp at an
+            # interval boundary collapse to one real write instead of
+            # herding on the row lock. Use the DB row's token_id (not the
+            # JWT's): after rotation the JWT carries a different token_id
+            # than the DB row.
+            last_used_at = token_row.get('last_used_at')
+            if (last_used_at is None or time.time() - last_used_at >=
+                    _SA_LAST_USED_UPDATE_INTERVAL_SECONDS):
+                try:
+                    await db_lookup.call_with_deadline(
+                        global_user_state.
+                        update_service_account_token_last_used,
+                        token_row['token_id'],
+                        _SA_LAST_USED_UPDATE_INTERVAL_SECONDS)
+                except Exception as e:  # pylint: disable=broad-except
+                    logger.debug(f'Failed to update token last used time: {e}')
 
             # Set the authenticated user
             auth_user = models.User(id=user_id,
@@ -548,10 +622,25 @@ class BearerTokenMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
 
             logger.debug(f'Authenticated service account: {user_id}')
 
-        except exceptions.ConcurrentWorkerExhaustedError:
-            # Request thread executor is full: let the app-level handler return
-            # 503 so the client retries, instead of masking it as a 401 below.
-            raise
+        except asyncio.TimeoutError:
+            # Convert to a retryable 503 here (not a 401 below, and not a
+            # raise): app-level exception handlers wrap the router only, so
+            # an exception raised in a middleware surfaces as a bare 500,
+            # which clients do not retry.
+            logger.error('Service account auth DB lookup timed out')
+            return db_lookup.db_timeout_response()
+        except exceptions.ConcurrentWorkerExhaustedError as e:
+            # Same reasoning as the timeout above: convert in-middleware so
+            # the client sees a retryable 503 instead of a bare 500.
+            logger.error(f'Concurrent worker exhausted during service account '
+                         f'auth: {e}')
+            return db_lookup.worker_exhausted_response()
+        except token_service.JWTSecretUnavailableError as e:
+            # Above the catch-all on purpose: a 401 would tell the caller its
+            # token is bad and send it off to rotate credentials, when the
+            # token is fine and the database is not.
+            logger.error(f'Service account auth unavailable: {e}')
+            return db_lookup.jwt_secret_unavailable_response()
         except Exception as e:  # pylint: disable=broad-except
             logger.error(f'Service account authentication failed: {e}',
                          exc_info=True)
@@ -598,17 +687,29 @@ class AuthProxyMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
                              'auth user was already set.')
             return await call_next(request)
 
-        # Add user to database if auth_user is present
+        # Add user to database if auth_user is present. Offload the sync DB
+        # upsert to the bounded auth thread executor under a deadline (it
+        # would otherwise run on the event loop for every
+        # auth-proxy-authenticated request); failures convert to retryable
+        # 503s here because app-level exception handlers cannot see
+        # exceptions raised in middlewares.
         if auth_user is not None:
-            newly_added = global_user_state.add_or_update_user(auth_user)
-            if newly_added:
-                # Offload the blocking config reload + role seed to a worker
-                # thread so this async middleware doesn't block the event loop.
-                # The reload lets a runtime `rbac.default_role` change take
-                # effect for this new user without a restart (the main
-                # API-server process does not reload config per request).
-                await asyncio.to_thread(permission.seed_new_user_role,
-                                        auth_user.id)
+            try:
+                newly_added = await db_lookup.call_with_deadline(
+                    global_user_state.add_or_update_user, auth_user)
+            except asyncio.TimeoutError:
+                logger.error('Auth proxy user upsert timed out')
+                return db_lookup.db_timeout_response()
+            except exceptions.ConcurrentWorkerExhaustedError as e:
+                logger.error(f'Concurrent worker exhausted during auth proxy '
+                             f'user upsert: {e}')
+                return db_lookup.worker_exhausted_response()
+            # Same deadline as the upsert above; see the helper for why a new
+            # user's seed is awaited while a returning one's repair is queued.
+            failed = await db_lookup.ensure_role_for_authenticated_user(
+                auth_user.id, newly_added)
+            if failed is not None:
+                return failed
 
         # Store user info in request.state for access by GET endpoints
         if auth_user is not None:
@@ -689,37 +790,71 @@ async def cleanup_unreferenced_file_mounts():
                          f'{common_utils.format_exception(e)}')
 
 
-async def cleanup_download_tmp():
-    """Delete expired download tmp directories.
+async def cleanup_clients_tmp():
+    """Delete expired client tmp directories and deprecated task YAMLs.
 
     Downloaded logs are transient — synced from the cluster for the client
     to download, then no longer needed.  Clean up anything older than the
     blob GC grace period (1 hour by default).
     """
+
+    def _do_cleanup():
+        tmp_dir = bs.get_blob_storage().download_tmp_base_dir()
+        if tmp_dir is None:
+            # Backend shares the persistent log dir; no separate
+            # cleanup needed.
+            return
+        if not os.path.exists(tmp_dir):
+            return
+        cutoff = time.time() - bs.GC_GRACE_SECONDS
+        for user_entry in os.scandir(tmp_dir):
+            if not user_entry.is_dir():
+                continue
+            for entry in os.scandir(user_entry.path):
+                if entry.is_dir():
+                    try:
+                        if entry.stat().st_mtime < cutoff:
+                            shutil.rmtree(entry.path, ignore_errors=True)
+                    except OSError:
+                        pass
+                elif entry.name.endswith('_translated.yaml'):
+                    # Deprecated: task YAMLs are no longer persisted, so any
+                    # file left here is unreferenced regardless of its age.
+                    # TODO(aylei): remove in next major release
+                    try:
+                        os.remove(entry.path)
+                    except OSError:
+                        pass
+
     while True:
         await asyncio.sleep(3600)
         try:
-            tmp_dir = bs.get_blob_storage().download_tmp_base_dir()
-            if tmp_dir is None:
-                # Backend shares the persistent log dir; no separate
-                # cleanup needed.
-                continue
-            if not os.path.exists(tmp_dir):
-                continue
-            cutoff = time.time() - bs.GC_GRACE_SECONDS
-            for user_entry in os.scandir(tmp_dir):
-                if not user_entry.is_dir():
-                    continue
-                for entry in os.scandir(user_entry.path):
-                    if entry.is_dir():
-                        try:
-                            if entry.stat().st_mtime < cutoff:
-                                shutil.rmtree(entry.path, ignore_errors=True)
-                        except OSError:
-                            pass
+            # Offloaded to a worker thread: the event loop must not block.
+            await anyio.to_thread.run_sync(_do_cleanup, abandon_on_cancel=True)
         except Exception as e:  # pylint: disable=broad-except
-            logger.error('Error in cleanup_download_tmp: '
+            logger.error('Error in cleanup_clients_tmp: '
                          f'{common_utils.format_exception(e)}')
+
+
+def _record_sky_logs_metrics(sky_logs_dir: str, top_level_entries: int,
+                             removed: int, duration: float) -> None:
+    """Publish the ~/sky_logs retention instruments for one sweep."""
+    if not metrics_utils.METRICS_ENABLED:
+        return
+    pid = str(os.getpid())
+    metrics_utils.SKY_APISERVER_SKY_LOGS_TOP_LEVEL_ENTRIES.labels(
+        pid=pid).set(top_level_entries)
+    metrics_utils.SKY_APISERVER_SKY_LOGS_PRUNE_DURATION_SECONDS.labels(
+        pid=pid).set(duration)
+    metrics_utils.SKY_APISERVER_SKY_LOGS_PRUNED_ENTRIES_TOTAL.inc(removed)
+    try:
+        fs = os.statvfs(sky_logs_dir)
+    except OSError as e:
+        logger.debug(f'Failed to stat the filesystem hosting {sky_logs_dir}: '
+                     f'{e}')
+        return
+    metrics_utils.SKY_APISERVER_SKY_LOGS_FS_USED_BYTES.labels(pid=pid).set(
+        (fs.f_blocks - fs.f_bfree) * fs.f_frsize)
 
 
 def _prune_sky_logs(cutoff: float) -> int:
@@ -731,6 +866,7 @@ def _prune_sky_logs(cutoff: float) -> int:
     of age so /provision_logs keeps serving live clusters; once the cluster
     is terminated its logs fall back to the age-based retention.
     """
+    start_time = time.time()
     sky_logs_dir = os.path.expanduser(constants.SKY_LOGS_DIRECTORY)
     if not os.path.isdir(sky_logs_dir):
         return 0
@@ -739,12 +875,20 @@ def _prune_sky_logs(cutoff: float) -> int:
         for path in global_user_state.get_all_cluster_provision_log_paths()
     }
     removed = 0
+    top_level_entries = 0
+    # os.stat releases the GIL during the stat syscall; DirEntry.stat() and
+    # is_dir() on Python 3.10 do not (fixed in 3.11.0, python/cpython#89175).
+    # On a high-latency filesystem (e.g. ~/sky_logs on NFS at ~1ms per stat),
+    # a DirEntry-based walk over tens of thousands of entries becomes one long
+    # GIL critical section that starves every other thread in the process.
+    # Safe to use the DirEntry methods again once the minimum Python is 3.11.
     for entry in os.scandir(sky_logs_dir):
+        top_level_entries += 1
         if not entry.name.startswith('sky-') or entry.name in protected_dirs:
             continue
         try:
-            if (entry.is_dir(follow_symlinks=False) and
-                    entry.stat().st_mtime < cutoff):
+            st = os.stat(entry.path, follow_symlinks=False)
+            if stat.S_ISDIR(st.st_mode) and st.st_mtime < cutoff:
                 shutil.rmtree(entry.path, ignore_errors=True)
                 removed += 1
         except OSError:
@@ -755,20 +899,27 @@ def _prune_sky_logs(cutoff: float) -> int:
     if os.path.isdir(file_uploads_dir):
         for entry in os.scandir(file_uploads_dir):
             try:
-                if (entry.is_file(follow_symlinks=False) and
-                        entry.stat().st_mtime < cutoff):
+                st = os.stat(entry.path, follow_symlinks=False)
+                if stat.S_ISREG(st.st_mode) and st.st_mtime < cutoff:
                     os.remove(entry.path)
                     removed += 1
             except OSError:
                 pass
+    _record_sky_logs_metrics(sky_logs_dir, top_level_entries, removed,
+                             time.time() - start_time)
     return removed
 
 
 async def cleanup_sky_logs():
     """Hourly GC of expired per-operation ~/sky_logs artifacts."""
+    await asyncio_utils.sleep_startup_jitter('sky_logs cleanup daemon')
     while True:
         try:
-            skypilot_config.reload_config()
+            # reload_config() does a blocking file read and, with the
+            # Postgres backend, a synchronous SELECT on the config DB.
+            # Run it off the event loop so it can't stall the other
+            # background daemons sharing this loop.
+            await asyncio.to_thread(skypilot_config.reload_config)
             retention_hours = skypilot_config.get_nested(
                 ('api_server', 'logs_retention_hours'),
                 server_constants.DEFAULT_LOGS_RETENTION_HOURS)
@@ -784,8 +935,21 @@ async def cleanup_sky_logs():
         await asyncio.sleep(3600)
 
 
-async def loop_lag_monitor(loop: asyncio.AbstractEventLoop,
-                           interval: float = 0.1) -> None:
+# Cadence of the per-worker loop lag timer. Also the heartbeat interval the
+# stall watchdog measures against, so the two must agree.
+LOOP_LAG_INTERVAL = 0.1
+
+
+async def loop_lag_monitor(
+        loop: asyncio.AbstractEventLoop,
+        interval: float = LOOP_LAG_INTERVAL,
+        stall_watchdog: Optional[loop_stall.LoopStallWatchdog] = None) -> None:
+    """Measures the loop's own scheduling lag on a fixed timer.
+
+    The single tick on the loop for this: it feeds the lag metrics when those
+    are enabled, and the stall watchdog's heartbeat when that is enabled. Each
+    consumer is gated on its own, so neither can silently disable the other.
+    """
     target = loop.time() + interval
 
     pid = str(os.getpid())
@@ -801,17 +965,21 @@ async def loop_lag_monitor(loop: asyncio.AbstractEventLoop,
         nonlocal target, lag_max_window_end, lag_max_in_window
         now = loop.time()
         lag = max(0.0, now - target)
-        if lag_threshold is not None and lag > lag_threshold:
-            logger.warning(f'Event loop lag {lag} seconds exceeds threshold '
-                           f'{lag_threshold} seconds.')
-        metrics_utils.SKY_APISERVER_EVENT_LOOP_LAG_SECONDS.observe(lag)
-        if now >= lag_max_window_end:
-            lag_max_window_end = now + lag_max_window_seconds
-            lag_max_in_window = lag
-        else:
-            lag_max_in_window = max(lag_max_in_window, lag)
-        metrics_utils.SKY_APISERVER_EVENT_LOOP_LAG_MAX_SECONDS.labels(
-            pid=pid).set(lag_max_in_window)
+        if stall_watchdog is not None:
+            stall_watchdog.beat()
+        if metrics_utils.METRICS_ENABLED:
+            if lag_threshold is not None and lag > lag_threshold:
+                logger.warning(
+                    f'Event loop lag {lag} seconds exceeds threshold '
+                    f'{lag_threshold} seconds.')
+            metrics_utils.SKY_APISERVER_EVENT_LOOP_LAG_SECONDS.observe(lag)
+            if now >= lag_max_window_end:
+                lag_max_window_end = now + lag_max_window_seconds
+                lag_max_in_window = lag
+            else:
+                lag_max_in_window = max(lag_max_in_window, lag)
+            metrics_utils.SKY_APISERVER_EVENT_LOOP_LAG_MAX_SECONDS.labels(
+                pid=pid).set(lag_max_in_window)
         target = now + interval
         loop.call_at(target, tick)
 
@@ -853,11 +1021,24 @@ async def lifespan(app: fastapi.FastAPI):  # pylint: disable=redefined-outer-nam
     asyncio.create_task(cleanup_upload_ids())
     # Start periodic version check task (runs daily)
     asyncio.create_task(version_check.check_versions_periodically())
-    if metrics_utils.METRICS_ENABLED:
-        # Start monitoring the event loop lag in each server worker
-        # event loop (process).
-        asyncio.create_task(loop_lag_monitor(asyncio.get_event_loop()))
-    yield
+    # Attribute event loop stalls to the code that caused them. Not gated on
+    # METRICS_ENABLED: its primary output is a log line, which is the only
+    # thing available when debugging a deployment after the fact.
+    stall_watchdog = loop_stall.start_watchdog(
+        heartbeat_interval=LOOP_LAG_INTERVAL)
+    if metrics_utils.METRICS_ENABLED or stall_watchdog is not None:
+        # One timer per worker loop, shared by the lag metrics and the stall
+        # watchdog's heartbeat.
+        asyncio.create_task(
+            loop_lag_monitor(asyncio.get_event_loop(),
+                             stall_watchdog=stall_watchdog))
+    try:
+        yield
+    finally:
+        # Runs after uvicorn has drained its connections, so a stall during
+        # the drain itself is still attributed.
+        if stall_watchdog is not None:
+            stall_watchdog.stop()
 
 
 class SecurityHeadersMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
@@ -1573,6 +1754,44 @@ async def _prepare_client_mount_dir(user_hash: str,
     return client_file_mounts_dir
 
 
+def _publish_chunk(zip_file_path: pathlib.Path, final_path: pathlib.Path,
+                   chunk_dir: Optional[pathlib.Path],
+                   total_chunks: int) -> Set[str]:
+    """Publishes a received chunk and reports which chunks are still missing.
+
+    Call this in a worker thread: the rename and the directory listing are
+    both synchronous, and the upload directory can live on a shared
+    filesystem (NFS/EFS) where a single operation costs milliseconds to
+    seconds. On the event loop that blocks every other request served by the
+    same worker for as long as the filesystem takes.
+
+    Args:
+        zip_file_path: The writer-unique temporary file holding the chunk.
+        final_path: The name to publish the chunk under.
+        chunk_dir: Directory holding the parts of a multi-chunk upload, or
+            None for a single-chunk upload, which has nothing to wait for.
+        total_chunks: The total number of chunks of this upload.
+
+    Returns:
+        The names of the chunks that have not been published yet, empty if
+        the upload is complete.
+    """
+    os.rename(str(zip_file_path), str(final_path))
+    if chunk_dir is None:
+        return set()
+    # A single directory read gives the state of the whole upload. Skip tmp
+    # files (e.g. ``part0.tmp.<hex>``) that may belong to in-flight
+    # concurrent writers: only published ``part{N}`` names count toward
+    # completion.
+    existing = set()
+    with os.scandir(chunk_dir) as entries:
+        for entry in entries:
+            name = entry.name
+            if name.startswith('part') and name[len('part'):].isdigit():
+                existing.add(name)
+    return set(f'part{i}' for i in range(total_chunks)) - existing
+
+
 async def _receive_and_assemble_chunks(
     base_dir: pathlib.Path,
     zip_name: str,
@@ -1613,6 +1832,8 @@ async def _receive_and_assemble_chunks(
     # a same blob does not interleave with each other.
     if total_chunks == 1:
         await anyio.Path(base_dir).mkdir(parents=True, exist_ok=True)
+        # No parts directory: a single-chunk upload has nothing to wait for.
+        chunk_dir = None
         final_path = base_dir / f'{zip_name}.zip'
         zip_file_path = base_dir / f'{zip_name}.tmp.{uuid.uuid4().hex}.zip'
     else:
@@ -1627,41 +1848,30 @@ async def _receive_and_assemble_chunks(
                 await f.write(chunk)
     except starlette.requests.ClientDisconnect as e:
         # Client disconnected, remove the zip file.
-        zip_file_path.unlink(missing_ok=True)
+        await asyncio.to_thread(zip_file_path.unlink, missing_ok=True)
         raise fastapi.HTTPException(
             status_code=400,
             detail='Client disconnected, please try again.') from e
     except Exception as e:
         logger.error(f'Error uploading zip file: {zip_file_path}')
         # Client disconnected, remove the zip file.
-        zip_file_path.unlink(missing_ok=True)
+        await asyncio.to_thread(zip_file_path.unlink, missing_ok=True)
         raise fastapi.HTTPException(
             status_code=500,
             detail=('Error uploading zip file: '
                     f'{common_utils.format_exception(e)}'))
 
-    def get_missing_chunks(total_chunks: int) -> Set[str]:
-        existing = set()
-        for p in chunk_dir.glob('part*'):
-            # Filter out tmp files (e.g. ``part0.tmp.<hex>``) that may
-            # belong to in-flight concurrent writers.  Only renamed
-            # final names ``part{N}`` count toward completion.
-            name = p.name
-            suffix = name[len('part'):] if name.startswith('part') else ''
-            if suffix.isdigit():
-                existing.add(name)
-        return set(f'part{i}' for i in range(total_chunks)) - existing
-
-    # Rename the writer-unique tmp file to its final name.
-    os.rename(str(zip_file_path), str(final_path))
+    # Rename the writer-unique tmp file to its final name and find out
+    # whether that completed the upload.
+    missing_chunks = await asyncio.to_thread(_publish_chunk, zip_file_path,
+                                             final_path, chunk_dir,
+                                             total_chunks)
     zip_file_path = final_path
 
-    if total_chunks > 1:
-        missing_chunks = get_missing_chunks(total_chunks)
-        if missing_chunks:
-            return payloads.UploadZipFileResponse(
-                status=responses.UploadStatus.UPLOADING.value,
-                missing_chunks=missing_chunks)
+    if missing_chunks:
+        return payloads.UploadZipFileResponse(
+            status=responses.UploadStatus.UPLOADING.value,
+            missing_chunks=missing_chunks)
     logger.info(f'Uploaded chunk: {zip_file_path}')
     if assemble:
         await _finalize_chunked_upload(base_dir=base_dir,
@@ -2445,11 +2655,24 @@ async def local_down(request: fastapi.Request,
     )
 
 
-async def get_expanded_request_id(request_id: str) -> str:
-    """Gets the expanded request ID for a given request ID prefix."""
+async def get_expanded_request_id(request_id: str,
+                                  scope_user_id: Optional[str] = None) -> str:
+    """Gets the expanded request ID for a given request ID prefix.
+
+    When ``scope_user_id`` is set, only requests owned by that user are
+    considered candidates. This both hides other users' requests (a
+    non-owned prefix resolves to a 404, identical to a genuine miss) and
+    closes an existence oracle: uniqueness is decided over the caller's own
+    requests only, so another user's request can never turn the response
+    into the distinguishable "multiple requests found" 400.
+    """
     request_tasks = await requests_lib.get_requests_async_with_prefix(
-        request_id, fields=['request_id'])
-    if request_tasks is None:
+        request_id, fields=['request_id', 'user_id'])
+    if request_tasks is not None and scope_user_id is not None:
+        request_tasks = [
+            task for task in request_tasks if task.user_id == scope_user_id
+        ]
+    if not request_tasks:
         raise fastapi.HTTPException(status_code=404,
                                     detail=f'Request {request_id!r} not found')
     if len(request_tasks) > 1:
@@ -2461,10 +2684,13 @@ async def get_expanded_request_id(request_id: str) -> str:
 
 # === API server related APIs ===
 @app.get('/api/get')
-async def api_get(request_id: str) -> payloads.RequestPayload:
+async def api_get(request: fastapi.Request,
+                  request_id: str) -> payloads.RequestPayload:
     """Gets a request with a given request ID prefix."""
-    # Validate request_id prefix matches a single request.
-    request_id = await get_expanded_request_id(request_id)
+    # Validate request_id prefix matches a single request, scoped to the
+    # caller so a non-admin cannot read another user's request.
+    request_id = await get_expanded_request_id(
+        request_id, scope_user_id=role_filter.request_owner_scope(request))
 
     # Exponential backoff: start fast (10ms) for short requests like
     # status/queue, then back off to 100ms for long requests like
@@ -2486,6 +2712,11 @@ async def api_get(request_id: str) -> payloads.RequestPayload:
         # Back off: 10ms -> 20ms -> 40ms -> 80ms -> 100ms (cap)
         poll_interval = min(poll_interval * 2, 0.1)
     request_task = await requests_lib.get_request_async(request_id)
+    # Stamp the request name so PrometheusMiddleware can record this /api/get
+    # call's latency broken out by request type (see
+    # SKY_APISERVER_REQUEST_GET_DURATION_SECONDS). Set on every non-404 outcome
+    # (success, error, should_retry) since request_task is available here.
+    request.state.request_name = request_task.name
     # Check the error before should_retry: an interrupted request is in a
     # terminal state (the server does not re-execute it after a restart),
     # so clients polling /api/get must get a definitive error telling them
@@ -2562,11 +2793,32 @@ async def stream(
             status_code=400,
             detail='Only one of request_id and log_path can be provided')
 
+    scope_user_id = role_filter.request_owner_scope(request)
+
+    if log_path is not None and scope_user_id is not None:
+        # log_path streaming targets arbitrary files under the shared
+        # ~/sky_logs tree and the multi-tenant API server log. A non-admin
+        # has no supported use for it, so gate it to admins/no-auth.
+        raise fastapi.HTTPException(
+            status_code=403,
+            detail='Streaming logs by log_path is restricted to admins.')
+
     if request_id is not None:
-        request_id = await get_expanded_request_id(request_id)
+        request_id = await get_expanded_request_id(request_id,
+                                                   scope_user_id=scope_user_id)
 
     if request_id is None and log_path is None:
-        request_id = await requests_lib.get_latest_request_id_async()
+        if scope_user_id is None:
+            request_id = await requests_lib.get_latest_request_id_async()
+        else:
+            # Scope "latest request" to the caller instead of leaking the
+            # server-wide most-recent request from any user.
+            latest = await requests_lib.get_request_tasks_async(
+                req_filter=requests_lib.RequestTaskFilter(user_id=scope_user_id,
+                                                          fields=['request_id'],
+                                                          sort=True,
+                                                          limit=1))
+            request_id = latest[0].request_id if latest else None
         if request_id is None:
             raise fastapi.HTTPException(status_code=404,
                                         detail='No request found')
@@ -2746,8 +2998,11 @@ async def stream(
 
 
 @app.post('/api/cancel')
-async def api_cancel(request: fastapi.Request,
-                     request_cancel_body: payloads.RequestCancelBody) -> None:
+async def api_cancel(
+    request: fastapi.Request,
+    request_cancel_body: payloads.RequestCancelBody = fastapi.Depends(
+        role_filter.force_caller_scope_cancel_body),
+) -> None:
     """Cancels requests."""
     await executor.schedule_request_async(
         request_id=request.state.request_id,
@@ -2785,6 +3040,9 @@ async def api_status(
         requests_lib.validate_fields(fields)
     except ValueError as e:
         raise fastapi.HTTPException(status_code=400, detail=str(e)) from e
+    # Scope to the caller so a non-admin only sees their own requests. None
+    # (admin / no-auth) means unscoped, i.e. every user's requests.
+    scope_user_id = role_filter.request_owner_scope(request)
     if request_ids is None:
         statuses = None
         if not all_status:
@@ -2793,6 +3051,7 @@ async def api_status(
             req_filter=requests_lib.RequestTaskFilter(
                 status=statuses,
                 cluster_names=[cluster_name] if cluster_name else None,
+                user_id=scope_user_id,
                 exclude_request_names=[
                     server_constants.REQUEST_NAME_PREFIX + d.value
                     for d in daemons.HIDDEN_REQUEST_NAMES
@@ -2811,6 +3070,10 @@ async def api_status(
             if request_tasks is None:
                 continue
             for request_task in request_tasks:
+                # Drop requests the caller does not own (non-admin scope).
+                if (scope_user_id is not None and
+                        request_task.user_id != scope_user_id):
+                    continue
                 encoded_request_tasks.append(
                     request_task.readable_encode(caller_user_id=caller_user_id))
         return encoded_request_tasks
@@ -3617,8 +3880,26 @@ async def complete_volume_name(incomplete: str,) -> List[str]:
 
 
 @app.get('/api/completion/api_request')
-async def complete_api_request(incomplete: str,) -> List[str]:
-    return await requests_lib.get_api_request_ids_start_with(incomplete)
+async def complete_api_request(request: fastapi.Request,
+                               incomplete: str) -> List[str]:
+    scope_user_id = role_filter.request_owner_scope(request)
+    if scope_user_id is None:
+        return await requests_lib.get_api_request_ids_start_with(incomplete)
+    # Non-admin: complete only the caller's own request IDs. Fetch their recent
+    # requests with the user_id filter, ordering, and 1000-row cap applied in
+    # SQL (via RequestTaskFilter), then prefix-match in memory. This keeps the
+    # bounded, recency-ordered behavior of the admin path instead of an
+    # unbounded full-table scan (an empty prefix would otherwise load every
+    # user's requests into memory).
+    request_tasks = await requests_lib.get_request_tasks_async(
+        req_filter=requests_lib.RequestTaskFilter(
+            user_id=scope_user_id, fields=['request_id'], sort=True, limit=1000)
+    )
+    return [
+        task.request_id
+        for task in request_tasks
+        if task.request_id.startswith(incomplete)
+    ]
 
 
 def _load_dynamic_routes() -> List[Tuple['re.Pattern[str]', str]]:
@@ -3791,10 +4072,37 @@ def _init_or_restore_server_user_hash():
         apply_user_hash(user_hash)
         return
 
-    # Initial deployment, generate a user hash and save it to the db.
-    user_hash = common_utils.get_user_hash()
-    global_user_state.set_system_config(_SERVER_USER_HASH_KEY, user_hash)
+    # Initial deployment. Insert-if-absent and apply whatever is live
+    # afterwards: replicas starting together would otherwise each generate a
+    # hash and the last write would win, leaving them disagreeing on the
+    # server id they have already applied locally.
+    user_hash = global_user_state.get_or_set_system_config(
+        _SERVER_USER_HASH_KEY, common_utils.get_user_hash())
     apply_user_hash(user_hash)
+
+
+def _bootstrap_jwt_secret() -> None:
+    """Best-effort pre-fork bootstrap of the JWT signing secret.
+
+    Runs in the parent process before uvicorn forks its workers, so generation
+    happens exactly once and before any request exists rather than racing on
+    the first service-account request. Workers do not inherit the cache, so
+    each still reads the row lazily; that makes this an optimisation, not a
+    correctness requirement.
+
+    Hence best-effort. Unlike the database errors that already stop startup one
+    line above, a corrupt `jwt_secret` row is a service-account-auth problem,
+    and letting it abort startup would take the dashboard and every interactive
+    user down with it -- in a crashloop.
+    """
+    try:
+        token_service.token_service.ensure_secret_loaded()
+    except Exception:  # pylint: disable=broad-except
+        logger.error(
+            'Could not bootstrap the JWT signing secret at startup. Service '
+            'account authentication will retry on its first request; nothing '
+            'else is affected.',
+            exc_info=True)
 
 
 if __name__ == '__main__':
@@ -3858,6 +4166,8 @@ if __name__ == '__main__':
     # Restore the server user hash
     logger.info('Initializing server user hash')
     _init_or_restore_server_user_hash()
+    logger.info('Initializing JWT signing secret')
+    _bootstrap_jwt_secret()
     # Set up consolidation mode signal file. Needs global user state DB access
     # to check for existing controller clusters. Placed after user hash restore
     # to avoid accidentally using the wrong server hash.
@@ -3877,10 +4187,9 @@ if __name__ == '__main__':
     logger.info(f'Max db connections: {max_db_connections}')
 
     # Reserve memory for jobs and serve/pool controller in consolidation mode.
+    # setup_consolidation_mode_on_startup() above has written the signal file.
     reserved_memory_mb = (
         controller_utils.compute_memory_reserved_for_controllers(
-            reserve_for_controllers=os.environ.get(
-                constants.OVERRIDE_CONSOLIDATION_MODE) is not None,
             # For jobs controller, we need to reserve for both jobs and
             # pool controller.
             reserve_extra_for_pool=not os.environ.get(
@@ -3901,9 +4210,11 @@ if __name__ == '__main__':
         background = uvloop.new_event_loop()
         if os.environ.get(constants.ENV_VAR_SERVER_METRICS_ENABLED):
             metrics.maybe_register_managed_jobs_collector()
-            metrics_server = metrics.build_metrics_server(
-                cmd_args.host, cmd_args.metrics_port)
-            global_tasks.append(background.create_task(metrics_server.serve()))
+            # Deliberately not on `background`: the scrape shares that
+            # loop's anyio thread limiter with every daemon below, and the
+            # ones that unlink files a batch at a time can hold the scrape
+            # off for tens of seconds. See metrics.start_metrics_server().
+            metrics.start_metrics_server(cmd_args.host, cmd_args.metrics_port)
             # Reap per-pid prometheus multiproc files left behind by
             # workers that crashed (SIGKILL, OOM, hard crash) and never
             # called mark_process_dead. Without this, MultiProcessCollector
@@ -3923,7 +4234,7 @@ if __name__ == '__main__':
         # be a singleton task.
         global_tasks.append(
             background.create_task(cleanup_unreferenced_file_mounts()))
-        global_tasks.append(background.create_task(cleanup_download_tmp()))
+        global_tasks.append(background.create_task(cleanup_clients_tmp()))
         global_tasks.append(background.create_task(cleanup_sky_logs()))
         threading.Thread(target=background.run_forever, daemon=True).start()
 
@@ -3968,6 +4279,7 @@ if __name__ == '__main__':
 
         for gt in global_tasks:
             gt.cancel()
+        metrics.stop_metrics_server()
         for plugin in plugins.get_plugins():
             plugin.shutdown()
         subprocess_utils.run_in_parallel(lambda worker: worker.cancel(),

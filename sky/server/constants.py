@@ -11,7 +11,7 @@ from sky.skylet import runtime_utils
 # based on version info is needed.
 # For more details and code guidelines, refer to:
 # https://docs.skypilot.co/en/latest/developers/CONTRIBUTING.html#backward-compatibility-guidelines
-API_VERSION = 56  # resize field on LaunchBody
+API_VERSION = 58  # managed jobs queue infra filter (--infra)
 
 # The minimum peer API version that the code should still work with.
 # Notes (dev):
@@ -43,6 +43,12 @@ MIN_API_ACCESS_API_VERSION = 42
 # Minimum API version that supports the SSH redirect first-frame protocol.
 MIN_SSH_REDIRECT_PROTOCOL_VERSION = 47
 
+# Minimum server API version that supports filtering the managed jobs queue by
+# infra (`infra_match`, surfaced as the CLI `--infra` flag and the dashboard's
+# Infra filter). An older server drops the field and answers with jobs on every
+# infra, so the client refuses to ask rather than mislabel that as filtered.
+MIN_JOBS_INFRA_FILTER_API_VERSION = 58
+
 # Minimum API version that supports Sky Batch (sky.batch module).
 MIN_BATCH_API_VERSION = 49
 
@@ -50,6 +56,7 @@ MIN_BATCH_API_VERSION = 49
 # launch response. Lets the CLI skip the follow-up /status round-trip that
 # only exists to fetch credentials for SSH config setup.
 MIN_LAUNCH_CREDENTIALS_API_VERSION = 50
+MIN_SLURM_HOST_PATH_VOLUME_API_VERSION = 57
 
 # Servers >= this version omit the bulky pickled `handle` from each replica
 # in serve/pool status responses, shipping pre-computed `infra` /

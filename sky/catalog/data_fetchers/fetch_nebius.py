@@ -12,7 +12,15 @@ import os
 import re
 from typing import Any, Dict, List, Optional
 
-from nebius.api.nebius.billing.v1alpha1 import OfferType
+from google.protobuf import any_pb2
+from nebius.api.nebius.billing.v1 import OfferType
+
+try:
+    # nebius >= 0.4 generates its own google.protobuf wrappers; the module
+    # does not exist on the 0.3.x SDK generation.
+    from nebius.api.google.protobuf import Any as _SdkAny
+except ImportError:
+    _SdkAny = None
 
 from sky.adaptors import nebius
 from sky.adaptors.nebius import billing
@@ -47,8 +55,8 @@ class PresetInfo:
         accelerator_name (str | None): The name of the accelerator
             (e.g., "H100"), or None if no accelerator.
         price_hourly (decimal.Decimal): The hourly price of the preset.
-        spot_price (decimal.Decimal): The spot (preemptible) price
-            of the preset.
+        spot_price (decimal.Decimal | None): The spot (preemptible) price
+            of the preset, or None if the preset has no spot price.
     """
 
     region: str
@@ -62,7 +70,7 @@ class PresetInfo:
     accelerator_manufacturer: Optional[str]
     accelerator_name: Optional[str]
     price_hourly: decimal.Decimal
-    spot_price: decimal.Decimal
+    spot_price: Optional[decimal.Decimal]
 
 
 def _format_decimal(value: decimal.Decimal) -> str:
@@ -84,6 +92,131 @@ def _format_decimal(value: decimal.Decimal) -> str:
     return f'{integer_part}.{decimal_part}'
 
 
+def _pack_any(message: Any) -> Any:
+    """Packs an SDK message into a protobuf Any across SDK generations."""
+    # nebius 0.3.x message classes wrap the underlying protobuf object in
+    # __pb2_message__; pack it into a plain protobuf Any, which the 0.3.x
+    # ResourceSpec accepts directly.
+    pb2_message = getattr(message, '__pb2_message__', None)
+    if pb2_message is not None:
+        any_message = any_pb2.Any()
+        any_message.Pack(pb2_message)
+        return any_message
+    # nebius >= 0.4.3 messages own their protobuf state directly (no wrapped
+    # pb2 object) and must be packed into the SDK's own Any wrapper: the new
+    # generation's ResourceSpec rejects a plain protobuf Any.
+    if _SdkAny is None:
+        raise TypeError(
+            'Cannot pack Nebius SDK message of type '
+            f'{type(message)!r}: the installed nebius SDK exposes neither '
+            '__pb2_message__ nor the nebius.api.google.protobuf.Any wrapper.')
+    return _SdkAny(
+        type_url=f'type.googleapis.com/{type(message).__PROTO_FULL_NAME__}',
+        value=message.SerializeToString())
+
+
+def _make_create_instance_request(parent_id: str, platform_name: str,
+                                  preset_name: str, preemptible: bool) -> Any:
+    """Builds a Compute CreateInstanceRequest for billing estimates."""
+    compute_v1 = compute()
+    instance_spec_kwargs = {
+        'resources': compute_v1.ResourcesSpec(
+            platform=platform_name,
+            preset=preset_name,
+        )
+    }
+    if preemptible:
+        instance_spec_kwargs['preemptible'] = compute_v1.PreemptibleSpec(
+            on_preemption=compute_v1.PreemptibleSpec.PreemptionPolicy.STOP)
+
+    return compute_v1.CreateInstanceRequest(
+        metadata=nebius_common().ResourceMetadata(parent_id=parent_id,),
+        spec=compute_v1.InstanceSpec(**instance_spec_kwargs),
+    )
+
+
+def _make_estimate_batch_request(
+        parent_id: str,
+        platform_name: str,
+        preset_name: str,
+        preemptible: bool,
+        offer_types: Optional[List[OfferType]] = None) -> Any:
+    """Builds a billing v1 EstimateBatchRequest for one compute preset."""
+    billing_v1 = billing()
+    instance_request = _make_create_instance_request(parent_id, platform_name,
+                                                     preset_name, preemptible)
+    estimate_spec = billing_v1.ResourceSpec(spec=_pack_any(instance_request))
+    aggregation_unit_value = (
+        billing_v1.FilterAggregationUnit.FilterAggregationUnitValue)
+    return billing_v1.EstimateBatchRequest(
+        resource_specs=[estimate_spec],
+        offer_types=offer_types,
+        filter_aggregation_unit=billing_v1.FilterAggregationUnit(
+            filter_aggregation_unit_values=[
+                aggregation_unit_value.FILTER_AGGREGATION_UNIT_HOUR
+            ]),
+    )
+
+
+def _get_hourly_total_cost(response: Any) -> decimal.Decimal:
+    """Extracts hourly aggregate cost from a billing v1 estimate response."""
+    total_costs = getattr(response, 'total_costs', None)
+    if not total_costs:
+        raise ValueError('Nebius billing estimate did not return total costs.')
+
+    hourly_costs = []
+    available_units = []
+    for total_cost in total_costs:
+        aggregation_unit = getattr(total_cost, 'aggregation_unit', None)
+        unit = getattr(aggregation_unit, 'unit', None)
+        if unit is not None:
+            available_units.append(unit)
+        if unit == 'hour':
+            hourly_costs.append(total_cost)
+
+    if len(hourly_costs) != 1:
+        raise ValueError(
+            'Nebius billing estimate expected exactly one hourly total cost, '
+            f'got {len(hourly_costs)}. Available units: {available_units}.')
+
+    hourly_cost = hourly_costs[0]
+    cost_type = None
+    which_oneof = getattr(hourly_cost, 'WhichOneof', None)
+    if callable(which_oneof):
+        cost_type = which_oneof('cost_type')
+    else:
+        which_field = getattr(hourly_cost, 'which_field_in_oneof', None)
+        if callable(which_field):
+            cost_type = which_field('cost_type')
+
+    if cost_type is not None:
+        if cost_type == 'range':
+            raise ValueError(
+                'Nebius billing estimate returned a range hourly total cost; '
+                'expected a general total cost.')
+        if cost_type != 'general':
+            raise ValueError(
+                'Nebius billing estimate hourly total cost has no general '
+                'cost.')
+
+    general = getattr(hourly_cost, 'general', None)
+    if general is None:
+        if getattr(hourly_cost, 'range', None) is not None:
+            raise ValueError(
+                'Nebius billing estimate returned a range hourly total cost; '
+                'expected a general total cost.')
+        raise ValueError(
+            'Nebius billing estimate hourly total cost has no general cost.')
+
+    total = getattr(general, 'total', None)
+    cost = getattr(total, 'cost', None)
+    if cost is None or cost == '':
+        raise ValueError(
+            'Nebius billing estimate hourly total cost is missing cost.')
+
+    return decimal.Decimal(cost)
+
+
 def estimate_platforms(
         platforms: List[Any], parent_id: str, region: str,
         offer_types: Optional[List[OfferType]]) -> List[PresetInfo]:
@@ -102,8 +235,18 @@ def estimate_platforms(
         List[PresetInfo]: A list of PresetInfo objects containing details and
         estimated prices for each preset.
     """
-    return asyncio.run(
-        _estimate_platforms_async(platforms, parent_id, region, offer_types))
+    try:
+        return asyncio.run(
+            _estimate_platforms_async(platforms, parent_id, region,
+                                      offer_types))
+    finally:
+        # This runs once per region, each time in its own event loop. The
+        # cached SDK holds channels bound to the loop asyncio.run() just
+        # closed; after a failed request on one of them every request in the
+        # next region's loop fails with "Event loop is closed", and those
+        # failures are then silently swallowed by return_exceptions=True.
+        # Reset the client so each region starts from a clean one.
+        nebius.clear_sdk_cache()
 
 
 async def _estimate_platforms_async(
@@ -116,35 +259,18 @@ async def _estimate_platforms_async(
     for platform in platforms:
         platform_name = platform.metadata.name
         for preset in platform.spec.presets:
-            # Form the specification for the price request
-            estimate_spec = billing().ResourceSpec(
-                compute_instance_spec=compute().CreateInstanceRequest(
-                    metadata=nebius_common().ResourceMetadata(
-                        parent_id=parent_id,),
-                    spec=compute().InstanceSpec(
-                        resources=compute().ResourcesSpec(
-                            platform=platform_name,
-                            preset=preset.name,
-                        )),
-                ))
-            price_request = billing().EstimateBatchRequest(
-                resource_specs=[estimate_spec], offer_types=offer_types)
-
-            # Form the specification for the spot price request
-            spot_estimate_spec = billing().ResourceSpec(
-                compute_instance_spec=compute().CreateInstanceRequest(
-                    metadata=nebius_common().ResourceMetadata(
-                        parent_id=parent_id,),
-                    spec=compute().InstanceSpec(
-                        resources=compute().ResourcesSpec(
-                            platform=platform_name,
-                            preset=preset.name,
-                        ),
-                        preemptible=compute().PreemptibleSpec(priority=1),
-                    ),
-                ))
-            spot_price_request = billing().EstimateBatchRequest(
-                resource_specs=[spot_estimate_spec], offer_types=offer_types)
+            price_request = _make_estimate_batch_request(
+                parent_id,
+                platform_name,
+                preset.name,
+                preemptible=False,
+                offer_types=offer_types)
+            spot_price_request = _make_estimate_batch_request(
+                parent_id,
+                platform_name,
+                preset.name,
+                preemptible=True,
+                offer_types=offer_types)
 
             # Start future for each preset
             futures.append((
@@ -163,14 +289,56 @@ async def _estimate_platforms_async(
         spot_requests.append(spot_req)
 
     normal, spot = await asyncio.gather(
-        asyncio.gather(*normal_requests),
-        asyncio.gather(*spot_requests),
+        asyncio.gather(*normal_requests, return_exceptions=True),
+        asyncio.gather(*spot_requests, return_exceptions=True),
     )
 
     # wait all futures to complete and collect results
     result = []
     for (platform, preset, _, _), normal, spot in zip(futures, normal, spot):
         platform_name = platform.metadata.name
+        if isinstance(normal, BaseException):
+            # The billing calculator may have no SKU for a platform/preset
+            # (e.g. a newly listed platform that is not priced yet), which
+            # fails the estimate request with INVALID_ARGUMENT. Skip such
+            # presets instead of failing the whole catalog fetch.
+            logger.warning('Skipping preset %s_%s in %s: %s', platform_name,
+                           preset.name, region, normal)
+            continue
+        # A request can succeed and still carry a cost we cannot use (an
+        # unexpected aggregation unit, or a range instead of a general cost).
+        # _get_hourly_total_cost raises for those, and it runs outside the
+        # gather above, so it needs its own guard: without one a single
+        # malformed response still fails the entire fetch.
+        try:
+            price_hourly = _get_hourly_total_cost(normal)
+        except ValueError as e:
+            logger.warning('Skipping preset %s_%s in %s: %s', platform_name,
+                           preset.name, region, e)
+            continue
+        # A resource with no SKU can come back as a successful estimate of 0
+        # rather than an error: gpu-gb300 in eu-north1 fails the spot estimate
+        # with "unresolved sku" but returns cost '0' for the on-demand one.
+        # Writing that through advertises the instance as free and makes the
+        # optimizer always prefer it, so treat it as unpriceable.
+        if price_hourly <= 0:
+            logger.warning(
+                'Skipping preset %s_%s in %s: the on-demand estimate returned '
+                '%s, so the resource has no price.', platform_name, preset.name,
+                region, price_hourly)
+            continue
+        # Keep presets that have an on-demand price but no spot price; the
+        # catalog writes an empty SpotPrice column for those.
+        spot_price = None
+        if isinstance(spot, BaseException):
+            logger.warning('No spot price for preset %s_%s in %s: %s',
+                           platform_name, preset.name, region, spot)
+        else:
+            try:
+                spot_price = _get_hourly_total_cost(spot)
+            except ValueError as e:
+                logger.warning('No spot price for preset %s_%s in %s: %s',
+                               platform_name, preset.name, region, e)
         result.append(
             PresetInfo(
                 region=region,
@@ -185,9 +353,8 @@ async def _estimate_platforms_async(
                 if platform_name.startswith('gpu-') else '',
                 accelerator_name=platform_name.split('-')[1].upper()
                 if platform_name.startswith('gpu-') else '',
-                price_hourly=decimal.Decimal(
-                    normal.hourly_cost.general.total.cost),
-                spot_price=decimal.Decimal(spot.hourly_cost.general.total.cost),
+                price_hourly=price_hourly,
+                spot_price=spot_price,
             ))
     return result
 
@@ -317,6 +484,7 @@ def _get_all_platform_prices(
     regions_map = _get_regions_map()
 
     presets = []
+    total_presets = 0
 
     for region_code in sorted(regions_map.keys()):
         project_id = PARENT_ID_TEMPLATE.format(region_code)
@@ -329,11 +497,23 @@ def _get_all_platform_prices(
             logger.warning('No platforms found in region %s', region)
             continue
 
+        total_presets += sum(
+            len(platform.spec.presets) for platform in platforms)
         presets.extend(
             estimate_platforms(platforms=platforms,
                                parent_id=project_id,
                                region=region,
                                offer_types=offer_types))
+
+    # Skipping the occasional unpriceable preset is fine, but a large
+    # fraction of failures indicates a systemic problem (e.g. expired
+    # credentials or a billing service outage). Fail loudly in that case
+    # instead of silently publishing a mostly-empty catalog.
+    num_failed = total_presets - len(presets)
+    if total_presets and num_failed * 2 > total_presets:
+        raise RuntimeError(f'Failed to price {num_failed} out of '
+                           f'{total_presets} presets; refusing to write a '
+                           'mostly-empty catalog.')
 
     return presets
 
@@ -349,6 +529,9 @@ def main() -> None:
 
     # Fetch presets and estimate
     presets = _get_all_platform_prices()
+    if not presets:
+        raise RuntimeError('No presets were collected; refusing to '
+                           'overwrite the catalog with an empty file.')
 
     # Write CSV
     write_preset_prices(presets, output_file)

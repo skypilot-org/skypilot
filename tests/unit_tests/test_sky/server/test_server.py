@@ -10,15 +10,18 @@ import time
 from unittest import mock
 
 import fastapi
+import prometheus_client as prom
 import pytest
 import uvicorn
 
 from sky import models
+from sky.schemas.api import responses as api_responses
 from sky.server import common as server_common
 from sky.server import constants as server_constants
 from sky.server import server
 from sky.server.requests import executor
 from sky.skylet import constants
+from sky.users import token_service
 from sky.utils import common_utils
 from sky.utils import config_utils
 
@@ -221,7 +224,8 @@ async def test_logs():
                                             mock_request_task.log_path,
                                             mock.ANY,
                                             polling_interval=1,
-                                            kill_request_on_disconnect=False)
+                                            kill_request_on_disconnect=False,
+                                            discard_log_after_stream=True)
 
 
 @mock.patch('sky.utils.context_utils.hijack_sys_attrs')
@@ -819,7 +823,7 @@ def test_api_get_endpoint_serializes_request_payload(monkeypatch):
         user_id='user-123',
     )
 
-    async def fake_expand(request_id):
+    async def fake_expand(request_id, scope_user_id=None):
         return request_id
 
     async def fake_status(request_id, include_msg=False):
@@ -870,7 +874,7 @@ def _make_interrupted_request(with_error: bool):
 def _mount_api_get_request(monkeypatch, request):
     from sky.server.requests import requests as requests_lib
 
-    async def fake_expand(request_id):
+    async def fake_expand(request_id, scope_user_id=None):
         return request_id
 
     async def fake_status(request_id, include_msg=False):
@@ -1144,7 +1148,575 @@ def test_prune_sky_logs_removes_expired_file_upload_logs(
     assert fresh_log.exists()
 
 
+def test_prune_sky_logs_records_metrics(tmp_path, monkeypatch,
+                                        _no_provision_log_paths):
+    """A sweep publishes the entry population, its duration and what it removed.
+
+    The entry gauge counts every top-level entry the scandir loop walks, not
+    just the expired ones, since that population is what the sweep costs.
+    """
+    monkeypatch.setattr(constants, 'SKY_LOGS_DIRECTORY', str(tmp_path))
+    monkeypatch.setattr(server.metrics_utils, 'METRICS_ENABLED', True)
+    now = 1_000_000.0
+    _touch_dir(tmp_path / 'sky-2020-01-01-00-00-00-000000', now - 10_000)
+    _touch_dir(tmp_path / 'sky-2020-01-02-00-00-00-000000', now - 100)
+    _touch_dir(tmp_path / 'api_server', now - 10_000)
+    pid = {'pid': str(os.getpid())}
+    pruned_before = prom.REGISTRY.get_sample_value(
+        'sky_apiserver_sky_logs_pruned_entries_total') or 0.0
+
+    removed = server._prune_sky_logs(cutoff=now - 5_000)
+
+    assert removed == 1
+    assert prom.REGISTRY.get_sample_value(
+        'sky_apiserver_sky_logs_top_level_entries', pid) == 3
+    assert prom.REGISTRY.get_sample_value(
+        'sky_apiserver_sky_logs_pruned_entries_total') - pruned_before == 1
+    assert prom.REGISTRY.get_sample_value(
+        'sky_apiserver_sky_logs_prune_duration_seconds', pid) >= 0
+    assert prom.REGISTRY.get_sample_value(
+        'sky_apiserver_sky_logs_fs_used_bytes', pid) > 0
+
+
+def test_prune_sky_logs_does_not_follow_symlinks(tmp_path, monkeypatch,
+                                                 _no_provision_log_paths):
+    """Symlinks are never traversed, so their targets are left untouched."""
+    monkeypatch.setattr(constants, 'SKY_LOGS_DIRECTORY', str(tmp_path))
+    now = 1_000_000.0
+    outside = _touch_dir(tmp_path / 'outside' / 'target', now - 10_000)
+    (tmp_path / 'sky-2020-01-01-00-00-00-000000').symlink_to(outside)
+    outside_file = _touch_file(tmp_path / 'outside' / 'target.log',
+                               now - 10_000)
+    (tmp_path / 'file_uploads').mkdir()
+    (tmp_path / 'file_uploads' / 'sky-link.log').symlink_to(outside_file)
+
+    removed = server._prune_sky_logs(cutoff=now - 5_000)
+
+    assert removed == 0
+    assert outside.exists()
+    assert outside_file.exists()
+
+
 def test_prune_sky_logs_missing_dir_is_noop(tmp_path, monkeypatch):
     monkeypatch.setattr(constants, 'SKY_LOGS_DIRECTORY',
                         str(tmp_path / 'does-not-exist'))
     assert server._prune_sky_logs(cutoff=1_000_000.0) == 0
+
+
+@pytest.mark.asyncio
+async def test_cleanup_sky_logs_reads_reloaded_retention_in_to_thread(
+        monkeypatch):
+    """A config swap done by reload_config inside asyncio.to_thread must be
+    visible to the subsequent get_nested on the loop thread.
+
+    cleanup_sky_logs runs the blocking reload off-loop with
+    `await asyncio.to_thread(skypilot_config.reload_config)` and then reads
+    retention_hours back on the loop thread. This guards the cross-thread
+    visibility the daemon relies on: a config swap performed in the
+    to_thread worker must reach the on-loop get_nested, or the daemon would
+    prune on a stale retention.
+
+    The real reload_config's source I/O (file read / DB SELECT) is stubbed
+    here to keep the unit test env/DB-free; its swap tail
+    (_set_loaded_config, the mechanism the real reload uses) and the real
+    get_nested read are exercised unchanged through the real cleanup_sky_logs
+    + real asyncio.to_thread.
+    """
+    from sky import skypilot_config
+
+    fresh_retention = 7
+    # Stale value (2) so a successful reload is observable: if the swap never
+    # reaches get_nested, the assertion below sees 2 instead of 7.
+    stale = config_utils.Config()
+    stale.set_nested(('api_server', 'logs_retention_hours'), 2)
+    # Swap in the stale config through the real accessor and let monkeypatch
+    # restore the original value at teardown: the loaded config is
+    # process-global, and leaving a swapped value behind would leak into
+    # later tests in this xdist worker (including when this test fails).
+    loaded_context = skypilot_config._get_config_context()
+    monkeypatch.setattr(loaded_context, 'config', stale)
+
+    def fake_reload():
+        # Mirrors the tail of the real _reload_config_as_server: build the
+        # new config and swap it in with _set_loaded_config. Runs from inside
+        # asyncio.to_thread, i.e. a worker thread.
+        cfg = config_utils.Config()
+        cfg.set_nested(('api_server', 'logs_retention_hours'), fresh_retention)
+        skypilot_config._set_loaded_config(cfg)
+
+    monkeypatch.setattr(server.skypilot_config, 'reload_config', fake_reload)
+
+    observed_cutoffs = []
+
+    def fake_prune(cutoff):
+        observed_cutoffs.append(cutoff)
+        return 0
+
+    monkeypatch.setattr(server, '_prune_sky_logs', fake_prune)
+
+    # asyncio.sleep is the while-True's last statement, outside the try/except,
+    # so raising a BaseException here exits cleanup_sky_logs after exactly one
+    # iteration; a BaseException subclass is chosen so the daemon's broad
+    # `except Exception` cannot swallow it.
+    class _StopLoop(BaseException):
+        pass
+
+    async def bail(_seconds):
+        raise _StopLoop
+
+    # No-op the daemon's startup jitter first: it awaits asyncio.sleep before
+    # the loop, so the patched sleep below would otherwise raise _StopLoop
+    # before a single iteration ran and the reload would never be exercised.
+    async def _noop_jitter(*_args, **_kwargs):
+        pass
+
+    monkeypatch.setattr(server.asyncio_utils, 'sleep_startup_jitter',
+                        _noop_jitter)
+    monkeypatch.setattr(server.asyncio, 'sleep', bail)
+
+    with pytest.raises(_StopLoop):
+        await server.cleanup_sky_logs()
+
+    # reload ran in a worker thread; get_nested ran on the loop thread.
+    assert skypilot_config.get_nested(('api_server', 'logs_retention_hours'),
+                                      -1) == fresh_retention
+    assert len(observed_cutoffs) == 1
+    expected_cutoff = time.time() - fresh_retention * 3600
+    assert abs(observed_cutoffs[0] - expected_cutoff) < 2
+
+
+# --- Tests for cleanup_clients_tmp (client tmp dir GC) ---
+
+
+def _set_download_tmp_base(monkeypatch, base) -> None:
+    storage = mock.Mock()
+    storage.download_tmp_base_dir.return_value = base
+    monkeypatch.setattr(server.bs, 'get_blob_storage', lambda: storage)
+
+
+async def _run_one_cleanup_pass(monkeypatch, daemon) -> None:
+    """Run a single pass of an hourly cleanup daemon, then stop it."""
+    sleeps = []
+
+    async def fake_sleep(delay):
+        sleeps.append(delay)
+        if len(sleeps) > 1:
+            raise asyncio.CancelledError()
+
+    monkeypatch.setattr(server.asyncio, 'sleep', fake_sleep)
+    with pytest.raises(asyncio.CancelledError):
+        await daemon()
+
+
+@pytest.mark.asyncio
+async def test_cleanup_clients_tmp_removes_expired_dirs(tmp_path, monkeypatch):
+    """Expired per-user entries go; fresh ones stay."""
+    tmp_base = tmp_path / 'clients'
+    _set_download_tmp_base(monkeypatch, str(tmp_base))
+    now = time.time()
+    logs = _touch_dir(tmp_base / 'user1' / 'sky_logs', now - 10_000)
+    # Legacy task YAMLs live in a dir, so they go with the dir sweep.
+    tasks = _touch_dir(tmp_base / 'user1' / 'tasks', now - 10_000)
+    fresh = _touch_dir(tmp_base / 'user1' / 'file_mounts', now - 10)
+
+    await _run_one_cleanup_pass(monkeypatch, server.cleanup_clients_tmp)
+
+    assert not logs.exists()
+    assert not tasks.exists()
+    assert fresh.exists()
+
+
+@pytest.mark.asyncio
+async def test_cleanup_clients_tmp_removes_translated_yamls_of_any_age(
+        tmp_path, monkeypatch):
+    """*_translated.yaml is deprecated, so age does not matter."""
+    tmp_base = tmp_path / 'clients'
+    _set_download_tmp_base(monkeypatch, str(tmp_base))
+    now = time.time()
+    old = _touch_file(tmp_base / 'user1' / 'abc_translated.yaml', now - 10_000)
+    fresh = _touch_file(tmp_base / 'user1' / 'def_translated.yaml', now)
+    other = _touch_file(tmp_base / 'user1' / 'config.yaml', now - 10_000)
+
+    await _run_one_cleanup_pass(monkeypatch, server.cleanup_clients_tmp)
+
+    assert not old.exists()
+    assert not fresh.exists()
+    assert other.exists()
+
+
+@pytest.mark.asyncio
+async def test_cleanup_clients_tmp_noop_without_download_tmp_base(
+        tmp_path, monkeypatch):
+    """Backends sharing the persistent log dir need no cleanup."""
+    _set_download_tmp_base(monkeypatch, None)
+    kept = _touch_file(tmp_path / 'user1' / 'abc_translated.yaml',
+                       time.time() - 10_000)
+
+    await _run_one_cleanup_pass(monkeypatch, server.cleanup_clients_tmp)
+
+    assert kept.exists()
+
+
+class _FakeTask:
+    """Minimal stand-in for a Request row (only the fields get_expanded uses)."""
+
+    def __init__(self, request_id, user_id):
+        self.request_id = request_id
+        self.user_id = user_id
+
+
+@pytest.mark.asyncio
+async def test_get_expanded_request_id_scopes_to_owner(monkeypatch):
+    all_tasks = [_FakeTask('abc-alice', 'alice'), _FakeTask('abc-bob', 'bob')]
+
+    async def fake_prefix(prefix, fields=None):
+        matched = [t for t in all_tasks if t.request_id.startswith(prefix)]
+        return matched or None
+
+    monkeypatch.setattr(server.requests_lib, 'get_requests_async_with_prefix',
+                        fake_prefix)
+
+    # Alice: uniqueness is decided over her own requests only -> resolves to
+    # hers, NOT a 400 "multiple found" (which would be an existence oracle).
+    assert await server.get_expanded_request_id(
+        'abc', scope_user_id='alice') == 'abc-alice'
+
+    # A prefix that only matches bob's request is a 404 for alice, identical
+    # to a genuine miss (no 400 that would confirm the row exists).
+    with pytest.raises(fastapi.HTTPException) as exc:
+        await server.get_expanded_request_id('abc-bob', scope_user_id='alice')
+    assert exc.value.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_get_expanded_request_id_admin_unscoped(monkeypatch):
+    both = [_FakeTask('abc-alice', 'alice'), _FakeTask('abc-bob', 'bob')]
+
+    async def fake_prefix(prefix, fields=None):
+        return list(both)
+
+    monkeypatch.setattr(server.requests_lib, 'get_requests_async_with_prefix',
+                        fake_prefix)
+
+    # Unscoped (admin / no-auth): the ambiguous prefix is a 400 as before.
+    with pytest.raises(fastapi.HTTPException) as exc:
+        await server.get_expanded_request_id('abc', scope_user_id=None)
+    assert exc.value.status_code == 400
+
+
+# --- SKY-6429: cross-user request-API access control (integration) ----------
+
+
+def _seed_request(rid, user_id, status=None):
+    from sky.server.requests import payloads
+    from sky.server.requests import requests as requests_lib
+    return requests_lib.Request(request_id=rid,
+                                name='sky.launch',
+                                entrypoint=_api_get_dummy_entrypoint,
+                                request_body=payloads.RequestBody(),
+                                status=status or
+                                requests_lib.RequestStatus.SUCCEEDED,
+                                created_at=1234567890.0,
+                                pid=None,
+                                user_id=user_id)
+
+
+@pytest.fixture()
+def _request_authz_env(tmp_path, monkeypatch):
+    """Isolated request DB seeded with alice's and bob's requests."""
+    import asyncio
+
+    from sky.server.requests import requests as requests_lib
+
+    logs = tmp_path / 'logs'
+    logs.mkdir()
+    monkeypatch.setattr('sky.server.constants.API_SERVER_REQUEST_DB_PATH',
+                        str(tmp_path / 'requests.db'))
+    monkeypatch.setattr('sky.server.constants.REQUEST_LOG_PATH_PREFIX',
+                        str(logs))
+    requests_lib._DB = None
+
+    async def _seed():
+        await requests_lib.create_if_not_exists_async(
+            _seed_request('alice-req-1', 'alice'))
+        await requests_lib.create_if_not_exists_async(
+            _seed_request('bob-req-1', 'bob'))
+
+    asyncio.new_event_loop().run_until_complete(_seed())
+    yield
+    requests_lib._DB = None
+
+
+def _scope_as(monkeypatch, scope):
+    """Force request_owner_scope (the single chokepoint) to a given value."""
+    monkeypatch.setattr(server.role_filter, 'request_owner_scope',
+                        lambda request: scope)
+
+
+def test_api_get_blocks_other_users_request(_request_authz_env, monkeypatch):
+    from fastapi.testclient import TestClient
+    client = TestClient(server.app)
+
+    # Alice can read her own request.
+    _scope_as(monkeypatch, 'alice')
+    assert client.get('/api/get', params={
+        'request_id': 'alice-req-1'
+    }).status_code == 200
+    # Alice cannot read bob's — 404, identical to a genuine miss.
+    assert client.get('/api/get', params={
+        'request_id': 'bob-req-1'
+    }).status_code == 404
+    # Admin (unscoped) can read bob's.
+    _scope_as(monkeypatch, None)
+    assert client.get('/api/get', params={
+        'request_id': 'bob-req-1'
+    }).status_code == 200
+
+
+def test_api_status_scopes_to_caller(_request_authz_env, monkeypatch):
+    from fastapi.testclient import TestClient
+    client = TestClient(server.app)
+
+    _scope_as(monkeypatch, 'alice')
+    ids = {
+        r['request_id']
+        for r in client.get('/api/status', params={
+            'all_status': True
+        }).json()
+    }
+    assert 'alice-req-1' in ids
+    assert 'bob-req-1' not in ids
+
+    # The request_ids (prefix) branch also drops non-owned rows.
+    body = client.get('/api/status',
+                      params={
+                          'request_ids': ['bob-req-1'],
+                          'all_status': True
+                      }).json()
+    assert body == []
+
+    # Admin sees everyone.
+    _scope_as(monkeypatch, None)
+    ids = {
+        r['request_id']
+        for r in client.get('/api/status', params={
+            'all_status': True
+        }).json()
+    }
+    assert {'alice-req-1', 'bob-req-1'} <= ids
+
+
+def test_api_completion_scopes_to_caller(_request_authz_env, monkeypatch):
+    from fastapi.testclient import TestClient
+    client = TestClient(server.app)
+
+    _scope_as(monkeypatch, 'alice')
+    ids = client.get('/api/completion/api_request', params={
+        'incomplete': ''
+    }).json()
+    assert 'alice-req-1' in ids
+    assert 'bob-req-1' not in ids
+
+
+def test_api_stream_log_path_admin_only(_request_authz_env, monkeypatch):
+    from fastapi.testclient import TestClient
+    client = TestClient(server.app)
+
+    # Non-admin: log_path streaming is forbidden.
+    _scope_as(monkeypatch, 'alice')
+    assert client.get('/api/stream',
+                      params={
+                          'log_path': 'api_server/foo.log'
+                      },
+                      headers={
+                          'user-agent': 'curl'
+                      }).status_code == 403
+    # Non-admin cannot stream another user's request either.
+    assert client.get('/api/stream',
+                      params={
+                          'request_id': 'bob-req-1'
+                      },
+                      headers={
+                          'user-agent': 'curl'
+                      }).status_code == 404
+
+
+class TestServerUserHashBootstrap:
+    """The server user hash must not be clobbered by a racing replica.
+
+    Replicas apply the hash locally after writing it, so an overwriting write
+    leaves them disagreeing on the server id they have already applied.
+    """
+
+    def test_bootstrap_adopts_the_stored_hash(self):
+        with mock.patch('sky.global_user_state.get_system_config',
+                        return_value=None), \
+                mock.patch('sky.global_user_state.get_or_set_system_config',
+                           return_value='hash-from-the-other-replica') as m, \
+                mock.patch('sky.global_user_state.set_system_config') as m_set, \
+                mock.patch('sky.utils.common_utils.get_user_hash',
+                           return_value='our-own-hash'), \
+                mock.patch('sky.utils.common_utils.set_user_hash_locally') as m_apply, \
+                mock.patch('sky.utils.common.refresh_server_id'):
+
+            server._init_or_restore_server_user_hash()
+
+            m.assert_called_once()
+            # Never the overwriting variant.
+            m_set.assert_not_called()
+            # Applied locally: the winner's hash, not the one we generated.
+            m_apply.assert_called_once_with('hash-from-the-other-replica')
+
+    def test_existing_hash_is_reused_without_a_write(self):
+        with mock.patch('sky.global_user_state.get_system_config',
+                        return_value='existing-hash'), \
+                mock.patch('sky.global_user_state.get_or_set_system_config') as m, \
+                mock.patch('sky.utils.common_utils.set_user_hash_locally') as m_apply, \
+                mock.patch('sky.utils.common.refresh_server_id'):
+
+            server._init_or_restore_server_user_hash()
+
+            m.assert_not_called()
+            m_apply.assert_called_once_with('existing-hash')
+
+
+class TestJwtSecretStartupBootstrap:
+    """Pre-forking the secret is an optimisation, not a startup requirement.
+
+    Workers still load it lazily, so a corrupt row must not crashloop the whole
+    server and take the dashboard and every interactive user down with
+    service-account auth.
+    """
+
+    def test_a_failed_bootstrap_does_not_abort_startup(self):
+        """And says so. Swallowing it silently leaves service-account auth
+        degraded with nothing pointing at the corrupt row.
+        """
+        with mock.patch('sky.users.token_service.token_service'
+                       ) as mock_token_service, \
+                mock.patch.object(server, 'logger') as mock_logger:
+            mock_token_service.ensure_secret_loaded.side_effect = (
+                token_service.JWTSecretUnavailableError('corrupt row'))
+
+            server._bootstrap_jwt_secret()
+
+            mock_token_service.ensure_secret_loaded.assert_called_once()
+            mock_logger.error.assert_called_once()
+
+
+def _write_part(path: pathlib.Path) -> pathlib.Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(b'data')
+    return path
+
+
+def test_publish_chunk_single_chunk_upload_has_nothing_to_wait_for(tmp_path):
+    tmp = _write_part(tmp_path / 'upload.tmp.deadbeef.zip')
+    final = tmp_path / 'upload.zip'
+
+    assert server._publish_chunk(tmp, final, None, 1) == set()
+    assert final.read_bytes() == b'data'
+    assert not tmp.exists()
+
+
+def test_publish_chunk_reports_chunks_not_published_yet(tmp_path):
+    chunk_dir = tmp_path / 'staging'
+    _write_part(chunk_dir / 'part0')
+    # A concurrent writer's in-flight tmp file must not count as published.
+    _write_part(chunk_dir / 'part2.tmp.deadbeef')
+    tmp = _write_part(chunk_dir / 'part1.tmp.cafe1234')
+
+    missing = server._publish_chunk(tmp, chunk_dir / 'part1', chunk_dir, 4)
+
+    assert missing == {'part2', 'part3'}
+    assert (chunk_dir / 'part1').read_bytes() == b'data'
+
+
+def test_publish_chunk_last_chunk_completes_the_upload(tmp_path):
+    chunk_dir = tmp_path / 'staging'
+    _write_part(chunk_dir / 'part0')
+    tmp = _write_part(chunk_dir / 'part1.tmp.cafe1234')
+
+    assert server._publish_chunk(tmp, chunk_dir / 'part1', chunk_dir,
+                                 2) == set()
+
+
+class _FakeUploadRequest:
+    """Minimal stand-in for the streaming request of an upload endpoint."""
+
+    def __init__(self, payload: bytes = b'chunk'):
+        self._payload = payload
+
+    async def stream(self):
+        yield self._payload
+
+
+@pytest.mark.asyncio
+async def test_receive_chunks_does_no_sync_fs_work_on_the_event_loop(
+        tmp_path, monkeypatch):
+    """The rename and the directory listing must not block the serving loop.
+
+    Both are synchronous calls that can take seconds on a shared filesystem,
+    and while either runs no other request on the same worker can proceed.
+    """
+    loop_thread = threading.get_ident()
+    calls = []
+
+    real_rename = os.rename
+    real_scandir = os.scandir
+
+    def tracking_rename(src, dst):
+        if str(tmp_path) in str(src):
+            calls.append(('rename', threading.get_ident()))
+        return real_rename(src, dst)
+
+    def tracking_scandir(path):
+        if str(tmp_path) in str(path):
+            calls.append(('scandir', threading.get_ident()))
+        return real_scandir(path)
+
+    monkeypatch.setattr(os, 'rename', tracking_rename)
+    monkeypatch.setattr(os, 'scandir', tracking_scandir)
+
+    result = await server._receive_and_assemble_chunks(
+        base_dir=tmp_path,
+        zip_name='upload',
+        request=_FakeUploadRequest(),
+        chunk_index=0,
+        total_chunks=2,
+        extract=False,
+        assemble=False)
+
+    # Chunk 1 has not arrived, so the client is told to keep going.
+    assert result is not None
+    assert result.status == api_responses.UploadStatus.UPLOADING.value
+    assert {op for op, _ in calls} == {'rename', 'scandir'}
+    assert [ident for _, ident in calls if ident == loop_thread] == []
+
+
+@pytest.mark.asyncio
+async def test_receive_chunks_skips_the_directory_listing_for_one_chunk(
+        tmp_path, monkeypatch):
+    """A single-chunk upload has nothing to wait for, so it must not list."""
+    real_scandir = os.scandir
+    listed = []
+
+    def tracking_scandir(path):
+        if str(tmp_path) in str(path):
+            listed.append(str(path))
+        return real_scandir(path)
+
+    monkeypatch.setattr(os, 'scandir', tracking_scandir)
+
+    result = await server._receive_and_assemble_chunks(
+        base_dir=tmp_path,
+        zip_name='upload',
+        request=_FakeUploadRequest(),
+        chunk_index=0,
+        total_chunks=1,
+        extract=False,
+        assemble=False)
+
+    assert result is None
+    assert listed == []
+    assert (tmp_path / 'upload.zip').read_bytes() == b'chunk'

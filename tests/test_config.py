@@ -1,5 +1,6 @@
 """Test skypilot_config"""
 import copy
+import json
 import os
 import pathlib
 import shutil
@@ -15,7 +16,9 @@ from sky.server.requests import payloads
 from sky.sky_logging import INFO
 from sky.skylet import constants
 from sky.utils import annotations
+from sky.utils import common_utils
 from sky.utils import config_utils
+from sky.utils import schemas
 from sky.utils import yaml_utils
 
 DISK_ENCRYPTED = True
@@ -334,6 +337,45 @@ def test_invalid_enum_config(monkeypatch, tmp_path) -> None:
         """))
     monkeypatch.setattr(skypilot_config, '_GLOBAL_CONFIG_PATH',
                         tmp_path / 'invalid.yaml')
+    with pytest.raises(ValueError) as e:
+        skypilot_config.reload_config()
+    assert 'Invalid config YAML' in e.value.args[0]
+
+
+@pytest.mark.parametrize('enforce_tags', [
+    '[]',
+    '[instance]',
+    '[volume]',
+    '[instance, volume]',
+    '[volume, instance]',
+])
+def test_aws_enforce_tags_valid(monkeypatch, tmp_path, enforce_tags) -> None:
+    config_path = tmp_path / 'valid.yaml'
+    config_path.open('w', encoding='utf-8').write(
+        textwrap.dedent(f"""\
+        aws:
+            enforce_tags: {enforce_tags}
+        """))
+    monkeypatch.setattr(skypilot_config, '_GLOBAL_CONFIG_PATH', config_path)
+    skypilot_config.reload_config()
+    assert skypilot_config.get_nested(('aws', 'enforce_tags'), None) is not None
+
+
+@pytest.mark.parametrize(('enforce_tags', 'reason'), [
+    ('[volume, volume]', 'duplicate'),
+    ('[Volume]', 'wrong case'),
+    ('[disk]', 'not a supported resource type'),
+])
+def test_aws_enforce_tags_invalid(monkeypatch, tmp_path, enforce_tags,
+                                  reason) -> None:
+    del reason  # Only for readable test ids.
+    config_path = tmp_path / 'invalid.yaml'
+    config_path.open('w', encoding='utf-8').write(
+        textwrap.dedent(f"""\
+        aws:
+            enforce_tags: {enforce_tags}
+        """))
+    monkeypatch.setattr(skypilot_config, '_GLOBAL_CONFIG_PATH', config_path)
     with pytest.raises(ValueError) as e:
         skypilot_config.reload_config()
     assert 'Invalid config YAML' in e.value.args[0]
@@ -737,6 +779,40 @@ def test_override_skypilot_config_without_original_config(
         ('aws', 'ssh_proxy_command'), None) is None
     assert os.environ.get(skypilot_config.ENV_VAR_SKYPILOT_CONFIG) is None
     assert not skypilot_config._get_loaded_config()
+
+
+def test_set_loaded_config_path_empty_is_not_serialized_null():
+    """An absent config path must be stored as None, not the string 'null'."""
+    original = skypilot_config.loaded_config_path_serialized()
+    try:
+        skypilot_config._set_loaded_config_path(None)
+        assert skypilot_config.loaded_config_path_serialized() is None
+        assert skypilot_config._get_loaded_config_path() == []
+    finally:
+        skypilot_config._set_loaded_config_path_serialized(original)
+
+
+def test_override_skypilot_config_with_null_config_path(monkeypatch, tmp_path):
+    """override_skypilot_config tolerates a config path serialized as 'null'.
+
+    A client with no config file (e.g. one whose config comes from the DB
+    backend) can send the JSON string 'null' as its config path. json.loads()
+    turns that into None, which used to be concatenated with a list.
+    """
+    os.environ.pop(skypilot_config.ENV_VAR_SKYPILOT_CONFIG, None)
+    config_path = tmp_path / 'config.yaml'
+    _create_config_file(config_path)
+    monkeypatch.setattr(skypilot_config, '_GLOBAL_CONFIG_PATH', config_path)
+    skypilot_config.reload_config()
+
+    override_configs = {'aws': {'vpc_name': 'override-vpc'}}
+    with skypilot_config.override_skypilot_config(override_configs,
+                                                  json.dumps(None)):
+        assert skypilot_config.get_nested(('aws', 'vpc_name'),
+                                          None) == 'override-vpc'
+        loaded_paths = skypilot_config._get_loaded_config_path()
+        assert isinstance(loaded_paths, list)
+        assert str(config_path) in loaded_paths
 
 
 def test_hierarchical_client_config(monkeypatch, tmp_path):
@@ -2031,8 +2107,8 @@ class TestRemoveQueueNameFromConfig:
                     ('workspaces', 'ws1', 'kubernetes', 'context_configs',
                      'ctx2', 'quota', 'queue'),
                 ]:
-                    assert current.get_nested(
-                        keys, 'NOT_SET') is None, (f'Expected None at {keys}')
+                    assert current.get_nested(keys, 'NOT_SET') == 'NOT_SET', (
+                        f'Expected {keys} to be removed')
 
     def test_noop_when_no_queue_name_set(self):
         """No error when queue name keys are absent."""
@@ -2093,7 +2169,8 @@ class TestRemoveQueueNameFromConfig:
              mock.patch.object(skypilot_config, 'to_dict', return_value=cfg):
             with skypilot_config.remove_queue_name_from_config():
                 current = skypilot_config.to_dict()
-                # Both the original and extra key should be None everywhere.
+                # Both the original and extra key should be removed
+                # everywhere.
                 for keys in [
                     ('kubernetes', 'kueue', 'local_queue_name'),
                     ('kubernetes', 'custom', 'queue'),
@@ -2107,8 +2184,42 @@ class TestRemoveQueueNameFromConfig:
                     ('workspaces', 'ws1', 'kubernetes', 'context_configs',
                      'ctx2', 'custom', 'queue'),
                 ]:
-                    assert current.get_nested(
-                        keys, 'NOT_SET') is None, (f'Expected None at {keys}')
+                    assert current.get_nested(keys, 'NOT_SET') == 'NOT_SET', (
+                        f'Expected {keys} to be removed')
+
+    def test_mutated_config_passes_schema_validation(self):
+        """Regression: removal must not leave `null` values behind.
+
+        Setting the queue keys to None instead of popping them produced a
+        mutated config that fails schema validation (`quota.queue` and
+        `kueue.local_queue_name` require strings), breaking anything that
+        reloads the config while the override is active.
+        """
+        cfg = _make_config({
+            'kubernetes': {
+                'quota': {
+                    'queue': 'root-quota-q'
+                },
+                'context_configs': {
+                    'ctx1': {
+                        'kueue': {
+                            'local_queue_name': 'ctx1-q'
+                        },
+                        'quota': {
+                            'queue': 'ctx1-quota-q'
+                        }
+                    }
+                }
+            },
+        })
+        with mock.patch.object(skypilot_config, 'to_dict', return_value=cfg):
+            with skypilot_config.remove_queue_name_from_config():
+                current = skypilot_config.to_dict()
+                # Must not raise.
+                common_utils.validate_schema(dict(current),
+                                             schemas.get_config_schema(),
+                                             'Invalid mutated config: ',
+                                             skip_none=False)
 
 
 class _BodyError(Exception):

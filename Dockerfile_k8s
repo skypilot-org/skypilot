@@ -1,6 +1,8 @@
 # Ubuntu 22.04 to match the GPU image's base (nvidia/cuda:*-ubuntu22.04 is
-# layered on top of ubuntu:22.04).
-FROM ubuntu:22.04
+# layered on top of ubuntu:22.04). Overridable so the same recipe can be
+# rebuilt on another base (e.g. ubuntu:24.04 for a newer glibc).
+ARG BASE_IMAGE=ubuntu:22.04
+FROM ${BASE_IMAGE}
 
 # Detect architecture using ARG with default value
 ARG TARGETARCH
@@ -31,7 +33,19 @@ RUN mkdir -p /var/run/sshd && \
     ssh-keygen -A
 
 # Setup new user named sky and add to sudoers.
-RUN useradd -m -s /bin/bash sky && \
+# sky must own uid/gid 1000: kubernetes-ray.yml.j2 pins runAsUser/runAsGroup/
+# fsGroup to 1000. Ubuntu 24.04+ base images ship a placeholder user holding it,
+# so evict whoever owns 1000 first -- keyed on the id rather than the name,
+# which varies across bases. userdel frees the account before it cleans up the
+# home dir and mail spool, so its exit status is not load-bearing here; the
+# explicit -u/-g is the real guard, failing the build instead of silently
+# landing sky on 1001.
+RUN existing_user=$(getent passwd 1000 | cut -d: -f1) && \
+    if [ -n "$existing_user" ]; then userdel -r "$existing_user" || true; fi && \
+    existing_group=$(getent group 1000 | cut -d: -f1) && \
+    if [ -n "$existing_group" ]; then groupdel "$existing_group" || true; fi && \
+    groupadd -g 1000 sky && \
+    useradd -m -s /bin/bash -u 1000 -g 1000 sky && \
     echo "sky ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
 
 # Switch to sky user

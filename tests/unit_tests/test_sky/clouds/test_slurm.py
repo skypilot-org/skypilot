@@ -2,17 +2,56 @@
 
 import os
 from pathlib import Path
+import re
+from unittest.mock import call
 from unittest.mock import patch
 import unittest.mock as mock
 
 import pytest
 
+from sky import clouds
 from sky import resources as resources_lib
+from sky import skypilot_config
 from sky.adaptors import slurm
 from sky.clouds import slurm as slurm_cloud
 from sky.provision.slurm import instance as slurm_instance
 from sky.provision.slurm import utils as slurm_utils
 from sky.skylet import constants
+
+
+class TestStopFeatureSupport:
+    """Tests dynamic stop/autostop support for Slurm resources."""
+
+    @pytest.mark.parametrize(
+        'image_id,pyxis_enabled,stop_supported',
+        [
+            ('ubuntu:24.04', True, True),
+            ('ubuntu:24.04', False, False),
+            (None, True, False),
+        ],
+    )
+    def test_requires_container_and_pyxis(self, image_id, pyxis_enabled,
+                                          stop_supported):
+        resources = mock.MagicMock()
+        resources.region = 'my-cluster'
+        resources.extract_docker_image.return_value = image_id
+
+        with patch('sky.clouds.slurm.slurm_utils.check_pyxis_enabled',
+                   return_value=pyxis_enabled), \
+             patch('sky.clouds.slurm.slurm_utils.check_fuse_enabled',
+                   return_value=False):
+            unsupported = slurm_cloud.Slurm._unsupported_features_for_resources(
+                resources)
+
+        assert ((clouds.CloudImplementationFeatures.STOP
+                 not in unsupported) == stop_supported)
+        # Autostop gates on the same container + Pyxis conditions as stop.
+        assert ((clouds.CloudImplementationFeatures.AUTOSTOP
+                 not in unsupported) == stop_supported)
+
+    def test_autostop_is_dynamic_not_statically_unsupported(self):
+        assert (clouds.CloudImplementationFeatures.AUTOSTOP
+                in slurm_cloud.Slurm._DYNAMICALLY_CHECKED_FEATURES)
 
 
 class TestGetSubmitUser:
@@ -92,16 +131,72 @@ class TestSlurmClientSubmitUser:
                                                   slurm_user='alice')
 
 
+class TestCheckComputeCredentials:
+    """The credential check must not impersonate the submit user.
+
+    Sites that enable submit_as_user commonly grant passwordless sudo for
+    the submission commands only (sbatch/srun/scancel/squeue), so an
+    impersonated read-only probe (sinfo) is denied — and a failed check
+    disables the cluster for every consumer of the enabled-clouds cache.
+    The check's probes carry no identity requirement, so they run as the
+    SSH user (slurm_user=None).
+    """
+
+    @patch('sky.clouds.slurm.skypilot_config.get_effective_region_config',
+           return_value=None)
+    @patch('sky.clouds.slurm.slurm_utils.get_identities_only',
+           return_value=True)
+    @patch('sky.clouds.slurm.slurm_utils.get_identity_file',
+           return_value='/root/.ssh/key')
+    @patch('sky.clouds.slurm.Slurm.existing_allowed_clusters',
+           return_value=['restricted'])
+    @patch('sky.clouds.slurm.slurm_utils.get_slurm_ssh_config')
+    @patch('sky.clouds.slurm.slurm.SlurmClient')
+    def test_check_runs_as_ssh_user_under_restricted_sudo(
+            self, mock_client_class, mock_get_ssh_config, *_mocks):
+        mock_get_ssh_config.return_value.lookup.return_value = {
+            'hostname': 'login.example.com',
+            'port': 22,
+            'user': 'svc',
+        }
+
+        def make_client(*args, **kwargs):
+            del args  # unused
+            client = mock.MagicMock()
+            if kwargs.get('slurm_user') is not None:
+                # Restricted-sudo cluster: any impersonated command is
+                # denied, exactly what the check must not depend on.
+                client.info.side_effect = RuntimeError(
+                    'sudo: a password is required')
+            else:
+                client.info.return_value = 'PARTITION AVAIL NODES'
+                client.get_env.return_value = {'HOME': '/home/svc'}
+                client.check_dir_shared_fs.return_value = 'nfs'
+            return client
+
+        mock_client_class.side_effect = make_client
+
+        success, ctx2text = slurm_cloud.Slurm._check_compute_credentials()
+
+        assert success
+        assert 'enabled' in ctx2text['restricted']
+        assert mock_client_class.call_args.kwargs['slurm_user'] is None
+
+
 class TestSubmitUserDeployVariables:
 
     @staticmethod
-    def _make_deploy_variables(submit_user, ssh_user='root'):
+    def _make_deploy_variables(submit_user,
+                               ssh_user='root',
+                               volume_mounts=None,
+                               image_id=None,
+                               config_container_mounts=None):
         cloud = slurm_cloud.Slurm()
         resources = mock.MagicMock(unsafe=True)
         resources.zone = 'gpu'
         resources.instance_type = '4CPU--16GB'
         resources.assert_launchable.return_value = resources
-        resources.extract_docker_image.return_value = None
+        resources.extract_docker_image.return_value = image_id
         resources.cluster_config_overrides = {}
 
         region = mock.MagicMock()
@@ -116,25 +211,43 @@ class TestSubmitUserDeployVariables:
             'identityfile': ['/root/.ssh/id_ed25519'],
         }
 
+        def _get_nested(keys, default_value=None, **_):
+            if (keys == ('slurm', 'cluster_configs', 'my-cluster',
+                         'container_mounts') and
+                    config_container_mounts is not None):
+                return config_container_mounts
+            return default_value
+
         with patch('sky.clouds.slurm.slurm_utils.get_slurm_ssh_config',
                    return_value=ssh_config), \
              patch('sky.clouds.slurm.slurm_utils.get_submit_user',
                    return_value=submit_user), \
              patch('sky.clouds.slurm.slurm_utils.get_partitions',
                    return_value=['gpu']), \
+             patch('sky.clouds.slurm.skypilot_config.get_nested',
+                   side_effect=_get_nested), \
              patch('sky.clouds.slurm.skypilot_config.'
-                   'get_effective_region_config', return_value=None):
+                   'get_effective_region_config', return_value=None), \
+             patch('sky.clouds.slurm.slurm.SlurmClient'), \
+             patch('sky.clouds.slurm.slurm_utils.resolve_sky_base_dir',
+                   return_value='/home/testuser'):
             return cloud.make_deploy_resources_variables(
                 resources=resources,
                 cluster_name=mock.MagicMock(),
                 region=region,
                 zones=[zone],
-                num_nodes=1)
+                num_nodes=1,
+                volume_mounts=volume_mounts)
 
     def test_submit_user_persisted(self):
         deploy_vars = self._make_deploy_variables('alice')
 
         assert deploy_vars['slurm_user'] == 'alice'
+
+    def test_sky_base_dir_persisted(self):
+        deploy_vars = self._make_deploy_variables('alice')
+
+        assert deploy_vars['sky_base_dir'] == '/home/testuser'
 
     def test_disabled_keeps_default(self):
         deploy_vars = self._make_deploy_variables(None, ssh_user='ubuntu')
@@ -146,6 +259,106 @@ class TestSubmitUserDeployVariables:
 
         assert deploy_vars['ssh_user'] == 'ubuntu'
         assert deploy_vars['slurm_user'] == 'alice'
+
+    def test_volume_mounts_serialized(self):
+        mount = mock.MagicMock()
+        mount.volume_config.config = {'host_path': '/host/data'}
+        mount.to_yaml_config.return_value = {
+            'path': '/data',
+            'volume_name': '',
+            'volume_config': {
+                'config': {
+                    'host_path': '/host/data',
+                    'mode': 'ro',
+                },
+            },
+            'is_ephemeral': False,
+        }
+
+        deploy_vars = self._make_deploy_variables(None,
+                                                  volume_mounts=[mount],
+                                                  image_id='ubuntu:22.04')
+
+        assert deploy_vars['slurm_volume_mounts'] == [
+            mount.to_yaml_config.return_value
+        ]
+
+    @pytest.mark.parametrize(
+        'config,image_id,error',
+        [
+            ({}, 'ubuntu:22.04', r"only supports inline host_path.*'/mnt'"),
+            ({
+                'host_path': '/host/data'
+            }, None, 'require a container image'),
+        ],
+    )
+    def test_volume_mounts_validate_slurm_support(self, config, image_id,
+                                                  error):
+        mount = mock.MagicMock()
+        mount.path = '/mnt'
+        mount.volume_config.config = config
+
+        with pytest.raises(ValueError, match=error):
+            self._make_deploy_variables(None,
+                                        volume_mounts=[mount],
+                                        image_id=image_id)
+
+    def test_config_container_mounts_serialized(self):
+        deploy_vars = self._make_deploy_variables(
+            None,
+            image_id='ubuntu:22.04',
+            config_container_mounts={
+                '/blob': '/data/blob',
+                '/scratch': {
+                    'host_path': '/nvme/$SLURM_JOB_ID',
+                    'mode': 'rw',
+                },
+            })
+
+        mounts = {
+            m['path']: m['volume_config']['config']
+            for m in deploy_vars['slurm_volume_mounts']
+        }
+        assert mounts == {
+            '/blob': {
+                'host_path': '/data/blob',
+                'mode': 'ro',
+            },
+            '/scratch': {
+                'host_path': '/nvme/$SLURM_JOB_ID',
+                'mode': 'rw',
+            },
+        }
+
+    def test_config_container_mounts_yield_to_task_volume(self):
+        mount = mock.MagicMock()
+        mount.path = '/data'
+        mount.volume_config.config = {'host_path': '/host/data'}
+        mount.to_yaml_config.return_value = {
+            'path': '/data',
+            'volume_config': {
+                'config': {
+                    'host_path': '/host/data',
+                    'mode': 'ro',
+                },
+            },
+        }
+
+        deploy_vars = self._make_deploy_variables(
+            None,
+            volume_mounts=[mount],
+            image_id='ubuntu:22.04',
+            config_container_mounts={'/data': '/config/data'})
+
+        assert deploy_vars['slurm_volume_mounts'] == [
+            mount.to_yaml_config.return_value
+        ]
+
+    def test_config_container_mounts_skipped_without_image(self):
+        deploy_vars = self._make_deploy_variables(
+            None, config_container_mounts={'/blob': '/data/blob'})
+
+        assert deploy_vars['slurm_volume_mounts'] == []
 
 
 class TestSubmitUserTemplate:
@@ -172,6 +385,7 @@ class TestSubmitUserTemplate:
                 'slurm_cluster': 'my-cluster',
                 'slurm_partition': 'gpu',
                 'provision_timeout': 120,
+                'sky_base_dir': '/fsx/alice',
                 'ssh_hostname': 'login.example.com',
                 'ssh_port': 22,
                 'slurm_private_key': '/root/.ssh/key',
@@ -186,6 +400,17 @@ class TestSubmitUserTemplate:
                 'accelerator_type': None,
                 'accelerator_count': 0,
                 'sbatch_options': {},
+                'slurm_volume_mounts': [{
+                    'path': '/data',
+                    'volume_name': '',
+                    'volume_config': {
+                        'config': {
+                            'host_path': '/host/data',
+                            'mode': 'ro',
+                        },
+                    },
+                    'is_ephemeral': False,
+                }],
                 'sky_ray_yaml_remote_path': '/tmp/ray.yaml',
                 'sky_ray_yaml_local_path': '/tmp/ray.yaml',
                 'sky_remote_path': '/tmp/sky',
@@ -208,7 +433,14 @@ class TestSubmitUserTemplate:
         else:
             assert config['provider']['slurm_user'] == slurm_user
         assert config['provider']['ssh']['user'] == transport_user
+        assert config['provider']['sky_base_dir'] == '/fsx/alice'
+        if image_id is None:
+            assert 'container_image' not in config['provider']
+        else:
+            assert config['provider']['container_image'] == image_id
         assert config['auth']['ssh_user'] == expected_ssh_user
+        assert config['available_node_types']['ray_head_default'][
+            'node_config']['volume_mounts'][0]['path'] == '/data'
 
 
 class TestCheckInstanceFits:
@@ -295,6 +527,75 @@ class TestCheckInstanceFits:
             assert reason_contains in reason
         else:
             assert reason is None
+
+
+class TestRegionsWithOfferingPartitionMap:
+    """Test configured partition validation against live partitions."""
+
+    @patch('sky.clouds.slurm.slurm_utils.lookup_gpu_partition_map',
+           new=mock.Mock(return_value=['configured-gpu']))
+    @patch('sky.clouds.slurm.slurm_utils.get_partitions',
+           new=mock.Mock(return_value=['live-gpu', 'cpu']))
+    @patch.object(slurm_cloud.Slurm,
+                  'existing_allowed_clusters',
+                  new=mock.Mock(return_value=['cluster-a']))
+    def test_fixed_region_partition_mismatch_returns_no_regions(self):
+        regions = slurm_cloud.Slurm.regions_with_offering(
+            instance_type='64CPU--256GB--H100:1',
+            accelerators=None,
+            use_spot=False,
+            region='cluster-a',
+            zone=None)
+
+        assert regions == []
+
+    @patch('sky.clouds.slurm.slurm_utils.lookup_gpu_partition_map',
+           new=mock.Mock(return_value=['configured-gpu']))
+    @patch('sky.clouds.slurm.slurm_utils.get_partitions',
+           new=mock.Mock(return_value=['live-gpu', 'cpu']))
+    @patch.object(slurm_cloud.Slurm,
+                  'existing_allowed_clusters',
+                  new=mock.Mock(return_value=['cluster-a']))
+    def test_fixed_region_partition_mismatch_surfaces_hint(self):
+        """The diagnostic must flow through the FeasibleResources hint, not
+        an exception, so other any_of/ordered candidates stay eligible."""
+        resources = mock.MagicMock(unsafe=True)
+        resources.instance_type = '64CPU--256GB--H100:1'
+        resources.region = 'cluster-a'
+        resources.zone = None
+        resources.use_spot = False
+        resources.is_launchable.return_value = True
+        resources.get_required_cloud_features.return_value = set()
+
+        feasible = slurm_cloud.Slurm()._get_feasible_launchable_resources(
+            resources)
+
+        assert feasible.resources_list == []
+        assert re.search(
+            r"gpu_partition_map.*'H100'.*'cluster-a'.*cpu.*live-gpu",
+            feasible.hint)
+
+    @patch('sky.clouds.slurm.slurm_utils.check_instance_fits',
+           new=mock.Mock(return_value=(True, None)))
+    @patch('sky.clouds.slurm.slurm_utils.lookup_gpu_partition_map',
+           new=mock.Mock(return_value=['gpu']))
+    @patch('sky.clouds.slurm.slurm_utils.get_partitions',
+           new=mock.Mock(side_effect=lambda cluster: {
+               'cluster-a': ['cpu'],
+               'cluster-b': ['gpu'],
+           }[cluster]))
+    @patch.object(slurm_cloud.Slurm,
+                  'existing_allowed_clusters',
+                  new=mock.Mock(return_value=['cluster-a', 'cluster-b']))
+    def test_unspecified_region_continues_after_partition_mismatch(self):
+        regions = slurm_cloud.Slurm.regions_with_offering(
+            instance_type='64CPU--256GB--H100:1',
+            accelerators=None,
+            use_spot=False,
+            region=None,
+            zone=None)
+
+        assert [region.name for region in regions] == ['cluster-b']
 
 
 class TestLookupGpuPartitionMap:
@@ -577,6 +878,35 @@ class TestSlurmGPUDefaults:
         assert instance_type.memory == expected_memory
 
 
+class TestIsInsideSlurmCluster:
+    """Test the two-layer Slurm marker resolution in slurm_utils."""
+
+    def test_runtime_dir_marker_detects_container_shape(self, tmp_path,
+                                                        monkeypatch):
+        """Marker in the runtime dir is found through SKY_RUNTIME_DIR."""
+        runtime_dir = tmp_path / 'rt'
+        (runtime_dir / '.sky').mkdir(parents=True)
+        monkeypatch.setenv(constants.SKY_RUNTIME_DIR_ENV_VAR_KEY,
+                           str(runtime_dir))
+        monkeypatch.setenv('HOME', str(tmp_path / 'home-without-marker'))
+
+        assert not slurm_utils.is_inside_slurm_cluster()
+        (runtime_dir / '.sky' / slurm_utils.SLURM_MARKER_FILE).touch()
+        assert slurm_utils.is_inside_slurm_cluster()
+
+    def test_home_marker_fallback(self, tmp_path, monkeypatch):
+        """Clusters without the runtime-dir marker still detect via HOME."""
+        home = tmp_path / 'cluster-home'
+        home.mkdir()
+        monkeypatch.setenv(constants.SKY_RUNTIME_DIR_ENV_VAR_KEY,
+                           str(tmp_path / 'rt-without-marker'))
+        monkeypatch.setenv('HOME', str(home))
+
+        assert not slurm_utils.is_inside_slurm_cluster()
+        (home / slurm_utils.SLURM_MARKER_FILE).touch()
+        assert slurm_utils.is_inside_slurm_cluster()
+
+
 class TestGRESGPUParsing:
     """Test slurm_utils.get_gpu_type_and_count."""
 
@@ -683,7 +1013,6 @@ class TestSbatchOptionsPrecedence:
                                             skypilot_config_dict,
                                             cluster_config_overrides=None):
         """Write config to tmp file, reload, and call make_deploy_resources_variables."""
-        from sky import skypilot_config
         from sky.utils import yaml_utils
 
         # Write config dict to a tmp YAML file.
@@ -728,7 +1057,11 @@ class TestSbatchOptionsPrecedence:
                     return_value=['gpu', 'cpu']), \
                  patch(
                     'sky.clouds.slurm.slurm_utils.resolve_gres_gpu_type',
-                    side_effect=lambda cluster, t, count=1, partition=None: t):
+                    side_effect=lambda cluster, t, count=1, partition=None: t), \
+                 patch('sky.clouds.slurm.slurm.SlurmClient'), \
+                 patch(
+                    'sky.clouds.slurm.slurm_utils.resolve_sky_base_dir',
+                    return_value='/home/slurm'):
                 deploy_vars = cloud.make_deploy_resources_variables(
                     resources=mock_resources,
                     cluster_name=mock.MagicMock(),
@@ -777,6 +1110,41 @@ class TestSbatchOptionsPrecedence:
         assert result == {
             'account': 'cluster-account',
             'qos': 'normal',
+            'constraint': 'skylake',
+        }
+
+    def test_workspace_cluster_overrides_global(self, tmp_path):
+        with skypilot_config.local_active_workspace_ctx('research'):
+            result = self._load_config_and_get_sbatch_options(
+                tmp_path, {
+                    'slurm': {
+                        'cluster_configs': {
+                            'mycluster': {
+                                'sbatch_options': {
+                                    'account': 'global-account',
+                                    'constraint': 'skylake',
+                                },
+                            },
+                        },
+                    },
+                    'workspaces': {
+                        'research': {
+                            'slurm': {
+                                'cluster_configs': {
+                                    'mycluster': {
+                                        'sbatch_options': {
+                                            'account': 'workspace-account',
+                                            'qos': 'workspace-qos',
+                                        },
+                                    },
+                                },
+                            },
+                        },
+                    },
+                })
+        assert result == {
+            'account': 'workspace-account',
+            'qos': 'workspace-qos',
             'constraint': 'skylake',
         }
 
@@ -943,7 +1311,10 @@ class TestSlurmProvisionTimeout:
              patch('sky.clouds.slurm.slurm_utils.get_submit_user',
                    return_value=None), \
              patch('sky.clouds.slurm.slurm_utils.resolve_gres_gpu_type',
-                   side_effect=lambda cluster, t, count=1, partition=None: t):
+                   side_effect=lambda cluster, t, count=1, partition=None: t), \
+             patch('sky.clouds.slurm.slurm.SlurmClient'), \
+             patch('sky.clouds.slurm.slurm_utils.resolve_sky_base_dir',
+                   return_value='/home/slurm'):
             deploy_vars = cloud.make_deploy_resources_variables(
                 resources=mock_resources,
                 cluster_name=mock.MagicMock(),
@@ -1004,7 +1375,10 @@ class TestProvisionTimeoutPassthrough:
         mock_slurm_client.return_value = mock_client
 
         mock_runner = mock.MagicMock()
-        mock_runner.run.return_value = (0, '', '')
+        mock_runner.run.side_effect = lambda cmd, **kwargs: (
+            (44, '', '')
+            if slurm_instance.SNAPSHOT_MANIFEST_FILENAME in cmd else
+            (0, '', ''))
         mock_runner.get_remote_home_dir.return_value = '/home/testuser'
         mock_ssh_runner.return_value = mock_runner
 
@@ -1019,6 +1393,7 @@ class TestProvisionTimeoutPassthrough:
                 'cluster': 'test-slurm',
                 'partition': 'gpu',
                 'provision_timeout': 120,
+                'sky_base_dir': '/home/testuser',
             },
             authentication_config={},
             docker_config={},
@@ -1074,7 +1449,10 @@ class TestProvisionTimeoutPassthrough:
         mock_slurm_client.return_value = mock_client
 
         mock_runner = mock.MagicMock()
-        mock_runner.run.return_value = (0, '', '')
+        mock_runner.run.side_effect = lambda cmd, **kwargs: (
+            (44, '', '')
+            if slurm_instance.SNAPSHOT_MANIFEST_FILENAME in cmd else
+            (0, '', ''))
         mock_runner.get_remote_home_dir.return_value = '/home/testuser'
         mock_ssh_runner.return_value = mock_runner
 
@@ -1089,6 +1467,7 @@ class TestProvisionTimeoutPassthrough:
                 'cluster': 'test-slurm',
                 'partition': 'gpu',
                 'provision_timeout': 120,
+                'sky_base_dir': '/home/testuser',
             },
             authentication_config={},
             docker_config={},
@@ -1138,11 +1517,14 @@ class TestCreateVirtualInstance:
         mock_slurm_client.return_value = mock_client
 
         mock_runner = mock.MagicMock()
-        mock_runner.run.return_value = (0, '', '')
+        mock_runner.run.side_effect = lambda cmd, **kwargs: (
+            (44, '', '')
+            if slurm_instance.SNAPSHOT_MANIFEST_FILENAME in cmd else
+            (0, '', ''))
         mock_runner.get_remote_home_dir.return_value = '/home/testuser'
         mock_ssh_runner.return_value = mock_runner
 
-    def _run_and_capture_script(self, cluster_name, config):
+    def _run_and_capture_script(self, cluster_name, config) -> str:
         """Run _create_virtual_instance and capture the generated script."""
         written_script = None
 
@@ -1164,7 +1546,38 @@ class TestCreateVirtualInstance:
             )
 
         assert written_script is not None, 'Script was not written'
+        assert isinstance(written_script, str)
         return written_script
+
+    @staticmethod
+    def _make_non_container_config(cpus):
+        from sky.provision import common
+
+        return common.ProvisionConfig(
+            provider_config={
+                'ssh': {
+                    'hostname': 'login.example.com',
+                    'port': '22',
+                    'user': 'root',
+                    'private_key': '/path/to/key',
+                },
+                'cluster': 'test-slurm',
+                'partition': 'cpus',
+                'provision_timeout': 300,
+                'slurm_user': 'alice',
+                'sky_base_dir': '/home/testuser',
+            },
+            authentication_config={},
+            docker_config={},
+            node_config={
+                'cpus': cpus,
+                'memory': 8,
+            },
+            count=1,
+            tags={},
+            resume_stopped_nodes=False,
+            ports_to_open_on_launch=None,
+        )
 
     @patch('sky.provision.slurm.instance._wait_for_job_nodes')
     @patch('sky.provision.slurm.instance.slurm_utils.get_proctrack_type')
@@ -1194,6 +1607,7 @@ class TestCreateVirtualInstance:
                 'cluster': 'test-slurm',
                 'partition': 'gpu',
                 'provision_timeout': 300,
+                'sky_base_dir': '/home/testuser',
             },
             authentication_config={},
             docker_config={},
@@ -1219,16 +1633,16 @@ class TestCreateVirtualInstance:
     @patch('sky.provision.slurm.instance.slurm.SlurmClient')
     @patch('sky.provision.slurm.instance.command_runner.'
            'SlurmLoginNodeCommandRunner')
-    def test_non_container_script_format(self, mock_ssh_runner,
-                                         mock_slurm_client,
-                                         mock_get_partition_info,
-                                         mock_get_proctrack_type,
-                                         mock_wait_for_job_nodes):
-        """Test that sbatch provision script without containers is correct."""
+    def test_restore_cleans_leftover_shared_state(self, mock_ssh_runner,
+                                                  mock_slurm_client,
+                                                  mock_get_partition_info,
+                                                  mock_get_proctrack_type,
+                                                  mock_wait_for_job_nodes):
+        """A restore empties the shared home before runtime setup runs."""
         from sky.provision import common
 
         self._setup_mocks(mock_ssh_runner, mock_slurm_client,
-                          mock_get_partition_info, 'cpus')
+                          mock_get_partition_info, 'gpu')
         mock_get_proctrack_type.return_value = 'cgroup'
 
         config = common.ProvisionConfig(
@@ -1236,19 +1650,108 @@ class TestCreateVirtualInstance:
                 'ssh': {
                     'hostname': 'login.example.com',
                     'port': '22',
-                    'user': 'root',
+                    'user': 'testuser',
                     'private_key': '/path/to/key',
                 },
                 'cluster': 'test-slurm',
-                'partition': 'cpus',
+                'partition': 'gpu',
                 'provision_timeout': 300,
-                'slurm_user': 'alice',
+                'sky_base_dir': '/home/testuser',
             },
             authentication_config={},
             docker_config={},
             node_config={
-                'cpus': 2,
-                'memory': 8,
+                'cpus': 4,
+                'memory': 16,
+                'image_id': 'nvcr.io/nvidia/pytorch:24.01-py3',
+            },
+            count=1,
+            tags={},
+            resume_stopped_nodes=True,
+            ports_to_open_on_launch=None,
+        )
+        manifest = {
+            'version': slurm_instance.SNAPSHOT_MANIFEST_VERSION,
+            'generation': '0123456789abcdef0123456789abcdef',
+            'image_id': 'nvcr.io/nvidia/pytorch:24.01-py3',
+            'created_at': 1234.5,
+            'has_job_db': False,
+            'nodes': ['node1'],
+        }
+        cleanup_script = slurm_instance._remove_shared_state_script(
+            '/home/testuser/.sky_clusters/test-cluster', preserve_logs=True)
+        submitted = {}
+
+        def check_submit(partition, cluster_name, tgt_path):
+            del partition, cluster_name, tgt_path
+            submitted['cleanup_seen'] = any(
+                call.args[0] == cleanup_script
+                for call in mock_ssh_runner.return_value.run.call_args_list)
+            return '5576'
+
+        mock_slurm_client.return_value.submit_job.side_effect = check_submit
+
+        with patch('tempfile.NamedTemporaryFile') as mock_tempfile:
+            mock_file = mock.MagicMock()
+            mock_file.__enter__.return_value = mock_file
+            mock_tempfile.return_value = mock_file
+            with patch.object(slurm_instance,
+                              '_read_snapshot_manifest',
+                              return_value=manifest):
+                slurm_instance._create_virtual_instance(
+                    region='us-west-2',
+                    cluster_name='test-cluster',
+                    cluster_name_on_cloud='test-cluster',
+                    config=config,
+                )
+
+        run_commands = [
+            call.args[0]
+            for call in mock_ssh_runner.return_value.run.call_args_list
+        ]
+        assert cleanup_script in run_commands
+        # The cleanup must precede the sbatch submission: afterwards the
+        # sbatch writes control files into the home, which the cleanup
+        # must not delete.
+        assert submitted['cleanup_seen'] is True
+
+    @patch('sky.provision.slurm.instance._wait_for_job_nodes')
+    @patch('sky.provision.slurm.instance.slurm_utils.get_proctrack_type')
+    @patch('sky.provision.slurm.instance.slurm_utils.get_partition_info')
+    @patch('sky.provision.slurm.instance.slurm.SlurmClient')
+    @patch('sky.provision.slurm.instance.command_runner.'
+           'SlurmLoginNodeCommandRunner')
+    def test_fresh_launch_keeps_shared_state(self, mock_ssh_runner,
+                                             mock_slurm_client,
+                                             mock_get_partition_info,
+                                             mock_get_proctrack_type,
+                                             mock_wait_for_job_nodes):
+        """Without a snapshot, the shared home is not cleaned at provision."""
+        from sky.provision import common
+
+        self._setup_mocks(mock_ssh_runner, mock_slurm_client,
+                          mock_get_partition_info, 'gpu')
+        mock_get_proctrack_type.return_value = 'cgroup'
+
+        config = common.ProvisionConfig(
+            provider_config={
+                'ssh': {
+                    'hostname': 'login.example.com',
+                    'port': '22',
+                    'user': 'testuser',
+                    'private_key': '/path/to/key',
+                },
+                'cluster': 'test-slurm',
+                'partition': 'gpu',
+                'provision_timeout': 300,
+                'sky_base_dir': '/home/testuser',
+            },
+            authentication_config={},
+            docker_config={},
+            node_config={
+                'cpus': 4,
+                'memory': 16,
+                'image_id': 'nvcr.io/nvidia/pytorch:24.01-py3',
             },
             count=1,
             tags={},
@@ -1256,11 +1759,328 @@ class TestCreateVirtualInstance:
             ports_to_open_on_launch=None,
         )
 
+        with patch('tempfile.NamedTemporaryFile') as mock_tempfile:
+            mock_file = mock.MagicMock()
+            mock_file.__enter__.return_value = mock_file
+            mock_tempfile.return_value = mock_file
+            slurm_instance._create_virtual_instance(
+                region='us-west-2',
+                cluster_name='test-cluster',
+                cluster_name_on_cloud='test-cluster',
+                config=config,
+            )
+
+        cleanup_script = slurm_instance._remove_shared_state_script(
+            '/home/testuser/.sky_clusters/test-cluster', preserve_logs=True)
+        run_commands = [
+            call.args[0]
+            for call in mock_ssh_runner.return_value.run.call_args_list
+        ]
+        assert cleanup_script not in run_commands
+
+        config.node_config['volume_mounts'] = [
+            {
+                'path': '/data',
+                'volume_name': '',
+                'volume_config': {
+                    'config': {
+                        'host_path': '/host/data',
+                        'mode': 'ro',
+                    },
+                },
+                'is_ephemeral': False,
+            },
+            {
+                'path': '/scratch',
+                'volume_name': '',
+                'volume_config': {
+                    'config': {
+                        'host_path': '/nvme/$SLURM_JOB_ID',
+                        'mode': 'rw',
+                    },
+                },
+                'is_ephemeral': False,
+            },
+            {
+                # No 'mode': must fail closed to read-only.
+                'path': '/models',
+                'volume_name': '',
+                'volume_config': {
+                    'config': {
+                        'host_path': '/host/models',
+                    },
+                },
+                'is_ephemeral': False,
+            },
+        ]
+        mounted_script = self._run_and_capture_script('test-cluster-mounted',
+                                                      config)
+        assert ('--container-mounts="/home/testuser:/home/testuser,'
+                '/tmp/ccache_$(id -u):/var/cache/ccache,'
+                '/tmp/test-cluster-mounted/.sky:/tmp/test-cluster-mounted/.sky,'
+                '/host/data:/data:ro,/nvme/$SLURM_JOB_ID:/scratch,'
+                '/host/models:/models:ro"' in mounted_script)
+
+    @patch('sky.provision.slurm.instance._validate_snapshot_files')
+    @patch('sky.provision.slurm.instance._read_snapshot_manifest')
+    @patch('sky.provision.slurm.instance._wait_for_job_nodes')
+    @patch('sky.provision.slurm.instance.slurm_utils.get_proctrack_type')
+    @patch('sky.provision.slurm.instance.slurm_utils.get_partition_info')
+    @patch('sky.provision.slurm.instance.slurm.SlurmClient')
+    @patch('sky.provision.slurm.instance.command_runner.'
+           'SlurmLoginNodeCommandRunner')
+    def test_multi_node_snapshot_restore_script(
+            self, mock_ssh_runner, mock_slurm_client, mock_get_partition_info,
+            mock_get_proctrack_type, mock_wait_for_job_nodes,
+            mock_read_manifest, mock_validate_files):
+        from sky.provision import common
+
+        del mock_wait_for_job_nodes
+        self._setup_mocks(mock_ssh_runner, mock_slurm_client,
+                          mock_get_partition_info, 'gpu')
+        mock_get_proctrack_type.return_value = 'cgroup'
+        cluster_name = 'test-cluster-restore'
+        snapshot_dir = (
+            f'/home/testuser/{slurm_instance.SNAPSHOT_DIRECTORY_NAME}'
+            f'/{cluster_name}')
+        generation = '0123456789abcdef0123456789abcdef'
+        generation_dir = slurm_instance._snapshot_generation_dir(
+            snapshot_dir, generation)
+        mock_read_manifest.return_value = {
+            'version': slurm_instance.SNAPSHOT_MANIFEST_VERSION,
+            'generation': generation,
+            'image_id': 'ubuntu:24.04',
+            'created_at': 1234.5,
+            'has_job_db': True,
+            'nodes': ['old-node-0', 'old-node-1'],
+        }
+        config = common.ProvisionConfig(
+            provider_config={
+                'ssh': {
+                    'hostname': 'login.example.com',
+                    'port': '22',
+                    'user': 'testuser',
+                    'private_key': '/path/to/key',
+                },
+                'cluster': 'test-slurm',
+                'partition': 'gpu',
+                'provision_timeout': 300,
+                'sky_base_dir': '/home/testuser',
+            },
+            authentication_config={},
+            docker_config={},
+            node_config={
+                'cpus': 4,
+                'memory': 16,
+                'image_id': 'ubuntu:24.04',
+            },
+            count=2,
+            tags={},
+            resume_stopped_nodes=False,
+            ports_to_open_on_launch=None,
+        )
+
+        script = self._run_and_capture_script(cluster_name, config)
+
+        mock_validate_files.assert_called_once()
+        assert 'mapfile -t SKY_NODES' in script
+        assert '-w "${SKY_NODES[0]}"' in script
+        assert '-w "${SKY_NODES[1]}"' in script
+        assert f'--container-image={generation_dir}/rank0.sqsh' in script
+        assert f'--container-image={generation_dir}/rank1.sqsh' in script
+        assert script.count('--job-name=sky-container-keeper') == 2
+        assert 'apt-get update' not in script
+        assert 'echo \'alias sudo=""\' >> ~/.bashrc' not in script
+        stale_cleanup = 'enroot remove -f "$candidate"'
+        assert stale_cleanup in script
+        assert script.index(stale_cleanup) < script.index(
+            f'--container-image={generation_dir}/rank0.sqsh')
+        restore_job_db = f'cp -f {generation_dir}/jobs.db'
+        assert restore_job_db in script
+        assert script.index(restore_job_db) < script.index(
+            f'--container-image={generation_dir}/rank0.sqsh')
+        assert script.count('CONTAINER_PIDS+=("$!")') == 2
+        readiness_check = 'done < <(enroot list -f)'
+        assert readiness_check in script
+        assert ('job_target="pyxis_${SLURM_JOB_ID}_"'
+                'test-cluster-restore' in script)
+        assert script.index(readiness_check) > script.index(
+            f'--container-image={generation_dir}/rank1.sqsh')
+        assert script.index(readiness_check) < script.index(
+            'touch /home/testuser/.sky_clusters/'
+            'test-cluster-restore/.sky_sbatch_ready')
+        consume_snapshot = ('rm -rf -- /home/testuser/.sky_snapshots/'
+                            'test-cluster-restore')
+        ready_signal = ('touch /home/testuser/.sky_clusters/'
+                        'test-cluster-restore/.sky_sbatch_ready')
+        assert script.index(readiness_check) < script.index(consume_snapshot)
+        assert script.index(consume_snapshot) < script.index(ready_signal)
+
+    @pytest.mark.parametrize('path', [
+        '/host/data,other',
+        '/host/data:/other',
+        '/host/data with-space',
+        '/host/"data"',
+        '/host/`id`',
+        '/host/$(id)',
+        '/host/${HOME}',
+        '/host/data\nmalicious',
+        'relative/path',
+    ])
+    def test_container_mount_rejects_unsafe_paths(self, path):
+        with pytest.raises(ValueError, match='Invalid Pyxis container mount'):
+            slurm_instance._validate_pyxis_mount_path(path, 'source')
+
+    @patch('sky.provision.slurm.instance._wait_for_job_nodes')
+    @patch('sky.provision.slurm.instance.slurm_utils.get_proctrack_type')
+    @patch('sky.provision.slurm.instance.slurm_utils.get_partition_info')
+    @patch('sky.provision.slurm.instance.slurm.SlurmClient')
+    @patch('sky.provision.slurm.instance.command_runner.'
+           'SlurmLoginNodeCommandRunner')
+    def test_non_container_script_format(self, mock_ssh_runner,
+                                         mock_slurm_client,
+                                         mock_get_partition_info,
+                                         mock_get_proctrack_type,
+                                         mock_wait_for_job_nodes):
+        """Test that sbatch provision script without containers is correct."""
+        self._setup_mocks(mock_ssh_runner, mock_slurm_client,
+                          mock_get_partition_info, 'cpus')
+        mock_get_proctrack_type.return_value = 'cgroup'
+
+        config = self._make_non_container_config(cpus=2)
         written_script = self._run_and_capture_script(
             'test-cluster-no-container', config)
+
         assert_sbatch_matches_snapshot('basic', written_script)
         assert mock_slurm_client.call_args.kwargs['slurm_user'] == 'alice'
         assert mock_ssh_runner.call_args.kwargs['slurm_user'] == 'alice'
+
+    @patch('sky.provision.slurm.instance._wait_for_job_nodes')
+    @patch('sky.provision.slurm.instance.slurm_utils.get_proctrack_type')
+    @patch('sky.provision.slurm.instance.slurm_utils.get_partition_info')
+    @patch('sky.provision.slurm.instance.slurm.SlurmClient')
+    @patch('sky.provision.slurm.instance.command_runner.'
+           'SlurmLoginNodeCommandRunner')
+    def test_fractional_cpus_are_rounded_up(self, mock_ssh_runner,
+                                            mock_slurm_client,
+                                            mock_get_partition_info,
+                                            mock_get_proctrack_type,
+                                            mock_wait_for_job_nodes):
+        self._setup_mocks(mock_ssh_runner, mock_slurm_client,
+                          mock_get_partition_info, 'cpus')
+        mock_get_proctrack_type.return_value = 'cgroup'
+
+        config = self._make_non_container_config(cpus=1.5)
+        written_script = self._run_and_capture_script(
+            'test-cluster-fractional-cpus', config)
+
+        assert '#SBATCH --cpus-per-task=2' in written_script
+
+    @patch('sky.provision.slurm.instance._wait_for_job_nodes')
+    @patch('sky.provision.slurm.instance.slurm_utils.get_proctrack_type')
+    @patch('sky.provision.slurm.instance.slurm_utils.get_partition_info')
+    @patch('sky.provision.slurm.instance.slurm.SlurmClient')
+    @patch('sky.provision.slurm.instance.command_runner.'
+           'SlurmLoginNodeCommandRunner')
+    def test_skylet_keeper_block_non_container(self, mock_ssh_runner,
+                                               mock_slurm_client,
+                                               mock_get_partition_info,
+                                               mock_get_proctrack_type,
+                                               mock_wait_for_job_nodes):
+        """Keeper step precedes the final anchor and runs the start spec."""
+        self._setup_mocks(mock_ssh_runner, mock_slurm_client,
+                          mock_get_partition_info, 'cpus')
+        mock_get_proctrack_type.return_value = 'cgroup'
+
+        config = self._make_non_container_config(cpus=2)
+        script = self._run_and_capture_script('test-keeper', config)
+
+        keeper_idx = script.index(
+            '( while true; do srun --overlap --jobid=$SLURM_JOB_ID '
+            '--nodes=1 --ntasks=1 --job-name=sky-skylet-keeper '
+            '--nodelist=$SKY_HEAD_NODE')
+        anchor_idx = script.rindex('sleep infinity\n')
+        # The keeper is backgrounded before the allocation-lifetime anchor.
+        assert keeper_idx < anchor_idx
+        keeper_line = script[keeper_idx:script.index('\n', keeper_idx)]
+        # Outer retry loop: the batch script restarts the step itself.
+        assert keeper_line.endswith('sleep 5; done ) &')
+        # Head node is resolved in-script from the allocation.
+        head_idx = script.index(
+            'SKY_HEAD_NODE=$(scontrol show hostnames "$SLURM_JOB_NODELIST" '
+            '| head -n1)')
+        assert head_idx < keeper_idx
+        # The loop runs the start spec from the runtime dir, foreground.
+        assert constants.SKYLET_START_FILE in keeper_line
+        assert 'while true; do' in keeper_line
+        # The keeper sets HOME; attempt_skylet may write the spec
+        # in-container where HOME is /root.
+        assert ('HOME=/home/testuser/.sky_clusters/test-keeper bash'
+                in keeper_line)
+        # Non-container keeper must not attach to a pyxis container.
+        assert '--container-name' not in keeper_line
+
+    @patch('sky.provision.slurm.instance._wait_for_job_nodes')
+    @patch('sky.provision.slurm.instance.slurm_utils.get_proctrack_type')
+    @patch('sky.provision.slurm.instance.slurm_utils.get_partition_info')
+    @patch('sky.provision.slurm.instance.slurm.SlurmClient')
+    @patch('sky.provision.slurm.instance.command_runner.'
+           'SlurmLoginNodeCommandRunner')
+    def test_skylet_keeper_block_container(self, mock_ssh_runner,
+                                           mock_slurm_client,
+                                           mock_get_partition_info,
+                                           mock_get_proctrack_type,
+                                           mock_wait_for_job_nodes):
+        """Container keeper stays host-side: no container attach args."""
+        from sky.provision import common
+
+        self._setup_mocks(mock_ssh_runner, mock_slurm_client,
+                          mock_get_partition_info, 'gpu')
+        mock_get_proctrack_type.return_value = 'cgroup'
+
+        config = common.ProvisionConfig(
+            provider_config={
+                'ssh': {
+                    'hostname': 'login.example.com',
+                    'port': '22',
+                    'user': 'testuser',
+                    'private_key': '/path/to/key',
+                },
+                'cluster': 'test-slurm',
+                'partition': 'gpu',
+                'provision_timeout': 300,
+                'sky_base_dir': '/home/testuser',
+            },
+            authentication_config={},
+            docker_config={},
+            node_config={
+                'cpus': 4,
+                'memory': 16,
+                'image_id': 'nvcr.io/nvidia/pytorch:24.01-py3',
+            },
+            count=1,
+            tags={},
+            resume_stopped_nodes=False,
+            ports_to_open_on_launch=None,
+        )
+        script = self._run_and_capture_script('test-keeper-ctr', config)
+
+        keeper_idx = script.index(
+            '( while true; do srun --overlap --jobid=$SLURM_JOB_ID '
+            '--nodes=1 --ntasks=1 --job-name=sky-skylet-keeper '
+            '--nodelist=$SKY_HEAD_NODE')
+        anchor_idx = script.rindex('\nwait -n "${CONTAINER_PIDS[@]}"\n')
+        assert keeper_idx < anchor_idx
+        keeper_line = script[keeper_idx:script.index('\n', keeper_idx)]
+        # The keeper never attaches the container: Slurm CLIs are host-only.
+        assert '--container-name' not in keeper_line
+        assert '--container-remap-root' not in keeper_line
+        assert constants.SKYLET_START_FILE in keeper_line
+        # The keeper sets the host-correct HOME when running the spec.
+        assert ('HOME=/home/testuser/.sky_clusters/test-keeper-ctr bash'
+                in keeper_line)
+        # Outer retry loop: the batch script restarts the step itself.
+        assert keeper_line.endswith('sleep 5; done ) &')
 
     @pytest.mark.parametrize('memory_gb,expected_mem_mb', [
         (0.5, 512),
@@ -1299,6 +2119,7 @@ class TestCreateVirtualInstance:
                 'cluster': 'test-slurm',
                 'partition': 'cpus',
                 'provision_timeout': 300,
+                'sky_base_dir': '/home/testuser',
             },
             authentication_config={},
             docker_config={},
@@ -1482,3 +2303,36 @@ class TestExpandPathVars:
         result = slurm_utils.expand_path_vars('/home/; rm -rf /',
                                               self.REMOTE_ENV)
         assert result == '/home/; rm -rf /'
+
+
+class TestResolveSkyBaseDir:
+    """Tests initial Slurm cluster state directory resolution."""
+
+    @patch('sky.provision.slurm.utils.skypilot_config.'
+           'get_effective_region_config',
+           return_value='/fsx/$USER')
+    def test_resolves_configured_workdir(self, mock_get_config):
+        client = mock.MagicMock(spec=slurm.SlurmClient)
+        client.get_env.return_value = {'USER': 'alice'}
+
+        result = slurm_utils.resolve_sky_base_dir('my-cluster', client)
+
+        assert result == '/fsx/alice'
+        mock_get_config.assert_called_once_with(cloud='slurm',
+                                                region='my-cluster',
+                                                keys=('workdir',),
+                                                default_value=None)
+        client.get_remote_home_dir.assert_not_called()
+
+    @patch('sky.provision.slurm.utils.skypilot_config.'
+           'get_effective_region_config',
+           return_value=None)
+    def test_uses_remote_home_without_workdir(self, mock_get_config):
+        client = mock.MagicMock(spec=slurm.SlurmClient)
+        client.get_remote_home_dir.return_value = '/home/alice'
+
+        result = slurm_utils.resolve_sky_base_dir('my-cluster', client)
+
+        assert result == '/home/alice'
+        mock_get_config.assert_called_once()
+        client.get_env.assert_not_called()

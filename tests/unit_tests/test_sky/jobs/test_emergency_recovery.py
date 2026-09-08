@@ -9,6 +9,7 @@ Covers the two layers of the feature:
 """
 import asyncio
 import contextlib
+import threading
 import time
 from unittest.mock import AsyncMock
 from unittest.mock import MagicMock
@@ -24,6 +25,7 @@ from sky.jobs import constants as jobs_constants
 from sky.jobs import controller
 from sky.jobs import scheduler
 from sky.jobs import state
+from sky.utils import controller_utils
 
 _PID = 1234
 _PID_STARTED_AT = 111.0
@@ -466,6 +468,52 @@ class TestEmergencyRecoveryState:
         await state.normalize_schedule_state_for_emergency_retry_async(1)
         assert _get_job_info_row(engine)['schedule_state'] == 'ALIVE'
 
+    @pytest.mark.asyncio
+    async def test_scheduled_launch_sync_reads_leave_the_loop(
+            self, _mock_managed_jobs_db_conn, monkeypatch):
+        # The pool and DAG lookups in scheduled_launch use the sync engine.
+        # They must run on a worker thread: a sync query on the loop thread
+        # blocks every asyncpg transaction this process holds open.
+        engine = _mock_managed_jobs_db_conn
+        _seed_job(engine, status='PENDING', schedule_state='LAUNCHING')
+        loop_thread = threading.get_ident()
+        real_get_engine = state._db_manager.get_engine
+
+        def guarded_get_engine():
+            assert threading.get_ident() != loop_thread, (
+                'sync state engine used on the event loop thread')
+            return real_get_engine()
+
+        monkeypatch.setattr(state._db_manager, 'get_engine', guarded_get_engine)
+        lock = asyncio.Lock()
+        async with scheduler.scheduled_launch(1, set(), lock,
+                                              asyncio.Condition(lock=lock)):
+            pass
+        assert _get_job_info_row(engine)['schedule_state'] == 'ALIVE'
+
+    @pytest.mark.asyncio
+    async def test_scheduled_launch_enters_with_reserved_slot(
+            self, _mock_managed_jobs_db_conn):
+        # start_job adds a claimed job to `starting` before its first launch.
+        # With LAUNCHES_PER_WORKER jobs claimed back to back, every job sees a
+        # full set that includes itself; it must enter anyway rather than wait
+        # for a slot none of them will release.
+        engine = _mock_managed_jobs_db_conn
+        _seed_job(engine, status='PENDING', schedule_state='LAUNCHING')
+        starting = {1} | set(
+            range(1000, 1000 + controller_utils.LAUNCHES_PER_WORKER - 1))
+        assert len(starting) == controller_utils.LAUNCHES_PER_WORKER
+        lock = asyncio.Lock()
+
+        async def _enter_and_exit():
+            async with scheduler.scheduled_launch(1, starting, lock,
+                                                  asyncio.Condition(lock=lock)):
+                assert 1 in starting
+
+        await asyncio.wait_for(_enter_and_exit(), timeout=5)
+        assert 1 not in starting
+        assert _get_job_info_row(engine)['schedule_state'] == 'ALIVE'
+
     def test_backoff_schedule_states_block_controller_autostop(
             self, _mock_managed_jobs_db_conn):
         # The controller-VM autostop keep-alive
@@ -491,19 +539,33 @@ class TestEmergencyRecoveryState:
 class _RetryLoopHarness:
     """Drives the real JobController.run() with mocked collaborators."""
 
-    def __init__(self, monkeypatch, body_effects):
-        """body_effects: side_effect list for _run_one_task."""
+    def __init__(self,
+                 monkeypatch,
+                 body_effects,
+                 is_job_group=False,
+                 num_tasks=1,
+                 task_statuses=None):
+        """body_effects: side_effect list for the job body.
+
+        Drives _run_one_task for single jobs, _run_job_group when
+        is_job_group is set. task_statuses feeds the group branch's
+        per-member status probe (defaults to all RUNNING).
+        """
         jc = controller.JobController.__new__(controller.JobController)
         jc._job_id = 1
-        task = MagicMock()
-        task.name = 'task0'
+        tasks = []
+        for i in range(num_tasks):
+            task = MagicMock()
+            task.name = f'task{i}'
+            tasks.append(task)
         dag = MagicMock()
-        dag.is_job_group.return_value = False
-        dag.tasks = [task]
+        dag.is_job_group.return_value = is_job_group
+        dag.tasks = tasks
         jc._dag = dag
         jc._pool = None
         jc._emergency_backoff_seconds = None
         jc._run_one_task = AsyncMock(side_effect=body_effects)
+        jc._run_job_group = AsyncMock(side_effect=body_effects)
         jc._update_failed_task_state = AsyncMock()
         jc._cleanup_cluster = AsyncMock()
         # Shared launching-slot primitives (real JobController gets these from
@@ -535,7 +597,15 @@ class _RetryLoopHarness:
         async def _fake_sleep(seconds):
             self.sleeps.append(seconds)
 
+        if task_statuses is None:
+            task_statuses = [state.ManagedJobStatus.RUNNING] * num_tasks
+
+        self.get_task_statuses = AsyncMock(
+            return_value=list(enumerate(task_statuses)))
+
         mjs = 'sky.jobs.controller.managed_job_state'
+        monkeypatch.setattr(f'{mjs}.get_all_task_ids_statuses_async',
+                            self.get_task_statuses)
         monkeypatch.setattr(f'{mjs}.get_emergency_recovery_budget_async',
                             self.get_budget)
         monkeypatch.setattr(f'{mjs}.record_emergency_recovery_attempt_async',
@@ -1025,3 +1095,95 @@ class TestTaskPrepFailureIsTerminal:
         h.get_budget.assert_not_awaited()
         h.record_attempt.assert_not_awaited()
         assert not h.sleeps
+
+
+class TestJobGroupEmergencyRecovery:
+    """Group-mode emergency recovery does no per-task surgery.
+
+    For job groups, every member is concurrently mid-flight, so "the
+    latest task" is an arbitrary member: marking it RECOVERING would
+    force-recover (tear down + relaunch) a possibly-healthy RUNNING
+    member on re-entry, and tearing down its cluster leaves siblings
+    running unsupervised through the backoff. The group branch skips
+    both and leaves reconciliation to the retry's resume classification,
+    keeping only the job-level bookkeeping (budget, launch slot,
+    schedule-state normalization, backoff).
+    """
+
+    @pytest.mark.asyncio
+    async def test_group_skips_per_task_surgery(self, monkeypatch):
+        h = _RetryLoopHarness(monkeypatch, [RuntimeError('boom'), True],
+                              is_job_group=True,
+                              num_tasks=3)
+
+        await h.jc.run()
+
+        assert h.jc._run_job_group.call_count == 2
+        h.jc._update_failed_task_state.assert_not_called()
+        # Budget is still spent and the episode paced like any other.
+        h.record_attempt.assert_awaited_once()
+        assert h.record_attempt.await_args.args[1] == 1
+        _assert_jittered(
+            h.sleeps, [jobs_constants.EMERGENCY_RECOVERY_BACKOFF_BASE_SECONDS])
+        # No per-task surgery: no member marked RECOVERING, no member's
+        # cluster torn down, no "latest task" resolution at all.
+        h.set_emergency.assert_not_awaited()
+        h.jc._cleanup_cluster.assert_not_awaited()
+        h.get_latest_task.assert_not_awaited()
+        # Job-level bookkeeping still runs.
+        h.normalize.assert_awaited_once()
+        assert 1 not in h.jc.starting  # launch slot released
+
+    @pytest.mark.asyncio
+    async def test_group_cancelling_member_retries_without_backoff(
+            self, monkeypatch):
+        h = _RetryLoopHarness(monkeypatch,
+                              [RuntimeError('boom'),
+                               asyncio.CancelledError()],
+                              is_job_group=True,
+                              num_tasks=2,
+                              task_statuses=[
+                                  state.ManagedJobStatus.RUNNING,
+                                  state.ManagedJobStatus.CANCELLING,
+                              ])
+
+        with pytest.raises(asyncio.CancelledError):
+            await h.jc.run()
+
+        assert h.jc._run_job_group.call_count == 2
+        assert not h.sleeps  # no backoff for the cancellation handoff
+        h.set_emergency.assert_not_awaited()
+        h.jc._cleanup_cluster.assert_not_awaited()
+        # Cancellation ordering mirrors the single-task fast path.
+        h.set_cancelling.assert_awaited_once()
+        h.set_cancelled.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_group_all_terminal_retries_without_backoff(
+            self, monkeypatch):
+        h = _RetryLoopHarness(monkeypatch, [RuntimeError('boom'), True],
+                              is_job_group=True,
+                              num_tasks=2,
+                              task_statuses=[
+                                  state.ManagedJobStatus.SUCCEEDED,
+                                  state.ManagedJobStatus.FAILED,
+                              ])
+
+        await h.jc.run()
+
+        assert h.jc._run_job_group.call_count == 2
+        assert not h.sleeps
+        h.set_emergency.assert_not_awaited()
+        h.jc._cleanup_cluster.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_single_task_surgery_unchanged(self, monkeypatch):
+        """Regression pin: single jobs keep the mark + early teardown."""
+        h = _RetryLoopHarness(monkeypatch, [RuntimeError('boom'), True])
+
+        await h.jc.run()
+
+        h.set_emergency.assert_awaited_once()
+        h.jc._cleanup_cluster.assert_awaited_once()
+        # The group-only bulk status probe is never used on this path.
+        h.get_task_statuses.assert_not_awaited()

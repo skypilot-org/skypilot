@@ -464,8 +464,12 @@ def _generate_pipeline(test_file: str, args: str) -> Dict[str, Any]:
             elif concurrency_limit is not None:
                 step['concurrency'] = concurrency_limit
                 step['concurrency_group'] = concurrency_group
-            if no_auto_retry:
+            if no_auto_retry or exclusive:
                 # Disable automatic retries but allow manual retries.
+                # Exclusive runs are serialized (concurrency 1), so an
+                # auto-retried failure re-runs the whole (often long) step and
+                # blocks every other exclusive step queued behind it. Fail fast
+                # and leave retrying to a human.
                 step['retry'] = {
                     'automatic': False,
                     'manual': {

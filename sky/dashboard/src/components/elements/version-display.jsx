@@ -71,8 +71,15 @@ export function useVersionInfo() {
   return useContext(VersionContext);
 }
 
-export function VersionTooltip({
-  children,
+/**
+ * What the version tooltip shows once it is open: the core version/commit and
+ * one line per plugin that has not opted out of the display.
+ *
+ * Exported separately from the tooltip that hosts it because the hosting
+ * tooltip only mounts its content while open, and this is the part with the
+ * behaviour worth asserting on.
+ */
+export function VersionTooltipContent({
   version,
   latestVersion,
   commit,
@@ -80,8 +87,14 @@ export function VersionTooltip({
   showUpdateInfo = true,
   showCommit = true,
 }) {
-  // Create tooltip content
-  const tooltipContent = (
+  // Everything below keys off what is actually shown, not off the raw list: a
+  // plugin that opted out of the display should not make the core commit call
+  // itself "Core", and should not suppress the "not available" fallback.
+  const visiblePlugins = plugins.filter(
+    (plugin) => !plugin.hidden_from_display
+  );
+
+  return (
     <div className="flex flex-col gap-0.5">
       {showUpdateInfo && latestVersion && (
         <div className="mb-1">
@@ -92,33 +105,50 @@ export function VersionTooltip({
       )}
       {showCommit && commit && (
         <div>
-          {plugins.length > 0 ? 'Core commit' : 'Commit'}: {commit}
+          {visiblePlugins.length > 0 ? 'Core commit' : 'Commit'}: {commit}
         </div>
       )}
-      {plugins
-        .filter((plugin) => !plugin.hidden_from_display)
-        .map((plugin, index) => {
-          const pluginName = plugin.name || 'Unknown Plugin';
-          const parts = [];
-          if (plugin.version) parts.push(plugin.version);
-          if (showCommit && plugin.commit) parts.push(plugin.commit);
-          return parts.length > 0 ? (
-            <div key={index}>
-              {pluginName}: {parts.join(' - ')}
-            </div>
-          ) : null;
-        })}
+      {visiblePlugins.map((plugin, index) => {
+        const pluginName = plugin.name || 'Unknown Plugin';
+        const parts = [];
+        if (plugin.version) parts.push(plugin.version);
+        if (showCommit && plugin.commit) parts.push(plugin.commit);
+        return parts.length > 0 ? (
+          <div key={index}>
+            {pluginName}: {parts.join(' - ')}
+          </div>
+        ) : null;
+      })}
       {!commit &&
-        plugins.length === 0 &&
+        visiblePlugins.length === 0 &&
         (!latestVersion || !showUpdateInfo) && (
           <div>Version information not available</div>
         )}
     </div>
   );
+}
 
+export function VersionTooltip({
+  children,
+  version,
+  latestVersion,
+  commit,
+  plugins,
+  showUpdateInfo = true,
+  showCommit = true,
+}) {
   return (
     <NonCapitalizedTooltip
-      content={tooltipContent}
+      content={
+        <VersionTooltipContent
+          version={version}
+          latestVersion={latestVersion}
+          commit={commit}
+          plugins={plugins}
+          showUpdateInfo={showUpdateInfo}
+          showCommit={showCommit}
+        />
+      }
       className="text-sm text-muted-foreground"
     >
       {children}

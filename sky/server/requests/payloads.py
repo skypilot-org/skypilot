@@ -581,6 +581,9 @@ class VolumeDeleteBody(RequestBody):
 class VolumeListBody(RequestBody):
     """The request body for the volume list endpoint."""
     refresh: bool = False
+    # None means every volume, so a client that predates this field and never
+    # sends it keeps getting the whole listing.
+    volume_names: Optional[List[str]] = None
 
 
 class VolumeValidateBody(RequestBody):
@@ -650,6 +653,10 @@ class JobsQueueV2Body(RequestBody):
     workspace_match: Optional[str] = None
     name_match: Optional[str] = None
     pool_match: Optional[str] = None
+    # `--infra` spec to filter on. Servers older than
+    # MIN_JOBS_INFRA_FILTER_API_VERSION drop this field silently, so the
+    # client checks the server version before sending it.
+    infra_match: Optional[str] = None
     page: Optional[int] = None
     limit: Optional[int] = None
     statuses: Optional[List[str]] = None

@@ -4,8 +4,9 @@ import math
 import os
 import re
 import shlex
+import subprocess
 import time
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, Dict, List, NamedTuple, Optional, Tuple, Union
 
 from paramiko.config import SSHConfig
 
@@ -15,6 +16,7 @@ from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import slurm
 from sky.skylet import constants
+from sky.skylet import runtime_utils
 from sky.utils import annotations
 from sky.utils import common_utils
 from sky.utils import gpu_names
@@ -29,7 +31,6 @@ _VAR_PATTERN = re.compile(r'\$(\w+|\{[^}]*\})')
 _SLURM_USER_PATTERN = re.compile(r'^[a-z_][a-z0-9_.-]*$')
 
 SLURM_MARKER_FILE = '.sky_slurm_cluster'
-SLURM_CONTAINER_MARKER_FILE = '.sky_slurm_container'
 
 # Regex pattern for parsing GPU GRES strings.
 # Format: 'gpu[:acc_type]:acc_count(optional_extra_info)'
@@ -56,6 +57,13 @@ _SLURM_PYXIS_CHECK_CACHE_TTL = 24 * 60 * 60
 _SLURM_FUSE_CHECK_CACHE_TTL = 24 * 60 * 60
 
 
+class SlurmClusterInventory(NamedTuple):
+    """Cluster-wide node, job, and partition inventory."""
+    nodes: List[Dict[str, Any]]
+    jobs: Dict[str, List[slurm.JobGresInfo]]
+    default_partition: Optional[str]
+
+
 def expand_path_vars(path: str, env: Dict[str, str]) -> str:
     """Expand $VAR and ${VAR} in path using the given environment dict.
 
@@ -72,6 +80,26 @@ def expand_path_vars(path: str, env: Dict[str, str]) -> str:
         return env.get(name, m.group(0))
 
     return _VAR_PATTERN.sub(_repl, path)
+
+
+def resolve_sky_base_dir(cluster: str, client: 'slurm.SlurmClient') -> str:
+    """Resolve the absolute shared directory used for Slurm cluster state."""
+    workdir = skypilot_config.get_effective_region_config(cloud='slurm',
+                                                          region=cluster,
+                                                          keys=('workdir',),
+                                                          default_value=None)
+    if workdir is not None:
+        workdir = expand_path_vars(workdir, client.get_env())
+        if not os.path.isabs(workdir):
+            raise RuntimeError('Resolved Slurm workdir must be absolute, got '
+                               f'{workdir!r}.')
+        return workdir
+
+    remote_home_dir = client.get_remote_home_dir()
+    if not os.path.isabs(remote_home_dir):
+        raise RuntimeError('Slurm remote home directory must be absolute, got '
+                           f'{remote_home_dir!r}.')
+    return remote_home_dir
 
 
 def get_gpu_type_and_count(gres_str: str) -> Tuple[Optional[str], int]:
@@ -1033,6 +1061,45 @@ def _parse_float_or_none(value: Optional[str]) -> Optional[float]:
         return None
 
 
+def _get_slurm_inventory_client(slurm_cluster_name: str) -> 'slurm.SlurmClient':
+    slurm_config = get_slurm_ssh_config()
+    slurm_config_dict = slurm_config.lookup(slurm_cluster_name)
+    logger.debug(f'Slurm config dict: {slurm_config_dict}')
+    return slurm.SlurmClient(
+        slurm_config_dict['hostname'],
+        int(slurm_config_dict.get('port', 22)),
+        slurm_config_dict['user'],
+        get_identity_file(slurm_config_dict),
+        ssh_proxy_command=slurm_config_dict.get('proxycommand', None),
+        ssh_proxy_jump=slurm_config_dict.get('proxyjump', None),
+        identities_only=get_identities_only(slurm_config_dict),
+        slurm_user=None,
+    )
+
+
+def run_on_login_node(slurm_cluster_name: str,
+                      cmd: str,
+                      timeout: Optional[int] = None) -> Tuple[int, str, str]:
+    """Runs a shell command on a Slurm cluster's login node.
+
+    Public entry point for callers outside the provisioner (e.g. the
+    GPU-metrics federation in sky/metrics/utils.py) that need to execute
+    something over the cluster's SSH transport without reaching into the
+    inventory client. See SlurmClient.run_command for the framing and
+    timeout semantics.
+
+    Args:
+        slurm_cluster_name: A Host alias in the Slurm SSH config.
+        cmd: Shell command to run on the login node.
+        timeout: Optional bound in seconds on the whole remote invocation.
+
+    Returns:
+        (returncode, stdout, stderr) of ``cmd``.
+    """
+    client = _get_slurm_inventory_client(slurm_cluster_name)
+    return client.run_command(cmd, timeout=timeout)
+
+
 def _get_slurm_node_info_list(slurm_cluster_name: str) -> List[Dict[str, Any]]:
     """Gathers detailed information about each node in the Slurm cluster.
 
@@ -1047,42 +1114,26 @@ def _get_slurm_node_info_list(slurm_cluster_name: str) -> List[Dict[str, Any]]:
         exceptions.CommandError: If a Slurm command fails on the cluster, e.g.
             because the login node is unreachable.
     """
-    # 1. Get node state and GRES using sinfo
+    slurm_client = _get_slurm_inventory_client(slurm_cluster_name)
+    node_infos, node_details_by_name = slurm_client.get_node_inventory()
+    return _build_slurm_node_info_list(slurm_cluster_name, slurm_client,
+                                       node_infos, node_details_by_name)
 
-    # can raise FileNotFoundError if config file does not exist.
-    slurm_config = get_slurm_ssh_config()
-    slurm_config_dict = slurm_config.lookup(slurm_cluster_name)
-    logger.debug(f'Slurm config dict: {slurm_config_dict}')
-    slurm_client = slurm.SlurmClient(
-        slurm_config_dict['hostname'],
-        int(slurm_config_dict.get('port', 22)),
-        slurm_config_dict['user'],
-        get_identity_file(slurm_config_dict),
-        ssh_proxy_command=slurm_config_dict.get('proxycommand', None),
-        ssh_proxy_jump=slurm_config_dict.get('proxyjump', None),
-        identities_only=get_identities_only(slurm_config_dict),
-        # The SSH transport identity gives cluster-wide inventory callers one
-        # consistent view of monitoring and capacity data.
-        slurm_user=None,
-    )
-    node_infos = slurm_client.info_nodes()
+
+def _build_slurm_node_info_list(
+    slurm_cluster_name: str,
+    slurm_client: 'slurm.SlurmClient',
+    node_infos: List[slurm.NodeInfo],
+    node_details_by_name: Dict[str, Dict[str, str]],
+    jobs_gres_by_node: Optional[Dict[str, List[str]]] = None,
+) -> List[Dict[str, Any]]:
+    """Build node inventory from cluster-wide Slurm query results."""
 
     if not node_infos:
         logger.warning(
             f'`sinfo -N` returned no output on cluster {slurm_cluster_name}. '
             f'No nodes found?')
         return []
-
-    # Best-effort enrichment with per-node scontrol attributes (CPU/memory
-    # allocation from the scheduler plus actual load/free-memory sampled
-    # by slurmd) — sinfo's format codes cannot express these. A failure
-    # here must not break basic node info.
-    try:
-        node_details_by_name = slurm_client.get_all_node_details()
-    except Exception as e:  # pylint: disable=broad-except
-        logger.debug(f'Could not fetch scontrol node details on cluster '
-                     f'{slurm_cluster_name}: {e}')
-        node_details_by_name = {}
 
     # 2. Process each node, aggregating partitions per node
     slurm_nodes_info: Dict[str, Dict[str, Any]] = {}
@@ -1135,7 +1186,11 @@ def _get_slurm_node_info_list(slurm_cluster_name: str) -> List[Dict[str, Any]]:
             # TODO(zhwu): move to enum
             if state in ('alloc', 'mix', 'drain', 'drng', 'drained', 'resv',
                          'comp'):
-                jobs_gres = _get_all_jobs_gres(slurm_client).get(node_name, [])
+                if jobs_gres_by_node is None:
+                    jobs_gres = _get_all_jobs_gres(slurm_client).get(
+                        node_name, [])
+                else:
+                    jobs_gres = jobs_gres_by_node.get(node_name, [])
                 if jobs_gres:
                     for job_line in jobs_gres:
                         _, job_gpu_count = get_gpu_type_and_count(job_line)
@@ -1200,6 +1255,35 @@ def _get_slurm_node_info_list(slurm_cluster_name: str) -> List[Dict[str, Any]]:
     return list(slurm_nodes_info.values())
 
 
+def get_slurm_cluster_inventory(
+        slurm_cluster_name: str) -> SlurmClusterInventory:
+    """Get nodes, running GPU jobs, and the default partition for a cluster.
+
+    The underlying Slurm commands run concurrently in one remote invocation.
+    Node information is required; jobs and partition metadata are best-effort.
+    """
+    slurm_client = _get_slurm_inventory_client(slurm_cluster_name)
+    snapshot = slurm_client.get_inventory_snapshot()
+    jobs_gres_by_node: Optional[Dict[str, List[str]]] = None
+    if snapshot.jobs is not None:
+        jobs_gres_by_node = {
+            node_name: [job.gres_str for job in jobs
+                       ] for node_name, jobs in snapshot.jobs.items()
+        }
+    nodes = _build_slurm_node_info_list(slurm_cluster_name, slurm_client,
+                                        snapshot.node_infos,
+                                        snapshot.node_details,
+                                        jobs_gres_by_node)
+    default_partition = None
+    if snapshot.partitions is not None:
+        default_partition = next((partition.name
+                                  for partition in snapshot.partitions
+                                  if partition.is_default), None)
+    return SlurmClusterInventory(nodes=nodes,
+                                 jobs=snapshot.jobs or {},
+                                 default_partition=default_partition)
+
+
 def slurm_cluster_names() -> List[str]:
     """Gets the names of the Slurm clusters this server is configured with.
 
@@ -1247,7 +1331,7 @@ def slurm_node_info(
         try:
             return _get_slurm_node_info_list(
                 slurm_cluster_name=slurm_cluster_name)
-        except (FileNotFoundError, RuntimeError,
+        except (FileNotFoundError, RuntimeError, subprocess.TimeoutExpired,
                 exceptions.NotSupportedError) as e:
             logger.debug(f'Could not retrieve Slurm node info: {e}')
             return []
@@ -1278,9 +1362,13 @@ def slurm_node_info(
 
 
 def is_inside_slurm_cluster() -> bool:
-    # Check for the marker file in the current home directory. When run by
-    # the skylet on a compute node, the HOME environment variable is set to
-    # the cluster's sky home directory by the SlurmCommandRunner.
+    # New allocations write the marker under the runtime dir's .sky/.
+    # That path resolves in both the host and container shapes.
+    # Older allocations only wrote it to $HOME, so keep that as a fallback.
+    if os.path.exists(
+            runtime_utils.get_runtime_dir_path(
+                os.path.join('.sky', SLURM_MARKER_FILE))):
+        return True
     marker_file = os.path.join(os.path.expanduser('~'), SLURM_MARKER_FILE)
     return os.path.exists(marker_file)
 

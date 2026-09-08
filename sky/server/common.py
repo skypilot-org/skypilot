@@ -18,8 +18,8 @@ import time
 import typing
 from typing import (Any, Callable, cast, Dict, Generic, List, Literal, Optional,
                     Tuple, TypeVar, Union)
+import urllib.parse
 from urllib.request import Request
-import uuid
 
 import cachetools
 import click
@@ -501,6 +501,50 @@ def get_server_url(host: Optional[str] = None) -> str:
     return url.rstrip('/')
 
 
+# Shown in place of a basic-auth password when a server URL is printed for
+# humans to read (banners, status lines). Chosen to be obviously not a real
+# password so nobody mistakes it for one.
+_REDACTED_PASSWORD = '<redacted>'
+
+
+def redact_url_password(url: str) -> str:
+    """Masks the basic-auth password embedded in a server URL, if any.
+
+    An API server endpoint can be configured with inline basic-auth
+    credentials, e.g. ``http://user:password@host:8080``. Echoing that URL
+    verbatim leaks the password into the terminal, logs, and -- when sky is
+    driven by an agent -- the agent's transcript. Use this only for the
+    human-readable places that display the URL; keep the real URL for anything
+    that has to connect or that the user needs to copy back into a command.
+
+    The username, scheme, host, port and path are preserved so the output is
+    still useful; only the password is replaced. Strings that are not URLs, or
+    URLs without a password, are returned unchanged.
+    """
+    try:
+        parsed = urllib.parse.urlsplit(url)
+        if not parsed.password:
+            return url
+        # urlsplit does not validate the port; SplitResult.port only raises
+        # when it is read, so keep that read inside the guard too.
+        port = parsed.port
+    except ValueError:
+        # Not something urlsplit can make sense of; leave it untouched rather
+        # than risk mangling it.
+        return url
+
+    # urlsplit strips the brackets off an IPv6 literal, so add them back when
+    # rebuilding the authority or the ':port' becomes ambiguous.
+    host = parsed.hostname or ''
+    if is_ipv6_host(host):
+        host = f'[{host}]'
+    netloc = f'{parsed.username or ""}:{_REDACTED_PASSWORD}@{host}'
+    if port is not None:
+        netloc += f':{port}'
+    return urllib.parse.urlunsplit(
+        (parsed.scheme, netloc, parsed.path, parsed.query, parsed.fragment))
+
+
 # Wildcard bind addresses (0.0.0.0 / ::) are valid to *bind* but are not
 # reliable *connect* targets (Windows rejects them; macOS rejects :: with
 # bindv6only=1). When dialing a server we just started locally, translate the
@@ -728,6 +772,39 @@ def handle_request_error(response: 'requests.Response') -> None:
                 f'{response.url}. '
                 f'Response: {response.status_code} '
                 f'{response.text}')
+
+
+def raise_if_rejected_synchronously(response: 'requests.Response') -> None:
+    """Raises the server's error for a synchronous 400.
+
+    An endpoint that validates before enqueuing replies 400 with a serialized
+    exception instead of a request id; without this the SDK would surface a raw
+    HTTPError. Endpoints opt in by calling this before `get_request_id`.
+
+    Always raises on a 400. A body this cannot decode -- a proxy's HTML error
+    page -- falls back to `handle_request_error`, because a caller with nothing
+    after this call would otherwise read the 400 as success.
+    """
+    if response.status_code != 400:
+        return
+    detail = None
+    try:
+        payload = response.json()
+        if isinstance(payload, dict):
+            detail = payload.get('detail')
+    except Exception as e:  # pylint: disable=broad-except
+        logger.debug(f'Could not parse the body of a 400 from '
+                     f'{response.url}: {e}')
+    if detail is None:
+        logger.debug(f'A 400 from {response.url} carried no error detail; '
+                     f'falling back to the generic error. '
+                     f'Body: {response.text[:200]}')
+        # No `return`: this raises today, but falling through keeps the
+        # always-raises promise from depending on that. deserialize_exception
+        # turns a None detail into a generic RuntimeError.
+        handle_request_error(response)
+    with ux_utils.print_exception_no_traceback():
+        raise exceptions.deserialize_exception(detail)
 
 
 def get_request_id(response: 'requests.Response') -> RequestId[T]:
@@ -1127,16 +1204,7 @@ def process_mounts_in_task_on_api_server(
 
     user_hash = env_vars.get(constants.USER_ID_ENV_VAR, 'unknown')
 
-    # We should not use int(time.time()) as there can be multiple requests at
-    # the same second.
-    task_id = str(uuid.uuid4().hex)
     client_dir = (API_SERVER_CLIENT_DIR.expanduser().resolve() / user_hash)
-    client_task_dir = client_dir / 'tasks'
-    client_task_dir.mkdir(parents=True, exist_ok=True)
-
-    client_task_path = client_task_dir / f'{task_id}.yaml'
-    client_task_path.write_text(task)
-
     client_file_mounts_dir = client_dir / 'file_mounts'
     client_file_mounts_dir.mkdir(parents=True, exist_ok=True)
 
@@ -1153,7 +1221,7 @@ def process_mounts_in_task_on_api_server(
         return str(file_mounts_base /
                    file_mounts_mapping[original_path].lstrip('/'))
 
-    task_configs = yaml_utils.read_yaml_all(str(client_task_path))
+    task_configs = yaml_utils.read_yaml_all_str(task)
     for task_config in task_configs:
         if task_config is None:
             continue
@@ -1202,13 +1270,8 @@ def process_mounts_in_task_on_api_server(
                         tls[key] = _get_client_file_mounts_path(
                             tls[key], file_mounts_mapping)
 
-    # We can switch to using string, but this is to make it easier to debug, by
-    # persisting the translated task yaml file.
-    translated_client_task_path = client_dir / f'{task_id}_translated.yaml'
-    yaml_utils.dump_yaml(str(translated_client_task_path), task_configs)
-
-    dag = dag_utils.load_dag_from_yaml(str(translated_client_task_path))
-    return dag
+    translated_task = yaml_utils.dump_yaml_str(task_configs)
+    return dag_utils.load_dag_from_yaml_str(translated_task)
 
 
 def api_server_user_logs_dir_prefix(

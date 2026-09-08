@@ -1,6 +1,6 @@
 {
   "skill_name": "skypilot",
-  "description": "Evaluates the 'Before You Start (Agent Bootstrap)' section behavior",
+  "description": "Evaluates the 'Before You Start (Agent Bootstrap)' and 'Converting a Slurm Workload' section behavior",
   "evals": [
     {
       "id": 1,
@@ -75,6 +75,58 @@
         {
           "text": "Agent re-runs `sky api status` after connecting to confirm it's reachable",
           "type": "required_action"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "name": "slurm-sbatch-time-not-autostop",
+      "prompt": "Convert this to SkyPilot for our Slurm cluster:\n#!/bin/bash\n#SBATCH --nodes=2\n#SBATCH --gpus-per-node=8\n#SBATCH --time=24:00:00\n#SBATCH --account=ai-research\nsrun python train.py",
+      "expected_output": "Agent produces a task YAML with num_nodes: 2, resources.accelerators: H100:8 (or asks for the GRES name), and puts both --time and --account under config.slurm.sbatch_options. The bare `srun` is dropped because `run` already executes on every node. Agent recommends `sky jobs launch` for this batch script.",
+      "assertions": [
+        {
+          "text": "Agent maps --time to config.slurm.sbatch_options.time",
+          "type": "required_action"
+        },
+        {
+          "text": "Agent does NOT map --time to autostop, which is unsupported on Slurm",
+          "type": "negative"
+        },
+        {
+          "text": "Agent maps --account to config.slurm.sbatch_options.account",
+          "type": "required_action"
+        },
+        {
+          "text": "Agent puts num_nodes at task level, not under resources",
+          "type": "required_action"
+        },
+        {
+          "text": "Agent does NOT wrap the run command in `srun` again",
+          "type": "negative"
+        },
+        {
+          "text": "Agent recommends `sky jobs launch` (not `sky launch`) for this batch script",
+          "type": "required_action"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "name": "slurm-job-array-to-num-jobs",
+      "prompt": "On Slurm I run `sbatch --array=0-99 shard.sh` and the script reads $SLURM_ARRAY_TASK_ID to pick its shard. What's the SkyPilot equivalent?",
+      "expected_output": "Agent answers `sky jobs launch --num-jobs 100` and maps $SLURM_ARRAY_TASK_ID to $SKYPILOT_JOB_RANK (with $SKYPILOT_NUM_JOBS for the count). May also mention pools for reusing workers across submissions.",
+      "assertions": [
+        {
+          "text": "Agent uses `sky jobs launch --num-jobs 100`",
+          "type": "required_action"
+        },
+        {
+          "text": "Agent maps $SLURM_ARRAY_TASK_ID to $SKYPILOT_JOB_RANK",
+          "type": "required_action"
+        },
+        {
+          "text": "Agent does NOT propose a shell for-loop as the primary answer",
+          "type": "negative"
         }
       ]
     }

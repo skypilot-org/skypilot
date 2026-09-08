@@ -1,7 +1,7 @@
 """Responses for the API server."""
 
 import enum
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import pydantic
 
@@ -236,7 +236,12 @@ class ManagedJobRecord(ResponseBaseModel):
     current_cluster_name: Optional[str] = None
     cluster_name_on_cloud: Optional[str] = None
     job_id_on_pool_cluster: Optional[int] = None
-    accelerators: Optional[Dict[str, int]] = None
+    # Accelerator counts can be fractional (e.g. ``{'L4': 0.125}``) since
+    # SkyPilot supports fractional GPU requests, so mirror the
+    # ``Resources.accelerators`` type here. Narrowing this to ``int`` made
+    # the Jobs Dashboard reject every record whenever any job used a
+    # fractional GPU.
+    accelerators: Optional[Dict[str, Union[int, float]]] = None
     labels: Optional[Dict[str, str]] = None
     links: Optional[Dict[str, str]] = None
     # Node names for dashboard display (comma-separated)
@@ -286,5 +291,18 @@ class VolumeRecord(ResponseBaseModel):
     # Error message for volume in ERROR state (e.g., PVC pending due to
     # access mode mismatch)
     error_message: Optional[str] = None
+    # Whether the error above is one the volume can still recover from, such as
+    # a network filesystem that takes minutes to provision. False for a volume
+    # that will never bind, and for a volume with no error at all.
+    error_may_resolve: bool = False
     # YAML configuration used to create the volume
     creation_yaml: Optional[str] = None
+    # Set only while the volume is being resized: `size` is the capacity it has
+    # now, and a resize can be in progress, or waiting for the workload using
+    # the volume to restart, for a long time. One of
+    # models.VolumeResizeStatus's values.
+    resize_status: Optional[str] = None
+    resize_target_size: Optional[str] = None
+    # What to show about the resize: the cloud's own account of it where there
+    # is one, plus what the user has to do next.
+    resize_message: Optional[str] = None

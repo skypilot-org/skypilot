@@ -8,8 +8,11 @@ import unittest.mock as mock
 import fastapi
 import pytest
 
+from sky.server.auth import db_lookup
+from sky.server.server import _SA_LAST_USED_UPDATE_INTERVAL_SECONDS
 from sky.server.server import BearerTokenMiddleware
 from sky.skylet import constants
+from sky.users import token_service as token_service_lib
 
 # The service-account auth path runs on the request event loop for every
 # request, so its DB lookups must be offloaded. A slow (mocked) DB call that
@@ -291,7 +294,85 @@ class TestBearerTokenMiddleware:
             assert base_mock_request.state.auth_user.name == 'test-service-account'
             # last_used must be updated with the DB row's token_id, not
             # the JWT's.
-            mock_update_last_used.assert_called_once_with('token_db_id_456')
+            mock_update_last_used.assert_called_once_with(
+                'token_db_id_456', _SA_LAST_USED_UPDATE_INTERVAL_SECONDS)
+
+    @pytest.mark.asyncio
+    async def test_fresh_last_used_skips_update(self, middleware,
+                                                base_mock_request,
+                                                mock_call_next, mock_token_row):
+        """A row whose last_used_at is fresh must NOT be re-written.
+
+        The write UPDATEs the token's single row, so per-request writes from
+        a concurrent fleet sharing one token serialize on the row lock and
+        can exhaust the auth executor; the middleware throttles the write to
+        once per _SA_LAST_USED_UPDATE_INTERVAL_SECONDS per token.
+        """
+        base_mock_request.headers = {'authorization': 'Bearer sky_valid_token'}
+        mock_token_row['last_used_at'] = int(time.time()) - 1
+
+        mock_payload = {
+            'sub': 'sa-123456',
+            'name': 'test-service-account',
+            'token_id': 'token_123'
+        }
+        mock_user_info = mock.Mock()
+        mock_user_info.name = 'test-service-account'
+
+        with mock.patch.dict(
+                os.environ,
+            {constants.ENV_VAR_ENABLE_SERVICE_ACCOUNTS: 'true'}), \
+                mock.patch('sky.users.token_service.token_service') as mock_token_service, \
+                mock.patch('sky.global_user_state.get_service_account_token_by_hash') as mock_get_by_hash, \
+                mock.patch('sky.global_user_state.get_user') as mock_get_user, \
+                mock.patch('sky.global_user_state.update_service_account_token_last_used') as mock_update_last_used:
+
+            mock_token_service.verify_token.return_value = mock_payload
+            mock_get_by_hash.return_value = mock_token_row
+            mock_get_user.return_value = mock_user_info
+
+            response = await middleware.dispatch(base_mock_request,
+                                                 mock_call_next)
+
+            # Authentication still succeeds; only the write is skipped.
+            assert response.status_code == 200
+            assert base_mock_request.state.auth_user.id == 'sa-123456'
+            mock_update_last_used.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_stale_last_used_is_updated(self, middleware,
+                                              base_mock_request, mock_call_next,
+                                              mock_token_row):
+        """A row whose last_used_at is older than the interval IS re-written."""
+        base_mock_request.headers = {'authorization': 'Bearer sky_valid_token'}
+        mock_token_row['last_used_at'] = int(time.time()) - 3600
+
+        mock_payload = {
+            'sub': 'sa-123456',
+            'name': 'test-service-account',
+            'token_id': 'token_123'
+        }
+        mock_user_info = mock.Mock()
+        mock_user_info.name = 'test-service-account'
+
+        with mock.patch.dict(
+                os.environ,
+            {constants.ENV_VAR_ENABLE_SERVICE_ACCOUNTS: 'true'}), \
+                mock.patch('sky.users.token_service.token_service') as mock_token_service, \
+                mock.patch('sky.global_user_state.get_service_account_token_by_hash') as mock_get_by_hash, \
+                mock.patch('sky.global_user_state.get_user') as mock_get_user, \
+                mock.patch('sky.global_user_state.update_service_account_token_last_used') as mock_update_last_used:
+
+            mock_token_service.verify_token.return_value = mock_payload
+            mock_get_by_hash.return_value = mock_token_row
+            mock_get_user.return_value = mock_user_info
+
+            response = await middleware.dispatch(base_mock_request,
+                                                 mock_call_next)
+
+            assert response.status_code == 200
+            mock_update_last_used.assert_called_once_with(
+                'token_db_id_456', _SA_LAST_USED_UPDATE_INTERVAL_SECONDS)
 
     @pytest.mark.asyncio
     async def test_missing_user_id_in_token(self, middleware, base_mock_request,
@@ -626,3 +707,141 @@ class TestBearerTokenMiddleware:
                 f'were in flight — the service-account user/token lookups run '
                 f'synchronously on the request loop. Offload them (e.g. '
                 f'asyncio.to_thread).')
+
+    @pytest.mark.asyncio
+    async def test_loaded_secret_costs_no_executor_dispatch(
+            self, middleware, base_mock_request, mock_call_next,
+            mock_token_row):
+        """Once the secret is loaded, the request must not dispatch at all.
+
+        The auth executor rejects rather than queues past its 32 in-flight
+        slots, so a no-op dispatch can turn away a request that needs no
+        database work -- while the database is degraded, which is when that
+        matters most.
+        """
+        base_mock_request.headers = {'authorization': 'Bearer sky_valid_token'}
+
+        mock_payload = {
+            'sub': 'sa-123456',
+            'name': 'test-service-account',
+            'token_id': 'token_123'
+        }
+        mock_user_info = mock.Mock()
+        mock_user_info.name = 'test-service-account'
+
+        with mock.patch.dict(
+                os.environ,
+            {constants.ENV_VAR_ENABLE_SERVICE_ACCOUNTS: 'true'}), \
+                mock.patch('sky.users.token_service.token_service') as mock_token_service, \
+                mock.patch('sky.global_user_state.get_service_account_token_by_hash',
+                           return_value=mock_token_row), \
+                mock.patch('sky.global_user_state.get_user',
+                           return_value=mock_user_info):
+
+            mock_token_service.secret_loaded.return_value = True
+            mock_token_service.verify_token.return_value = mock_payload
+
+            response = await middleware.dispatch(base_mock_request,
+                                                 mock_call_next)
+
+            assert response.status_code == 200
+            mock_token_service.ensure_secret_loaded.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_secret_unavailable_is_503_not_401(self, middleware,
+                                                     base_mock_request,
+                                                     mock_call_next):
+        """A DB failure loading the signing secret must not read as a bad token.
+
+        A 401 tells the caller its credential is invalid and sends operators
+        off to rotate tokens, when the token is fine and the database is not.
+        """
+        base_mock_request.headers = {'authorization': 'Bearer sky_valid_token'}
+
+        with mock.patch.dict(
+                os.environ,
+            {constants.ENV_VAR_ENABLE_SERVICE_ACCOUNTS: 'true'}), \
+                mock.patch('sky.users.token_service.token_service') as mock_token_service:
+
+            mock_token_service.secret_loaded.return_value = False
+            mock_token_service.ensure_secret_loaded.side_effect = (
+                token_service_lib.JWTSecretUnavailableError('db down'))
+
+            response = await middleware.dispatch(base_mock_request,
+                                                 mock_call_next)
+
+            assert response.status_code == 503
+            assert 'Retry-After' in response.headers
+            assert 'Your token is still valid' in response.body.decode()
+            # The token was never even looked at.
+            mock_token_service.verify_token.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_secret_load_timeout_is_503(self, middleware,
+                                              base_mock_request,
+                                              mock_call_next):
+        """A secret load that outlives the auth deadline gets the same 503."""
+        base_mock_request.headers = {'authorization': 'Bearer sky_valid_token'}
+
+        with mock.patch.dict(
+                os.environ,
+            {constants.ENV_VAR_ENABLE_SERVICE_ACCOUNTS: 'true'}), \
+                mock.patch('sky.users.token_service.token_service') as mock_token_service, \
+                mock.patch.object(db_lookup, 'AUTH_DB_TIMEOUT_SECONDS', 0.05):
+
+            mock_token_service.secret_loaded.return_value = False
+            mock_token_service.ensure_secret_loaded.side_effect = _blocking(
+                None)
+
+            response = await middleware.dispatch(base_mock_request,
+                                                 mock_call_next)
+
+            assert response.status_code == 503
+
+    @pytest.mark.asyncio
+    async def test_secret_load_does_not_block_event_loop(
+            self, middleware, base_mock_request, mock_call_next,
+            mock_token_row):
+        """The secret load is a DB read too, and runs on the first
+        SA-authenticated request of a process. It must be offloaded like the
+        lookups around it.
+        """
+        base_mock_request.headers = {'authorization': 'Bearer sky_valid_token'}
+
+        mock_payload = {
+            'sub': 'sa-123456',
+            'name': 'test-service-account',
+            'token_id': 'token_123'
+        }
+        mock_user_info = mock.Mock()
+        mock_user_info.name = 'test-service-account'
+
+        with mock.patch.dict(
+                os.environ,
+            {constants.ENV_VAR_ENABLE_SERVICE_ACCOUNTS: 'true'}), \
+                mock.patch('sky.users.token_service.token_service') as mock_token_service, \
+                mock.patch('sky.global_user_state.get_service_account_token_by_hash',
+                           return_value=mock_token_row), \
+                mock.patch('sky.global_user_state.get_user',
+                           return_value=mock_user_info):
+
+            mock_token_service.secret_loaded.return_value = False
+            mock_token_service.ensure_secret_loaded.side_effect = _blocking(
+                None)
+            mock_token_service.verify_token.return_value = mock_payload
+
+            stop = asyncio.Event()
+            monitor = asyncio.create_task(_measure_max_loop_lag(stop))
+            await asyncio.sleep(0.05)
+
+            response = await middleware.dispatch(base_mock_request,
+                                                 mock_call_next)
+
+            stop.set()
+            worst_lag = await monitor
+
+            assert response.status_code == 200
+            assert worst_lag < _MAX_ACCEPTABLE_LOOP_LAG_SECONDS, (
+                f'Loading the JWT signing secret starved the event loop for '
+                f'{worst_lag:.2f}s. Run it on the auth executor via '
+                f'db_lookup.call_with_deadline.')

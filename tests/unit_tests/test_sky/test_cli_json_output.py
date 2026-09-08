@@ -14,6 +14,7 @@ import pytest
 from sky.catalog import common as catalog_common
 from sky.client import sdk
 from sky.client.cli import command
+from sky.client.cli import utils as cli_utils
 from sky.jobs import state as job_state
 from sky.schemas.api import responses
 from sky.server.requests import payloads
@@ -23,6 +24,30 @@ from sky.utils import status_lib
 
 class TestStatusJsonOutput:
     """Tests for `sky status -o json` output format."""
+
+    @pytest.fixture(autouse=True)
+    def _mock_side_fetches(self, monkeypatch):
+        """Stub every server fetch `sky status` makes besides the cluster
+        records (which each test stubs itself with its own data).
+
+        The status command also submits workspace / enabled-clouds /
+        user-workspace / managed-jobs / services / pools requests for the
+        table view. These tests only assert on the JSON output shape, but
+        without stubs those submissions hit the shared live API server the
+        CI workers auto-start — and a transient connection reset there
+        failed the test even though it could never affect the JSON output
+        (a frequent CI flake: ConnectionResetError(104)).
+        """
+        monkeypatch.setattr(
+            'sky.client.cli.utils.get_managed_job_queue', lambda **kw:
+            (None, cli_utils.QueueResultVersion.V1))
+        monkeypatch.setattr('sky.serve.status', lambda **kw: None)
+        monkeypatch.setattr('sky.jobs.pool_status', lambda **kw: None)
+        monkeypatch.setattr('sky.client.sdk.workspaces', lambda *a, **kw: None)
+        monkeypatch.setattr('sky.client.sdk.enabled_clouds',
+                            lambda *a, **kw: None)
+        monkeypatch.setattr('sky.client.sdk.get_user_workspace',
+                            lambda *a, **kw: {})
 
     def _make_cluster_record(self, name='mycluster', **kwargs):
         defaults = dict(
@@ -276,6 +301,52 @@ class TestJobsQueueJsonOutput:
         assert captured['skip_finished'] is True
         assert captured['statuses'] is None
         assert 'deprecated' not in result.output.lower()
+
+
+class TestJobsQueueInfraFilter:
+    """`--infra` on `sky jobs queue`: the spec reaches the server verbatim.
+
+    The CLI does not parse it -- the server does, with the same
+    ``InfraInfo.from_str`` a launch uses -- so what matters here is that the
+    flag arrives as typed and that its absence sends nothing.
+    """
+
+    def _install(self, monkeypatch):
+        """Mock the queue call and capture the kwargs it receives."""
+        captured = {}
+
+        def fake_queue(**kw):
+            captured.update(kw)
+            return ('req-1', mock.MagicMock(v2=lambda: True))
+
+        monkeypatch.setattr('sky.client.cli.utils.get_managed_job_queue',
+                            fake_queue)
+        monkeypatch.setattr('sky.jobs.pool_status', lambda **kw: None)
+        monkeypatch.setattr('sky.client.sdk.stream_and_get', lambda *a, **kw:
+                            ([], 0, {}, 0))
+        return captured
+
+    def test_spec_reaches_the_server_verbatim(self, monkeypatch):
+        captured = self._install(monkeypatch)
+        result = cli_testing.CliRunner().invoke(command.jobs_queue,
+                                                ['--infra', 'slurm/prod-gpu'])
+        assert result.exit_code == 0, result.output
+        assert captured['infra_match'] == 'slurm/prod-gpu'
+
+    def test_kubernetes_context_keeps_its_slashes(self, monkeypatch):
+        # A k8s context is the whole string after `k8s/` and may contain `/`,
+        # so the CLI must not split or normalise it.
+        captured = self._install(monkeypatch)
+        result = cli_testing.CliRunner().invoke(command.jobs_queue,
+                                                ['--infra', 'k8s/team/ctx'])
+        assert result.exit_code == 0, result.output
+        assert captured['infra_match'] == 'k8s/team/ctx'
+
+    def test_no_infra_sends_nothing(self, monkeypatch):
+        captured = self._install(monkeypatch)
+        result = cli_testing.CliRunner().invoke(command.jobs_queue, [])
+        assert result.exit_code == 0, result.output
+        assert captured['infra_match'] is None
 
 
 class TestJobsQueueTimeRangeFilter:

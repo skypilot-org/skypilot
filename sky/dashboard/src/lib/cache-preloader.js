@@ -2,11 +2,11 @@
 // This utility manages background preloading of cache data to improve page switching performance
 
 import dashboardCache from './cache';
+import { MANAGED_JOBS_SUMMARY_ARGS } from '@/data/connectors/constants';
 import { getClusters } from '@/data/connectors/clusters';
 import {
   getManagedJobs,
   getManagedJobsWithClientPagination,
-  MANAGED_JOBS_SUMMARY_ARGS,
 } from '@/data/connectors/jobs';
 import {
   getWorkspaces,

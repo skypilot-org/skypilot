@@ -85,7 +85,7 @@
             "uid": "$datasource"
           },
           "editorMode": "code",
-          "expr": "avg(DCGM_FI_DEV_GPU_UTIL{cluster=~\"$cluster\"})",
+          "expr": "avg(avg by (cluster, Hostname, gpu) (DCGM_FI_DEV_GPU_UTIL{cluster=~\"$cluster\"} >= 0 <= 100))",
           "instant": false,
           "legendFormat": "",
           "range": true,
@@ -375,7 +375,7 @@
             "uid": "$datasource"
           },
           "editorMode": "code",
-          "expr": "avg(DCGM_FI_DEV_GPU_UTIL{cluster=~\"$cluster\"})",
+          "expr": "avg(avg by (cluster, Hostname, gpu) (DCGM_FI_DEV_GPU_UTIL{cluster=~\"$cluster\"} >= 0 <= 100))",
           "instant": false,
           "legendFormat": "GPU Utilization",
           "range": true,
@@ -399,7 +399,7 @@
             "uid": "$datasource"
           },
           "editorMode": "code",
-          "expr": "avg_over_time((avg(DCGM_FI_DEV_GPU_UTIL{cluster=~\"$cluster\"}))[$__range:$__interval] @ end())",
+          "expr": "avg_over_time((avg(avg by (cluster, Hostname, gpu) (DCGM_FI_DEV_GPU_UTIL{cluster=~\"$cluster\"} >= 0 <= 100)))[$__range:$__interval] @ end())",
           "instant": false,
           "legendFormat": "Avg GPU Utilization",
           "range": true,
@@ -602,5 +602,5 @@
   "timezone": "",
   "title": "SkyPilot History",
   "uid": "skypilot-compute-overview",
-  "version": 5
+  "version": 6
 }

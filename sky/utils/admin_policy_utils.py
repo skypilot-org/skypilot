@@ -1,6 +1,7 @@
 """Admin policy utils."""
 import contextlib
 import copy
+import dataclasses
 import importlib
 import typing
 from typing import Iterator, Optional, Tuple, Union
@@ -159,6 +160,13 @@ def apply(
     if dag.is_job_group():
         assert dag.execution is not None
         mutated_dag.set_execution(dag.execution)
+        # Preserve the rest of the JobGroup header: these live on the Dag,
+        # not on the tasks the policy mutates, so a fresh Dag would
+        # silently drop them (e.g., an explicit `inter_connection: false`
+        # would revert to unset, which behaves as enabled).
+        mutated_dag.inter_connection = dag.inter_connection
+        mutated_dag.primary_tasks = dag.primary_tasks
+        mutated_dag.termination_delay = dag.termination_delay
 
     mutated_config = None
     for task in dag.tasks:
@@ -209,6 +217,15 @@ def apply(
         mutated_dag.graph.add_edge(mutated_dag.tasks[u_idx],
                                    mutated_dag.tasks[v_idx])
 
-    logger.debug(f'Mutated user request: {mutated_user_request}')
+    # MutatedUserRequest carries the whole SkyPilot config, so its repr would
+    # print api_server.service_account_token and any docker-login password in
+    # full. Log a copy whose config is redacted; dataclasses.replace keeps the
+    # repr shape, so this keeps working if the request grows a field.
+    logger.debug(
+        'Mutated user request: %s',
+        dataclasses.replace(mutated_user_request,
+                            skypilot_config=config_utils.Config(
+                                config_utils.redact_sensitive_values(
+                                    mutated_user_request.skypilot_config))))
     mutated_dag.policy_applied = True
     return mutated_dag, mutated_config

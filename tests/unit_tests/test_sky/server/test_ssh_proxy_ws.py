@@ -21,6 +21,11 @@ def _make_websocket():
     return websocket
 
 
+# `wrap_command_as_user` prefixes the payload with this: `sudo -u` stays in the
+# caller's cwd, unlike `su --login`, so the target's home is restored by hand.
+_CD_HOME = 'cd -- "$HOME" || exit 1; '
+
+
 def test_slurm_ssh_proxy_runs_as_submit_user():
     command = server._build_slurm_job_ssh_command(
         provider_config={
@@ -37,7 +42,7 @@ def test_slurm_ssh_proxy_runs_as_submit_user():
     argv = shlex.split(command)
     assert argv[:5] == ['su', '--login', '--shell', '/bin/bash', '--command']
     assert argv[6:] == ['--', 'alice']
-    assert argv[5].startswith('srun ')
+    assert argv[5].startswith(_CD_HOME + 'srun ')
     assert '~alice/.ssh/authorized_keys' in argv[5]
 
 
@@ -55,12 +60,17 @@ def test_slurm_ssh_proxy_uses_sudo_for_non_root_transport():
         is_container_image=False)
 
     argv = shlex.split(command)
-    assert argv[:8] == [
-        'sudo', '--non-interactive', '--', 'su', '--login', '--shell',
-        '/bin/bash', '--command'
+    # `-u alice` is load-bearing: the privilege drop happens in sudo itself,
+    # so the sudoers grant can be scoped to the submit users. Without it sudo
+    # would run the inner shell as root.
+    assert argv[:9] == [
+        'sudo', '--non-interactive', '-H', '-u', 'alice', '--', '/bin/bash',
+        '--login', '-c'
     ]
-    assert argv[9:] == ['--', 'alice']
-    assert argv[8].startswith('srun ')
+    # The old form ran `su` as root and dropped privileges there.
+    assert 'su' not in argv
+    assert argv[9].startswith(_CD_HOME + 'srun ')
+    assert len(argv) == 10
 
 
 def test_slurm_container_ssh_proxy_uses_root_in_container():

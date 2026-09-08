@@ -72,6 +72,8 @@ COL_FILE_MOUNTS_BLOB_ID = 'file_mounts_blob_id'
 LEGACY_REQUEST_LOG_PATH_PREFIX = '~/sky_logs/api_server/requests'
 
 DEFAULT_REQUESTS_RETENTION_HOURS = 24  # 1 day
+# Interval between two runs of the requests GC daemon.
+_REQUESTS_GC_INTERVAL_SECONDS = 3600  # 1 hour
 
 # TODO(zhwu): For scalability, there are several TODOs:
 # [x] Have a way to queue requests.
@@ -1212,6 +1214,32 @@ async def set_request_failed_async(request_id: str, e: BaseException) -> None:
         request_task.set_error(e)
 
 
+@metrics_lib.time_me_async
+@asyncio_utils.shield
+async def set_request_failed_if_pending_async(request_id: str,
+                                              e: BaseException) -> bool:
+    """Set a request to failed only while it is still PENDING.
+
+    PENDING is the only status a request can be in while its initial enqueue
+    is in flight: any other status means a worker already claimed the request
+    (the put actually committed) and the owner's outcome stands -- including
+    WAITING, which is only ever set after a claimed run parks for a retry.
+
+    Returns:
+        True if the request was transitioned to FAILED.
+    """
+    set_exception_stacktrace(e)
+    storage = request_storage.get_request_backend()
+    async with storage.update_request_async(request_id) as request_task:
+        assert request_task is not None, request_id
+        if request_task.status != RequestStatus.PENDING:
+            return False
+        request_task.status = RequestStatus.FAILED
+        request_task.finished_at = time.time()
+        request_task.set_error(e)
+        return True
+
+
 def set_request_succeeded(request_id: str, result: Optional[Any]) -> None:
     """Set a request to succeeded and populate the result."""
     with update_request(request_id) as request_task:
@@ -1358,6 +1386,7 @@ async def clean_finished_requests_with_retention(retention_seconds: int,
 
 async def requests_gc_daemon():
     """Garbage collect finished requests periodically."""
+    await asyncio_utils.sleep_startup_jitter('requests GC daemon')
     while True:
         logger.info('Running requests GC daemon...')
         # Use the latest config.
@@ -1375,9 +1404,10 @@ async def requests_gc_daemon():
         except Exception as e:  # pylint: disable=broad-except
             logger.error(f'Error running requests GC daemon: {e}'
                          f'traceback: {traceback.format_exc()}')
-        # Run the daemon at most once every hour to avoid too frequent
-        # cleanup.
-        await asyncio.sleep(max(retention_seconds, 3600))
+        # Fixed, and deliberately independent of the retention window: the
+        # interval controls how much accumulates between passes, not how long
+        # anything is kept.
+        await asyncio.sleep(_REQUESTS_GC_INTERVAL_SECONDS)
 
 
 def _cleanup():
@@ -1587,6 +1617,12 @@ class SqliteRequestBackend(request_storage.RequestBackend):
                 if not _should_kill_request(request_id, request_record):
                     continue
                 assert request_record is not None
+                # When a user_id scope is given, only cancel requests owned by
+                # that user. Without this, an explicit request_ids list would
+                # bypass the scope entirely and let a caller cancel another
+                # user's request.
+                if (user_id is not None and request_record.user_id != user_id):
+                    continue
                 if request_record.pid is not None:
                     logger.debug(
                         f'Killing request process {request_record.pid}')

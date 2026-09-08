@@ -205,8 +205,8 @@ def iam():
 
 def billing():
     # pylint: disable=import-outside-toplevel
-    from nebius.api.nebius.billing import v1alpha1 as billing_v1alpha1
-    return billing_v1alpha1
+    from nebius.api.nebius.billing import v1 as billing_v1
+    return billing_v1
 
 
 def nebius_common():
@@ -282,18 +282,40 @@ def sdk():
     return _sdk(None, default_cred_path)
 
 
+def _user_agent_prefix() -> str:
+    # Import locally to avoid a circular import while sky is initialized.
+    # pylint: disable=import-outside-toplevel
+    from sky import __version__
+    return f'skypilot/{__version__}'
+
+
 @annotations.lru_cache(scope='request')
 def _sdk(token: Optional[str], cred_path: Optional[str]):
     # Exactly one of token or cred_path must be provided
     assert (token is None) != (cred_path is None), (token, cred_path)
     if token is not None:
-        return nebius.sdk.SDK(credentials=token, domain=api_domain())
+        return nebius.sdk.SDK(credentials=token,
+                              domain=api_domain(),
+                              user_agent_prefix=_user_agent_prefix())
     if cred_path is not None:
         return nebius.sdk.SDK(
             credentials_file_name=os.path.expanduser(cred_path),
             domain=api_domain(),
+            user_agent_prefix=_user_agent_prefix(),
         )
     raise ValueError('Either token or credentials file path must be provided')
+
+
+def clear_sdk_cache() -> None:
+    """Drops the cached SDK client.
+
+    The SDK is cached per credentials and holds grpc.aio channels bound to the
+    event loop that first used them. `asyncio.run()` closes the loop it
+    creates, and once a request has failed on such a channel, later calls from
+    a fresh loop raise "Event loop is closed". Callers that drive more than one
+    `asyncio.run()` cycle in a single process must reset the client in between.
+    """
+    _sdk.cache_clear()
 
 
 def get_nebius_credentials(boto3_session):

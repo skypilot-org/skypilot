@@ -34,10 +34,12 @@ class Slurm(clouds.Cloud):
 
     _REPR = 'Slurm'
     _CLOUD_UNSUPPORTED_FEATURES = {
-        clouds.CloudImplementationFeatures.AUTOSTOP: 'Slurm does not '
-                                                     'support autostop.',
-        clouds.CloudImplementationFeatures.STOP: 'Slurm does not support '
-                                                 'stopping instances.',
+        clouds.CloudImplementationFeatures.AUTOSTOP:
+            'Autostop is supported only for container clusters on Slurm '
+            'clusters with Pyxis installed.',
+        clouds.CloudImplementationFeatures.STOP:
+            'Stopping is supported only for container clusters on Slurm '
+            'clusters with Pyxis installed.',
         clouds.CloudImplementationFeatures.SPOT_INSTANCE: 'Spot instances are '
                                                           'not supported in '
                                                           'Slurm.',
@@ -66,7 +68,9 @@ class Slurm(clouds.Cloud):
     # Features that are checked dynamically per cluster (e.g., via SSH).
     # Used for early exit in _unsupported_features_for_resources().
     _DYNAMICALLY_CHECKED_FEATURES = {
+        clouds.CloudImplementationFeatures.AUTOSTOP,
         clouds.CloudImplementationFeatures.DOCKER_IMAGE,
+        clouds.CloudImplementationFeatures.STOP,
         clouds.CloudImplementationFeatures.STORAGE_MOUNTING,
     }
     _MAX_CLUSTER_NAME_LEN_LIMIT = 120
@@ -116,12 +120,25 @@ class Slurm(clouds.Cloud):
             clusters = cls.existing_allowed_clusters()
         else:
             clusters = [cluster]
+        uses_container = resources.extract_docker_image() is not None
+        dynamically_checked_features = cls._DYNAMICALLY_CHECKED_FEATURES.copy()
+        if not uses_container:
+            # Stop and autostop additionally require a container cluster.
+            dynamically_checked_features.remove(
+                clouds.CloudImplementationFeatures.STOP)
+            dynamically_checked_features.remove(
+                clouds.CloudImplementationFeatures.AUTOSTOP)
         for c in clusters:
             try:
                 # Docker image support requires the Pyxis SPANK plugin.
                 if slurm_utils.check_pyxis_enabled(c):
                     unsupported.pop(
                         clouds.CloudImplementationFeatures.DOCKER_IMAGE, None)
+                    if uses_container:
+                        unsupported.pop(clouds.CloudImplementationFeatures.STOP,
+                                        None)
+                        unsupported.pop(
+                            clouds.CloudImplementationFeatures.AUTOSTOP, None)
                 # Storage mounting requires FUSE (/dev/fuse).
                 if slurm_utils.check_fuse_enabled(c):
                     unsupported.pop(
@@ -131,8 +148,7 @@ class Slurm(clouds.Cloud):
                 logger.debug(f'Failed to check cluster features on {c}: '
                              f'{common_utils.format_exception(e)}')
             # Stop early if all dynamically checked features are resolved.
-            if not any(f in unsupported
-                       for f in cls._DYNAMICALLY_CHECKED_FEATURES):
+            if not any(f in unsupported for f in dynamically_checked_features):
                 break
         return unsupported
 
@@ -322,6 +338,9 @@ class Slurm(clouds.Cloud):
             try:
                 sit = slurm_utils.SlurmInstanceType.from_instance_type(
                     instance_type)
+            except ValueError:
+                pass
+            else:
                 if sit.accelerator_type is not None:
                     mapped = slurm_utils.lookup_gpu_partition_map(
                         cluster, sit.accelerator_type)
@@ -378,8 +397,6 @@ class Slurm(clouds.Cloud):
                                 f'on cluster {cluster!r}. Please '
                                 f'double-check the partition name.'
                                 f'{colorama.Style.RESET_ALL}')
-            except ValueError:
-                pass
 
             # TODO(kevin): Batch this check to reduce number of roundtrips.
             for partition in partitions_to_check:
@@ -474,7 +491,7 @@ class Slurm(clouds.Cloud):
         dryrun: bool = False,
         volume_mounts: Optional[List['volume_lib.VolumeMount']] = None,
     ) -> Dict[str, Any]:
-        del cluster_name, dryrun, volume_mounts  # Unused.
+        del cluster_name, dryrun  # Unused.
         if region is not None:
             cluster = region.name
         else:
@@ -542,6 +559,15 @@ class Slurm(clouds.Cloud):
                     f'Error: {common_utils.format_exception(e)}')
 
         image_id = resources.extract_docker_image()
+        if volume_mounts:
+            for mount in volume_mounts:
+                if mount.volume_config.config.get('host_path') is None:
+                    raise ValueError(
+                        f'Slurm only supports inline host_path volume '
+                        f'mounts; {mount.path!r} does not bind a host path.')
+            if image_id is None:
+                raise ValueError(
+                    'Slurm host_path volume mounts require a container image.')
 
         provision_timeout = skypilot_config.get_effective_region_config(
             cloud='slurm',
@@ -564,14 +590,15 @@ class Slurm(clouds.Cloud):
         # Read sbatch_options with three-level merge:
         # global < cluster < partition.
         sbatch_options: Dict[str, Any] = {}
+        slurm_config = skypilot_config.get_workspace_cloud('slurm')
         for config_keys in [
-            ('slurm', 'sbatch_options'),
-            ('slurm', 'cluster_configs', cluster, 'sbatch_options'),
-            ('slurm', 'cluster_configs', cluster, 'partition_configs',
-             partition, 'sbatch_options'),
+            ('sbatch_options',),
+            ('cluster_configs', cluster, 'sbatch_options'),
+            ('cluster_configs', cluster, 'partition_configs', partition,
+             'sbatch_options'),
         ]:
-            level_config = skypilot_config.get_nested(config_keys,
-                                                      default_value=None)
+            level_config = slurm_config.get_nested(config_keys,
+                                                   default_value=None)
             if level_config is not None:
                 sbatch_options.update(level_config)
         # Merge task-level config overrides (from `config:` in task YAML).
@@ -583,6 +610,55 @@ class Slurm(clouds.Cloud):
         if task_sbatch is not None:
             sbatch_options.update(task_sbatch)
 
+        # Read admin-declared container mounts with two-level merge:
+        # global < cluster. Each entry maps a container path to either a
+        # host path string (read-only) or {host_path: ..., mode: ro|rw}.
+        container_mounts: Dict[str, Any] = {}
+        for config_keys in [
+            ('slurm', 'container_mounts'),
+            ('slurm', 'cluster_configs', cluster, 'container_mounts'),
+        ]:
+            level_config = skypilot_config.get_nested(config_keys,
+                                                      default_value=None)
+            if level_config is not None:
+                container_mounts.update(level_config)
+
+        volume_mount_vars = []
+        if container_mounts:
+            if image_id is None:
+                logger.debug(f'Ignoring configured container_mounts for '
+                             f'cluster {cluster!r}: the task does not use a '
+                             f'container image.')
+            else:
+                # pylint: disable-next=import-outside-toplevel
+                from sky.utils import volume
+                task_mount_paths = {mount.path for mount in volume_mounts or []}
+                for dst_path, mount_config in sorted(container_mounts.items()):
+                    if dst_path in task_mount_paths:
+                        logger.debug(
+                            f'Configured container mount {dst_path!r} is '
+                            f'overridden by the task YAML volume.')
+                        continue
+                    if isinstance(mount_config, str):
+                        mount_config = {'host_path': mount_config}
+                    mount = volume.VolumeMount.resolve_host_path_config(
+                        dst_path, mount_config)
+                    volume_mount_vars.append(mount.to_yaml_config())
+        volume_mount_vars.extend(
+            mount.to_yaml_config() for mount in volume_mounts or [])
+
+        client = slurm.SlurmClient(
+            ssh_config_dict['hostname'],
+            int(ssh_config_dict.get('port', 22)),
+            ssh_config_dict['user'],
+            slurm_utils.get_identity_file(ssh_config_dict),
+            ssh_proxy_command=ssh_config_dict.get('proxycommand', None),
+            ssh_proxy_jump=ssh_config_dict.get('proxyjump', None),
+            identities_only=slurm_utils.get_identities_only(ssh_config_dict),
+            slurm_user=slurm_user,
+        )
+        sky_base_dir = slurm_utils.resolve_sky_base_dir(cluster, client)
+
         deploy_vars = {
             'instance_type': resources.instance_type,
             'custom_resources': custom_resources,
@@ -593,6 +669,7 @@ class Slurm(clouds.Cloud):
             'slurm_cluster': cluster,
             'slurm_partition': partition,
             'provision_timeout': provision_timeout,
+            'sky_base_dir': sky_base_dir,
             # TODO(jwj): Pass SSH config in a smarter way
             'ssh_hostname': ssh_config_dict['hostname'],
             'ssh_port': str(ssh_config_dict.get('port', 22)),
@@ -611,6 +688,9 @@ class Slurm(clouds.Cloud):
                 (constants.SKY_CLUSTER_NAME_ENV_VAR_KEY),
             'image_id': image_id,
             'sbatch_options': sbatch_options,
+            # 'volume_mounts' is reserved by write_cluster_config(), which
+            # overwrites it with generic VolumeInfo objects.
+            'slurm_volume_mounts': volume_mount_vars,
         }
 
         return deploy_vars
@@ -630,7 +710,9 @@ class Slurm(clouds.Cloud):
                 zone=resources.zone,
                 resources=resources)
             if not available_regions:
-                return resources_utils.FeasibleResources([], [], None)
+                hint = self._gpu_partition_map_hint(resources.instance_type,
+                                                    resources.region)
+                return resources_utils.FeasibleResources([], [], hint)
 
             # Return a single resource without region set.
             # The optimizer will call make_launchables_for_valid_region_zones()
@@ -702,11 +784,47 @@ class Slurm(clouds.Cloud):
             zone=resources.zone,
             resources=resources)
         if not available_regions:
-            hint = self._get_memory_hint(resources)
+            hint = (self._gpu_partition_map_hint(chosen_instance_type,
+                                                 resources.region) or
+                    self._get_memory_hint(resources))
             return resources_utils.FeasibleResources([], [], hint)
 
         return resources_utils.FeasibleResources(_make([chosen_instance_type]),
                                                  [], None)
+
+    @staticmethod
+    def _gpu_partition_map_hint(instance_type: str,
+                                region: Optional[str]) -> Optional[str]:
+        """Return a hint when a pinned cluster's gpu_partition_map maps the
+        requested accelerator only to partitions that do not exist there.
+
+        Returning a hint instead of raising keeps other ``any_of``/``ordered``
+        resource candidates eligible; the optimizer only surfaces the hint
+        when no candidate is feasible.
+        """
+        if region is None:
+            return None
+        try:
+            sit = slurm_utils.SlurmInstanceType.from_instance_type(
+                instance_type)
+        except ValueError:
+            return None
+        if sit.accelerator_type is None:
+            return None
+        mapped = slurm_utils.lookup_gpu_partition_map(region,
+                                                      sit.accelerator_type)
+        if mapped is None:
+            return None
+        try:
+            live_partitions = sorted(slurm_utils.get_partitions(region))
+        except Exception as e:  # pylint: disable=broad-except
+            logger.debug(f'Failed to get partitions for {region}: {e}')
+            return None
+        if not live_partitions or any(p in live_partitions for p in mapped):
+            return None
+        return (f'None of the partitions {mapped} in gpu_partition_map for '
+                f'accelerator {sit.accelerator_type!r} exist on cluster '
+                f'{region!r}. Available partitions: {live_partitions}.')
 
     @staticmethod
     def _get_memory_hint(resources: 'resources_lib.Resources') -> Optional[str]:
@@ -797,7 +915,16 @@ class Slurm(clouds.Cloud):
                     ssh_proxy_jump=ssh_config_dict.get('proxyjump', None),
                     identities_only=slurm_utils.get_identities_only(
                         ssh_config_dict),
-                    slurm_user=slurm_utils.get_submit_user(cluster),
+                    # The check's probes (sinfo, env, a stat of the workdir)
+                    # are read-only: run them as the SSH user rather than the
+                    # submit user. With submit_as_user, acting as the submit
+                    # user goes through su/sudo, and clusters commonly grant
+                    # passwordless sudo only for the submission commands
+                    # (sbatch/srun/scancel/squeue) — wrapping sinfo would fail
+                    # the whole credential check and silently disable Slurm,
+                    # taking down every consumer of the enabled-clouds cache
+                    # (e.g. GPU availability on the infra page).
+                    slurm_user=None,
                 )
                 info = client.info()
                 logger.debug(f'Slurm cluster {cluster} sinfo: {info}')

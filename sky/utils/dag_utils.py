@@ -18,7 +18,8 @@ logger = sky_logging.init_logger(__name__)
 
 # JobGroup header fields
 _JOB_GROUP_HEADER_FIELDS = {
-    'name', 'execution', 'primary_tasks', 'termination_delay'
+    'name', 'execution', 'primary_tasks', 'termination_delay',
+    'inter_connection'
 }
 _JOB_GROUP_REQUIRED_HEADER_FIELDS = {'name'}
 
@@ -498,26 +499,26 @@ def _load_job_group(
     """
     if not configs or len(configs) < 2:
         with ux_utils.print_exception_no_traceback():
-            raise ValueError('JobGroup YAML must have at least 2 documents: '
+            raise ValueError('Job Group YAML must have at least 2 documents: '
                              'header and at least one job definition.')
 
     # Parse header
     header = configs[0]
     if header is None:
         with ux_utils.print_exception_no_traceback():
-            raise ValueError('JobGroup header cannot be empty.')
+            raise ValueError('Job Group header cannot be empty.')
 
     # Validate header has required fields
     missing_fields = _JOB_GROUP_REQUIRED_HEADER_FIELDS - set(header.keys())
     if missing_fields:
         with ux_utils.print_exception_no_traceback():
             raise ValueError(
-                f'JobGroup header missing required fields: {missing_fields}')
+                f'Job Group header missing required fields: {missing_fields}')
 
     # Warn about unknown fields in header
     unknown_fields = set(header.keys()) - _JOB_GROUP_HEADER_FIELDS
     if unknown_fields:
-        logger.warning(f'Unknown fields in JobGroup header: {unknown_fields}. '
+        logger.warning(f'Unknown fields in Job Group header: {unknown_fields}. '
                        'These will be ignored.')
 
     group_name = header['name']
@@ -547,7 +548,7 @@ def _load_job_group(
     job_configs = configs[1:]
     if not job_configs:
         with ux_utils.print_exception_no_traceback():
-            raise ValueError('JobGroup must have at least one job definition.')
+            raise ValueError('Job Group must have at least one job definition.')
 
     # Create DAG using context manager pattern (consistent with _load_chain_dag)
     job_names = set()
@@ -561,7 +562,7 @@ def _load_job_group(
             if job_name is None:
                 with ux_utils.print_exception_no_traceback():
                     raise ValueError(
-                        f'Job {i + 1} in JobGroup must have a "name" field.')
+                        f'Job {i + 1} in Job Group must have a "name" field.')
 
             # Validate job name is safe for shell/filesystem use
             if not all(c.isalnum() or c in '-_' for c in job_name):
@@ -575,7 +576,7 @@ def _load_job_group(
             if job_name in job_names:
                 with ux_utils.print_exception_no_traceback():
                     raise ValueError(
-                        f'Duplicate job name in JobGroup: {job_name}')
+                        f'Duplicate job name in Job Group: {job_name}')
             job_names.add(job_name)
 
             # Create task from job config (auto-added to current dag context)
@@ -644,7 +645,19 @@ def _load_job_group(
                     f'termination_delay must be a string, int, or dict, '
                     f'got {type(termination_delay).__name__}')
 
-    logger.info(f'Loaded JobGroup "{group_name}" with {len(dag.tasks)} jobs: '
+    # Parse and validate inter_connection. Semantic validation (e.g.
+    # non-Kubernetes pins contradicting `inter_connection: true`) lives in
+    # the optimizer, the choke point every launch passes through.
+    inter_connection = header.get('inter_connection')
+    if inter_connection is not None:
+        if not isinstance(inter_connection, bool):
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(f'inter_connection must be a boolean, '
+                                 f'got {type(inter_connection).__name__}: '
+                                 f'{inter_connection!r}')
+        dag.inter_connection = inter_connection
+
+    logger.info(f'Loaded Job Group "{group_name}" with {len(dag.tasks)} jobs: '
                 f'{[t.name for t in dag.tasks]}')
 
     return dag
@@ -692,6 +705,8 @@ def dump_job_group_to_yaml_str(dag: dag_lib.Dag,
         header['primary_tasks'] = dag.primary_tasks
     if dag.termination_delay is not None:
         header['termination_delay'] = dag.termination_delay
+    if dag.inter_connection is not None:
+        header['inter_connection'] = dag.inter_connection
 
     # Build job configs
     configs: List[Dict[str, Any]] = [header]
