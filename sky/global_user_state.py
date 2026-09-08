@@ -421,6 +421,58 @@ _db_manager = db_utils.DatabaseManager(
     'state', create_table, post_init_fn=lambda _: _sqlite_supports_returning())
 initialize_and_get_db = _db_manager.get_engine
 
+# Server-side bounds on the `users` upsert transaction (Postgres only).
+#
+# The upsert runs on the request authentication path for every request, on
+# the API server's bounded auth thread pool, under a client-side deadline
+# (`AUTH_DB_TIMEOUT_SECONDS` in `sky.server.auth.db_lookup`, 5 s; not
+# imported here because this module is not server-only). That deadline frees
+# the caller but not the thread: a thread that waits on the users row lock,
+# or a session that stops talking inside its open transaction, keeps its
+# thread and its connection for as long as the database allows. One orphaned
+# session holding a single users row then pins every later upsert of that
+# row until the pool is exhausted.
+#
+# These values MUST stay at or below that deadline, so the database gives up
+# before (or as) the caller does and the thread is released:
+# - lock_timeout < statement_timeout, so a row-lock wait reports the
+#   distinct "lock not available" error (SQLSTATE 55P03) instead of a
+#   generic statement cancel (57014);
+# - statement_timeout bounds each statement itself;
+# - idle_in_transaction_session_timeout terminates a session that goes
+#   quiet inside the transaction (the orphan case; 57P05 on that session's
+#   next statement), which releases the row lock it holds.
+#
+# `SET LOCAL` is transaction-scoped: it applies to this transaction only and
+# resets at COMMIT/ROLLBACK, so it is safe through a transaction-mode
+# connection pooler and leaks nothing into later transactions on the same
+# server connection.
+_USER_UPSERT_LOCK_TIMEOUT_MS = 3900
+_USER_UPSERT_STATEMENT_TIMEOUT_MS = 4000
+_USER_UPSERT_IDLE_IN_TRANSACTION_TIMEOUT_MS = 5000
+
+
+def _bound_user_upsert_transaction(session: orm.Session) -> None:
+    """Issue the `SET LOCAL` timeouts for the users upsert transaction.
+
+    Must run before any other statement in the session: the Session
+    auto-begins its transaction on the first statement, and `SET LOCAL`
+    only takes effect inside that transaction. Issued explicitly through
+    the Session (not from an engine event hook) so a failure here goes
+    through SQLAlchemy's normal error handling and reaches the caller as a
+    regular DB error.
+    """
+    for parameter, value_ms in (
+        ('lock_timeout', _USER_UPSERT_LOCK_TIMEOUT_MS),
+        ('statement_timeout', _USER_UPSERT_STATEMENT_TIMEOUT_MS),
+        ('idle_in_transaction_session_timeout',
+         _USER_UPSERT_IDLE_IN_TRANSACTION_TIMEOUT_MS),
+    ):
+        # SET does not accept bind parameters; the values are module
+        # constants, never user input.
+        session.execute(
+            sqlalchemy.text(f'SET LOCAL {parameter} = \'{value_ms}ms\''))
+
 
 @metrics_lib.time_me
 def add_or_update_user(
@@ -442,6 +494,10 @@ def add_or_update_user(
     if created_at is None:
         created_at = int(time.time())
     with orm.Session(engine) as session:
+        if engine.dialect.name == db_utils.SQLAlchemyDialect.POSTGRESQL.value:
+            # First statements of the transaction; see the constants above.
+            _bound_user_upsert_transaction(session)
+
         # Check for duplicate names if not allowed (within the same transaction)
         if not allow_duplicate_name:
             existing_user = session.query(user_table).filter(
