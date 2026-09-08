@@ -29,7 +29,6 @@ import typing
 from typing import Any, Dict, List, Literal, Optional, Set, Tuple, Type
 import uuid
 import zipfile
-import zlib
 
 import aiofiles
 import anyio
@@ -2951,42 +2950,7 @@ async def stream(
         # downloaded file is a real .log.gz that double-clicks open
         # on macOS / extracts trivially with `gunzip` on Linux.
         media_type = 'application/gzip'
-        # zlib.MAX_WBITS | 16 = gzip wrapper.
-        compressor = zlib.compressobj(6, zlib.DEFLATED, 16 + zlib.MAX_WBITS)
-
-        async def gzipped():
-            # Track whether we ever observed a non-empty source chunk so
-            # the empty-stream signal (used by the SDK to fall back to
-            # the rsync path for terminal jobs) survives gzip framing.
-            # The gzip header alone is ~10 bytes; we suppress it
-            # entirely for an empty source by skipping the trailing
-            # flush() in that case.
-            saw_payload = False
-            try:
-                async for chunk in content:
-                    if isinstance(chunk, str):
-                        chunk_bytes = chunk.encode('utf-8')
-                    else:
-                        chunk_bytes = chunk
-                    if chunk_bytes:
-                        saw_payload = True
-                        compressed = compressor.compress(chunk_bytes)
-                        if compressed:
-                            yield compressed
-            except (asyncio.CancelledError, GeneratorExit):  # pylint: disable=try-except-raise
-                # Client disconnect: PEP 525 forbids yielding while a
-                # GeneratorExit is propagating, so we explicitly do
-                # not run the flush() yield below.
-                raise
-            # Natural EOF only — emit the gzip trailer if we actually
-            # produced anything; otherwise the response stays empty so
-            # the SDK's bytes_written==0 fallback fires.
-            if saw_payload:
-                tail_bytes = compressor.flush()
-                if tail_bytes:
-                    yield tail_bytes
-
-        out_content: Any = gzipped()
+        out_content: Any = stream_utils.gzip_stream(content)
     else:
         out_content = content
 

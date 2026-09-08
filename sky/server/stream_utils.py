@@ -3,7 +3,8 @@
 import asyncio
 import collections
 import pathlib
-from typing import AsyncGenerator, Deque, List, Optional
+from typing import Any, AsyncGenerator, Deque, List, Optional
+import zlib
 
 import aiofiles
 import fastapi
@@ -41,7 +42,7 @@ async def _yield_log_file_with_payloads_skipped(
         if not line:
             return
         is_payload, line_str = message_utils.decode_payload(
-            line.decode('utf-8'), raise_for_mismatch=False)
+            line.decode('utf-8', errors='replace'), raise_for_mismatch=False)
         if is_payload:
             continue
 
@@ -170,6 +171,140 @@ async def log_streamer(
     follow: bool = True,
     cluster_name: Optional[str] = None,
     polling_interval: float = DEFAULT_POLL_INTERVAL
+) -> AsyncGenerator[str, None]:
+    """Streams the logs of a request, and never dies silently doing it.
+
+    Everything below reads bytes a task wrote, and a task writes whatever it
+    likes. An exception raised on one line used to escape this generator: the
+    response then ended mid-body with nothing logged and nothing said, so the
+    reader saw a log that simply stopped -- and a `?compress=gz` download
+    saved a gzip with no trailer, which will not open at all. Three such
+    triggers have been found by being reported; this boundary is what makes
+    the fourth one visible instead of silent.
+
+    Args: see `_log_stream_chunks`, which does the streaming.
+    """
+    yielded_any = False
+    try:
+        async for chunk in _log_stream_chunks(request_id, log_path, plain_logs,
+                                              tail, follow, cluster_name,
+                                              polling_interval):
+            # `bool(chunk)`, not True: `gzipped()` one layer up counts bytes
+            # for the same decision, and an empty chunk would make the two
+            # disagree -- a marker emitted here while gzip still saw nothing,
+            # which is the case this flag exists to prevent.
+            yielded_any = yielded_any or bool(chunk)
+            yield chunk
+    except (asyncio.CancelledError, GeneratorExit):  # pylint: disable=try-except-raise
+        # Both are BaseException, so `except Exception` below would not catch
+        # them anyway; spelled out because a reader should not have to know
+        # that to see that a disconnect is not an error. PEP 525 also forbids
+        # yielding while a GeneratorExit propagates.
+        raise
+    except fastapi.HTTPException:  # pylint: disable=try-except-raise
+        # Control flow, not a streaming failure: `wait_for_request_to_start`
+        # raises 404 for an unknown request id and the client is served that
+        # status. Swallowing it here would answer an empty 200 instead.
+        raise
+    except Exception:  # pylint: disable=broad-except
+        logger.exception('Log streaming failed '
+                         f'(request {request_id}, path {log_path})')
+        if not yielded_any:
+            # End the response cleanly and empty rather than re-raising.
+            # An empty stream is a signal: the SDK falls back to sync-down on
+            # bytes_written == 0. Re-raising aborts the chunked response
+            # instead, and `iter_content` then throws ChunkedEncodingError
+            # before that check is ever reached -- measured, not assumed --
+            # so the caller crashes rather than falling back. A marker line
+            # would equally suppress the signal. `logger.exception` above is
+            # what keeps this visible, and silence was the complaint.
+            #
+            # This is deliberately asymmetric, and only the download path
+            # needs it: `bytes_written == 0` appears once, in
+            # `jobs/client/sdk.py`, and that request hardcodes compress=gz.
+            # An interactive reader therefore gets an unexplained empty log
+            # for an early failure. Accepted rather than threading a flag
+            # from the endpoint: the common cause of an empty log -- an
+            # unknown request id -- is an HTTPException and stays a 404, and
+            # what is left needs a DB or aiofiles failure in the first
+            # moments, which is rare and always in the server log.
+            return
+        # No exception text: it can carry a SQL statement or a server-side
+        # path, and this is a response body. The reader needs to know the log
+        # is incomplete; the reason is in the API server log, which the line
+        # above wrote against this request id.
+        yield ('\n[SkyPilot] Log streaming stopped by an internal error; the '
+               f'log is incomplete. API server request: {request_id}\n')
+
+
+async def gzip_stream(
+        content: AsyncGenerator[Any, None]) -> AsyncGenerator[bytes, None]:
+    """Gzip a log stream as PAYLOAD, so a download saves a real .log.gz.
+
+    Not transport encoding: the browser would decompress that before saving
+    and defeat the point. Lives here rather than inside the endpoint so the
+    trailer behaviour below is reachable from a test -- it is what decides
+    whether a failed download opens at all.
+    """
+    # zlib.MAX_WBITS | 16 = gzip wrapper.
+    compressor = zlib.compressobj(6, zlib.DEFLATED, 16 + zlib.MAX_WBITS)
+    # Track whether we ever observed a non-empty source chunk so
+    # the empty-stream signal (used by the SDK to fall back to
+    # the rsync path for terminal jobs) survives gzip framing.
+    # The gzip header alone is ~10 bytes; we suppress it
+    # entirely for an empty source by skipping the trailing
+    # flush() in that case.
+    saw_payload = False
+    try:
+        async for chunk in content:
+            if isinstance(chunk, str):
+                chunk_bytes = chunk.encode('utf-8')
+            else:
+                chunk_bytes = chunk
+            if chunk_bytes:
+                saw_payload = True
+                compressed = compressor.compress(chunk_bytes)
+                if compressed:
+                    yield compressed
+    except (asyncio.CancelledError, GeneratorExit):  # pylint: disable=try-except-raise
+        # Client disconnect: PEP 525 forbids yielding while a
+        # GeneratorExit is propagating, so we explicitly do
+        # not run the flush() yield below.
+        raise
+    except Exception:  # pylint: disable=broad-except
+        # An upstream failure still deserves an openable file: close the gzip
+        # member with what we have, then let the error propagate. Without this
+        # the saved file is a header with no trailer, which no tool will open
+        # -- strictly worse than a short log, because it hides the part that
+        # did arrive.
+        #
+        # `log_streamer` handles its own failures, so what reaches here is a
+        # plugin-installed provider (`set_log_provider`) or `compress` itself.
+        # Those end differently from an in-tree failure: a partial gzip and an
+        # aborted response, rather than an empty body and the sync-down
+        # fallback.
+        if saw_payload:
+            tail_bytes = compressor.flush()
+            if tail_bytes:
+                yield tail_bytes
+        raise
+    # Natural EOF only — emit the gzip trailer if we actually
+    # produced anything; otherwise the response stays empty so
+    # the SDK's bytes_written==0 fallback fires.
+    if saw_payload:
+        tail_bytes = compressor.flush()
+        if tail_bytes:
+            yield tail_bytes
+
+
+async def _log_stream_chunks(
+    request_id: Optional[str],
+    log_path: Optional[pathlib.Path],
+    plain_logs: bool,
+    tail: Optional[int],
+    follow: bool,
+    cluster_name: Optional[str],
+    polling_interval: float,
 ) -> AsyncGenerator[str, None]:
     """Streams the logs of a request.
 
@@ -308,7 +443,7 @@ async def _tail_log_file(
         if not file_chunk:
             # Process any remaining incomplete line
             if incomplete_line:
-                line_str = incomplete_line.decode('utf-8')
+                line_str = incomplete_line.decode('utf-8', errors='replace')
                 if plain_logs:
                     is_payload, line_str = message_utils.decode_payload(
                         line_str, raise_for_mismatch=False)
@@ -445,7 +580,7 @@ async def _tail_log_file(
         # Process all complete lines in this chunk
         for line_bytes in lines_bytes:
             # Reconstruct line with newline (since split removed it)
-            line_str = line_bytes.decode('utf-8') + '\n'
+            line_str = line_bytes.decode('utf-8', errors='replace') + '\n'
 
             if plain_logs:
                 is_payload, line_str = message_utils.decode_payload(
