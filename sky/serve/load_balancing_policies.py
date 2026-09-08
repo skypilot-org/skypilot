@@ -158,7 +158,6 @@ class LeastLoadPolicy(LoadBalancingPolicy, name='least_load', default=True):
 
     def begin_request(self, replica_url: str,
                       request: 'fastapi.Request') -> Callable[[], None]:
-        self.pre_execute_hook(replica_url, request)
         load_released = False
 
         def release_load() -> None:
@@ -168,6 +167,11 @@ class LeastLoadPolicy(LoadBalancingPolicy, name='least_load', default=True):
             load_released = True
             self.post_execute_hook(replica_url, request)
 
+        # Keep this as the last operation before returning the release
+        # callback. It increments load_map; a potentially-raising operation
+        # after it would leak the increment before the callback is handed to
+        # the caller.
+        self.pre_execute_hook(replica_url, request)
         return release_load
 
     def _select_tied_replica(self, replicas: List[str]) -> str:
