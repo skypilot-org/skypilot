@@ -181,18 +181,28 @@ async def log_streamer(
     triggers have been found by being reported; this boundary is what makes
     the third one visible instead of silent.
     """
+    yielded_any = False
     try:
         async for chunk in _log_stream_chunks(request_id, log_path, plain_logs,
                                               tail, follow, cluster_name,
                                               polling_interval):
+            yielded_any = True
             yield chunk
     except (asyncio.CancelledError, GeneratorExit):  # pylint: disable=try-except-raise
-        # The client went away. Not an error, and PEP 525 forbids yielding
-        # while a GeneratorExit propagates, so this must not fall through to
-        # the handler below.
+        # Both are BaseException, so `except Exception` below would not catch
+        # them anyway; spelled out because a reader should not have to know
+        # that to see that a disconnect is not an error. PEP 525 also forbids
+        # yielding while a GeneratorExit propagates.
         raise
     except Exception as e:  # pylint: disable=broad-except
         logger.exception(f'Log streaming for {request_id} failed')
+        if not yielded_any:
+            # An empty response is a signal, not an absence: the SDK falls
+            # back to sync-down on bytes_written == 0, and a marker line
+            # would suppress that and hand the user a one-line log instead of
+            # the real one. The log line above is what makes this visible;
+            # that silence was the actual complaint.
+            raise
         yield ('\n[SkyPilot] Log streaming stopped: '
                f'{type(e).__name__}: {e}\n')
 

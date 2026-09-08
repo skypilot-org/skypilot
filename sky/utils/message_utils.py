@@ -60,6 +60,11 @@ def decode_payload(
     Returns:
         A tuple of (bool, Any). The bool indicates whether it is a payload
         string. The Any is the decoded payload, which is a str, dict or list.
+
+        With `raise_for_mismatch=False` this is a question about arbitrary
+        text, so it always answers: a payload-shaped line whose body will not
+        parse is not a payload, and comes back as (False, the whole original
+        line) for the caller to treat as content.
     """
     matched = _PAYLOAD_PATTERN.findall(payload_str)
     if not matched:
@@ -81,11 +86,6 @@ def decode_payload(
                 # the streaming generator and truncated the log. Broad on
                 # purpose -- bad syntax, the recursion limit and the integer
                 # digit limit are only the failures we know of.
-                return False, payload_str
-            # Valid JSON is still not necessarily ours. Only a str can be a
-            # control frame; `Control.decode` raises TypeError on anything
-            # else, and its callers do not catch that.
-            if not isinstance(decoded, str):
                 return False, payload_str
             return True, decoded
 

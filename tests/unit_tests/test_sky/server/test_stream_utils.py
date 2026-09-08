@@ -326,21 +326,34 @@ def test_no_parse_failure_escapes_the_classifier(monkeypatch, exc):
     assert decoded == _PAYLOAD_SHAPED_LINE
 
 
-def test_a_valid_but_non_string_payload_is_not_ours():
-    """`<sky-payload>123</sky-payload>` parses, and is still task output.
+@pytest.mark.parametrize('scalar', [123, None, True])
+def test_a_scalar_payload_does_not_crash_the_decoder(scalar):
+    """A task can print `<sky-payload>123</sky-payload>`.
 
-    Only a str can be a control frame: `Control.decode` does `in` on it and
-    raises TypeError otherwise, which `decode_rich_status` does not catch and
-    `read_provision_status_from_log` guards only for OSError/ValueError. So
-    the crash lands in the client.
+    `Control.decode` does `in` on the decoded body: containers survive it,
+    scalars raise TypeError -- and `decode_rich_status` has no except, while
+    `read_provision_status_from_log` guards only OSError/ValueError, so the
+    crash reached the client.
     """
-    line = '<sky-payload>123</sky-payload>'
+    control, msg = rich_utils.Control.decode(scalar)
+
+    assert control is None
+    assert msg == scalar
+
+
+def test_a_dict_payload_is_still_ours():
+    """`instance_setup` sends `{'ray_port': N}`, and provision logs are full
+    of them. Classifying those as task output would print the raw frame to the
+    user instead of dropping it.
+    """
+    line = '<sky-payload>{"ray_port": 6380}</sky-payload>'
 
     is_payload, decoded = message_utils.decode_payload(line,
                                                        raise_for_mismatch=False)
 
-    assert is_payload is False
-    assert decoded == line
+    assert is_payload is True
+    assert decoded == {'ray_port': 6380}
+    assert rich_utils.Control.decode(decoded) == (None, {'ray_port': 6380})
 
 
 def test_a_type_mismatch_returns_the_whole_line():
@@ -378,21 +391,44 @@ async def test_a_non_utf8_byte_does_not_lose_the_log(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_a_failure_mid_stream_is_reported_not_swallowed(monkeypatch):
+async def test_a_failure_after_output_says_why_the_log_stopped(monkeypatch):
     """The boundary exists for the trigger nobody has thought of yet.
 
-    Two have been found by being reported, each silent: the response ended
-    mid-body with nothing logged. Whatever the third turns out to be, the
-    reader should see that the log stopped and why.
+    Three have been found by being reported, each silent: the response ended
+    mid-body with nothing logged. Whatever the fourth turns out to be, a
+    reader who already has half a log should be told why it stopped.
+    """
+
+    async def _half_then_boom(*args, **kwargs):
+        yield 'first half\n'
+        raise RuntimeError('some future trigger')
+
+    monkeypatch.setattr(stream_utils, '_log_stream_chunks', _half_then_boom)
+
+    streamed = ''.join(
+        [chunk async for chunk in stream_utils.log_streamer(None, None)])
+
+    assert 'first half' in streamed
+    assert 'Log streaming stopped' in streamed
+    assert 'some future trigger' in streamed
+
+
+@pytest.mark.asyncio
+async def test_a_failure_before_any_output_keeps_the_empty_signal(monkeypatch):
+    """An empty response is a signal, not an absence.
+
+    `sky jobs logs --sync-down` falls back to rsync on bytes_written == 0, so
+    a marker line here would suppress the fallback and save a one-line log in
+    place of the real one. The failure must still reach the server log, which
+    is what `logger.exception` in the boundary is for.
     """
 
     async def _boom(*args, **kwargs):
-        raise RuntimeError('some future trigger')
+        raise RuntimeError('failed before the first chunk')
         yield  # pylint: disable=unreachable
 
     monkeypatch.setattr(stream_utils, '_log_stream_chunks', _boom)
 
-    chunks = [chunk async for chunk in stream_utils.log_streamer(None, None)]
-
-    assert 'Log streaming stopped' in ''.join(chunks)
-    assert 'some future trigger' in ''.join(chunks)
+    with pytest.raises(RuntimeError, match='before the first chunk'):
+        async for _ in stream_utils.log_streamer(None, None):
+            pass
