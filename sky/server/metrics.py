@@ -26,6 +26,7 @@ from sky import skypilot_config
 from sky.adaptors import kubernetes as kubernetes_adaptor
 from sky.metrics import utils as metrics_utils
 from sky.server import constants as server_constants
+from sky.server import job_wait_metrics
 from sky.skylet import runtime_utils
 from sky.utils import annotations
 from sky.utils import common
@@ -1021,6 +1022,7 @@ def maybe_register_managed_jobs_collector():
     if not managed_job_utils.is_consolidation_mode():
         return
     _MANAGED_JOBS_COLLECTOR = _wrap_collector(ManagedJobsCollector())
+    register_plugin_collector(job_wait_metrics.JobWaitCollector())
     try:
         prom.REGISTRY.register(_MANAGED_JOBS_COLLECTOR)
     except ValueError:
