@@ -194,7 +194,12 @@ async def log_streamer(
         # that to see that a disconnect is not an error. PEP 525 also forbids
         # yielding while a GeneratorExit propagates.
         raise
-    except Exception as e:  # pylint: disable=broad-except
+    except fastapi.HTTPException:  # pylint: disable=try-except-raise
+        # Control flow, not a streaming failure: `wait_for_request_to_start`
+        # raises 404 for an unknown request id and the client is served that
+        # status. Swallowing it here would answer an empty 200 instead.
+        raise
+    except Exception:  # pylint: disable=broad-except
         logger.exception(f'Log streaming for {request_id} failed')
         if not yielded_any:
             # End the response cleanly and empty rather than re-raising.
@@ -206,8 +211,12 @@ async def log_streamer(
             # would equally suppress the signal. `logger.exception` above is
             # what keeps this visible, and silence was the complaint.
             return
-        yield ('\n[SkyPilot] Log streaming stopped: '
-               f'{type(e).__name__}: {e}\n')
+        # No exception text: it can carry a SQL statement or a server-side
+        # path, and this is a response body. The reader needs to know the log
+        # is incomplete; the reason is in the API server log, which the line
+        # above wrote against this request id.
+        yield ('\n[SkyPilot] Log streaming stopped by an internal error; the '
+               f'log is incomplete. API server request: {request_id}\n')
 
 
 async def _log_stream_chunks(

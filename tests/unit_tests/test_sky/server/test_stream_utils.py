@@ -2,6 +2,7 @@
 import json
 
 import aiofiles
+import fastapi
 import pytest
 
 from sky.server import constants as server_constants
@@ -410,7 +411,10 @@ async def test_a_failure_after_output_says_why_the_log_stopped(monkeypatch):
 
     assert 'first half' in streamed
     assert 'Log streaming stopped' in streamed
-    assert 'some future trigger' in streamed
+    # The reason belongs in the server log, not in a response body: exception
+    # text can carry a SQL statement or a server-side path.
+    assert 'some future trigger' not in streamed
+    assert 'RuntimeError' not in streamed
 
 
 @pytest.mark.asyncio
@@ -436,3 +440,24 @@ async def test_a_failure_before_any_output_keeps_the_empty_signal(monkeypatch):
     chunks = [chunk async for chunk in stream_utils.log_streamer(None, None)]
 
     assert not chunks, 'anything here suppresses the sync-down fallback'
+
+
+@pytest.mark.asyncio
+async def test_a_404_is_still_a_404(monkeypatch):
+    """`wait_for_request_to_start` raises 404 for an unknown request id, and
+    the client is served that status. The error boundary must not turn it into
+    an empty 200 -- it is control flow, not a streaming failure.
+    """
+
+    async def _not_found(*args, **kwargs):
+        raise fastapi.HTTPException(status_code=404,
+                                    detail='Request X not found')
+        yield  # pylint: disable=unreachable
+
+    monkeypatch.setattr(stream_utils, '_log_stream_chunks', _not_found)
+
+    with pytest.raises(fastapi.HTTPException) as excinfo:
+        async for _ in stream_utils.log_streamer('X', None):
+            pass
+
+    assert excinfo.value.status_code == 404
