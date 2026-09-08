@@ -1,0 +1,71 @@
+# Launch+cancel repro for the cancellation-poisoned executor-worker
+# deadlock (logging RLock orphaned by cancel-time KeyboardInterrupt on
+# Python <=3.12). See generators/launch_cancel_generator.py.
+#
+# Run a single in-process client against a dev tenant (no worker VMs, no
+# victim pool needed — launch_cancel provisions its own short-lived k8s
+# clusters):
+#
+#   sky api login -e https://<user>:<pass>@<api-server-host>
+#   python tests/load_tests/benchmark_worker.py \
+#       --config tests/load_tests/configs/launch_cancel_repro.yaml -w 0 \
+#       -o /tmp/lc_results
+#
+# While it runs, watch the api-server executor workers for the wedge
+# fingerprint (N provisioning threads parked at logging._acquireLock):
+#   configs/../pyspy_wedge_watch.sh   (run inside the api-server pod)
+#
+# target.endpoint here is unused by the worker (it uses the ambient sky
+# login); it's only recorded for provenance.
+target:
+  endpoint: "https://<api-server-host>"
+  cloud: kubernetes
+
+workers:
+  count: 1
+
+# Top-level fence for non-driver generators; launch_cancel is a driver and
+# manages its own duration below, so this is just an upper safety bound.
+duration_s: 5400
+
+victim_pool:
+  enabled: false
+
+generators:
+  - name: launch-cancel
+    type: launch_cancel
+    # ~1 launch every 6s; max_inflight keeps several launches mid-provision
+    # so cancels land while the main thread is actively in k8s API calls
+    # (max poison exposure). Bounded to keep dataplane pod count reasonable
+    # on the shared cluster (<= max_inflight * num_nodes pods, churned +
+    # torn down). 10 not 6: probes live ~2min vs ~20s for cancel-fated
+    # launches, so at 6 the probes hog slots and throttle the cancel rate.
+    launch_gap_s: 6
+    max_inflight: 10
+    # 12-node tiny k8s clusters: each launch makes many main-thread k8s API
+    # calls (each = 2x setLevel -> _clear_cache = a poison window), and fans
+    # create_namespaced_pod across a provision-thread pool — the exact
+    # surface that parks at _acquireLock when the RLock is orphaned. More
+    # nodes = wider per-launch poison window + a clearer thread pileup.
+    num_nodes: 12
+    task_cpus: "0.25"
+    task_memory: "0.5"
+    infra: k8s
+    # Sweep the SIGTERM landing point across the launch lifecycle. Most
+    # launches are cancelled; every 4th is an uncancelled probe.
+    cancel_intervals_s: [3, 4, 5, 6, 7, 8, 10, 12, 15, 18, 22, 27, 33, 40]
+    cancel_jitter_s: 3
+    probe_every: 4
+    # A launch still RUNNING after ~3.5 min = suspected poisoned-worker
+    # wedge (client-side halt signal). Normal launches here reach terminal
+    # within ~2 min (provision then fail at the run step, or succeed). The
+    # in-pod pg_wedge_detector confirms authoritatively via py-spy +
+    # postgres pid correlation before this fires.
+    wedge_after_s: 210
+    halt_on_wedge: true
+    down_after: true
+    down_delay_s: 20
+    duration_s: 3600
+    poll_s: 8
+    drain_timeout_s: 600
+    cluster_prefix: lc
