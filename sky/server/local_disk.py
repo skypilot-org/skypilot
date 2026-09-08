@@ -29,6 +29,7 @@ Three notes on matching what the platform sees:
   charged roots are compared against the budget.
 """
 import dataclasses
+import errno
 import os
 import time
 from typing import Dict, List, Optional, Tuple
@@ -50,6 +51,12 @@ logger = sky_logging.init_logger(__name__)
 EPHEMERAL_STORAGE_LIMIT_ENV_VAR = 'SKYPILOT_POD_EPHEMERAL_STORAGE_BYTES_LIMIT'
 EPHEMERAL_STORAGE_REQUEST_ENV_VAR = (
     'SKYPILOT_POD_EPHEMERAL_STORAGE_BYTES_REQUEST')
+
+# Which resource field a budget came from. Only a limit is enforced: a
+# platform is free to let a container exceed its request, so headroom
+# against a request would reach zero with room to spare.
+BUDGET_SOURCE_LIMIT = 'limit'
+BUDGET_SOURCE_REQUEST = 'request'
 
 # Work bounds for one scan of one root. The scan is on the metrics refresh
 # path, so it must finish in bounded time no matter how many files a root
@@ -77,6 +84,10 @@ class RootUsage:
     used_bytes: int
     files: int
     truncated: bool
+    # Entries the walk could not read for a reason other than the entry
+    # having gone away. Those bytes are missing from used_bytes, so a
+    # non-zero count means the size is a lower bound.
+    unreadable: int = 0
     # Mount point of the filesystem holding this root, so a root can be
     # joined to its entry in Snapshot.filesystems. None if it could not
     # be determined.
@@ -95,11 +106,23 @@ class FilesystemUsage:
 
 
 @dataclasses.dataclass
+class Budget:
+    """The container's declared ephemeral-storage allowance."""
+    total_bytes: int
+    # BUDGET_SOURCE_LIMIT or BUDGET_SOURCE_REQUEST.
+    source: str
+
+    @property
+    def enforced(self) -> bool:
+        return self.source == BUDGET_SOURCE_LIMIT
+
+
+@dataclasses.dataclass
 class Snapshot:
     """One pass over every root the server owns."""
     roots: Dict[str, RootUsage]
     filesystems: Dict[str, FilesystemUsage]
-    budget_bytes: Optional[int]
+    budget: Optional[Budget]
     duration_seconds: float
 
     @property
@@ -126,13 +149,20 @@ class Snapshot:
 
     @property
     def headroom_bytes(self) -> Optional[int]:
-        """Room left against ``budget_bytes``, or None without a budget.
+        """Room left before the budget stops the server writing.
+
+        None unless the budget is an enforced one. Room left against a
+        mere scheduling request is not headroom: the platform allows a
+        container past its request, so the number would reach zero while
+        the disk still has space, and read as imminent death. The exact
+        answer for the boundary that does stop writes is the available
+        space on the filesystem -- see ``filesystems``.
 
         An upper bound, for the reason ``used_bytes`` is a lower one.
         """
-        if self.budget_bytes is None:
+        if self.budget is None or not self.budget.enforced:
             return None
-        return max(self.budget_bytes - self.used_bytes, 0)
+        return max(self.budget.total_bytes - self.used_bytes, 0)
 
 
 def local_roots() -> Dict[str, str]:
@@ -160,20 +190,60 @@ def local_roots() -> Dict[str, str]:
         roots.update(blob_storage.get_blob_storage().local_disk_roots())
     except Exception as e:  # pylint: disable=broad-except
         logger.debug(f'Could not resolve blob storage local roots: {e}')
-    return roots
+    return _drop_nested(roots)
 
 
-def budget_bytes() -> Optional[int]:
-    """Returns this container's ephemeral-storage budget, if it has one.
+def _drop_nested(roots: Dict[str, str]) -> Dict[str, str]:
+    """Drops any root contained in another, keeping the outermost.
+
+    The roots must be disjoint trees. Walking a tree twice would count
+    every byte in it twice, and hard links are only deduplicated within a
+    single root, so an overlap corrupts the total rather than merely
+    duplicating a label. Enforced here so a backend that reports a
+    directory already covered by another root cannot silently inflate the
+    numbers.
+    """
+    normalized = {
+        name: os.path.normpath(os.path.abspath(path))
+        for name, path in roots.items()
+    }
+    kept: Dict[str, str] = {}
+    for name, path in normalized.items():
+        covered_by = None
+        for other_name, other in normalized.items():
+            if other_name == name:
+                continue
+            if path == other:
+                # The same tree under two names: keep whichever came
+                # first, so the choice does not depend on dict order.
+                if other_name in kept:
+                    covered_by = other_name
+                    break
+                continue
+            if path.startswith(other.rstrip(os.sep) + os.sep):
+                covered_by = other_name
+                break
+        if covered_by is not None:
+            logger.debug(f'Not measuring local root {name} at {path} '
+                         f'separately: already covered by {covered_by}')
+            continue
+        kept[name] = path
+    return kept
+
+
+def budget() -> Optional[Budget]:
+    """Returns this container's declared ephemeral-storage allowance.
 
     Prefers the limit, which is the boundary that gets enforced, and falls
-    back to the request, which is what the deployment declared it needs.
-    Returns None when neither is exposed -- there is no way to read the
-    field from the kernel, since ephemeral-storage is not a cgroup
+    back to the request, which is only what the deployment declared it
+    needs. Returns None when neither is exposed -- there is no way to read
+    the field from the kernel, since ephemeral-storage is not a cgroup
     controller.
     """
-    for env_var in (EPHEMERAL_STORAGE_LIMIT_ENV_VAR,
-                    EPHEMERAL_STORAGE_REQUEST_ENV_VAR):
+    for env_var, source in ((EPHEMERAL_STORAGE_LIMIT_ENV_VAR,
+                             BUDGET_SOURCE_LIMIT),
+                            (EPHEMERAL_STORAGE_REQUEST_ENV_VAR,
+                             BUDGET_SOURCE_REQUEST)):
         raw = os.environ.get(env_var)
         if not raw:
             continue
@@ -183,8 +253,13 @@ def budget_bytes() -> Optional[int]:
             logger.warning(f'Ignoring unparseable {env_var}={raw!r}')
             continue
         if value > 0:
-            return value
+            return Budget(total_bytes=value, source=source)
     return None
+
+
+def _count_unreadable(error: OSError) -> int:
+    """Returns 1 if *error* hides bytes from the walk, 0 if it does not."""
+    return 0 if error.errno == errno.ENOENT else 1
 
 
 def _entry_bytes(stat_result) -> int:
@@ -201,14 +276,19 @@ def _scan_root(path: str, deadline: float, max_entries: int) -> RootUsage:
     used = 0
     files = 0
     entries = 0
+    unreadable = 0
     truncated = False
     # Only inodes with more than one link can be reached twice, so only
     # those need to be remembered.
     seen: set = set()
     try:
         used += _entry_bytes(os.stat(path))
-    except OSError:
-        return RootUsage(path=path, used_bytes=0, files=0, truncated=False)
+    except OSError as e:
+        return RootUsage(path=path,
+                         used_bytes=0,
+                         files=0,
+                         truncated=False,
+                         unreadable=_count_unreadable(e))
 
     stack: List[str] = [path]
     while stack:
@@ -221,6 +301,9 @@ def _scan_root(path: str, deadline: float, max_entries: int) -> RootUsage:
         try:
             scandir = os.scandir(current)
         except OSError as e:
+            # A whole subtree missing from the total is worth reporting;
+            # a directory that was simply GC'd away is not.
+            unreadable += _count_unreadable(e)
             logger.debug(f'Skipping {current} while measuring {path}: {e}')
             continue
         with scandir:
@@ -235,8 +318,11 @@ def _scan_root(path: str, deadline: float, max_entries: int) -> RootUsage:
                 try:
                     stat_result = entry.stat(follow_symlinks=False)
                     is_dir = entry.is_dir(follow_symlinks=False)
-                except OSError:
-                    # Raced with a GC or a rotation; the bytes are gone.
+                except OSError as e:
+                    # ENOENT is the normal case here -- the request-log GC
+                    # unlinks constantly, and those bytes really are gone.
+                    # Anything else is a blind spot in the total.
+                    unreadable += _count_unreadable(e)
                     continue
                 if stat_result.st_nlink > 1:
                     key = (stat_result.st_dev, stat_result.st_ino)
@@ -253,10 +339,14 @@ def _scan_root(path: str, deadline: float, max_entries: int) -> RootUsage:
     if truncated:
         logger.info(f'Local disk scan of {path} truncated after '
                     f'{entries} entries; reported size is a lower bound')
+    if unreadable:
+        logger.info(f'Local disk scan of {path} could not read '
+                    f'{unreadable} entries; reported size is a lower bound')
     return RootUsage(path=path,
                      used_bytes=used,
                      files=files,
-                     truncated=truncated)
+                     truncated=truncated,
+                     unreadable=unreadable)
 
 
 def _mountpoint(path: str) -> Optional[str]:
@@ -381,5 +471,5 @@ def scan(
     return Snapshot(roots=roots,
                     filesystems=_filesystem_usage(
                         [path for _, path in measured]),
-                    budget_bytes=budget_bytes(),
+                    budget=budget(),
                     duration_seconds=time.monotonic() - started)

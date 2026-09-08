@@ -4,6 +4,7 @@ The collector is exercised unwrapped: ResilientCollector refreshes on a
 background thread, so a test that went through it would assert against
 whichever snapshot happened to be current.
 """
+import errno
 import os
 
 import pytest
@@ -102,31 +103,54 @@ def test_scan_reports_the_filesystem_behind_each_root(roots):
 
 def test_budget_prefers_the_limit_over_the_request(monkeypatch):
     monkeypatch.setenv(local_disk.EPHEMERAL_STORAGE_REQUEST_ENV_VAR, '100')
-    assert local_disk.budget_bytes() == 100
+    request = local_disk.budget()
+    assert request.total_bytes == 100
+    assert request.source == local_disk.BUDGET_SOURCE_REQUEST
+    assert request.enforced is False
+
     monkeypatch.setenv(local_disk.EPHEMERAL_STORAGE_LIMIT_ENV_VAR, '250')
-    assert local_disk.budget_bytes() == 250
+    limit = local_disk.budget()
+    assert limit.total_bytes == 250
+    assert limit.source == local_disk.BUDGET_SOURCE_LIMIT
+    assert limit.enforced is True
 
 
 @pytest.mark.parametrize('raw', ['', 'not-a-number', '0', '-1'])
 def test_budget_absent_when_unusable(monkeypatch, raw):
     monkeypatch.setenv(local_disk.EPHEMERAL_STORAGE_LIMIT_ENV_VAR, raw)
-    assert local_disk.budget_bytes() is None
+    assert local_disk.budget() is None
 
 
-def test_headroom_needs_a_budget_and_never_goes_negative(roots):
+def test_a_request_is_not_headroom(roots, monkeypatch):
+    """A request does not stop the container, so it cannot bound headroom.
+
+    Reporting room left against a scheduling request would reach zero
+    while the disk still has space, and read as imminent death.
+    """
+    present, _ = roots
+    _write(str(present / 'a.log'), 64 * 1024)
+    monkeypatch.setenv(local_disk.EPHEMERAL_STORAGE_REQUEST_ENV_VAR, '4096')
+
+    snapshot = local_disk.scan()
+
+    assert snapshot.budget.source == local_disk.BUDGET_SOURCE_REQUEST
+    # Already over the request, and still no headroom claim either way.
+    assert snapshot.used_bytes > 4096
+    assert snapshot.headroom_bytes is None
+
+
+def test_headroom_needs_a_limit_and_never_goes_negative(roots, monkeypatch):
     present, _ = roots
     _write(str(present / 'a.log'), 64 * 1024)
 
     assert local_disk.scan().headroom_bytes is None
 
-    os.environ[local_disk.EPHEMERAL_STORAGE_LIMIT_ENV_VAR] = str(1024**3)
-    try:
-        snapshot = local_disk.scan()
-        assert snapshot.headroom_bytes == 1024**3 - snapshot.used_bytes
-        os.environ[local_disk.EPHEMERAL_STORAGE_LIMIT_ENV_VAR] = '1'
-        assert local_disk.scan().headroom_bytes == 0
-    finally:
-        del os.environ[local_disk.EPHEMERAL_STORAGE_LIMIT_ENV_VAR]
+    monkeypatch.setenv(local_disk.EPHEMERAL_STORAGE_LIMIT_ENV_VAR, str(1024**3))
+    snapshot = local_disk.scan()
+    assert snapshot.headroom_bytes == 1024**3 - snapshot.used_bytes
+
+    monkeypatch.setenv(local_disk.EPHEMERAL_STORAGE_LIMIT_ENV_VAR, '1')
+    assert local_disk.scan().headroom_bytes == 0
 
 
 def _families(collector):
@@ -141,6 +165,9 @@ def test_collector_omits_budget_series_when_the_container_has_no_budget(roots):
 
     assert families['sky_apiserver_local_disk_budget_bytes'].samples == []
     assert families['sky_apiserver_local_disk_headroom_bytes'].samples == []
+    unreadable = families[
+        'sky_apiserver_local_disk_scan_unreadable_entries'].samples
+    assert all(s.value == 0 for s in unreadable)
     used = {
         s.labels['root']: s.value
         for s in families['sky_apiserver_local_disk_used_bytes'].samples
@@ -165,6 +192,7 @@ def test_collector_emits_budget_and_headroom_when_exposed(roots, monkeypatch):
     budget, = families['sky_apiserver_local_disk_budget_bytes'].samples
     headroom, = families['sky_apiserver_local_disk_headroom_bytes'].samples
     assert budget.value == 8 * 1024**3
+    assert budget.labels == {'source': local_disk.BUDGET_SOURCE_LIMIT}
     assert 0 < headroom.value <= budget.value
 
 
@@ -263,3 +291,57 @@ def test_deadline_is_enforced_on_a_small_tree(roots):
     snapshot = local_disk.scan(timeout_seconds=-1.0)
 
     assert snapshot.roots['present'].truncated is True
+
+
+def test_an_unreadable_subtree_is_reported_not_hidden(roots):
+    """A permission error must not publish a partial size as a whole one."""
+    present, _ = roots
+    _write(str(present / 'readable.log'), 4096)
+    locked = present / 'locked'
+    locked.mkdir()
+    _write(str(locked / 'big.log'), 1024 * 1024)
+    os.chmod(locked, 0o000)
+    try:
+        usage = local_disk.scan().roots['present']
+    finally:
+        os.chmod(locked, 0o755)
+
+    assert usage.unreadable == 1
+    # The megabyte inside the unreadable directory is missing, which is
+    # exactly why the count has to be published alongside the size.
+    assert usage.used_bytes < 1024 * 1024
+    assert usage.truncated is False
+
+
+def test_a_vanished_entry_is_not_an_unreadable_one(roots):
+    """The request-log GC unlinks constantly; those bytes really are gone."""
+    present, _ = roots
+    _write(str(present / 'a.log'), 4096)
+
+    assert local_disk.scan().roots['present'].unreadable == 0
+    assert local_disk._count_unreadable(OSError(errno.ENOENT, 'gone')) == 0
+    assert local_disk._count_unreadable(OSError(errno.EACCES, 'denied')) == 1
+
+
+def test_a_root_inside_another_root_is_measured_once(tmp_path, monkeypatch):
+    """Overlapping roots would count every byte in the overlap twice.
+
+    Hard links are only deduplicated within one root, so an overlap
+    corrupts the total rather than merely duplicating a label.
+    """
+    outer = tmp_path / 'outer'
+    inner = outer / 'nested' / 'inner'
+    inner.mkdir(parents=True)
+    _write(str(inner / 'a.log'), 512 * 1024)
+
+    monkeypatch.setattr(
+        local_disk, 'local_roots', lambda: local_disk._drop_nested({
+            'outer': str(outer),
+            'inner': str(inner),
+            'same_as_outer': str(outer),
+        }))
+
+    snapshot = local_disk.scan()
+
+    assert list(snapshot.roots) == ['outer']
+    assert snapshot.roots['outer'].files == 1

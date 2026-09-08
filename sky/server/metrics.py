@@ -556,19 +556,33 @@ _LOCAL_DISK_FS_AVAIL_HELP = (
     'budget below, it is exact.')
 
 _LOCAL_DISK_BUDGET_HELP = (
-    'The container\'s own ephemeral-storage budget in bytes, from the limit '
-    'if one is declared and otherwise the request. No series is emitted when '
-    'neither is exposed to the container, which is the common case: the '
-    'field cannot be read from the kernel, since ephemeral-storage is not a '
-    'cgroup controller, so it has to be injected (Kubernetes: a '
-    'resourceFieldRef env var).')
+    'The container\'s own declared ephemeral-storage allowance in bytes, by '
+    'the resource field it came from. source="limit" is enforced -- exceed '
+    'it and the container is stopped. source="request" is not: a platform '
+    'may allow a container past its request, so exceeding it means only that '
+    'the container is over what it declared, and first in line to be stopped '
+    'when the node itself runs out. No series is emitted when neither field '
+    'is exposed, which is the common case: it cannot be read from the '
+    'kernel, since ephemeral-storage is not a cgroup controller, so it has '
+    'to be injected (Kubernetes: a resourceFieldRef env var).')
 
 _LOCAL_DISK_HEADROOM_HELP = (
-    'Bytes left against sky_apiserver_local_disk_budget_bytes, and absent '
-    'for the same reason that is. Counts only the roots whose '
-    'sky_apiserver_local_disk_root_charged_to_ephemeral is 1. An upper '
-    'bound: those roots cover what the server writes, not every byte the '
-    'platform charges to this container.')
+    'Bytes left before the budget stops the server writing. Emitted only '
+    'when the budget is an enforced limit: room left against a mere '
+    'scheduling request is not headroom, since the container is allowed '
+    'past it, and the number would reach zero with disk to spare. For the '
+    'boundary that does stop writes without a limit, use '
+    'sky_apiserver_local_disk_fs_avail_bytes. Counts only the roots whose '
+    'sky_apiserver_local_disk_root_charged_to_ephemeral is 1, and is an '
+    'upper bound: those roots cover what the server writes, not every byte '
+    'the platform charges to this container.')
+
+_LOCAL_DISK_UNREADABLE_HELP = (
+    'Entries the last walk of this root could not read, excluding entries '
+    'that had simply gone away -- the request-log GC unlinks constantly and '
+    'those bytes really are gone. Non-zero means a permission or I/O error '
+    'kept part of the tree out of the reported size, so treat it as a lower '
+    'bound.')
 
 
 class LocalDiskUsageCollector:
@@ -614,15 +628,21 @@ class LocalDiskUsageCollector:
             'sky_apiserver_local_disk_root_charged_to_ephemeral',
             _LOCAL_DISK_ROOT_CHARGED_HELP,
             labels=['root'])
+        unreadable = prom_core.GaugeMetricFamily(
+            'sky_apiserver_local_disk_scan_unreadable_entries',
+            _LOCAL_DISK_UNREADABLE_HELP,
+            labels=['root'])
         for root, usage in snapshot.roots.items():
             used.add_metric([root], usage.used_bytes)
             files.add_metric([root], usage.files)
             truncated.add_metric([root], 1 if usage.truncated else 0)
+            unreadable.add_metric([root], usage.unreadable)
             charged.add_metric(
                 [root], 1 if snapshot.is_charged_to_ephemeral(root) else 0)
         yield used
         yield files
         yield truncated
+        yield unreadable
         yield charged
 
         fs_size = prom_core.GaugeMetricFamily(
@@ -645,12 +665,16 @@ class LocalDiskUsageCollector:
             value=snapshot.duration_seconds)
 
         budget = prom_core.GaugeMetricFamily(
-            'sky_apiserver_local_disk_budget_bytes', _LOCAL_DISK_BUDGET_HELP)
+            'sky_apiserver_local_disk_budget_bytes',
+            _LOCAL_DISK_BUDGET_HELP,
+            labels=['source'])
         headroom = prom_core.GaugeMetricFamily(
             'sky_apiserver_local_disk_headroom_bytes',
             _LOCAL_DISK_HEADROOM_HELP)
-        if snapshot.budget_bytes is not None:
-            budget.add_metric([], snapshot.budget_bytes)
+        if snapshot.budget is not None:
+            budget.add_metric([snapshot.budget.source],
+                              snapshot.budget.total_bytes)
+        if snapshot.headroom_bytes is not None:
             headroom.add_metric([], snapshot.headroom_bytes)
         yield budget
         yield headroom
