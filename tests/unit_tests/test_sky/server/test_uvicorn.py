@@ -8,6 +8,7 @@ address succeed, bind failure exits instead of raising).
 """
 
 import socket
+import sys
 
 import pytest
 import uvicorn as uvicorn_lib
@@ -24,37 +25,56 @@ def _config(**kwargs) -> uvicorn_lib.Config:
     return uvicorn_lib.Config('dummy:app', **kwargs)
 
 
+@pytest.fixture(name='on_linux')
+def on_linux_fixture(monkeypatch):
+    """Pretend to run on Linux, the only platform the feature is enabled on."""
+    monkeypatch.setattr(sys, 'platform', 'linux')
+
+
 @pytest.mark.skipif(not _HAS_SO_REUSEPORT, reason='Platform lacks SO_REUSEPORT')
-def test_reuse_port_disabled_by_default(monkeypatch):
+def test_reuse_port_disabled_by_default(monkeypatch, on_linux):
     """Without the env var set, the feature is off (opt-in)."""
+    del on_linux
     monkeypatch.delenv(constants.ENV_VAR_SERVER_REUSE_PORT, raising=False)
     assert not uvicorn._reuse_port_enabled(_config())
 
 
 @pytest.mark.skipif(not _HAS_SO_REUSEPORT, reason='Platform lacks SO_REUSEPORT')
 @pytest.mark.parametrize('value', ['1', 'true', 'yes', 'TRUE', 'Yes'])
-def test_reuse_port_enabled_values(monkeypatch, value):
+def test_reuse_port_enabled_values(monkeypatch, on_linux, value):
+    del on_linux
     monkeypatch.setenv(constants.ENV_VAR_SERVER_REUSE_PORT, value)
     assert uvicorn._reuse_port_enabled(_config())
 
 
 @pytest.mark.parametrize('value', ['0', 'false', 'no', '', 'enable'])
-def test_reuse_port_disabled_values(monkeypatch, value):
+def test_reuse_port_disabled_values(monkeypatch, on_linux, value):
+    del on_linux
     monkeypatch.setenv(constants.ENV_VAR_SERVER_REUSE_PORT, value)
     assert not uvicorn._reuse_port_enabled(_config())
 
 
-def test_reuse_port_disabled_for_uds_and_fd(monkeypatch):
+def test_reuse_port_disabled_for_uds_and_fd(monkeypatch, on_linux):
     """SO_REUSEPORT only applies to TCP host/port listeners."""
+    del on_linux
     monkeypatch.setenv(constants.ENV_VAR_SERVER_REUSE_PORT, '1')
     assert not uvicorn._reuse_port_enabled(_config(uds='/tmp/skypilot.sock'))
     assert not uvicorn._reuse_port_enabled(_config(fd=3))
 
 
-def test_reuse_port_disabled_without_platform_support(monkeypatch):
+def test_reuse_port_disabled_without_platform_support(monkeypatch, on_linux):
     """On platforms without SO_REUSEPORT the flag is a no-op."""
+    del on_linux
     monkeypatch.setenv(constants.ENV_VAR_SERVER_REUSE_PORT, '1')
     monkeypatch.delattr(socket, 'SO_REUSEPORT', raising=False)
+    assert not uvicorn._reuse_port_enabled(_config())
+
+
+@pytest.mark.parametrize('platform', ['darwin', 'freebsd13', 'win32'])
+def test_reuse_port_disabled_off_linux(monkeypatch, platform):
+    """macOS/BSD expose SO_REUSEPORT but send all connections to one socket."""
+    monkeypatch.setattr(sys, 'platform', platform)
+    monkeypatch.setenv(constants.ENV_VAR_SERVER_REUSE_PORT, '1')
     assert not uvicorn._reuse_port_enabled(_config())
 
 
@@ -96,3 +116,32 @@ def test_bind_reuse_port_socket_exits_on_bind_failure():
             uvicorn._bind_reuse_port_socket(_config(port=port))
     finally:
         blocker.close()
+
+
+@pytest.mark.skipif(not _HAS_SO_REUSEPORT, reason='Platform lacks SO_REUSEPORT')
+def test_run_resolves_ephemeral_port(monkeypatch, on_linux):
+    """port=0 is resolved in the parent before workers bind their own sockets.
+
+    Workers bind independently, so an unresolved port 0 would put every worker
+    on a different ephemeral port and no single endpoint would reach the pool.
+    """
+    del on_linux
+    monkeypatch.setenv(constants.ENV_VAR_SERVER_REUSE_PORT, '1')
+    captured = {}
+
+    class _FakeMultiprocess:
+
+        def __init__(self, config, target, sockets):
+            del target
+            captured['port'] = config.port
+            captured['sockets'] = sockets
+
+        def run(self):
+            pass
+
+    monkeypatch.setattr(uvicorn, 'SlowStartMultiprocess', _FakeMultiprocess)
+    config = _config(port=0, workers=2)
+    uvicorn.run(config)
+    assert captured['sockets'] == []
+    assert captured['port'] != 0
+    assert config.port == captured['port']

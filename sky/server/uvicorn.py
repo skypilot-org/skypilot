@@ -71,10 +71,14 @@ def _reuse_port_enabled(config: uvicorn.Config) -> bool:
     connections across the per-socket queues by a 4-tuple hash, spreading the
     load evenly.
 
-    Opt-in via env var, and only on platforms that support SO_REUSEPORT.
+    Opt-in via env var, and Linux-only: macOS and BSD have SO_REUSEPORT but
+    hand every new connection to a single socket instead of distributing them,
+    which concentrates all traffic on one worker.
     SO_REUSEPORT only applies to TCP host/port binding, so it is disabled when
     the server listens on a Unix domain socket or an inherited file descriptor.
     """
+    if not sys.platform.startswith('linux'):
+        return False
     if not hasattr(socket, 'SO_REUSEPORT'):
         return False
     if config.uds is not None or config.fd is not None:
@@ -394,7 +398,12 @@ def run(config: uvicorn.Config, max_db_connections: Optional[int] = None):
                 # port already taken by a non-SO_REUSEPORT process, or
                 # permission denied). Otherwise the parent starts fine and only
                 # the workers crash-loop as they each hit the bind error.
-                _bind_reuse_port_socket(config).close()
+                probe_socket = _bind_reuse_port_socket(config)
+                # Each worker binds on its own, so an ephemeral port has to be
+                # resolved here or every worker would land on a different port.
+                if config.port == 0:
+                    config.port = probe_socket.getsockname()[1]
+                probe_socket.close()
                 sockets = []
             else:
                 sockets = [config.bind_socket()]
