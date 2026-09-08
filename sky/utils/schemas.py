@@ -1509,6 +1509,24 @@ _SBATCH_OPTIONS_SCHEMA = {
     },
 }
 
+# `quota.queue` names the QOS a job is submitted with (`sbatch --qos`) and
+# `quota.account` the account it is charged to (`sbatch --account`), mirroring
+# `kubernetes.quota.queue`. Permissive so external schedulers (registered via
+# plugins) can layer their own sub-fields under `quota`.
+_SLURM_QUOTA_SCHEMA = {
+    'type': 'object',
+    'required': [],
+    'additionalProperties': True,
+    'properties': {
+        'queue': {
+            'type': 'string',
+        },
+        'account': {
+            'type': 'string',
+        },
+    },
+}
+
 _GPU_PARTITION_MAP_SCHEMA = {
     'type': 'object',
     'required': [],
@@ -2206,6 +2224,7 @@ def get_config_schema():
                 },
                 'pricing': _PRICING_SCHEMA,
                 'sbatch_options': _SBATCH_OPTIONS_SCHEMA,
+                'quota': _SLURM_QUOTA_SCHEMA,
                 'gpu_partition_map': _GPU_PARTITION_MAP_SCHEMA,
                 'cpu_partition': {
                     'type': 'string',
@@ -2292,6 +2311,7 @@ def get_config_schema():
                             },
                             'pricing': _PRICING_SCHEMA,
                             'sbatch_options': _SBATCH_OPTIONS_SCHEMA,
+                            'quota': _SLURM_QUOTA_SCHEMA,
                             'gpu_partition_map': _GPU_PARTITION_MAP_SCHEMA,
                             'cpu_partition': {
                                 'type': 'string',
@@ -2308,6 +2328,7 @@ def get_config_schema():
                                     'properties': {
                                         'pricing': _PRICING_SCHEMA,
                                         'sbatch_options': _SBATCH_OPTIONS_SCHEMA,  # pylint: disable=line-too-long
+                                        'quota': _SLURM_QUOTA_SCHEMA,
                                     },
                                 },
                             },
@@ -2815,6 +2836,7 @@ def get_config_schema():
                         },
                         'allowed_clusters': slurm_allowed_clusters_schema,
                         'sbatch_options': _SBATCH_OPTIONS_SCHEMA,
+                        'quota': _SLURM_QUOTA_SCHEMA,
                         'cluster_configs': {
                             'type': 'object',
                             'required': [],
@@ -2825,6 +2847,7 @@ def get_config_schema():
                                 'additionalProperties': False,
                                 'properties': {
                                     'sbatch_options': _SBATCH_OPTIONS_SCHEMA,
+                                    'quota': _SLURM_QUOTA_SCHEMA,
                                     'partition_configs': {
                                         'type': 'object',
                                         'required': [],
@@ -2835,6 +2858,7 @@ def get_config_schema():
                                             'additionalProperties': False,
                                             'properties': {
                                                 'sbatch_options': _SBATCH_OPTIONS_SCHEMA,  # pylint: disable=line-too-long
+                                                'quota': _SLURM_QUOTA_SCHEMA,
                                             },
                                         },
                                     },

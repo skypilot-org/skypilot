@@ -615,15 +615,26 @@ class TestWorkspaceSchema(unittest.TestCase):
                     'sbatch_options': {
                         'account': 'workspace-account',
                     },
+                    'quota': {
+                        'queue': 'workspace-qos',
+                        'account': 'workspace-account',
+                    },
                     'cluster_configs': {
                         'my-cluster': {
                             'sbatch_options': {
                                 'qos': 'workspace-qos',
                             },
+                            'quota': {
+                                'queue': 'cluster-qos',
+                            },
                             'partition_configs': {
                                 'gpu': {
                                     'sbatch_options': {
                                         'constraint': 'h100',
+                                    },
+                                    'quota': {
+                                        'queue': 'partition-qos',
+                                        'account': 'partition-account',
                                     },
                                 },
                             },
