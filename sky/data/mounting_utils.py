@@ -483,8 +483,13 @@ def get_az_mount_install_cmd() -> str:
         '  echo "blobfuse2 is not supported on $ARCH" && '
         f'  exit {exceptions.ARCH_NOT_SUPPORTED_EXIT_CODE}; '
         'fi && '
-        # Try to install fuse3 from default repos
-        'sudo apt-get update && '
+        # Try to install fuse3 from default repos. `apt-get update` fails as
+        # a whole when any one configured repository is unusable -- an
+        # expired release file on an end-of-life suite, say -- which would
+        # otherwise skip the install below and leave the mount to fail with
+        # a missing blobfuse2. The install is the gate instead.
+        '{ sudo apt-get update || echo "apt-get update failed; continuing '
+        'with the existing package index"; } && '
         'FUSE3_INSTALLED=0 && '
         # Detect which libfuse3 package is available. Debian 13+ (trixie) uses
         # libfuse3-4 instead of libfuse3-3 due to library soname bump.
