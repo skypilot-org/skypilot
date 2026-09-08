@@ -192,8 +192,8 @@ def test_only_charged_roots_count_against_the_budget(roots, monkeypatch):
     _write(str(present / 'a.log'), 256 * 1024)
     _write(str(other / 'b.log'), 8 * 1024 * 1024)
 
-    def fake_charged(mountpoint, sources):
-        del sources
+    def fake_charged(mountpoint, sources, container_root_device):
+        del sources, container_root_device
         return mountpoint == str(present)
 
     # One mount point per root, so each can be classified on its own.
