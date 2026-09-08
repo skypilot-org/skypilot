@@ -539,15 +539,22 @@ async def _stream_until_idle(log, plain, monkeypatch):
     # Fire on the first idle pass instead of waiting 30 real seconds.
     monkeypatch.setattr(stream_utils, '_HEARTBEAT_INTERVAL', 0)
 
+    # `wait_for`, not `asyncio.timeout`: the latter is 3.11+ and CI runs 3.9.
+    # The pump appends into a list the caller owns, because `wait_for`
+    # discards the coroutine's result when it times out -- and a followed
+    # stream never returns, so timing out is the normal path here.
     chunks = []
     agen = stream_utils.log_streamer(None, log, plain_logs=plain, follow=True)
+
+    async def _pump():
+        async for chunk in agen:
+            chunks.append(chunk)
+            if len(chunks) > 3:
+                return
+
     try:
-        async with asyncio.timeout(2):
-            async for chunk in agen:
-                chunks.append(chunk)
-                if len(chunks) > 3:
-                    break
-    except TimeoutError:
+        await asyncio.wait_for(_pump(), timeout=2)
+    except asyncio.TimeoutError:
         pass
     finally:
         await agen.aclose()
