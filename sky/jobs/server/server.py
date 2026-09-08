@@ -113,8 +113,11 @@ async def wait(request: fastapi.Request,
 
 
 @router.post('/cancel')
-async def cancel(request: fastapi.Request,
-                 jobs_cancel_body: payloads.JobsCancelBody) -> None:
+async def cancel(
+    request: fastapi.Request,
+    jobs_cancel_body: payloads.JobsCancelBody = fastapi.Depends(
+        role_filter.reject_all_users_jobs_cancel_body),
+) -> None:
     await executor.schedule_request_async(
         request_id=request.state.request_id,
         request_name=request_names.RequestName.JOBS_CANCEL,

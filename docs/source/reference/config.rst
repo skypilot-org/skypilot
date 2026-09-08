@@ -273,6 +273,7 @@ Below is the configuration syntax and some example values. See detailed explanat
 
   :ref:`rbac <config-yaml-rbac>`:
     :ref:`default_role <config-yaml-rbac-default-role>`: admin
+    :ref:`restrict_all_users_mutations <config-yaml-rbac-restrict-all-users-mutations>`: false
 
   :ref:`db <config-yaml-db>`: postgresql://postgres@localhost/skypilot
 
@@ -3180,6 +3181,44 @@ If not specified, the default role is ``admin``.
 .. TODO(aylei): Refine this after unified authentication.
 
 Note: RBAC is only functional when :ref:`OAuth <api-server-oauth>` is configured.
+
+.. _config-yaml-rbac-restrict-all-users-mutations:
+
+``rbac.restrict_all_users_mutations``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Reserve the ``--all-users`` / ``-u`` flag on **mutating** commands for admins
+(optional, defaults to ``false``).
+
+``-u`` on a mutating command fans the operation out over every user's
+resources, so one user can tear down or cancel a teammate's work in a single
+command. Set this to ``true`` to allow it for admins only:
+
+.. code-block:: yaml
+
+  rbac:
+    restrict_all_users_mutations: true
+
+Affected commands: ``sky down -u``, ``sky stop -u``, ``sky autostop -u``,
+``sky cancel -u`` and ``sky jobs cancel -u``. Non-admins must target their own
+resources (``-a`` / ``--all``) or name resources explicitly instead.
+
+Read-only uses of ``-u`` are **not** affected: ``sky status -u``,
+``sky queue -u`` and ``sky jobs queue -u`` keep working for everyone. This
+setting restricts what a user may *do*, not what they may see.
+
+.. note::
+
+  ``sky cancel -u`` and ``sky jobs cancel -u`` are rejected by the API server,
+  so the restriction also holds for SDK callers. ``sky down``/``stop``/
+  ``autostop`` expand ``-u`` into one request per cluster in the client, so
+  for those three the check is client-side and a caller driving the Python SDK
+  directly is not stopped by it. Use :ref:`Workspaces <workspaces>`
+  if you need a hard isolation boundary between users' clusters.
+
+Like the rest of RBAC, this is only functional when
+:ref:`OAuth <api-server-oauth>` is configured; without per-user identity every
+caller is treated as an admin.
 
 .. _config-yaml-db:
 
