@@ -2740,13 +2740,11 @@ def get_cached_check_results(
     if _slurm_submit_as_user_enabled():
         user_results = _get_check_results_row(_user_scoped_key(key), workspace)
         results = {
-            **{
-                c: v for c, v in results.items() if not _is_user_scoped_cloud(c)
-            },
-            **{
-                c: v for c, v in user_results.items() if _is_user_scoped_cloud(c)
-            },
+            c: v for c, v in results.items() if not _is_user_scoped_cloud(c)
         }
+        for cloud, value in user_results.items():
+            if _is_user_scoped_cloud(cloud):
+                results[cloud] = value
     return results
 
 
