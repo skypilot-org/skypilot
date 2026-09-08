@@ -19,7 +19,8 @@ _PREFIX = 'sky_managed_job_'
 
 
 def _rows(now: float) -> List[Any]:
-    e, t, j = state.job_events_table.c, state.spot_table.c, state.job_info_table.c
+    e = state.job_events_table.c
+    t, j = state.spot_table.c, state.job_info_table.c
     events = sa.select(
         e.spot_job_id,
         e.task_id,
@@ -62,6 +63,7 @@ def _rows(now: float) -> List[Any]:
                 [s.value for s in state.ManagedJobStatus.terminal_statuses()]),
             events.c.last_event >= datetime.datetime.fromtimestamp(
                 cutoff, datetime.timezone.utc)))
+    # pylint: disable=protected-access
     with state._db_manager.get_engine().connect() as conn:
         return list(conn.execute(query).mappings())
 
@@ -86,7 +88,7 @@ class JobWaitCollector:
             ('wait_7d_tasks', 'Tasks first submitted in the last seven days.',
              ['outcome']),
             ('wait_7d_seconds_bucket',
-             'Cumulative buckets of seven-day waits; rolling gauges, not counters.',
+             'Seven-day cumulative wait buckets; gauges, not counters.',
              ['outcome', 'phase', 'le']),
             ('wait_7d_seconds_count', 'Seven-day wait observations.',
              ['outcome', 'phase']),
@@ -100,7 +102,7 @@ class JobWaitCollector:
              'Recent or active tasks with missing or invalid timing data.',
              ['reason']),
             ('wait_outlier_seconds',
-             'Twenty longest known waits, from the seven-day cohort or active tasks.',
+             'Twenty longest known waits: seven-day cohort or current waiters.',
              ['job_id', 'task_id', 'outcome']),
         ]:
             yield GaugeMetricFamily(_PREFIX + name,
