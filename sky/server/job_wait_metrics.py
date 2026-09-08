@@ -137,7 +137,7 @@ class JobWaitCollector:
             terminal = state.ManagedJobStatus(row['status']).is_terminal()
             previously_started = (running is not None or
                                   row['start_at'] is not None or row['status']
-                                  in ('RUNNING', 'RECOVERING', 'SUCCEEDED'))
+                                  in ('RUNNING', 'SUCCEEDED'))
             if not terminal and not previously_started:
                 waiting[key] += 1
             if queued is None:

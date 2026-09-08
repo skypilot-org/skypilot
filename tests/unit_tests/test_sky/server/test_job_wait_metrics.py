@@ -250,11 +250,10 @@ def test_invalid_chronology_does_not_emit_negative_duration(db):
     assert values(data, 'sky_managed_job_wait_7d_seconds_count') == []
 
 
-@pytest.mark.parametrize('status', ['RUNNING', 'RECOVERING'])
-def test_started_status_with_missing_history_is_not_waiting(db, status):
+def test_started_status_with_missing_history_is_not_waiting(db):
     seed(db,
          1,
-         status=status,
+         status='RUNNING',
          submitted=NOW - 100,
          events=[
              (0, 'PENDING', 'Job submitted to queue', NOW - 100),
@@ -276,3 +275,26 @@ def test_legacy_resources_preserve_requested_gpu_type(db):
     with db.begin() as conn:
         conn.execute(state.spot_table.update().values(full_resources=None))
     assert values(samples(), 'sky_managed_job_waiting_tasks', gpu='L40S') == [1]
+
+
+@pytest.mark.parametrize('started', [None, NOW - 200])
+def test_recovery_only_excludes_tasks_that_previously_started(db, started):
+    seed(db,
+         1,
+         status='RECOVERING',
+         submitted=NOW - 100,
+         started=started,
+         events=[
+             (0, 'PENDING', 'Job submitted to queue', NOW - 600),
+             (0, 'STARTING', 'Job is starting', NOW - 590),
+             (0, 'RECOVERING', 'Job is recovering', NOW - 100),
+         ])
+    data = samples()
+    if started is None:
+        assert values(data, 'sky_managed_job_waiting_tasks') == [1]
+        assert values(data, 'sky_managed_job_oldest_wait_seconds') == [600]
+    else:
+        assert values(data, 'sky_managed_job_waiting_tasks') == []
+        assert values(data,
+                      'sky_managed_job_wait_missing_tasks',
+                      reason='start') == [1]
