@@ -260,23 +260,17 @@ SKY_APISERVER_REQUEST_REJECTIONS_TOTAL = prom.Counter(
 # saw on the handshake response (101 for accepted). Handshakes are not HTTP
 # requests from the request counter's point of view, so without this counter a
 # storm of rejected handshakes is invisible: it only shows up as fewer open
-# connections. `path` is the matched route template (bounded).
+# connections. `path` is the matched route template (bounded). `status` is the
+# status code the client received ('101', '401', '503', ...), spelled like the
+# `status` of SKY_APISERVER_REQUEST_REJECTIONS_TOTAL above; unlike
+# SKY_APISERVER_REQUESTS_TOTAL's `status` it is the code, not the class.
+# A refused handshake is also counted in SKY_APISERVER_REQUEST_REJECTIONS_TOTAL
+# with kind=websocket and the stamped reason, which is where the decision that
+# refused it (unauthorized / forbidden / a 503 cause) can be read.
 SKY_APISERVER_WEBSOCKET_HANDSHAKES_TOTAL = prom.Counter(
     'sky_apiserver_websocket_handshakes_total',
     'WebSocket handshakes by outcome and the HTTP status the client saw',
-    ['path', 'outcome', 'client_status'],
-)
-
-# WebSocket handshakes refused by a middleware, by the decision that refused
-# them (the close-code set in sky/server/middleware_utils.websocket_aware:
-# unauthorized / forbidden / error). Kept from the first, observational
-# change; SKY_APISERVER_WEBSOCKET_HANDSHAKES_TOTAL above adds accepted
-# handshakes and the HTTP status the client saw. `path` is restricted to the
-# registered WebSocket routes, else `other`.
-SKY_APISERVER_WEBSOCKET_HANDSHAKE_REJECTIONS_TOTAL = prom.Counter(
-    'sky_apiserver_websocket_handshake_rejections_total',
-    'WebSocket handshakes refused by a middleware, by decision',
-    ['path', 'outcome'],
+    ['path', 'outcome', 'status'],
 )
 
 SKY_APISERVER_WEBSOCKET_CONNECTIONS = prom.Gauge(

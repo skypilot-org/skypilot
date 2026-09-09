@@ -440,8 +440,13 @@ async def test_websocket_redirect_does_not_override_a_stamped_reason():
 
 
 # ─────────────────────────────────────────────────────────────────────────
-# Refused handshakes are counted by decision, with or without the extension.
-# Without it the close frames are the pre-extension ones, byte for byte.
+# A refused handshake is counted once, by the metrics layer outside this
+# wrapper (sky.server.metrics.PrometheusMiddleware): the status the client
+# saw goes to sky_apiserver_websocket_handshakes_total and the reason left
+# on the scope to sky_apiserver_request_rejections_total{kind="websocket"}.
+# The wrapper itself records nothing, so a refusal is never double-counted.
+# Without the extension the close frames are the pre-extension ones, byte
+# for byte.
 # ─────────────────────────────────────────────────────────────────────────
 
 
@@ -456,44 +461,50 @@ def _sample(counter, **labels) -> float:
     return total
 
 
+_HANDSHAKE_COUNTERS = (
+    metrics_utils.SKY_APISERVER_WEBSOCKET_HANDSHAKES_TOTAL,
+    metrics_utils.SKY_APISERVER_REQUEST_REJECTIONS_TOTAL,
+)
+
+
 @pytest.fixture(autouse=True)
 def clear_rejection_counters():
-    for counter in (
-            metrics_utils.SKY_APISERVER_WEBSOCKET_HANDSHAKE_REJECTIONS_TOTAL,
-            metrics_utils.SKY_APISERVER_REQUEST_REJECTIONS_TOTAL):
+    for counter in _HANDSHAKE_COUNTERS:
         counter.clear()
     yield
-    for counter in (
-            metrics_utils.SKY_APISERVER_WEBSOCKET_HANDSHAKE_REJECTIONS_TOTAL,
-            metrics_utils.SKY_APISERVER_REQUEST_REJECTIONS_TOTAL):
+    for counter in _HANDSHAKE_COUNTERS:
         counter.clear()
+
+
+def _nothing_counted() -> bool:
+    return all(_sample(counter) == 0.0 for counter in _HANDSHAKE_COUNTERS)
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize('behavior, outcome, close_frame', [
-    ('unauthorized', 'unauthorized', {
+@pytest.mark.parametrize('behavior, close_frame', [
+    ('unauthorized', {
         'type': 'websocket.close',
         'code': 4401,
         'reason': 'Unauthorized',
     }),
-    ('forbidden', 'forbidden', {
+    ('forbidden', {
         'type': 'websocket.close',
         'code': 4403,
         'reason': 'Forbidden',
     }),
-    ('error', 'error', {
+    ('error', {
         'type': 'websocket.close',
         'code': 1011,
         'reason': 'Internal Server Error',
     }),
-    ('unavailable', 'error', {
+    ('unavailable', {
         'type': 'websocket.close',
         'code': 1011,
         'reason': 'Internal Server Error',
     }),
 ])
-async def test_a_refused_handshake_is_counted_and_the_close_frame_is_unchanged(
-        behavior, outcome, close_frame):
+async def test_a_refused_handshake_closes_as_before_and_is_not_counted_here(
+        behavior, close_frame):
     app_called = False
 
     async def app(scope, receive, send):
@@ -507,67 +518,38 @@ async def test_a_refused_handshake_is_counted_and_the_close_frame_is_unchanged(
 
     assert not app_called
     assert sent == [close_frame]
-    assert _sample(
-        metrics_utils.SKY_APISERVER_WEBSOCKET_HANDSHAKE_REJECTIONS_TOTAL,
-        path='/kubernetes-pod-ssh-proxy',
-        outcome=outcome) == 1.0
-    assert _sample(
-        metrics_utils.SKY_APISERVER_WEBSOCKET_HANDSHAKE_REJECTIONS_TOTAL) == 1.0
+    # The metrics layer outside sees this close and records the empty 403
+    # the client gets; nothing is recorded in here.
+    assert _nothing_counted()
 
 
 @pytest.mark.asyncio
-async def test_a_refused_handshake_with_the_extension_is_counted_by_decision():
+async def test_a_refused_handshake_with_the_extension_keeps_the_reason():
     middleware = _make_middleware(lambda *a: None, behavior='unavailable')
     scope = _scope_with_extension(path='/kubernetes-pod-ssh-proxy')
     sent = await _run(middleware, scope)
     assert sent[0]['status'] == 503
-    assert _sample(
-        metrics_utils.SKY_APISERVER_WEBSOCKET_HANDSHAKE_REJECTIONS_TOTAL,
-        path='/kubernetes-pod-ssh-proxy',
-        outcome='error') == 1.0
     # The stamped reason stays on the scope for the metrics layer outside,
     # which records the rejection with the status the client saw; this layer
-    # does not count it a second time.
+    # does not count it.
     assert middleware_utils.get_rejection_reason(scope) == \
         middleware_utils.REJECT_REASON_AUTH_DB_TIMEOUT
-    assert _sample(metrics_utils.SKY_APISERVER_REQUEST_REJECTIONS_TOTAL) == 0.0
+    assert _nothing_counted()
 
 
 @pytest.mark.asyncio
-async def test_an_accepted_handshake_is_not_counted_as_refused():
+async def test_an_accepted_handshake_stamps_no_reason():
 
     async def app(scope, receive, send):
         del scope, receive
         await send({'type': 'websocket.accept'})
 
     middleware = _make_middleware(app, behavior='accept')
-    sent = await _run(middleware, _make_websocket_scope())
+    scope = _make_websocket_scope()
+    sent = await _run(middleware, scope)
     assert sent == [{'type': 'websocket.accept'}]
-    assert _sample(
-        metrics_utils.SKY_APISERVER_WEBSOCKET_HANDSHAKE_REJECTIONS_TOTAL) == 0.0
-
-
-@pytest.mark.asyncio
-async def test_handshake_paths_outside_the_websocket_routes_are_bounded():
-    middleware = _make_middleware(lambda *a: None, behavior='forbidden')
-    for i in range(3):
-        await _run(middleware, _make_websocket_scope(path=f'/probe/{i}'))
-    assert _sample(
-        metrics_utils.SKY_APISERVER_WEBSOCKET_HANDSHAKE_REJECTIONS_TOTAL,
-        path=middleware_utils.OTHER_WEBSOCKET_PATH_LABEL,
-        outcome='forbidden') == 3.0
-    assert _sample(
-        metrics_utils.SKY_APISERVER_WEBSOCKET_HANDSHAKE_REJECTIONS_TOTAL,
-        path='/probe/0') == 0.0
-
-
-def test_websocket_path_label():
-    for path in middleware_utils.WEBSOCKET_ROUTE_PATHS:
-        assert middleware_utils.websocket_path_label({'path': path}) == path
-    assert middleware_utils.websocket_path_label({'path': '/x'}) == \
-        middleware_utils.OTHER_WEBSOCKET_PATH_LABEL
-    assert middleware_utils.websocket_path_label({}) == \
-        middleware_utils.OTHER_WEBSOCKET_PATH_LABEL
+    assert middleware_utils.get_rejection_reason(scope) is None
+    assert _nothing_counted()
 
 
 def test_record_rejection_is_a_noop_without_a_stamp():
@@ -709,9 +691,9 @@ async def test_a_scope_without_the_extension_takes_the_close_path(
 
     assert not app_called
     assert sent == [close_frame]
-    # The refusal is still counted by decision.
-    assert _sample(
-        metrics_utils.SKY_APISERVER_WEBSOCKET_HANDSHAKE_REJECTIONS_TOTAL) == 1.0
+    # Nothing is counted in here; the metrics layer outside records the
+    # empty 403 the client saw.
+    assert _nothing_counted()
 
 
 class _StatusMiddleware(starlette.middleware.base.BaseHTTPMiddleware):

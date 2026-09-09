@@ -45,16 +45,6 @@ REJECT_REASON_STATE_KEY = 'reject_reason'
 REJECTION_KIND_HTTP = 'http'
 REJECTION_KIND_WEBSOCKET = 'websocket'
 
-# `path` label of the handshake-rejection counter: the registered WebSocket
-# routes (sky/server/server.py) or this fixed value. Handshake paths are
-# chosen by the client, so the raw path cannot be a label value.
-WEBSOCKET_ROUTE_PATHS = frozenset((
-    '/kubernetes-pod-ssh-proxy',
-    '/slurm-job-ssh-proxy',
-    '/ssh-interactive-auth',
-))
-OTHER_WEBSOCKET_PATH_LABEL = 'other'
-
 
 def mark_rejection(request: fastapi.Request, reason: str) -> None:
     """Record why this request is being answered with a canned response.
@@ -96,14 +86,6 @@ def record_rejection(scope: starlette.types.Scope, status_code: int,
     # otherwise label the series `HTTPStatus.SERVICE_UNAVAILABLE`.
     metrics_utils.SKY_APISERVER_REQUEST_REJECTIONS_TOTAL.labels(
         reason=reason, status=str(int(status_code)), kind=kind).inc()
-
-
-def websocket_path_label(scope: starlette.types.Scope) -> str:
-    """Bounded `path` label for a WebSocket handshake."""
-    path = scope.get('path', '')
-    if path in WEBSOCKET_ROUTE_PATHS:
-        return path
-    return OTHER_WEBSOCKET_PATH_LABEL
 
 
 # --- fail-open recording ---------------------------------------------------
@@ -255,9 +237,11 @@ def websocket_aware(
     only) the connection is closed with 4401 / 4403 / 1011 as before; servers
     render any pre-accept close as an empty HTTP 403. A status the server
     cannot render is replaced by one it can (see `_renderable_status`).
-    Either way a refused handshake is counted by decision in
-    `sky_apiserver_websocket_handshake_rejections_total{path,outcome}`; the
-    metrics layer records the client-visible status and the stamped reason.
+    This wrapper records no metric itself. The metrics layer outside
+    (`sky.server.metrics.PrometheusMiddleware`) counts every handshake in
+    `sky_apiserver_websocket_handshakes_total` with the status the client
+    saw and, for a refused one, the reason stamped on the scope in
+    `sky_apiserver_request_rejections_total{kind="websocket"}`.
 
     Note: for websocket connection, the mutation made by the underlying HTTP
     middleware on the request and response will be discarded.
@@ -294,11 +278,9 @@ def websocket_aware(
             if decision == WebSocketDecision.ACCEPT:
                 await self.app(scope, receive, send)
                 return
-            # By decision; the metrics layer outside records the status the
-            # client saw and the stamped reason. Fail-open: a fault in the
-            # counter must not change what the client gets.
-            record_safely('WebSocket handshake rejection',
-                          self._count_rejection, scope, decision)
+            # Refused. Nothing is counted here: the metrics layer outside
+            # sees the message sent below and records the status the client
+            # saw together with the reason stamped on the scope.
             if supports_websocket_http_response(scope):
                 await self._reject_with_http_response(send, response)
                 return
@@ -320,13 +302,6 @@ def websocket_aware(
                     'code': 1011,
                     'reason': 'Internal Server Error',
                 })
-
-        @staticmethod
-        def _count_rejection(scope: starlette.types.Scope,
-                             decision: WebSocketDecision) -> None:
-            metrics_utils.SKY_APISERVER_WEBSOCKET_HANDSHAKE_REJECTIONS_TOTAL \
-                .labels(path=websocket_path_label(scope),
-                        outcome=decision.value).inc()
 
         @staticmethod
         async def _reject_with_http_response(
@@ -354,8 +329,8 @@ def websocket_aware(
                 # redirects to ws(s):// URLs only, and a 2xx/3xx is not a
                 # rejection it can explain (the ssh client would print
                 # "HTTP 307"). Say what it needs to do instead: authenticate.
-                # This also keeps the handshake metric's client_status label
-                # to real rejection statuses.
+                # This also keeps the handshake metric's status label to real
+                # rejection statuses.
                 status_code = int(http.HTTPStatus.UNAUTHORIZED)
                 body = b'{"detail":"Authentication required"}'
                 headers = [(b'content-type', b'application/json')]

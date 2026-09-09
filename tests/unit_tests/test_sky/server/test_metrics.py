@@ -837,8 +837,7 @@ async def test_websocket_accepted_handshake_is_counted(prometheus_middleware):
     inner = _ws_app([{'type': 'websocket.accept'}])
     await prometheus_middleware.run(inner, '/ws', scope_type='websocket')
 
-    assert _handshakes(path='/ws', outcome='accepted',
-                       client_status='101') == 1.0
+    assert _handshakes(path='/ws', outcome='accepted', status='101') == 1.0
     # A handshake is not an HTTP request.
     assert _get_metric_value('sky_apiserver_requests_total',
                              {'path': '/ws'}) == 0.0
@@ -862,8 +861,7 @@ async def test_websocket_rejected_by_close_is_counted_as_a_403(
         })
     await prometheus_middleware.run(inner, '/ws', scope_type='websocket')
 
-    assert _handshakes(path='/ws', outcome='rejected',
-                       client_status='403') == 1.0
+    assert _handshakes(path='/ws', outcome='rejected', status='403') == 1.0
     assert _rejections(reason=middleware_utils.REJECT_REASON_UNAUTHORIZED,
                        status='403',
                        kind='websocket') == 1.0
@@ -889,8 +887,7 @@ async def test_websocket_rejected_with_http_response_keeps_its_status(
         })
     await prometheus_middleware.run(inner, '/ws', scope_type='websocket')
 
-    assert _handshakes(path='/ws', outcome='rejected',
-                       client_status='503') == 1.0
+    assert _handshakes(path='/ws', outcome='rejected', status='503') == 1.0
     assert _rejections(
         reason=middleware_utils.REJECT_REASON_AUTH_WORKER_EXHAUSTED,
         status='503',
@@ -914,8 +911,7 @@ async def test_websocket_exception_before_accept_is_counted_as_a_500(
         await prometheus_middleware.run(_ws_app([], exc=RuntimeError('boom')),
                                         '/ws',
                                         scope_type='websocket')
-    assert _handshakes(path='/ws', outcome='rejected',
-                       client_status='500') == 1.0
+    assert _handshakes(path='/ws', outcome='rejected', status='500') == 1.0
     assert _rejections(
         reason=middleware_utils.REJECT_REASON_UNHANDLED_EXCEPTION,
         status='500',
@@ -932,8 +928,7 @@ async def test_websocket_close_after_accept_is_not_a_rejection(
         'code': 1000
     }])
     await prometheus_middleware.run(inner, '/ws', scope_type='websocket')
-    assert _handshakes(path='/ws', outcome='accepted',
-                       client_status='101') == 1.0
+    assert _handshakes(path='/ws', outcome='accepted', status='101') == 1.0
     assert _handshakes(outcome='rejected') == 0.0
 
 
@@ -1254,8 +1249,7 @@ def test_late_registered_websocket_routes_resolve_to_their_template(tmp_path):
     with pytest.raises(starlette.websockets.WebSocketDisconnect):
         with client.websocket_connect('/sub/ws', headers={'x-reject': '1'}):
             pass
-    assert _handshakes(path='/sub/ws', outcome='rejected',
-                       client_status='403') == 1.0
+    assert _handshakes(path='/sub/ws', outcome='rejected', status='403') == 1.0
     # No such route: the router closes the handshake; one fixed label.
     with pytest.raises(starlette.websockets.WebSocketDisconnect):
         with client.websocket_connect('/ws-not-here'):

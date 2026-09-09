@@ -2043,12 +2043,11 @@ class PrometheusMiddleware:
         app, root_path = scope.get('app'), scope.get('root_path', '')
         settled = False
 
-        def record(accepted: bool, client_status: int) -> None:
-            self._record_handshake(scope, accepted, client_status, app,
-                                   root_path)
+        def record(accepted: bool, status_code: int) -> None:
+            self._record_handshake(scope, accepted, status_code, app, root_path)
 
         def record_http_rejection(message: starlette.types.Message) -> None:
-            record(accepted=False, client_status=int(message['status']))
+            record(accepted=False, status_code=int(message['status']))
 
         def record_unhandled_exception() -> None:
             # uvicorn answers an exception before the accept with an HTTP 500
@@ -2056,7 +2055,7 @@ class PrometheusMiddleware:
             scope['state'].setdefault(
                 middleware_utils.REJECT_REASON_STATE_KEY,
                 middleware_utils.REJECT_REASON_UNHANDLED_EXCEPTION)
-            record(accepted=False, client_status=500)
+            record(accepted=False, status_code=500)
 
         async def send_wrapper(message: starlette.types.Message) -> None:
             nonlocal settled
@@ -2069,7 +2068,7 @@ class PrometheusMiddleware:
                     middleware_utils.record_safely('WebSocket handshake',
                                                    record,
                                                    accepted=True,
-                                                   client_status=101)
+                                                   status_code=101)
                 elif message_type == 'websocket.close':
                     # A close before accept: servers render it as an empty
                     # HTTP 403 whatever the close code says.
@@ -2077,7 +2076,7 @@ class PrometheusMiddleware:
                     middleware_utils.record_safely('WebSocket handshake',
                                                    record,
                                                    accepted=False,
-                                                   client_status=403)
+                                                   status_code=403)
                 elif message_type == 'websocket.http.response.start':
                     settled = True
                     middleware_utils.record_safely('WebSocket handshake',
@@ -2097,20 +2096,21 @@ class PrometheusMiddleware:
     def _record_handshake(self,
                           scope: starlette.types.Scope,
                           accepted: bool,
-                          client_status: int,
+                          status_code: int,
                           app: Any = None,
                           root_path: Optional[str] = None) -> None:
+        """Count one handshake; `status_code` is what the client saw."""
         path = self._path_label(scope, app, root_path)
         outcome = 'accepted' if accepted else 'rejected'
         metrics_utils.SKY_APISERVER_WEBSOCKET_HANDSHAKES_TOTAL.labels(
-            path=path, outcome=outcome, client_status=str(client_status)).inc()
+            path=path, outcome=outcome, status=str(status_code)).inc()
         if accepted:
             return
         reason = (middleware_utils.get_rejection_reason(scope) or
                   middleware_utils.REJECT_REASON_UNSPECIFIED)
         metrics_utils.SKY_APISERVER_REQUEST_REJECTIONS_TOTAL.labels(
             reason=reason,
-            status=str(client_status),
+            status=str(status_code),
             kind=middleware_utils.REJECTION_KIND_WEBSOCKET).inc()
 
     # --- path label -------------------------------------------------------

@@ -111,7 +111,6 @@ _COUNTERS = (
     metrics_utils.SKY_APISERVER_REQUEST_GET_DURATION_SECONDS,
     metrics_utils.SKY_APISERVER_REQUEST_REJECTIONS_TOTAL,
     metrics_utils.SKY_APISERVER_WEBSOCKET_HANDSHAKES_TOTAL,
-    metrics_utils.SKY_APISERVER_WEBSOCKET_HANDSHAKE_REJECTIONS_TOTAL,
 )
 
 
@@ -554,7 +553,7 @@ async def test_websocket_app_exception_still_propagates(fault, monkeypatch,
         assert _sample(metrics_utils.SKY_APISERVER_WEBSOCKET_HANDSHAKES_TOTAL,
                        path='/ws/{session_id}',
                        outcome='rejected',
-                       client_status='500') == 1.0
+                       status='500') == 1.0
     else:
         assert failure_log.failures >= 1
 
@@ -574,10 +573,12 @@ class _Unavailable503(starlette.middleware.base.BaseHTTPMiddleware):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize('extension', [False, True])
-async def test_websocket_aware_rejection_is_unchanged_when_its_counter_fails(
-        extension, monkeypatch, warning):
-    """The handshake-rejection counter inside websocket_aware fails open
-    too: the client gets the same close frame / HTTP response."""
+async def test_websocket_aware_records_no_metric_itself(extension, monkeypatch,
+                                                        warning):
+    """All counting is left to the metrics layer outside the wrapper, so a
+    refusal is counted once (there) and a broken counter cannot change what
+    the client gets: with every counter broken the wrapper alone sends the
+    same messages and logs nothing."""
 
     async def never_called(scope, receive, send):
         del scope, receive, send
@@ -589,17 +590,17 @@ async def test_websocket_aware_rejection_is_unchanged_when_its_counter_fails(
         _ws_scope('/kubernetes-pod-ssh-proxy', extension=extension))
     assert raised is None
     assert reference, 'the reference run must have refused the handshake'
+    assert all(_sample(counter) == 0.0 for counter in _COUNTERS)
 
-    monkeypatch.setattr(
-        metrics_utils.SKY_APISERVER_WEBSOCKET_HANDSHAKE_REJECTIONS_TOTAL,
-        'labels', _boom)
+    for counter in _COUNTERS:
+        monkeypatch.setattr(counter, 'labels', _boom)
     sent, raised = await _run(
         wrapper_cls(never_called),
         _ws_scope('/kubernetes-pod-ssh-proxy', extension=extension))
 
     assert raised is None
     assert sent == reference
-    assert warning.call_count == 1
+    assert warning.call_count == 0
     if extension:
         assert sent[0]['status'] == 503
     else:

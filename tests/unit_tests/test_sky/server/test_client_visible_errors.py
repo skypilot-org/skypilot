@@ -188,7 +188,7 @@ def test_a_rejected_websocket_handshake_is_counted_and_carries_its_status():
     assert _sample(metrics_utils.SKY_APISERVER_WEBSOCKET_HANDSHAKES_TOTAL,
                    path='/kubernetes-pod-ssh-proxy',
                    outcome='rejected',
-                   client_status='503') == 1.0
+                   status='503') == 1.0
     assert _sample(metrics_utils.SKY_APISERVER_REQUEST_REJECTIONS_TOTAL,
                    reason=middleware_utils.REJECT_REASON_AUTH_WORKER_EXHAUSTED,
                    status='503',
@@ -211,7 +211,7 @@ def test_an_accepted_websocket_handshake_is_counted():
     assert _sample(metrics_utils.SKY_APISERVER_WEBSOCKET_HANDSHAKES_TOTAL,
                    path='/kubernetes-pod-ssh-proxy',
                    outcome='accepted',
-                   client_status='101') == 1.0
+                   status='101') == 1.0
     assert _sample(metrics_utils.SKY_APISERVER_WEBSOCKET_HANDSHAKES_TOTAL,
                    outcome='rejected') == 0.0
 

@@ -48,10 +48,8 @@ def _sample(counter, **labels) -> float:
 
 @pytest.fixture(autouse=True)
 def clear_counters():
-    counters = (
-        metrics_utils.SKY_APISERVER_WEBSOCKET_HANDSHAKES_TOTAL,
-        metrics_utils.SKY_APISERVER_REQUEST_REJECTIONS_TOTAL,
-        metrics_utils.SKY_APISERVER_WEBSOCKET_HANDSHAKE_REJECTIONS_TOTAL)
+    counters = (metrics_utils.SKY_APISERVER_WEBSOCKET_HANDSHAKES_TOTAL,
+                metrics_utils.SKY_APISERVER_REQUEST_REJECTIONS_TOTAL)
     for counter in counters:
         counter.clear()
     yield
@@ -243,7 +241,7 @@ async def test_accepted_handshake_still_works(ws_impl):
     assert _sample(metrics_utils.SKY_APISERVER_WEBSOCKET_HANDSHAKES_TOTAL,
                    path=_WS_PATH,
                    outcome='accepted',
-                   client_status='101') == 1.0
+                   status='101') == 1.0
 
 
 @pytest.mark.asyncio
@@ -261,7 +259,7 @@ async def test_rejection_reaches_the_client_with_status_headers_and_body(
     assert _sample(metrics_utils.SKY_APISERVER_WEBSOCKET_HANDSHAKES_TOTAL,
                    path=_WS_PATH,
                    outcome='rejected',
-                   client_status='503') == 1.0
+                   status='503') == 1.0
     assert _sample(metrics_utils.SKY_APISERVER_REQUEST_REJECTIONS_TOTAL,
                    reason=middleware_utils.REJECT_REASON_AUTH_WORKER_EXHAUSTED,
                    status='503',
@@ -283,7 +281,7 @@ async def test_rejection_without_the_extension_is_the_old_empty_403(ws_impl):
     assert _sample(metrics_utils.SKY_APISERVER_WEBSOCKET_HANDSHAKES_TOTAL,
                    path=_WS_PATH,
                    outcome='rejected',
-                   client_status='403') == 1.0
+                   status='403') == 1.0
     # The stamped reason survives; the status is the one the client saw.
     assert _sample(metrics_utils.SKY_APISERVER_REQUEST_REJECTIONS_TOTAL,
                    reason=middleware_utils.REJECT_REASON_AUTH_WORKER_EXHAUSTED,
@@ -317,4 +315,4 @@ async def test_unrenderable_status_does_not_break_the_server(ws_impl):
     assert _sample(metrics_utils.SKY_APISERVER_WEBSOCKET_HANDSHAKES_TOTAL,
                    path=_WS_PATH,
                    outcome='rejected',
-                   client_status='403') == 1.0
+                   status='403') == 1.0
