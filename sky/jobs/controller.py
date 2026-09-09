@@ -720,12 +720,13 @@ class JobController:
             launch_time = time.time() - launch_start
             logger.info(f'Cluster launch completed in {launch_time:.2f}s')
             assert remote_job_submitted_at is not None, remote_job_submitted_at
-        job_id_on_pool_cluster: Optional[int] = None
+        # The id of the job submitted on the cluster (None if unknown, in
+        # which case the latest job on the cluster is used).
+        submit_cluster_name, job_id_on_pool_cluster = (
+            await managed_job_state.get_pool_submit_info_async(self._job_id))
         if self._pool:
             # Update the cluster name when using pool.
-            cluster_name, job_id_on_pool_cluster = (
-                await
-                managed_job_state.get_pool_submit_info_async(self._job_id))
+            cluster_name = submit_cluster_name
         if cluster_name is None:
             # Check if we have been cancelled here, in the case where a user
             # quickly cancels the job we want to gracefully handle it here,
@@ -1583,11 +1584,12 @@ class JobController:
 
             recovered_time = await executor.recover()
 
-            # Update cluster_name for pools after recovery
+            # Refresh the id of the job submitted on the (new) cluster after
+            # recovery, and the cluster name for pools.
+            pool_cluster_name, job_id_on_pool_cluster = (
+                await
+                managed_job_state.get_pool_submit_info_async(self._job_id))
             if self._pool is not None:
-                pool_cluster_name, job_id_on_pool_cluster = (
-                    await
-                    managed_job_state.get_pool_submit_info_async(self._job_id))
                 assert pool_cluster_name is not None
                 cluster_name = pool_cluster_name
 

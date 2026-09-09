@@ -2553,9 +2553,15 @@ def update_job_full_resources(job_id: int,
         session.commit()
 
 
-async def set_job_id_on_pool_cluster_async(job_id: int,
-                                           job_id_on_pool_cluster: int) -> None:
-    """Set the job id on the pool cluster for a job."""
+async def set_job_id_on_pool_cluster_async(
+        job_id: int, job_id_on_pool_cluster: Optional[int]) -> None:
+    """Set the id of the job submitted on the cluster for a managed job.
+
+    Despite the name, this is recorded for every managed job, not only for
+    pool jobs: the controller uses it to check the status of and fetch the
+    logs for the job it submitted, instead of the latest job on the cluster.
+    None means unknown, in which case the latest job on the cluster is used.
+    """
     engine = await _db_manager.get_async_engine()
     async with sql_async.AsyncSession(engine) as session:
         await session.execute(

@@ -151,6 +151,20 @@ def _consume_task_exception(task: 'asyncio.Future') -> None:
                      f'{common_utils.format_exception(exc)}')
 
 
+def _job_id_from_launch_result(launch_result: Any) -> Optional[int]:
+    """Return the on-cluster job id from a ``sky.launch`` request result.
+
+    ``sky.launch`` returns ``(job_id, handle)``. The job id is None when no
+    job was submitted; anything unexpected is treated the same way, so the
+    caller falls back to the latest job on the cluster.
+    """
+    if isinstance(launch_result, tuple) and len(launch_result) == 2:
+        job_id = launch_result[0]
+        if isinstance(job_id, int) and not isinstance(job_id, bool):
+            return job_id
+    return None
+
+
 class _LaunchRequestParked(Exception):
     """The underlying launch request was parked to wait for a condition.
 
@@ -682,7 +696,7 @@ class StrategyExecutor:
                                                      _stream_and_get)
 
     async def _await_launch_request(self, request_id: str,
-                                    stream_task: 'asyncio.Future') -> None:
+                                    stream_task: 'asyncio.Future') -> Any:
         """Wait for the inner launch request, detecting if it parks.
 
         While waiting on the request's log stream (started by
@@ -699,6 +713,10 @@ class StrategyExecutor:
         while the request is WAITING, so the same stream picks up where it
         left off, with no reconnect and no replayed log lines.
 
+        Returns:
+            The result of the launch request, i.e. the ``(job_id, handle)``
+            tuple returned by ``sky.launch``.
+
         Raises:
             _LaunchRequestParked: The request was parked as WAITING.
             Exception: Any exception raised by the launch request itself.
@@ -708,8 +726,7 @@ class StrategyExecutor:
                 {stream_task}, timeout=_LAUNCH_REQUEST_STATUS_POLL_SECONDS)
             if done:
                 # Surface the exception of the request, if any.
-                stream_task.result()
-                return
+                return stream_task.result()
             try:
                 request_payload = await self._get_request_payload(request_id)
             except Exception as e:  # pylint: disable=broad-except
@@ -1045,8 +1062,9 @@ class StrategyExecutor:
                                                 ).create_future())
                                             stream_task.set_result(result)
                                 assert stream_task is not None
-                                await self._await_launch_request(
-                                    request_id, stream_task)
+                                launch_result = (await
+                                                 self._await_launch_request(
+                                                     request_id, stream_task))
                             except asyncio.CancelledError:
                                 if request_id:
                                     await self._cancel_launch_request(request_id
@@ -1058,6 +1076,16 @@ class StrategyExecutor:
                                     stream_task.add_done_callback(
                                         _consume_task_exception)
                                 raise
+                            # Remember which job sky.launch submitted on the
+                            # cluster, so that status checks and log
+                            # downloads target that job rather than whatever
+                            # job is the latest on the cluster (e.g. a later
+                            # `sky exec` on the same cluster, see #10682).
+                            # None (unknown) falls back to the latest job.
+                            self.job_id_on_pool_cluster = (
+                                _job_id_from_launch_result(launch_result))
+                            await state.set_job_id_on_pool_cluster_async(
+                                self.job_id, self.job_id_on_pool_cluster)
                             logger.info('Managed job cluster launched.')
                         else:
                             # Get task resources from DAG for resource-aware
