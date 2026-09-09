@@ -115,11 +115,12 @@ def test_eof_stops_watching_and_owner_closes_once(loop):
         owner.close()
         assert not _fd_is_open(read_fd)
 
-        # fd-reuse canary: the next pipe takes the lowest free number, i.e.
-        # the one just closed. Nothing may close it behind our back once the
-        # loop runs its pending callbacks and the GC collects the reader.
+        # fd-reuse canary: the next pipe normally takes the lowest free
+        # number, i.e. the one just closed (another thread may grab it first,
+        # so this is not asserted). Nothing may close the canary behind our
+        # back once the loop runs its pending callbacks and the GC collects
+        # the reader.
         canary_r, canary_w = os.pipe()
-        assert read_fd in (canary_r, canary_w)
         del reader
         await _spin(loop)
         os.write(canary_w, b'x')
