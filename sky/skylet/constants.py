@@ -734,7 +734,8 @@ ENV_VAR_DB_POOL_HOSTPORT = (f'{SKYPILOT_ENV_VAR_PREFIX}DB_POOL_HOSTPORT')
 # from the same value (`sky.global_user_state.add_or_update_user`), so read
 # it through `sky.utils.db.db_utils.get_auth_db_timeout_seconds()` rather
 # than from the environment directly: that keeps the two from drifting
-# apart.
+# apart. Server-side only: it is stripped from client request payloads and
+# from the per-request environment overlay on the server.
 ENV_VAR_AUTH_DB_TIMEOUT_SECONDS = (
     f'{SKYPILOT_ENV_VAR_PREFIX}AUTH_DB_TIMEOUT_SECONDS')
 DEFAULT_AUTH_DB_TIMEOUT_SECONDS = 5.0

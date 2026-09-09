@@ -195,13 +195,28 @@ class TestAuthDbTimeoutSetting:
         monkeypatch.setenv(_DEADLINE_ENV, raw)
         assert db_utils.get_auth_db_timeout_seconds() == expected
 
-    @pytest.mark.parametrize('raw', ['abc', '', '0', '-1', 'nan', 'inf'])
+    @pytest.mark.parametrize('raw',
+                             ['abc', '', '0', '-1', 'nan', 'inf', '2147484'])
     def test_nonsensical_values_are_refused_loudly(self, monkeypatch, raw):
         """Not silently replaced by the default: a non-positive deadline
-        would fail every auth call, and `0` disables a Postgres timeout."""
+        would fail every auth call, `0` disables a Postgres timeout, and a
+        deadline above Postgres' 32-bit millisecond range would make the
+        SET LOCAL itself fail on every upsert."""
         monkeypatch.setenv(_DEADLINE_ENV, raw)
         with pytest.raises(ValueError, match=_DEADLINE_ENV):
             db_utils.get_auth_db_timeout_seconds()
+
+    def test_largest_accepted_deadline_fits_postgres_milliseconds(
+            self, monkeypatch):
+        """Boundary: the largest accepted value derives timeouts that are
+        still valid Postgres settings (<= 2147483647 ms); one more second
+        is refused (see above)."""
+        monkeypatch.setenv(_DEADLINE_ENV,
+                           str(db_utils.AUTH_DB_TIMEOUT_MAX_SECONDS))
+        assert (db_utils.get_auth_db_timeout_seconds() ==
+                db_utils.AUTH_DB_TIMEOUT_MAX_SECONDS)
+        for value_ms in global_user_state._user_upsert_timeouts_ms():
+            assert 0 < value_ms <= 2147483647
 
     def test_db_lookup_deadline_comes_from_the_same_source(self):
         """`db_lookup.AUTH_DB_TIMEOUT_SECONDS` is read at import through the

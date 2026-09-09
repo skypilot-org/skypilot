@@ -467,7 +467,10 @@ def _user_upsert_timeouts_ms() -> Tuple[int, int, int]:
     percentage of the configured auth deadline (see the note above).
     Computed per call: the deadline lookup is one environment read, which is
     nothing next to the statements it bounds, and it lets tests vary the
-    deadline.
+    deadline. The read sees the server's own setting only: the variable is
+    stripped from client request payloads and from the per-request
+    environment overlay (`executor.override_request_env_and_config`) before
+    the request worker calls this.
 
     Raises:
         ValueError: if the configured deadline is not a positive number (see
