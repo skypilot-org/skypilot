@@ -720,12 +720,15 @@ class JobController:
             launch_time = time.time() - launch_start
             logger.info(f'Cluster launch completed in {launch_time:.2f}s')
             assert remote_job_submitted_at is not None, remote_job_submitted_at
+        # The id of the job submitted on the cluster (None if unknown, in
+        # which case the latest job on the cluster is used).
+        job_id_on_pool_cluster: Optional[int] = None
         if self._pool:
             # Update the cluster name when using pool.
             cluster_name, job_id_on_pool_cluster = (
                 await
                 managed_job_state.get_pool_submit_info_async(self._job_id))
-        elif job_id_on_pool_cluster is None:
+        else:
             job_id_on_pool_cluster = await self._resolve_job_id_on_cluster(
                 self._strategy_executor)
         if cluster_name is None:
