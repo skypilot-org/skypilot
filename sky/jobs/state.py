@@ -3,6 +3,7 @@
 # that we can easily switch to a s3-based storage.
 import asyncio
 import collections
+import dataclasses
 import datetime
 import enum
 import json
@@ -3932,6 +3933,58 @@ def set_job_info(job_id: int,
         )
         session.execute(insert_stmt)
         session.commit()
+
+
+@dataclasses.dataclass(frozen=True)
+class JobInfoRow:
+    """The job-level row of a managed job (``job_info``), typed.
+
+    ``workspace`` is already resolved: a row from before workspaces existed
+    has none stored and counts as the default workspace, the same way
+    ``get_workspace`` and cancel treat it. ``root_job_id`` /
+    ``parent_job_id`` / ``parent_task_id`` are None for a top-level job.
+    """
+    job_id: int
+    name: Optional[str]
+    workspace: str
+    user_hash: Optional[str]
+    root_job_id: Optional[int]
+    parent_job_id: Optional[int]
+    parent_task_id: Optional[int]
+
+    @property
+    def tree_root_job_id(self) -> int:
+        """The top-level job of this job's tree: its root, else itself."""
+        return self.root_job_id if self.root_job_id is not None else self.job_id
+
+
+def get_job_info_row(job_id: int) -> Optional[JobInfoRow]:
+    """The typed ``job_info`` row of a managed job, or None if there is none.
+
+    Task status is not here (it lives per task in ``spot``); use
+    ``get_status`` for that.
+    """
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
+        row = session.execute(
+            sqlalchemy.select(
+                job_info_table.c.spot_job_id, job_info_table.c.name,
+                job_info_table.c.workspace, job_info_table.c.user_hash,
+                job_info_table.c.root_job_id, job_info_table.c.parent_job_id,
+                job_info_table.c.parent_task_id).where(
+                    job_info_table.c.spot_job_id == job_id)).fetchone()
+    if row is None:
+        return None
+    workspace = row[2]
+    if workspace is None:
+        workspace = constants.SKYPILOT_DEFAULT_WORKSPACE
+    return JobInfoRow(job_id=row[0],
+                      name=row[1],
+                      workspace=workspace,
+                      user_hash=row[3],
+                      root_job_id=row[4],
+                      parent_job_id=row[5],
+                      parent_task_id=row[6])
 
 
 def get_jobs_launched_from(

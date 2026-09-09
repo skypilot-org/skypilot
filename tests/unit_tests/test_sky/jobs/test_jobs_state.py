@@ -2019,6 +2019,35 @@ class TestParentJobLinks:
         assert state.get_jobs_launched_from(
             [root, unrelated, 12345]) == (tree + [(unrelated_child, unrelated)])
 
+    def test_job_info_row(self, _mock_managed_jobs_db_conn):
+        root = self._new_job('root')
+        child = self._new_job('child', parent_job_id=root, parent_task_id=1)
+        row = state.get_job_info_row(child)
+        assert row == state.JobInfoRow(job_id=child,
+                                       name='child',
+                                       workspace='ws',
+                                       user_hash='user1',
+                                       root_job_id=root,
+                                       parent_job_id=root,
+                                       parent_task_id=1)
+        assert row.tree_root_job_id == root
+        root_row = state.get_job_info_row(root)
+        assert root_row is not None
+        assert root_row.root_job_id is None
+        assert root_row.tree_root_job_id == root
+        assert state.get_job_info_row(12345) is None
+
+    def test_job_info_row_resolves_missing_workspace(
+            self, _mock_managed_jobs_db_conn):
+        # A row from before workspaces existed counts as the default one.
+        with _mock_managed_jobs_db_conn.begin() as conn:
+            conn.execute(state.job_info_table.insert().values(spot_job_id=500,
+                                                              name='legacy',
+                                                              workspace=None))
+        row = state.get_job_info_row(500)
+        assert row is not None
+        assert row.workspace == constants.SKYPILOT_DEFAULT_WORKSPACE
+
     def test_queue_returns_link_fields(self, _mock_managed_jobs_db_conn):
         root = self._new_job('root')
         child = self._new_job('child', parent_job_id=root, parent_task_id=1)
