@@ -52,7 +52,15 @@ _MAX_DESCRIBED_THREADS = 8
 # of a dump. It is the only in-process evidence of a descriptor closed under
 # a sleeping thread (see hung_threads.scan_ownerless_sockets).
 _SCAN_INTERVAL_SECONDS = 300.0
+# A saturated executor rejects every submit. The exhaustion path starts a
+# short-lived dump thread to look at the slot holders, at most this often
+# per executor, so a storm of rejections costs the rejecting thread (often
+# the event loop) one thread start per second rather than one per reject.
+_EXHAUSTION_CHECK_INTERVAL_SECONDS = 1.0
 
+# Executors of this process, watched by the watchdog thread. Registration
+# and the watchdog's copy of the set both take _watchdog_lock: a WeakSet
+# raises RuntimeError when it changes size while being iterated.
 _executors: 'weakref.WeakSet[OnDemandThreadExecutor]' = weakref.WeakSet()
 _watchdog_lock = threading.Lock()
 _watchdog_pid: Optional[int] = None
@@ -61,11 +69,13 @@ _last_scan: float = float('-inf')
 _db_peers: Optional[List[Tuple[str, int]]] = None
 
 
-def _ensure_watchdog() -> None:
-    """Start the per-process watchdog thread once (again after a fork)."""
+def _register(executor: 'OnDemandThreadExecutor') -> None:
+    """Add an executor to the watched set and start the per-process watchdog
+    thread the first time (again after a fork)."""
     global _watchdog_pid
     pid = os.getpid()
     with _watchdog_lock:
+        _executors.add(executor)
         if _watchdog_pid == pid:
             return
         _watchdog_pid = pid
@@ -75,13 +85,30 @@ def _ensure_watchdog() -> None:
 
 
 def _watchdog_loop() -> None:
+    """Observe every executor, forever. Nothing that happens in one tick may
+    end this thread: it is what reports a stuck process, and _register never
+    starts a second one for the same process."""
     while True:
         time.sleep(_WATCHDOG_INTERVAL_SECONDS)
-        for executor in list(_executors):
-            try:
-                executor.observe()
-            except Exception as e:  # pylint: disable=broad-except
-                logger.debug(f'Executor [{executor.name}] watchdog: {e!r}')
+        try:
+            _watchdog_tick()
+        except Exception as e:  # pylint: disable=broad-except
+            logger.debug(f'Thread executor watchdog tick failed: {e!r}')
+
+
+def _watchdog_tick() -> None:
+    """One pass over the executors of this process."""
+    with _watchdog_lock:
+        # Registration takes the same lock, so an executor being built on
+        # another thread cannot change the set while it is copied. An
+        # executor garbage collected on another thread at this moment can
+        # still make the copy raise; the loop tolerates that.
+        executors = list(_executors)
+    for executor in executors:
+        try:
+            executor.observe()
+        except Exception as e:  # pylint: disable=broad-except
+            logger.debug(f'Executor [{executor.name}] watchdog: {e!r}')
 
 
 def _state_db_peers() -> List[Tuple[str, int]]:
@@ -138,8 +165,9 @@ class _RunningTask(NamedTuple):
 
     @property
     def over_deadline(self) -> bool:
+        # started + age is the clock reading the snapshot was taken at.
         return (self.task.deadline is not None and
-                time.monotonic() > self.task.deadline)
+                self.task.started + self.age > self.task.deadline)
 
 
 class OnDemandThreadExecutor(concurrent.futures.Executor):
@@ -195,6 +223,10 @@ class OnDemandThreadExecutor(concurrent.futures.Executor):
         self._dumped_stuck: FrozenSet[int] = frozenset()
         self._dumped_exhausted: FrozenSet[int] = frozenset()
         self._heartbeat_interval: float = _DUMP_MIN_INTERVAL_SECONDS
+        # When the exhaustion path last started a dump thread. Read and
+        # written without a lock: two rejects in the same instant may both
+        # start one, which the dump's own lock then reconciles.
+        self._last_exhaustion_check: float = float('-inf')
         # Cache the labeled metric children to avoid the label lookup on
         # every submit/complete.
         self._active_gauge: Optional[prom.Gauge] = None
@@ -217,8 +249,7 @@ class OnDemandThreadExecutor(concurrent.futures.Executor):
             self._oldest_age_gauge = (
                 metrics_utils.SKY_APISERVER_THREADS_OLDEST_AGE_SECONDS.labels(
                     pid=pid, name=name))
-        _executors.add(self)
-        _ensure_watchdog()
+        _register(self)
 
     def _cleanup_thread(self, thread: threading.Thread):
         with self._threads_lock:
@@ -227,13 +258,19 @@ class OnDemandThreadExecutor(concurrent.futures.Executor):
     def _snapshot(self) -> List[_RunningTask]:
         """Every running task, oldest first.
 
-        Threads that are no longer alive are dropped: after a fork the child
-        inherits the parent's table but none of its threads.
+        Threads that ran and exited are dropped: after a fork the child
+        inherits the parent's table but none of its threads. A thread that
+        is registered but not started yet (submit() inserts it, then starts
+        it) also reports is_alive() False; it has no ident until it starts,
+        and it must stay, or its task would never be tracked.
         """
         now = time.monotonic()
         items: List[_RunningTask] = []
         with self._threads_lock:
-            dead = [t for t in self._threads if not t.is_alive()]
+            dead = [
+                t for t in self._threads
+                if t.ident is not None and not t.is_alive()
+            ]
             for t in dead:
                 del self._threads[t]
             for thread, task in self._threads.items():
@@ -325,11 +362,20 @@ class OnDemandThreadExecutor(concurrent.futures.Executor):
         rejects every submit, so this dumps only when the threads holding
         the slots (the stuck ones, or the oldest if the executor has no
         threshold) differ from the last exhaustion dump, and never more than
-        once per _DUMP_MIN_INTERVAL_SECONDS. The watchdog heartbeat keeps
-        repeating an unchanged picture at its backed-off interval.
+        once per _DUMP_MIN_INTERVAL_SECONDS; the dump thread itself is
+        started at most once per _EXHAUSTION_CHECK_INTERVAL_SECONDS. The
+        watchdog heartbeat keeps repeating an unchanged picture at its
+        backed-off interval. For an executor without a threshold the slot
+        holders are merely the oldest tasks of a busy pool; describing them
+        once per distinct set is still cheaper than the per-request error
+        the caller logs.
         """
-        if time.monotonic() - self._last_dump < _DUMP_MIN_INTERVAL_SECONDS:
+        now = time.monotonic()
+        if (now - self._last_dump < _DUMP_MIN_INTERVAL_SECONDS or
+                now - self._last_exhaustion_check <
+                _EXHAUSTION_CHECK_INTERVAL_SECONDS):
             return
+        self._last_exhaustion_check = now
 
         def _dump():
             try:

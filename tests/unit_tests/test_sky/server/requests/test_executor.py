@@ -1851,6 +1851,22 @@ def test_auth_and_request_executors_are_distinct():
         _reset_thread_executors()
 
 
+def test_auth_executor_reports_stuck_threads_after_thirty_seconds():
+    """The auth pool is the one production pool with a stuck threshold: its
+    callers give up after a few seconds, so a thread still running at 30 s
+    is holding a slot for nobody. The request pool has none (streams run
+    for hours)."""
+    _reset_thread_executors()
+    try:
+        auth_executor = executor.get_auth_thread_executor()
+        assert auth_executor.max_workers == executor._AUTH_THREADS_LIMIT  # pylint: disable=protected-access
+        assert auth_executor.stuck_after_seconds == 30.0
+        assert executor.get_request_thread_executor(
+        ).stuck_after_seconds is None
+    finally:
+        _reset_thread_executors()
+
+
 def test_saturating_request_executor_does_not_block_auth():
     """The point of the split: streaming work filling the request executor
     must not make authentication fail.

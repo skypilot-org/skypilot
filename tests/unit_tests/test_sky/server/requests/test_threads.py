@@ -6,6 +6,7 @@ import queue
 import sys
 import threading
 import time
+import weakref
 
 import prometheus_client
 import pytest
@@ -381,7 +382,9 @@ def test_exhaustion_dump_describes_blocked_thread(monkeypatch):
             assert f'fd={a.fileno()}' in dump
             assert f'fd {a.fileno()}: socket:[' in dump
             assert 'unix' in dump and 'recv-q=0' in dump
-        # A second exhaustion with the same slot holder dumps nothing.
+        # A second exhaustion moments later starts no dump thread (the
+        # per-second start gate and the 60 s floor). The same-holder check
+        # is covered by test_exhaustion_dump_only_when_slot_holders_change.
         with pytest.raises(exceptions.ConcurrentWorkerExhaustedError):
             executor.submit(dummy_task)
         time.sleep(0.2)
@@ -588,3 +591,208 @@ def test_watchdog_thread_started_once():
     OnDemandThreadExecutor(name='wd_b', max_workers=1).shutdown()
     names = [t.name for t in threading.enumerate()]
     assert names.count('thread-executor-watchdog') == 1
+
+
+def test_snapshot_keeps_registered_but_unstarted_thread(monkeypatch):
+    """submit() registers the thread, then starts it. A snapshot landing in
+    between (a watchdog tick or an exhaustion dump) sees is_alive() False
+    and must not purge the entry, or the task runs untracked for life."""
+    executor = OnDemandThreadExecutor(name='prestart_test',
+                                      max_workers=2,
+                                      stuck_after_seconds=0.05)
+    seen = {}
+    orig_start = threading.Thread.start
+
+    def start_after_snapshot(self):
+        if self.name.startswith('prestart_test-'):
+            # pylint: disable-next=protected-access
+            seen['tracked_during_start'] = len(executor._snapshot())
+        return orig_start(self)
+
+    monkeypatch.setattr(threading.Thread, 'start', start_after_snapshot)
+    release = threading.Event()
+    try:
+        fut = executor.submit(blocking_task, release)
+        assert seen['tracked_during_start'] == 1
+        time.sleep(0.1)
+        # Still tracked, and now past the threshold.
+        assert executor.observe()[0] == 1
+        release.set()
+        assert fut.result(timeout=5) is True
+        assert _wait_for(lambda: executor.observe() == (0, 0.0))
+    finally:
+        release.set()
+        executor.shutdown()
+
+
+class _Registry(weakref.WeakSet):
+    """Stand-in for the module's executor set: iterates in name order (a set
+    has none) and records whether the watchdog lock was held while doing so."""
+
+    def __init__(self):
+        super().__init__()
+        self.locked_during_iteration = []
+
+    def __iter__(self):
+        # pylint: disable-next=protected-access
+        self.locked_during_iteration.append(threads_mod._watchdog_lock.locked())
+        return iter(sorted(super().__iter__(), key=lambda e: e.name))
+
+
+def test_watchdog_tick_isolates_a_failing_executor(monkeypatch):
+    """One executor whose observe() raises must not cost the others their
+    observation, and the tick must return normally."""
+    registry = _Registry()
+    bad = OnDemandThreadExecutor(name='wd_a_bad', max_workers=1)
+    good = OnDemandThreadExecutor(name='wd_b_good', max_workers=1)
+    registry.add(bad)
+    registry.add(good)
+    monkeypatch.setattr(threads_mod, '_executors', registry)
+    observed = []
+
+    def failing_observe():
+        raise RuntimeError('observe failed')
+
+    monkeypatch.setattr(bad, 'observe', failing_observe)
+    monkeypatch.setattr(good, 'observe', lambda: observed.append(1) or (0, 0.0))
+    try:
+        threads_mod._watchdog_tick()  # pylint: disable=protected-access
+        threads_mod._watchdog_tick()  # pylint: disable=protected-access
+    finally:
+        bad.shutdown()
+        good.shutdown()
+    assert observed == [1, 1]
+    # The set is copied under the lock that registration takes, so a
+    # concurrent constructor cannot change it mid-iteration.
+    assert registry.locked_during_iteration == [True, True]
+
+
+def test_watchdog_loop_survives_failed_ticks_under_registration_churn(
+        monkeypatch):
+    """The real loop keeps ticking after ticks raised, while executors are
+    built and dropped on another thread (the WeakSet changes size)."""
+    monkeypatch.setattr(threads_mod, '_WATCHDOG_INTERVAL_SECONDS', 0.001)
+    real_tick = threads_mod._watchdog_tick  # pylint: disable=protected-access
+    state = {'calls': 0, 'good': 0}
+    under_test = {}
+
+    def tick():
+        if threading.current_thread() is not under_test.get('thread'):
+            # The process's own watchdog is not part of this test.
+            return real_tick()
+        state['calls'] += 1
+        if state['calls'] <= 3:
+            raise RuntimeError('Set changed size during iteration')
+        real_tick()
+        state['good'] += 1
+        if state['good'] >= 100:
+            # Ends this loop thread; threading ignores SystemExit silently.
+            raise SystemExit
+        return None
+
+    monkeypatch.setattr(threads_mod, '_watchdog_tick', tick)
+    stop = threading.Event()
+
+    def churn():
+        while not stop.is_set():
+            OnDemandThreadExecutor(name='churn', max_workers=1).shutdown()
+
+    churner = threading.Thread(target=churn, name='churn', daemon=True)
+    loop = threading.Thread(
+        target=threads_mod._watchdog_loop,  # pylint: disable=protected-access
+        name='watchdog-under-test',
+        daemon=True)
+    under_test['thread'] = loop
+    churner.start()
+    loop.start()
+    try:
+        assert _wait_for(lambda: state['good'] >= 100, timeout=20)
+    finally:
+        stop.set()
+        churner.join(timeout=5)
+    loop.join(timeout=5)
+    assert not loop.is_alive()
+    assert state['calls'] >= 103
+
+
+def test_watchdog_dump_floor_applies_to_a_newly_stuck_thread(monkeypatch):
+    """A thread crossing the threshold within the minimum interval of the
+    previous dump waits for the interval; this is the guard that bounds a
+    ramp to one dump per minute per executor."""
+    clock = _fake_clock(monkeypatch)
+    monkeypatch.setattr(threads_mod, '_DUMP_MIN_INTERVAL_SECONDS', 60.0)
+    messages = _capture_warnings(monkeypatch)
+    executor = OnDemandThreadExecutor(name='floor_test',
+                                      max_workers=4,
+                                      stuck_after_seconds=30.0)
+    release = threading.Event()
+    try:
+        fut_a = executor.submit(blocking_task, release)
+        clock.now += 31  # A crosses the threshold and is dumped.
+        assert executor.observe()[0] == 1
+        assert len(messages) == 1
+        fut_b = executor.submit(blocking_task, release)
+        clock.now += 31  # B crosses; only 31 s since the last dump.
+        assert executor.observe()[0] == 2
+        assert len(messages) == 1
+        clock.now += 30  # 61 s since the last dump: B is reported.
+        executor.observe()
+        assert len(messages) == 2
+        assert '2 thread(s) running longer' in messages[1]
+        assert 'unchanged' not in messages[1]
+        release.set()
+        assert fut_a.result(timeout=5) is True
+        assert fut_b.result(timeout=5) is True
+    finally:
+        release.set()
+        executor.shutdown()
+
+
+def test_exhaustion_dump_thread_started_at_most_once_per_second(monkeypatch):
+    """A saturated executor rejects every submit; the reject path must not
+    start a dump thread per rejection once the picture is unchanged."""
+    clock = _fake_clock(monkeypatch)
+    messages = _capture_warnings(monkeypatch)
+    executor = OnDemandThreadExecutor(name='throttle_test', max_workers=1)
+    release = threading.Event()
+    snapshots = []
+    real_snapshot = executor._snapshot  # pylint: disable=protected-access
+
+    def counting_snapshot():
+        snapshots.append(threading.current_thread().name)
+        return real_snapshot()
+
+    def dump_thread_snapshots():
+        return [n for n in snapshots if n.endswith('-exhaustion-dump')]
+
+    monkeypatch.setattr(executor, '_snapshot', counting_snapshot)
+
+    def reject(n):
+        for _ in range(n):
+            with pytest.raises(exceptions.ConcurrentWorkerExhaustedError):
+                executor.submit(dummy_task)
+
+    try:
+        fut = executor.submit(blocking_task, release)
+        reject(50)
+        assert _wait_for(lambda: len(messages) == 1)
+        time.sleep(0.1)
+        assert len(dump_thread_snapshots()) == 1
+        # Past the dump floor, same slot holder: every reject passes the
+        # floor check, but only the first in a second starts a thread.
+        clock.now += 61
+        reject(50)
+        assert _wait_for(lambda: len(dump_thread_snapshots()) == 2)
+        time.sleep(0.1)
+        assert len(dump_thread_snapshots()) == 2
+        assert len(messages) == 1
+        # The next second lets another look happen.
+        clock.now += 1
+        reject(1)
+        assert _wait_for(lambda: len(dump_thread_snapshots()) == 3)
+        assert len(messages) == 1
+        release.set()
+        assert fut.result(timeout=5) is True
+    finally:
+        release.set()
+        executor.shutdown()
