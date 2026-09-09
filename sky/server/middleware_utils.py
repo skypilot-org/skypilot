@@ -74,6 +74,11 @@ def record_rejection(scope: starlette.types.Scope, status_code: int,
     reason = get_rejection_reason(scope)
     if reason is None:
         return
+    if int(status_code) < 400:
+        # A stamp without a refusal: the middleware marked a reason and then
+        # let the request through, and the route answered it. Not a
+        # rejection; this counter must never disagree with the status.
+        return
     # int() first: responses built with an `http.HTTPStatus` member would
     # otherwise label the series `HTTPStatus.SERVICE_UNAVAILABLE`.
     metrics_utils.SKY_APISERVER_REQUEST_REJECTIONS_TOTAL.labels(

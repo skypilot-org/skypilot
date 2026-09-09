@@ -404,6 +404,27 @@ def test_record_rejection_is_a_noop_without_a_stamp():
                    kind='http') == 1.0
 
 
+def test_record_rejection_ignores_a_stamp_on_a_success():
+    """A middleware that stamps a reason and then calls `call_next` leaves a
+    stamp on a 2xx/3xx. That is a misuse, not a rejection; the counter must
+    not say `forbidden` about a request that succeeded."""
+    scope = {
+        'state': {
+            'reject_reason': middleware_utils.REJECT_REASON_FORBIDDEN
+        }
+    }
+    for status_code in (200, http.HTTPStatus.CREATED, 307):
+        middleware_utils.record_rejection(scope, status_code,
+                                          middleware_utils.REJECTION_KIND_HTTP)
+    assert _sample(metrics_utils.SKY_APISERVER_REQUEST_REJECTIONS_TOTAL) == 0.0
+    # The same stamp on a refusal is counted.
+    middleware_utils.record_rejection(scope, 403,
+                                      middleware_utils.REJECTION_KIND_HTTP)
+    assert _sample(metrics_utils.SKY_APISERVER_REQUEST_REJECTIONS_TOTAL,
+                   reason='forbidden',
+                   status='403') == 1.0
+
+
 def test_record_rejection_labels_an_http_status_enum_by_number():
     """Responses are often built with `http.HTTPStatus` members; the label
     must be the number, not `HTTPStatus.SERVICE_UNAVAILABLE`."""
