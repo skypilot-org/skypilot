@@ -6,6 +6,8 @@ underlying cluster in the managed-job timeline.
 """
 import datetime
 
+import pytest
+
 from sky import global_user_state
 from sky.jobs import runner as managed_job_runner
 from sky.jobs import state as managed_job_state
@@ -103,18 +105,24 @@ def test_merge_orders_newest_first_and_truncates(monkeypatch):
         global_user_state.ClusterEventType.STATUS_CHANGE,
         global_user_state.ClusterEventType.LAUNCH_PROGRESS,
     })
-    # Newest first, truncated to limit=3 (drops the oldest 'Job is starting').
+    # Newest first, capped at limit=3. The job's own two transitions keep
+    # their place and the remaining slot goes to the newest cluster event:
+    # a launch can emit more cluster events than the limit, and losing the
+    # job's status sequence to them is the worse failure (see
+    # test_limit_never_starves_the_job_own_timeline).
     reasons = [e['reason'] for e in result]
     assert reasons == [
         'Job has started',
         'Launching (1 pod(s) pending due to Pulling)',
-        'Launching (Kubernetes cluster is autoscaling)',
+        'Job is starting',
     ]
-    # Merged cluster events are tagged as STARTING-phase events.
+    # Merged cluster events are tagged as STARTING-phase events, and carry
+    # the task whose cluster produced them (this used to be hard-coded None,
+    # which made a job group's tasks indistinguishable in the timeline).
     pulling = next(e for e in result if 'Pulling' in e['reason'])
     assert pulling['new_status'] == managed_job_state.ManagedJobStatus.STARTING
     assert pulling['spot_job_id'] == 1
-    assert pulling['task_id'] is None
+    assert pulling['task_id'] == 0
 
 
 def test_pool_jobs_skip_merge(monkeypatch):
@@ -241,6 +249,182 @@ def test_pipeline_uses_per_task_cluster_name(monkeypatch):
 
     # Per-task cluster names, not the shared DAG name 'pipe-1'.
     assert queried_names == ['pipe-0-1', 'pipe-1-1']
+
+
+def test_merged_cluster_events_carry_their_task_id(monkeypatch):
+    """A job group's cluster events must not all report task_id None.
+
+    Otherwise the CLI's TASK column is wrong for every merged row and the
+    events of two tasks are indistinguishable.
+    """
+    job_events = [
+        _job_event('Job is starting',
+                   managed_job_state.ManagedJobStatus.STARTING, 100)
+    ]
+    monkeypatch.setattr(managed_job_state, 'get_job_events',
+                        lambda **kwargs: list(job_events))
+    monkeypatch.setattr(
+        managed_job_state, 'get_managed_job_tasks', lambda job_id: [
+            _task(task_name='grp-0', task_id=0),
+            _task(task_name='grp-1', task_id=1),
+        ])
+    c0 = managed_job_utils.generate_managed_job_cluster_name('grp-0', 1)
+    c1 = managed_job_utils.generate_managed_job_cluster_name('grp-1', 1)
+    by_cluster = {
+        c0: [{
+            'reason': 'Launching (pending: Resources)',
+            'transitioned_at': 110
+        }],
+        c1: [{
+            'reason': 'Launching (pending: Priority)',
+            'transitioned_at': 120
+        }],
+    }
+    monkeypatch.setattr(
+        global_user_state,
+        'get_cluster_events_by_name',
+        lambda name, event_types, limit=None: by_cluster.get(name, []))
+
+    events = core.get_job_events(job_id=1,
+                                 limit=None,
+                                 include_cluster_events=True)
+    merged = {
+        event['reason']: event['task_id']
+        for event in events
+        if 'pending:' in event['reason']
+    }
+    assert merged == {
+        'Launching (pending: Resources)': 0,
+        'Launching (pending: Priority)': 1,
+    }
+
+
+class TestResolveTaskId:
+    """A task name or id is resolved the way `sky jobs logs` accepts it."""
+
+    @staticmethod
+    def _tasks(monkeypatch):
+        monkeypatch.setattr(
+            managed_job_state, 'get_managed_job_tasks', lambda job_id: [
+                _task(task_name='train', task_id=0),
+                _task(task_name='eval', task_id=1),
+            ])
+
+    def test_name_and_id(self, monkeypatch):
+        self._tasks(monkeypatch)
+        assert core._resolve_task_id(1, 'eval') == 1
+        assert core._resolve_task_id(1, 0) == 0
+        # A numeric string is an id, matching the CLI's documented behavior.
+        assert core._resolve_task_id(1, '1') == 1
+
+    def test_unknown_name_or_id_raises(self, monkeypatch):
+        self._tasks(monkeypatch)
+        with pytest.raises(ValueError, match="'nope' not found"):
+            core._resolve_task_id(1, 'nope')
+        with pytest.raises(ValueError, match='Task 9 not found'):
+            core._resolve_task_id(1, 9)
+
+    def test_missing_job_raises(self, monkeypatch):
+        monkeypatch.setattr(managed_job_state, 'get_managed_job_tasks',
+                            lambda job_id: [])
+        with pytest.raises(ValueError, match='Managed job 7 not found'):
+            core._resolve_task_id(7, 'train')
+
+
+def test_limit_never_starves_the_job_own_timeline(monkeypatch):
+    """A chatty launch must not push PENDING/STARTING out of the window.
+
+    The merged list is capped at `limit`, and the cluster side can produce
+    more events than that on its own; the job's transitions are the sequence
+    the timeline is read for, so they keep their place.
+    """
+    job_events = [
+        _job_event('Job submitted to queue',
+                   managed_job_state.ManagedJobStatus.PENDING, 100),
+        _job_event('Job is starting',
+                   managed_job_state.ManagedJobStatus.STARTING, 110),
+    ]
+    monkeypatch.setattr(managed_job_state, 'get_job_events',
+                        lambda **kwargs: list(job_events))
+    monkeypatch.setattr(managed_job_state, 'get_managed_job_tasks',
+                        lambda job_id: [_task()])
+    # 20 cluster events, all newer than the job's own two.
+    monkeypatch.setattr(global_user_state,
+                        'get_cluster_events_by_name',
+                        lambda name, event_types, limit=None: [{
+                            'reason': f'Launching (step {i})',
+                            'transitioned_at': 200 + i
+                        } for i in range(20)][:limit or 20])
+
+    result = core.get_job_events(job_id=1, limit=5, include_cluster_events=True)
+    assert len(result) == 5
+    reasons = [event['reason'] for event in result]
+    # Both job events survive; the rest of the budget goes to the newest
+    # cluster events.
+    assert 'Job submitted to queue' in reasons
+    assert 'Job is starting' in reasons
+    assert sum(1 for r in reasons if r.startswith('Launching')) == 3
+    # Still newest-first overall.
+    stamps = [event['timestamp'].timestamp() for event in result]
+    assert stamps == sorted(stamps, reverse=True)
+
+
+def test_limit_never_starves_the_cluster_events(monkeypatch):
+    """A job with many recoveries must not hide the current launch reason.
+
+    The mirror of test_limit_never_starves_the_job_own_timeline: when the
+    job's own transitions can fill the whole budget, the newest row of all
+    is usually the launch reason the user is waiting on, so the cluster side
+    keeps a floor.
+    """
+    job_events = [
+        _job_event(f'transition {i}',
+                   managed_job_state.ManagedJobStatus.RECOVERING, 100 + i)
+        for i in range(5)
+    ]
+    monkeypatch.setattr(managed_job_state, 'get_job_events',
+                        lambda **kwargs: list(reversed(job_events)))
+    monkeypatch.setattr(managed_job_state, 'get_managed_job_tasks',
+                        lambda job_id: [_task()])
+    monkeypatch.setattr(managed_job_utils, 'generate_managed_job_cluster_name',
+                        lambda name, job_id: f'{name}-{job_id}')
+    monkeypatch.setattr(global_user_state,
+                        'get_cluster_events_by_name',
+                        lambda name, event_types, limit=None: [{
+                            'reason': 'Launching (pending: Resources)',
+                            'transitioned_at': 500
+                        }])
+
+    result = core.get_job_events(job_id=1, limit=5, include_cluster_events=True)
+    reasons = [event['reason'] for event in result]
+    assert len(result) == 5
+    # The newest event of all survives, and it is reported first.
+    assert reasons[0] == 'Launching (pending: Resources)'
+    # The oldest job transition is what gives up its slot.
+    assert 'transition 0' not in reasons
+    assert 'transition 4' in reasons
+
+
+def test_limit_one_returns_the_newest_event_of_either_source(monkeypatch):
+    job_events = [
+        _job_event('Job is starting',
+                   managed_job_state.ManagedJobStatus.STARTING, 100)
+    ]
+    monkeypatch.setattr(managed_job_state, 'get_job_events',
+                        lambda **kwargs: list(job_events))
+    monkeypatch.setattr(managed_job_state, 'get_managed_job_tasks',
+                        lambda job_id: [_task()])
+    monkeypatch.setattr(managed_job_utils, 'generate_managed_job_cluster_name',
+                        lambda name, job_id: f'{name}-{job_id}')
+    monkeypatch.setattr(global_user_state,
+                        'get_cluster_events_by_name',
+                        lambda name, event_types, limit=None: [{
+                            'reason': 'Launching (pending: Resources)',
+                            'transitioned_at': 500
+                        }])
+
+    result = core.get_job_events(job_id=1, limit=1, include_cluster_events=True)
+    assert [e['reason'] for e in result] == ['Launching (pending: Resources)']
 
 
 def test_events_go_through_the_registered_runner(monkeypatch):
