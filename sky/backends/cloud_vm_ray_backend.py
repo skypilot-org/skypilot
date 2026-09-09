@@ -1900,15 +1900,18 @@ class RetryingVmProvisioner(object):
                 # room" is the wrong answer and the caller can say so.
                 logger.warning(common_utils.format_exception(e))
                 failover_history.append(e)
-                if prev_cluster_status is not None or (
-                        launchable_retries_disabled):
-                    # The same two guards the ResourcesUnavailableError branch
-                    # applies, for the same reasons: an existing cluster is
-                    # never failed over for (see _yield_zones, and the
-                    # INIT-only assertion in the tail below), and with no
-                    # registered DAG there is nothing to fail over to. The
-                    # wrapper is what reaches the caller; the history it
-                    # carries is what says this was not a capacity failure.
+                cluster_cannot_fail_over = (
+                    prev_cluster_status is not None and
+                    prev_cluster_status != status_lib.ClusterStatus.INIT)
+                if cluster_cannot_fail_over or launchable_retries_disabled:
+                    # Two cases cannot reach the tail below. An UP or STOPPED
+                    # cluster is never failed over for (see _yield_zones, and
+                    # the INIT-only assertion in that tail) -- but an INIT one
+                    # is, which is why this is not simply "there is an
+                    # existing cluster". And with no registered DAG there is
+                    # nothing to fail over to. The wrapper is what reaches the
+                    # caller; the history it carries is what says this was not
+                    # a capacity failure.
                     raise exceptions.ResourcesUnavailableError(
                         common_utils.format_exception(e),
                         no_failover=True,
