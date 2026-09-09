@@ -1,4 +1,5 @@
 """Unit tests for database utilities with SKY_RUNTIME_DIR environment variable."""
+import asyncio
 import os
 import sqlite3
 from unittest import mock
@@ -61,6 +62,54 @@ async def isolated_database(tmp_path):
         yield conn, str(db_path)
     finally:
         await conn.close()
+
+
+@pytest.mark.asyncio
+async def test_async_write_waits_for_competing_writer(isolated_database):
+    """Async writes use the same lock budget as synchronous writes."""
+    conn, db_path = isolated_database
+    blocker = sqlite3.connect(db_path)
+    blocker.execute('BEGIN IMMEDIATE')
+
+    async def release_writer():
+        # Exceed sqlite3's default five-second timeout.
+        await asyncio.sleep(6)
+        blocker.commit()
+
+    release = asyncio.create_task(release_writer())
+    try:
+        result = await asyncio.wait_for(conn.execute_get_returning_value_async(
+            'INSERT INTO items (value) VALUES (?) RETURNING value',
+            ('after_lock',)),
+                                        timeout=15)
+        assert result == ('after_lock',)
+        assert blocker.execute('SELECT value FROM items').fetchall() == [
+            ('after_lock',)
+        ]
+    finally:
+        await release
+        blocker.close()
+
+
+@pytest.mark.asyncio
+async def test_async_write_fails_when_lock_budget_expires(
+        isolated_database, monkeypatch):
+    """A persistent lock still fails without inserting or retrying the write."""
+    conn, db_path = isolated_database
+    monkeypatch.setattr(db_utils, '_DB_TIMEOUT_S', 0.05)
+    blocker = sqlite3.connect(db_path)
+    blocker.execute('BEGIN IMMEDIATE')
+    try:
+        with pytest.raises(sqlite3.OperationalError,
+                           match='database is locked'):
+            await asyncio.wait_for(conn.execute_get_returning_value_async(
+                'INSERT INTO items (value) VALUES (?) RETURNING value',
+                ('locked',)),
+                                   timeout=2)
+        assert blocker.execute('SELECT value FROM items').fetchall() == []
+    finally:
+        blocker.rollback()
+        blocker.close()
 
 
 @pytest.mark.asyncio
