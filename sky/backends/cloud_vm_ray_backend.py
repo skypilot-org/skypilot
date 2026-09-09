@@ -1899,8 +1899,23 @@ class RetryingVmProvisioner(object):
                 # is the only kind of failure the history holds, "wait for
                 # room" is the wrong answer and the caller can say so.
                 logger.warning(common_utils.format_exception(e))
-                _add_to_blocked_resources(self._blocked_resources, to_provision)
                 failover_history.append(e)
+                if prev_cluster_status is not None or (
+                        launchable_retries_disabled):
+                    # The same two guards the ResourcesUnavailableError branch
+                    # applies, for the same reasons: an existing cluster is
+                    # never failed over for (see _yield_zones, and the
+                    # INIT-only assertion in the tail below), and with no
+                    # registered DAG there is nothing to fail over to. The
+                    # wrapper is what reaches the caller; the history it
+                    # carries is what says this was not a capacity failure.
+                    raise exceptions.ResourcesUnavailableError(
+                        common_utils.format_exception(e),
+                        no_failover=True,
+                        failover_history=failover_history) from e
+                # Otherwise fall through: the tail blocks this candidate and
+                # records it in resource_exceptions, then re-optimizes over
+                # what remains.
             except exceptions.ResourcesUnavailableError as e:
                 failover_history.append(e)
                 if e.no_failover:

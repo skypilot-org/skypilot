@@ -63,6 +63,27 @@ def test_provision_unsupported_error_is_not_a_capacity_failure():
     ])
 
 
+def test_provision_unsupported_error_wrapped_for_an_existing_cluster():
+    """The failover tail is only reachable for a new or INIT cluster.
+
+    An UP/STOPPED cluster never falls through to it -- _yield_zones marks
+    those no_failover, and the tail asserts as much -- so a provisioning
+    failure there has to be wrapped and raised instead of continuing. The
+    wrapper is a ResourcesUnavailableError because that is what callers
+    catch; what tells them this was not a capacity failure is the history it
+    carries, which holds no ResourcesUnavailableError.
+    """
+    original = exceptions.ProvisionUnsupportedError('no way to render this')
+    wrapped = exceptions.ResourcesUnavailableError('no way to render this',
+                                                   no_failover=True,
+                                                   failover_history=[original])
+
+    assert wrapped.no_failover
+    assert not any(
+        isinstance(err, exceptions.ResourcesUnavailableError)
+        for err in wrapped.failover_history)
+
+
 def test_provision_unsupported_error_round_trips():
     """It crosses the client/server boundary like any other launch error."""
     e = exceptions.ProvisionUnsupportedError('no way to render this')
