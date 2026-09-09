@@ -88,9 +88,11 @@ def test_merge_orders_newest_first_and_truncates(monkeypatch):
     captured = {}
 
     def _fake_cluster_events(name, event_types, limit=None):
+        # Two callers now: the merge asks for both types with the budget,
+        # and resolving a torn-down cluster's allocation asks for
+        # launch-progress alone and unbounded.
+        captured.setdefault('calls', []).append((name, set(event_types), limit))
         captured['name'] = name
-        captured['event_types'] = event_types
-        captured['limit'] = limit
         return list(cluster_events)
 
     monkeypatch.setattr(global_user_state, 'get_cluster_events_by_name',
@@ -103,10 +105,10 @@ def test_merge_orders_newest_first_and_truncates(monkeypatch):
     assert captured['name'] == 'my-task-1'
     # Both the milestone sequence and the finer-grained launch progress are
     # requested.
-    assert (set(captured['event_types']) == {
+    assert (3, {
         global_user_state.ClusterEventType.STATUS_CHANGE,
         global_user_state.ClusterEventType.LAUNCH_PROGRESS,
-    })
+    }) in [(limit, types) for _, types, limit in captured['calls']]
     # Newest first, capped at limit=3. The job's own two transitions keep
     # their place and the remaining slot goes to the newest cluster event:
     # a launch can emit more cluster events than the limit, and losing the
@@ -249,8 +251,10 @@ def test_pipeline_uses_per_task_cluster_name(monkeypatch):
 
     core.get_job_events(job_id=1, include_cluster_events=True)
 
-    # Per-task cluster names, not the shared DAG name 'pipe-1'.
-    assert queried_names == ['pipe-0-1', 'pipe-1-1']
+    # Per-task cluster names, not the shared DAG name 'pipe-1'. Each is
+    # asked about twice -- once by the merge, once to resolve a torn-down
+    # cluster's Slurm allocation -- so compare the distinct names.
+    assert list(dict.fromkeys(queried_names)) == ['pipe-0-1', 'pipe-1-1']
 
 
 def test_merged_cluster_events_carry_their_task_id(monkeypatch):
@@ -459,12 +463,17 @@ def test_only_slurm_backed_clusters_resolve_to_an_allocation(monkeypatch):
     }
     monkeypatch.setattr(global_user_state, 'get_cluster_from_name',
                         lambda name, **kwargs: records.get(name))
+    monkeypatch.setattr(global_user_state, 'get_cluster_events_by_name',
+                        lambda *args, **kwargs: [])
     allocations = core._slurm_allocations([('slurm-cluster', 0),
                                            ('k8s-cluster', 1),
                                            ('gone-cluster', 2)])
     # The Slurm cluster name comes from the resources' region, and the sbatch
-    # job name from cluster_name_on_cloud.
-    assert allocations == [('dev-slurm', 'sky-my-task-1-a1b2', 0)]
+    # job name from cluster_name_on_cloud. The cluster that is simply not
+    # there has no recorded allocation either, so it contributes nothing.
+    assert allocations == [
+        core._SlurmAllocation('dev-slurm', 'sky-my-task-1-a1b2', [], 0)
+    ]
 
 
 def test_a_cluster_read_that_fails_is_skipped(monkeypatch):
@@ -716,3 +725,84 @@ def test_a_failure_resolving_the_allocations_is_not_an_error(monkeypatch):
                         lambda name, **kwargs: {'handle': _slurm_handle()})
     assert core.get_job_events(job_id=1,
                                include_cluster_events=True) == job_events
+
+
+def _alloc_event(job_id, slurm_cluster='dev-slurm', at=100):
+    return {
+        'reason': f'Launching (Slurm job {job_id} on {slurm_cluster})',
+        'transitioned_at': at,
+    }
+
+
+def test_a_torn_down_cluster_resolves_from_its_recorded_allocations(
+        monkeypatch):
+    """The point of reading sacct is a job Slurm has already forgotten, and
+    that is exactly when the cluster record is gone too. The events written
+    at submission outlive it."""
+    monkeypatch.setattr(global_user_state, 'get_cluster_from_name',
+                        lambda name, **kwargs: None)
+    monkeypatch.setattr(
+        global_user_state, 'get_cluster_events_by_name',
+        lambda *args, **kwargs: [
+            _alloc_event('17300', at=300),
+            {
+                'reason': 'Launching (pending: Resources; partition: dev)',
+                'transitioned_at': 200
+            },
+            _alloc_event('17269', at=100),
+        ])
+    allocations = core._slurm_allocations([('gone-cluster', 0)])
+    # Both attempts, oldest first, under the one Slurm cluster; the
+    # pending-reason event is not mistaken for an allocation.
+    assert allocations == [
+        core._SlurmAllocation('dev-slurm', None, ['17300', '17269'], 0)
+    ]
+
+
+def test_a_live_cluster_record_wins_over_the_recorded_events(monkeypatch):
+    """The record is authoritative while it exists; the events are the
+    fallback, so a live cluster pays no attention to them."""
+    monkeypatch.setattr(global_user_state, 'get_cluster_from_name',
+                        lambda name, **kwargs: {'handle': _slurm_handle()})
+
+    def _should_not_be_called(*args, **kwargs):
+        raise AssertionError('the events are only the fallback')
+
+    monkeypatch.setattr(global_user_state, 'get_cluster_events_by_name',
+                        _should_not_be_called)
+    assert core._slurm_allocations([
+        ('live-cluster', 0)
+    ]) == [core._SlurmAllocation('dev-slurm', 'sky-my-task-1-a1b2', [], 0)]
+
+
+def test_a_recorded_allocation_is_read_by_id_not_by_name(monkeypatch):
+    """An id needs no time window -- sacct's `-j` puts the job's whole
+    history in scope -- while a name-based query would."""
+    monkeypatch.setattr(managed_job_state, 'get_job_events',
+                        lambda **kwargs: [])
+    monkeypatch.setattr(managed_job_state, 'get_managed_job_tasks',
+                        lambda job_id: [dict(_task(), submitted_at=50)])
+    monkeypatch.setattr(global_user_state, 'get_cluster_from_name',
+                        lambda name, **kwargs: None)
+    monkeypatch.setattr(global_user_state, 'get_cluster_events_by_name',
+                        lambda *args, **kwargs: [_alloc_event('17269')])
+    by_ids = []
+    monkeypatch.setattr(
+        core.slurm_provision_utils,
+        'job_timeline_by_ids',
+        lambda cluster, job_ids, deadline=None:
+        (by_ids.append((cluster, list(job_ids))) or
+         [_entry('ended', 500, 'Slurm allocation 17269 ended: COMPLETED')]))
+
+    def _by_name(*args, **kwargs):
+        raise AssertionError('a recorded allocation is addressed by id')
+
+    monkeypatch.setattr(core.slurm_provision_utils, 'job_timeline', _by_name)
+    result = core.get_job_events(job_id=1, include_cluster_events=True)
+    assert by_ids == [('dev-slurm', ['17269'])]
+    # The recording event is a launch-progress event too, so it also merges
+    # in -- which is how a reader learns the id to pass to sacct themselves.
+    assert [event['reason'] for event in result] == [
+        'Slurm allocation 17269 ended: COMPLETED',
+        'Launching (Slurm job 17269 on dev-slurm)',
+    ]

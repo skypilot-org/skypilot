@@ -612,3 +612,56 @@ def test_the_pure_parses_survived_the_move():
     # passes the answers in as evidence.
     for gone in ('resolve_effective_qos', 'blocking_gres', 'gres_cap_labels'):
         assert not hasattr(sp, gone), gone
+
+
+# --- pending_ahead ordering -----------------------------------------------
+
+
+def _queued(job_id, priority, partition='h200', state='PENDING'):
+    return {
+        'job_id': job_id,
+        'partition': partition,
+        'priority': str(priority),
+        'state': state,
+    }
+
+
+def test_a_higher_priority_job_is_ahead():
+    mine = {'job_id': '100', 'partition': 'h200', 'priority': '500'}
+    sweep = [_queued('99', 900), _queued('101', 10)]
+    assert sp.pending_ahead(sweep, mine) == 1
+
+
+def test_an_older_job_at_the_same_priority_is_ahead():
+    """Measured on a cluster with no multifactor priority: every job reports
+    priority 1, so counting only strictly-higher priorities answered "nothing
+    is ahead of you" while an older job was plainly next. Slurm breaks the tie
+    by submission, which the id orders."""
+    mine = {'job_id': '17269', 'partition': 'dev', 'priority': '1'}
+    sweep = [
+        _queued('17260', 1, partition='dev'),  # older, so ahead
+        _queued('17999', 1, partition='dev'),  # newer, so behind
+    ]
+    assert sp.pending_ahead(sweep, mine) == 1
+
+
+def test_an_array_element_orders_by_its_base_id():
+    mine = {'job_id': '17300_4', 'partition': 'dev', 'priority': '1'}
+    sweep = [_queued('17221_9', 1, partition='dev')]
+    assert sp.pending_ahead(sweep, mine) == 1
+
+
+def test_a_job_in_another_partition_is_not_ahead():
+    mine = {'job_id': '17269', 'partition': 'dev', 'priority': '1'}
+    assert sp.pending_ahead([_queued('17260', 1, partition='cpu')], mine) == 0
+
+
+def test_a_running_job_is_not_counted_as_ahead():
+    mine = {'job_id': '17269', 'partition': 'dev', 'priority': '1'}
+    sweep = [_queued('17260', 1, partition='dev', state='RUNNING')]
+    assert sp.pending_ahead(sweep, mine) == 0
+
+
+def test_an_unparseable_id_at_the_same_priority_is_not_guessed():
+    mine = {'job_id': '17269', 'partition': 'dev', 'priority': '1'}
+    assert sp.pending_ahead([_queued('weird', 1, partition='dev')], mine) == 0

@@ -260,11 +260,22 @@ def partition_node_counts(
 
 def pending_ahead(sweep: List[Dict[str, Any]], job: Dict[str,
                                                          Any]) -> Optional[int]:
-    """Pending jobs sharing a candidate partition with a higher scheduling
-    priority (squeue %Q). None when this job's priority is unknown."""
+    """Pending jobs sharing a candidate partition that Slurm will consider
+    before this one. None when this job's priority is unknown.
+
+    Higher priority (squeue %Q) goes first, and **a tie is broken by job id**.
+    Counting only strictly higher priorities looks equivalent until you meet a
+    cluster with no multifactor priority configured: there every job reports
+    priority 1, every comparison ties, and the answer is always "nothing is
+    ahead of you" while an older job is plainly next in line. Slurm breaks
+    such ties by submission, which the id orders -- so an id lower than
+    ours is ahead, and a job array element's `17221_2` compares by its base
+    number.
+    """
     mine = _int_or_none(job.get('priority'))
     if mine is None:
         return None
+    my_id = _base_job_id(job.get('job_id'))
     partitions = partitions_of(job.get('partition'))
     ahead = 0
     for other in sweep:
@@ -275,9 +286,31 @@ def pending_ahead(sweep: List[Dict[str, Any]], job: Dict[str,
         if not partitions_of(other.get('partition')).intersection(partitions):
             continue
         theirs = _int_or_none(other.get('priority'))
-        if theirs is not None and theirs > mine:
+        if theirs is None:
+            continue
+        if theirs > mine:
             ahead += 1
+        elif theirs == mine and my_id is not None:
+            their_id = _base_job_id(other.get('job_id'))
+            if their_id is not None and their_id < my_id:
+                ahead += 1
     return ahead
+
+
+def _base_job_id(value: Any) -> Optional[int]:
+    """The numeric part of a Slurm job id, for ordering by submission.
+
+    Slurm spells an array element `17221_2` and a heterogeneous component
+    `123+0`; both share the base job's submission order, which is all this is
+    used for.
+    """
+    if value is None:
+        return None
+    head = re.split(r'[_+]', str(value).strip(), maxsplit=1)[0]
+    try:
+        return int(head)
+    except ValueError:
+        return None
 
 
 def _int_or_none(value: Any) -> Optional[int]:

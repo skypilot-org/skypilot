@@ -3,12 +3,13 @@ import datetime
 import ipaddress
 import os
 import pathlib
+import re
 import shlex
 import sys
 import tempfile
 import time
 import typing
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, NamedTuple, Optional, Tuple, Union
 from urllib import parse as urlparse
 import uuid
 
@@ -2028,35 +2029,91 @@ def _resolve_task_id(job_id: int, task: Union[str, int]) -> int:
 _SLURM_TIMELINE_BUDGET_SECONDS = 20
 
 
+class _SlurmAllocation(NamedTuple):
+    """How to ask Slurm about one of a job's allocations.
+
+    Exactly one of ``job_name`` and ``job_ids`` is set: the live cluster
+    record gives the sbatch job name, while the events written at submission
+    give the ids directly.
+    """
+    slurm_cluster: str
+    job_name: Optional[str]
+    job_ids: List[str]
+    task_id: Optional[int]
+
+
+# `Launching (Slurm job 17269 on hyperpod-slurm)`, written by
+# provision/slurm/instance.py when an allocation is submitted.
+_SLURM_ALLOCATION_RE = re.compile(
+    r'^Launching \(Slurm job (?P<job_id>\S+) on (?P<cluster>.+)\)$')
+
+
 def _slurm_allocations(
-    clusters: List[Tuple[str, Optional[int]]]
-) -> List[Tuple[str, str, Optional[int]]]:
-    """``(slurm cluster, sbatch job name, task id)`` per Slurm-backed cluster.
+        clusters: List[Tuple[str, Optional[int]]]) -> List[_SlurmAllocation]:
+    """One entry per Slurm-backed cluster of the job.
 
     A Slurm-backed SkyPilot cluster is one long-running ``sbatch`` allocation
     named after its ``cluster_name_on_cloud``, submitted to the Slurm cluster
     the resources' ``region`` names (see ``provision/slurm/instance.py``).
-    Both facts live on the cluster record, which teardown removes -- so an
-    allocation is resolvable only while its cluster exists, which is the
-    window in which "why is this not running yet" gets asked. A job whose
-    cluster is gone keeps its own transitions and the durations they carry.
+    While the cluster exists its record carries both facts, and that is the
+    authoritative answer.
+
+    Teardown removes the record, so a finished job falls back to the events
+    the provisioner wrote when it submitted each allocation -- which outlive
+    the cluster, and name the allocation by id. That fallback is what makes
+    "why did this wait six hours" answerable after the fact; without it the
+    timeline would only ever be visible while the job was still running.
     """
-    allocations: List[Tuple[str, str, Optional[int]]] = []
+    allocations: List[_SlurmAllocation] = []
     for cluster_name, task_id in clusters:
         try:
             record = global_user_state.get_cluster_from_name(
                 cluster_name, include_user_info=False)
         except Exception as e:  # pylint: disable=broad-except
             logger.debug(f'Failed to read cluster {cluster_name!r}: {e}')
-            continue
+            record = None
         handle = record.get('handle') if record is not None else None
         resources = getattr(handle, 'launched_resources', None)
-        if resources is None or not isinstance(resources.cloud, clouds.Slurm):
+        if resources is not None and isinstance(resources.cloud, clouds.Slurm):
+            name_on_cloud = getattr(handle, 'cluster_name_on_cloud', None)
+            if resources.region and name_on_cloud:
+                allocations.append(
+                    _SlurmAllocation(resources.region, name_on_cloud, [],
+                                     task_id))
+                continue
+        if record is not None:
+            # The cluster is there and is not on Slurm.
             continue
-        name_on_cloud = getattr(handle, 'cluster_name_on_cloud', None)
-        if resources.region and name_on_cloud:
-            allocations.append((resources.region, name_on_cloud, task_id))
+        allocations.extend(_recorded_allocations(cluster_name, task_id))
     return allocations
+
+
+def _recorded_allocations(cluster_name: str,
+                          task_id: Optional[int]) -> List[_SlurmAllocation]:
+    """The allocations of a cluster that no longer exists, from its events.
+
+    One entry per Slurm cluster, carrying every id recorded for it -- a job
+    that recovered submitted more than one, and each is a separate attempt
+    worth reporting.
+    """
+    try:
+        events = global_user_state.get_cluster_events_by_name(
+            cluster_name, [global_user_state.ClusterEventType.LAUNCH_PROGRESS])
+    except Exception as e:  # pylint: disable=broad-except
+        logger.debug(f'Failed to read events of {cluster_name!r}: {e}')
+        return []
+    by_cluster: Dict[str, List[str]] = {}
+    for event in events:
+        match = _SLURM_ALLOCATION_RE.match(str(event.get('reason', '')))
+        if match is None:
+            continue
+        ids = by_cluster.setdefault(match.group('cluster'), [])
+        if match.group('job_id') not in ids:
+            ids.append(match.group('job_id'))
+    return [
+        _SlurmAllocation(slurm_cluster, None, ids, task_id)
+        for slurm_cluster, ids in by_cluster.items()
+    ]
 
 
 def _job_submitted_at(job_id: int) -> int:
@@ -2101,26 +2158,32 @@ def _slurm_timeline_events(
     # true ceiling is this plus whichever read is in flight when it passes.
     deadline = time.monotonic() + _SLURM_TIMELINE_BUDGET_SECONDS
     rows: List[Dict[str, Any]] = []
-    for slurm_cluster, job_name, task_id in allocations:
+    for alloc in allocations:
         if time.monotonic() >= deadline:
             logger.debug(f'Out of time to read the Slurm timeline of job '
-                         f'{job_id}; {job_name!r} on {slurm_cluster} and any '
-                         'later allocation are skipped')
+                         f'{job_id}; {alloc.slurm_cluster} and any later '
+                         'allocation are skipped')
             break
         try:
-            entries = slurm_provision_utils.job_timeline(slurm_cluster,
-                                                         job_name,
-                                                         since,
-                                                         deadline=deadline)
+            if alloc.job_ids:
+                entries = slurm_provision_utils.job_timeline_by_ids(
+                    alloc.slurm_cluster, alloc.job_ids, deadline=deadline)
+            else:
+                assert alloc.job_name is not None, alloc
+                entries = slurm_provision_utils.job_timeline(
+                    alloc.slurm_cluster,
+                    alloc.job_name,
+                    since,
+                    deadline=deadline)
         except Exception as e:  # pylint: disable=broad-except
             # Best-effort, like the cluster-event merge: an unreachable login
             # node must not fail the request.
             logger.debug(f'Failed to read the Slurm timeline of job {job_id} '
-                         f'(allocation {job_name!r} on {slurm_cluster}): {e}')
+                         f'on {alloc.slurm_cluster}: {e}')
             continue
         rows.extend({
             'spot_job_id': job_id,
-            'task_id': task_id,
+            'task_id': alloc.task_id,
             'new_status': None,
             'code': None,
             'reason': entry['text'],

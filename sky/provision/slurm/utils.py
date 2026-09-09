@@ -7,7 +7,8 @@ import re
 import shlex
 import subprocess
 import time
-from typing import Any, Callable, Dict, List, NamedTuple, Optional, Tuple, Union
+from typing import (Any, Callable, Dict, List, NamedTuple, Optional, Sequence,
+                    Tuple, Union)
 
 from paramiko.config import SSHConfig
 
@@ -1605,7 +1606,45 @@ def job_timeline(cluster: str,
         logger.debug(f'Could not read Slurm accounting for {job_name!r} on '
                      f'{cluster}: {e}')
         records = []
+    return _timeline_of(client, cluster, records, job_name, deadline)
 
+
+def job_timeline_by_ids(
+        cluster: str,
+        job_ids: Sequence[str],
+        deadline: Optional[float] = None) -> List[Dict[str, Any]]:
+    """The same timeline, for allocations already known by id.
+
+    This is the path for a job whose cluster has been reclaimed: the ids come
+    from the events written when each allocation was submitted, so nothing
+    has to be looked up by name -- and asking sacct for an id needs no time
+    window, since `-j` puts the job's whole history in scope.
+    """
+    client = _client_for(cluster)
+    if client is None:
+        return []
+    records: List[Dict[str, str]] = []
+    for job_id in job_ids:
+        if deadline is not None and time.monotonic() >= deadline:
+            logger.debug(f'Out of time to read the rest of the Slurm '
+                         f'allocations on {cluster}')
+            break
+        try:
+            records.extend(client.get_job_accounting(job_id))
+        except Exception as e:  # pylint: disable=broad-except
+            logger.debug(f'Could not read Slurm accounting for {job_id} on '
+                         f'{cluster}: {e}')
+    return _timeline_of(client, cluster, records, None, deadline)
+
+
+def _timeline_of(client: 'slurm.SlurmClient', cluster: str,
+                 records: List[Dict[str, str]], job_name: Optional[str],
+                 deadline: Optional[float]) -> List[Dict[str, Any]]:
+    """Entries for ``records``, plus the live diagnosis of a pending one.
+
+    ``job_name`` enables the squeue fallback for a cluster with no accounting;
+    a caller that resolved by id has no name to fall back on and passes None.
+    """
     # Records are grouped by job id, not counted as one run: several records
     # under one id are a requeue's attempts, while several ids are separate
     # allocations that happen to share the name.
@@ -1631,7 +1670,7 @@ def job_timeline(cluster: str,
             logger.debug(f'Out of time to explain pending Slurm jobs '
                          f'{pending_ids} on {cluster}')
         return sorted(entries, key=lambda entry: entry['at'])
-    if not records:
+    if not records and job_name is not None:
         # Nothing from accounting: squeue still knows a queued allocation,
         # and a job that has not started is the one most in need of an
         # answer, so a cluster without slurmdbd is not left silent.

@@ -329,6 +329,35 @@ def _record_pending_reason(cluster_name: str, reason: Optional[str],
                      f'{e}')
 
 
+def _record_allocation(cluster_name: str, slurm_cluster: str,
+                       job_id: str) -> None:
+    """Persist which Slurm allocation backs this cluster.
+
+    The cluster row carries the same two facts -- its resources' region, and
+    cluster_name_on_cloud on the handle -- but teardown removes it, while
+    cluster events outlive it. Recording them is what lets a finished job
+    still be asked what its allocation did, which is the whole reason to read
+    sacct: it is the only source for a job squeue has already forgotten.
+
+    One event per allocation, by id: a recovery submits a new one and adds a
+    row rather than replacing this one, so every attempt stays addressable.
+    The wording follows the launch-progress convention of this module so the
+    row reads sensibly in `sky jobs events`, and it is deliberately distinct
+    from the timeline's own `Slurm allocation ...` sentences.
+    """
+    try:
+        global_user_state.add_cluster_event(
+            cluster_name,
+            new_status=None,
+            reason=f'Launching (Slurm job {job_id} on {slurm_cluster})',
+            event_type=global_user_state.ClusterEventType.LAUNCH_PROGRESS,
+            nop_if_duplicate=True,
+        )
+    except Exception as e:  # pylint: disable=broad-except
+        logger.debug(f'Failed to record the Slurm allocation of '
+                     f'{cluster_name}: {e}')
+
+
 def _make_pending_callback(
     cluster_name: str,
     partition: Optional[str] = None,
@@ -825,6 +854,7 @@ def _create_virtual_instance(
         job_id = existing_jobs[0]
         logger.debug(f'Job with name {cluster_name_on_cloud} already exists '
                      f'(JOBID: {job_id})')
+        _record_allocation(cluster_name, slurm_cluster, job_id)
 
         # Wait for nodes to be allocated (job might be in PENDING state)
         _wait_for_job_nodes(client, job_id, provision_timeout, partition,
@@ -1272,6 +1302,7 @@ touch {sky_cluster_home_dir}/.hushlogin
     logger.debug(f'Successfully submitted Slurm job {job_id} to partition '
                  f'{partition} for cluster {cluster_name_on_cloud} '
                  f'with {num_nodes} nodes')
+    _record_allocation(cluster_name, slurm_cluster, job_id)
 
     _wait_for_job_nodes(client, job_id, provision_timeout, partition,
                         on_pending)
