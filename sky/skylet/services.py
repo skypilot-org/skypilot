@@ -576,7 +576,10 @@ class ManagedJobsServiceImpl(managed_jobsv1_pb2_grpc.ManagedJobsServiceServicer
                     # Batch progress fields
                     is_batch=job.get('is_batch'),
                     batch_total_batches=job.get('batch_total_batches'),
-                    batch_completed_batches=job.get('batch_completed_batches'))
+                    batch_completed_batches=job.get('batch_completed_batches'),
+                    # Parent link (None for top-level jobs)
+                    parent_job_id=job.get('parent_job_id'),
+                    parent_task_id=job.get('parent_task_id'))
                 jobs_info.append(job_info)
 
             return managed_jobsv1_pb2.GetJobTableResponse(

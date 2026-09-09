@@ -217,6 +217,16 @@ job_info_table = sqlalchemy.Table(
     sqlalchemy.Column('last_emergency_recovery_at',
                       sqlalchemy.Float,
                       server_default=None),
+    # The managed job (and task within it) that launched this job, when it
+    # was launched from inside another managed job (e.g. an eval job launched
+    # by a job group's watcher task). NULL for top-level jobs. Written once on
+    # the child's row; parent rows are never mutated.
+    sqlalchemy.Column('parent_job_id',
+                      sqlalchemy.Integer,
+                      server_default=None,
+                      index=True),
+    sqlalchemy.Column('parent_task_id', sqlalchemy.Integer,
+                      server_default=None),
 )
 
 # Separate table for API access token IDs associated with managed jobs.
@@ -503,6 +513,10 @@ def _get_jobs_dict(r: 'row.RowMapping') -> Dict[str, Any]:
         'batch_total_batches': r.get('batch_total_batches'),
         'batch_completed_batches': r.get('batch_completed_batches'),
         'node_names': common_utils.get_display_node_names(r.get('node_names')),
+        # The job/task that launched this job, when launched from inside
+        # another managed job. NULL for top-level jobs.
+        'parent_job_id': r.get('parent_job_id'),
+        'parent_task_id': r.get('parent_task_id'),
     }
 
 
@@ -892,16 +906,17 @@ ControllerPidRecord = collections.namedtuple('ControllerPidRecord', [
 
 
 # === Status transition functions ===
-def set_job_info_without_job_id(
-        name: str,
-        workspace: str,
-        entrypoint: str,
-        pool: Optional[str],
-        pool_hash: Optional[str],
-        user_hash: Optional[str],
-        execution: Optional[str] = None,
-        is_batch: bool = False,
-        file_mounts_blob_id: Optional[str] = None) -> int:
+def set_job_info_without_job_id(name: str,
+                                workspace: str,
+                                entrypoint: str,
+                                pool: Optional[str],
+                                pool_hash: Optional[str],
+                                user_hash: Optional[str],
+                                execution: Optional[str] = None,
+                                is_batch: bool = False,
+                                file_mounts_blob_id: Optional[str] = None,
+                                parent_job_id: Optional[int] = None,
+                                parent_task_id: Optional[int] = None) -> int:
     engine = _db_manager.get_engine()
     with orm.Session(engine) as session:
         if engine.dialect.name == db_utils.SQLAlchemyDialect.SQLITE.value:
@@ -923,6 +938,8 @@ def set_job_info_without_job_id(
             execution=execution,
             is_batch=is_batch,
             file_mounts_blob_id=file_mounts_blob_id,
+            parent_job_id=parent_job_id,
+            parent_task_id=parent_task_id,
         )
 
         if engine.dialect.name == db_utils.SQLAlchemyDialect.SQLITE.value:
@@ -3826,7 +3843,9 @@ def set_job_info(job_id: int,
                  pool_hash: Optional[str],
                  user_hash: Optional[str] = None,
                  execution: Optional[str] = None,
-                 is_batch: bool = False):
+                 is_batch: bool = False,
+                 parent_job_id: Optional[int] = None,
+                 parent_task_id: Optional[int] = None):
     engine = _db_manager.get_engine()
     with orm.Session(engine) as session:
         if engine.dialect.name == db_utils.SQLAlchemyDialect.SQLITE.value:
@@ -3847,9 +3866,64 @@ def set_job_info(job_id: int,
             user_hash=user_hash,
             execution=execution,
             is_batch=is_batch,
+            parent_job_id=parent_job_id,
+            parent_task_id=parent_task_id,
         )
         session.execute(insert_stmt)
         session.commit()
+
+
+def get_parent_job(job_id: int) -> Tuple[Optional[int], Optional[int]]:
+    """Return (parent_job_id, parent_task_id) for a job, or (None, None)."""
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
+        row = session.execute(
+            sqlalchemy.select(
+                job_info_table.c.parent_job_id,
+                job_info_table.c.parent_task_id).where(
+                    job_info_table.c.spot_job_id == job_id)).fetchone()
+        if row is None:
+            return None, None
+        return row[0], row[1]
+
+
+def get_children_job_ids(job_id: int) -> List[int]:
+    """Return the ids of jobs whose parent_job_id is ``job_id``."""
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
+        rows = session.execute(
+            sqlalchemy.select(job_info_table.c.spot_job_id).where(
+                job_info_table.c.parent_job_id == job_id).order_by(
+                    job_info_table.c.spot_job_id.asc())).fetchall()
+        return [row[0] for row in rows]
+
+
+def get_descendant_job_ids(job_ids: List[int]) -> List[int]:
+    """Return every descendant of ``job_ids`` (children, grandchildren, ...).
+
+    Breadth-first, one query per tree level. The input ids themselves are not
+    included. Cycles cannot occur (a child is always created after its
+    parent and the link is never rewritten), but the visited set guards the
+    walk regardless.
+    """
+    engine = _db_manager.get_engine()
+    descendants: List[int] = []
+    visited = set(job_ids)
+    frontier = list(job_ids)
+    with orm.Session(engine) as session:
+        while frontier:
+            rows = session.execute(
+                sqlalchemy.select(job_info_table.c.spot_job_id).where(
+                    job_info_table.c.parent_job_id.in_(frontier)).order_by(
+                        job_info_table.c.spot_job_id.asc())).fetchall()
+            frontier = []
+            for (child_id,) in rows:
+                if child_id in visited:
+                    continue
+                visited.add(child_id)
+                descendants.append(child_id)
+                frontier.append(child_id)
+    return descendants
 
 
 def reset_jobs_for_recovery() -> None:

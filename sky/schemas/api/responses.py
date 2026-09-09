@@ -254,6 +254,10 @@ class ManagedJobRecord(ResponseBaseModel):
     # within a job group. NULL for non-job-group jobs (single jobs and
     # pipelines).
     is_primary_in_job_group: Optional[bool] = None
+    # The managed job (and task within it) that launched this job, when it
+    # was launched from inside another managed job. None for top-level jobs.
+    parent_job_id: Optional[int] = None
+    parent_task_id: Optional[int] = None
     # Whether this job is a batch coordinator (ds.map())
     is_batch: Optional[bool] = None
     # Batch progress fields (NULL for non-batch jobs)
