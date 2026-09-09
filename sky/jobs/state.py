@@ -927,10 +927,13 @@ def _derive_root_job_id(parent_job_id: Optional[int],
     """
     if root_job_id is not None or parent_job_id is None:
         return root_job_id
-    derived = get_root_job_id(parent_job_id)
-    # An unknown parent (e.g. a remote controller whose DB predates the link)
-    # is still recorded as the root: better a shallow tree than none.
-    return derived if derived is not None else parent_job_id
+    parent_link = get_job_links([parent_job_id]).get(parent_job_id)
+    if parent_link is None:
+        # An unknown parent (e.g. a remote controller whose DB predates the
+        # link) is still recorded as the root: a shallow tree beats none.
+        return parent_job_id
+    parent_root, _, _ = parent_link
+    return parent_root if parent_root is not None else parent_job_id
 
 
 def set_job_info_without_job_id(name: str,
@@ -3904,88 +3907,49 @@ def set_job_info(job_id: int,
         session.commit()
 
 
-def get_root_job_id(job_id: int) -> Optional[int]:
-    """The top-level job of ``job_id``'s tree.
+def get_job_links(
+    job_ids: List[int]
+) -> Dict[int, Tuple[Optional[int], Optional[int], Optional[int]]]:
+    """(root_job_id, parent_job_id, parent_task_id) for each of ``job_ids``.
 
-    ``job_id``'s own ``root_job_id`` if it was launched from another job,
-    else ``job_id`` itself. None if there is no such job.
+    One query. Ids with no row are absent from the result. All three values
+    are None for a top-level job.
     """
-    engine = _db_manager.get_engine()
-    with orm.Session(engine) as session:
-        row = session.execute(
-            sqlalchemy.select(job_info_table.c.root_job_id).where(
-                job_info_table.c.spot_job_id == job_id)).fetchone()
-        if row is None:
-            return None
-        return row[0] if row[0] is not None else job_id
-
-
-def get_tree_job_ids(root_job_id: int) -> List[int]:
-    """Every job launched (at any depth) from top-level job ``root_job_id``.
-
-    One indexed query; the root itself is not included. For the subtree of a
-    non-root job use ``get_descendant_job_ids``.
-    """
+    if not job_ids:
+        return {}
     engine = _db_manager.get_engine()
     with orm.Session(engine) as session:
         rows = session.execute(
-            sqlalchemy.select(job_info_table.c.spot_job_id).where(
-                job_info_table.c.root_job_id == root_job_id).order_by(
-                    job_info_table.c.spot_job_id.asc())).fetchall()
-        return [row[0] for row in rows]
-
-
-def get_parent_job(job_id: int) -> Tuple[Optional[int], Optional[int]]:
-    """Return (parent_job_id, parent_task_id) for a job, or (None, None)."""
-    engine = _db_manager.get_engine()
-    with orm.Session(engine) as session:
-        row = session.execute(
             sqlalchemy.select(
+                job_info_table.c.spot_job_id, job_info_table.c.root_job_id,
                 job_info_table.c.parent_job_id,
                 job_info_table.c.parent_task_id).where(
-                    job_info_table.c.spot_job_id == job_id)).fetchone()
-        if row is None:
-            return None, None
-        return row[0], row[1]
+                    job_info_table.c.spot_job_id.in_(job_ids))).fetchall()
+    return {row[0]: (row[1], row[2], row[3]) for row in rows}
 
 
-def get_children_job_ids(job_id: int) -> List[int]:
-    """Return the ids of jobs whose parent_job_id is ``job_id``."""
+def get_tree_links(
+        root_job_ids: List[int]
+) -> Dict[int, Tuple[Optional[int], Optional[int]]]:
+    """(parent_job_id, parent_task_id) for every job launched, at any depth,
+    from any of the top-level jobs ``root_job_ids``.
+
+    One indexed query on ``root_job_id``; the roots themselves are not
+    included. Any subtree question (cancel this node and everything under
+    it, group these rows for display) is answered in memory from the
+    returned parent links.
+    """
+    if not root_job_ids:
+        return {}
     engine = _db_manager.get_engine()
     with orm.Session(engine) as session:
         rows = session.execute(
-            sqlalchemy.select(job_info_table.c.spot_job_id).where(
-                job_info_table.c.parent_job_id == job_id).order_by(
-                    job_info_table.c.spot_job_id.asc())).fetchall()
-        return [row[0] for row in rows]
-
-
-def get_descendant_job_ids(job_ids: List[int]) -> List[int]:
-    """Return every descendant of ``job_ids`` (children, grandchildren, ...).
-
-    Breadth-first, one query per tree level. The input ids themselves are not
-    included. Cycles cannot occur (a child is always created after its
-    parent and the link is never rewritten), but the visited set guards the
-    walk regardless.
-    """
-    engine = _db_manager.get_engine()
-    descendants: List[int] = []
-    visited = set(job_ids)
-    frontier = list(job_ids)
-    with orm.Session(engine) as session:
-        while frontier:
-            rows = session.execute(
-                sqlalchemy.select(job_info_table.c.spot_job_id).where(
-                    job_info_table.c.parent_job_id.in_(frontier)).order_by(
+            sqlalchemy.select(
+                job_info_table.c.spot_job_id, job_info_table.c.parent_job_id,
+                job_info_table.c.parent_task_id).where(
+                    job_info_table.c.root_job_id.in_(root_job_ids)).order_by(
                         job_info_table.c.spot_job_id.asc())).fetchall()
-            frontier = []
-            for (child_id,) in rows:
-                if child_id in visited:
-                    continue
-                visited.add(child_id)
-                descendants.append(child_id)
-                frontier.append(child_id)
-    return descendants
+    return {row[0]: (row[1], row[2]) for row in rows}
 
 
 def reset_jobs_for_recovery() -> None:
