@@ -1706,6 +1706,14 @@ class PrometheusMiddleware:
     Duration is measured from entry into this layer, i.e. it includes the
     time the authentication middlewares spend (DB lookups under their
     deadline): it is the latency the client observed.
+
+    Recording fails open. Every recording call (counters, histograms, the
+    route-template lookup, the rejection counters) runs under
+    `middleware_utils.record_safely`: an exception there is logged
+    (rate-limited per process) and dropped, the ASGI message that triggered
+    it is forwarded to the client unchanged, and the response stream is not
+    altered. Exceptions raised by the wrapped application are not caught:
+    they are counted as a 500 and re-raised for Starlette's error handler.
     """
 
     def __init__(self, app: starlette.types.ASGIApp):
@@ -1737,25 +1745,38 @@ class PrometheusMiddleware:
         app, root_path = scope.get('app'), scope.get('root_path', '')
         started = False
 
+        def record_response(message: starlette.types.Message) -> None:
+            self._record_http(scope, int(message['status']), start_time, app,
+                              root_path)
+
+        def record_unhandled_exception() -> None:
+            # Escaped every inner layer; Starlette's ServerErrorMiddleware
+            # (outside us) turns it into a bare 500. Count what the client
+            # sees.
+            scope['state'].setdefault(
+                middleware_utils.REJECT_REASON_STATE_KEY,
+                middleware_utils.REJECT_REASON_UNHANDLED_EXCEPTION)
+            self._record_http(scope, 500, start_time, app, root_path)
+
         async def send_wrapper(message: starlette.types.Message) -> None:
             nonlocal started
-            if message['type'] == 'http.response.start' and not started:
+            # Fail-open: recording runs under record_safely, so whatever
+            # happens in the metrics path the original message is forwarded
+            # unchanged. `started` is set first so a failed recording is not
+            # retried on a later message.
+            if not started and message.get('type') == 'http.response.start':
                 started = True
-                self._record_http(scope, int(message['status']), start_time,
-                                  app, root_path)
+                middleware_utils.record_safely('HTTP response', record_response,
+                                               message)
             await send(message)
 
         try:
             await self.app(scope, receive, send_wrapper)
         except Exception:  # pylint: disable=broad-except
             if not started:
-                # Escaped every inner layer; Starlette's ServerErrorMiddleware
-                # (outside us) turns it into a bare 500. Count what the client
-                # sees, then let it propagate.
-                scope['state'].setdefault(
-                    middleware_utils.REJECT_REASON_STATE_KEY,
-                    middleware_utils.REJECT_REASON_UNHANDLED_EXCEPTION)
-                self._record_http(scope, 500, start_time, app, root_path)
+                middleware_utils.record_safely('unhandled HTTP exception',
+                                               record_unhandled_exception)
+            # Always let the application's exception propagate.
             raise
 
     def _record_http(self,
@@ -1809,33 +1830,51 @@ class PrometheusMiddleware:
             self._record_handshake(scope, accepted, client_status, app,
                                    root_path)
 
+        def record_http_rejection(message: starlette.types.Message) -> None:
+            record(accepted=False, client_status=int(message['status']))
+
+        def record_unhandled_exception() -> None:
+            # uvicorn answers an exception before the accept with an HTTP 500
+            # handshake response.
+            scope['state'].setdefault(
+                middleware_utils.REJECT_REASON_STATE_KEY,
+                middleware_utils.REJECT_REASON_UNHANDLED_EXCEPTION)
+            record(accepted=False, client_status=500)
+
         async def send_wrapper(message: starlette.types.Message) -> None:
             nonlocal settled
-            message_type = message['type']
+            # Fail-open, as in _handle_http: the handshake message is
+            # forwarded unchanged whatever happens in the metrics path.
             if not settled:
+                message_type = message.get('type')
                 if message_type == 'websocket.accept':
                     settled = True
-                    record(accepted=True, client_status=101)
+                    middleware_utils.record_safely('WebSocket handshake',
+                                                   record,
+                                                   accepted=True,
+                                                   client_status=101)
                 elif message_type == 'websocket.close':
                     # A close before accept: servers render it as an empty
                     # HTTP 403 whatever the close code says.
                     settled = True
-                    record(accepted=False, client_status=403)
+                    middleware_utils.record_safely('WebSocket handshake',
+                                                   record,
+                                                   accepted=False,
+                                                   client_status=403)
                 elif message_type == 'websocket.http.response.start':
                     settled = True
-                    record(accepted=False, client_status=int(message['status']))
+                    middleware_utils.record_safely('WebSocket handshake',
+                                                   record_http_rejection,
+                                                   message)
             await send(message)
 
         try:
             await self.app(scope, receive, send_wrapper)
         except Exception:  # pylint: disable=broad-except
             if not settled:
-                # uvicorn answers an exception before the accept with an
-                # HTTP 500 handshake response.
-                scope['state'].setdefault(
-                    middleware_utils.REJECT_REASON_STATE_KEY,
-                    middleware_utils.REJECT_REASON_UNHANDLED_EXCEPTION)
-                record(accepted=False, client_status=500)
+                middleware_utils.record_safely('unhandled WebSocket exception',
+                                               record_unhandled_exception)
+            # Always let the application's exception propagate.
             raise
 
     def _record_handshake(self,
@@ -1892,7 +1931,16 @@ class PrometheusMiddleware:
         key = (scope.get('type', ''), scope.get('method', ''), path)
         label = self._route_template_cache.get(key)
         if label is None:
-            label = self._resolve_route_template(scope, routes, path, root_path)
+            try:
+                label = self._resolve_route_template(scope, routes, path,
+                                                     root_path)
+            except Exception as e:  # pylint: disable=broad-except
+                # Fail-open: a resolver fault costs this request its route
+                # template, not its count. Not memoized, so a transient fault
+                # is retried on the next request to the path.
+                middleware_utils.note_recording_failure(
+                    'route template resolution', e)
+                return UNMATCHED_PATH_LABEL
             if len(self._route_template_cache) >= _ROUTE_TEMPLATE_CACHE_SIZE:
                 self._route_template_cache.clear()
             self._route_template_cache[key] = label
