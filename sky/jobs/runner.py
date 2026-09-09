@@ -75,6 +75,32 @@ class ManagedJobRunner(Protocol):
     ) -> str:
         ...
 
+    def events(
+        self,
+        *,
+        job_id: int,
+        task_id: Optional[int],
+        task: Optional[Union[str, int]],
+        limit: Optional[int],
+        include_cluster_events: bool,
+    ) -> List[Dict[str, Any]]:
+        """The status-transition timeline of a managed job, newest first.
+
+        Rows are dicts with ``spot_job_id``, ``task_id``, ``new_status``,
+        ``code``, ``reason`` and ``timestamp``.
+
+        Unlike the other methods here this one takes no ``handle`` or
+        ``backend``: the answer comes from the jobs database and from the
+        cluster's own events, and nothing is asked of the controller. The
+        extension point exists so a runner can add what the infrastructure
+        knows about the same job -- on Slurm, what the allocation waited on
+        and for how long -- which the default implementation cannot read.
+
+        ``include_cluster_events`` merges the underlying cluster's
+        launch-progress events into the timeline; ``limit`` caps the merged
+        result, with neither source allowed to crowd out the other entirely.
+        """
+
     def tail_managed_job_logs(
         self,
         *,

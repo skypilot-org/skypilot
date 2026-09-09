@@ -357,6 +357,21 @@ class _DefaultManagedJobRunner:
                 raise RuntimeError(e.error_msg) from e
         return stdout
 
+    def events(
+        self,
+        *,
+        job_id: int,
+        task_id: Optional[int],
+        task: Optional[Union[str, int]],
+        limit: Optional[int],
+        include_cluster_events: bool,
+    ) -> List[Dict[str, Any]]:
+        return _job_events(job_id=job_id,
+                           task_id=task_id,
+                           task=task,
+                           limit=limit,
+                           include_cluster_events=include_cluster_events)
+
     def tail_managed_job_logs(
         self,
         *,
@@ -1997,6 +2012,31 @@ def get_job_events(
     task_id: Optional[int] = None,
     limit: Optional[int] = 10,
     include_cluster_events: bool = False,
+    task: Optional[Union[str, int]] = None,
+) -> List[Dict[str, Any]]:
+    """Get task events for a managed job.
+
+    Routed through the registered ``ManagedJobRunner`` so a runner can add
+    what the infrastructure knows about the same job -- on Slurm, what the
+    allocation waited on and for how long. The default implementation
+    answers from the jobs database and the cluster's own events; see
+    ``_job_events`` for the arguments and the row shape.
+    """
+    return managed_job_runner.current().events(
+        job_id=job_id,
+        task_id=task_id,
+        task=task,
+        limit=limit,
+        include_cluster_events=include_cluster_events)
+
+
+def _job_events(
+    *,
+    job_id: int,
+    task_id: Optional[int],
+    task: Optional[Union[str, int]],
+    limit: Optional[int],
+    include_cluster_events: bool,
 ) -> List[Dict[str, Any]]:
     """Get task events for a managed job.
 
@@ -2012,6 +2052,7 @@ def get_job_events(
     Returns:
         List of task event records, ordered newest first.
     """
+    del task  # Resolved by a later change; the protocol carries it already.
     events = managed_job_state.get_job_events(job_id=job_id,
                                               task_id=task_id,
                                               limit=limit)

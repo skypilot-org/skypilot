@@ -7,6 +7,7 @@ underlying cluster in the managed-job timeline.
 import datetime
 
 from sky import global_user_state
+from sky.jobs import runner as managed_job_runner
 from sky.jobs import state as managed_job_state
 from sky.jobs import utils as managed_job_utils
 from sky.jobs.server import core
@@ -240,3 +241,45 @@ def test_pipeline_uses_per_task_cluster_name(monkeypatch):
 
     # Per-task cluster names, not the shared DAG name 'pipe-1'.
     assert queried_names == ['pipe-0-1', 'pipe-1-1']
+
+
+def test_events_go_through_the_registered_runner(monkeypatch):
+    """The whole point of the indirection: a runner can answer with what the
+    infrastructure knows about the job, which the default cannot read."""
+    calls = []
+
+    class _Runner:
+
+        def events(self, **kwargs):
+            calls.append(kwargs)
+            return [_job_event('from the runner', None, 1)]
+
+    monkeypatch.setattr(managed_job_runner, '_current', _Runner())
+    result = core.get_job_events(job_id=7,
+                                 task_id=1,
+                                 limit=5,
+                                 include_cluster_events=True,
+                                 task='train')
+    assert [event['reason'] for event in result] == ['from the runner']
+    # Every argument is passed through; nothing is interpreted on the way.
+    assert calls == [{
+        'job_id': 7,
+        'task_id': 1,
+        'task': 'train',
+        'limit': 5,
+        'include_cluster_events': True,
+    }]
+
+
+def test_the_default_runner_still_reads_the_database(monkeypatch):
+    """Overriding must be a choice, not the only path: with nothing
+    registered the answer is the same as before the indirection existed."""
+    job_events = [
+        _job_event('Job has started',
+                   managed_job_state.ManagedJobStatus.RUNNING, 300)
+    ]
+    monkeypatch.setattr(managed_job_state, 'get_job_events',
+                        lambda **kwargs: list(job_events))
+    monkeypatch.setattr(managed_job_runner, '_current', None)
+    assert core.get_job_events(job_id=1,
+                               include_cluster_events=False) == job_events
