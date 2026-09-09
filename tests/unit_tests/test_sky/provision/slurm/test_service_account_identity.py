@@ -30,11 +30,8 @@ def identity_config(monkeypatch):
                     'username_map': {
                         'Machine': 'cluster-svc'
                     },
-                    'default_service_account_user': 'default-a',
                 },
-                'b': {
-                    'default_service_account_user': 'default-b'
-                },
+                'b': {},
             },
         },
     })
@@ -42,6 +39,8 @@ def identity_config(monkeypatch):
     monkeypatch.setattr(skypilot_config, '_get_config_context', lambda: ctx)
     monkeypatch.setattr(common_utils, 'get_current_user',
                         lambda: models.User(id='sa-1234', name='Machine'))
+    monkeypatch.setattr(utils.global_user_state, 'get_service_account_creator',
+                        lambda _: None)
     return config
 
 
@@ -51,14 +50,28 @@ def test_mapping_precedence(identity_config, cluster, expected):
     assert utils.get_submit_user(cluster) == expected
 
 
-@pytest.mark.parametrize('cluster,expected', [('a', 'default-a'),
-                                              ('b', 'default-b')])
-def test_unmapped_service_account_uses_cluster_default(identity_config,
-                                                       monkeypatch, cluster,
-                                                       expected):
-    monkeypatch.setattr(common_utils, 'get_current_user',
-                        lambda: models.User(id='sa-5678', name='inference'))
+@pytest.mark.parametrize('cluster,expected', [('a', 'jane-cluster'),
+                                              ('b', 'jdoe'), ('c', 'jdoe')])
+def test_service_account_uses_creator_mapping(identity_config, monkeypatch,
+                                              cluster, expected):
+    identity_config['slurm']['username_map'].pop('Machine')
+    identity_config['slurm']['cluster_configs']['a']['username_map'] = {
+        'jane.doe@example.com': 'jane-cluster'
+    }
+    identity_config['slurm']['username_map']['jane.doe@example.com'] = 'jdoe'
+    monkeypatch.setattr(
+        utils.global_user_state, 'get_service_account_creator',
+        lambda _: models.User(id='human', name='jane.doe@example.com'))
     assert utils.get_submit_user(cluster) == expected
+
+
+def test_service_account_uses_creator_email_local_part(identity_config,
+                                                       monkeypatch):
+    identity_config['slurm']['username_map'].clear()
+    monkeypatch.setattr(
+        utils.global_user_state, 'get_service_account_creator',
+        lambda _: models.User(id='human', name='jane.doe@example.com'))
+    assert utils.get_submit_user('b') == 'jane.doe'
 
 
 def test_unmapped_service_account_rejected(identity_config, monkeypatch):
@@ -69,7 +82,7 @@ def test_unmapped_service_account_rejected(identity_config, monkeypatch):
         utils.get_submit_user('c')
 
 
-def test_human_ignores_service_default(identity_config, monkeypatch):
+def test_human_uses_email_local_part(identity_config, monkeypatch):
     monkeypatch.setattr(
         common_utils, 'get_current_user',
         lambda: models.User(id='human', name='alice@example.com'))
@@ -91,8 +104,8 @@ def test_invalid_mapping_rejected(identity_config, value):
 def test_schema(identity_config):
     common_utils.validate_schema(identity_config, schemas.get_config_schema(),
                                  '')
-    identity_config['slurm']['cluster_configs']['a'][
-        'default_service_account_user'] = 'svc;id'
+    identity_config['slurm']['cluster_configs']['a']['username_map'][
+        'Machine'] = 'svc;id'
     with pytest.raises(ValueError):
         common_utils.validate_schema(identity_config,
                                      schemas.get_config_schema(), '')
@@ -108,7 +121,9 @@ def test_client_cannot_override_identity(identity_config):
                 },
                 'cluster_configs': {
                     'a': {
-                        'default_service_account_user': 'root'
+                        'username_map': {
+                            'Machine': 'root'
+                        }
                     }
                 },
             }
@@ -235,3 +250,14 @@ def test_sso_username_map_precedence(identity_config, monkeypatch, cluster,
     identity_config['slurm']['cluster_configs']['a']['username_map'][
         'alice@example.com'] = 'alice-cluster'
     assert utils.get_submit_user(cluster) == expected
+
+
+def test_service_account_creator_chain(identity_config, monkeypatch):
+    identity_config['slurm']['username_map'].clear()
+    creators = {
+        'sa-1234': models.User(id='sa-parent', name='parent'),
+        'sa-parent': models.User(id='human', name='jane@example.com'),
+    }
+    monkeypatch.setattr(utils.global_user_state, 'get_service_account_creator',
+                        creators.get)
+    assert utils.get_submit_user('b') == 'jane'

@@ -12,6 +12,7 @@ from paramiko.config import SSHConfig
 
 from sky import clouds
 from sky import exceptions
+from sky import global_user_state
 from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import slurm
@@ -165,14 +166,15 @@ def get_submit_user(cluster_name: str) -> Optional[str]:
         ('slurm', 'cluster_configs', cluster_name), default_value={})
     cluster_mapping = cluster_config.get('username_map', {})
     submit_user = cluster_mapping.get(user.name, mapping.get(user.name))
-    if submit_user is None and user.is_service_account():
-        submit_user = cluster_config.get('default_service_account_user')
-        if submit_user is None:
+    while submit_user is None and user.is_service_account():
+        creator = global_user_state.get_service_account_creator(user.id)
+        if creator is None:
             raise ValueError(
-                f'No Unix user configured for service account {user.name!r} '
+                f'Cannot find the creator of service account {user.name!r} '
                 f'on Slurm cluster {cluster_name!r}. Ask an administrator to '
-                'set slurm.username_map or the cluster-level '
-                'default_service_account_user.')
+                'set slurm.username_map.')
+        user = creator
+        submit_user = cluster_mapping.get(user.name, mapping.get(user.name))
     if submit_user is not None:
         if _SLURM_USER_PATTERN.fullmatch(submit_user) is None:
             raise ValueError(
@@ -180,7 +182,8 @@ def get_submit_user(cluster_name: str) -> Optional[str]:
                 f'user {user.name!r} on Slurm cluster {cluster_name!r}.')
         return submit_user
 
-    user_name = common_utils.get_current_user_name()
+    user_name = user.name
+    assert user_name is not None
     submit_user = user_name.split('@', 1)[0]
     if _SLURM_USER_PATTERN.fullmatch(submit_user) is None:
         raise ValueError(
