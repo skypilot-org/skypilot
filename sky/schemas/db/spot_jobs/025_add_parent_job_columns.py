@@ -32,15 +32,14 @@ depends_on: Union[str, Sequence[str], None] = None
 def upgrade():
     """Add parent_job_id (indexed) and parent_task_id to job_info."""
     with op.get_context().autocommit_block():
+        # Nullable, no default: NULL is "no parent", for existing jobs and
+        # for any insert that leaves the column out.
         db_utils.add_column_to_table_alembic('job_info',
                                              'parent_job_id',
                                              sa.Integer(),
-                                             server_default=None,
                                              index=True)
-        db_utils.add_column_to_table_alembic('job_info',
-                                             'parent_task_id',
-                                             sa.Integer(),
-                                             server_default=None)
+        db_utils.add_column_to_table_alembic('job_info', 'parent_task_id',
+                                             sa.Integer())
 
 
 def downgrade():
