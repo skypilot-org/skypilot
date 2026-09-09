@@ -15,6 +15,7 @@ import uuid
 import colorama
 
 from sky import exceptions
+from sky import global_user_state
 from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import slurm
@@ -292,6 +293,106 @@ def _wait_for_job_nodes(
 
     raise TimeoutError(f'Job {job_id} did not get nodes allocated within '
                        f'{timeout} seconds. Last state: {last_state}')
+
+
+def _record_pending_reason(cluster_name: str, reason: Optional[str],
+                           partition: Optional[str]) -> None:
+    """Persist the squeue pending reason as a cluster launch-progress event.
+
+    The spinner is transient; this makes the reason visible in `sky jobs queue
+    -v` details and in the job's event timeline. Only the reason is
+    recorded (not the pending count) so nop_if_duplicate collapses repeated
+    polls into one event.
+
+    The partition rides along because a reader has no other way to get it: by
+    the time anyone looks at the event the allocation may be gone, and Slurm's
+    reason code alone ('Resources') cannot say *where* the job was waiting.
+    Deliberately not recorded: node counts. They are a snapshot, and a
+    "3 idle nodes" claim still sitting in the event log an hour later is worse
+    than no claim -- a reader that wants counts should ask for them now.
+    """
+    if not reason:
+        return
+    detail = f'pending: {reason}'
+    if partition:
+        detail += f'; partition: {partition}'
+    try:
+        global_user_state.add_cluster_event(
+            cluster_name,
+            new_status=None,
+            reason=f'Launching ({detail})',
+            event_type=global_user_state.ClusterEventType.LAUNCH_PROGRESS,
+            nop_if_duplicate=True,
+        )
+    except Exception as e:  # pylint: disable=broad-except
+        logger.debug(f'Failed to record pending reason for {cluster_name}: '
+                     f'{e}')
+
+
+def _record_allocation(cluster_name: str, slurm_cluster: str,
+                       job_id: str) -> None:
+    """Persist which Slurm allocation backs this cluster.
+
+    The cluster row carries the same two facts -- its resources' region, and
+    cluster_name_on_cloud on the handle -- but teardown removes it, while
+    cluster events outlive it. Recording them is what lets a finished job
+    still be asked what its allocation did, which is the whole reason to read
+    sacct: it is the only source for a job squeue has already forgotten.
+
+    One event per allocation, by id: a recovery submits a new one and adds a
+    row rather than replacing this one, so every attempt stays addressable.
+    The wording follows the launch-progress convention of this module so the
+    row reads sensibly wherever launch progress is shown, and it is
+    deliberately distinct from the sentences a reader of the timeline
+    composes from it.
+    """
+    try:
+        global_user_state.add_cluster_event(
+            cluster_name,
+            new_status=None,
+            reason=f'Launching (Slurm job {job_id} on {slurm_cluster})',
+            event_type=global_user_state.ClusterEventType.LAUNCH_PROGRESS,
+            nop_if_duplicate=True,
+        )
+    except Exception as e:  # pylint: disable=broad-except
+        logger.debug(f'Failed to record the Slurm allocation of '
+                     f'{cluster_name}: {e}')
+
+
+def _make_pending_callback(
+    cluster_name: str,
+    partition: Optional[str] = None,
+) -> Callable[[str, Optional[str], Optional[int]], None]:
+    """Callback for the pending phase of a Slurm allocation.
+
+    Refreshes the launch spinner and records the squeue reason as a cluster
+    event. Both are change-gated: the wait loop polls every few seconds, and
+    the spinner message embeds the pending count (which moves far more often
+    than the reason), so the two need separate memories.
+    """
+    last_status_msg: Optional[str] = None
+    last_recorded_reason: Optional[str] = None
+
+    def _on_pending(state: str, reason: Optional[str],
+                    pending_count: Optional[int]) -> None:
+        nonlocal last_status_msg, last_recorded_reason
+        del state  # unused
+        parts = []
+        if reason:
+            parts.append(f'pending: {reason}')
+        if pending_count is not None and pending_count > 0:
+            word = 'other' if pending_count == 1 else 'others'
+            parts.append(f'{pending_count} {word} pending')
+        msg = f'Launching ({", ".join(parts)})' if parts else 'Launching'
+        status_msg = ux_utils.spinner_message(msg, cluster_name=cluster_name)
+        if status_msg != last_status_msg:
+            rich_utils.force_update_status(status_msg)
+            last_status_msg = status_msg
+        if reason != last_recorded_reason:
+            _record_pending_reason(cluster_name, reason, partition)
+            last_recorded_reason = reason
+
+    return _on_pending
 
 
 def _sky_cluster_home_dir(base_dir: str, cluster_name_on_cloud: str) -> str:
@@ -747,26 +848,7 @@ def _create_virtual_instance(
                  f'job to be allocated on partition {partition}')
 
     num_nodes = config.count
-    last_status_msg = None
-
-    def _on_pending(state: str, reason: Optional[str],
-                    pending_count: Optional[int]) -> None:
-        nonlocal last_status_msg
-        del state  # unused
-        parts = []
-        if reason:
-            parts.append(f'pending: {reason}')
-        if pending_count is not None and pending_count > 0:
-            word = 'other' if pending_count == 1 else 'others'
-            parts.append(f'{pending_count} {word} pending')
-        if parts:
-            msg = f'Launching ({", ".join(parts)})'
-        else:
-            msg = 'Launching'
-        status_msg = ux_utils.spinner_message(msg, cluster_name=cluster_name)
-        if status_msg != last_status_msg:
-            rich_utils.force_update_status(status_msg)
-            last_status_msg = status_msg
+    on_pending = _make_pending_callback(cluster_name, partition)
 
     if existing_jobs:
         assert len(existing_jobs) == 1, (
@@ -776,10 +858,11 @@ def _create_virtual_instance(
         job_id = existing_jobs[0]
         logger.debug(f'Job with name {cluster_name_on_cloud} already exists '
                      f'(JOBID: {job_id})')
+        _record_allocation(cluster_name, slurm_cluster, job_id)
 
         # Wait for nodes to be allocated (job might be in PENDING state)
         _wait_for_job_nodes(client, job_id, provision_timeout, partition,
-                            _on_pending)
+                            on_pending)
         nodes, _ = client.get_job_nodes(job_id)
         # Reset spinner since nodes are now allocated
         rich_utils.force_update_status(
@@ -1223,9 +1306,10 @@ touch {sky_cluster_home_dir}/.hushlogin
     logger.debug(f'Successfully submitted Slurm job {job_id} to partition '
                  f'{partition} for cluster {cluster_name_on_cloud} '
                  f'with {num_nodes} nodes')
+    _record_allocation(cluster_name, slurm_cluster, job_id)
 
     _wait_for_job_nodes(client, job_id, provision_timeout, partition,
-                        _on_pending)
+                        on_pending)
     nodes, _ = client.get_job_nodes(job_id)
     # Reset spinner since nodes are now allocated
     rich_utils.force_update_status(
