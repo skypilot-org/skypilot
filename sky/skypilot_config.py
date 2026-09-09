@@ -1301,6 +1301,41 @@ def get_effective_slurm_account(
                                               partition=partition)
 
 
+def get_effective_slurm_quota_value(
+        key: str,
+        cluster: Optional[str] = None,
+        partition: Optional[str] = None,
+        workspace: Optional[str] = None,
+        override_configs: Optional[Dict[str, Any]] = None) -> Optional[str]:
+    """Returns a ``slurm.quota.<key>`` value, scope-resolved.
+
+    The ``slurm.quota`` block is deliberately permissive
+    (``additionalProperties: True``) so that consumers can carry
+    scheduler-specific sub-fields beyond the ``queue`` and ``account`` that
+    :func:`get_effective_queue_name` and :func:`get_effective_slurm_account`
+    read. This is the generic counterpart to those two: it resolves any such
+    sub-field over the same scopes -- workspace > global, and within each,
+    partition > cluster > cloud -- so a consumer does not have to reimplement
+    the walk and risk resolving its own field differently from ``queue``.
+
+    Args:
+        key: The sub-field under ``slurm.quota`` to read.
+        cluster: Slurm cluster, selecting the ``cluster_configs`` level.
+        partition: Partition, selecting the ``partition_configs`` level.
+        workspace: Workspace to read first; defaults to the active one.
+        override_configs: Task-level ``config`` overrides.
+
+    Returns:
+        The resolved value, or None if the field is unset at every scope.
+    """
+    return _get_effective_scoped_config_value(cloud='slurm',
+                                              property_keys=[('quota', key)],
+                                              region=cluster,
+                                              workspace=workspace,
+                                              override_configs=override_configs,
+                                              partition=partition)
+
+
 def get_effective_namespace(
         cloud: str,
         region: Optional[str] = None,
