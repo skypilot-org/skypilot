@@ -1893,10 +1893,8 @@ class TestParentJobLinks:
                  parent_task_id=None,
                  root_job_id=None,
                  with_task: bool = True) -> int:
-        # Mirror the launch path: the root is the parent's root, else the
-        # parent itself.
-        if parent_job_id is not None and root_job_id is None:
-            root_job_id = state.get_root_job_id(parent_job_id)
+        # root_job_id is normally derived at insert (parent's root, else the
+        # parent); tests pass it only to exercise the explicit path.
         job_id = state.set_job_info_without_job_id(
             name=name,
             workspace='ws',
@@ -1947,7 +1945,6 @@ class TestParentJobLinks:
                            pool=None,
                            pool_hash=None,
                            user_hash='user1',
-                           root_job_id=root,
                            parent_job_id=root,
                            parent_task_id=0)
         assert state.get_parent_job(900) == (root, 0)
@@ -1994,6 +1991,16 @@ class TestParentJobLinks:
         # subtree is the descendant walk.
         assert not state.get_tree_job_ids(c1)
         assert state.get_descendant_job_ids([c1]) == [g1, gg1]
+
+    def test_explicit_root_wins_over_derivation(self,
+                                                _mock_managed_jobs_db_conn):
+        root = self._new_job('root')
+        child = self._new_job('child', parent_job_id=root)
+        # A caller that already knows the root may pass it; it is not
+        # re-derived.
+        grandchild = self._new_job('gc', parent_job_id=child, root_job_id=root)
+        assert state.get_root_job_id(grandchild) == root
+        assert state.get_parent_job(grandchild) == (child, None)
 
     def test_queue_returns_parent_fields(self, _mock_managed_jobs_db_conn):
         root = self._new_job('root')
