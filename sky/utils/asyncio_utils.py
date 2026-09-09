@@ -134,14 +134,15 @@ class NonOwningPipeReader:
 
     Why not `loop.connect_read_pipe(protocol_factory, pipe)`: it hands the
     loop a file object that owns the fd. asyncio's pipe transport closes that
-    object once. uvloop's pipe transport first lets libuv close the fd and
-    then calls `pipe.close()` on the same, already-closed fd number (it
-    swallows the EBADF). CPython releases the GIL between those two closes,
-    so an fd allocated by another thread in that window takes the freed number
-    and is then closed under its owner: a DB socket, a /proc file, another
-    pipe. `add_reader()` / `remove_reader()` never close the fd on either loop
-    (asyncio selectors; libuv `uv_poll`), so with this class the fd has exactly
-    one owner.
+    object once. uvloop's pipe transport closes the fd number twice: once
+    through libuv (`uv_close`) and once through `pipe.close()`; whichever
+    runs second gets EBADF, which is swallowed. The order depends on whether
+    the transport is closed explicitly or torn down by the cyclic GC. CPython
+    releases the GIL around its close(), so an fd allocated by another thread
+    in that window takes the freed number and is then closed under its owner:
+    a DB socket, a /proc file, another pipe. `add_reader()` /
+    `remove_reader()` never close the fd on either loop (asyncio selectors;
+    libuv `uv_poll`), so with this class the fd has exactly one owner.
 
     `start()` switches the fd to non-blocking mode. Do not read it through the
     owning file object while the reader is active.

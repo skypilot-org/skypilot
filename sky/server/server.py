@@ -3428,10 +3428,13 @@ async def kubernetes_pod_ssh_proxy(websocket: fastapi.WebSocket,
     # `loop.connect_read_pipe(..., proc.stdout)` must not be used here: it
     # gives the loop an object that owns the fd. Under uvloop the pipe
     # transport then closes the fd twice on the same number when it is torn
-    # down (libuv `uv_close`, then `proc.stdout.close()` with the EBADF
-    # swallowed), with a GIL release in between. Any other thread that
-    # allocates an fd in that window (a DB connection, a /proc read, a
-    # socket) gets the freed number and has it closed under it.
+    # down: once through libuv (`uv_close`) and once through
+    # `proc.stdout.close()`; whichever runs second gets EBADF, which is
+    # swallowed. The order depends on whether the transport is closed
+    # explicitly or collected by the cyclic GC. CPython releases the GIL
+    # around its close(), so any other thread that allocates an fd in that
+    # window (a DB connection, a /proc read, a socket) gets the freed number
+    # and has it closed under it.
     # NonOwningPipeReader only watches the fd; `proc.stdout` stays its single
     # owner and is closed exactly once in the `finally` below.
     stdout_reader = asyncio_utils.NonOwningPipeReader(loop,
@@ -3490,31 +3493,36 @@ async def kubernetes_pod_ssh_proxy(websocket: fastapi.WebSocket,
             conn_gauge.dec()
         # Unregister the fd from the loop before anything closes it.
         stdout_reader.stop()
-        # poll() reaps the child if it already exited on its own (before the
-        # port-forward came up, or under an active session).
-        exited_on_its_own = proc.poll() is not None
-        if exited_on_its_own and proxying:
-            leftover = stdout_reader.drain()
-            logger.error('kubectl port-forward exited before the ssh '
-                         'websocket connection was closed. Remaining '
-                         f'output: {leftover!r}')
-        if not exited_on_its_own:
-            logger.info('Terminating kubectl port-forward process')
-            proc.terminate()
-            # Reap the kubectl child. `asyncio.create_subprocess_exec` had
-            # this handled by asyncio's child watcher; `subprocess.Popen` is
-            # outside that watcher so we must wait() ourselves or leave a
-            # zombie.
-            try:
-                await asyncio.wait_for(loop.run_in_executor(None, proc.wait),
-                                       timeout=5)
-            except asyncio.TimeoutError:
-                logger.warning(
-                    'kubectl did not exit 5s after SIGTERM; sending SIGKILL.')
-                proc.kill()
-                await loop.run_in_executor(None, proc.wait)
-        # The one and only close of the stdout pipe fd.
-        proc.stdout.close()
+        exited_on_its_own = False
+        try:
+            # poll() reaps the child if it already exited on its own (before
+            # the port-forward came up, or under an active session).
+            exited_on_its_own = proc.poll() is not None
+            if exited_on_its_own and proxying:
+                leftover = stdout_reader.drain()
+                logger.error('kubectl port-forward exited before the ssh '
+                             'websocket connection was closed. Remaining '
+                             f'output: {leftover!r}')
+            if not exited_on_its_own:
+                logger.info('Terminating kubectl port-forward process')
+                proc.terminate()
+                # Reap the kubectl child. `asyncio.create_subprocess_exec`
+                # had this handled by asyncio's child watcher;
+                # `subprocess.Popen` is outside that watcher so we must
+                # wait() ourselves or leave a zombie.
+                try:
+                    waiter = loop.run_in_executor(None, proc.wait)
+                    await asyncio.wait_for(waiter, timeout=5)
+                except asyncio.TimeoutError:
+                    logger.warning('kubectl did not exit 5s after SIGTERM; '
+                                   'sending SIGKILL.')
+                    proc.kill()
+                    await loop.run_in_executor(None, proc.wait)
+        finally:
+            # The one and only close of the stdout pipe fd. Unconditional, so
+            # a cancellation or an executor error while waiting for kubectl
+            # cannot skip it.
+            proc.stdout.close()
         if exited_on_its_own or stdout_eof:
             reason = 'KubectlPortForwardExit'
         elif ssh_failed:
