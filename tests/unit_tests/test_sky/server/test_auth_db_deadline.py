@@ -30,20 +30,25 @@ These tests pin the containment behavior:
 # pylint: disable=protected-access,redefined-outer-name,missing-class-docstring
 
 import asyncio
+import concurrent.futures
 import os
+import sqlite3
 import time
 import unittest.mock as mock
 
 import fastapi
+import psycopg2
 import pytest
 import sqlalchemy.exc
 
 from sky import exceptions
 from sky import models
+from sky.metrics import utils as metrics_utils
 from sky.server import server
 from sky.server.auth import db_lookup
 from sky.server.requests import threads
 from sky.skylet import constants
+from sky.utils.db import deadline as db_deadline
 
 # Lookups sleep _SLOW_DB_SECONDS while the deadline is patched to
 # _DEADLINE_SECONDS, so every "slow DB" test trips the deadline quickly and
@@ -653,3 +658,241 @@ class TestServerSideTimeoutMapping:
 
         _assert_retryable_timeout_503(response)
         assert not call_next_sentinel.reached
+
+
+class TestDeadlineHandedToTheDbLayer:
+    """`_run_with_deadline` sets the thread-local deadline the DB layer honours.
+
+    Without it the SET LOCAL listener and the wait callback are inert and the
+    thread is only ever freed by the database -- the pin this change removes.
+    """
+
+    @pytest.mark.asyncio
+    async def test_thread_local_deadline_is_set_inside_the_call(
+            self, monkeypatch):
+        monkeypatch.setattr(db_lookup, 'AUTH_DB_TIMEOUT_SECONDS', 5)
+        seen = {}
+
+        def _probe():
+            seen['deadline'] = db_deadline.get_deadline()
+            seen['now'] = time.monotonic()
+            return 'ok'
+
+        assert await db_lookup.call_with_deadline(_probe) == 'ok'
+        assert seen[
+            'deadline'] is not None, 'no deadline handed to the DB layer'
+        remaining = seen['deadline'] - seen['now']
+        # The inner budget: the 5s deadline minus the client margin.
+        assert 4.0 < remaining <= 5 - db_lookup._CLIENT_DEADLINE_MARGIN_SECONDS
+
+    @pytest.mark.asyncio
+    async def test_request_pool_variant_sets_it_too(self, monkeypatch):
+        monkeypatch.setattr(db_lookup, 'AUTH_DB_TIMEOUT_SECONDS', 5)
+        seen = {}
+
+        def _probe():
+            seen['deadline'] = db_deadline.get_deadline()
+
+        await db_lookup._call_on_request_pool(_probe)
+        assert seen['deadline'] is not None
+
+    @pytest.mark.asyncio
+    async def test_deadline_is_cleared_after_the_call(self, monkeypatch):
+        # One worker thread, so the check runs on the thread the call used.
+        monkeypatch.setattr(db_lookup, 'AUTH_DB_TIMEOUT_SECONDS', 5)
+        pool = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+        try:
+
+            def _boom():
+                raise sqlalchemy.exc.OperationalError(
+                    'stmt', {},
+                    db_deadline.DBDeadlineExceeded('x',
+                                                   reason='client_deadline'))
+
+            await db_lookup._run_with_deadline(pool, lambda: 'ok')
+            with pytest.raises(db_lookup.AuthDBTimeoutError):
+                await db_lookup._run_with_deadline(pool, _boom)
+            assert pool.submit(db_deadline.get_deadline).result(5) is None
+        finally:
+            pool.shutdown(wait=True)
+
+    @pytest.mark.asyncio
+    async def test_a_tiny_budget_still_leaves_a_positive_deadline(
+            self, monkeypatch):
+        monkeypatch.setattr(db_lookup, 'AUTH_DB_TIMEOUT_SECONDS', 0.2)
+        seen = {}
+
+        def _probe():
+            seen['remaining'] = db_deadline.get_deadline() - time.monotonic()
+
+        await db_lookup.call_with_deadline(_probe)
+        assert seen['remaining'] > 0
+
+
+def _metric(reason):
+    return metrics_utils.SKY_APISERVER_AUTH_DB_DEADLINE_TOTAL.labels(
+        reason=reason)._value.get()
+
+
+class TestClientSideDeadlineMapping:
+    """What the DB layer raises reaches the middleware as the retryable 503.
+
+    The client-side bounds (the wait callback) raise `DBDeadlineExceeded`; a
+    connection that dropped under the call raises a plain psycopg2 error with
+    no SQLSTATE. Both are the client's bad luck, not a bad request, and must
+    not surface as a bare 500. Real faults still propagate unchanged.
+    """
+
+    @pytest.fixture(autouse=True)
+    def real_deadline(self, monkeypatch):
+        monkeypatch.setattr(db_lookup, 'AUTH_DB_TIMEOUT_SECONDS', 5)
+
+    @pytest.mark.asyncio
+    async def test_client_deadline_becomes_timeout_error(self):
+
+        def _raise():
+            orig = db_deadline.DBDeadlineExceeded(
+                'x', reason='client_deadline_fd_stolen')
+            raise sqlalchemy.exc.OperationalError('stmt', {}, orig)
+
+        before = _metric('client_deadline_fd_stolen')
+        with pytest.raises(db_lookup.AuthDBTimeoutError) as ei:
+            await db_lookup.call_with_deadline(_raise)
+        assert ei.value.reason == 'client_deadline_fd_stolen'
+        assert isinstance(ei.value, asyncio.TimeoutError)
+        assert isinstance(ei.value.__cause__, sqlalchemy.exc.OperationalError)
+        assert _metric('client_deadline_fd_stolen') == before + 1
+
+    @pytest.mark.asyncio
+    async def test_unwrapped_client_deadline_maps(self):
+
+        def _raise():
+            raise db_deadline.DBDeadlineExceeded('x', reason='connect_timeout')
+
+        with pytest.raises(db_lookup.AuthDBTimeoutError) as ei:
+            await db_lookup.call_with_deadline(_raise)
+        assert ei.value.reason == 'connect_timeout'
+
+    @pytest.mark.asyncio
+    async def test_server_timeout_counts_its_reason(self):
+        before = _metric('lock_timeout')
+        with pytest.raises(db_lookup.AuthDBTimeoutError) as ei:
+            await db_lookup.call_with_deadline(_raises_db_error('55P03'))
+        assert ei.value.reason == 'lock_timeout'
+        assert _metric('lock_timeout') == before + 1
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize('orig', [
+        psycopg2.OperationalError('server closed the connection unexpectedly'),
+        psycopg2.InterfaceError('connection already closed'),
+    ])
+    async def test_dropped_connection_becomes_retryable(self, orig):
+
+        def _raise():
+            raise sqlalchemy.exc.OperationalError('stmt', {}, orig)
+
+        before = _metric('db_error')
+        with pytest.raises(db_lookup.AuthDBTimeoutError) as ei:
+            await db_lookup.call_with_deadline(_raise)
+        assert ei.value.reason == 'db_error'
+        assert _metric('db_error') == before + 1
+
+    @pytest.mark.asyncio
+    async def test_dropped_connection_is_a_503_at_the_middleware(
+            self, mock_request, call_next_sentinel):
+        proxy_config = mock.Mock()
+        proxy_config.enabled = True
+        with mock.patch.object(server.server_config,
+                               'load_external_proxy_config',
+                               return_value=proxy_config):
+            middleware = server.AuthProxyMiddleware(app=mock.Mock())
+
+        def _dropped(*args, **kwargs):
+            del args, kwargs
+            raise sqlalchemy.exc.OperationalError(
+                'INSERT INTO users ...', {},
+                psycopg2.OperationalError('SSL SYSCALL error: EOF detected'))
+
+        with mock.patch.object(
+                server,
+                '_extract_user_from_header',
+                return_value=models.User(id='u-1', name='tester')), \
+                mock.patch('sky.global_user_state.add_or_update_user',
+                           _dropped):
+            response = await middleware.dispatch(mock_request,
+                                                 call_next_sentinel)
+        _assert_retryable_timeout_503(response)
+        assert not call_next_sentinel.reached
+
+    @pytest.mark.asyncio
+    async def test_sqlite_operational_error_still_propagates(self):
+        # sqlite3.OperationalError also covers schema errors ("no such
+        # table"); those are real faults, not transient, and stay a 500.
+
+        def _raise():
+            raise sqlalchemy.exc.OperationalError(
+                'stmt', {}, sqlite3.OperationalError('no such table: users'))
+
+        with pytest.raises(sqlalchemy.exc.OperationalError) as ei:
+            await db_lookup.call_with_deadline(_raise)
+        assert not isinstance(ei.value, asyncio.TimeoutError)
+
+    @pytest.mark.asyncio
+    async def test_programming_error_still_propagates(self):
+
+        def _raise():
+            raise sqlalchemy.exc.ProgrammingError(
+                'stmt', {}, psycopg2.ProgrammingError('syntax error'))
+
+        with pytest.raises(sqlalchemy.exc.ProgrammingError):
+            await db_lookup.call_with_deadline(_raise)
+
+    @pytest.mark.asyncio
+    async def test_caller_timeout_still_raises_and_is_counted(
+            self, monkeypatch):
+        # The thread does not give up (a Python-level block, not DB I/O):
+        # wait_for is the backstop, and its firing is the "pinned" alarm.
+        monkeypatch.setattr(db_lookup, 'AUTH_DB_TIMEOUT_SECONDS', 0.1)
+        before = _metric('caller_timeout')
+        with pytest.raises(asyncio.TimeoutError) as ei:
+            await db_lookup.call_with_deadline(lambda: time.sleep(0.6))
+        assert not isinstance(ei.value, db_lookup.AuthDBTimeoutError)
+        assert _metric('caller_timeout') == before + 1
+
+    @pytest.mark.asyncio
+    async def test_a_late_thread_outcome_is_logged(self, monkeypatch):
+        # wait_for released the caller; the thread finishes later. Its outcome
+        # lands on a cancelled future, so the only trace is this log line --
+        # what an operator correlates with a "stuck thread" report.
+        monkeypatch.setattr(db_lookup, 'AUTH_DB_TIMEOUT_SECONDS', 0.1)
+        pool = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+
+        def _late_then_fail():
+            time.sleep(0.5)
+            raise sqlalchemy.exc.OperationalError(
+                'stmt', {},
+                db_deadline.DBDeadlineExceeded('x', reason='client_deadline'))
+
+        try:
+            with mock.patch.object(db_lookup.logger, 'info') as info:
+                with pytest.raises(asyncio.TimeoutError):
+                    await db_lookup._run_with_deadline(pool, _late_then_fail)
+                pool.shutdown(wait=True)  # let the thread finish
+            messages = [str(c.args[0]) for c in info.call_args_list]
+            # Other tests in this module leave late threads of their own
+            # behind (tiny budgets, sleeping stand-ins); pick out ours.
+            late = [m for m in messages if '_late_then_fail' in m]
+            assert late, messages
+            assert 'finished' in late[0] and 'after' in late[0]
+            assert 'client_deadline' in late[0]
+        finally:
+            pool.shutdown(wait=True)
+
+    @pytest.mark.asyncio
+    async def test_an_in_time_outcome_is_not_logged_as_late(self, monkeypatch):
+        monkeypatch.setattr(db_lookup, 'AUTH_DB_TIMEOUT_SECONDS', 5)
+        with mock.patch.object(db_lookup.logger, 'info') as info:
+            assert await db_lookup.call_with_deadline(lambda: 'ok') == 'ok'
+        assert not [
+            c for c in info.call_args_list if 'finished' in str(c.args[0])
+        ]

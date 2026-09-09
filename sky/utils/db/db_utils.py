@@ -20,6 +20,7 @@ from sqlalchemy.ext import asyncio as sqlalchemy_async
 from sky import sky_logging
 from sky.skylet import constants
 from sky.skylet import runtime_utils
+from sky.utils.db import deadline as db_deadline
 from sky.utils.db import sql_metrics
 
 logger = sky_logging.init_logger(__name__)
@@ -793,6 +794,13 @@ def get_engine(
                             pool_pre_ping=True,
                             pool_recycle=1800))
                 sql_metrics.install(_postgres_engine_cache[cache_key], role)
+                # Bound any transaction opened under an auth-path deadline
+                # with SET LOCAL statement/lock/idle-in-transaction timeouts.
+                # Inert unless a thread-local deadline is set, so this is a
+                # no-op for every non-auth caller and for async engines. Keys
+                # on the driver's transaction state, so its position among
+                # the other engine listeners does not matter.
+                db_deadline.install(_postgres_engine_cache[cache_key])
             engine = _postgres_engine_cache[cache_key]
     else:
         assert db_name is not None, 'db_name must be provided for SQLite'

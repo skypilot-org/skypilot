@@ -38,6 +38,7 @@ from sky.utils import registry
 from sky.utils import status_lib
 from sky.utils import yaml_utils
 from sky.utils.db import db_utils
+from sky.utils.db import deadline as db_deadline
 from sky.utils.db import migration_utils
 from sky.utils.db import retries as db_retries
 
@@ -450,6 +451,14 @@ initialize_and_get_db = _db_manager.get_engine
 #   connection (the FATAL was sent while nobody was reading).
 # At the default 5 s deadline these are 3900 / 4000 / 5000 ms.
 #
+# These explicit statements are for callers with no deadline of their own
+# (the request executor's per-request upsert, the user-management
+# endpoints). On the auth path, where the caller sets a thread-local
+# deadline, the engine listener in `sky.utils.db.deadline` sizes the same
+# three timeouts from the *remaining* budget and prepends them to the first
+# statement of the transaction instead (no extra round trips), and the
+# explicit statements are skipped -- see `add_or_update_user`.
+#
 # `SET LOCAL` is transaction-scoped: it applies to this transaction only and
 # resets at COMMIT/ROLLBACK, so it is safe through a transaction-mode
 # connection pooler and leaks nothing into later transactions on the same
@@ -537,8 +546,16 @@ def add_or_update_user(
     if created_at is None:
         created_at = int(time.time())
     with orm.Session(engine) as session:
-        if engine.dialect.name == db_utils.SQLAlchemyDialect.POSTGRESQL.value:
+        if (engine.dialect.name == db_utils.SQLAlchemyDialect.POSTGRESQL.value
+                and not db_deadline.is_bounding(engine)):
             # First statements of the transaction; see the constants above.
+            # Skipped only when this engine's listener in
+            # `sky.utils.db.deadline` is about to bound the transaction itself
+            # (auth-path deadline set AND the listener attached to this
+            # engine): it sizes the same three timeouts from the remaining
+            # budget, with no extra round trips. Callers with no deadline (the
+            # request executor's per-request upsert, the user-management
+            # endpoints) and any engine without the listener keep these.
             _bound_user_upsert_transaction(session)
 
         # Check for duplicate names if not allowed (within the same transaction)
