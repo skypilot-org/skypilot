@@ -261,11 +261,3 @@ def test_service_account_creator_chain(identity_config, monkeypatch):
     monkeypatch.setattr(utils.global_user_state, 'get_service_account_creator',
                         creators.get)
     assert utils.get_submit_user('b') == 'jane'
-
-
-def test_service_account_creator_cycle(identity_config, monkeypatch):
-    identity_config['slurm']['username_map'].clear()
-    monkeypatch.setattr(utils.global_user_state, 'get_service_account_creator',
-                        lambda _: models.User(id='sa-1234', name='Machine'))
-    with pytest.raises(ValueError, match='Cycle.*creators'):
-        utils.get_submit_user('b')

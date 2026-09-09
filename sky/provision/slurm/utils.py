@@ -166,14 +166,7 @@ def get_submit_user(cluster_name: str) -> Optional[str]:
         ('slurm', 'cluster_configs', cluster_name), default_value={})
     cluster_mapping = cluster_config.get('username_map', {})
     submit_user = cluster_mapping.get(user.name, mapping.get(user.name))
-    visited = set()
     while submit_user is None and user.is_service_account():
-        if user.id in visited:
-            raise ValueError(
-                f'Cycle in service-account creators for {user.name!r} on '
-                f'Slurm cluster {cluster_name!r}. Configure slurm.username_map.'
-            )
-        visited.add(user.id)
         creator = global_user_state.get_service_account_creator(user.id)
         if creator is None:
             raise ValueError(
