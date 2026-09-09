@@ -1409,6 +1409,53 @@ def get_cluster_events(
 
 
 @db_retries.retry
+def get_latest_cluster_events(
+    cluster_names: List[str],
+    event_types: List[ClusterEventType],
+) -> Dict[str, Tuple[str, int]]:
+    """{cluster_name: (reason, transitioned_at)} of the newest matching event.
+
+    Looks up by the persisted ``name`` column (like get_cluster_events_by_name)
+    in a single query, so callers can annotate many clusters without a
+    per-cluster round trip. Clusters with no matching event are omitted; the
+    timestamp lets a caller ignore events left by an earlier attempt on a
+    reused cluster name.
+    """
+    if not cluster_names or not event_types:
+        return {}
+    engine = _db_manager.get_engine()
+    type_values = [event_type.value for event_type in event_types]
+    with orm.Session(engine) as session:
+        # Latest transitioned_at per cluster in SQL, so the read does not
+        # grow with a cluster's event history.
+        latest = session.query(
+            cluster_event_table.c.name.label('name'),
+            sqlalchemy.func.max(
+                cluster_event_table.c.transitioned_at).label('latest_at'),
+        ).filter(
+            cluster_event_table.c.name.in_(cluster_names),
+            cluster_event_table.c.type.in_(type_values),
+        ).group_by(cluster_event_table.c.name).subquery()
+        rows = session.query(
+            cluster_event_table.c.name,
+            cluster_event_table.c.reason,
+            cluster_event_table.c.transitioned_at,
+        ).join(
+            latest,
+            sqlalchemy.and_(
+                cluster_event_table.c.name == latest.c.name,
+                cluster_event_table.c.transitioned_at == latest.c.latest_at,
+            ),
+        ).filter(cluster_event_table.c.type.in_(type_values)).all()
+    events: Dict[str, Tuple[str, int]] = {}
+    for name, reason, transitioned_at in rows:
+        # Two events in the same second: keep the first non-empty reason.
+        if name not in events and reason:
+            events[name] = (reason, transitioned_at)
+    return events
+
+
+@db_retries.retry
 def get_cluster_events_by_name(
     cluster_name: str,
     event_types: List[ClusterEventType],
