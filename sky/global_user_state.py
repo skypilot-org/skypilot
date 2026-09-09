@@ -1463,14 +1463,15 @@ def get_latest_cluster_events(
                 ),
             ).filter(cluster_event_table.c.type.in_(type_values)).order_by(
                 cluster_event_table.c.transitioned_at.desc(),
-                # transitioned_at is whole seconds, and a provisioner can
-                # write two events inside one -- the Slurm one records the
-                # allocation and then polls for a reason. Without a second
-                # key the winner is whatever the database happened to
-                # return. Descending reason breaks the tie deterministically
-                # and, for those two, prefers `Launching (pending: ...)`
-                # over `Launching (Slurm job ...)`, which is the one a
-                # reader is asking for.
+                # transitioned_at is whole seconds and the table has no
+                # insertion order to fall back on, so a second key is what
+                # makes the answer stable instead of whatever the database
+                # happened to return. Which row of a tied pair it prefers is
+                # arbitrary: text ordering is the database's collation, and
+                # the same two rows sort the other way round under a locale
+                # collation than under SQLite's binary one. No caller may
+                # rely on the direction -- writers whose rows must not be
+                # confused for each other must not share a second.
                 cluster_event_table.c.reason.desc(),
             ).all()
             for name, reason, transitioned_at in rows:

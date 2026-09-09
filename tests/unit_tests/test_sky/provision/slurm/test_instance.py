@@ -1504,6 +1504,38 @@ class TestRecordAllocation:
         add_event.assert_called_once_with(
             _CLUSTER,
             new_status=None,
+            reason='Slurm allocation 17269 on hyperpod-slurm',
+            event_type=instance.global_user_state.ClusterEventType.DEBUG,
+            nop_if_duplicate=True,
+        )
+
+    def test_the_identity_is_not_a_launch_progress_event(self):
+        """It used to be, and it was written in the same second as the first
+        pending reason -- so which of the two `details` showed came down to
+        the database's text collation, which orders them the other way round
+        under a locale collation than under SQLite's binary one.
+        """
+        with mock.patch.object(instance.global_user_state,
+                               'add_cluster_event') as add_event:
+            instance._record_allocation(_CLUSTER, 'hyperpod-slurm', '17269')
+            instance._record_pending_reason(_CLUSTER, 'Resources', 'dev')
+        types = [c.kwargs['event_type'] for c in add_event.call_args_list]
+        progress = instance.global_user_state.ClusterEventType.LAUNCH_PROGRESS
+        assert types == [
+            instance.global_user_state.ClusterEventType.DEBUG, progress
+        ]
+
+    def test_the_nodes_are_granted_as_launch_progress(self):
+        """The progress half, written once the wait returns: later than any
+        pending reason, so recency alone settles which one a reader sees.
+        """
+        with mock.patch.object(instance.global_user_state,
+                               'add_cluster_event') as add_event:
+            instance._record_nodes_allocated(_CLUSTER, 'hyperpod-slurm',
+                                             '17269')
+        add_event.assert_called_once_with(
+            _CLUSTER,
+            new_status=None,
             reason='Launching (Slurm job 17269 on hyperpod-slurm)',
             event_type=instance.global_user_state.ClusterEventType.
             LAUNCH_PROGRESS,
@@ -1511,16 +1543,18 @@ class TestRecordAllocation:
         )
 
     def test_the_text_does_not_collide_with_a_pending_reason(self):
-        """Both are launch-progress events on the same cluster, and a reader
-        tells them apart by their text alone."""
+        """A reader of the timeline tells the rows apart by their text."""
         with mock.patch.object(instance.global_user_state,
                                'add_cluster_event') as add_event:
             instance._record_allocation(_CLUSTER, 'hyperpod-slurm', '17269')
             allocation = add_event.call_args.kwargs['reason']
+            instance._record_nodes_allocated(_CLUSTER, 'hyperpod-slurm',
+                                             '17269')
+            granted = add_event.call_args.kwargs['reason']
             instance._record_pending_reason(_CLUSTER, 'Resources', 'dev')
             pending = add_event.call_args.kwargs['reason']
-        assert allocation != pending
-        assert 'pending:' not in allocation
+        assert len({allocation, granted, pending}) == 3
+        assert 'pending:' not in allocation and 'pending:' not in granted
         assert 'Slurm job' not in pending
 
     def test_swallows_db_errors(self):
@@ -1529,3 +1563,35 @@ class TestRecordAllocation:
                                'add_cluster_event',
                                side_effect=RuntimeError('db is down')):
             instance._record_allocation(_CLUSTER, 'hyperpod-slurm', '17269')
+            instance._record_nodes_allocated(_CLUSTER, 'hyperpod-slurm',
+                                             '17269')
+
+
+class TestWaitForJobNodes:
+    """The wait loop's ordering, which decides what shares a second."""
+
+    def test_no_pending_reason_is_recorded_once_the_nodes_are_granted(self):
+        """The state read can say CONFIGURING while the nodes land in the same
+        iteration. Recording a reason then would put it in the same whole
+        second as the caller's node-allocated event, leaving the two to be
+        separated by the database's collation alone.
+        """
+        client = mock.MagicMock()
+        client.get_job_state.return_value = 'CONFIGURING'
+        client.check_job_has_nodes.return_value = True
+        on_pending = mock.MagicMock()
+        instance._wait_for_job_nodes(client, '17269', 60, 'dev', on_pending)
+        on_pending.assert_not_called()
+        client.get_job_reason.assert_not_called()
+
+    def test_a_pending_job_still_reports_its_reason(self):
+        """The mirror: the reorder must not silence the wait it is about."""
+        client = mock.MagicMock()
+        client.get_job_state.return_value = 'PENDING'
+        client.check_job_has_nodes.side_effect = [False, True]
+        client.get_job_reason.return_value = 'Resources'
+        client.get_pending_job_count.return_value = 2
+        on_pending = mock.MagicMock()
+        with mock.patch.object(instance.time, 'sleep'):
+            instance._wait_for_job_nodes(client, '17269', 60, 'dev', on_pending)
+        on_pending.assert_called_once_with('PENDING', 'Resources', 2)

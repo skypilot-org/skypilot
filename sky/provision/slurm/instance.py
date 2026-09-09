@@ -271,6 +271,17 @@ def _wait_for_job_nodes(
             raise RuntimeError(f'Job {job_id} terminated with state {state} '
                                'before nodes were allocated.')
 
+        # Checked before the pending branch, not after: the state read above
+        # can say CONFIGURING (or PENDING) while the nodes are granted moments
+        # later in this same iteration, and recording a pending reason then
+        # would write it in the same second as the caller's node-allocated
+        # event. transitioned_at is whole seconds, so those two rows would tie
+        # with nothing but the database's collation to separate them -- the
+        # thing the two event types exist to avoid.
+        if client.check_job_has_nodes(job_id):
+            logger.debug(f'Job {job_id} has nodes allocated')
+            return
+
         if state in ('PENDING', 'CONFIGURING') and on_pending is not None:
             try:
                 reason = client.get_job_reason(job_id)
@@ -284,10 +295,6 @@ def _wait_for_job_nodes(
             except Exception as e:  # pylint: disable=broad-except
                 logger.debug(f'Failed to get pending status for job '
                              f'{job_id}: {e}')
-
-        if client.check_job_has_nodes(job_id):
-            logger.debug(f'Job {job_id} has nodes allocated')
-            return
 
         time.sleep(2)
 
@@ -339,12 +346,39 @@ def _record_allocation(cluster_name: str, slurm_cluster: str,
     still be asked what its allocation did, which is the whole reason to read
     sacct: it is the only source for a job squeue has already forgotten.
 
+    Written at submission, so it survives a job cancelled while it was still
+    queued -- the case most worth asking about afterwards.
+
     One event per allocation, by id: a recovery submits a new one and adds a
     row rather than replacing this one, so every attempt stays addressable.
-    The wording follows the launch-progress convention of this module so the
-    row reads sensibly wherever launch progress is shown, and it is
-    deliberately distinct from the sentences a reader of the timeline
-    composes from it.
+
+    A DEBUG event rather than launch progress: which allocation backs a
+    cluster is metadata. It never changes and the launch is not waiting on it,
+    so it does not belong in the column that says what the launch *is* waiting
+    on -- where it also landed in the same second as the first pending reason,
+    leaving the database's collation to decide which of the two a reader saw.
+    The launch-progress half is recorded once the nodes are granted, by which
+    time it is strictly later than any pending reason.
+    """
+    try:
+        global_user_state.add_cluster_event(
+            cluster_name,
+            new_status=None,
+            reason=f'Slurm allocation {job_id} on {slurm_cluster}',
+            event_type=global_user_state.ClusterEventType.DEBUG,
+            nop_if_duplicate=True,
+        )
+    except Exception as e:  # pylint: disable=broad-except
+        logger.debug(f'Failed to record the Slurm allocation of '
+                     f'{cluster_name}: {e}')
+
+
+def _record_nodes_allocated(cluster_name: str, slurm_cluster: str,
+                            job_id: str) -> None:
+    """Record that the allocation has its nodes, as launch progress.
+
+    Written once the wait returns, so `details` moves from why the queue was
+    waiting to which allocation is now bootstrapping the runtime.
     """
     try:
         global_user_state.add_cluster_event(
@@ -355,7 +389,7 @@ def _record_allocation(cluster_name: str, slurm_cluster: str,
             nop_if_duplicate=True,
         )
     except Exception as e:  # pylint: disable=broad-except
-        logger.debug(f'Failed to record the Slurm allocation of '
+        logger.debug(f'Failed to record the node allocation of '
                      f'{cluster_name}: {e}')
 
 
@@ -863,6 +897,7 @@ def _create_virtual_instance(
         # Wait for nodes to be allocated (job might be in PENDING state)
         _wait_for_job_nodes(client, job_id, provision_timeout, partition,
                             on_pending)
+        _record_nodes_allocated(cluster_name, slurm_cluster, job_id)
         nodes, _ = client.get_job_nodes(job_id)
         # Reset spinner since nodes are now allocated
         rich_utils.force_update_status(
@@ -1310,6 +1345,7 @@ touch {sky_cluster_home_dir}/.hushlogin
 
     _wait_for_job_nodes(client, job_id, provision_timeout, partition,
                         on_pending)
+    _record_nodes_allocated(cluster_name, slurm_cluster, job_id)
     nodes, _ = client.get_job_nodes(job_id)
     # Reset spinner since nodes are now allocated
     rich_utils.force_update_status(
