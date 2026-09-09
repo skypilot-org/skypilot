@@ -56,7 +56,7 @@ AUTH_DB_TIMEOUT_SECONDS = float(
 _SERVER_TIMEOUT_PGCODES = {
     '55P03': 'lock_timeout',  # LockNotAvailable
     '57014': 'statement_timeout',  # QueryCanceled
-    '57P05': 'idle_in_transaction_session_timeout',
+    '25P03': 'idle_in_transaction_session_timeout',
 }
 
 

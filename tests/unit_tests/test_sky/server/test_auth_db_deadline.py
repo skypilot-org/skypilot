@@ -518,7 +518,7 @@ def _raises_db_error(pgcode, message='canceling statement due to timeout'):
 _SERVER_TIMEOUT_PGCODES = (
     '55P03',  # lock_timeout: lock_not_available
     '57014',  # statement_timeout: query_canceled
-    '57P05',  # idle_in_transaction_session_timeout (next statement)
+    '25P03',  # idle_in_transaction_session_timeout (next statement)
 )
 
 

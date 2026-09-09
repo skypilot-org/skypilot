@@ -440,8 +440,10 @@ initialize_and_get_db = _db_manager.get_engine
 #   generic statement cancel (57014);
 # - statement_timeout bounds each statement itself;
 # - idle_in_transaction_session_timeout terminates a session that goes
-#   quiet inside the transaction (the orphan case; 57P05 on that session's
-#   next statement), which releases the row lock it holds.
+#   quiet inside the transaction (the orphan case), which releases the row
+#   lock it holds. The terminated session's own next statement fails: with
+#   SQLSTATE 25P03 if the client reads the FATAL, otherwise as a closed
+#   connection (the FATAL was sent while nobody was reading).
 #
 # `SET LOCAL` is transaction-scoped: it applies to this transaction only and
 # resets at COMMIT/ROLLBACK, so it is safe through a transaction-mode
