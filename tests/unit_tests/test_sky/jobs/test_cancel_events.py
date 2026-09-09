@@ -57,7 +57,18 @@ def _signal_dir(tmp_path, monkeypatch):
     yield signal_dir
 
 
-def _seed_running_job(engine, job_id: int, workspace: str = 'default') -> None:
+def _seed_running_job(engine,
+                      job_id: int,
+                      workspace: str = 'default',
+                      parent_job_id=None,
+                      status: str = 'RUNNING') -> None:
+    # Raw insert, so set the root the way a launch would (it travels in the
+    # parent task's env): the parent's root, else the parent itself.
+    root_job_id = None
+    if parent_job_id is not None:
+        parent_row = state.get_job_info_row(parent_job_id)
+        root_job_id = (parent_row.tree_root_job_id
+                       if parent_row is not None else parent_job_id)
     with engine.connect() as conn:
         conn.execute(state.job_info_table.insert().values(
             spot_job_id=job_id,
@@ -69,10 +80,13 @@ def _seed_running_job(engine, job_id: int, workspace: str = 'default') -> None:
             controller_pid=12345,
             controller_pid_started_at=time.time(),
             schedule_state=state.ManagedJobScheduleState.ALIVE.value,
+            root_job_id=root_job_id,
+            parent_job_id=parent_job_id,
+            parent_task_id=None if parent_job_id is None else 1,
         ))
         conn.execute(state.spot_table.insert().values(
             job_name=f'job-{job_id}',
-            status='RUNNING',
+            status=status,
             spot_job_id=job_id,
             task_id=0,
         ))
@@ -147,4 +161,122 @@ def test_skipped_job_is_not_attributed(_mock_managed_jobs_db_conn, _signal_dir):
 
     assert 'No job to cancel' in msg
     assert not _event_reasons(1)
+    assert not (_signal_dir / '1').exists()
+
+
+# ---------------------------------------------------------------------------
+# Cascade to jobs launched from the cancelled job (dynamic job group members)
+# ---------------------------------------------------------------------------
+
+
+def _seed_tree(engine):
+    """1 (group) -> 2 (eval) -> 3 (launched by the eval); 4 unrelated."""
+    _seed_running_job(engine, 1)
+    _seed_running_job(engine, 2, parent_job_id=1)
+    _seed_running_job(engine, 3, parent_job_id=2)
+    _seed_running_job(engine, 4)
+
+
+def test_cancel_parent_cascades_to_descendants(_mock_managed_jobs_db_conn,
+                                               _signal_dir):
+    _seed_tree(_mock_managed_jobs_db_conn)
+
+    msg = utils.cancel_jobs_by_id(job_ids=[1],
+                                  current_workspace='default',
+                                  cancel_request_info=utils.CancelRequestInfo(
+                                      user_name='alice', request_id='req-1'))
+
+    assert 'Jobs with IDs 1, 2, 3 are scheduled to be cancelled.' in msg
+    assert 'includes 2 jobs launched from the cancelled job.' in msg
+    for job_id in (1, 2, 3):
+        assert (_signal_dir / str(job_id)).exists()
+    assert not (_signal_dir / '4').exists()
+    # The requester is on every job; descendants also name the job the user
+    # actually cancelled and, when different, the job that launched them.
+    assert _event_reasons(1) == [
+        'Cancellation requested by user alice (request ID: req-1)'
+    ]
+    assert _event_reasons(2) == [
+        'Cancellation requested by user alice (request ID: req-1) '
+        '(cancelled with job 1)'
+    ]
+    assert _event_reasons(3) == [
+        'Cancellation requested by user alice (request ID: req-1) '
+        '(cancelled with job 1, launched from job 2)'
+    ]
+
+
+def test_cancel_child_leaves_parent_and_siblings(_mock_managed_jobs_db_conn,
+                                                 _signal_dir):
+    _seed_tree(_mock_managed_jobs_db_conn)
+    _seed_running_job(_mock_managed_jobs_db_conn, 5, parent_job_id=1)
+
+    msg = utils.cancel_jobs_by_id(job_ids=[2], current_workspace='default')
+
+    assert 'Jobs with IDs 2, 3 are scheduled to be cancelled.' in msg
+    assert (_signal_dir / '2').exists()
+    assert (_signal_dir / '3').exists()
+    assert not (_signal_dir / '1').exists()
+    assert not (_signal_dir / '5').exists()
+
+
+def test_terminal_parent_still_cascades(_mock_managed_jobs_db_conn,
+                                        _signal_dir):
+    """`sky jobs cancel <group>` after the group finished still takes the
+    evals it launched that are still running."""
+    _seed_running_job(_mock_managed_jobs_db_conn, 1, status='SUCCEEDED')
+    _seed_running_job(_mock_managed_jobs_db_conn, 2, parent_job_id=1)
+
+    msg = utils.cancel_jobs_by_id(job_ids=[1], current_workspace='default')
+
+    assert 'Job with ID 2 is scheduled to be cancelled.' in msg
+    assert 'includes 1 job launched from the cancelled job.' in msg
+    assert not (_signal_dir / '1').exists()
+    assert (_signal_dir / '2').exists()
+
+
+def test_cascade_without_requester_is_still_attributed(
+        _mock_managed_jobs_db_conn, _signal_dir, monkeypatch):
+    monkeypatch.setattr(utils.CancelRequestInfo, 'from_request_context',
+                        classmethod(lambda cls: None))
+    _seed_tree(_mock_managed_jobs_db_conn)
+
+    utils.cancel_jobs_by_id(job_ids=[1], current_workspace='default')
+
+    # The requested job has no requester to record; the descendants must
+    # still say they were cancelled with their parent.
+    assert _event_reasons(1) == []
+    assert _event_reasons(2) == [
+        'Cancellation requested (cancelled with job 1)'
+    ]
+
+
+def test_cancel_descendant_jobs_spares_the_job_itself(
+        _mock_managed_jobs_db_conn, _signal_dir):
+    """The controller's primaries-done sweep: descendants go, the group stays."""
+    _seed_tree(_mock_managed_jobs_db_conn)
+
+    msg = utils.cancel_descendant_jobs(
+        1, note='with job group 1: all primary tasks finished')
+
+    assert 'Jobs with IDs 2, 3 are scheduled to be cancelled.' in msg
+    assert not (_signal_dir / '1').exists()
+    assert (_signal_dir / '2').exists()
+    assert (_signal_dir / '3').exists()
+    assert not (_signal_dir / '4').exists()
+    assert _event_reasons(1) == []
+    # Every swept job, at any depth, carries the sweep's reason: it went down
+    # because the root finished.
+    assert _event_reasons(2) == [
+        'Cancellation requested with job group 1: all primary tasks finished'
+    ]
+    assert _event_reasons(3) == [
+        'Cancellation requested with job group 1: all primary tasks finished'
+    ]
+
+
+def test_cancel_descendant_jobs_with_no_descendants(_mock_managed_jobs_db_conn,
+                                                    _signal_dir):
+    _seed_running_job(_mock_managed_jobs_db_conn, 1)
+    assert utils.cancel_descendant_jobs(1, note='x') == 'No job to cancel.'
     assert not (_signal_dir / '1').exists()
