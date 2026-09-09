@@ -159,10 +159,12 @@ message ManagedJobInfo {
   optional int32 batch_total_batches = 39;
   // Batch progress: number of completed batches (NULL for non-batch jobs).
   optional int32 batch_completed_batches = 40;
-  // The managed job (and task within it) that launched this job, when it was
-  // launched from inside another managed job. Unset for top-level jobs.
+  // Where this job came from, when launched from inside another managed job.
+  // All unset for top-level jobs. root_job_id is the top-level job of the
+  // tree; parent_job_id/parent_task_id is the job and task that launched it.
   optional int64 parent_job_id = 41;
   optional int64 parent_task_id = 42;
+  optional int64 root_job_id = 43;
 }
 
 // A pair of internal and external IP addresses
