@@ -1278,6 +1278,192 @@ def test_a_route_registered_after_its_path_was_labeled_is_resolved(tmp_path):
     assert _requests_total(path='/late/1') == 0.0
 
 
+# ─────────────────────────────────────────────────────────────────────────
+# path label: resolution cost does not depend on the number of routes
+# ─────────────────────────────────────────────────────────────────────────
+
+
+def _distinct_ok():
+    """A fresh handler function: one endpoint per route, as in the server."""
+
+    async def ok():
+        return {}
+
+    return ok
+
+
+def _wide_app(num_literal=300) -> fastapi.FastAPI:
+    """Many parameterless routes, a few parameterized ones, one catch-all."""
+    app = fastapi.FastAPI()
+    app.add_middleware(metrics.PrometheusMiddleware)
+    for i in range(num_literal):
+        app.add_api_route(f'/literal/{i}', _distinct_ok(), methods=['GET'])
+    app.add_api_route('/items/{item_id}', _distinct_ok(), methods=['GET'])
+    app.add_api_route('/items/{item_id}/status',
+                      _distinct_ok(),
+                      methods=['GET'])
+    app.add_api_route('/pools/{name}', _distinct_ok(), methods=['GET'])
+    app.add_api_route('/dashboard/{full_path:path}',
+                      _distinct_ok(),
+                      methods=['GET'])
+    return app
+
+
+def _metrics_layer(app: fastapi.FastAPI) -> metrics.PrometheusMiddleware:
+    """The PrometheusMiddleware instance in the app's built stack."""
+    layer = app.middleware_stack.app  # inside Starlette's ServerErrorMiddleware
+    assert isinstance(layer, metrics.PrometheusMiddleware)
+    return layer
+
+
+def _match_scope(path, method='GET', root_path=''):
+    return {
+        'type': 'http',
+        'method': method,
+        'path': path,
+        'root_path': root_path,
+        'path_params': {},
+    }
+
+
+def test_routed_requests_resolve_from_the_dispatched_endpoint():
+    """No per-path matching for routed requests: the router already chose."""
+    app = _wide_app()
+    client = TestClient(app)
+    for i in range(50):
+        assert client.get(f'/items/cluster-{i}/status').status_code == 200
+    for i in range(20):
+        assert client.get(f'/literal/{i}').status_code == 200
+    assert _requests_total(path='/items/{item_id}/status',
+                           method='GET',
+                           status='2xx') == 50.0
+    assert _requests_total(path='/items/cluster-1/status') == 0.0
+    # The unrouted memo was never needed: every request carried an endpoint.
+    assert len(_metrics_layer(app)._route_template_cache) == 0
+
+
+def test_unrouted_requests_try_only_the_candidates_that_can_match(monkeypatch):
+    app = _wide_app()
+    routes = app.router.routes
+    index = metrics._RouteIndex(routes)
+    tried = []
+    real = metrics._match_candidates
+
+    def counting(candidates, match_scope):
+        tried.append(len(candidates))
+        return real(candidates, match_scope)
+
+    monkeypatch.setattr(metrics, '_match_candidates', counting)
+    cases = [
+        # (path, expected template, max candidates tried)
+        ('/literal/7', '/literal/7', 1),
+        ('/items/9', '/items/{item_id}', 2),
+        ('/items/9/status', '/items/{item_id}/status', 2),
+        ('/pools/p1', '/pools/{name}', 1),
+        ('/dashboard/a/b.js', '/dashboard/{full_path:path}', 1),
+        ('/wp-admin/setup.php', None, 0),
+        ('/literal/7/extra', None, 0),
+    ]
+    for path, expected, max_tried in cases:
+        tried.clear()
+        assert index.resolve_unrouted(_match_scope(path)) == expected, path
+        assert tried == [len(routes)] or tried[0] <= max_tried, (path, tried)
+        # And always the same answer as scanning the whole table.
+        assert metrics._match_route_template(
+            routes, _match_scope(path)) == expected, path
+
+
+def test_unrouted_resolution_keeps_the_dispatch_order():
+    """A literal route behind a parameterized one that also matches its path
+    is shadowed at dispatch; the label says so too. And the other way round."""
+    shadowed = fastapi.FastAPI()
+    shadowed.add_api_route('/items/{item_id}', _ok, methods=['GET'])
+    shadowed.add_api_route('/items/all', _ok, methods=['GET'])
+    index = metrics._RouteIndex(shadowed.router.routes)
+    assert index.resolve_unrouted(_match_scope('/items/all')) == \
+        '/items/{item_id}'
+    first = fastapi.FastAPI()
+    first.add_api_route('/items/all', _ok, methods=['GET'])
+    first.add_api_route('/items/{item_id}', _ok, methods=['GET'])
+    index = metrics._RouteIndex(first.router.routes)
+    assert index.resolve_unrouted(_match_scope('/items/all')) == '/items/all'
+    assert index.resolve_unrouted(_match_scope('/items/7')) == \
+        '/items/{item_id}'
+
+
+def test_root_path_is_removed_before_matching():
+    index = metrics._RouteIndex(_routed_app().router.routes)
+    assert index.resolve_unrouted(
+        _match_scope('/prefix/status', root_path='/prefix')) == '/status'
+    assert index.resolve_unrouted(
+        _match_scope('/prefix/items/1', root_path='/prefix')) == \
+        '/items/{item_id}'
+
+
+def test_one_function_under_two_templates_is_resolved_by_path():
+    app = fastapi.FastAPI()
+    app.add_middleware(metrics.PrometheusMiddleware)
+    app.add_api_route('/a/{x}', _ok, methods=['GET'])
+    app.add_api_route('/b/{x}', _ok, methods=['GET'])
+    client = TestClient(app)
+    assert client.get('/a/1').status_code == 200
+    assert client.get('/b/2').status_code == 200
+    assert _requests_total(path='/a/{x}', method='GET', status='2xx') == 1.0
+    assert _requests_total(path='/b/{x}', method='GET', status='2xx') == 1.0
+    assert _requests_total(path=metrics.UNMATCHED_PATH_LABEL) == 0.0
+
+
+def test_a_route_added_to_an_included_router_later_is_resolved():
+    """Adding to an already-included router keeps the top-level table's
+    size; the index versions on the whole tree. The new route reuses the
+    function of an indexed one on purpose: a stale endpoint map would label
+    it `/ext/first`."""
+    app = fastapi.FastAPI()
+    app.add_middleware(metrics.PrometheusMiddleware)
+    router = fastapi.APIRouter()
+    router.add_api_route('/first', _ok, methods=['GET'])
+    app.include_router(router, prefix='/ext')
+    client = TestClient(app)
+    assert client.get('/ext/first').status_code == 200
+    router.add_api_route('/late/{n}', _ok, methods=['GET'])
+    response = client.get('/ext/late/1')
+    if response.status_code == 404:
+        pytest.skip('this FastAPI flattens included routers on include')
+    assert response.status_code == 200
+    assert _requests_total(path='/ext/late/{n}', method='GET',
+                           status='2xx') == 1.0
+    assert _requests_total(path='/ext/late/1') == 0.0
+    assert _requests_total(path=metrics.UNMATCHED_PATH_LABEL) == 0.0
+
+
+def test_a_foreign_endpoint_rebuilds_the_index_once(monkeypatch):
+    app = _wide_app()
+    layer = metrics.PrometheusMiddleware(_responding_app(200))
+    builds = []
+    real_init = metrics._RouteIndex.__init__
+
+    def counting_init(self, routes):
+        builds.append(len(routes))
+        real_init(self, routes)
+
+    monkeypatch.setattr(metrics._RouteIndex, '__init__', counting_init)
+    foreign = object()  # an endpoint no route in the table owns
+    scope = {
+        'type': 'http',
+        'method': 'GET',
+        'path': '/literal/1',
+        'app': app,
+        'endpoint': foreign,
+    }
+    # Falls back to matching the path; one rebuild for the unknown endpoint.
+    assert layer._path_label(dict(scope)) == '/literal/1'
+    assert len(builds) == 2
+    assert layer._path_label(dict(scope)) == '/literal/1'
+    scope['path'] = '/literal/2'
+    assert layer._path_label(dict(scope)) == '/literal/2'
+    assert len(builds) == 2
+
+
 @pytest.fixture(autouse=True)
 def cleanup_metrics():
     """Clean up metrics after each test to avoid interference."""

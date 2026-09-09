@@ -64,8 +64,9 @@ _HTTP_FAULTS = {
                                _disk_full),
     'record_rejection': lambda mp: mp.setattr(middleware_utils,
                                               'record_rejection', _boom),
-    'route resolver': lambda mp: mp.setattr(metrics, '_match_route_template',
-                                            _boom),
+    'route resolver': lambda mp: mp.setattr(metrics, '_match_candidates', _boom
+                                           ),
+    'route index': lambda mp: mp.setattr(metrics, '_RouteIndex', _boom),
     'path label': lambda mp: mp.setattr(metrics.PrometheusMiddleware,
                                         '_path_label', _boom),
     'whole recorder': lambda mp: mp.setattr(metrics.PrometheusMiddleware,
@@ -80,8 +81,9 @@ _WS_FAULTS = {
         metrics_utils.SKY_APISERVER_REQUEST_REJECTIONS_TOTAL),
     'disk full': _labels_fault(
         metrics_utils.SKY_APISERVER_WEBSOCKET_HANDSHAKES_TOTAL, _disk_full),
-    'route resolver': lambda mp: mp.setattr(metrics, '_match_route_template',
-                                            _boom),
+    'route resolver': lambda mp: mp.setattr(metrics, '_match_candidates', _boom
+                                           ),
+    'route index': lambda mp: mp.setattr(metrics, '_RouteIndex', _boom),
     'path label': lambda mp: mp.setattr(metrics.PrometheusMiddleware,
                                         '_path_label', _boom),
     'whole recorder': lambda mp: mp.setattr(metrics.PrometheusMiddleware,
@@ -669,7 +671,7 @@ async def test_route_resolver_failure_counts_the_request_as_unmatched(warning):
     app = _routed_app()
     middleware = metrics.PrometheusMiddleware(
         _ScriptedApp(_http_messages('200 json')[0]))
-    with mock.patch.object(metrics, '_match_route_template', _boom):
+    with mock.patch.object(metrics, '_match_candidates', _boom):
         sent, raised = await _run(middleware, _http_scope(app=app))
     assert raised is None
     assert len(sent) == 2
