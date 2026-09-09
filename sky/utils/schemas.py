@@ -2287,10 +2287,6 @@ def get_config_schema():
                                 'type': 'boolean',
                             },
                             'username_map': (_SLURM_USERNAME_MAP_SCHEMA),
-                            'default_service_account_user': {
-                                'type': 'string',
-                                'pattern': '^[a-z_][a-z0-9_.-]*$'
-                            },
                             # The Prometheus this cluster's GPU metrics are
                             # federated from.
                             'prometheus': {

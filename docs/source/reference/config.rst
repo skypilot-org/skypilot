@@ -2455,16 +2455,16 @@ Map full SkyPilot usernames or service-account names to Unix users when
       training:
         username_map:
           inference-prod: inference-training
-        default_service_account_user: batch-services
 
 A cluster-specific mapping overrides the tenant mapping for the same name.
-For service accounts without an entry, the cluster's
-``default_service_account_user`` is used. Without a mapping or default,
-submission fails; service-account names are not implicitly mapped to Unix
-accounts. Human users without an entry use their email local part.
+A service account without an entry uses its creator's Unix identity: the
+creator's cluster mapping, then tenant mapping, then email local part. If the
+creator is another service account, the same resolution applies to that account.
+Human users without an entry use their email local part. If the creator cannot
+be found, configure an explicit mapping for the service account.
 
-The cluster default applies to every otherwise-unmapped service account with
-access to that cluster. It does not grant SkyPilot roles or workspace access.
+This changes the Unix submit identity only; it does not grant SkyPilot roles
+or workspace access.
 All mapped accounts need the same login-node impersonation permissions as
 human submit users. Account existence and impersonation are checked before
 allocation creation, with a 15-second timeout.
