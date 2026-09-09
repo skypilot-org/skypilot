@@ -1345,6 +1345,20 @@ class RetryingVmProvisioner(object):
                         # Pausing to wait on an external condition: keep the
                         # resources for resume, do not tear down or fail over.
                         raise
+                    except exceptions.ProvisionUnsupportedError as e:
+                        # The request itself cannot be served here, so the
+                        # remaining zones of this candidate cannot help. Tear
+                        # down what was created and let the caller decide
+                        # whether another candidate might serve it.
+                        last_error_reason = str(e)
+                        CloudVmRayBackend().post_teardown_cleanup(
+                            handle,
+                            terminate=not prev_cluster_ever_up,
+                            remove_from_db=False,
+                            failover=True,
+                        )
+                        with ux_utils.print_exception_no_traceback():
+                            raise
                     except config_lib.KubernetesError as e:
                         if e.insufficent_resources:
                             insufficient_resources = e.insufficent_resources
@@ -1876,6 +1890,16 @@ class RetryingVmProvisioner(object):
                 _add_to_blocked_resources(
                     self._blocked_resources,
                     resources_lib.Resources(cloud=to_provision.cloud))
+                failover_history.append(e)
+            except exceptions.ProvisionUnsupportedError as e:
+                # Recorded in the history like any other failover reason, but
+                # deliberately not as a ResourcesUnavailableError: a caller
+                # deciding whether to keep waiting for capacity reads the
+                # history for capacity failures, and this is not one. When it
+                # is the only kind of failure the history holds, "wait for
+                # room" is the wrong answer and the caller can say so.
+                logger.warning(common_utils.format_exception(e))
+                _add_to_blocked_resources(self._blocked_resources, to_provision)
                 failover_history.append(e)
             except exceptions.ResourcesUnavailableError as e:
                 failover_history.append(e)
