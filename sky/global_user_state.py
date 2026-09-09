@@ -289,6 +289,12 @@ cluster_event_table = sqlalchemy.Table(
     sqlalchemy.Column('transitioned_at', sqlalchemy.Integer, primary_key=True),
     sqlalchemy.Column('type', sqlalchemy.Text),
     sqlalchemy.Column('request_id', sqlalchemy.Text, server_default=None),
+    # The primary key is (cluster_hash, reason, transitioned_at), but the two
+    # readers that have to survive a cluster's teardown look events up by
+    # `name` instead -- see get_latest_cluster_events and
+    # get_cluster_events_by_name. Without this they scan the whole table.
+    sqlalchemy.Index('ix_cluster_events_name_type', 'name', 'type',
+                     'transitioned_at'),
 )
 
 ssh_key_table = sqlalchemy.Table(
