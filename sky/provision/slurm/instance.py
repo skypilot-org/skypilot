@@ -378,13 +378,17 @@ def _record_nodes_allocated(cluster_name: str, slurm_cluster: str,
     """Record that the allocation has its nodes, as launch progress.
 
     Written once the wait returns, so `details` moves from why the queue was
-    waiting to which allocation is now bootstrapping the runtime.
+    waiting to which allocation is now bootstrapping the runtime. The text
+    leads with the transition rather than the id, because marking the end of
+    the queue wait is what a reader watching that column is waiting for.
     """
+    reason = (f'Launching (nodes allocated; Slurm job {job_id} '
+              f'on {slurm_cluster})')
     try:
         global_user_state.add_cluster_event(
             cluster_name,
             new_status=None,
-            reason=f'Launching (Slurm job {job_id} on {slurm_cluster})',
+            reason=reason,
             event_type=global_user_state.ClusterEventType.LAUNCH_PROGRESS,
             nop_if_duplicate=True,
         )

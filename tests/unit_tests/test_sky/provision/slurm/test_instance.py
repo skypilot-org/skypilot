@@ -1536,7 +1536,8 @@ class TestRecordAllocation:
         add_event.assert_called_once_with(
             _CLUSTER,
             new_status=None,
-            reason='Launching (Slurm job 17269 on hyperpod-slurm)',
+            reason=('Launching (nodes allocated; Slurm job 17269 '
+                    'on hyperpod-slurm)'),
             event_type=instance.global_user_state.ClusterEventType.
             LAUNCH_PROGRESS,
             nop_if_duplicate=True,

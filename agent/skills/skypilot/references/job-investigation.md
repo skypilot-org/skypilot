@@ -37,7 +37,7 @@ current state. Common shapes:
 | `Failure: <reason>` | Terminal failure | Read the reason; `sky jobs logs N --no-follow` for the task output |
 | `Cancellation requested by ...` | Someone cancelled it | The requester and request ID are in the text |
 | `Launching (pending: <reason>; partition: <p>)` | Job is STARTING and Slurm has not allocated nodes yet | See "Slurm pending reasons" below |
-| `Launching (Slurm job <id> on <cluster>)` | Nodes are allocated; the job is still bootstrapping | Nothing to fix. That id is what `sacct -j <id>` takes if you have login-node access |
+| `Launching (nodes allocated; Slurm job <id> on <cluster>)` | The queue wait is over; the job is still bootstrapping | Nothing to fix. That id is what `sacct -j <id>` takes if you have login-node access |
 
 ## Slurm pending reasons
 
