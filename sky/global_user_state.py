@@ -425,33 +425,71 @@ initialize_and_get_db = _db_manager.get_engine
 #
 # The upsert runs on the request authentication path for every request, on
 # the API server's bounded auth thread pool, under a client-side deadline
-# (`AUTH_DB_TIMEOUT_SECONDS` in `sky.server.auth.db_lookup`, 5 s; not
-# imported here because this module is not server-only). That deadline frees
-# the caller but not the thread: a thread that waits on the users row lock,
-# or a session that stops talking inside its open transaction, keeps its
-# thread and its connection for as long as the database allows. One orphaned
+# (`AUTH_DB_TIMEOUT_SECONDS` in `sky.server.auth.db_lookup`; not imported
+# here because this module is not server-only). That deadline frees the
+# caller but not the thread: a thread that waits on the users row lock, or a
+# session that stops talking inside its open transaction, keeps its thread
+# and its connection for as long as the database allows. One orphaned
 # session holding a single users row then pins every later upsert of that
 # row until the pool is exhausted.
 #
-# These values MUST stay at or below that deadline, so the database gives up
-# before (or as) the caller does and the thread is released:
-# - lock_timeout < statement_timeout, so a row-lock wait reports the
-#   distinct "lock not available" error (SQLSTATE 55P03) instead of a
-#   generic statement cancel (57014);
-# - statement_timeout bounds each statement itself;
-# - idle_in_transaction_session_timeout terminates a session that goes
-#   quiet inside the transaction (the orphan case), which releases the row
-#   lock it holds. The terminated session's own next statement fails: with
-#   SQLSTATE 25P03 if the client reads the FATAL, otherwise as a closed
+# The three timeouts are therefore derived from that same deadline, read
+# through `db_utils.get_auth_db_timeout_seconds()` (the one place the
+# configured value is parsed), as these percentages of it. They MUST stay at
+# or below the deadline so the database gives up before (or as) the caller
+# does and the thread is released:
+# - lock_timeout (78 %) < statement_timeout (80 %), so a row-lock wait
+#   reports the distinct "lock not available" error (SQLSTATE 55P03) instead
+#   of a generic statement cancel (57014);
+# - statement_timeout (80 %) bounds each statement itself, with a little
+#   headroom under the deadline for the round trip;
+# - idle_in_transaction_session_timeout (100 %) terminates a session that
+#   goes quiet inside the transaction (the orphan case), which releases the
+#   row lock it holds. The terminated session's own next statement fails:
+#   with SQLSTATE 25P03 if the client reads the FATAL, otherwise as a closed
 #   connection (the FATAL was sent while nobody was reading).
+# At the default 5 s deadline these are 3900 / 4000 / 5000 ms.
 #
 # `SET LOCAL` is transaction-scoped: it applies to this transaction only and
 # resets at COMMIT/ROLLBACK, so it is safe through a transaction-mode
 # connection pooler and leaks nothing into later transactions on the same
 # server connection.
-_USER_UPSERT_LOCK_TIMEOUT_MS = 3900
-_USER_UPSERT_STATEMENT_TIMEOUT_MS = 4000
-_USER_UPSERT_IDLE_IN_TRANSACTION_TIMEOUT_MS = 5000
+_USER_UPSERT_LOCK_TIMEOUT_PERCENT = 78
+_USER_UPSERT_STATEMENT_TIMEOUT_PERCENT = 80
+_USER_UPSERT_IDLE_IN_TRANSACTION_TIMEOUT_PERCENT = 100
+
+
+def _user_upsert_timeouts_ms() -> Tuple[int, int, int]:
+    """The users upsert's server-side timeouts, in whole milliseconds.
+
+    Returns ``(lock_timeout, statement_timeout,
+    idle_in_transaction_session_timeout)``, each the corresponding
+    percentage of the configured auth deadline (see the note above).
+    Computed per call: the deadline lookup is one environment read, which is
+    nothing next to the statements it bounds, and it lets tests vary the
+    deadline.
+
+    Raises:
+        ValueError: if the configured deadline is not a positive number (see
+            `db_utils.get_auth_db_timeout_seconds`), or is so small that the
+            three values would not be distinct, ordered, positive integers.
+            Postgres treats a timeout of ``0`` as *disabled*, so a rounding
+            to zero must never reach the database.
+    """
+    deadline_ms = db_utils.get_auth_db_timeout_seconds() * 1000
+    lock_ms = round(deadline_ms * _USER_UPSERT_LOCK_TIMEOUT_PERCENT / 100)
+    statement_ms = round(deadline_ms * _USER_UPSERT_STATEMENT_TIMEOUT_PERCENT /
+                         100)
+    idle_ms = round(deadline_ms *
+                    _USER_UPSERT_IDLE_IN_TRANSACTION_TIMEOUT_PERCENT / 100)
+    if not 0 < lock_ms < statement_ms < idle_ms:
+        raise ValueError(
+            f'{constants.ENV_VAR_AUTH_DB_TIMEOUT_SECONDS} is too small '
+            f'({deadline_ms} ms) to derive distinct server-side timeouts for '
+            f'the users upsert (got lock_timeout={lock_ms}ms, '
+            f'statement_timeout={statement_ms}ms, '
+            f'idle_in_transaction_session_timeout={idle_ms}ms).')
+    return lock_ms, statement_ms, idle_ms
 
 
 def _bound_user_upsert_transaction(session: orm.Session) -> None:
@@ -464,14 +502,14 @@ def _bound_user_upsert_transaction(session: orm.Session) -> None:
     through SQLAlchemy's normal error handling and reaches the caller as a
     regular DB error.
     """
+    lock_ms, statement_ms, idle_ms = _user_upsert_timeouts_ms()
     for parameter, value_ms in (
-        ('lock_timeout', _USER_UPSERT_LOCK_TIMEOUT_MS),
-        ('statement_timeout', _USER_UPSERT_STATEMENT_TIMEOUT_MS),
-        ('idle_in_transaction_session_timeout',
-         _USER_UPSERT_IDLE_IN_TRANSACTION_TIMEOUT_MS),
+        ('lock_timeout', lock_ms),
+        ('statement_timeout', statement_ms),
+        ('idle_in_transaction_session_timeout', idle_ms),
     ):
-        # SET does not accept bind parameters; the values are module
-        # constants, never user input.
+        # SET does not accept bind parameters; the values are integers
+        # derived from a validated setting, never user input.
         session.execute(
             sqlalchemy.text(f'SET LOCAL {parameter} = \'{value_ms}ms\''))
 

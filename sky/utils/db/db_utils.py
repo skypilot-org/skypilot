@@ -2,6 +2,7 @@
 import asyncio
 import contextlib
 import enum
+import math
 import os
 import pathlib
 import sqlite3
@@ -612,6 +613,41 @@ def _pooler_configured() -> bool:
     return bool(
         os.environ.get(constants.ENV_VAR_DB_POOL_CONNECTION_URI) or
         os.environ.get(constants.ENV_VAR_DB_POOL_HOSTPORT))
+
+
+def get_auth_db_timeout_seconds() -> float:
+    """The deadline on the API server's auth-path DB calls, in seconds.
+
+    Read from ``constants.ENV_VAR_AUTH_DB_TIMEOUT_SECONDS`` (default
+    ``constants.DEFAULT_AUTH_DB_TIMEOUT_SECONDS``). This is the single
+    source for that value: ``sky.server.auth.db_lookup`` uses it as the
+    client-side ``asyncio.wait_for`` deadline on every auth DB lookup, and
+    ``sky.global_user_state.add_or_update_user`` derives the server-side
+    ``SET LOCAL`` timeouts on the users upsert from it, so the database
+    always gives up at or before the caller does. The environment is read
+    on each call (a cheap lookup) so tests can vary it.
+
+    Raises:
+        ValueError: if the variable is set but is not a positive, finite
+            number of seconds. A non-positive deadline would fail every
+            auth call client-side, and as a Postgres timeout ``0`` means
+            *disabled* (and a negative value is rejected), so such a value
+            is refused loudly rather than silently substituted.
+    """
+    raw = os.environ.get(constants.ENV_VAR_AUTH_DB_TIMEOUT_SECONDS)
+    if raw is None:
+        return constants.DEFAULT_AUTH_DB_TIMEOUT_SECONDS
+    try:
+        seconds = float(raw)
+    except ValueError:
+        raise ValueError(
+            f'{constants.ENV_VAR_AUTH_DB_TIMEOUT_SECONDS}={raw!r} is not a '
+            'number of seconds.') from None
+    if not (math.isfinite(seconds) and seconds > 0):
+        raise ValueError(
+            f'{constants.ENV_VAR_AUTH_DB_TIMEOUT_SECONDS}={raw!r} must be a '
+            'positive, finite number of seconds.')
+    return seconds
 
 
 # Bound on the connect phase of a no_pool engine. Unlike a pooled checkout,

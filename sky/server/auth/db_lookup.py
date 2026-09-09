@@ -23,7 +23,6 @@ only, so an exception raised in a middleware surfaces as a bare 500,
 which clients do not retry.
 """
 import asyncio
-import os
 from typing import Any, Callable, Optional
 
 import fastapi
@@ -34,6 +33,7 @@ from sky.server.requests import executor
 from sky.users import permission
 from sky.utils import common_utils
 from sky.utils import context_utils
+from sky.utils.db import db_utils
 
 logger = sky_logging.init_logger(__name__)
 
@@ -42,14 +42,20 @@ logger = sky_logging.init_logger(__name__)
 # trouble, while staying well below the SQLAlchemy pool checkout timeout
 # (30s) and typical pooler queue-wait timeouts so requests fail fast
 # before executor threads pile up.
-AUTH_DB_TIMEOUT_SECONDS = float(
-    os.environ.get('SKYPILOT_AUTH_DB_TIMEOUT_SECONDS', '5'))
+#
+# Configured by `constants.ENV_VAR_AUTH_DB_TIMEOUT_SECONDS` (default 5 s),
+# read through the shared helper so the server-side timeouts the users
+# upsert derives from the same value cannot drift from this one. A value
+# that is not a positive number fails here, at server startup, with a
+# message naming the variable.
+AUTH_DB_TIMEOUT_SECONDS = db_utils.get_auth_db_timeout_seconds()
 
 # Postgres SQLSTATE codes raised when the database itself gives up on an
 # auth-path call at a server-side timeout. The users upsert sets these
-# timeouts on its own transaction (see `global_user_state.add_or_update_user`)
-# at or below `AUTH_DB_TIMEOUT_SECONDS`, so the database normally fails the
-# call *before* `asyncio.wait_for` does -- and, unlike `wait_for`, actually
+# timeouts on its own transaction (see `global_user_state.add_or_update_user`),
+# derived from the same configured deadline as `AUTH_DB_TIMEOUT_SECONDS` and
+# strictly below or equal to it, so the database normally fails the call
+# *before* `asyncio.wait_for` does -- and, unlike `wait_for`, actually
 # releases the executor thread. Such an error is the same condition as the
 # client-side deadline (a slow or locked database) and gets the same
 # retryable 503; anything else still propagates unchanged.
