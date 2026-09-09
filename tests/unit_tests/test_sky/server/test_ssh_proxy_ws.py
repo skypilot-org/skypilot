@@ -6,6 +6,7 @@ unhandled RuntimeError traceback) when cluster validation fails.
 """
 
 import asyncio
+import contextlib
 import gc
 import logging
 import os
@@ -234,20 +235,30 @@ def loop(request):
         asyncio.set_event_loop(None)
 
 
-@pytest.fixture
-def sky_caplog(caplog, monkeypatch):
-    """`caplog` that also sees records from `sky.*` loggers.
+@contextlib.contextmanager
+def _capture_sky_logs(caplog, name: str, level: int):
+    """Capture records emitted by the `sky` logger `name` in `caplog`.
 
-    `sky_logging` sets `propagate = False` on the `sky` logger, so its
-    records never reach the root logger, which is where pytest installs the
-    caplog handler. pytest >= 9.1 attaches that handler to non-propagating
-    loggers as well (pytest-dev/pytest#3697); older releases, e.g. the 8.x
-    that Python 3.9 still resolves to, do not, and `caplog.records` stays
-    empty. Let `sky` propagate for the duration of the test so both behave
-    the same.
+    pytest installs the caplog handler on the root logger, but `sky_logging`
+    sets `propagate = False` on the `sky` logger and the API server's logging
+    setup (`sky.server.uvicorn.add_timestamp_prefix_for_server_logs`, run
+    when another test starts the app in-process in the same worker) does the
+    same for `sky.server`. Records from `sky.server.*` never reach the root
+    logger, so `caplog.records` stays empty. pytest >= 9.1 also attaches its
+    handler to non-propagating loggers (pytest-dev/pytest#3697); the 8.x that
+    Python 3.9 still resolves to does not. Attach the handler to the emitting
+    logger itself so every pytest version and worker history behaves the
+    same. Enter this from the test body: pytest swaps `caplog.handler`
+    between the setup and call phases, so a fixture would attach the wrong
+    one.
     """
-    monkeypatch.setattr(logging.getLogger('sky'), 'propagate', True)
-    return caplog
+    emitter = logging.getLogger(name)
+    with caplog.at_level(level, logger=name):
+        emitter.addHandler(caplog.handler)
+        try:
+            yield caplog
+        finally:
+            emitter.removeHandler(caplog.handler)
 
 
 @pytest.fixture
@@ -382,9 +393,9 @@ def test_ssh_proxy_kubectl_exit_before_forwarding_reaps_child(
 
 
 def test_ssh_proxy_kubectl_death_mid_session_logs_leftover(
-        loop, fake_kubectl, sky_caplog):
+        loop, fake_kubectl, caplog):
     before = _closed_total('KubectlPortForwardExit')
-    with sky_caplog.at_level(logging.ERROR, logger='sky.server.server'):
+    with _capture_sky_logs(caplog, 'sky.server.server', logging.ERROR):
         _, captured = _run_handler(loop, fake_kubectl, 'die',
                                    _wait_for_kubectl_death)
     proc = captured.procs[0]
@@ -396,10 +407,10 @@ def test_ssh_proxy_kubectl_death_mid_session_logs_leftover(
     # port-forward came up, including its last line before exiting.
     exit_messages = [
         rec.getMessage()
-        for rec in sky_caplog.records
+        for rec in caplog.records
         if 'kubectl port-forward exited before' in rec.getMessage()
     ]
-    assert exit_messages, sky_caplog.text
+    assert exit_messages, caplog.text
     assert all(
         'lost connection to pod' in msg for msg in exit_messages), exit_messages
     _assert_pipe_fd_released(loop, proc)
