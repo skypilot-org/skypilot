@@ -1259,7 +1259,7 @@ app = fastapi.FastAPI(prefix='/api/v1', debug=True, lifespan=lifespan)
 #   Middleware3(Middleware2(Middleware1(request)))
 # If MiddlewareN does something like print(n); call_next(); print(n), you'll get
 #   3; 2; 1; <request>; 1; 2; 3
-# The metrics middleware is added last, i.e. outermost; see below.
+# The metrics middleware is added last (outermost); see below.
 # APIVersionMiddleware also records the dispatched endpoint for workspace-access
 # classification. Added near-first => inner to PathCleanMiddleware /
 # InternalDashboardPrefixMiddleware, so the path it records is the router-
@@ -1322,9 +1322,9 @@ if __name__ == 'sky.server.server':
 # after every core and plugin middleware: it counts the response the client
 # actually receives, including the 401/403/503s the authentication, RBAC,
 # shutdown and plugin middlewares answer themselves without calling the next
-# layer. Placed inside the stack (where it used to be, as the first
-# middleware added), none of those were counted and an authentication outage
-# showed up on dashboards as a drop in successful requests rather than as
+# layer, and every WebSocket handshake (accepted or rejected). Placed inside
+# the stack, none of those would be counted and a fleet-wide auth outage
+# shows up on dashboards as a drop in successful requests rather than as
 # errors. Use environment variable to make the metrics middleware optional.
 if os.environ.get(constants.ENV_VAR_SERVER_METRICS_ENABLED):
     app.add_middleware(metrics.PrometheusMiddleware)

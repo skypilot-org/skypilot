@@ -8,15 +8,16 @@ import os
 import re
 import threading
 import time
-from typing import Dict, FrozenSet, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Mapping, Optional, Sequence, Set, Tuple
 
 import fastapi
+import fastapi.routing
 from prometheus_client import core as prom_core
 from prometheus_client import generate_latest
 from prometheus_client import multiprocess
 import prometheus_client as prom
 import psutil
-import starlette.middleware.base
+import starlette.routing
 import starlette.types
 import uvicorn
 
@@ -1554,167 +1555,227 @@ def _is_streaming_api(path: str) -> bool:
     return path.endswith('/logs') or path.endswith('/api/stream')
 
 
-def _get_user_label(request: fastapi.Request) -> str:
-    """Extract user label from request for metrics.
+def _get_user_label(state: Mapping[str, Any]) -> str:
+    """Extract the user label for metrics from the request state.
 
-    Returns the authenticated user's name if available, otherwise 'anonymous'.
+    `state` is the ASGI scope's `state` dict, i.e. what `request.state`
+    is backed by. Returns the authenticated user's name if available,
+    otherwise 'anonymous'.
     """
-    auth_user = getattr(request.state, 'auth_user', None)
-    if auth_user is not None and auth_user.name:
+    auth_user = state.get('auth_user')
+    if auth_user is not None and getattr(auth_user, 'name', None):
         return auth_user.name
     return 'anonymous'
 
 
-# Prefixes that bound the `path` label of an unrouted request -- one a
-# middleware answered without the router running; see `_unrouted_path_label`.
-# The prefixes are the routers mounted in sky/server/server.py plus the
-# plugin route root; the `*` form keeps the prefix regexes dashboards and
-# rules already use (e.g. `/api/.*`, `/dashboard/.*`) matching, and a
-# router's bare root (`/users`) folds into the same bucket.
-_UNROUTED_PATH_PREFIXES = (
-    '/api/',
-    '/dashboard/',
-    '/internal/dashboard/',
-    '/plugins/',
-    '/jobs/',
-    '/serve/',
-    '/users/',
-    '/workspaces/',
-    '/volumes/',
-    '/ssh_node_pools/',
-    '/recipes/',
-    '/storage/',
-    '/debug/',
-)
-OTHER_PATH_LABEL = 'other'
+# `path` label value for requests no registered route matches (404s, and
+# requests a middleware rejected on a path that is not an endpoint). One
+# fixed value instead of the raw path, so unauthenticated scanners cannot
+# create a series per path they probe.
+UNMATCHED_PATH_LABEL = 'unmatched'
+# `path` label used when a mounted sub-application handles the request
+# but exposes no routes of its own to match against (e.g. static files).
+_MOUNT_TAIL = '/{path}'
+# Mirror of InternalDashboardPrefixMiddleware in sky/server/server.py (the
+# dashboard's reverse proxy prefix). Requests rejected by an outer middleware
+# never reach that rewrite, so the metrics layer strips the prefix itself
+# before resolving the route template; the successes and the rejections of
+# one endpoint then land in the same series.
+_INTERNAL_DASHBOARD_PREFIX = '/internal/dashboard/'
+# Bound on the (scope type, method, path) -> route template memo. Cleared
+# when full, and whenever the route table changes size (a route registered
+# after a request to its path was already labeled).
+_ROUTE_TEMPLATE_CACHE_SIZE = 4096
+_RouteTable = Sequence[starlette.routing.BaseRoute]
 
 
-def _reached_router(request: fastapi.Request) -> bool:
-    """Whether the request got past every middleware to the router.
+def _dispatch_candidates(routes: _RouteTable) -> Sequence[Any]:
+    """The entries a request is matched against, in dispatch order.
 
-    Starlette's router stamps itself on the scope when it runs
-    (`scope['router']`); a request a middleware answered itself never gets
-    there. This is what tells a route's own 4xx/5xx (raw path, as before)
-    from a middleware's canned response (bounded path).
+    Recent FastAPI versions do not copy an included router's routes into the
+    parent table: `include_router` appends one opaque entry per included
+    router and resolves its effective (prefixed) routes lazily, so the entry
+    matches a request but carries no path of its own. `iter_route_contexts`
+    -- what FastAPI's OpenAPI generator uses -- expands those entries into
+    contexts that carry the effective `path` and forward `matches()`; Mounts,
+    Hosts and plain Starlette routes pass through unchanged. Older FastAPI
+    versions flatten on include, so the table itself is the candidate list.
     """
-    return 'router' in request.scope
+    iter_route_contexts = getattr(fastapi.routing, 'iter_route_contexts', None)
+    if iter_route_contexts is None:
+        return routes
+    try:
+        return list(iter_route_contexts(routes))
+    except Exception:  # pylint: disable=broad-except
+        return routes
 
 
-def _literal_route_paths(app) -> FrozenSet[str]:
-    """The registered route paths without path parameters.
+def _match_route_template(routes: _RouteTable,
+                          match_scope: Dict[str, Any]) -> Optional[str]:
+    """The template of the route Starlette would dispatch `match_scope` to.
 
-    "Registered route" means a route on the app's own table: with current
-    FastAPI, `include_router` adds one opaque entry per router, so the
-    routes of the included core and plugin routers are not in it and fold
-    into their prefix bucket (see `_unrouted_path_label`). Bounded either
-    way.
+    Same first-FULL-match-else-first-PARTIAL-match rule as
+    `starlette.routing.Router`. Mounted sub-applications are resolved
+    recursively when they expose routes; otherwise the mount path plus a
+    fixed tail is used. `match_scope` must be a private copy: `matches()`
+    implementations may write to it.
     """
-    routes = getattr(app, 'routes', None)
-    if not isinstance(routes, (list, tuple)):
-        return frozenset()
-    return frozenset(route.path
-                     for route in routes
-                     if isinstance(getattr(route, 'path', None), str) and
-                     '{' not in route.path)
+    partial: Optional[Tuple[Any, Dict[str, Any]]] = None
+    for route in _dispatch_candidates(routes):
+        try:
+            match, child_scope = route.matches(match_scope)
+        except Exception:  # pylint: disable=broad-except
+            # A route type that cannot evaluate this scope: treat it as not
+            # matching rather than failing to label the request.
+            continue
+        if match == starlette.routing.Match.FULL:
+            return _template_of(route, match_scope, child_scope)
+        if match == starlette.routing.Match.PARTIAL and partial is None:
+            partial = (route, child_scope)
+    if partial is not None:
+        return _template_of(partial[0], match_scope, partial[1])
+    return None
 
 
-def _unrouted_path_label(path: str, literal_routes: FrozenSet[str]) -> str:
-    """Bounded `path` label for a response a middleware produced.
+def _template_of(route: Any, match_scope: Dict[str, Any],
+                 child_scope: Dict[str, Any]) -> str:
+    # `route` is a Starlette route, or a FastAPI route context wrapping the
+    # registered route. A context for an API route carries the effective
+    # (prefixed) path itself; for any other route type included through a
+    # router (WebSocket routes, plain Starlette routes, mounts) the prefixed
+    # copy is its `starlette_route`.
+    effective = getattr(route, 'starlette_route', None) or route
+    original = getattr(effective, 'original_route', effective)
+    if isinstance(original, (starlette.routing.Mount, starlette.routing.Host)):
+        is_mount = isinstance(original, starlette.routing.Mount)
+        # A Mount's path is a template (`/{tenant}/api` stays a template, not
+        # the matched value); a Host adds nothing to the path.
+        prefix = original.path if is_mount else ''
+        # Starlette apps and routers expose `.routes`; StaticFiles and
+        # foreign ASGI apps do not.
+        sub_routes = getattr(original, 'routes', None)
+        if sub_routes:
+            sub_scope = dict(match_scope)
+            sub_scope.update(child_scope)
+            sub = _match_route_template(sub_routes, sub_scope)
+            if sub is not None:
+                return prefix + sub
+        return prefix + _MOUNT_TAIL if is_mount else UNMATCHED_PATH_LABEL
+    path = getattr(effective, 'path', None)
+    return path if path else UNMATCHED_PATH_LABEL
 
-    The request never reached the router (an authentication 401/503, an
-    RBAC 403, a CORS preflight, a sign-in redirect, ...), and its path is
-    chosen by whoever sent it -- unauthenticated scanners included -- so
-    the raw path cannot be the label value. The raw path is kept only when
-    it is exactly a registered (parameterless) route; anything else is
-    folded into one of the fixed `_UNROUTED_PATH_PREFIXES` buckets, as
-    `<prefix>*`, or into `other`. A request that did reach the router keeps
-    its raw path, 404s included, exactly as before.
-    """
-    if path in literal_routes:
-        return path
-    for prefix in _UNROUTED_PATH_PREFIXES:
-        if path.startswith(prefix) or path == prefix[:-1]:
-            return prefix + '*'
-    return OTHER_PATH_LABEL
 
+class PrometheusMiddleware:
+    """Pure-ASGI middleware that records request metrics.
 
-class PrometheusMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
-    """Middleware to collect Prometheus metrics for HTTP requests.
+    Counts what the client actually receives, so it must be the OUTERMOST
+    middleware of the app (added last in sky/server/server.py). An
+    authentication, RBAC or shutdown middleware that answers a request
+    itself never calls the next layer; with the metrics middleware inside
+    the stack those responses -- exactly the ones an outage produces -- are
+    never counted, and the only visible symptom is successful traffic
+    dropping. This layer observes the ASGI `http.response.start` message
+    instead of a `call_next` return value, so it sees every response
+    regardless of which layer produced it. It is deliberately not a
+    `BaseHTTPMiddleware`: those pass non-HTTP scopes straight through, so
+    WebSocket handshakes would not be observed either.
 
-    Registered as the OUTERMOST middleware (added last in
-    sky/server/server.py), so it records the response the client actually
-    receives. An authentication, RBAC or shutdown middleware that answers a
-    request itself never calls the next layer; with this middleware inside
-    the stack those responses -- exactly the ones an outage produces -- were
-    never counted, and the only visible symptom was successful traffic
-    dropping.
+    Recorded per HTTP request: `sky_apiserver_requests_total`,
+    `sky_apiserver_requests_by_user_total`,
+    `sky_apiserver_request_duration_seconds` (non-streaming APIs) and
+    `sky_apiserver_request_get_duration_seconds` (/api/get, by request
+    name); plus `sky_apiserver_request_rejections_total{reason}` when a
+    middleware stamped a rejection reason (`middleware_utils.mark_rejection`).
+    Per WebSocket handshake: `sky_apiserver_websocket_handshakes_total`
+    with the HTTP status the client saw, and the rejection counter when the
+    handshake was refused.
 
-    The `path` label is read after the inner layers ran, so it is the path
-    the router saw (inner middlewares rewrite `scope['path']` in place, e.g.
-    the internal dashboard prefix): the same value as before. For a response
-    produced by a middleware the path is bounded instead; see
-    `_unrouted_path_label`. When the middleware that answered
-    stamped a reason (`middleware_utils.mark_rejection`), the response is
-    also counted in `sky_apiserver_request_rejections_total`.
+    The `path` label is the matched route's template (e.g.
+    `/ssh_node_pools/{pool_name}/status`), which bounds the label's
+    cardinality by the number of registered routes: an unauthenticated
+    client's requests are now counted too, and their paths are arbitrary.
+    Unmatched paths are recorded as `UNMATCHED_PATH_LABEL`. Inner
+    middlewares rewrite `scope['path']` in place (the internal dashboard
+    prefix), so the path is read when the response starts, not on entry.
+    The application and `root_path` are captured on entry instead: the
+    router replaces both in place when it dispatches into a mounted
+    sub-application. Routes are resolved against the live route table on
+    every cache miss, so routes registered after this layer was built (the
+    core routers and plugin routes are) are matched like any other.
 
     Duration is measured from entry into this layer, i.e. it includes the
     time the authentication middlewares spend (DB lookups under their
     deadline): it is the latency the client observed.
-
-    WebSocket scopes pass straight through, as for every BaseHTTPMiddleware;
-    refused handshakes are counted by `middleware_utils.websocket_aware`.
     """
 
     def __init__(self, app: starlette.types.ASGIApp):
-        super().__init__(app)
-        # (route count, literal route paths) of the app, rebuilt if routes
-        # were added since. Routes are all registered before the first
-        # request in practice; the count check keeps the memo honest anyway.
-        self._literal_routes: Optional[Tuple[int, FrozenSet[str]]] = None
+        self.app = app
+        self._route_template_cache: Dict[Tuple[str, str, str], str] = {}
+        self._route_template_cache_routes = -1
 
-    def _literal_route_paths(self, app) -> FrozenSet[str]:
-        routes = getattr(app, 'routes', None)
-        count = len(routes) if isinstance(routes, (list, tuple)) else 0
-        if self._literal_routes is None or self._literal_routes[0] != count:
-            self._literal_routes = (count, _literal_route_paths(app))
-        return self._literal_routes[1]
+    async def __call__(self, scope: starlette.types.Scope,
+                       receive: starlette.types.Receive,
+                       send: starlette.types.Send) -> None:
+        scope_type = scope.get('type')
+        if scope_type == 'http':
+            await self._handle_http(scope, receive, send)
+        elif scope_type == 'websocket':
+            await self._handle_websocket(scope, receive, send)
+        else:
+            await self.app(scope, receive, send)
 
-    async def dispatch(self, request: fastapi.Request, call_next):
-        logger.debug(f'PROM Middleware Request: {request}, {request.url.path}')
+    # --- HTTP -------------------------------------------------------------
+
+    async def _handle_http(self, scope: starlette.types.Scope,
+                           receive: starlette.types.Receive,
+                           send: starlette.types.Send) -> None:
+        scope.setdefault('state', {})
+        logger.debug(f'PROM Middleware Request: {scope.get("method")} '
+                     f'{scope.get("path")}')
         start_time = time.time()
-        method = request.method
-        status_code = 0
+        # See _path_label: both are replaced in place by a mount dispatch.
+        app, root_path = scope.get('app'), scope.get('root_path', '')
+        started = False
+
+        async def send_wrapper(message: starlette.types.Message) -> None:
+            nonlocal started
+            if message['type'] == 'http.response.start' and not started:
+                started = True
+                self._record_http(scope, int(message['status']), start_time,
+                                  app, root_path)
+            await send(message)
 
         try:
-            response = await call_next(request)
-            status_code = response.status_code
+            await self.app(scope, receive, send_wrapper)
         except Exception:  # pylint: disable=broad-except
-            # Escaped every inner layer; Starlette's error handler (outside
-            # us) turns it into a bare 500. Count what the client sees.
-            status_code = 500
+            if not started:
+                # Escaped every inner layer; Starlette's ServerErrorMiddleware
+                # (outside us) turns it into a bare 500. Count what the client
+                # sees, then let it propagate.
+                scope['state'].setdefault(
+                    middleware_utils.REJECT_REASON_STATE_KEY,
+                    middleware_utils.REJECT_REASON_UNHANDLED_EXCEPTION)
+                self._record_http(scope, 500, start_time, app, root_path)
             raise
-        finally:
-            self._record(request, method, status_code, start_time)
 
-        return response
-
-    def _record(self, request: fastapi.Request, method: str, status_code: int,
-                start_time: float) -> None:
-        # Read after the inner layers ran: the scope dict is shared down the
-        # stack, so this is the (possibly rewritten) path the router saw.
-        raw_path = request.scope.get('path', '')
-        path = raw_path
-        if not _reached_router(request):
-            path = _unrouted_path_label(
-                raw_path, self._literal_route_paths(request.scope.get('app')))
+    def _record_http(self,
+                     scope: starlette.types.Scope,
+                     status_code: int,
+                     start_time: float,
+                     app: Any = None,
+                     root_path: Optional[str] = None) -> None:
+        state = scope.get('state') or {}
+        method = scope.get('method', '')
+        raw_path = scope.get('path', '')
+        path = self._path_label(scope, app, root_path)
         status_code_group = _get_status_code_group(status_code)
         metrics_utils.SKY_APISERVER_REQUESTS_TOTAL.labels(
             path=path, method=method, status=status_code_group).inc()
-        # Record per-user metrics
-        user = _get_user_label(request)
         metrics_utils.SKY_APISERVER_REQUESTS_BY_USER_TOTAL.labels(
-            user=user, method=method, status=status_code_group).inc()
-        middleware_utils.record_rejection(request.scope, status_code,
+            user=_get_user_label(state),
+            method=method,
+            status=status_code_group).inc()
+        middleware_utils.record_rejection(scope, status_code,
                                           middleware_utils.REJECTION_KIND_HTTP)
         if _is_streaming_api(raw_path):
             # Exclude streaming APIs, the duration is not meaningful.
@@ -1729,10 +1790,131 @@ class PrometheusMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
         # handler stamps request.state.request_name once it knows which
         # request is being fetched; record it by name so bounded types can be
         # alerted on separately from unbounded ones (launch/exec/...).
-        request_name = getattr(request.state, 'request_name', None)
+        request_name = state.get('request_name')
         if request_name is not None:
             metrics_utils.SKY_APISERVER_REQUEST_GET_DURATION_SECONDS.labels(
                 name=request_name, status=status_code_group).observe(duration)
+
+    # --- WebSocket --------------------------------------------------------
+
+    async def _handle_websocket(self, scope: starlette.types.Scope,
+                                receive: starlette.types.Receive,
+                                send: starlette.types.Send) -> None:
+        scope.setdefault('state', {})
+        # See _path_label: both are replaced in place by a mount dispatch.
+        app, root_path = scope.get('app'), scope.get('root_path', '')
+        settled = False
+
+        def record(accepted: bool, client_status: int) -> None:
+            self._record_handshake(scope, accepted, client_status, app,
+                                   root_path)
+
+        async def send_wrapper(message: starlette.types.Message) -> None:
+            nonlocal settled
+            message_type = message['type']
+            if not settled:
+                if message_type == 'websocket.accept':
+                    settled = True
+                    record(accepted=True, client_status=101)
+                elif message_type == 'websocket.close':
+                    # A close before accept: servers render it as an empty
+                    # HTTP 403 whatever the close code says.
+                    settled = True
+                    record(accepted=False, client_status=403)
+                elif message_type == 'websocket.http.response.start':
+                    settled = True
+                    record(accepted=False, client_status=int(message['status']))
+            await send(message)
+
+        try:
+            await self.app(scope, receive, send_wrapper)
+        except Exception:  # pylint: disable=broad-except
+            if not settled:
+                # uvicorn answers an exception before the accept with an
+                # HTTP 500 handshake response.
+                scope['state'].setdefault(
+                    middleware_utils.REJECT_REASON_STATE_KEY,
+                    middleware_utils.REJECT_REASON_UNHANDLED_EXCEPTION)
+                record(accepted=False, client_status=500)
+            raise
+
+    def _record_handshake(self,
+                          scope: starlette.types.Scope,
+                          accepted: bool,
+                          client_status: int,
+                          app: Any = None,
+                          root_path: Optional[str] = None) -> None:
+        path = self._path_label(scope, app, root_path)
+        outcome = 'accepted' if accepted else 'rejected'
+        metrics_utils.SKY_APISERVER_WEBSOCKET_HANDSHAKES_TOTAL.labels(
+            path=path, outcome=outcome, client_status=str(client_status)).inc()
+        if accepted:
+            return
+        reason = (middleware_utils.get_rejection_reason(scope) or
+                  middleware_utils.REJECT_REASON_UNSPECIFIED)
+        metrics_utils.SKY_APISERVER_REQUEST_REJECTIONS_TOTAL.labels(
+            reason=reason,
+            status=str(client_status),
+            kind=middleware_utils.REJECTION_KIND_WEBSOCKET).inc()
+
+    # --- path label -------------------------------------------------------
+
+    def _path_label(self,
+                    scope: starlette.types.Scope,
+                    app: Any = None,
+                    root_path: Optional[str] = None) -> str:
+        """Route template for the request, memoized per (type, method, path).
+
+        `app` and `root_path` are the values the scope carried when the
+        request entered this layer. The router mutates both in place while
+        dispatching into a mounted sub-application (`scope['app']` becomes
+        the sub-application, `root_path` grows by the mount path) and this
+        label is computed when the response starts, i.e. after that; matching
+        from the mutated values would drop the mount prefix or match nothing.
+        Without the captured values (direct callers) the scope's are used.
+        """
+        if app is None:
+            app = scope.get('app')
+        if root_path is None:
+            root_path = scope.get('root_path', '')
+        path = scope.get('path', '')
+        if path.startswith(_INTERNAL_DASHBOARD_PREFIX):
+            path = path.replace(_INTERNAL_DASHBOARD_PREFIX, '/', 1)
+        # Starlette stores the application on the scope before the middleware
+        # stack runs, so the live route table is reachable from here.
+        routes = getattr(getattr(app, 'router', app), 'routes', None)
+        # A path labeled before its route was registered would otherwise stay
+        # `unmatched`: drop the memo when the table changes size.
+        num_routes = len(routes) if routes else 0
+        if num_routes != self._route_template_cache_routes:
+            self._route_template_cache.clear()
+            self._route_template_cache_routes = num_routes
+        key = (scope.get('type', ''), scope.get('method', ''), path)
+        label = self._route_template_cache.get(key)
+        if label is None:
+            label = self._resolve_route_template(scope, routes, path, root_path)
+            if len(self._route_template_cache) >= _ROUTE_TEMPLATE_CACHE_SIZE:
+                self._route_template_cache.clear()
+            self._route_template_cache[key] = label
+        return label
+
+    @staticmethod
+    def _resolve_route_template(scope: starlette.types.Scope,
+                                routes: Optional[_RouteTable], path: str,
+                                root_path: str) -> str:
+        # Without a router (a bare ASGI callable in tests) there is nothing to
+        # match against and the raw path is used.
+        if not routes:
+            return path
+        match_scope = {
+            'type': scope.get('type', 'http'),
+            'method': scope.get('method', 'GET'),
+            'path': path,
+            'root_path': root_path,
+            'path_params': {},
+        }
+        template = _match_route_template(routes, match_scope)
+        return template if template is not None else UNMATCHED_PATH_LABEL
 
 
 peak_rss_bytes = 0
