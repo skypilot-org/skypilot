@@ -1,6 +1,7 @@
 """Kubernetes network provisioning."""
 from typing import Any, Dict, List, Optional
 
+from sky import exceptions
 from sky import sky_logging
 from sky.adaptors import kubernetes
 from sky.provision import common
@@ -198,11 +199,20 @@ def _cleanup_ports_for_ingress(
     namespace = kubernetes_utils.get_namespace_from_config(provider_config)
     for port in ports:
         service_name = f'{cluster_name_on_cloud}--skypilot-svc--{port}'
-        network_utils.delete_namespaced_service(
-            context=context,
-            namespace=namespace,
-            service_name=service_name,
-        )
+        try:
+            network_utils.delete_namespaced_service(
+                context=context,
+                namespace=namespace,
+                service_name=service_name,
+            )
+        except exceptions.PortDoesNotExistError:
+            # The service is already gone. Keep going: the remaining port
+            # services and the shared ingress below still have to be
+            # deleted, and the caller treats this error as a completed
+            # cleanup, so aborting here leaks them silently.
+            logger.warning(
+                f'cleanup_ports: Tried to delete service {service_name}, '
+                'but the service was not found (404).')
 
     # Delete the single ingress used for all ports
     ingress_name = f'{cluster_name_on_cloud}-skypilot-ingress'
