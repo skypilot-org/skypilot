@@ -433,6 +433,17 @@ When using SkyPilot programmatically, follow this loop:
 
 > **Never poll with `sleep` + `sky queue`** — use `sky logs CLUSTER JOB_ID` to stream logs and block until done. Use `--status` if you only need the exit code, or `--tail N` to fetch recent output after completion.
 
+## Investigating a Managed Job
+
+When the user asks "what is my job doing" or "why is it pending/failing", run
+these in order and stop as soon as the question is answered:
+
+1. `sky jobs queue -v -o json` — read `status`, `details`, `failure_reason` (`-v` adds the `details` field)
+2. `sky jobs queue -v -o json` — `details` says why the cluster is still pending (e.g. a Slurm `QOSGrpGRES` or `Dependency` reason, with the partition it is queued in)
+3. `sky jobs logs JOB_ID --tail 100 --no-follow` — recent task output; `--controller` for provisioning/recovery logs
+
+See [Job Investigation](references/job-investigation.md) for how to read `details`, the event timeline, and Slurm pending reasons.
+
 ## Common Agent Mistakes
 
 | Mistake | Why it's wrong | Do this instead |
@@ -471,5 +482,6 @@ For detailed reference documentation:
 - [Python SDK](references/python-sdk.md) — Programmatic API and SDK usage
 - [Advanced Patterns](references/advanced-patterns.md) — Multi-cloud, distributed training, production patterns
 - [Migrating from Slurm](references/migrating-from-slurm.md) — Converting `sbatch` scripts to task YAMLs, Slurm command/env-var mapping, Slurm-specific constraints
+- [Job Investigation](references/job-investigation.md) — Which command answers "what is my job doing and why"; reading `details`, events, Slurm pending reasons
 - [Troubleshooting](references/troubleshooting.md) — Error diagnosis and solutions
 - [Examples](references/examples.md) — Copy-paste task YAML examples
