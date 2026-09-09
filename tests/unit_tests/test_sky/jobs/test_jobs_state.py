@@ -1885,7 +1885,7 @@ class TestInfraFilterCodegenCompatibility:
 
 
 class TestParentJobLinks:
-    """parent_job_id / parent_task_id persistence and descendant walks."""
+    """root/parent/parent_task persistence and the two link fetchers."""
 
     @staticmethod
     def _new_job(name: str,
@@ -1913,29 +1913,25 @@ class TestParentJobLinks:
                               metadata='{}')
         return job_id
 
-    def test_top_level_job_has_no_parent(self, _mock_managed_jobs_db_conn):
+    def test_top_level_job_has_no_links(self, _mock_managed_jobs_db_conn):
         job_id = self._new_job('root')
-        assert state.get_parent_job(job_id) == (None, None)
-        # A top-level job is its own root.
-        assert state.get_root_job_id(job_id) == job_id
-        assert not state.get_tree_job_ids(job_id)
-        assert not state.get_children_job_ids(job_id)
-        assert not state.get_descendant_job_ids([job_id])
+        assert state.get_job_links([job_id]) == {job_id: (None, None, None)}
+        assert not state.get_tree_links([job_id])
 
-    def test_unknown_job_has_no_parent(self, _mock_managed_jobs_db_conn):
-        assert state.get_parent_job(12345) == (None, None)
-        assert state.get_root_job_id(12345) is None
+    def test_unknown_ids_are_absent(self, _mock_managed_jobs_db_conn):
+        assert not state.get_job_links([12345])
+        assert not state.get_job_links([])
+        assert not state.get_tree_links([])
 
-    def test_parent_link_round_trips(self, _mock_managed_jobs_db_conn):
+    def test_direct_member_links_round_trip(self, _mock_managed_jobs_db_conn):
         root = self._new_job('root')
         child = self._new_job('child', parent_job_id=root, parent_task_id=1)
-        assert state.get_parent_job(child) == (root, 1)
-        assert state.get_children_job_ids(root) == [child]
-        assert state.get_root_job_id(child) == root
-        assert state.get_tree_job_ids(root) == [child]
+        # Root derived at insert: the parent is top-level, so it is the root.
+        assert state.get_job_links([child]) == {child: (root, root, 1)}
+        assert state.get_tree_links([root]) == {child: (root, 1)}
 
-    def test_codegen_set_job_info_persists_parent(self,
-                                                  _mock_managed_jobs_db_conn):
+    def test_codegen_set_job_info_derives_root(self,
+                                               _mock_managed_jobs_db_conn):
         root = self._new_job('root')
         # The remote-controller (codegen) path supplies the job id itself.
         state.set_job_info(job_id=900,
@@ -1947,12 +1943,10 @@ class TestParentJobLinks:
                            user_hash='user1',
                            parent_job_id=root,
                            parent_task_id=0)
-        assert state.get_parent_job(900) == (root, 0)
-        assert state.get_children_job_ids(root) == [900]
-        assert state.get_root_job_id(900) == root
-        assert state.get_tree_job_ids(root) == [900]
+        assert state.get_job_links([900]) == {900: (root, root, 0)}
+        assert state.get_tree_links([root]) == {900: (root, 0)}
 
-    def test_descendants_walk_all_levels(self, _mock_managed_jobs_db_conn):
+    def test_deeper_levels_share_the_root(self, _mock_managed_jobs_db_conn):
         root = self._new_job('root')
         c1 = self._new_job('c1', parent_job_id=root, parent_task_id=1)
         c2 = self._new_job('c2', parent_job_id=root, parent_task_id=1)
@@ -1961,48 +1955,43 @@ class TestParentJobLinks:
         unrelated = self._new_job('other')
         unrelated_child = self._new_job('other-child', parent_job_id=unrelated)
 
-        descendants = state.get_descendant_job_ids([root])
-        # Excludes the input, includes every level, no unrelated jobs.
-        assert set(descendants) == {c1, c2, g1, gg1}
-        assert root not in descendants
-        assert unrelated not in descendants
-        assert unrelated_child not in descendants
-        # Breadth-first: children before grandchildren.
-        assert descendants.index(c1) < descendants.index(g1)
-        assert descendants.index(g1) < descendants.index(gg1)
-
-        # Multiple roots, overlapping subtrees: each id at most once, and
-        # an input id is never reported as its own descendant.
-        both = state.get_descendant_job_ids([root, c1])
-        assert sorted(both) == sorted({c2, g1, gg1})
-        assert len(both) == len(set(both))
-
-        # A leaf has no descendants; an empty input has none.
-        assert not state.get_descendant_job_ids([gg1])
-        assert not state.get_descendant_job_ids([])
-
-        # Every level carries the same root, so the whole tree is one
-        # indexed query; a grandchild's root is the top, not its parent.
-        assert state.get_root_job_id(gg1) == root
-        assert state.get_root_job_id(g1) == root
-        assert state.get_tree_job_ids(root) == sorted({c1, c2, g1, gg1})
-        assert state.get_tree_job_ids(unrelated) == [unrelated_child]
-        # A non-root node has no tree of its own under root_job_id; its
-        # subtree is the descendant walk.
-        assert not state.get_tree_job_ids(c1)
-        assert state.get_descendant_job_ids([c1]) == [g1, gg1]
+        # Every level carries the top-level root, not its parent.
+        links = state.get_job_links([c1, g1, gg1, unrelated_child])
+        assert links == {
+            c1: (root, root, 1),
+            g1: (root, c1, 0),
+            gg1: (root, g1, 0),
+            unrelated_child: (unrelated, unrelated, None),
+        }
+        # The whole tree under a root is one fetch, with the parent edges
+        # needed to pick out any subtree in memory.
+        assert state.get_tree_links([root]) == {
+            c1: (root, 1),
+            c2: (root, 1),
+            g1: (c1, 0),
+            gg1: (g1, 0),
+        }
+        # Several roots at once; a non-root id yields nothing.
+        assert set(state.get_tree_links(
+            [root, unrelated])) == {c1, c2, g1, gg1, unrelated_child}
+        assert not state.get_tree_links([c1])
 
     def test_explicit_root_wins_over_derivation(self,
                                                 _mock_managed_jobs_db_conn):
         root = self._new_job('root')
         child = self._new_job('child', parent_job_id=root)
-        # A caller that already knows the root may pass it; it is not
-        # re-derived.
         grandchild = self._new_job('gc', parent_job_id=child, root_job_id=root)
-        assert state.get_root_job_id(grandchild) == root
-        assert state.get_parent_job(grandchild) == (child, None)
+        assert state.get_job_links([grandchild]) == {
+            grandchild: (root, child, None)
+        }
 
-    def test_queue_returns_parent_fields(self, _mock_managed_jobs_db_conn):
+    def test_unknown_parent_becomes_the_root(self, _mock_managed_jobs_db_conn):
+        # A parent with no row (e.g. a controller DB that predates the link)
+        # is still recorded as the root rather than dropping the link.
+        child = self._new_job('orphan', parent_job_id=777)
+        assert state.get_job_links([child]) == {child: (777, 777, None)}
+
+    def test_queue_returns_link_fields(self, _mock_managed_jobs_db_conn):
         root = self._new_job('root')
         child = self._new_job('child', parent_job_id=root, parent_task_id=1)
         jobs, _ = state.get_managed_jobs_with_filters(
