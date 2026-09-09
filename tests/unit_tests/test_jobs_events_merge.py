@@ -467,3 +467,57 @@ def test_the_default_runner_still_reads_the_database(monkeypatch):
     monkeypatch.setattr(managed_job_runner, '_current', None)
     assert core.get_job_events(job_id=1,
                                include_cluster_events=False) == job_events
+
+
+def test_the_floor_holds_when_the_job_events_are_all_newer(monkeypatch):
+    """The floor has to *reserve* a slot, not just widen the candidate pool.
+    The final cut is by recency, so a job with a full budget of newer
+    transitions used to evict every cluster row that had been admitted --
+    hiding exactly the provisioning history the merge is read for.
+    """
+    job_events = [
+        _job_event('Job is restarting',
+                   managed_job_state.ManagedJobStatus.STARTING, 600 + i)
+        for i in range(3)
+    ]
+    monkeypatch.setattr(managed_job_state, 'get_job_events',
+                        lambda **kwargs: list(job_events))
+    monkeypatch.setattr(managed_job_state, 'get_managed_job_tasks',
+                        lambda job_id: [_task()])
+    monkeypatch.setattr(
+        global_user_state,
+        'get_cluster_events_by_name',
+        lambda name, event_types, limit=None: [{
+            'reason': 'Launching (pending: Resources; partition: dev)',
+            'transitioned_at': 100,
+        }])
+
+    result = core.get_job_events(job_id=1, limit=3, include_cluster_events=True)
+    assert len(result) == 3
+    assert result[-1]['reason'] == (
+        'Launching (pending: Resources; partition: dev)')
+
+
+def test_limit_one_prefers_the_newest_even_when_it_is_the_job_s_own(
+        monkeypatch):
+    """The mirror of test_limit_one_returns_the_newest_event_of_either_source:
+    the reserved infra share must never cost the job's own newest row, or a
+    single-row view would show an old launch line instead of the transition
+    that just happened."""
+    job_events = [
+        _job_event('Job has started',
+                   managed_job_state.ManagedJobStatus.RUNNING, 500)
+    ]
+    monkeypatch.setattr(managed_job_state, 'get_job_events',
+                        lambda **kwargs: list(job_events))
+    monkeypatch.setattr(managed_job_state, 'get_managed_job_tasks',
+                        lambda job_id: [_task()])
+    monkeypatch.setattr(global_user_state,
+                        'get_cluster_events_by_name',
+                        lambda name, event_types, limit=None: [{
+                            'reason': 'Launching (pending: Resources)',
+                            'transitioned_at': 100
+                        }])
+
+    result = core.get_job_events(job_id=1, limit=1, include_cluster_events=True)
+    assert [event['reason'] for event in result] == ['Job has started']

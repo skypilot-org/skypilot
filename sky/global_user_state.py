@@ -1431,33 +1431,51 @@ def get_latest_cluster_events(
         return {}
     engine = _db_manager.get_engine()
     type_values = [event_type.value for event_type in event_types]
-    with orm.Session(engine) as session:
-        # Latest transitioned_at per cluster in SQL, so the read does not
-        # grow with a cluster's event history.
-        latest = session.query(
-            cluster_event_table.c.name.label('name'),
-            sqlalchemy.func.max(
-                cluster_event_table.c.transitioned_at).label('latest_at'),
-        ).filter(
-            cluster_event_table.c.name.in_(cluster_names),
-            cluster_event_table.c.type.in_(type_values),
-        ).group_by(cluster_event_table.c.name).subquery()
-        rows = session.query(
-            cluster_event_table.c.name,
-            cluster_event_table.c.reason,
-            cluster_event_table.c.transitioned_at,
-        ).join(
-            latest,
-            sqlalchemy.and_(
-                cluster_event_table.c.name == latest.c.name,
-                cluster_event_table.c.transitioned_at == latest.c.latest_at,
-            ),
-        ).filter(cluster_event_table.c.type.in_(type_values)).all()
     events: Dict[str, Tuple[str, int]] = {}
-    for name, reason, transitioned_at in rows:
-        # Two events in the same second: keep the first non-empty reason.
-        if name not in events and reason:
-            events[name] = (reason, transitioned_at)
+    names_list = list(cluster_names)
+    with orm.Session(engine) as session:
+        # Chunked for the same reason as every other name/hash IN query in
+        # this module: SQLite caps a statement at 999 bound parameters, and a
+        # deployment with that many clusters provisioning at once would
+        # otherwise raise -- which the caller swallows, so *every* cluster
+        # would lose its launch reason rather than the excess.
+        for offset in range(0, len(names_list), _CLUSTER_IN_QUERY_CHUNK_SIZE):
+            batch = names_list[offset:offset + _CLUSTER_IN_QUERY_CHUNK_SIZE]
+            # Latest transitioned_at per cluster in SQL, so the read does not
+            # grow with a cluster's event history.
+            latest = session.query(
+                cluster_event_table.c.name.label('name'),
+                sqlalchemy.func.max(
+                    cluster_event_table.c.transitioned_at).label('latest_at'),
+            ).filter(
+                cluster_event_table.c.name.in_(batch),
+                cluster_event_table.c.type.in_(type_values),
+            ).group_by(cluster_event_table.c.name).subquery()
+            rows = session.query(
+                cluster_event_table.c.name,
+                cluster_event_table.c.reason,
+                cluster_event_table.c.transitioned_at,
+            ).join(
+                latest,
+                sqlalchemy.and_(
+                    cluster_event_table.c.name == latest.c.name,
+                    cluster_event_table.c.transitioned_at == latest.c.latest_at,
+                ),
+            ).filter(cluster_event_table.c.type.in_(type_values)).order_by(
+                cluster_event_table.c.transitioned_at.desc(),
+                # transitioned_at is whole seconds, and a provisioner can
+                # write two events inside one -- the Slurm one records the
+                # allocation and then polls for a reason. Without a second
+                # key the winner is whatever the database happened to
+                # return. Descending reason breaks the tie deterministically
+                # and, for those two, prefers `Launching (pending: ...)`
+                # over `Launching (Slurm job ...)`, which is the one a
+                # reader is asking for.
+                cluster_event_table.c.reason.desc(),
+            ).all()
+            for name, reason, transitioned_at in rows:
+                if name not in events and reason:
+                    events[name] = (reason, transitioned_at)
     return events
 
 

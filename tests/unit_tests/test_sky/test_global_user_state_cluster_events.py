@@ -375,3 +375,54 @@ def test_latest_cluster_events_batched(tmp_path, monkeypatch):
     }
     assert not global_user_state.get_latest_cluster_events([], [progress])
     assert not global_user_state.get_latest_cluster_events(['c-a'], [])
+
+
+def test_latest_cluster_events_ties_are_deterministic(tmp_path, monkeypatch):
+    """transitioned_at is whole seconds, and the Slurm provisioner writes two
+    launch-progress events inside one: it records the allocation, then polls
+    for a reason. Without a second sort key the winner was whatever the
+    database happened to return, so `details` could show the allocation id
+    instead of the wait reason it is read for.
+    """
+    _fresh_db(tmp_path, monkeypatch)
+    _add_cluster('c-a')
+    progress = global_user_state.ClusterEventType.LAUNCH_PROGRESS
+    for reason in ('Launching (Slurm job 17269 on dev-slurm)',
+                   'Launching (pending: Resources; partition: dev)'):
+        global_user_state.add_cluster_event('c-a',
+                                            None,
+                                            reason,
+                                            progress,
+                                            transitioned_at=1000)
+    for _ in range(5):
+        events = global_user_state.get_latest_cluster_events(['c-a'],
+                                                             [progress])
+        assert events == {
+            'c-a': ('Launching (pending: Resources; partition: dev)', 1000)
+        }
+
+
+def test_latest_cluster_events_chunks_the_name_list(tmp_path, monkeypatch):
+    """SQLite caps a statement at 999 bound parameters. Unchunked, a
+    deployment with that many clusters provisioning at once raised -- and the
+    caller swallows the error, so *every* cluster lost its launch reason
+    rather than the excess.
+    """
+    _fresh_db(tmp_path, monkeypatch)
+    monkeypatch.setattr(global_user_state, '_CLUSTER_IN_QUERY_CHUNK_SIZE', 2)
+    progress = global_user_state.ClusterEventType.LAUNCH_PROGRESS
+    names = []
+    for i in range(5):
+        name = f'chunk-{i}'
+        _add_cluster(name)
+        names.append(name)
+        global_user_state.add_cluster_event(name,
+                                            None,
+                                            f'Launching (pending: r{i})',
+                                            progress,
+                                            transitioned_at=1000 + i)
+    events = global_user_state.get_latest_cluster_events(names, [progress])
+    # Every cluster answered, across three batches of at most two names.
+    assert events == {
+        f'chunk-{i}': (f'Launching (pending: r{i})', 1000 + i) for i in range(5)
+    }

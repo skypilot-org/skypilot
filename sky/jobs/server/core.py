@@ -2150,10 +2150,17 @@ def _job_events(
     # Neither source may be starved. One launch can produce more cluster
     # events than `limit`, and dropping the oldest rows would hide the
     # PENDING -> STARTING -> RUNNING sequence the timeline is read for; but a
-    # job with many recoveries can fill the budget with its own transitions,
-    # and the launch reason the user is waiting on is usually the newest row
-    # of all. So the cluster side keeps a floor of half the budget (at least
-    # one row), and the trailing cut then trims the oldest job events.
-    cluster_floor = min(max(limit // 2, 1), len(converted))
-    room = max(limit - len(events), cluster_floor)
-    return _newest_first(events + _newest_first(converted)[:room])[:limit]
+    # job with many recoveries can fill the budget with its own transitions.
+    # So the job's own events take the budget first, the cluster side is
+    # guaranteed a share of what is left, and recency settles the remainder.
+    floor = min(max(limit // 2, 1), len(converted))
+    room = max(limit - len(events), floor)
+    candidates = _newest_first(converted)[:room]
+    # The share has to be *reserved*, not merely offered as a candidate: the
+    # final cut is by recency, so a job with a full budget of newer
+    # transitions would evict every cluster row that had been admitted.
+    # Capped so the job's own newest row never loses its slot; at limit=1
+    # that leaves the single row to whichever source is newest.
+    reserved = min(floor, len(candidates), limit - (1 if events else 0))
+    rest = _newest_first(events + candidates[reserved:])
+    return _newest_first(candidates[:reserved] + rest[:limit - reserved])
