@@ -235,6 +235,22 @@ def loop(request):
 
 
 @pytest.fixture
+def sky_caplog(caplog, monkeypatch):
+    """`caplog` that also sees records from `sky.*` loggers.
+
+    `sky_logging` sets `propagate = False` on the `sky` logger, so its
+    records never reach the root logger, which is where pytest installs the
+    caplog handler. pytest >= 9.1 attaches that handler to non-propagating
+    loggers as well (pytest-dev/pytest#3697); older releases, e.g. the 8.x
+    that Python 3.9 still resolves to, do not, and `caplog.records` stays
+    empty. Let `sky` propagate for the duration of the test so both behave
+    the same.
+    """
+    monkeypatch.setattr(logging.getLogger('sky'), 'propagate', True)
+    return caplog
+
+
+@pytest.fixture
 def fake_kubectl(tmp_path):
     path = tmp_path / 'kubectl'
     path.write_text(f'#!{sys.executable}\n' + _FAKE_KUBECTL)
@@ -366,15 +382,24 @@ def test_ssh_proxy_kubectl_exit_before_forwarding_reaps_child(
 
 
 def test_ssh_proxy_kubectl_death_mid_session_logs_leftover(
-        loop, fake_kubectl, caplog):
+        loop, fake_kubectl, sky_caplog):
     before = _closed_total('KubectlPortForwardExit')
-    with caplog.at_level(logging.ERROR, logger='sky.server.server'):
+    with sky_caplog.at_level(logging.ERROR, logger='sky.server.server'):
         _, captured = _run_handler(loop, fake_kubectl, 'die',
                                    _wait_for_kubectl_death)
     proc = captured.procs[0]
     assert captured.echoed == b''
+    # Reaped by poll(), not terminated (the fake exits 0 on SIGTERM).
     assert proc.returncode == 1
     assert _closed_total('KubectlPortForwardExit') == before + 1
-    assert any('lost connection to pod' in rec.getMessage()
-               for rec in caplog.records), caplog.text
+    # The kubectl-died-first branch logged what kubectl printed after the
+    # port-forward came up, including its last line before exiting.
+    exit_messages = [
+        rec.getMessage()
+        for rec in sky_caplog.records
+        if 'kubectl port-forward exited before' in rec.getMessage()
+    ]
+    assert exit_messages, sky_caplog.text
+    assert all(
+        'lost connection to pod' in msg for msg in exit_messages), exit_messages
     _assert_pipe_fd_released(loop, proc)
