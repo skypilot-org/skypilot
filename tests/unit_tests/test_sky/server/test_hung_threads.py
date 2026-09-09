@@ -175,13 +175,17 @@ def test_hex_addr():
 
 
 @linux_only
-def test_scan_finds_socket_closed_under_a_sleeping_poll():
+def test_scan_finds_socket_closed_under_a_sleeping_poll(monkeypatch):
     """Reproduce, without a database, the failure the scan exists for: a
     thread sleeps in poll() on a TCP socket; another thread closes that
     descriptor number and the number is reused; the peer then sends a reply.
     The connection stays established with the reply unread and no descriptor
     pointing at it. The per-thread view now shows the new owner of the
     number; only the scan shows the orphan."""
+    # A shared development host can have dozens of ownerless connections of
+    # its own (processes whose descriptors this user cannot read); do not let
+    # the report limit hide the one this test creates.
+    monkeypatch.setattr(hung_threads, '_MAX_SCAN_RESULTS', 10000)
     srv = socket.socket()
     srv.bind(('127.0.0.1', 0))
     srv.listen(5)
@@ -243,3 +247,24 @@ def test_scan_finds_socket_closed_under_a_sleeping_poll():
     time.sleep(0.1)
     lines = hung_threads.scan_ownerless_sockets()
     assert not any(f'127.0.0.1:{victim_port} ->' in l for l in lines)
+
+
+def test_scan_lists_unread_replies_first(monkeypatch):
+    """More ownerless connections than the report limit: the one with unread
+    bytes (the orphan that holds a lock) is listed first, not cut."""
+    peer = '0100007F:1920'  # 127.0.0.1:6432
+    rows = [('0100007F:0001', peer, '01', '00000000:00000000', '999')]
+    rows += [(f'0100007F:{1000 + i:04X}', peer, '01', '00000000:00000000',
+              str(2000 + i)) for i in range(20)]
+    rows.append(('0100007F:BEEF', peer, '01', '00000000:00000044', '3000'))
+    monkeypatch.setattr(hung_threads, '_tcp_rows', lambda: rows)
+    monkeypatch.setattr(hung_threads, '_socket_inodes_by_process',
+                        lambda deadline: ({'999'}, 1, 0, 3, True))
+    monkeypatch.setattr(hung_threads, '_MAX_SCAN_RESULTS', 16)
+    lines = hung_threads.scan_ownerless_sockets()
+    assert lines[0].startswith('ownerless sockets: 21 ')
+    assert len(lines) == 1 + 16 + 1
+    assert lines[1] == ('  socket:[3000] 127.0.0.1:48879 -> 127.0.0.1:6432 '
+                        'ESTABLISHED recv-q=68 send-q=0 owner=none')
+    assert lines[2].startswith('  socket:[2000] ')  # ties keep table order
+    assert lines[-1] == '  ... 5 more'

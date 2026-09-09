@@ -479,6 +479,14 @@ def _peer_hex_forms(peers: Iterable[Tuple[str, int]]) -> Set[str]:
     return out
 
 
+def _recv_q(row: Tuple[str, str, str, str, str]) -> int:
+    """Unread bytes of a /proc/net/tcp row ('tx_queue:rx_queue' hex)."""
+    try:
+        return int(row[3].split(':')[1], 16)
+    except (IndexError, ValueError):
+        return -1
+
+
 def scan_ownerless_sockets(extra_peers: Iterable[Tuple[str,
                                                        int]] = ()) -> List[str]:
     """List established TCP connections in this network namespace that no
@@ -503,7 +511,9 @@ def scan_ownerless_sockets(extra_peers: Iterable[Tuple[str,
 
     Costs one read of ``/proc/net/tcp`` plus a walk of every readable
     ``/proc/<pid>/fd`` -- tens to a few hundred milliseconds on a busy pod --
-    so callers keep it rare. Returns log lines; the first is a summary.
+    so callers keep it rare. Returns log lines; the first is a summary, then
+    at most _MAX_SCAN_RESULTS connections, the ones with the most unread
+    bytes first.
     """
     started = time.monotonic()
     try:
@@ -516,6 +526,11 @@ def scan_ownerless_sockets(extra_peers: Iterable[Tuple[str,
             row for row in rows
             if row[4] != '0' and row[4] not in owned and row[1] in peers
         ]
+        # An orphan whose peer answered and nobody read the reply is the one
+        # that holds a lock; other ownerless connections (another container
+        # in the pod, a process whose descriptors we cannot read) must not
+        # push it past the report limit. Stable, so ties keep table order.
+        suspects.sort(key=_recv_q, reverse=True)
         elapsed_ms = (time.monotonic() - started) * 1000
         summary = (f'ownerless sockets: {len(suspects)} established/'
                    f'close-wait connection(s) to a peer this host talks to '
