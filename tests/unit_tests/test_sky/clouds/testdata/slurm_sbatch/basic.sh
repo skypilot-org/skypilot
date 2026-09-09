@@ -21,6 +21,23 @@ cleanup() {
         kill $(cat "/tmp/test-cluster-no-container/.sky/skylet_pid") 2>/dev/null || true
     fi
     echo "Cleaning up sky directories..."
+    # Unmount the storage MOUNT paths recorded by the mount keeper, so the
+    # FUSE daemons killed with this allocation do not leave disconnected
+    # mount points on the nodes. Runs through the container for container
+    # clusters: that is the namespace the mounts live in. The primary
+    # unmount happens in _cleanup_slurm_allocation while the allocation is
+    # still quiet; this is the backstop for paths that skip it, so it runs
+    # before the slower enroot cleanup.
+    if [ -f /home/testuser/.sky_clusters/test-cluster-no-container/.sky/storage_mounts/paths ]; then
+        echo "Unmounting storage mounts..."
+        srun --overlap --nodes=1 --ntasks-per-node=1 bash -c 'while read -r mount_path; do
+    [ -n "$mount_path" ] || continue
+    mount_path="${mount_path%/}"
+    fusermount -uz "$mount_path" 2>/dev/null || fusermount3 -uz "$mount_path" 2>/dev/null || true
+done < /home/testuser/.sky_clusters/test-cluster-no-container/.sky/storage_mounts/paths
+' || true
+        echo "Unmounted storage mounts."
+    fi
     # Remove the per-node enroot container, if it exists.
     # This is only needed when container_scope=global.
     # When container_scope=job, named containers are removed automatically
@@ -64,4 +81,35 @@ touch /home/testuser/.sky_clusters/test-cluster-no-container/.sky_sbatch_ready
 # Host-side keeper step that starts skylet and restarts it if it dies.
 SKY_HEAD_NODE=$(scontrol show hostnames "$SLURM_JOB_NODELIST" | head -n1)
 ( while true; do srun --overlap --jobid=$SLURM_JOB_ID --nodes=1 --ntasks=1 --job-name=sky-skylet-keeper --nodelist=$SKY_HEAD_NODE bash -c 'while true; do if [ -f /tmp/test-cluster-no-container/.sky/skylet_start ]; then HOME=/home/testuser/.sky_clusters/test-cluster-no-container bash /tmp/test-cluster-no-container/.sky/skylet_start; fi; sleep 5; done'; sleep 5; done ) &
+# Storage-mount keeper: launches mount specs as persistent steps.
+( mkdir -p /home/testuser/.sky_clusters/test-cluster-no-container/.sky/storage_mounts && touch /home/testuser/.sky_clusters/test-cluster-no-container/.sky/storage_mounts/keeper_ready
+  while true; do
+    for spec in /home/testuser/.sky_clusters/test-cluster-no-container/.sky/storage_mounts/spec-*.sh; do
+      [ -e "$spec" ] || continue
+      gen=${spec##*/spec-}; gen=${gen%.sh}
+      [ -e /home/testuser/.sky_clusters/test-cluster-no-container/.sky/storage_mounts/started-$gen ] && continue
+      ( srun --overlap --job-name=sky-storage-mount-keeper --unbuffered --nodes=1 --ntasks-per-node=1 --kill-on-bad-exit=0 bash -c 'spec=$1
+gen=${spec##*/spec-}
+gen=${gen%.sh}
+cd /home/testuser/.sky_clusters/test-cluster-no-container && export HOME="$PWD"
+export SKY_RUNTIME_DIR="/tmp/test-cluster-no-container"
+([ -f ~/.bashrc ] && source ~/.bashrc || true)
+mkdir -p /home/testuser/.sky_clusters/test-cluster-no-container/.sky/storage_mounts/logs
+if bash "$spec" > /home/testuser/.sky_clusters/test-cluster-no-container/.sky/storage_mounts/logs/storage_mounts-$SLURMD_NODENAME-$gen.log 2>&1; then
+  touch /home/testuser/.sky_clusters/test-cluster-no-container/.sky/storage_mounts/done-$gen/$SLURMD_NODENAME
+  exec sleep infinity
+else
+  echo $? > /home/testuser/.sky_clusters/test-cluster-no-container/.sky/storage_mounts/failed-$gen/$SLURMD_NODENAME
+  exit 1
+fi
+' bash "$spec"
+        mount_srun_rc=$?
+        if [ "$mount_srun_rc" -ne 0 ]; then
+          mkdir -p /home/testuser/.sky_clusters/test-cluster-no-container/.sky/storage_mounts/failed-$gen
+          echo "$mount_srun_rc" > /home/testuser/.sky_clusters/test-cluster-no-container/.sky/storage_mounts/failed-$gen/_step
+        fi ) &
+      echo $! > /home/testuser/.sky_clusters/test-cluster-no-container/.sky/storage_mounts/started-$gen
+    done
+    sleep 2
+  done ) &
 sleep infinity

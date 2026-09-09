@@ -454,11 +454,26 @@ class TestDrainSlurmWorkloadSteps:
             instance.slurm.JobStepInfo('123.extern', 'extern'),
             instance.slurm.JobStepInfo('123.0', 'sky-container-keeper'),
             instance.slurm.JobStepInfo('123.1', 'sky-skylet-keeper'),
+            instance.slurm.JobStepInfo('123.2', 'sky-storage-mount-keeper'),
         ]
 
         instance._drain_slurm_workload_steps(client, '123')
 
         client.signal_job_step.assert_not_called()
+
+    def test_terms_storage_mount_steps_not_named_keeper(self):
+        """A mount step under a different name is still a workload step."""
+        client = mock.MagicMock()
+        client.list_job_steps.return_value = []
+        client.list_job_steps.side_effect = None
+        workload_step = instance.slurm.JobStepInfo('123.3', 'bash')
+        client.list_job_steps.side_effect = [[workload_step], []]
+
+        instance._drain_slurm_workload_steps(client, '123')
+
+        assert client.signal_job_step.call_args_list == [
+            mock.call('123', '123.3', 'TERM'),
+        ]
 
     def test_terms_task_and_ssh_steps_then_waits_for_exit(self, monkeypatch):
         self._patch_clock(monkeypatch)
@@ -602,6 +617,76 @@ class TestStopInstances:
         assert events.index('cancel jobs') < events.index('drain steps')
         assert events.index('drain steps') < events.index('backup jobs db')
 
+    def test_unmounts_recorded_storage_mounts_before_draining(
+            self, monkeypatch):
+        """stop unmounts keeper-recorded paths before draining steps."""
+        client, login_runner, head_runner, _, _ = self._setup(
+            monkeypatch, ['node-a', 'node-b'])
+        del head_runner
+        events = []
+        original_run = login_runner.run.side_effect
+
+        def run(command, **kwargs):
+            if command.startswith('test -f') and 'paths' in command:
+                # The keeper recorded mount paths.
+                return 0, '', ''
+            if 'fusermount' in command:
+                events.append('unmount')
+                assert '--nodes=2' in command
+                assert '--container-name=test-cluster:exec' in command
+                assert '--jobid=123' in command
+            return original_run(command, **kwargs)
+
+        login_runner.run.side_effect = run
+        client.list_job_steps.side_effect = lambda job_id: (events.append(
+            'drain steps') or [])
+
+        instance.stop_instances(_CLUSTER,
+                                provider_config=_CONTAINER_PROVIDER_CONFIG)
+
+        assert 'unmount' in events
+        assert events.index('unmount') < events.index('drain steps')
+
+    def test_stop_skips_unmount_without_recorded_paths(self, monkeypatch):
+        """No paths file (nothing ever mounted): no unmount srun."""
+        _, login_runner, _, _, _ = self._setup(monkeypatch, ['node-a'])
+        commands = []
+        original_run = login_runner.run.side_effect
+
+        def run(command, **kwargs):
+            commands.append(command)
+            if 'storage_mounts/paths' in command:
+                # No mount paths were ever recorded.
+                return 1, '', ''
+            return original_run(command, **kwargs)
+
+        login_runner.run.side_effect = run
+
+        instance.stop_instances(_CLUSTER,
+                                provider_config=_CONTAINER_PROVIDER_CONFIG)
+
+        assert not any('fusermount' in command for command in commands)
+
+    def test_stop_unmount_failure_does_not_block_stop(self, monkeypatch):
+        """A failed unmount is logged and the stop proceeds."""
+        client, login_runner, _, _, cancel_slurm_job = self._setup(
+            monkeypatch, ['node-a'])
+        del client
+
+        def run(command, **kwargs):
+            if 'fusermount' in command:
+                return 1, '', 'fusermount: failed'
+            if 'storage_mounts/paths' in command:
+                return 0, '', ''
+            return 0, '', ''
+
+        login_runner.run.side_effect = run
+
+        instance.stop_instances(_CLUSTER,
+                                provider_config=_CONTAINER_PROVIDER_CONFIG)
+
+        cancel_slurm_job.assert_called_once()
+
     def test_exports_all_nodes_then_publishes_manifest(self, monkeypatch):
         nodes = ['node-a', 'node-b']
         _, login_runner, head_runner, write_manifest, cancel_slurm_job = (
@@ -661,7 +746,15 @@ class TestStopInstances:
     def test_cleanup_allocation_runs_on_every_node(self, monkeypatch):
         client = mock.MagicMock()
         login_runner = mock.MagicMock()
-        login_runner.run.return_value = (0, '', '')
+
+        def run(command, **kwargs):
+            del kwargs
+            # No storage mounts were recorded.
+            if command.startswith('test -f') and 'paths' in command:
+                return 1, '', ''
+            return 0, '', ''
+
+        login_runner.run.side_effect = run
         monkeypatch.setattr(instance.skypilot_config,
                             'get_effective_region_config',
                             mock.MagicMock(return_value=None))
@@ -675,7 +768,13 @@ class TestStopInstances:
                                            _PROVIDER_CONFIG, '123',
                                            ['node-a', 'node-b'])
 
-        node_cleanup = login_runner.run.call_args_list[0].args[0]
+        commands = [call.args[0] for call in login_runner.run.call_args_list]
+        # The unmount paths check runs first, while the allocation is still
+        # quiet (the mocked runner reports no paths file, so no unmount
+        # srun follows).
+        assert commands[0].startswith('test -f')
+        assert 'storage_mounts/paths' in commands[0]
+        node_cleanup = commands[1]
         assert '--jobid=123' in node_cleanup
         assert '--nodes=2 --ntasks-per-node=1' in node_cleanup
         assert 'pyxis_test-cluster' in node_cleanup
@@ -684,7 +783,7 @@ class TestStopInstances:
                 '            if ! container_exists "$enroot_name"; then'
                 in node_cleanup)
         assert 'rm -rf -- /tmp/test-cluster' in node_cleanup
-        shared_cleanup = login_runner.run.call_args_list[1].args[0]
+        shared_cleanup = commands[2]
         assert shared_cleanup == instance._remove_shared_state_script(
             '/home/test/.sky_clusters/test-cluster', preserve_logs=False)
 

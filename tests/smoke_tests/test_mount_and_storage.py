@@ -686,6 +686,132 @@ def test_slurm_storage_mounts_cached(image_id: Optional[str]):
             smoke_tests_utils.run_one_test(test)
 
 
+@pytest.mark.slurm
+@pytest.mark.parametrize(
+    'image_id',
+    [
+        None,  # No container image
+        'docker:ubuntu:24.04',
+    ])
+def test_slurm_storage_mounts(image_id: Optional[str]):
+    """Storage MOUNT on Slurm survives proctrack/cgroup step teardown.
+
+    Under proctrack/cgroup, a FUSE daemon launched by an ephemeral srun step
+    is killed when that step exits. The allocation-owned mount keeper step
+    owns the daemons instead, so: the mount must be readable from a brand-new
+    step after the launch's own steps exited (sky exec), a relaunch with a
+    second bucket must keep both mounts readable, and sky down must unmount
+    the recorded paths on every node the cluster used.
+    """
+    name = smoke_tests_utils.get_cluster_name()
+    storage_name = f'sky-test-{int(time.time())}'
+    storage_name_2 = f'sky-test-2-{int(time.time())}'
+    mount_root = f'/tmp/{name}'
+
+    mount_yaml = textwrap.dedent(f"""\
+        num_nodes: 2
+
+        file_mounts:
+          {mount_root}/data:
+            name: {storage_name}
+            source: ~/tmp-workdir
+            mode: MOUNT
+            config:
+              mount:
+                read_only: true
+
+        run: |
+          set -ex
+          ls -l {mount_root}/data/foo
+        """)
+    both_mounts_yaml = textwrap.dedent(f"""\
+        num_nodes: 2
+
+        file_mounts:
+          {mount_root}/data:
+            name: {storage_name}
+            source: ~/tmp-workdir
+            mode: MOUNT
+            config:
+              mount:
+                read_only: true
+          {mount_root}/data2:
+            name: {storage_name_2}
+            source: ~/tmp-workdir
+            mode: MOUNT
+            config:
+              mount:
+                read_only: true
+
+        run: |
+          set -ex
+          ls -l {mount_root}/data/foo
+          ls -l {mount_root}/data2/foo
+        """)
+
+    image_id_arg = f'--image-id {image_id}' if image_id is not None else ''
+
+    # Parse "sky check slurm" output: "    ├── cluster: enabled" -> "cluster"
+    # sed strips ANSI escape codes from colored output
+    get_slurm_cluster = ("sky check slurm 2>&1 | "
+                         "sed 's/\\x1b\\[[0-9;]*m//g' | "
+                         "grep -E '(├──|└──)' | "
+                         "grep 'enabled' | "
+                         "head -1 | "
+                         "awk -F': ' '{print $1}' | "
+                         "awk '{print $NF}'")
+    nodes_file = f'/tmp/{name}-nodes.txt'
+    get_nodes = (f"import sky; "
+                 f"clusters = sky.get(sky.status(['{name}'])); "
+                 f"open('{nodes_file}', 'w').write(clusters[0]['node_names'])")
+
+    with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f1:
+        with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f2:
+            f1.write(mount_yaml)
+            f1.flush()
+            f2.write(both_mounts_yaml)
+            f2.flush()
+            test_commands = [
+                *smoke_tests_utils.STORAGE_SETUP_COMMANDS,
+                # The run command executes on every node of the allocation.
+                f'sky launch -y -c {name} --infra slurm {image_id_arg} '
+                f'{smoke_tests_utils.LOW_RESOURCE_ARG} {f1.name}',
+                f'sky logs {name} 1 --status',
+                # A brand-new ephemeral step must see the mount: the FUSE
+                # daemon outlived the launch's own steps.
+                f'sky exec {name} -- "set -ex; ls -l {mount_root}/data/foo"',
+                # Relaunching with a second bucket mounts it alongside the
+                # first (a new keeper generation; the old mount stays).
+                f'sky launch -y -c {name} --infra slurm {image_id_arg} '
+                f'{smoke_tests_utils.LOW_RESOURCE_ARG} {f2.name}',
+                f'sky logs {name} 3 --status',
+                # Capture the allocation's nodes before tearing it down.
+                f'python -c {shlex.quote(get_nodes)}',
+                f'sky down -y {name}',
+                # Teardown unmounted every recorded path on every node the
+                # cluster used. For container clusters the mounts lived in
+                # the container's mount namespace, which the down removed,
+                # so the host check trivially passes there. $NODES expands on
+                # the driver; the escaped $node expands on the login node.
+                f'SLURM_CLUSTER=$({get_slurm_cluster}) && '
+                f'NODES=$(cat {nodes_file} | tr "," " ") && '
+                'ssh -F ~/.slurm/config $SLURM_CLUSTER '
+                '"for node in $NODES; do '
+                'if srun -w \\"\\$node\\" findmnt '
+                f'{mount_root}/data {mount_root}/data2; then '
+                'echo \\"ERROR: mount left behind on \\$node\\"; '
+                'exit 1; fi; done; echo \\"teardown unmount verified\\"\"',
+            ]
+            test = smoke_tests_utils.Test(
+                'slurm_storage_mounts',
+                test_commands,
+                f'sky down -y {name}; rm -f {nodes_file}; '
+                f'sky storage delete -y {storage_name} {storage_name_2}',
+                timeout=30 * 60,  # 30 mins
+            )
+            smoke_tests_utils.run_one_test(test)
+
+
 @pytest.mark.kubernetes
 def test_kubernetes_ensure_no_fd_leak_fusermount_server():
     """Verify fusermount-server closes /dev/fuse fds after MOUNT_CACHED mounts.

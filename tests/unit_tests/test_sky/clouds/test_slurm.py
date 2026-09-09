@@ -2082,6 +2082,150 @@ class TestCreateVirtualInstance:
         # Outer retry loop: the batch script restarts the step itself.
         assert keeper_line.endswith('sleep 5; done ) &')
 
+    @patch('sky.provision.slurm.instance._wait_for_job_nodes')
+    @patch('sky.provision.slurm.instance.slurm_utils.get_proctrack_type')
+    @patch('sky.provision.slurm.instance.slurm_utils.get_partition_info')
+    @patch('sky.provision.slurm.instance.slurm.SlurmClient')
+    @patch('sky.provision.slurm.instance.command_runner.'
+           'SlurmLoginNodeCommandRunner')
+    def test_storage_mount_keeper_block_non_container(self, mock_ssh_runner,
+                                                      mock_slurm_client,
+                                                      mock_get_partition_info,
+                                                      mock_get_proctrack_type,
+                                                      mock_wait_for_job_nodes):
+        """Mount keeper scans for specs and launches persistent steps."""
+        from sky.provision.slurm import storage_mount as slurm_storage_mount
+
+        self._setup_mocks(mock_ssh_runner, mock_slurm_client,
+                          mock_get_partition_info, 'cpus')
+        mock_get_proctrack_type.return_value = 'cgroup'
+
+        config = self._make_non_container_config(cpus=2)
+        script = self._run_and_capture_script('test-mount-keeper', config)
+
+        mount_dir = (f'/home/testuser/.sky_clusters/test-mount-keeper'
+                     f'/.sky/{slurm_storage_mount.STORAGE_MOUNTS_DIR_NAME}')
+        # The keeper marks itself ready before scanning for specs.
+        assert (f'touch {mount_dir}/'
+                f'{slurm_storage_mount.KEEPER_READY_MARKER}' in script)
+        assert f'for spec in {mount_dir}/spec-*.sh; do' in script
+        # Launched specs are never relaunched (started marker).
+        assert '[ -e "$spec" ] || continue' in script
+        assert f'[ -e {mount_dir}/started-$gen ] && continue' in script
+        # The step is a persistent, allocation-owned srun step.
+        keeper_idx = script.index('--job-name=sky-storage-mount-keeper')
+        assert '--kill-on-bad-exit=0' in script
+        # Host shape mirrors _run_via_srun(in_container=False): HOME is the
+        # shared cluster home and bashrc is sourced for PATH.
+        step_idx = script.index(
+            "cd /home/testuser/.sky_clusters/test-mount-keeper"
+            ' && export HOME="$PWD"')
+        assert step_idx > keeper_idx
+        assert '([ -f ~/.bashrc ] && source ~/.bashrc || true)' in script
+        assert 'export SKY_RUNTIME_DIR=' in script
+        # Success holds the step open so the FUSE daemon survives; failure
+        # records the node's exit code.
+        assert 'exec sleep infinity' in script
+        assert (f'echo $? > {mount_dir}/failed-$gen/$SLURMD_NODENAME' in script)
+        # The srun client runs in the foreground of a backgrounded subshell
+        # that records a non-zero rc as the _step failure marker.
+        assert (f'echo "$mount_srun_rc" > {mount_dir}/failed-$gen/'
+                f'{slurm_storage_mount.STEP_FAILED_MARKER}' in script)
+        # No pyxis args on the host shape.
+        assert '--container-name' not in script
+
+    @patch('sky.provision.slurm.instance._wait_for_job_nodes')
+    @patch('sky.provision.slurm.instance.slurm_utils.get_proctrack_type')
+    @patch('sky.provision.slurm.instance.slurm_utils.get_partition_info')
+    @patch('sky.provision.slurm.instance.slurm.SlurmClient')
+    @patch('sky.provision.slurm.instance.command_runner.'
+           'SlurmLoginNodeCommandRunner')
+    def test_storage_mount_keeper_block_container(self, mock_ssh_runner,
+                                                  mock_slurm_client,
+                                                  mock_get_partition_info,
+                                                  mock_get_proctrack_type,
+                                                  mock_wait_for_job_nodes):
+        """Container mount keeper joins the container; no HOME override."""
+        from sky.provision import common
+        from sky.provision.slurm import storage_mount as slurm_storage_mount
+
+        self._setup_mocks(mock_ssh_runner, mock_slurm_client,
+                          mock_get_partition_info, 'gpu')
+        mock_get_proctrack_type.return_value = 'cgroup'
+
+        config = common.ProvisionConfig(
+            provider_config={
+                'ssh': {
+                    'hostname': 'login.example.com',
+                    'port': '22',
+                    'user': 'testuser',
+                    'private_key': '/path/to/key',
+                },
+                'cluster': 'test-slurm',
+                'partition': 'gpu',
+                'provision_timeout': 300,
+                'sky_base_dir': '/home/testuser',
+            },
+            authentication_config={},
+            docker_config={},
+            node_config={
+                'cpus': 4,
+                'memory': 16,
+                'image_id': 'nvcr.io/nvidia/pytorch:24.01-py3',
+            },
+            count=1,
+            tags={},
+            resume_stopped_nodes=False,
+            ports_to_open_on_launch=None,
+        )
+        script = self._run_and_capture_script('test-mount-keeper-ctr', config)
+
+        keeper_idx = script.index('--job-name=sky-storage-mount-keeper')
+        keeper_cmd = script[keeper_idx:script.index('\n', keeper_idx)]
+        # The mount step attaches to the running container so the FUSE
+        # daemon lives in the container's mount namespace.
+        assert '--container-name=test-mount-keeper-ctr:exec' in keeper_cmd
+        assert '--container-remap-root' in keeper_cmd
+        # Container shape mirrors _run_via_srun(in_container=True): no cd or
+        # HOME override around the mount step.
+        assert ('cd /home/testuser/.sky_clusters/test-mount-keeper-ctr'
+                ' && export HOME="$PWD"' not in script)
+
+    @patch('sky.provision.slurm.instance._wait_for_job_nodes')
+    @patch('sky.provision.slurm.instance.slurm_utils.get_proctrack_type')
+    @patch('sky.provision.slurm.instance.slurm_utils.get_partition_info')
+    @patch('sky.provision.slurm.instance.slurm.SlurmClient')
+    @patch('sky.provision.slurm.instance.command_runner.'
+           'SlurmLoginNodeCommandRunner')
+    def test_cleanup_trap_unmounts_recorded_paths(self, mock_ssh_runner,
+                                                  mock_slurm_client,
+                                                  mock_get_partition_info,
+                                                  mock_get_proctrack_type,
+                                                  mock_wait_for_job_nodes):
+        """The cleanup trap unmounts paths recorded by the mount keeper."""
+        from sky.provision.slurm import storage_mount as slurm_storage_mount
+
+        self._setup_mocks(mock_ssh_runner, mock_slurm_client,
+                          mock_get_partition_info, 'cpus')
+        mock_get_proctrack_type.return_value = 'cgroup'
+
+        config = self._make_non_container_config(cpus=2)
+        script = self._run_and_capture_script('test-unmount-trap', config)
+
+        mount_dir = (f'/home/testuser/.sky_clusters/test-unmount-trap'
+                     f'/.sky/{slurm_storage_mount.STORAGE_MOUNTS_DIR_NAME}')
+        guard_idx = script.index(
+            f'if [ -f {mount_dir}/{slurm_storage_mount.PATHS_FILE_NAME} ]')
+        assert 'fusermount -uz "$mount_path"' in script
+        assert 'fusermount3 -uz "$mount_path"' in script
+        # The unmount runs before the runtime directory is removed.
+        assert guard_idx < script.index(
+            'srun --overlap --nodes=1 rm -rf /tmp/test-unmount-trap')
+        # The unmount srun is best-effort but keeps its stderr in the
+        # sbatch log for teardown debugging.
+        assert (f"done < {mount_dir}/{slurm_storage_mount.PATHS_FILE_NAME}\n"
+                "' || true" in script)
+
     @pytest.mark.parametrize('memory_gb,expected_mem_mb', [
         (0.5, 512),
         (1.5, 1536),
