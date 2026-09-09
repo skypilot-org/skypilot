@@ -48,6 +48,7 @@ from sky.server import server
 from sky.server.auth import db_lookup
 from sky.server.requests import threads
 from sky.skylet import constants
+from sky.utils import context_utils
 from sky.utils.db import deadline as db_deadline
 
 # Lookups sleep _SLOW_DB_SECONDS while the deadline is patched to
@@ -686,6 +687,33 @@ class TestDeadlineHandedToTheDbLayer:
         assert 4.0 < remaining <= 5 - db_lookup._CLIENT_DEADLINE_MARGIN_SECONDS
 
     @pytest.mark.asyncio
+    async def test_deadline_origin_is_the_submit_not_the_thread_start(
+            self, monkeypatch):
+        """Same origin as `wait_for`: time the call spends between submit
+        and thread start (a busy pool, a loop stall) comes off the DB
+        layer's budget too, so the two deadlines cannot disagree."""
+        monkeypatch.setattr(db_lookup, 'AUTH_DB_TIMEOUT_SECONDS', 5)
+        real = context_utils.to_thread_with_executor
+        delay = 0.3
+
+        async def _start_late(pool, fn, *args, **kwargs):
+            await asyncio.sleep(delay)
+            return await real(pool, fn, *args, **kwargs)
+
+        monkeypatch.setattr(context_utils, 'to_thread_with_executor',
+                            _start_late)
+        seen = {}
+
+        def _probe():
+            seen['remaining'] = db_deadline.get_deadline() - time.monotonic()
+
+        await db_lookup.call_with_deadline(_probe)
+        inner = 5 - db_lookup._CLIENT_DEADLINE_MARGIN_SECONDS
+        # A deadline computed at thread start would show ~inner remaining.
+        assert seen['remaining'] < inner - delay + 0.1, seen
+        assert seen['remaining'] > inner - delay - 1.0, seen
+
+    @pytest.mark.asyncio
     async def test_request_pool_variant_sets_it_too(self, monkeypatch):
         monkeypatch.setattr(db_lookup, 'AUTH_DB_TIMEOUT_SECONDS', 5)
         seen = {}
@@ -727,6 +755,42 @@ class TestDeadlineHandedToTheDbLayer:
 
         await db_lookup.call_with_deadline(_probe)
         assert seen['remaining'] > 0
+
+
+class TestLifespanWiring:
+    """The server lifespan installs the psycopg2 wait callback.
+
+    That call is the one place the client-side half is switched on (never on
+    import -- see `TestNoInstallOnImport` in the deadline tests). Everything
+    else the lifespan starts is stubbed: this is a test of one line, and must
+    not touch the requests DB or start daemons.
+    """
+
+    @pytest.mark.asyncio
+    async def test_lifespan_installs_the_wait_callback(self, monkeypatch):
+
+        async def _noop(*args, **kwargs):
+            del args, kwargs
+
+        monkeypatch.setattr(server.requests_lib,
+                            'delete_orphan_internal_daemons_async', _noop)
+        monkeypatch.setattr(server.daemons, 'INTERNAL_REQUEST_DAEMONS', [])
+        monkeypatch.setattr(server, 'schedule_on_boot_check_async', _noop)
+        monkeypatch.setattr(server, 'cleanup_upload_ids', _noop)
+        monkeypatch.setattr(server.version_check, 'check_versions_periodically',
+                            _noop)
+        monkeypatch.setattr(server.loop_stall, 'start_watchdog',
+                            lambda **kwargs: None)
+        monkeypatch.setattr(server.metrics_utils, 'METRICS_ENABLED', False)
+        db_deadline.uninstall_wait_callback()
+        try:
+            assert db_deadline.get_wait_callback() is None
+            async with server.lifespan(mock.Mock()):
+                await asyncio.sleep(0)  # let the stubbed startup tasks finish
+                assert (db_deadline.get_wait_callback() is
+                        db_deadline.wait_callback)
+        finally:
+            db_deadline.uninstall_wait_callback()
 
 
 def _metric(reason):

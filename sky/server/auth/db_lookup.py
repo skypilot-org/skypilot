@@ -64,9 +64,9 @@ AUTH_DB_TIMEOUT_SECONDS = db_utils.get_auth_db_timeout_seconds()
 # *thread* is freed -- by the server-side SET LOCAL bounds and the psycopg2
 # wait callback in `sky.utils.db.deadline` -- before `wait_for` releases only
 # the caller. The server-side bounds fire a further margin earlier (see
-# `deadline._SERVER_MARGIN_MS`), so at the default deadline
-# (`constants.DEFAULT_AUTH_DB_TIMEOUT_SECONDS`, 5 s) the order is: lock
-# ~3.9s < statement ~4.0s < thread (client) 4.5s < wait_for 5.0s.
+# `deadline._SERVER_MARGIN_MS` / `_LOCK_UNDER_MS`), so for a configured
+# deadline D the order is: lock D-1.1s < statement D-1.0s < thread (client)
+# D-0.5s < wait_for D (e.g. D = 5 s: 3.9 < 4.0 < 4.5 < 5.0).
 _CLIENT_DEADLINE_MARGIN_SECONDS = 0.5
 # Floor on the inner (DB-layer) budget. `db_utils.get_auth_db_timeout_seconds`
 # already refuses a deadline that is not a positive number, and the users

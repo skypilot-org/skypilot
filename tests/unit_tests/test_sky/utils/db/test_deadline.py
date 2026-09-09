@@ -33,6 +33,7 @@ that presents psycopg2's ``status`` / ``autocommit`` surface.
 # pylint: disable=protected-access,missing-class-docstring,redefined-outer-name
 import os
 import re
+import select
 import socket
 import sqlite3
 import threading
@@ -44,6 +45,7 @@ import pytest
 import sqlalchemy
 from sqlalchemy import orm
 
+from sky.utils.db import db_utils
 from sky.utils.db import deadline
 
 
@@ -213,6 +215,46 @@ class TestWaitCallbackDeadline:
         finally:
             _close_all(a, b)
 
+    def test_no_deadline_is_one_unbounded_poll(self):
+        """Parity with sync psycopg2 for callers without a deadline: one
+        poll(fd, -1), no timed slices (a sliced wait would wake and re-check
+        the fd every second for every DB call in the web process)."""
+        real_poll = select.poll
+        calls = []
+
+        class _RecordingPoller:
+
+            def __init__(self):
+                self._poller = real_poll()
+                self.fd = None
+
+            def register(self, fd, flags):
+                self.fd = fd
+                self._poller.register(fd, flags)
+
+            def poll(self, *args):
+                calls.append((self.fd, args))
+                return self._poller.poll(*args)
+
+        a, b = socket.socketpair()
+        try:
+            conn = _FakeConn(
+                a.fileno(),
+                [psycopg2.extensions.POLL_READ, psycopg2.extensions.POLL_OK])
+            with mock.patch.object(select, 'poll', _RecordingPoller):
+                t, result = _run_callback_in_thread(conn, deadline_seconds=None)
+                time.sleep(0.3)
+                assert t.is_alive(), 'returned before the socket was ready'
+                b.send(b'x')
+                t.join(3)
+            assert not t.is_alive()
+            assert result['kind'] == 'returned'
+            ours = [args for fd, args in calls if fd == a.fileno()]
+            # Exactly one poll on our fd, called with NO timeout argument.
+            assert ours == [()], ours
+        finally:
+            _close_all(a, b)
+
     def test_conn_poll_is_not_called_after_an_expired_slice(self):
         # libpq requires PQconnectPoll/PQconsumeInput only when the socket is
         # ready; a slice that expires without readiness must only re-check the
@@ -328,6 +370,69 @@ class TestStolenFd:
         finally:
             deadline.clear_deadline()
             _close_all(b, c, d)
+
+    def test_first_wait_records_the_identity_of_an_existing_connection(self):
+        """A connection made before the callback was installed (a pool
+        connection from before the lifespan) has no recorded identity. Its
+        first wait must record one, or the fd gate stays inert for that
+        connection for its whole pooled life."""
+        a, b = socket.socketpair()
+        fd = a.fileno()
+        conn = _FakeConn(
+            fd, [psycopg2.extensions.POLL_READ, psycopg2.extensions.POLL_OK])
+        assert conn not in deadline._sock_ident
+        b.send(b'x')  # readable at once: the first wait returns
+        deadline.wait_callback(conn)
+        assert conn.polls == 2
+        assert deadline._sock_ident.get(conn) == deadline._ident(fd)
+        # Now steal the number; the next wait must refuse it before libpq I/O.
+        assert a.detach() == fd
+        os.close(fd)
+        c, d = socket.socketpair()
+        try:
+            assert c.fileno() == fd, 'test setup: fd number not reused'
+            d.send(b'y')  # the foreign fd is readable: a broken gate returns
+            conn._states = [
+                psycopg2.extensions.POLL_READ, psycopg2.extensions.POLL_OK
+            ]
+            deadline.set_deadline(time.monotonic() + 1.0)
+            with pytest.raises(deadline.DBDeadlineExceeded) as ei:
+                deadline.wait_callback(conn)
+            assert ei.value.reason == 'client_deadline_fd_stolen'
+            assert conn.polls == 2, 'conn.poll() ran on the stolen fd'
+        finally:
+            deadline.clear_deadline()
+            _close_all(b, c, d)
+
+    def test_a_theft_in_the_deadline_slice_keeps_the_theft_label(self):
+        """The deadline expires in the same slice the fd was stolen in: the
+        error must still say fd_stolen (the per-worker double-close detector
+        label), not the generic client_deadline."""
+        a, b = socket.socketpair()
+        fd = a.fileno()
+        keep = []
+
+        def _steal_during_poll(conn, n):
+            del conn
+            if n == 1:
+                assert a.detach() == fd
+                os.close(fd)
+                c, d = socket.socketpair()
+                keep.extend([c, d])
+                assert c.fileno() == fd, 'test setup: fd number not reused'
+
+        conn = _FakeConn(fd, [psycopg2.extensions.POLL_READ] * 10,
+                         on_poll=_steal_during_poll)
+        deadline._sock_ident[conn] = deadline._ident(fd)
+        try:
+            deadline.set_deadline(time.monotonic() - 1.0)  # already expired
+            with pytest.raises(deadline.DBDeadlineExceeded) as ei:
+                deadline.wait_callback(conn)
+            assert ei.value.reason == 'client_deadline_fd_stolen'
+            assert conn.polls == 1
+        finally:
+            deadline.clear_deadline()
+            _close_all(b, *keep)
 
     def test_stolen_fd_without_a_deadline_pins_until_the_wait_ends(self):
         """The incident's pin, with plain sockets: no deadline means libpq's
@@ -829,6 +934,32 @@ class TestSetLocalListener:
         deadline.install(engine)
         deadline.set_deadline(time.monotonic() + 5)
         assert not deadline.is_bounding(engine)
+
+    def test_get_engine_attaches_the_listener_to_every_sync_engine(
+            self, monkeypatch):
+        """The wiring in `db_utils.get_engine`: every sync Postgres engine it
+        builds (pooled, direct, no_pool) carries the listener; the asyncpg
+        engine does not. No database is needed: `create_engine` is lazy."""
+        monkeypatch.setenv('IS_SKYPILOT_SERVER', '1')
+        monkeypatch.setenv('SKYPILOT_DB_CONNECTION_URI',
+                           'postgresql://u:p@127.0.0.1:1/dbx')
+        monkeypatch.setenv('SKYPILOT_DB_POOL_CONNECTION_URI',
+                           'postgresql://u:p@127.0.0.1:2/dbx?sslmode=disable')
+        monkeypatch.delenv('SKYPILOT_DB_POOL_HOSTPORT', raising=False)
+        monkeypatch.setattr(db_utils, '_postgres_engine_cache', {})
+        pooled = db_utils.get_engine('state')
+        direct = db_utils.get_engine('state', direct=True)
+        no_pool = db_utils.get_engine('state', no_pool=True)
+        async_engine = db_utils.get_engine('state', async_engine=True)
+        assert len({id(pooled), id(direct), id(no_pool)}) == 3
+        for engine in (pooled, direct, no_pool):
+            assert engine.dialect.driver == 'psycopg2', engine.url
+            deadline.set_deadline(time.monotonic() + 5)
+            assert deadline.is_bounding(engine), engine.url
+            deadline.clear_deadline()
+            assert not deadline.is_bounding(engine)
+        deadline.set_deadline(time.monotonic() + 5)
+        assert not deadline.is_bounding(async_engine)
 
     def test_install_is_idempotent(self):
         engine, emitted = self._spy_engine(pretend_postgres=True)
