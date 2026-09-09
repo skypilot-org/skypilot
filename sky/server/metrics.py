@@ -8,7 +8,7 @@ import os
 import re
 import threading
 import time
-from typing import Dict, List, Optional, Set, Tuple
+from typing import Dict, FrozenSet, List, Optional, Set, Tuple
 
 import fastapi
 from prometheus_client import core as prom_core
@@ -17,6 +17,7 @@ from prometheus_client import multiprocess
 import prometheus_client as prom
 import psutil
 import starlette.middleware.base
+import starlette.types
 import uvicorn
 
 from sky import core
@@ -27,6 +28,7 @@ from sky.adaptors import kubernetes as kubernetes_adaptor
 from sky.metrics import utils as metrics_utils
 from sky.server import constants as server_constants
 from sky.server import local_disk
+from sky.server import middleware_utils
 from sky.skylet import runtime_utils
 from sky.utils import annotations
 from sky.utils import common
@@ -1563,51 +1565,170 @@ def _get_user_label(request: fastapi.Request) -> str:
     return 'anonymous'
 
 
+# `path` label for a response produced by a middleware, i.e. a request that
+# never reached the router (an authentication 401/503, an RBAC 403, ...).
+# The metrics middleware is the outermost one, so these responses are
+# counted, and their paths are chosen by whoever sent them -- unauthenticated
+# scanners included -- so the raw path cannot be the label value. The raw
+# path is kept only when it is exactly a registered (parameterless) route;
+# anything else is folded into one of these fixed prefixes, as `<prefix>*`,
+# or into `other`. The prefixes are the routers mounted in
+# sky/server/server.py plus the plugin route root; the `*` form keeps the
+# prefix regexes dashboards and rules already use (e.g. `/api/.*`,
+# `/dashboard/.*`) matching. The bare prefix (`/users`, a router's root
+# route) folds into the same bucket. A request that did reach the router
+# keeps its raw path, 404s included, exactly as before.
+#
+# "Registered route" means a route on the app's own table: with current
+# FastAPI, `include_router` adds one opaque entry per router, so the routes
+# of the included core and plugin routers are not in it and fold into their
+# prefix bucket. Bounded either way.
+_MIDDLEWARE_REJECTED_PATH_PREFIXES = (
+    '/api/',
+    '/dashboard/',
+    '/internal/dashboard/',
+    '/plugins/',
+    '/jobs/',
+    '/serve/',
+    '/users/',
+    '/workspaces/',
+    '/volumes/',
+    '/ssh_node_pools/',
+    '/recipes/',
+    '/storage/',
+    '/debug/',
+)
+OTHER_PATH_LABEL = 'other'
+
+
+def _reached_router(request: fastapi.Request) -> bool:
+    """Whether the request got past every middleware to the router.
+
+    Starlette's router stamps itself on the scope when it runs
+    (`scope['router']`); a request a middleware answered itself never gets
+    there. This is what tells a route's own 4xx/5xx (raw path, as before)
+    from a middleware's canned rejection (bounded path).
+    """
+    return 'router' in request.scope
+
+
+def _literal_route_paths(app) -> FrozenSet[str]:
+    """The registered route paths without path parameters."""
+    routes = getattr(app, 'routes', None)
+    if not isinstance(routes, (list, tuple)):
+        return frozenset()
+    return frozenset(route.path
+                     for route in routes
+                     if isinstance(getattr(route, 'path', None), str) and
+                     '{' not in route.path)
+
+
+def _middleware_rejected_path_label(path: str,
+                                    literal_routes: FrozenSet[str]) -> str:
+    """Bounded `path` label for a response a middleware produced."""
+    if path in literal_routes:
+        return path
+    for prefix in _MIDDLEWARE_REJECTED_PATH_PREFIXES:
+        if path.startswith(prefix) or path == prefix[:-1]:
+            return prefix + '*'
+    return OTHER_PATH_LABEL
+
+
 class PrometheusMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
-    """Middleware to collect Prometheus metrics for HTTP requests."""
+    """Middleware to collect Prometheus metrics for HTTP requests.
+
+    Registered as the OUTERMOST middleware (added last in
+    sky/server/server.py), so it records the response the client actually
+    receives. An authentication, RBAC or shutdown middleware that answers a
+    request itself never calls the next layer; with this middleware inside
+    the stack those responses -- exactly the ones an outage produces -- were
+    never counted, and the only visible symptom was successful traffic
+    dropping.
+
+    The `path` label is read after the inner layers ran, so it is the path
+    the router saw (inner middlewares rewrite `scope['path']` in place, e.g.
+    the internal dashboard prefix): the same value as before. For a response
+    produced by a middleware the path is bounded instead; see
+    `_middleware_rejected_path_label`. When the middleware that answered
+    stamped a reason (`middleware_utils.mark_rejection`), the response is
+    also counted in `sky_apiserver_request_rejections_total`.
+
+    Duration is measured from entry into this layer, i.e. it includes the
+    time the authentication middlewares spend (DB lookups under their
+    deadline): it is the latency the client observed.
+
+    WebSocket scopes pass straight through, as for every BaseHTTPMiddleware;
+    refused handshakes are counted by `middleware_utils.websocket_aware`.
+    """
+
+    def __init__(self, app: starlette.types.ASGIApp):
+        super().__init__(app)
+        # (route count, literal route paths) of the app, rebuilt if routes
+        # were added since. Routes are all registered before the first
+        # request in practice; the count check keeps the memo honest anyway.
+        self._literal_routes: Optional[Tuple[int, FrozenSet[str]]] = None
+
+    def _literal_route_paths(self, app) -> FrozenSet[str]:
+        routes = getattr(app, 'routes', None)
+        count = len(routes) if isinstance(routes, (list, tuple)) else 0
+        if self._literal_routes is None or self._literal_routes[0] != count:
+            self._literal_routes = (count, _literal_route_paths(app))
+        return self._literal_routes[1]
 
     async def dispatch(self, request: fastapi.Request, call_next):
-        path = request.url.path
         logger.debug(f'PROM Middleware Request: {request}, {request.url.path}')
-        streaming = _is_streaming_api(path)
-        if not streaming:
-            # Exclude streaming APIs, the duration is not meaningful.
-            # TODO(aylei): measure the duration of async execution instead.
-            start_time = time.time()
+        start_time = time.time()
         method = request.method
-        status_code_group = ''
+        status_code = 0
 
         try:
             response = await call_next(request)
-            status_code_group = _get_status_code_group(response.status_code)
+            status_code = response.status_code
         except Exception:  # pylint: disable=broad-except
-            status_code_group = '5xx'
+            # Escaped every inner layer; Starlette's error handler (outside
+            # us) turns it into a bare 500. Count what the client sees.
+            status_code = 500
             raise
         finally:
-            metrics_utils.SKY_APISERVER_REQUESTS_TOTAL.labels(
-                path=path, method=method, status=status_code_group).inc()
-            # Record per-user metrics
-            user = _get_user_label(request)
-            metrics_utils.SKY_APISERVER_REQUESTS_BY_USER_TOTAL.labels(
-                user=user, method=method, status=status_code_group).inc()
-            if not streaming:
-                duration = time.time() - start_time
-                metrics_utils.SKY_APISERVER_REQUEST_DURATION_SECONDS.labels(
-                    path=path, method=method,
-                    status=status_code_group).observe(duration)
-                # /api/get long-polls until the underlying request is terminal,
-                # so its duration is the client-observed latency of that request
-                # type. The handler stamps request.state.request_name once it
-                # knows which request is being fetched; record it by name so
-                # bounded types can be alerted on separately from unbounded ones
-                # (launch/exec/...).
-                request_name = getattr(request.state, 'request_name', None)
-                if request_name is not None:
-                    metrics_utils.SKY_APISERVER_REQUEST_GET_DURATION_SECONDS \
-                        .labels(name=request_name,
-                                status=status_code_group).observe(duration)
+            self._record(request, method, status_code, start_time)
 
         return response
+
+    def _record(self, request: fastapi.Request, method: str, status_code: int,
+                start_time: float) -> None:
+        # Read after the inner layers ran: the scope dict is shared down the
+        # stack, so this is the (possibly rewritten) path the router saw.
+        raw_path = request.scope.get('path', '')
+        path = raw_path
+        if not _reached_router(request):
+            path = _middleware_rejected_path_label(
+                raw_path, self._literal_route_paths(request.scope.get('app')))
+        status_code_group = _get_status_code_group(status_code)
+        metrics_utils.SKY_APISERVER_REQUESTS_TOTAL.labels(
+            path=path, method=method, status=status_code_group).inc()
+        # Record per-user metrics
+        user = _get_user_label(request)
+        metrics_utils.SKY_APISERVER_REQUESTS_BY_USER_TOTAL.labels(
+            user=user, method=method, status=status_code_group).inc()
+        middleware_utils.record_rejection(request.scope, status_code,
+                                          middleware_utils.REJECTION_KIND_HTTP)
+        if _is_streaming_api(raw_path):
+            # Exclude streaming APIs, the duration is not meaningful.
+            # TODO(aylei): measure the duration of async execution instead.
+            return
+        duration = time.time() - start_time
+        metrics_utils.SKY_APISERVER_REQUEST_DURATION_SECONDS.labels(
+            path=path, method=method,
+            status=status_code_group).observe(duration)
+        # /api/get long-polls until the underlying request is terminal, so its
+        # duration is the client-observed latency of that request type. The
+        # handler stamps request.state.request_name once it knows which
+        # request is being fetched; record it by name so bounded types can be
+        # alerted on separately from unbounded ones (launch/exec/...).
+        request_name = getattr(request.state, 'request_name', None)
+        if request_name is not None:
+            metrics_utils.SKY_APISERVER_REQUEST_GET_DURATION_SECONDS.labels(
+                name=request_name, status=status_code_group).observe(duration)
 
 
 peak_rss_bytes = 0

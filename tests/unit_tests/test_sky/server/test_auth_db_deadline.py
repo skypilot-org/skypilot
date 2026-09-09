@@ -32,6 +32,7 @@ import pytest
 
 from sky import exceptions
 from sky import models
+from sky.server import middleware_utils
 from sky.server import server
 from sky.server.auth import db_lookup
 from sky.server.requests import threads
@@ -374,6 +375,17 @@ async def test_call_with_deadline_raises_timeout():
         await db_lookup.call_with_deadline(_slow(None))
 
 
+def _request() -> fastapi.Request:
+    """A bare request for the helpers to stamp their rejection reason on."""
+    return fastapi.Request({
+        'type': 'http',
+        'method': 'GET',
+        'path': '/',
+        'headers': [],
+        'state': {},
+    })
+
+
 class TestEnsureRoleForAuthenticatedUser:
     """The decision both auth front-ends share.
 
@@ -390,7 +402,7 @@ class TestEnsureRoleForAuthenticatedUser:
                                new=mock.AsyncMock()) as bounded, \
              mock.patch('sky.users.permission.permission_service') as perm:
             assert await db_lookup.ensure_role_for_authenticated_user(
-                'u-new', True) is None
+                'u-new', True, request=_request()) is None
         assert bounded.await_count == 1
         assert bounded.await_args[0][1] == 'u-new'
         perm.queue_role_repair.assert_not_called()
@@ -402,10 +414,15 @@ class TestEnsureRoleForAuthenticatedUser:
                                '_call_on_request_pool',
                                side_effect=asyncio.TimeoutError), \
              mock.patch('sky.users.permission.permission_service') as perm:
+            request = _request()
             response = await db_lookup.ensure_role_for_authenticated_user(
-                'u-slow', True)
+                'u-slow', True, request=request)
         assert response is not None and response.status_code == 503
         perm.queue_role_repair.assert_called_once_with('u-slow')
+        # The 503 is attributed for the metrics layer: a middleware answering a
+        # request itself is otherwise invisible to request counters.
+        assert request.state.reject_reason == \
+            middleware_utils.REJECT_REASON_ROLE_SEED_UNAVAILABLE
 
     @pytest.mark.asyncio
     async def test_a_saturated_executor_answers_503_and_queues(self):
@@ -414,10 +431,13 @@ class TestEnsureRoleForAuthenticatedUser:
                 '_call_on_request_pool',
                 side_effect=exceptions.ConcurrentWorkerExhaustedError('busy')
         ), mock.patch('sky.users.permission.permission_service') as perm:
+            request = _request()
             response = await db_lookup.ensure_role_for_authenticated_user(
-                'u-busy', True)
+                'u-busy', True, request=request)
         assert response is not None and response.status_code == 503
         perm.queue_role_repair.assert_called_once_with('u-busy')
+        assert request.state.reject_reason == \
+            middleware_utils.REJECT_REASON_AUTH_WORKER_EXHAUSTED
 
     @pytest.mark.asyncio
     async def test_a_returning_user_with_no_known_role_is_only_queued(self):
@@ -428,7 +448,7 @@ class TestEnsureRoleForAuthenticatedUser:
                                new=mock.AsyncMock()) as bounded:
             perm.probably_has_role.return_value = False
             assert await db_lookup.ensure_role_for_authenticated_user(
-                'u-old', False) is None
+                'u-old', False, request=_request()) is None
         perm.queue_role_repair.assert_called_once_with('u-old')
         bounded.assert_not_awaited()
 
@@ -437,7 +457,7 @@ class TestEnsureRoleForAuthenticatedUser:
         with mock.patch('sky.users.permission.permission_service') as perm:
             perm.probably_has_role.return_value = True
             assert await db_lookup.ensure_role_for_authenticated_user(
-                'u-fine', False) is None
+                'u-fine', False, request=_request()) is None
         perm.queue_role_repair.assert_not_called()
 
     @pytest.mark.asyncio
@@ -455,7 +475,8 @@ class TestEnsureRoleForAuthenticatedUser:
                                'get_auth_thread_executor') as auth_pool, \
              mock.patch.object(db_lookup.executor,
                                'get_request_thread_executor') as request_pool:
-            await db_lookup.ensure_role_for_authenticated_user('u-new', True)
+            await db_lookup.ensure_role_for_authenticated_user(
+                'u-new', True, request=_request())
         auth_pool.assert_not_called()
         request_pool.assert_called_once()
 
@@ -471,10 +492,50 @@ class TestEnsureRoleForAuthenticatedUser:
                                side_effect=RuntimeError('db is unhappy')), \
              mock.patch('sky.users.permission.permission_service') as perm:
             response = await db_lookup.ensure_role_for_authenticated_user(
-                'u-broken', True)
+                'u-broken', True, request=_request())
         assert response is not None and response.status_code == 503
         # And it says why it gave up. `db_timeout_response`'s text blames a slow
         # database, which is wrong for the reason this path usually fails:
         # contention on the policy lock, a healthy database doing its job.
         assert b'assigning roles' in response.body
         perm.queue_role_repair.assert_called_once_with('u-broken')
+
+
+class TestHelpersWithoutARequest:
+    """The response helpers keep working when called with no arguments.
+
+    Middlewares outside this repository call `db_timeout_response()` and
+    `worker_exhausted_response()` bare. Making `request` required would turn
+    their 503 -- the retryable answer on exactly the auth-pool-exhausted /
+    auth-DB-deadline path -- into a TypeError, which a middleware surfaces as
+    a bare 500 that clients do not retry. So: same 503 without a request, the
+    reason attribution is the only thing a caller gains by passing one.
+    """
+
+    @pytest.mark.parametrize('helper', [
+        db_lookup.db_timeout_response,
+        db_lookup.role_seed_unavailable_response,
+        db_lookup.jwt_secret_unavailable_response,
+        db_lookup.worker_exhausted_response,
+    ])
+    def test_no_argument_call_is_the_same_503(self, helper):
+        bare = helper()
+        request = _request()
+        attributed = helper(request)
+        assert bare.status_code == attributed.status_code == 503
+        assert bare.body == attributed.body
+        assert bare.headers.get('retry-after') == \
+            attributed.headers.get('retry-after')
+        # Only the attributed one carries a reason for the metrics layer.
+        assert hasattr(request.state, middleware_utils.REJECT_REASON_STATE_KEY)
+
+    @pytest.mark.asyncio
+    async def test_ensure_role_keeps_its_original_positional_signature(self):
+        with mock.patch.object(db_lookup,
+                               '_call_on_request_pool',
+                               side_effect=asyncio.TimeoutError), \
+             mock.patch('sky.users.permission.permission_service') as perm:
+            response = await db_lookup.ensure_role_for_authenticated_user(
+                'u-slow', True)
+        assert response is not None and response.status_code == 503
+        perm.queue_role_repair.assert_called_once_with('u-slow')
