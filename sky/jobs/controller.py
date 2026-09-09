@@ -720,13 +720,14 @@ class JobController:
             launch_time = time.time() - launch_start
             logger.info(f'Cluster launch completed in {launch_time:.2f}s')
             assert remote_job_submitted_at is not None, remote_job_submitted_at
-        # The id of the job submitted on the cluster (None if unknown, in
-        # which case the latest job on the cluster is used).
-        submit_cluster_name, job_id_on_pool_cluster = (
-            await managed_job_state.get_pool_submit_info_async(self._job_id))
         if self._pool:
             # Update the cluster name when using pool.
-            cluster_name = submit_cluster_name
+            cluster_name, job_id_on_pool_cluster = (
+                await
+                managed_job_state.get_pool_submit_info_async(self._job_id))
+        elif job_id_on_pool_cluster is None:
+            job_id_on_pool_cluster = await self._resolve_job_id_on_cluster(
+                self._strategy_executor)
         if cluster_name is None:
             # Check if we have been cancelled here, in the case where a user
             # quickly cancels the job we want to gracefully handle it here,
@@ -933,6 +934,29 @@ class JobController:
                 failure_reason=str(e),
                 callback_func=callback_func)
             return False
+
+    async def _resolve_job_id_on_cluster(
+            self,
+            executor: 'recovery_strategy.StrategyExecutor') -> Optional[int]:
+        """Return the id of the job submitted on a non-pool task's cluster.
+
+        The executor remembers the id from its own launch, which is correct
+        per task (JobGroup tasks launch concurrently, each on its own
+        cluster). When this process did not launch the task (resume after a
+        controller restart), fall back to the persisted id, but only for a
+        single-task job: the persisted job_info field is shared by all tasks
+        of a managed job, so for a JobGroup it may belong to another task.
+        None means unknown, in which case the latest job on the cluster is
+        used, as before.
+        """
+        if executor.job_id_on_pool_cluster is not None:
+            return executor.job_id_on_pool_cluster
+        if len(self._dag.tasks) != 1:
+            return None
+        _, job_id_on_cluster = (await
+                                managed_job_state.get_pool_submit_info_async(
+                                    self._job_id))
+        return job_id_on_cluster
 
     async def _monitor_one_task(
         self,
@@ -1584,14 +1608,16 @@ class JobController:
 
             recovered_time = await executor.recover()
 
-            # Refresh the id of the job submitted on the (new) cluster after
-            # recovery, and the cluster name for pools.
-            pool_cluster_name, job_id_on_pool_cluster = (
-                await
-                managed_job_state.get_pool_submit_info_async(self._job_id))
+            # Update cluster_name for pools after recovery; refresh the id
+            # of the job the executor submitted on the (new) cluster.
             if self._pool is not None:
+                pool_cluster_name, job_id_on_pool_cluster = (
+                    await
+                    managed_job_state.get_pool_submit_info_async(self._job_id))
                 assert pool_cluster_name is not None
                 cluster_name = pool_cluster_name
+            else:
+                job_id_on_pool_cluster = executor.job_id_on_pool_cluster
 
             if keep_starting:
                 # The task stayed STARTING (kept-starting resume). Reaching
@@ -1876,7 +1902,7 @@ class JobController:
             task_id=task_id,
             task=task,
             cluster_name=cluster_name,
-            job_id_on_pool_cluster=None,
+            job_id_on_pool_cluster=executor.job_id_on_pool_cluster,
             cleanup_cluster_on_success=False,  # JobGroup cleans up all at end
             force_transit_to_recovering=force_transit_to_recovering,
             on_recovery=on_recovery,
@@ -1888,7 +1914,7 @@ class JobController:
             task=task,
             cluster_name=cluster_name,
             executor=executor,
-            job_id_on_pool_cluster=None,
+            job_id_on_pool_cluster=executor.job_id_on_pool_cluster,
             cleanup_cluster_on_success=False,  # JobGroup cleans up all at end
             force_transit_to_recovering=force_transit_to_recovering,
             on_recovery=on_recovery,
@@ -2657,7 +2683,10 @@ class JobController:
             handle = await asyncio.to_thread(
                 global_user_state.get_handle_from_cluster_name, cluster_name)
             job_id_on_pool_cluster = None
-            if self._pool is not None:
+            # Pool jobs are single-task; for non-pool jobs the persisted id
+            # is only this task's for a single-task job (see
+            # _resolve_job_id_on_cluster).
+            if self._pool is not None or len(self._dag.tasks) == 1:
                 _, job_id_on_pool_cluster = (
                     await
                     managed_job_state.get_pool_submit_info_async(self._job_id))
@@ -3176,7 +3205,15 @@ class ControllerManager:
                                                   job_id_on_pool_cluster)
             return
 
-        # Non-pool path: download logs for each active task.
+        # Non-pool path: download logs for each active task. The persisted
+        # on-cluster job id identifies the submitted job only when a single
+        # task is active: the job_info field is shared by all tasks of a
+        # managed job, so for a JobGroup (concurrent tasks) it may belong to
+        # another task, and the latest job on each cluster is used instead.
+        job_id_on_cluster: Optional[int] = None
+        if len(task_ids) == 1:
+            _, job_id_on_cluster = (
+                await managed_job_state.get_pool_submit_info_async(job_id))
         for task_id in task_ids:
             try:
                 task = dag.tasks[task_id]
@@ -3185,7 +3222,8 @@ class ControllerManager:
                     managed_job_utils.generate_managed_job_cluster_name(
                         task.name, job_id))
                 await self._download_log_from_cluster(controller, job_id,
-                                                      task_id, cluster_name)
+                                                      task_id, cluster_name,
+                                                      job_id_on_cluster)
             except Exception as e:  # pylint: disable=broad-except
                 logger.warning(
                     f'Failed to download logs for job {job_id}, '
