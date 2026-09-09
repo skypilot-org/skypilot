@@ -22,10 +22,29 @@ from typing import Awaitable, Callable, Tuple, Type, TypeVar
 import sqlalchemy.exc
 
 from sky.utils import common_utils
+from sky.utils.db import deadline as db_deadline
 
 logger = logging.getLogger(__name__)
 
 T = TypeVar('T')
+
+
+def _stop_for_deadline(e: BaseException, delay: float) -> bool:
+    """Whether the caller's thread-local deadline says a retry cannot help.
+
+    Only when a thread-local deadline is set (i.e. the caller is on the bounded
+    auth path). Then, either ``e`` *is* that deadline (a client- or server-side
+    bound fired; replaying would hold the thread past the deadline the bound
+    exists to enforce), or the backoff sleep alone would run past the deadline
+    (the retry could not even start in budget). Everywhere else (no deadline
+    set), this is False and retry behaviour is unchanged.
+    """
+    deadline = db_deadline.get_deadline()
+    if deadline is None:
+        return False
+    if db_deadline.is_deadline_error(e):
+        return True
+    return time.monotonic() + delay >= deadline
 
 
 def _build_retryable_exceptions() -> Tuple[Type[BaseException], ...]:
@@ -113,6 +132,10 @@ def with_db_retries(fn: Callable[[int], T],
                              f'{max_retries} attempts; {summarize(e)}')
                 raise
             delay = backoff.current_backoff()
+            if _stop_for_deadline(e, delay):
+                logger.debug(f'Not retrying under the caller\'s deadline: '
+                             f'{summarize(e)}')
+                raise
             logger.warning(
                 f'Transient DB error (attempt {attempt + 1}/{max_retries}), '
                 f'retrying in {delay:.1f}s: {summarize(e)}')
@@ -142,6 +165,10 @@ async def with_db_retries_async(coro_fn: Callable[[int], Awaitable[T]],
                              f'{max_retries} attempts; {summarize(e)}')
                 raise
             delay = backoff.current_backoff()
+            if _stop_for_deadline(e, delay):
+                logger.debug(f'Not retrying under the caller\'s deadline: '
+                             f'{summarize(e)}')
+                raise
             logger.warning(
                 f'Transient DB error (attempt {attempt + 1}/{max_retries}), '
                 f'retrying in {delay:.1f}s: {summarize(e)}')

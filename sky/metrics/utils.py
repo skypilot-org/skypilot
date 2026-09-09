@@ -334,6 +334,32 @@ SKY_APISERVER_THREADS_EXHAUSTED_TOTAL = prom.Counter(
     ['name'],
 )
 
+# Auth-path DB lookups that gave up at their own deadline instead of pinning
+# the executor thread. Small fixed label set (one value per way the deadline
+# fired):
+#   lock_timeout / statement_timeout / idle_in_transaction -- the server
+#     enforced the bound (a held row lock, a slow statement, an orphaned
+#     transaction);
+#   client_deadline -- the client gave up waiting on the socket (server
+#     unreachable/frozen);
+#   connect_timeout -- the DSN's connect_timeout passed during the connection
+#     handshake (an unreachable server or pooler);
+#   client_deadline_fd_stolen / client_deadline_fd_closed -- the socket's fd
+#     no longer identified our connection when the deadline fired (the
+#     stolen-fd class): a per-worker production detector for the fd double
+#     close, independent of the RCA;
+#   db_error -- a non-deadline transient DB error (connection dropped) mapped
+#     to a retryable 503 rather than a bare 500;
+#   caller_timeout -- asyncio.wait_for fired while the thread was still
+#     running, i.e. a bound below it did NOT free the thread. After this
+#     change it should stay ~0; a sustained rate is the "thread pinned"
+#     alarm.
+SKY_APISERVER_AUTH_DB_DEADLINE_TOTAL = prom.Counter(
+    'sky_apiserver_auth_db_deadline_total',
+    'Auth-path DB lookups that hit their own deadline, by how it fired',
+    ['reason'],
+)
+
 # Time a request spends waiting in the task queue (from creation to dequeue).
 SKY_APISERVER_QUEUE_WAIT_SECONDS = prom.Histogram(
     'sky_apiserver_queue_wait_seconds',

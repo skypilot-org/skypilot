@@ -22,6 +22,7 @@ from sky.utils import common
 from sky.utils import common_utils
 from sky.utils import locks
 from sky.utils.db import db_utils
+from sky.utils.db import deadline as db_deadline
 from sky.utils.db import kv_cache
 from sky.workspaces import constants as workspace_constants
 from sky.workspaces import utils as workspaces_utils
@@ -699,6 +700,14 @@ class PermissionService:
         try:
             self._load_policy_no_lock()
         except Exception as e:  # pylint: disable=broad-except
+            if db_deadline.is_deadline_error(e):
+                # The reload hit the caller's auth-path deadline (a slow DB or a
+                # held lock). Do NOT swallow it into "no roles" -- that denies
+                # the principal with a non-retryable 403. Re-raise so the
+                # middleware maps it to the retryable 503 it maps every other
+                # auth deadline to. casbin keeps the old policy on a failed
+                # reload (it swaps only on success), so nothing is lost.
+                raise
             logger.warning(f'Policy reload for unrecognized principal '
                            f'{user_id} failed; treating them as role-less: '
                            f'{common_utils.format_exception(e)}')
