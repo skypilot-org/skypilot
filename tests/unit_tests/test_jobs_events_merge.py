@@ -521,3 +521,32 @@ def test_limit_one_prefers_the_newest_even_when_it_is_the_job_s_own(
 
     result = core.get_job_events(job_id=1, limit=1, include_cluster_events=True)
     assert [event['reason'] for event in result] == ['Job has started']
+
+
+def test_a_runner_without_events_falls_back_to_the_default(monkeypatch):
+    """The plugins that register a runner ship separately from the server, so
+    one predating this method can be installed against a newer OSS. Calling
+    it unconditionally would fail the endpoint on an interface it never saw.
+    """
+    job_events = [
+        _job_event('Job has started',
+                   managed_job_state.ManagedJobStatus.RUNNING, 300)
+    ]
+    monkeypatch.setattr(managed_job_state, 'get_job_events',
+                        lambda **kwargs: list(job_events))
+
+    class _OldRunner:
+        """Implements the three methods that existed before `events`."""
+
+        def fetch_managed_job_table(self, **kwargs):
+            raise AssertionError('not reached')
+
+        def cancel_managed_jobs(self, **kwargs):
+            raise AssertionError('not reached')
+
+        def tail_managed_job_logs(self, **kwargs):
+            raise AssertionError('not reached')
+
+    monkeypatch.setattr(managed_job_runner, '_current', _OldRunner())
+    assert core.get_job_events(job_id=1,
+                               include_cluster_events=False) == job_events

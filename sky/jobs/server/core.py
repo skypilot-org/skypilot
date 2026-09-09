@@ -2050,12 +2050,24 @@ def get_job_events(
     answers from the jobs database and the cluster's own events; see
     ``_job_events`` for the arguments and the row shape.
     """
-    return managed_job_runner.current().events(
-        job_id=job_id,
-        task_id=task_id,
-        task=task,
-        limit=limit,
-        include_cluster_events=include_cluster_events)
+    runner = managed_job_runner.current()
+    # A runner that predates this method: the plugins that register one are
+    # distributed separately from the server, so an older one can be
+    # installed against a newer OSS. Answer from the default rather than
+    # failing the endpoint on an interface it never saw.
+    if not hasattr(runner, 'events'):
+        logger.debug(f'{type(runner).__name__} does not implement events(); '
+                     'using the default')
+        return _job_events(job_id=job_id,
+                           task_id=task_id,
+                           task=task,
+                           limit=limit,
+                           include_cluster_events=include_cluster_events)
+    return runner.events(job_id=job_id,
+                         task_id=task_id,
+                         task=task,
+                         limit=limit,
+                         include_cluster_events=include_cluster_events)
 
 
 def _job_events(

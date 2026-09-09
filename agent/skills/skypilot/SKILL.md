@@ -438,11 +438,10 @@ When using SkyPilot programmatically, follow this loop:
 When the user asks "what is my job doing" or "why is it pending/failing", run
 these in order and stop as soon as the question is answered:
 
-1. `sky jobs queue -v -o json` — read `status`, `details`, `failure_reason` (`-v` adds the `details` field)
-2. `sky jobs queue -v -o json` — `details` says why the cluster is still pending (e.g. a Slurm `QOSGrpGRES` or `Dependency` reason, with the partition it is queued in)
-3. `sky jobs logs JOB_ID --tail 100 --no-follow` — recent task output; `--controller` for provisioning/recovery logs
+1. `sky jobs queue -v -o json` — `status`, `details`, `failure_reason` (`-v` is what adds `details`). For a job that has not started, `details` is the answer: it says what the cluster is waiting on, e.g. a Slurm `QOSGrpGRES` or `Dependency` reason with the partition it is queued in
+2. `sky jobs logs JOB_ID --tail 100 --no-follow` — recent task output; `--controller` for provisioning/recovery logs
 
-See [Job Investigation](references/job-investigation.md) for how to read `details`, the event timeline, and Slurm pending reasons.
+See [Job Investigation](references/job-investigation.md) for how to read `details` and the Slurm pending reasons.
 
 ## Common Agent Mistakes
 
