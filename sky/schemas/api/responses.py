@@ -261,6 +261,12 @@ class ManagedJobRecord(ResponseBaseModel):
     root_job_id: Optional[int] = None
     parent_job_id: Optional[int] = None
     parent_task_id: Optional[int] = None
+
+    @property
+    def group_job_id(self) -> Optional[int]:
+        """The job this record is grouped under: its root, else itself."""
+        return self.root_job_id if self.root_job_id is not None else self.job_id
+
     # Whether this job is a batch coordinator (ds.map())
     is_batch: Optional[bool] = None
     # Batch progress fields (NULL for non-batch jobs)
