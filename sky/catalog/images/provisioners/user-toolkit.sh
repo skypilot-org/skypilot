@@ -7,6 +7,6 @@ pip install numpy
 pip install pandas
 
 if [ "$AZURE_GRID_DRIVER" = 1 ]; then
-    # Need PyTorch X.X.X+cu121 version to be compatible with older NVIDIA driver (535.161.08 or lower)
+    # Keep the PyTorch runtime aligned with this image's CUDA 12.2 toolkit.
     pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
 fi
