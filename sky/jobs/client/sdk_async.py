@@ -37,10 +37,16 @@ async def launch(
     _need_confirmation: bool = False,
     stream_logs: Optional[
         sdk_async.StreamConfig] = sdk_async.DEFAULT_STREAM_CONFIG,
+    job_group: Union[int, str, None, sdk._AutoJobGroup] = sdk.AUTO_JOB_GROUP,  # pylint: disable=protected-access
 ) -> Tuple[Optional[List[int]], Optional[backends.ResourceHandle]]:
     """Async version of launch() that launches a managed job."""
-    request_id = await asyncio.to_thread(sdk.launch, task, name, pool, num_jobs,
-                                         _need_confirmation)
+    request_id = await asyncio.to_thread(sdk.launch,
+                                         task,
+                                         name,
+                                         pool,
+                                         num_jobs,
+                                         job_group=job_group,
+                                         _need_confirmation=_need_confirmation)
     if stream_logs is not None:
         return await sdk_async._stream_and_get(request_id, stream_logs)  # pylint: disable=protected-access
     else:
