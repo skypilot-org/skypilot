@@ -349,6 +349,37 @@ class TestAcceleratorNameMatches:
         # A10 should not match A100
         assert not _accelerator_name_matches('A10', ['a100'])
 
+    def test_no_match_for_distinct_model_variant(self):
+        """Test that a model-differentiating suffix is not a prefix match.
+
+        Regression test for #9035: on a cluster whose only GPU is H100,
+        requesting a variant that does not exist there (e.g. H100-MEGA) used to
+        succeed because the bare name is a '-'-separated prefix of it.
+
+        The match is directional. A request naming a specific variant is not
+        satisfied by a node that is only known to be the bare model, but the
+        converse still holds: a bare 'H100' request may land on an 'H100-MEGA'
+        node, since that node is an H100.
+        """
+        for variant in ['H100-MEGA', 'H100-NVL', 'H100-NVLINK']:
+            assert not _accelerator_name_matches(variant, ['h100'])
+            assert _accelerator_name_matches('H100', [variant.lower()])
+        # The variant must still match itself.
+        assert _accelerator_name_matches('H100-MEGA', ['h100-mega'])
+
+    def test_no_match_across_ti_variant(self):
+        """Test that a '-Ti' GPU is distinct from its non-Ti sibling.
+
+        Regression test for the report in #9035 of a cluster holding both
+        RTX3090 and RTX3090-Ti nodes: a job explicitly requesting RTX3090-TI
+        was scheduled onto plain RTX3090 nodes, leaving the Ti nodes idle.
+        """
+        assert not _accelerator_name_matches('RTX3090-TI', ['rtx3090'])
+        assert _accelerator_name_matches('RTX3090-TI', ['rtx3090-ti'])
+        # A Ti node is an acceptable home for a plain RTX3090 request, the
+        # same direction that lets an H100 request use an H100-MEGA node.
+        assert _accelerator_name_matches('RTX3090', ['rtx3090-ti'])
+
     def test_case_insensitive(self):
         """Test case-insensitive matching."""
         assert _accelerator_name_matches('H200', ['H200'])
@@ -423,21 +454,18 @@ class TestAcceleratorNameMatches:
         assert _accelerator_name_matches('H100', ['h100-80gb'])
         assert _accelerator_name_matches('H100-80GB', ['h100'])
 
-        # H100-MEGA is the same H100 80GB silicon (A3 Mega instance), so
-        # cross-matching with H100 is harmless and preserved.
+        # H100-MEGA is the same H100 80GB silicon (A3 Mega instance), so a
+        # bare H100 request may still land on an H100-MEGA node. The converse
+        # is rejected: see test_no_match_for_distinct_model_variant.
         assert _accelerator_name_matches('H100', ['h100-mega'])
-        assert _accelerator_name_matches('H100-MEGA', ['h100'])
 
     def test_no_cross_variant_matching(self):
         """Test that different GPU variants don't incorrectly match.
 
-        H100 and H100-MEGA are different GPUs and should not match each
-        other. However, due to prefix matching, H100 will match H100-MEGA.
-        This is a known limitation that's acceptable because:
-        1. It's unlikely a user launches with H100-MEGA and expects H100
-        2. Not matching would break backward compat for valid cases
+        A bare H100 request still matches an H100-MEGA node, which is an H100.
+        The reverse no longer matches; see
+        test_no_match_for_distinct_model_variant.
         """
-        # These will match due to prefix logic - this is expected behavior
         assert _accelerator_name_matches('H100', ['h100-mega'])
         # But ensure unrelated GPUs don't match
         assert not _accelerator_name_matches('H200', ['h100-mega'])

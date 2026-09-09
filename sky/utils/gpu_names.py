@@ -76,6 +76,52 @@ _CANONICAL_GPU_MEMORY_GIB_LOWER = {
 # (e.g. 'A100-80G') since user-typed names are not always canonicalized.
 _MEMORY_SUFFIX_RE = re.compile(r'-(\d+)\s*gb?(?:-|$)', re.IGNORECASE)
 
+# Suffix tokens that describe how a GPU is packaged rather than which GPU it
+# is: a bus/form factor or an on-device memory size. Two names differing only
+# by these tokens denote the same physical GPU (e.g. 'H200-SXM-80GB' is an
+# H200). Any other token marks a distinct model -- 'H100-MEGA', 'H100-NVL' and
+# 'RTX3090-TI' are all different GPUs from their bare-name prefix, and several
+# appear in CANONICAL_GPU_NAMES in their own right.
+_FORM_FACTOR_TOKENS = frozenset({
+    'sxm',
+    'sxm2',
+    'sxm3',
+    'sxm4',
+    'sxm5',
+    'pci',
+    'pcie',
+    'hbm',
+    'hbm2',
+    'hbm2e',
+    'hbm3',
+    'hbm3e',
+})
+
+# Matches a standalone memory token like '80GB', '80G' or '32gb'.
+_MEMORY_TOKEN_RE = re.compile(r'^\d+\s*gb?$', re.IGNORECASE)
+
+
+def is_packaging_variant(shorter: str, longer: str) -> bool:
+    """Returns whether `longer` names the same physical GPU as `shorter`.
+
+    `longer` qualifies only when it is `shorter` followed by '-' and suffix
+    tokens that all describe packaging -- a form factor ('SXM', 'PCIE') or a
+    device memory size ('80GB'). This distinguishes a fallback name for the
+    same hardware, e.g. 'H200-SXM-80GB' for 'H200', from a genuinely different
+    model that happens to share a prefix, e.g. 'H100-MEGA' for 'H100'.
+
+    Comparison is case-insensitive. Callers still need to compare device memory
+    (see get_gpu_device_memory_gib) to reject a smaller-memory node.
+    """
+    shorter_lower = shorter.lower()
+    longer_lower = longer.lower()
+    if not longer_lower.startswith(f'{shorter_lower}-'):
+        return False
+    suffix_tokens = longer_lower[len(shorter_lower) + 1:].split('-')
+    return all(token in _FORM_FACTOR_TOKENS or
+               _MEMORY_TOKEN_RE.match(token) is not None
+               for token in suffix_tokens)
+
 
 def get_gpu_device_memory_gib(name: str) -> Optional[int]:
     """Returns the single-device memory (GiB) implied by a GPU name.
