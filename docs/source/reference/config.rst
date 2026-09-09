@@ -2449,7 +2449,7 @@ Map full SkyPilot usernames or service-account names to Unix users when
   slurm:
     submit_as_user: true
     username_map:
-      alice@example.com: aliceabc
+      jane.doe@example.com: jdoe
       inference-prod: inference-svc
     cluster_configs:
       training:
