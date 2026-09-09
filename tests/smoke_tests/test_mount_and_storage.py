@@ -797,10 +797,15 @@ def test_slurm_storage_mounts(image_id: Optional[str]):
                 f'NODES=$(cat {nodes_file} | tr "," " ") && '
                 'ssh -F ~/.slurm/config $SLURM_CLUSTER '
                 '"for node in $NODES; do '
-                'if srun -w \\"\\$node\\" findmnt '
-                f'{mount_root}/data {mount_root}/data2; then '
-                'echo \\"ERROR: mount left behind on \\$node\\"; '
-                'exit 1; fi; done; echo \\"teardown unmount verified\\"\"',
+                f'for p in {mount_root}/data {mount_root}/data2; do '
+                # One path per findmnt: with two positional arguments findmnt
+                # treats them as source and target and never matches.
+                # --immediate fails fast on a busy node instead of queueing.
+                'if srun --immediate=60 -w \\"\\$node\\" '
+                'findmnt --mountpoint \\"\\$p\\"; then '
+                'echo \\"ERROR: mount left behind on \\$node: \\$p\\"; '
+                'exit 1; fi; done; done; '
+                'echo \\"teardown unmount verified\\"\"',
             ]
             test = smoke_tests_utils.Test(
                 'slurm_storage_mounts',

@@ -339,17 +339,10 @@ def _raise_mount_failure(head_runner: command_runner.SlurmCommandRunner,
     for node in node_names:
         if _failed_marker(mount_dir, generation, node) in failed_paths:
             failed_nodes.append(node)
-    exit_codes: Dict[str, str] = {}
-    log_tails: Dict[str, str] = {}
-    for node in failed_nodes:
-        rc, stdout, _ = head_runner.run_driver(
-            f'cat {_failed_marker(mount_dir, generation, node)}',
-            require_outputs=True,
-            stream_logs=False)
-        if rc == 0:
-            exit_codes[node] = stdout.strip()
-        log_tails[node] = _read_node_log(head_runner, mount_dir, generation,
-                                         node)
+    # One round trip collects every failed node's exit code and log tail:
+    # each command is an SSH connection plus a step launch.
+    details = _read_failure_details(head_runner, mount_dir, generation,
+                                    failed_nodes)
     step_failed = _step_failed_marker(mount_dir, generation) in failed_paths
 
     detail_lines = []
@@ -358,9 +351,10 @@ def _raise_mount_failure(head_runner: command_runner.SlurmCommandRunner,
             'The storage-mount keeper step exited before every node '
             'reported a result.')
     for node in failed_nodes:
-        detail_lines.append(f'=== Node {node} (exit code '
-                            f'{exit_codes.get(node, "unknown")}) ===')
-        detail_lines.append(log_tails[node])
+        exit_code, log_tail = details.get(
+            node, ('unknown', f'(no mount log found for node {node})'))
+        detail_lines.append(f'=== Node {node} (exit code {exit_code}) ===')
+        detail_lines.append(log_tail)
     detail = '\n'.join(detail_lines)
 
     log_path = os.path.expanduser(log_path)
@@ -370,7 +364,7 @@ def _raise_mount_failure(head_runner: command_runner.SlurmCommandRunner,
         f.write(detail)
         f.write('\n')
 
-    for node, code in exit_codes.items():
+    for node, (code, _) in details.items():
         if code.isdigit() and int(code) == exceptions.MOUNT_PATH_NON_EMPTY_CODE:
             raise RuntimeError(
                 f'Mount path is non-empty on Slurm node {node}. It may be a '
@@ -379,7 +373,7 @@ def _raise_mount_failure(head_runner: command_runner.SlurmCommandRunner,
                 'non-existent path.')
 
     returncode = 1
-    for code in exit_codes.values():
+    for code, _ in details.values():
         if code.isdigit():
             returncode = int(code)
             break
@@ -393,15 +387,79 @@ def _raise_mount_failure(head_runner: command_runner.SlurmCommandRunner,
         detailed_reason=detail)
 
 
-def _read_node_log(head_runner: command_runner.SlurmCommandRunner,
-                   mount_dir: str, generation: str, node: str) -> str:
-    node_log = _node_log_path(mount_dir, generation, node)
-    rc, stdout, _ = head_runner.run_driver(
-        f'tail -n 100 {shlex.quote(node_log)}',
-        require_outputs=True,
-        stream_logs=False)
+# Output token prefixes for the batched log-collection commands; lets the
+# parser ignore SSH noise.
+_NODE_LOG_PREFIX = 'SKYSMLOG:'
+_FAILURE_PREFIX = 'SKYSMFAIL:'
+
+
+def _read_failure_details(
+        head_runner: command_runner.SlurmCommandRunner, mount_dir: str,
+        generation: str, failed_nodes: List[str]) -> Dict[str, Tuple[str, str]]:
+    """Reads each failed node's exit code and log tail in one round trip."""
+    if not failed_nodes:
+        return {}
+    lines = []
+    for node in failed_nodes:
+        marker = shlex.quote(_failed_marker(mount_dir, generation, node))
+        lines.append(f'code=$(cat {marker} 2>/dev/null || echo unknown) && '
+                     f'echo {_FAILURE_PREFIX}{node}:$code')
+        node_log = shlex.quote(_node_log_path(mount_dir, generation, node))
+        lines.append(f'tail -n 100 {node_log} 2>/dev/null || '
+                     f'echo "(no mount log found for node {node})"')
+    stdout = _run_batched(head_runner, '\n'.join(lines))
+    details: Dict[str, Tuple[str, str]] = {}
+    current_node: Optional[str] = None
+    for line in stdout.splitlines():
+        if line.startswith(_FAILURE_PREFIX):
+            marker = line[len(_FAILURE_PREFIX):]
+            node, _, code = marker.partition(':')
+            details[node] = (code, '')
+            current_node = node
+        elif current_node is not None:
+            code, tail = details[current_node]
+            details[current_node] = (code, tail + line + '\n')
+    return details
+
+
+def _read_node_logs(head_runner: command_runner.SlurmCommandRunner,
+                    mount_dir: str, generation: str,
+                    node_names: List[str]) -> Dict[str, str]:
+    """Tails every node's mount log in one round trip."""
+    lines = []
+    for node in node_names:
+        lines.append(f'echo {_NODE_LOG_PREFIX}{node}')
+        node_log = shlex.quote(_node_log_path(mount_dir, generation, node))
+        lines.append(f'tail -n 100 {node_log} 2>/dev/null || '
+                     f'echo "(no mount log found for node {node})"')
+    stdout = _run_batched(head_runner, '\n'.join(lines))
+    logs: Dict[str, str] = {}
+    current_node: Optional[str] = None
+    for line in stdout.splitlines():
+        if line.startswith(_NODE_LOG_PREFIX):
+            current_node = line[len(_NODE_LOG_PREFIX):]
+            logs[current_node] = ''
+        elif current_node is not None:
+            logs[current_node] += line + '\n'
+    return logs
+
+
+def _run_batched(head_runner: command_runner.SlurmCommandRunner,
+                 cmd: str) -> str:
+    """Runs a log-collection batch; best-effort (empty output on failure)."""
+    # The batch is diagnostics: a transport failure degrades the error
+    # message or the collected logs, never the mount result itself.
+    try:
+        rc, stdout, _ = head_runner.run_driver(cmd,
+                                               require_outputs=True,
+                                               stream_logs=False)
+    except Exception as e:  # pylint: disable=broad-except
+        logger.warning('Failed to collect the Slurm storage-mount logs: %s', e)
+        return ''
     if rc != 0:
-        return f'(no mount log found for node {node})'
+        logger.warning('Failed to collect the Slurm storage-mount logs: '
+                       f'rc={rc}')
+        return ''
     return stdout
 
 
@@ -414,10 +472,11 @@ def _collect_node_logs(head_runner: command_runner.SlurmCommandRunner,
     log_path = os.path.expanduser(log_path)
     log_dir = os.path.dirname(log_path)
     os.makedirs(log_dir, exist_ok=True)
+    logs = _read_node_logs(head_runner, mount_dir, generation, node_names)
     with open(log_path, 'a', encoding='utf-8') as f:
         for node in node_names:
             f.write(f'=== storage mounts on node {node} ===\n')
-            f.write(_read_node_log(head_runner, mount_dir, generation, node))
+            f.write(logs.get(node, f'(no mount log found for node {node})'))
             f.write('\n')
 
 
