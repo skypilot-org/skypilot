@@ -34,7 +34,7 @@ GLOBAL_USER_STATE_VERSION = '023'  # index cluster_events by name
 GLOBAL_USER_STATE_LOCK_PATH = f'~/.sky/locks/.{GLOBAL_USER_STATE_DB_NAME}.lock'
 
 SPOT_JOBS_DB_NAME = 'spot_jobs_db'
-SPOT_JOBS_VERSION = '025'  # add job_info.parent_job_id/parent_task_id
+SPOT_JOBS_VERSION = '025'  # add job_info.root/parent_job_id, parent_task_id
 SPOT_JOBS_LOCK_PATH = f'~/.sky/locks/.{SPOT_JOBS_DB_NAME}.lock'
 
 SERVE_DB_NAME = 'serve_db'
