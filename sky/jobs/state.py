@@ -918,24 +918,6 @@ ControllerPidRecord = collections.namedtuple('ControllerPidRecord', [
 
 
 # === Status transition functions ===
-def _derive_root_job_id(parent_job_id: Optional[int],
-                        root_job_id: Optional[int]) -> Optional[int]:
-    """The root for a new job: the parent's root, else the parent itself.
-
-    Callers only know the immediate parent (the job they were launched
-    from); the root is derived here so every insert path agrees.
-    """
-    if root_job_id is not None or parent_job_id is None:
-        return root_job_id
-    parent_link = get_job_links([parent_job_id]).get(parent_job_id)
-    if parent_link is None:
-        # An unknown parent (e.g. a remote controller whose DB predates the
-        # link) is still recorded as the root: a shallow tree beats none.
-        return parent_job_id
-    parent_root, _, _ = parent_link
-    return parent_root if parent_root is not None else parent_job_id
-
-
 def set_job_info_without_job_id(name: str,
                                 workspace: str,
                                 entrypoint: str,
@@ -969,7 +951,7 @@ def set_job_info_without_job_id(name: str,
             execution=execution,
             is_batch=is_batch,
             file_mounts_blob_id=file_mounts_blob_id,
-            root_job_id=_derive_root_job_id(parent_job_id, root_job_id),
+            root_job_id=root_job_id,
             parent_job_id=parent_job_id,
             parent_task_id=parent_task_id,
         )
@@ -3899,7 +3881,7 @@ def set_job_info(job_id: int,
             user_hash=user_hash,
             execution=execution,
             is_batch=is_batch,
-            root_job_id=_derive_root_job_id(parent_job_id, root_job_id),
+            root_job_id=root_job_id,
             parent_job_id=parent_job_id,
             parent_task_id=parent_task_id,
         )
@@ -3907,49 +3889,30 @@ def set_job_info(job_id: int,
         session.commit()
 
 
-def get_job_links(
-    job_ids: List[int]
-) -> Dict[int, Tuple[Optional[int], Optional[int], Optional[int]]]:
-    """(root_job_id, parent_job_id, parent_task_id) for each of ``job_ids``.
+def get_jobs_launched_from(
+        job_ids: List[int]) -> List[Tuple[int, Optional[int]]]:
+    """(job_id, parent_job_id) for every job under the trees of ``job_ids``.
 
-    One query. Ids with no row are absent from the result. All three values
-    are None for a top-level job.
+    One query: the rows whose ``root_job_id`` is the root of any of the given
+    ids (a top-level id is its own root). Callers pick out the subtree they
+    want in memory from the parent edges; the roots themselves are not
+    included. Used by cancel to take a job's launched jobs down with it.
     """
     if not job_ids:
-        return {}
+        return []
     engine = _db_manager.get_engine()
+    roots = sqlalchemy.select(
+        sqlalchemy.func.coalesce(job_info_table.c.root_job_id,
+                                 job_info_table.c.spot_job_id)).where(
+                                     job_info_table.c.spot_job_id.in_(job_ids))
     with orm.Session(engine) as session:
         rows = session.execute(
             sqlalchemy.select(
-                job_info_table.c.spot_job_id, job_info_table.c.root_job_id,
-                job_info_table.c.parent_job_id,
-                job_info_table.c.parent_task_id).where(
-                    job_info_table.c.spot_job_id.in_(job_ids))).fetchall()
-    return {row[0]: (row[1], row[2], row[3]) for row in rows}
-
-
-def get_tree_links(
-        root_job_ids: List[int]
-) -> Dict[int, Tuple[Optional[int], Optional[int]]]:
-    """(parent_job_id, parent_task_id) for every job launched, at any depth,
-    from any of the top-level jobs ``root_job_ids``.
-
-    One indexed query on ``root_job_id``; the roots themselves are not
-    included. Any subtree question (cancel this node and everything under
-    it, group these rows for display) is answered in memory from the
-    returned parent links.
-    """
-    if not root_job_ids:
-        return {}
-    engine = _db_manager.get_engine()
-    with orm.Session(engine) as session:
-        rows = session.execute(
-            sqlalchemy.select(
-                job_info_table.c.spot_job_id, job_info_table.c.parent_job_id,
-                job_info_table.c.parent_task_id).where(
-                    job_info_table.c.root_job_id.in_(root_job_ids)).order_by(
+                job_info_table.c.spot_job_id,
+                job_info_table.c.parent_job_id).where(
+                    job_info_table.c.root_job_id.in_(roots)).order_by(
                         job_info_table.c.spot_job_id.asc())).fetchall()
-    return {row[0]: (row[1], row[2]) for row in rows}
+    return [(row[0], row[1]) for row in rows]
 
 
 def reset_jobs_for_recovery() -> None:
