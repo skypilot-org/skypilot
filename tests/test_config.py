@@ -2461,6 +2461,35 @@ def test_get_effective_slurm_quota_value(monkeypatch, tmp_path) -> None:
         'not_a_field', cluster='clusterA', partition='gpu') is None
 
 
+def test_get_effective_slurm_quota_value_preserves_type(monkeypatch,
+                                                        tmp_path) -> None:
+    """Non-string sub-fields come back as configured, not coerced.
+
+    `slurm.quota` is `additionalProperties: True`, so a sub-field can hold
+    any JSON type. Coercing to str would mask a mis-typed config and
+    returning None would silently drop it, so the value passes through and
+    the caller validates -- which is why the getter is annotated `Any`.
+    """
+    with open(tmp_path / 'slurm_quota_types.yaml', 'w', encoding='utf-8') as f:
+        f.write("""\
+        slurm:
+            quota:
+                a_number: 42
+                a_bool: true
+                a_list: [one, two]
+                a_mapping: {nested: value}
+        """)
+    monkeypatch.setattr(skypilot_config, '_GLOBAL_CONFIG_PATH',
+                        tmp_path / 'slurm_quota_types.yaml')
+    skypilot_config.reload_config()
+
+    get = skypilot_config.get_effective_slurm_quota_value
+    assert get('a_number', cluster='clusterA') == 42
+    assert get('a_bool', cluster='clusterA') is True
+    assert get('a_list', cluster='clusterA') == ['one', 'two']
+    assert get('a_mapping', cluster='clusterA') == {'nested': 'value'}
+
+
 def test_get_effective_slurm_account(monkeypatch, tmp_path) -> None:
     """`quota.account` walks the same scopes as the Slurm `quota.queue`."""
     with open(tmp_path / 'slurm_account.yaml', 'w', encoding='utf-8') as f:
