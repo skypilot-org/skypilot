@@ -98,7 +98,15 @@ class ManagedJobRunner(Protocol):
 
         ``include_cluster_events`` merges the underlying cluster's
         launch-progress events into the timeline; ``limit`` caps the merged
-        result, with neither source allowed to crowd out the other entirely.
+        result at exactly that many of the most recent rows.
+
+        Reading state directly rather than asking the controller -- which is
+        what ``queue`` does -- is what the ``/jobs/events`` endpoint has
+        always done, and is left unchanged here: it is the API server's own
+        ``spot_jobs`` and ``global_user_state`` that are read, so the answer
+        is complete wherever the controller shares them (consolidation mode,
+        or a shared database). This seam exists to *add* to that answer, not
+        to move where it comes from.
         """
 
     def tail_managed_job_logs(

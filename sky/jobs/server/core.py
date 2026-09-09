@@ -2157,22 +2157,14 @@ def _job_events(
                       key=lambda event: event['timestamp'].timestamp(),
                       reverse=True)
 
-    if limit is None:
-        return _newest_first(events + converted)
-    # Neither source may be starved. One launch can produce more cluster
-    # events than `limit`, and dropping the oldest rows would hide the
-    # PENDING -> STARTING -> RUNNING sequence the timeline is read for; but a
-    # job with many recoveries can fill the budget with its own transitions.
-    # So the job's own events take the budget first, the cluster side is
-    # guaranteed a share of what is left, and recency settles the remainder.
-    floor = min(max(limit // 2, 1), len(converted))
-    room = max(limit - len(events), floor)
-    candidates = _newest_first(converted)[:room]
-    # The share has to be *reserved*, not merely offered as a candidate: the
-    # final cut is by recency, so a job with a full budget of newer
-    # transitions would evict every cluster row that had been admitted.
-    # Capped so the job's own newest row never loses its slot; at limit=1
-    # that leaves the single row to whichever source is newest.
-    reserved = min(floor, len(candidates), limit - (1 if events else 0))
-    rest = _newest_first(events + candidates[reserved:])
-    return _newest_first(candidates[:reserved] + rest[:limit - reserved])
+    # Plain recency: the window is exactly the most recent `limit` rows of
+    # the merged list. Reserving a share for the cluster side was tried and
+    # dropped -- it made the window neither "the most recent N" nor reliably
+    # inclusive (a job with ten recent transitions gave slots away to
+    # provisioning rows from long ago, while a cluster row newer than every
+    # job row could still lose to an older one). "Why has this not started"
+    # is answered by the `details` column instead, which is guaranteed rather
+    # than budget-dependent. `converted` is already bounded per cluster by
+    # the same `limit`, so nothing runs away here.
+    merged = _newest_first(events + converted)
+    return merged if limit is None else merged[:limit]

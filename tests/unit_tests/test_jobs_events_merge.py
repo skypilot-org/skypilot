@@ -105,16 +105,13 @@ def test_merge_orders_newest_first_and_truncates(monkeypatch):
         global_user_state.ClusterEventType.STATUS_CHANGE,
         global_user_state.ClusterEventType.LAUNCH_PROGRESS,
     })
-    # Newest first, capped at limit=3. The job's own two transitions keep
-    # their place and the remaining slot goes to the newest cluster event:
-    # a launch can emit more cluster events than the limit, and losing the
-    # job's status sequence to them is the worse failure (see
-    # test_limit_never_starves_the_job_own_timeline).
+    # Newest first, and the window is exactly the most recent three rows of
+    # the merged list -- so the older 'Job is starting' drops out.
     reasons = [e['reason'] for e in result]
     assert reasons == [
         'Job has started',
         'Launching (1 pod(s) pending due to Pulling)',
-        'Job is starting',
+        'Launching (Kubernetes cluster is autoscaling)',
     ]
     # Merged cluster events are tagged as STARTING-phase events, and carry
     # the task whose cluster produced them (this used to be hard-coded None,
@@ -331,51 +328,10 @@ class TestResolveTaskId:
             core._resolve_task_id(7, 'train')
 
 
-def test_limit_never_starves_the_job_own_timeline(monkeypatch):
-    """A chatty launch must not push PENDING/STARTING out of the window.
-
-    The merged list is capped at `limit`, and the cluster side can produce
-    more events than that on its own; the job's transitions are the sequence
-    the timeline is read for, so they keep their place.
-    """
-    job_events = [
-        _job_event('Job submitted to queue',
-                   managed_job_state.ManagedJobStatus.PENDING, 100),
-        _job_event('Job is starting',
-                   managed_job_state.ManagedJobStatus.STARTING, 110),
-    ]
-    monkeypatch.setattr(managed_job_state, 'get_job_events',
-                        lambda **kwargs: list(job_events))
-    monkeypatch.setattr(managed_job_state, 'get_managed_job_tasks',
-                        lambda job_id: [_task()])
-    # 20 cluster events, all newer than the job's own two.
-    monkeypatch.setattr(global_user_state,
-                        'get_cluster_events_by_name',
-                        lambda name, event_types, limit=None: [{
-                            'reason': f'Launching (step {i})',
-                            'transitioned_at': 200 + i
-                        } for i in range(20)][:limit or 20])
-
-    result = core.get_job_events(job_id=1, limit=5, include_cluster_events=True)
-    assert len(result) == 5
-    reasons = [event['reason'] for event in result]
-    # Both job events survive; the rest of the budget goes to the newest
-    # cluster events.
-    assert 'Job submitted to queue' in reasons
-    assert 'Job is starting' in reasons
-    assert sum(1 for r in reasons if r.startswith('Launching')) == 3
-    # Still newest-first overall.
-    stamps = [event['timestamp'].timestamp() for event in result]
-    assert stamps == sorted(stamps, reverse=True)
-
-
-def test_limit_never_starves_the_cluster_events(monkeypatch):
-    """A job with many recoveries must not hide the current launch reason.
-
-    The mirror of test_limit_never_starves_the_job_own_timeline: when the
-    job's own transitions can fill the whole budget, the newest row of all
-    is usually the launch reason the user is waiting on, so the cluster side
-    keeps a floor.
+def test_the_newest_row_wins_when_the_job_is_chatty(monkeypatch):
+    """A job with enough transitions to fill the budget on its own still
+    reports the launch reason when that is the newest row of all: the cut is
+    by recency across both sources, not per source.
     """
     job_events = [
         _job_event(f'transition {i}',
@@ -403,6 +359,36 @@ def test_limit_never_starves_the_cluster_events(monkeypatch):
     # The oldest job transition is what gives up its slot.
     assert 'transition 0' not in reasons
     assert 'transition 4' in reasons
+
+
+def test_the_window_is_exactly_the_most_recent_rows(monkeypatch):
+    """Reserving a share for the cluster side was tried and dropped: it gave
+    slots to provisioning rows from long ago, so a caller that asked for the
+    ten most recent events got six of them. `details` carries the
+    "why has this not started" guarantee instead.
+    """
+    job_events = [
+        _job_event(f'transition {i}',
+                   managed_job_state.ManagedJobStatus.RECOVERING, 1000 + i)
+        for i in range(10)
+    ]
+    monkeypatch.setattr(managed_job_state, 'get_job_events',
+                        lambda **kwargs: list(reversed(job_events)))
+    monkeypatch.setattr(managed_job_state, 'get_managed_job_tasks',
+                        lambda job_id: [_task()])
+    monkeypatch.setattr(global_user_state,
+                        'get_cluster_events_by_name',
+                        lambda name, event_types, limit=None: [{
+                            'reason': f'Launching (step {i})',
+                            'transitioned_at': 100 + i
+                        } for i in range(4)])
+
+    result = core.get_job_events(job_id=1,
+                                 limit=10,
+                                 include_cluster_events=True)
+    reasons = [event['reason'] for event in result]
+    assert len(reasons) == 10
+    assert not any(r.startswith('Launching') for r in reasons)
 
 
 def test_limit_one_returns_the_newest_event_of_either_source(monkeypatch):
@@ -469,41 +455,11 @@ def test_the_default_runner_still_reads_the_database(monkeypatch):
                                include_cluster_events=False) == job_events
 
 
-def test_the_floor_holds_when_the_job_events_are_all_newer(monkeypatch):
-    """The floor has to *reserve* a slot, not just widen the candidate pool.
-    The final cut is by recency, so a job with a full budget of newer
-    transitions used to evict every cluster row that had been admitted --
-    hiding exactly the provisioning history the merge is read for.
-    """
-    job_events = [
-        _job_event('Job is restarting',
-                   managed_job_state.ManagedJobStatus.STARTING, 600 + i)
-        for i in range(3)
-    ]
-    monkeypatch.setattr(managed_job_state, 'get_job_events',
-                        lambda **kwargs: list(job_events))
-    monkeypatch.setattr(managed_job_state, 'get_managed_job_tasks',
-                        lambda job_id: [_task()])
-    monkeypatch.setattr(
-        global_user_state,
-        'get_cluster_events_by_name',
-        lambda name, event_types, limit=None: [{
-            'reason': 'Launching (pending: Resources; partition: dev)',
-            'transitioned_at': 100,
-        }])
-
-    result = core.get_job_events(job_id=1, limit=3, include_cluster_events=True)
-    assert len(result) == 3
-    assert result[-1]['reason'] == (
-        'Launching (pending: Resources; partition: dev)')
-
-
 def test_limit_one_prefers_the_newest_even_when_it_is_the_job_s_own(
         monkeypatch):
     """The mirror of test_limit_one_returns_the_newest_event_of_either_source:
-    the reserved infra share must never cost the job's own newest row, or a
-    single-row view would show an old launch line instead of the transition
-    that just happened."""
+    a single-row view shows the transition that just happened, not an older
+    launch line."""
     job_events = [
         _job_event('Job has started',
                    managed_job_state.ManagedJobStatus.RUNNING, 500)
