@@ -918,6 +918,21 @@ ControllerPidRecord = collections.namedtuple('ControllerPidRecord', [
 
 
 # === Status transition functions ===
+def _derive_root_job_id(parent_job_id: Optional[int],
+                        root_job_id: Optional[int]) -> Optional[int]:
+    """The root for a new job: the parent's root, else the parent itself.
+
+    Callers only know the immediate parent (the job they were launched
+    from); the root is derived here so every insert path agrees.
+    """
+    if root_job_id is not None or parent_job_id is None:
+        return root_job_id
+    derived = get_root_job_id(parent_job_id)
+    # An unknown parent (e.g. a remote controller whose DB predates the link)
+    # is still recorded as the root: better a shallow tree than none.
+    return derived if derived is not None else parent_job_id
+
+
 def set_job_info_without_job_id(name: str,
                                 workspace: str,
                                 entrypoint: str,
@@ -951,7 +966,7 @@ def set_job_info_without_job_id(name: str,
             execution=execution,
             is_batch=is_batch,
             file_mounts_blob_id=file_mounts_blob_id,
-            root_job_id=root_job_id,
+            root_job_id=_derive_root_job_id(parent_job_id, root_job_id),
             parent_job_id=parent_job_id,
             parent_task_id=parent_task_id,
         )
@@ -3881,7 +3896,7 @@ def set_job_info(job_id: int,
             user_hash=user_hash,
             execution=execution,
             is_batch=is_batch,
-            root_job_id=root_job_id,
+            root_job_id=_derive_root_job_id(parent_job_id, root_job_id),
             parent_job_id=parent_job_id,
             parent_task_id=parent_task_id,
         )
