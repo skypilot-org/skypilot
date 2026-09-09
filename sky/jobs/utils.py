@@ -3343,9 +3343,12 @@ def get_managed_job_queue(
         ]
         # Keyed by job id, not by task: in a job group every task shares the
         # id, so a RECOVERING task's reason reaches its STARTING sibling's row
-        # too. `_format_job_details` therefore only applies each of these to a
-        # row that is itself in that status -- the maps are built from rows in
-        # that status, so nothing else could have been meant by them.
+        # too. `_format_job_details` therefore applies these two only to a row
+        # that is itself in that status -- the maps are built from rows in that
+        # status, so nothing else could have been meant by them. The
+        # cancellation below is deliberately not guarded that way: cancelling
+        # a job cancels every task in it, so it is the right answer on a
+        # sibling's row as well, and it is checked first for that reason.
         recovery_reasons, pending_reasons = (
             managed_job_state.get_latest_recovery_and_pending_reasons(
                 recovering_job_ids, pending_job_ids))

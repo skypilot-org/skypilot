@@ -180,3 +180,17 @@ def test_a_sibling_pending_reason_does_not_shadow_a_launch_reason():
         pending_reason='Waiting for a launch slot',
         launch_reason='Launching (pending: Priority)')
     assert starting['details'] == 'Launching (pending: Priority)'
+
+
+def test_a_cancellation_wins_over_a_launch_reason():
+    """Cancelling a job cancels every task in it, so unlike the recovery and
+    pending reasons this one is right on a sibling's row too -- it is checked
+    first and deliberately not gated on the row's own status.
+    """
+    starting = _job(job_id=7, task_id=1, status='STARTING')
+    managed_job_utils._format_job_details(
+        job=starting,
+        highest_blocking_priority=0,
+        cancel_reason='Cancellation requested by alice',
+        launch_reason='Launching (pending: Resources)')
+    assert starting['details'] == 'Cancellation requested by alice'
