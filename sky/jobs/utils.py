@@ -3044,7 +3044,8 @@ def _format_job_details(*,
         job['details'] = state_details
     elif job['failure_reason']:
         job['details'] = f'Failure: {job["failure_reason"]}'
-    elif recovery_reason:
+    elif recovery_reason and job['status'] == (
+            managed_job_state.ManagedJobStatus.RECOVERING.value):
         # Surface why a job is recovering (e.g. an OOMKilled pod) so the
         # transient recovery cause is visible in the CLI and dashboard, not
         # just the controller logs. The reason (e.g. from
@@ -3063,7 +3064,8 @@ def _format_job_details(*,
             if hint is not None:
                 detail += f' ({hint})'
         job['details'] = detail
-    elif pending_reason:
+    elif pending_reason and job['status'] == (
+            managed_job_state.ManagedJobStatus.PENDING.value):
         # Surface why a job is still PENDING (e.g. it was submitted to the
         # controller queue or is in launch backoff) so the reason is visible
         # in the job details view, not just the event table. Collapse
@@ -3339,6 +3341,11 @@ def get_managed_job_queue(
             for job in jobs
             if job['status'] == managed_job_state.ManagedJobStatus.PENDING.value
         ]
+        # Keyed by job id, not by task: in a job group every task shares the
+        # id, so a RECOVERING task's reason reaches its STARTING sibling's row
+        # too. `_format_job_details` therefore only applies each of these to a
+        # row that is itself in that status -- the maps are built from rows in
+        # that status, so nothing else could have been meant by them.
         recovery_reasons, pending_reasons = (
             managed_job_state.get_latest_recovery_and_pending_reasons(
                 recovering_job_ids, pending_job_ids))

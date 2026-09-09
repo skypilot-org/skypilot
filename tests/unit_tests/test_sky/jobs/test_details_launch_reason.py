@@ -144,3 +144,39 @@ def test_launch_reasons_swallow_db_errors():
                            'get_latest_cluster_events',
                            side_effect=RuntimeError('db')):
         assert not managed_job_utils._get_launch_reasons_by_task(_jobs())
+
+
+def test_a_sibling_task_recovery_reason_does_not_shadow_a_launch_reason():
+    """In a job group each task has its own row, but recovery and pending
+    reasons are looked up by job id alone -- so a STARTING task used to
+    inherit a RECOVERING sibling's reason, and since that branch is checked
+    first, its own launch reason was hidden. The reason belongs to the task
+    that is in that status.
+    """
+    starting = _job(job_id=7, task_id=1, status='STARTING')
+    managed_job_utils._format_job_details(
+        job=starting,
+        highest_blocking_priority=0,
+        recovery_reason='OOMKilled',
+        launch_reason='Launching (pending: Resources; partition: dev)')
+    assert starting['details'] == (
+        'Launching (pending: Resources; partition: dev)')
+
+
+def test_a_recovering_task_still_reports_its_recovery_reason():
+    """The mirror: the guard must not silence the row the reason is about."""
+    recovering = _job(job_id=7, task_id=0, status='RECOVERING')
+    managed_job_utils._format_job_details(job=recovering,
+                                          highest_blocking_priority=0,
+                                          recovery_reason='OOMKilled')
+    assert recovering['details'] == 'Recovering: OOMKilled'
+
+
+def test_a_sibling_pending_reason_does_not_shadow_a_launch_reason():
+    starting = _job(job_id=7, task_id=1, status='STARTING')
+    managed_job_utils._format_job_details(
+        job=starting,
+        highest_blocking_priority=0,
+        pending_reason='Waiting for a launch slot',
+        launch_reason='Launching (pending: Priority)')
+    assert starting['details'] == 'Launching (pending: Priority)'
