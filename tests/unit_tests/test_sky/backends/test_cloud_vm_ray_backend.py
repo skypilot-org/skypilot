@@ -803,3 +803,72 @@ class TestProvisionClusterLockParking:
                                      is_launched_by_jobs_controller=True)
         assert result is sentinel
         assert locked_provision.call_count == 2
+
+
+class TestSlurmContainerImageBackfill:
+    """Backfilling provider.container_image for pre-upgrade Slurm clusters."""
+
+    @staticmethod
+    def _handle(cloud, image):
+        launched = MagicMock()
+        launched.cloud = MagicMock(spec=cloud)
+        launched.extract_docker_image.return_value = image
+        return CloudVmRayResourceHandle(
+            cluster_name='test-cluster',
+            cluster_name_on_cloud='test-cluster-abc',
+            cluster_yaml='test-cluster.yml',
+            launched_nodes=1,
+            launched_resources=launched,
+        )
+
+    def test_backfills_legacy_container_cluster(self):
+        handle = self._handle(clouds.Slurm, 'ubuntu:24.04')
+        with patch('sky.global_user_state.get_cluster_yaml_dict',
+                   return_value={'provider': {'cluster': 'c'}}), \
+             patch('sky.global_user_state.set_cluster_yaml') as mock_set:
+            handle._maybe_backfill_slurm_container_image()
+        mock_set.assert_called_once()
+        name, written = mock_set.call_args.args
+        assert name == 'test-cluster'
+        from sky.utils import yaml_utils
+        assert (yaml_utils.safe_load(written)['provider']['container_image'] ==
+                'ubuntu:24.04')
+
+    def test_noop_when_already_present(self):
+        handle = self._handle(clouds.Slurm, 'ubuntu:24.04')
+        with patch('sky.global_user_state.get_cluster_yaml_dict',
+                   return_value={'provider': {
+                       'container_image': 'ubuntu:24.04'
+                   }}), \
+             patch('sky.global_user_state.set_cluster_yaml') as mock_set:
+            handle._maybe_backfill_slurm_container_image()
+        mock_set.assert_not_called()
+
+    def test_reconciles_stale_value(self):
+        handle = self._handle(clouds.Slurm, 'ubuntu:24.04')
+        with patch('sky.global_user_state.get_cluster_yaml_dict',
+                   return_value={'provider': {
+                       'container_image': 'old:1'
+                   }}), \
+             patch('sky.global_user_state.set_cluster_yaml') as mock_set:
+            handle._maybe_backfill_slurm_container_image()
+        _, written = mock_set.call_args.args
+        from sky.utils import yaml_utils
+        assert (yaml_utils.safe_load(written)['provider']['container_image'] ==
+                'ubuntu:24.04')
+
+    def test_noop_for_non_container_slurm(self):
+        handle = self._handle(clouds.Slurm, None)
+        with patch('sky.global_user_state.get_cluster_yaml_dict') as mock_get, \
+             patch('sky.global_user_state.set_cluster_yaml') as mock_set:
+            handle._maybe_backfill_slurm_container_image()
+        mock_get.assert_not_called()
+        mock_set.assert_not_called()
+
+    def test_noop_for_non_slurm_cloud(self):
+        handle = self._handle(clouds.AWS, 'ubuntu:24.04')
+        with patch('sky.global_user_state.get_cluster_yaml_dict') as mock_get, \
+             patch('sky.global_user_state.set_cluster_yaml') as mock_set:
+            handle._maybe_backfill_slurm_container_image()
+        mock_get.assert_not_called()
+        mock_set.assert_not_called()

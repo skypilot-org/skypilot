@@ -530,7 +530,7 @@ class TestGetClusterFailureReasonFromEvents:
     @mock.patch('sky.provision.kubernetes.instance._get_pod_events')
     def test_returns_first_evicted(self, mock_events, mock_kutils):
         mock_kutils.get_namespace_from_config.return_value = 'ns'
-        mock_kutils.get_context_from_config.return_value = 'ctx'
+        mock_kutils.get_execution_context_from_config.return_value = 'ctx'
         mock_events.return_value = [
             _make_event(
                 'Evicted', 'Pod ephemeral local storage usage '
@@ -546,7 +546,7 @@ class TestGetClusterFailureReasonFromEvents:
     @mock.patch('sky.provision.kubernetes.instance._get_pod_events')
     def test_none_when_no_failure_event(self, mock_events, mock_kutils):
         mock_kutils.get_namespace_from_config.return_value = 'ns'
-        mock_kutils.get_context_from_config.return_value = 'ctx'
+        mock_kutils.get_execution_context_from_config.return_value = 'ctx'
         mock_events.return_value = [_make_event('Scheduled', 'assigned')]
         assert k8s_instance.get_cluster_failure_reason_from_events(
             {}, ['pod-0', 'pod-1']) is None
@@ -566,7 +566,7 @@ class TestGetClusterFailureReasonFromPods:
     def test_returns_condensed_reason_for_abnormal_pod(self, mock_kutils,
                                                        mock_core_api):
         mock_kutils.get_namespace_from_config.return_value = 'ns'
-        mock_kutils.get_context_from_config.return_value = 'ctx'
+        mock_kutils.get_execution_context_from_config.return_value = 'ctx'
         mock_kutils.pod_terminated_abnormally.return_value = True
         mock_kutils.get_condensed_pod_reason.return_value = (
             'OOMKilled (exit code 137)')
@@ -578,7 +578,7 @@ class TestGetClusterFailureReasonFromPods:
     @mock.patch('sky.provision.kubernetes.instance.kubernetes_utils')
     def test_none_when_no_pod_abnormal(self, mock_kutils, mock_core_api):
         mock_kutils.get_namespace_from_config.return_value = 'ns'
-        mock_kutils.get_context_from_config.return_value = 'ctx'
+        mock_kutils.get_execution_context_from_config.return_value = 'ctx'
         mock_kutils.pod_terminated_abnormally.return_value = False
         assert k8s_instance.get_cluster_failure_reason_from_pods(
             {}, ['pod-0', 'pod-1']) is None
@@ -587,7 +587,7 @@ class TestGetClusterFailureReasonFromPods:
     @mock.patch('sky.provision.kubernetes.instance.kubernetes_utils')
     def test_skips_pod_read_errors(self, mock_kutils, mock_core_api):
         mock_kutils.get_namespace_from_config.return_value = 'ns'
-        mock_kutils.get_context_from_config.return_value = 'ctx'
+        mock_kutils.get_execution_context_from_config.return_value = 'ctx'
         # First pod read raises; the second pod is abnormal.
         mock_core_api.return_value.read_namespaced_pod.side_effect = [
             Exception('boom'),

@@ -6,6 +6,7 @@ import ipaddress
 import logging
 import re
 import shlex
+import subprocess
 from typing import Dict, List, NamedTuple, Optional, Sequence, Tuple
 
 from sky.adaptors import common
@@ -301,6 +302,25 @@ class SlurmClient:
                 disable_identities_only=not identities_only,
                 slurm_user=slurm_user,
             )
+
+    def validate_submit_user(self, cluster_name: str, submit_user: str) -> None:
+        """Check the Unix account through the submit runner."""
+        target = shlex.quote(submit_user)
+        command = (f'id -u -- {target} >/dev/null && '
+                   f'test "$(id -u)" = "$(id -u -- {target})"')
+        error = (f'Cannot submit to Slurm cluster {cluster_name!r} as Unix '
+                 f'user {submit_user!r} through SSH user {self.ssh_user!r}. ')
+        try:
+            rc, stdout, stderr = self._run_slurm_cmd(command, timeout=15)
+        except subprocess.TimeoutExpired as e:
+            raise RuntimeError(error + 'Account validation timed out after '
+                               '15 seconds.') from e
+        if rc != 0:
+            raise RuntimeError(
+                error + f'Account validation exited with code {rc}. '
+                'Check that the account exists and the SSH user can run '
+                'the submission shell as that account. '
+                f'{stdout}\n{stderr}')
 
     def _run_slurm_cmd(self,
                        cmd: str,
@@ -1186,18 +1206,6 @@ class SlurmClient:
     def get_remote_home_dir(self) -> str:
         """Returns the remote user's home directory."""
         return self._runner.get_remote_home_dir()
-
-    def check_file_exists(self, path: str) -> bool:
-        """Check if a file exists on the remote host."""
-        cmd = f'test -f {shlex.quote(path)}'
-        rc, stdout, stderr = self._run_slurm_cmd(cmd)
-        if rc not in (0, 1):
-            subprocess_utils.handle_returncode(
-                rc,
-                cmd,
-                f'Failed to check for file: {path}',
-                stderr=f'{stdout}\n{stderr}')
-        return rc == 0
 
     def check_fuse_enabled(self) -> bool:
         """Check if FUSE is available on the cluster.

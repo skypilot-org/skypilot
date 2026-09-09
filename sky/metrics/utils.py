@@ -383,6 +383,73 @@ SKY_APISERVER_SKY_LOGS_PRUNED_ENTRIES_TOTAL = prom.Counter(
     'Expired ~/sky_logs artifacts removed by the retention sweep',
 )
 
+# Time a request spent before its execution first started: from the request
+# row being created (PENDING) to its first transition to RUNNING. Unlike
+# SKY_APISERVER_QUEUE_WAIT_SECONDS (per-enqueue queue residency), this
+# includes scheduling preconditions, which hold a request PENDING. It is
+# observed exactly once, at the first execution start, so retry backoff
+# after that start is excluded and a request looping through the
+# retry-requeue path cannot re-observe its ever-growing age (see #9988).
+# The tail extends past the queue-wait buckets because precondition waits
+# (e.g. exec waiting on cluster start) routinely exceed 600s.
+SKY_APISERVER_REQUEST_PENDING_SECONDS = prom.Histogram(
+    'sky_apiserver_request_pending_seconds',
+    'Time from request creation to its first execution start',
+    ['name', 'schedule_type'],
+    buckets=(0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0, 30.0, 60.0, 120.0,
+             300.0, 600.0, 1800.0, 3600.0, 7200.0, float('inf')),
+)
+
+
+def observe_request_pending(name: str, schedule_type: str,
+                            pending_seconds: float) -> None:
+    """Record time a request spent pending before its first execution.
+
+    Metric emission must never disrupt the execution path, so any failure
+    is logged and swallowed.
+    """
+    if not METRICS_ENABLED:
+        return
+    try:
+        SKY_APISERVER_REQUEST_PENDING_SECONDS.labels(
+            name=name,
+            schedule_type=schedule_type).observe(max(0.0, pending_seconds))
+    except Exception as e:  # pylint: disable=broad-except
+        logger.error(f'Failed to observe request pending metric: {e}')
+
+
+# Wall-clock time of a single provisioning attempt (one cloud/region), from
+# provision start to instances up on the cloud, i.e. the compute acquisition
+# time. Failover across regions/clouds yields one observation per attempt,
+# labeled by outcome. Provisioning routinely takes minutes and can take hours
+# under capacity shortages, so the buckets extend far past _LATENCY_BUCKETS.
+SKY_PROVISION_DURATION_SECONDS = prom.Histogram(
+    'sky_provision_duration_seconds',
+    'Wall-clock time of a single provisioning attempt, from provision start '
+    'to instances running on the cloud',
+    ['cloud', 'result'],
+    buckets=(5.0, 10.0, 30.0, 60.0, 120.0, 300.0, 600.0, 1200.0, 1800.0, 3600.0,
+             7200.0, float('inf')),
+)
+
+
+def observe_provision_duration(cloud: str, result: str,
+                               duration_seconds: float) -> None:
+    """Record the duration of one provisioning attempt.
+
+    Metric emission must never disrupt provisioning, so any failure is
+    logged and swallowed.
+    """
+    if not METRICS_ENABLED:
+        return
+    try:
+        SKY_PROVISION_DURATION_SECONDS.labels(cloud=cloud,
+                                              result=result).observe(
+                                                  max(0.0, duration_seconds))
+    except Exception as e:  # pylint: disable=broad-except
+        logger.error(f'Failed to observe provision duration metric: {e}')
+
+
 # --- Managed Jobs Metrics ---
 
 # Per-controller-process gauges (consolidation mode only).

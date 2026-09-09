@@ -1893,3 +1893,38 @@ def test_saturating_request_executor_does_not_block_auth():
             except Exception:  # pylint: disable=broad-except
                 pass
         _reset_thread_executors()
+
+
+def test_maybe_observe_request_pending_first_execution_only():
+    """Pending-time metric observes first executions only.
+
+    The retry/pause requeue path sets WAITING (and clears pid) before
+    re-enqueueing, so a WAITING request at execution start is a
+    re-execution and must not re-observe its age; a PENDING request is
+    the first start and must observe exactly once.
+    """
+
+    def make_request(status):
+        return requests_lib.Request(
+            request_id='pending-metric-test',
+            name='test-request',
+            status=status,
+            created_at=time.time() - 5,
+            user_id='test-user',
+            entrypoint=dummy_entrypoint,
+            request_body=payloads.RequestBody(),
+            schedule_type=requests_lib.ScheduleType.SHORT)
+
+    with mock.patch.object(executor.metrics_utils,
+                           'observe_request_pending') as observe:
+        executor._maybe_observe_request_pending(  # pylint: disable=protected-access
+            make_request(requests_lib.RequestStatus.PENDING))
+        assert observe.call_count == 1
+        name, schedule_type, pending_seconds = observe.call_args[0]
+        assert name == 'test-request'
+        assert schedule_type == requests_lib.ScheduleType.SHORT.value
+        assert pending_seconds >= 5
+
+        executor._maybe_observe_request_pending(  # pylint: disable=protected-access
+            make_request(requests_lib.RequestStatus.WAITING))
+        assert observe.call_count == 1

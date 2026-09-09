@@ -172,7 +172,7 @@ MANAGED_JOB_ID_ENV_VAR = f'{SKYPILOT_ENV_VAR_PREFIX}MANAGED_JOB_ID'
 # cluster yaml is updated.
 #
 # TODO(zongheng,zhanghao): make the upgrading of skylet automatic?
-SKYLET_VERSION = '39'  # add external-link log-scan skylet event.
+SKYLET_VERSION = '40'  # managed job table supports infra_match.
 # The version of the lib files that skylet/jobs use. Whenever there is an API
 # change for the job_lib or log_lib, we need to bump this version, so that the
 # user can be notified to update their SkyPilot version on the remote cluster.
@@ -619,6 +619,7 @@ OVERRIDEABLE_CONFIG_KEYS_IN_TASK: List[Tuple[str, ...]] = [
     ('vast', 'datacenter_only'),
     ('vast', 'create_instance_kwargs'),
     ('slurm', 'sbatch_options'),
+    ('slurm', 'quota'),
     ('slurm', 'cpu_partition'),
     ('active_workspace',),
 ]
@@ -648,6 +649,7 @@ SKIPPED_CLIENT_OVERRIDE_KEYS: List[Tuple[str, ...]] = [
     # Slurm submit identity and cluster settings are managed server-side.
     ('slurm', 'cluster_configs'),
     ('slurm', 'submit_as_user'),
+    ('slurm', 'username_map'),
 ]
 
 # Constants for Azure blob storage

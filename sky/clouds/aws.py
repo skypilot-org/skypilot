@@ -861,6 +861,16 @@ class AWS(clouds.Cloud):
             region=region_name,
             keys=('disk_encrypted',),
             default_value=False)
+
+        # Resource types whose tagging must not be silently given up. By
+        # default a refusal to tag volumes degrades to a warning; naming
+        # `volume` here makes it fail the launch instead, for deployments that
+        # have to guarantee tag coverage.
+        enforce_tags = skypilot_config.get_effective_region_config(
+            cloud='aws',
+            region=region_name,
+            keys=('enforce_tags',),
+            default_value=[])
         user_security_group_config = skypilot_config.get_effective_region_config(
             cloud='aws',
             region=region_name,
@@ -905,6 +915,7 @@ class AWS(clouds.Cloud):
             'security_group_managed_by_skypilot':
                 str(security_group != user_security_group).lower(),
             'max_efa_interfaces': max_efa_interfaces,
+            'enforce_tags': enforce_tags,
             'docker_run_options': docker_run_options,
             **AWS._get_disk_specs(resources.disk_tier)
         }

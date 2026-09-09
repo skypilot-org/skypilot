@@ -224,7 +224,8 @@ async def test_logs():
                                             mock_request_task.log_path,
                                             mock.ANY,
                                             polling_interval=1,
-                                            kill_request_on_disconnect=False)
+                                            kill_request_on_disconnect=False,
+                                            discard_log_after_stream=True)
 
 
 @mock.patch('sky.utils.context_utils.hijack_sys_attrs')
@@ -402,6 +403,76 @@ async def test_prepare_request_passes_auth_user():
         mock_prepare.assert_awaited_once()
         _, kwargs = mock_prepare.call_args
         assert kwargs['auth_user'] == auth_user
+
+
+@pytest.mark.asyncio
+async def test_hook_logs_keeps_its_request_log(tmp_path, monkeypatch):
+    """`/hook_logs` must not discard the request log it streams.
+
+    Its client, ``sky.client.sdk.tail_hook_logs``, does not read the body
+    this endpoint streams -- it re-reads the same log through
+    ``/api/stream``. So a log discarded when the first response ends leaves
+    that second read with nothing, and the hook output never reaches the
+    user.
+
+    ``stream_response_for_long_request`` is deliberately not mocked here: the
+    default it applies is the whole point of the test, so the real streaming
+    and log-discard path has to run. The log is placed where
+    ``log_provider.discard_log`` would look for it (it resolves the path from
+    the request id, not from ``log_path``), otherwise a discard would delete
+    some other file and the assertion below could not fail.
+    """
+    from sky.server.requests import log_provider
+    from sky.server.requests import payloads
+
+    request_id = 'hook-logs-request-id'
+    monkeypatch.setattr(server_constants, 'REQUEST_LOG_PATH_PREFIX',
+                        str(tmp_path))
+    log_path = log_provider.local_log_path(request_id,
+                                           log_provider.RequestLogType.REQUEST)
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    log_path.write_text('hook-marker\nEVENT=stop\n')
+
+    request = mock.MagicMock()
+    request.state = mock.MagicMock()
+    request.state.request_id = request_id
+    request.state.auth_user = None
+
+    request_task = mock.MagicMock()
+    request_task.request_id = request_id
+    request_task.log_path = log_path
+
+    hook_logs_body = payloads.HookLogsBody(cluster_name='test-cluster',
+                                           event='stop')
+    background_tasks = fastapi.BackgroundTasks()
+
+    async def _already_started(*args, **kwargs):
+        """The request has left PENDING; yield nothing and return."""
+        return
+        yield ''  # pragma: no cover -- makes this an async generator
+
+    with mock.patch('sky.server.requests.executor.prepare_request_async',
+                    new_callable=mock.AsyncMock,
+                    return_value=request_task), \
+         mock.patch('sky.server.requests.executor.execute_request_in_coroutine'
+                   ) as mock_execute, \
+         mock.patch('sky.server.stream_utils.wait_for_request_to_start',
+                    _already_started), \
+         mock.patch('sky.server.requests.requests.get_request_status_async',
+                    new_callable=mock.AsyncMock, return_value=None):
+        mock_execute.return_value = executor.CoroutineTask(
+            asyncio.create_task(asyncio.sleep(0)))
+
+        response = await server.hook_logs(request, hook_logs_body,
+                                          background_tasks)
+        streamed = ''.join([chunk async for chunk in response.body_iterator])
+
+    # The stream really ran -- without this the check below is vacuous.
+    assert 'hook-marker' in streamed, streamed
+    assert log_path.exists(), (
+        'the /hook_logs request log was discarded when its response ended; '
+        'sky.client.sdk.tail_hook_logs re-reads that log through /api/stream '
+        'and would show the user nothing')
 
 
 @pytest.mark.asyncio
@@ -1200,6 +1271,88 @@ def test_prune_sky_logs_missing_dir_is_noop(tmp_path, monkeypatch):
     monkeypatch.setattr(constants, 'SKY_LOGS_DIRECTORY',
                         str(tmp_path / 'does-not-exist'))
     assert server._prune_sky_logs(cutoff=1_000_000.0) == 0
+
+
+@pytest.mark.asyncio
+async def test_cleanup_sky_logs_reads_reloaded_retention_in_to_thread(
+        monkeypatch):
+    """A config swap done by reload_config inside asyncio.to_thread must be
+    visible to the subsequent get_nested on the loop thread.
+
+    cleanup_sky_logs runs the blocking reload off-loop with
+    `await asyncio.to_thread(skypilot_config.reload_config)` and then reads
+    retention_hours back on the loop thread. This guards the cross-thread
+    visibility the daemon relies on: a config swap performed in the
+    to_thread worker must reach the on-loop get_nested, or the daemon would
+    prune on a stale retention.
+
+    The real reload_config's source I/O (file read / DB SELECT) is stubbed
+    here to keep the unit test env/DB-free; its swap tail
+    (_set_loaded_config, the mechanism the real reload uses) and the real
+    get_nested read are exercised unchanged through the real cleanup_sky_logs
+    + real asyncio.to_thread.
+    """
+    from sky import skypilot_config
+
+    fresh_retention = 7
+    # Stale value (2) so a successful reload is observable: if the swap never
+    # reaches get_nested, the assertion below sees 2 instead of 7.
+    stale = config_utils.Config()
+    stale.set_nested(('api_server', 'logs_retention_hours'), 2)
+    # Swap in the stale config through the real accessor and let monkeypatch
+    # restore the original value at teardown: the loaded config is
+    # process-global, and leaving a swapped value behind would leak into
+    # later tests in this xdist worker (including when this test fails).
+    loaded_context = skypilot_config._get_config_context()
+    monkeypatch.setattr(loaded_context, 'config', stale)
+
+    def fake_reload():
+        # Mirrors the tail of the real _reload_config_as_server: build the
+        # new config and swap it in with _set_loaded_config. Runs from inside
+        # asyncio.to_thread, i.e. a worker thread.
+        cfg = config_utils.Config()
+        cfg.set_nested(('api_server', 'logs_retention_hours'), fresh_retention)
+        skypilot_config._set_loaded_config(cfg)
+
+    monkeypatch.setattr(server.skypilot_config, 'reload_config', fake_reload)
+
+    observed_cutoffs = []
+
+    def fake_prune(cutoff):
+        observed_cutoffs.append(cutoff)
+        return 0
+
+    monkeypatch.setattr(server, '_prune_sky_logs', fake_prune)
+
+    # asyncio.sleep is the while-True's last statement, outside the try/except,
+    # so raising a BaseException here exits cleanup_sky_logs after exactly one
+    # iteration; a BaseException subclass is chosen so the daemon's broad
+    # `except Exception` cannot swallow it.
+    class _StopLoop(BaseException):
+        pass
+
+    async def bail(_seconds):
+        raise _StopLoop
+
+    # No-op the daemon's startup jitter first: it awaits asyncio.sleep before
+    # the loop, so the patched sleep below would otherwise raise _StopLoop
+    # before a single iteration ran and the reload would never be exercised.
+    async def _noop_jitter(*_args, **_kwargs):
+        pass
+
+    monkeypatch.setattr(server.asyncio_utils, 'sleep_startup_jitter',
+                        _noop_jitter)
+    monkeypatch.setattr(server.asyncio, 'sleep', bail)
+
+    with pytest.raises(_StopLoop):
+        await server.cleanup_sky_logs()
+
+    # reload ran in a worker thread; get_nested ran on the loop thread.
+    assert skypilot_config.get_nested(('api_server', 'logs_retention_hours'),
+                                      -1) == fresh_retention
+    assert len(observed_cutoffs) == 1
+    expected_cutoff = time.time() - fresh_retention * 3600
+    assert abs(observed_cutoffs[0] - expected_cutoff) < 2
 
 
 # --- Tests for cleanup_clients_tmp (client tmp dir GC) ---

@@ -56,7 +56,7 @@ export const WS_API_URL = API_URL.replace(/^http/, 'ws');
 // upgrade then still reports its own build's version, not the new server's, so
 // it can't over-report support for wire formats its code doesn't handle.
 // Enforced by tests/unit_tests/test_api_version_consistency.py.
-export const CLIENT_API_VERSION = '57';
+export const CLIENT_API_VERSION = '58';
 // Header names expected by the server's APIVersionMiddleware. Mirrors
 // sky/server/constants.py:API_VERSION_HEADER / VERSION_HEADER.
 // The middleware (versions._check_version_compatibility) requires BOTH
@@ -73,9 +73,11 @@ export const VERSION_HEADER = 'X-SkyPilot-Version';
 // identifying placeholder that the server parses but doesn't depend on
 // for correctness (only used to format upgrade-hint messages).
 export const CLIENT_VERSION = 'dashboard;';
-// Custom events used to coordinate plugin loading with the layout shell.
-// layout.jsx listens for these to avoid flashing the fallback top bar before
-// a navigation plugin (e.g. sidebar) has had a chance to register.
+// Custom events used to coordinate plugin loading with the app shell.
+// _app.js waits for EVENT_PLUGINS_LOADED before building the tree, so that
+// slots plugins register into are already populated on first render.
+// EVENT_NAVIGATION_READY is dispatched by a navigation plugin once it has
+// registered; it is kept for plugins that want to observe that point.
 export const EVENT_NAVIGATION_READY = 'skydashboard:navigation-ready';
 export const EVENT_PLUGINS_LOADED = 'skydashboard:plugins-loaded';
 

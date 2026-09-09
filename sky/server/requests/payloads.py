@@ -653,6 +653,10 @@ class JobsQueueV2Body(RequestBody):
     workspace_match: Optional[str] = None
     name_match: Optional[str] = None
     pool_match: Optional[str] = None
+    # `--infra` spec to filter on. Servers older than
+    # MIN_JOBS_INFRA_FILTER_API_VERSION drop this field silently, so the
+    # client checks the server version before sending it.
+    infra_match: Optional[str] = None
     page: Optional[int] = None
     limit: Optional[int] = None
     statuses: Optional[List[str]] = None

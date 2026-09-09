@@ -3,6 +3,8 @@
 import asyncio
 import contextlib
 import datetime
+import shlex
+import textwrap
 import time
 from unittest import mock
 
@@ -12,6 +14,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.ext.asyncio import create_async_engine
 
 from sky.jobs import state
+from sky.jobs import utils as jobs_utils
 from sky.skylet import constants
 
 
@@ -870,6 +873,128 @@ class TestGetLatestRecoveryReasons:
         assert state.get_latest_recovery_and_pending_reasons([1], [])[0] == {}
 
 
+class TestGetLatestCancelRequestReasons:
+    """Who-requested-the-cancel lookup for the `details` column."""
+
+    def test_empty_job_ids(self, _mock_managed_jobs_db_conn):
+        assert state.get_cancel_request_reasons([]) == {}
+
+    def test_attributed_request_wins_over_generic_cancelling(
+            self, _mock_managed_jobs_db_conn):
+        early = datetime.datetime(2026, 1, 1, 0, 0, 0)
+        late = datetime.datetime(2026, 1, 1, 0, 5, 0)
+        attributed = ('Cancellation requested by user alice '
+                      '(request ID: 9b6e6396-0000-4000-8000-000000000000)')
+        # The request event is written first; the controller's generic
+        # CANCELLING event lands later and must not shadow it.
+        state.add_job_event(1,
+                            None,
+                            state.ManagedJobStatus.CANCELLING,
+                            attributed,
+                            timestamp=early)
+        state.add_job_event(1,
+                            None,
+                            state.ManagedJobStatus.CANCELLING,
+                            'Job is cancelling',
+                            timestamp=late)
+        state.add_job_event(1,
+                            None,
+                            state.ManagedJobStatus.CANCELLED,
+                            'Job has been cancelled',
+                            timestamp=late)
+        # Job 2 was cancelled without an attributed request (internal cancel).
+        state.add_job_event(2,
+                            None,
+                            state.ManagedJobStatus.CANCELLING,
+                            'Job is cancelling',
+                            timestamp=late)
+        # Job 3 is attributed but not requested.
+        state.add_job_event(3,
+                            None,
+                            state.ManagedJobStatus.CANCELLING,
+                            'Cancellation requested by user bob',
+                            timestamp=late)
+        assert state.get_cancel_request_reasons([1, 2]) == {1: attributed}
+
+    def test_first_attributed_request_wins(self, _mock_managed_jobs_db_conn):
+        # alice's targeted cancel caused the cancellation; bob's fleet-wide
+        # cancel arrived while the job was already CANCELLING and is in the
+        # event log but is not why the job ended.
+        early = datetime.datetime(2026, 1, 1, 0, 0, 0)
+        late = datetime.datetime(2026, 1, 1, 0, 5, 0)
+        state.add_job_event(1,
+                            None,
+                            state.ManagedJobStatus.CANCELLING,
+                            'Cancellation requested by user alice',
+                            timestamp=early)
+        state.add_job_event(1,
+                            None,
+                            state.ManagedJobStatus.CANCELLING,
+                            'Cancellation requested by user bob',
+                            timestamp=late)
+        assert state.get_cancel_request_reasons([1]) == {
+            1: 'Cancellation requested by user alice'
+        }
+
+
+class TestJobEventRetentionKeepsCancelRequests:
+    """The attributed cancel-request event outlives job-event retention."""
+
+    @pytest.mark.asyncio
+    async def test_cancel_request_event_survives_cleanup(
+            self, _mock_managed_jobs_db_conn):
+        old = datetime.datetime.now() - datetime.timedelta(days=60)
+        recent = datetime.datetime.now()
+        attributed = ('Cancellation requested by user alice '
+                      '(request ID: 9b6e6396-0000-4000-8000-000000000000)')
+        state.add_job_event(1,
+                            None,
+                            state.ManagedJobStatus.CANCELLING,
+                            attributed,
+                            timestamp=old)
+        # Everything else past the cutoff goes, including the controller's
+        # generic CANCELLING event, a CANCELLING event with no reason at all,
+        # and the terminal CANCELLED event.
+        state.add_job_event(1,
+                            None,
+                            state.ManagedJobStatus.CANCELLING,
+                            'Job is cancelling',
+                            timestamp=old)
+        state.add_job_event(1,
+                            None,
+                            state.ManagedJobStatus.CANCELLING,
+                            None,
+                            timestamp=old)
+        state.add_job_event(1,
+                            None,
+                            state.ManagedJobStatus.CANCELLED,
+                            'Job has been cancelled',
+                            timestamp=old)
+        state.add_job_event(2,
+                            0,
+                            state.ManagedJobStatus.RUNNING,
+                            'Job has started',
+                            timestamp=old)
+        state.add_job_event(3,
+                            0,
+                            state.ManagedJobStatus.RUNNING,
+                            'Job has started',
+                            timestamp=recent)
+
+        await state.cleanup_job_events_with_retention_async(30 * 24)
+
+        remaining = sorted(
+            (e['spot_job_id'], e['new_status'].value, e['reason'])
+            for job_id in (1, 2, 3)
+            for e in state.get_job_events(job_id))
+        assert remaining == [
+            (1, 'CANCELLING', attributed),
+            (3, 'RUNNING', 'Job has started'),
+        ]
+        # And the requester is still what the queue surfaces.
+        assert state.get_cancel_request_reasons([1]) == {1: attributed}
+
+
 class TestSetRecoveringEventReason:
     """Reason/code selection for the RECOVERING event in set_recovering_async.
 
@@ -1487,3 +1612,273 @@ class TestGetLatestRecoveryAndPendingReasons:
                                                                           [1])
         assert recovery == {}
         assert pending == {1: 'Job is in backoff'}
+
+
+@pytest.fixture
+def _seed_infra_jobs(_mock_managed_jobs_db_conn):
+    """Seed RUNNING jobs spread across clouds, regions and zones.
+
+    `gke-lookalike` differs from `gke` only where the latter has an underscore,
+    so a spec typed with that underscore can tell a literal match apart from a
+    LIKE wildcard.
+    """
+
+    async def mock_callback(status: str):
+        pass
+
+    infras = {
+        'slurm-gpu': ('Slurm', 'prod-gpu', None),
+        'slurm-cpu': ('Slurm', 'prod-cpu', None),
+        'gke': ('Kubernetes', 'gke_sky-dev_us-central1-c_alpha', None),
+        'gke-lookalike':
+            ('Kubernetes', 'gkeXsky-dev_us-central1-c_alpha', None),
+        'nested-ctx': ('Kubernetes', 'team/ctx', None),
+        'aws': ('AWS', 'us-east-1', 'us-east-1a'),
+        'ssh-pool': ('SSH', 'ssh-my-pool', None),
+    }
+
+    async def create_job_states():
+        ids = {}
+        for key, (cloud, region, zone) in infras.items():
+            job_id = state.set_job_info_without_job_id(name=f'job-{key}',
+                                                       workspace='ws1',
+                                                       entrypoint='ep',
+                                                       pool=None,
+                                                       pool_hash=None,
+                                                       user_hash='user1')
+            state.set_pending(job_id,
+                              task_id=0,
+                              task_name='task0',
+                              resources_str='{}',
+                              metadata='{}')
+            state.scheduler_set_waiting([job_id], f'/tmp/dag-{key}.yaml',
+                                        f'/tmp/user-{key}.yaml',
+                                        f'/tmp/env-{key}', None, 100)
+            await state.set_starting_async(job_id, 0, f'run-{key}', 100.0, '{}',
+                                           {}, mock_callback)
+            await state.set_started_async(job_id, 0, 100.0, mock_callback)
+            state.set_job_infra(job_id, cloud=cloud, region=region, zone=zone)
+            ids[key] = job_id
+
+        # A job that never launched: no cloud, no region, no zone.
+        job_id = state.set_job_info_without_job_id(name='job-unplaced',
+                                                   workspace='ws1',
+                                                   entrypoint='ep',
+                                                   pool=None,
+                                                   pool_hash=None,
+                                                   user_hash='user1')
+        state.set_pending(job_id,
+                          task_id=0,
+                          task_name='task0',
+                          resources_str='{}',
+                          metadata='{}')
+        ids['unplaced'] = job_id
+        return ids
+
+    loop = asyncio.new_event_loop()
+    try:
+        return loop.run_until_complete(create_job_states())
+    finally:
+        loop.close()
+
+
+class TestInfraFilter:
+    """`infra_match`: the `--infra` spec, pushed down to SQL."""
+
+    def _names(self, jobs):
+        return sorted({job['job_name'] for job in jobs})
+
+    def _match(self, spec):
+        jobs, total = state.get_managed_jobs_with_filters(infra_match=spec)
+        return self._names(jobs), total
+
+    def test_bare_cloud(self, _seed_infra_jobs):
+        names, total = self._match('slurm')
+        assert names == ['job-slurm-cpu', 'job-slurm-gpu']
+        assert total == 2
+
+    def test_k8s_alias_matches_kubernetes(self, _seed_infra_jobs):
+        by_alias, _ = self._match('k8s')
+        by_name, _ = self._match('kubernetes')
+        assert by_alias == by_name
+        assert 'job-gke' in by_alias
+
+    def test_cloud_and_region(self, _seed_infra_jobs):
+        assert self._match('slurm/prod-gpu')[0] == ['job-slurm-gpu']
+
+    def test_region_matches_by_prefix(self, _seed_infra_jobs):
+        # Half-typed, as the dashboard filter box is typed into.
+        assert self._match('slurm/prod')[0] == [
+            'job-slurm-cpu', 'job-slurm-gpu'
+        ]
+
+    def test_region_is_a_prefix_not_a_substring(self, _seed_infra_jobs):
+        # `gpu` names no region here: it only appears mid-string.
+        assert self._match('slurm/gpu')[0] == []
+
+    def test_zone_is_its_own_component(self, _seed_infra_jobs):
+        assert self._match('aws/us-east-1/us-east-1a')[0] == ['job-aws']
+        assert self._match('aws/us-east-1/us-west-2b')[0] == []
+
+    def test_wildcard_widens_one_component(self, _seed_infra_jobs):
+        assert self._match('slurm/*')[0] == ['job-slurm-cpu', 'job-slurm-gpu']
+        assert self._match('*/prod-gpu')[0] == ['job-slurm-gpu']
+        # A wildcard widens a component, not the whole spec.
+        assert self._match('aws/*')[0] == ['job-aws']
+
+    def test_kubernetes_context_keeps_its_slash(self, _seed_infra_jobs):
+        assert self._match('k8s/team/ctx')[0] == ['job-nested-ctx']
+
+    def test_ssh_pool_is_named_without_its_prefix(self, _seed_infra_jobs):
+        # `from_str` re-attaches the `ssh-` the context is stored under.
+        assert self._match('ssh/my-pool')[0] == ['job-ssh-pool']
+
+    def test_underscore_is_literal_not_a_wildcard(self, _seed_infra_jobs):
+        # Without LIKE escaping this would also match `gkeXsky-dev...`.
+        assert self._match('k8s/gke_sky-dev')[0] == ['job-gke']
+
+    def test_case_insensitive_on_both_sides(self, _seed_infra_jobs):
+        assert self._match('SLURM/PROD-GPU')[0] == ['job-slurm-gpu']
+
+    def test_unplaced_job_matches_no_infra(self, _seed_infra_jobs):
+        # A job that never launched has no cloud, so it cannot be on one.
+        for spec in ('slurm', 'kubernetes', '*/prod-gpu'):
+            assert 'job-unplaced' not in self._match(spec)[0]
+
+    def test_no_filter_returns_everything(self, _seed_infra_jobs):
+        assert self._match(None)[1] == 8
+
+    def test_total_counts_only_the_matches(self, _seed_infra_jobs):
+        # The point of pushing the filter down: `total` is the filtered total,
+        # so the page count the dashboard renders is the matching one.
+        jobs, total = state.get_managed_jobs_with_filters(infra_match='slurm',
+                                                          page=1,
+                                                          limit=1)
+        assert len(jobs) == 1
+        assert total == 2
+
+    def test_status_counts_inherit_the_filter(self, _seed_infra_jobs):
+        # Shared query builder, so the status pills narrow with the table.
+        assert state.get_status_count_with_filters(infra_match='slurm') == {
+            'RUNNING': 2
+        }
+
+    def test_malformed_spec_is_rejected(self, _seed_infra_jobs):
+        with pytest.raises(ValueError, match='Invalid infra format'):
+            state.get_managed_jobs_with_filters(infra_match='aws//us-east-1')
+
+
+class TestInfraOptions:
+    """The values the dashboard's Infra filter offers, computed in SQL.
+
+    They have to be `--infra` specs, because that is what the filter is
+    matched as, and they have to describe the whole selected queue rather
+    than one page of it -- that is the reason they are computed here at all.
+    """
+
+    def test_names_every_infra_in_the_queue(self, _seed_infra_jobs):
+        assert state.get_infra_options_with_filters() == [
+            'aws/us-east-1',
+            'kubernetes/gkeXsky-dev_us-central1-c_alpha',
+            'kubernetes/gke_sky-dev_us-central1-c_alpha',
+            'kubernetes/team/ctx',
+            'slurm/prod-cpu',
+            'slurm/prod-gpu',
+            'ssh/my-pool',
+        ]
+
+    def test_every_option_round_trips_as_a_filter(self, _seed_infra_jobs):
+        # The point of the pairing: an option handed straight back as the
+        # filter has to select a non-empty result.
+        for option in state.get_infra_options_with_filters():
+            jobs, total = state.get_managed_jobs_with_filters(
+                infra_match=option)
+            assert jobs, option
+            assert total > 0, option
+
+    def test_ssh_pool_is_named_without_its_prefix(self, _seed_infra_jobs):
+        # `ssh-my-pool` is the stored context; `ssh/my-pool` is what a user
+        # types, and what `InfraInfo.from_str` turns back into the context.
+        options = state.get_infra_options_with_filters()
+        assert 'ssh/my-pool' in options
+        assert 'ssh/ssh-my-pool' not in options
+
+    def test_a_zone_never_narrows_an_option(self, _seed_infra_jobs):
+        # The AWS job has a zone, but the option stops at the region: the
+        # region matches by prefix, so a zone would only select less.
+        assert 'aws/us-east-1' in state.get_infra_options_with_filters()
+        assert 'aws/us-east-1/us-east-1a' not in (
+            state.get_infra_options_with_filters())
+
+    def test_unplaced_job_contributes_nothing(self, _seed_infra_jobs):
+        # `job-unplaced` never launched, so it has no infra to offer.
+        assert all(option for option in state.get_infra_options_with_filters())
+        assert len(state.get_infra_options_with_filters()) == 7
+
+    def test_other_filters_narrow_the_options(self, _seed_infra_jobs):
+        # An option always names a non-empty result, so a filter that
+        # excludes an infra has to drop it from the list too.
+        assert state.get_infra_options_with_filters(name_match='job-slurm') == [
+            'slurm/prod-cpu', 'slurm/prod-gpu'
+        ]
+
+    def test_an_inaccessible_workspace_hides_its_infra(self, _seed_infra_jobs):
+        assert state.get_infra_options_with_filters(
+            accessible_workspaces=['other-ws']) == []
+
+
+class TestInfraFilterCodegenCompatibility:
+    """The generated queue code against a controller that predates `infra_match`.
+
+    The kwarg cannot be passed to a controller whose `dump_managed_job_queue`
+    has no such parameter -- it raises TypeError there and breaks the queue for
+    every caller, not just the ones filtering. So the branch that passes it has
+    to be keyed on the same version the guard is.
+    """
+
+    def _run_branch(self, built: str, version: int):
+        """Execute the version branch of the generated code with a stub.
+
+        `built` is the shell command the codegen returns, so the Python source
+        is its last token. Returns the kwargs the generated code would hand
+        the controller.
+        """
+        code = shlex.split(built)[-1]
+        start = code.index('_infra_match = ')
+        end = code.index('print(job_table')
+        branch = textwrap.dedent(code[start:end])
+        captured = {}
+
+        class _Utils:
+
+            @staticmethod
+            def dump_managed_job_queue(**kwargs):
+                captured.update(kwargs)
+                return '{}'
+
+        exec(  # pylint: disable=exec-used
+            branch, {
+                'utils': _Utils,
+                'managed_job_version': version
+            })
+        return captured
+
+    def test_old_controller_is_not_handed_the_kwarg(self):
+        code = jobs_utils.ManagedJobCodeGen.get_job_table()
+        one_older = jobs_utils.INFRA_FILTER_MANAGED_JOBS_VERSION - 1
+        kwargs = self._run_branch(code, one_older)
+        assert 'infra_match' not in kwargs, (
+            f'a v{one_older} controller would get a kwarg it does not accept')
+
+    def test_new_controller_is_handed_the_kwarg(self):
+        code = jobs_utils.ManagedJobCodeGen.get_job_table(infra_match='aws')
+        kwargs = self._run_branch(code,
+                                  jobs_utils.INFRA_FILTER_MANAGED_JOBS_VERSION)
+        assert kwargs['infra_match'] == 'aws'
+
+    def test_old_controller_refuses_an_infra_filter(self):
+        code = jobs_utils.ManagedJobCodeGen.get_job_table(infra_match='aws')
+        one_older = jobs_utils.INFRA_FILTER_MANAGED_JOBS_VERSION - 1
+        with pytest.raises(RuntimeError,
+                           match=jobs_utils.INFRA_FILTER_UNSUPPORTED_MARKER):
+            self._run_branch(code, one_older)

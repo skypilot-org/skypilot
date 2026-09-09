@@ -2165,7 +2165,7 @@ def _create_pods(region: str, cluster_name: str, cluster_name_on_cloud: str,
     """Create pods based on the config."""
     provider_config = config.provider_config
     namespace = kubernetes_utils.get_namespace_from_config(provider_config)
-    context = kubernetes_utils.get_context_from_config(provider_config)
+    context = kubernetes_utils.get_control_context_from_config(provider_config)
     pod_spec = copy.deepcopy(config.node_config)
     create_pods_start = datetime.datetime.now(datetime.timezone.utc)
 
@@ -2733,7 +2733,7 @@ def terminate_instances(
 ) -> None:
     """See sky/provision/__init__.py"""
     namespace = kubernetes_utils.get_namespace_from_config(provider_config)
-    context = kubernetes_utils.get_context_from_config(provider_config)
+    context = kubernetes_utils.get_control_context_from_config(provider_config)
     pods = kubernetes_utils.filter_pods(namespace, context,
                                         ray_tag_filter(cluster_name_on_cloud),
                                         None)
@@ -2781,7 +2781,7 @@ def cleanup_cluster_resources(
         provider_config: Provider configuration dictionary
     """
     namespace = kubernetes_utils.get_namespace_from_config(provider_config)
-    context = kubernetes_utils.get_context_from_config(provider_config)
+    context = kubernetes_utils.get_control_context_from_config(provider_config)
     _delete_cluster_services(cluster_name_on_cloud, namespace, context)
 
 
@@ -2850,7 +2850,8 @@ def get_cluster_info(
     del region  # unused
     assert provider_config is not None
     namespace = kubernetes_utils.get_namespace_from_config(provider_config)
-    context = kubernetes_utils.get_context_from_config(provider_config)
+    context = kubernetes_utils.get_execution_context_from_config(
+        provider_config)
 
     running_pods = kubernetes_utils.filter_pods(
         namespace, context, ray_tag_filter(cluster_name_on_cloud), ['Running'])
@@ -3161,7 +3162,8 @@ def get_node_health_for_cluster(
         Dict mapping node_name -> NodeHealthInfo for unhealthy nodes.
     """
     namespace = kubernetes_utils.get_namespace_from_config(provider_config)
-    context = kubernetes_utils.get_context_from_config(provider_config)
+    context = kubernetes_utils.get_execution_context_from_config(
+        provider_config)
     is_ssh = context.startswith('ssh-') if context else False
     identity = 'SSH Node Pool' if is_ssh else 'Kubernetes cluster'
     label_selector = (f'{constants.TAG_SKYPILOT_CLUSTER_NAME}='
@@ -3225,7 +3227,8 @@ def get_missing_node_reason(node_names: List[str],
         A human-readable reason, or None when every node is present and
         healthy (or none could be checked).
     """
-    context = kubernetes_utils.get_context_from_config(provider_config)
+    context = kubernetes_utils.get_execution_context_from_config(
+        provider_config)
     unique_names = sorted({name for name in node_names if name})
     if not unique_names:
         return None
@@ -3485,7 +3488,8 @@ def _first_pod_failure_reason(
     name a cause. Best-effort -- per_pod_fn is expected to never raise.
     """
     namespace = kubernetes_utils.get_namespace_from_config(provider_config)
-    context = kubernetes_utils.get_context_from_config(provider_config)
+    context = kubernetes_utils.get_execution_context_from_config(
+        provider_config)
     for pod_name in pod_names:
         reason = per_pod_fn(context, namespace, pod_name)
         if reason is not None:
@@ -3539,7 +3543,8 @@ def emit_autostop_event_best_effort(provider_config: Dict[str, Any],
     """
     try:
         namespace = kubernetes_utils.get_namespace_from_config(provider_config)
-        context = kubernetes_utils.get_context_from_config(provider_config)
+        context = kubernetes_utils.get_control_context_from_config(
+            provider_config)
         k8s_client = kubernetes.kubernetes.client
         now = datetime.datetime.now(datetime.timezone.utc)
         # The event references the head pod, whose name is exactly
@@ -3592,7 +3597,8 @@ def get_cluster_autostop_event(
     """
     try:
         namespace = kubernetes_utils.get_namespace_from_config(provider_config)
-        context = kubernetes_utils.get_context_from_config(provider_config)
+        context = kubernetes_utils.get_control_context_from_config(
+            provider_config)
         events = kubernetes.core_api(context).list_namespaced_event(
             namespace,
             field_selector=f'reason={AUTOSTOP_EVENT_REASON}',
@@ -4049,7 +4055,7 @@ def query_instances(
 
     assert provider_config is not None
     namespace = kubernetes_utils.get_namespace_from_config(provider_config)
-    context = kubernetes_utils.get_context_from_config(provider_config)
+    context = kubernetes_utils.get_control_context_from_config(provider_config)
     is_ssh = context.startswith('ssh-') if context else False
     identity = 'SSH Node Pool' if is_ssh else 'Kubernetes cluster'
     label_selector = (f'{constants.TAG_SKYPILOT_CLUSTER_NAME}='
@@ -4141,7 +4147,7 @@ def get_command_runners(
     instances = cluster_info.instances
     namespace = kubernetes_utils.get_namespace_from_config(
         cluster_info.provider_config)
-    context = kubernetes_utils.get_context_from_config(
+    context = kubernetes_utils.get_execution_context_from_config(
         cluster_info.provider_config)
 
     runners: List[command_runner.CommandRunner] = []

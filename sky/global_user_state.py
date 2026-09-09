@@ -3330,6 +3330,21 @@ def add_service_account_token(token_id: str,
 
 
 @metrics_lib.time_me
+def get_service_account_creator(
+        service_account_user_id: str) -> Optional[models.User]:
+    """Return the creator of a service account, if the creator still exists."""
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
+        query = session.query(
+            service_account_token_table.c.creator_user_hash).filter_by(
+                service_account_user_id=service_account_user_id)
+        row = query.distinct().one_or_none()
+    if row is None:
+        return None
+    return get_user(row.creator_user_hash)
+
+
+@metrics_lib.time_me
 def get_service_account_token(token_id: str) -> Optional[Dict[str, Any]]:
     """Get a service account token by token_id."""
     engine = _db_manager.get_engine()

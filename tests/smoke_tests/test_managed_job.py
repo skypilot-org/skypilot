@@ -106,6 +106,23 @@ def test_managed_jobs_basic(generic_cloud: str):
             # --since and --after are mutually exclusive (rejected client-side).
             's=$(sky jobs queue --since 1h --after 2020-01-01 2>&1) || true; '
             'echo "$s"; echo "$s" | grep -i "mutually exclusive"',
+            # Infra filtering, matched server-side against the cloud/region
+            # recorded for each job: the cloud both jobs ran on keeps them,
+            # and a cloud nothing ran on drops them. `nonexistent-cloud`
+            # parses as a cloud name and simply matches no row -- an
+            # unmatched filter is an empty queue, not an error.
+            f's=$(sky jobs queue --infra {generic_cloud}); echo "$s"; '
+            f'echo "$s" | grep {name}-1 && echo "$s" | grep {name}-2',
+            # The negative case has to prove the queue answered before it
+            # concludes anything from an absent name: an error prints neither
+            # job either, so `! grep` alone would pass on a broken filter.
+            f's=$(sky jobs queue --infra nonexistent-cloud); echo "$s"; '
+            f'echo "$s" | grep -q "Managed jobs" && '
+            f'! echo "$s" | grep {name}-1 && ! echo "$s" | grep {name}-2',
+            # A malformed spec is rejected rather than silently ignored --
+            # a dropped infra filter would answer with jobs on other infra.
+            's=$(sky jobs queue --infra "aws//us-east-1" 2>&1) || true; '
+            'echo "$s"; echo "$s" | grep -i "invalid infra format"',
         ],
         # TODO(zhwu): Change to f'sky jobs cancel -y -n {name}-1 -n {name}-2' when
         # canceling multiple job names is supported.
