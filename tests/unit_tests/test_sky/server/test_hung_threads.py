@@ -268,3 +268,33 @@ def test_scan_lists_unread_replies_first(monkeypatch):
                         'ESTABLISHED recv-q=68 send-q=0 owner=none')
     assert lines[2].startswith('  socket:[2000] ')  # ties keep table order
     assert lines[-1] == '  ... 5 more'
+
+
+def test_scan_leaves_excluded_peers_out(monkeypatch):
+    """The database behind a sidecar pooler: this process holds a direct
+    connection to it (an advisory-lock session), so the endpoint would count
+    as one this host talks to, and the pooler's own server connections to it
+    come from another process namespace and all look ownerless. The caller
+    excludes the endpoint; the orphan to the pooler is still reported."""
+    pooler = '0100007F:1920'  # 127.0.0.1:6432
+    database = '0500000A:1538'  # 10.0.0.5:5432
+    rows = [
+        ('0100007F:0001', pooler, '01', '00000000:00000000', '100'),  # owned
+        ('0600000A:0002', database, '01', '00000000:00000000', '101'),  # owned
+        ('0100007F:BEEF', pooler, '01', '00000000:00000044', '200'),  # orphan
+    ]
+    # The pooler's server connections, no owner among visible processes.
+    rows += [(f'0600000A:{1000 + i:04X}', database, '01', '00000000:00000000',
+              str(300 + i)) for i in range(5)]
+    monkeypatch.setattr(hung_threads, '_tcp_rows', lambda: rows)
+    monkeypatch.setattr(hung_threads, '_socket_inodes_by_process',
+                        lambda deadline: ({'100', '101'}, 1, 0, 2, True))
+    lines = hung_threads.scan_ownerless_sockets([('127.0.0.1', 6432)])
+    assert lines[0].startswith('ownerless sockets: 6 '), lines
+    lines = hung_threads.scan_ownerless_sockets([('127.0.0.1', 6432)],
+                                                exclude_peers=[('10.0.0.5',
+                                                                5432)])
+    assert lines[0].startswith('ownerless sockets: 1 '), lines
+    assert len(lines) == 2
+    assert lines[1] == ('  socket:[200] 127.0.0.1:48879 -> 127.0.0.1:6432 '
+                        'ESTABLISHED recv-q=68 send-q=0 owner=none')

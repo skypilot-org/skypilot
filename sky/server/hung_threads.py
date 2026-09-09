@@ -35,10 +35,10 @@ whatever is allocated next, and the thread's dump shows the *new* owner of
 the number (often a perfectly healthy-looking socket of the same kind) while
 the real connection sits established with unread data and no descriptor
 pointing at it. The scan lists such sockets, restricted to peers that some
-process here is also connected to, so a sidecar's own connections in a shared
-namespace do not show up. It parses ``/proc/net/tcp`` and walks every
-readable ``/proc/<pid>/fd``, so callers rate-limit it well below the
-per-thread dump.
+process here is also connected to or that the caller names, minus peers the
+caller excludes, so a sidecar's own connections in a shared namespace do not
+show up. It parses ``/proc/net/tcp`` and walks every readable
+``/proc/<pid>/fd``, so callers rate-limit it well below the per-thread dump.
 
 Everything here is best effort: any step may fail on a non-Linux host, a
 hardened container, or a thread that resumed between two reads, and a
@@ -487,14 +487,20 @@ def _recv_q(row: Tuple[str, str, str, str, str]) -> int:
         return -1
 
 
-def scan_ownerless_sockets(extra_peers: Iterable[Tuple[str,
-                                                       int]] = ()) -> List[str]:
+def scan_ownerless_sockets(
+        extra_peers: Iterable[Tuple[str, int]] = (),
+        exclude_peers: Iterable[Tuple[str, int]] = (),
+) -> List[str]:
     """List established TCP connections in this network namespace that no
     process we can see owns, restricted to peers some visible process is
     also connected to, plus ``extra_peers`` (host, port) the caller knows it
     talks to -- typically the database, whose orphaned connections are the
     ones that hold locks. Without ``extra_peers`` an orphan to a peer nobody
     happens to be connected to at scan time goes unreported.
+    ``exclude_peers`` are left out even when a visible process is connected
+    to them: the database behind a sidecar pooler is one, because the
+    pooler's own connections to it come from another process namespace and
+    every one of them would look ownerless here.
 
     A descriptor number closed while another thread sleeps in ``poll`` on it
     leaves the kernel socket alive with no descriptor pointing at it. The
@@ -522,6 +528,7 @@ def scan_ownerless_sockets(extra_peers: Iterable[Tuple[str,
             _socket_inodes_by_process(started + _SCAN_TIME_BUDGET_SECONDS))
         peers = {rem for _, rem, _, _, ino in rows if ino in owned}
         peers |= _peer_hex_forms(extra_peers)
+        peers -= _peer_hex_forms(exclude_peers)
         suspects = [
             row for row in rows
             if row[4] != '0' and row[4] not in owned and row[1] in peers

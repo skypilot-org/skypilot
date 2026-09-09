@@ -66,22 +66,32 @@ _watchdog_lock = threading.Lock()
 _watchdog_pid: Optional[int] = None
 _scan_lock = threading.Lock()
 _last_scan: float = float('-inf')
-_db_peers: Optional[List[Tuple[str, int]]] = None
+_db_peers: Optional['_DbPeers'] = None
 
 
 def _register(executor: 'OnDemandThreadExecutor') -> None:
     """Add an executor to the watched set and start the per-process watchdog
-    thread the first time (again after a fork)."""
+    thread the first time (again after a fork).
+
+    Building an executor must not fail because the process cannot start one
+    more thread: if the watchdog cannot be started, the executors stay
+    unwatched and the next registration tries again.
+    """
     global _watchdog_pid
     pid = os.getpid()
     with _watchdog_lock:
         _executors.add(executor)
         if _watchdog_pid == pid:
             return
+        try:
+            threading.Thread(target=_watchdog_loop,
+                             name='thread-executor-watchdog',
+                             daemon=True).start()
+        except Exception as e:  # pylint: disable=broad-except
+            logger.debug(
+                f'Thread executor watchdog could not be started: {e!r}')
+            return
         _watchdog_pid = pid
-        threading.Thread(target=_watchdog_loop,
-                         name='thread-executor-watchdog',
-                         daemon=True).start()
 
 
 def _watchdog_loop() -> None:
@@ -111,14 +121,33 @@ def _watchdog_tick() -> None:
             logger.debug(f'Executor [{executor.name}] watchdog: {e!r}')
 
 
-def _state_db_peers() -> List[Tuple[str, int]]:
-    """(host, port) of the state database as this process reaches it: the
-    pooler if one is configured, and the database itself. A connection to
-    one of these that no process owns any more is exactly what a stray close
-    under a sleeping database call leaves behind, and it can hold locks."""
+class _DbPeers(NamedTuple):
+    # (host, port) the ownerless-socket scan looks at, and ones it must not.
+    scan: List[Tuple[str, int]]
+    skip: List[Tuple[str, int]]
+
+
+def _state_db_peers() -> _DbPeers:
+    """Where this process reaches the state database, for the scan.
+
+    ``scan`` is the endpoint the process connects to for state-database
+    work: the pooler when one is configured, else the database itself. A
+    connection to it that no process owns any more is what a stray close
+    under a sleeping database call leaves behind, and it can hold locks.
+
+    ``skip`` is the database behind a pooler. The process opens a few
+    connections to it directly (session-level advisory locks), but a
+    sidecar pooler's server connections go to the same endpoint from
+    another process namespace of the same network namespace, so every one
+    of them would look ownerless from here: up to the pooler's pool size of
+    false positives per scan, whether the endpoint is named or picked up
+    from a direct connection open at scan time. The scan leaves it out, so
+    an orphaned direct connection is not reported when a pooler is
+    configured; the pooled path carries the request-time database calls.
+    """
     global _db_peers
     if _db_peers is None:
-        peers: List[Tuple[str, int]] = []
+        endpoints: Dict[bool, Tuple[str, int]] = {}
         for direct in (False, True):
             try:
                 # pylint: disable-next=protected-access
@@ -127,10 +156,16 @@ def _state_db_peers() -> List[Tuple[str, int]]:
                     continue
                 parts = urllib.parse.urlsplit(conn_string)
                 if parts.hostname:
-                    peers.append((parts.hostname, parts.port or 5432))
+                    endpoints[direct] = (parts.hostname, parts.port or 5432)
             except Exception:  # pylint: disable=broad-except
                 continue
-        _db_peers = peers
+        pooled = endpoints.get(False)
+        direct_endpoint = endpoints.get(True)
+        scan = [pooled] if pooled is not None else []
+        # Without a pooler both strings are the same URI: nothing to skip.
+        skip = ([direct_endpoint] if direct_endpoint is not None and
+                direct_endpoint != pooled else [])
+        _db_peers = _DbPeers(scan, skip)
     return _db_peers
 
 
@@ -142,7 +177,9 @@ def _maybe_scan_ownerless_sockets() -> List[str]:
         if now - _last_scan < _SCAN_INTERVAL_SECONDS:
             return []
         _last_scan = now
-    return hung_threads.scan_ownerless_sockets(_state_db_peers())
+    peers = _state_db_peers()
+    return hung_threads.scan_ownerless_sockets(peers.scan,
+                                               exclude_peers=peers.skip)
 
 
 _task_seq = itertools.count(1)
@@ -369,6 +406,11 @@ class OnDemandThreadExecutor(concurrent.futures.Executor):
         holders are merely the oldest tasks of a busy pool; describing them
         once per distinct set is still cheaper than the per-request error
         the caller logs.
+
+        A process at its thread limit cannot start the dump thread. That
+        costs the dump, nothing else: the caller still gets the executor's
+        own ConcurrentWorkerExhaustedError, which is what the submit sites
+        handle.
         """
         now = time.monotonic()
         if (now - self._last_dump < _DUMP_MIN_INTERVAL_SECONDS or
@@ -395,9 +437,14 @@ class OnDemandThreadExecutor(concurrent.futures.Executor):
             except Exception as e:  # pylint: disable=broad-except
                 logger.debug(f'Executor [{self.name}] dump failed: {e!r}')
 
-        threading.Thread(target=_dump,
-                         name=f'{self.name}-exhaustion-dump',
-                         daemon=True).start()
+        try:
+            threading.Thread(target=_dump,
+                             name=f'{self.name}-exhaustion-dump',
+                             daemon=True).start()
+        except Exception as e:  # pylint: disable=broad-except
+            logger.debug(
+                f'Executor [{self.name}] could not start the dump thread: '
+                f'{e!r}')
 
     def _task_wrapper(self, fn: Callable, fut: concurrent.futures.Future, /,
                       *args, **kwargs):

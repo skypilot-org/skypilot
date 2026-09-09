@@ -239,7 +239,7 @@ def _fake_clock(monkeypatch):
     monkeypatch.setattr(threads_mod, 'time', clock)
     # No ownerless-socket scan in these tests (covered in test_hung_threads).
     monkeypatch.setattr(threads_mod, '_last_scan', float('inf'))
-    monkeypatch.setattr(threads_mod, '_db_peers', [])
+    monkeypatch.setattr(threads_mod, '_db_peers', threads_mod._DbPeers([], []))  # pylint: disable=protected-access
     return clock
 
 
@@ -499,10 +499,13 @@ def test_exhaustion_dump_only_when_slot_holders_change(monkeypatch):
 def test_dump_includes_rate_limited_ownerless_socket_scan(monkeypatch):
     clock = _fake_clock(monkeypatch)
     monkeypatch.setattr(threads_mod, '_last_scan', float('-inf'))
+    pooler, database = ('127.0.0.1', 6432), ('db.example.internal', 5432)
+    monkeypatch.setattr(threads_mod, '_db_peers',
+                        threads_mod._DbPeers([pooler], [database]))  # pylint: disable=protected-access
     calls = []
 
-    def fake_scan(extra_peers=()):
-        calls.append((clock.now, list(extra_peers)))
+    def fake_scan(extra_peers=(), exclude_peers=()):
+        calls.append((clock.now, list(extra_peers), list(exclude_peers)))
         return ['ownerless sockets: 1 ...', '  socket:[1] a -> b']
 
     monkeypatch.setattr(hung_threads, 'scan_ownerless_sockets', fake_scan)
@@ -516,7 +519,8 @@ def test_dump_includes_rate_limited_ownerless_socket_scan(monkeypatch):
         clock.now += 2
         executor.observe()
         assert len(messages) == 1 and 'ownerless sockets: 1' in messages[0]
-        assert calls == [(1002.0, [])]
+        # The scan looks at the pooler and leaves the database behind it out.
+        assert calls == [(1002.0, [pooler], [database])]
         # A second dump inside the scan interval carries no scan.
         executor.submit(blocking_task, release_b)
         clock.now += 61
@@ -536,19 +540,111 @@ def test_dump_includes_rate_limited_ownerless_socket_scan(monkeypatch):
 
 
 def test_state_db_peers_from_environment(monkeypatch):
+    """The scan looks at the endpoint this process connects to for state
+    database work and leaves the database behind a pooler out: a sidecar
+    pooler's own connections to it live in another process namespace and
+    would all be reported as ownerless."""
+    # pylint: disable=protected-access
     from sky.skylet import constants  # pylint: disable=import-outside-toplevel
-    monkeypatch.setattr(threads_mod, '_db_peers', None)
+    database = ('db.example.internal', 5433)
     monkeypatch.setenv(constants.ENV_VAR_IS_SKYPILOT_SERVER, '1')
     monkeypatch.setenv(constants.ENV_VAR_DB_CONNECTION_URI,
                        'postgresql://u:p@db.example.internal:5433/sky')
+
+    # Pooler as host:port rewrite (the sidecar case).
+    monkeypatch.setattr(threads_mod, '_db_peers', None)
     monkeypatch.setenv(constants.ENV_VAR_DB_POOL_HOSTPORT, '127.0.0.1:6432')
-    assert threads_mod._state_db_peers() == [  # pylint: disable=protected-access
-        ('127.0.0.1', 6432), ('db.example.internal', 5433)
-    ]
+    peers = threads_mod._state_db_peers()
+    assert peers.scan == [('127.0.0.1', 6432)]
+    assert peers.skip == [database]
+
+    # Pooler as a full connection URI.
+    monkeypatch.setattr(threads_mod, '_db_peers', None)
+    monkeypatch.delenv(constants.ENV_VAR_DB_POOL_HOSTPORT)
+    monkeypatch.setenv(constants.ENV_VAR_DB_POOL_CONNECTION_URI,
+                       'postgresql://u:p@pooler.example.internal:6432/sky')
+    peers = threads_mod._state_db_peers()
+    assert peers.scan == [('pooler.example.internal', 6432)]
+    assert peers.skip == [database]
+
+    # No pooler: the database itself is scanned, nothing is skipped.
+    monkeypatch.setattr(threads_mod, '_db_peers', None)
+    monkeypatch.delenv(constants.ENV_VAR_DB_POOL_CONNECTION_URI)
+    peers = threads_mod._state_db_peers()
+    assert peers.scan == [database]
+    assert peers.skip == []
+
+    # No database configured (SQLite): nothing to scan.
     monkeypatch.setattr(threads_mod, '_db_peers', None)
     monkeypatch.delenv(constants.ENV_VAR_DB_CONNECTION_URI)
-    assert threads_mod._state_db_peers() == []  # pylint: disable=protected-access
+    assert threads_mod._state_db_peers() == threads_mod._DbPeers([], [])
     monkeypatch.setattr(threads_mod, '_db_peers', None)
+
+
+def test_saturated_submit_raises_exhausted_when_dump_thread_cannot_start(
+        monkeypatch):
+    """The exhaustion dump runs in a thread of its own. A process at its
+    thread limit cannot start it; the caller must still get the executor's
+    own saturation error, which is what every submit site handles, and not
+    the RuntimeError of the failed start."""
+    debug_messages = []
+    monkeypatch.setattr(threads_mod.logger, 'debug',
+                        lambda msg, *a, **k: debug_messages.append(str(msg)))
+    real_start = threading.Thread.start
+
+    def start_unless_dump(self):
+        if self.name.endswith('-exhaustion-dump'):
+            raise RuntimeError('cannot start new thread (simulated)')
+        return real_start(self)
+
+    monkeypatch.setattr(threading.Thread, 'start', start_unless_dump)
+    executor = OnDemandThreadExecutor(name='nodump_test',
+                                      max_workers=1,
+                                      stuck_after_seconds=30.0)
+    release = threading.Event()
+    try:
+        fut = executor.submit(blocking_task, release)
+        with pytest.raises(exceptions.ConcurrentWorkerExhaustedError):
+            executor.submit(dummy_task)
+        assert any('could not start the dump thread' in m
+                   for m in debug_messages), debug_messages
+        release.set()
+        assert fut.result(timeout=5) is True
+    finally:
+        release.set()
+        executor.shutdown()
+
+
+def test_executor_construction_survives_watchdog_start_failure(monkeypatch):
+    """The first executor built in a process starts the watchdog thread. If
+    the process cannot start it, the executor is still built and usable, and
+    the next executor built tries again."""
+    # pylint: disable=protected-access
+    monkeypatch.setattr(threads_mod, '_watchdog_pid', None)
+    monkeypatch.setattr(threads_mod, '_watchdog_loop', lambda: None)
+    attempts = []
+    real_start = threading.Thread.start
+
+    def start_failing_once(self):
+        if self.name == 'thread-executor-watchdog':
+            attempts.append(self)
+            if len(attempts) == 1:
+                raise RuntimeError('cannot start new thread (simulated)')
+        return real_start(self)
+
+    monkeypatch.setattr(threading.Thread, 'start', start_failing_once)
+    first = OnDemandThreadExecutor(name='wd_fail_a', max_workers=1)
+    try:
+        assert len(attempts) == 1
+        assert threads_mod._watchdog_pid is None
+        assert first.submit(dummy_task).result(timeout=5) is True
+        second = OnDemandThreadExecutor(name='wd_fail_b', max_workers=1)
+        second.shutdown()
+        assert len(attempts) == 2
+        assert threads_mod._watchdog_pid == os.getpid()
+        attempts[1].join(5)
+    finally:
+        first.shutdown()
 
 
 def test_snapshot_drops_dead_threads():
