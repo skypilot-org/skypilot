@@ -224,6 +224,17 @@ class JobController:
       task).
     """
 
+    # Whether this job is the top-level job of its tree (not itself launched
+    # from another job). Only the root sweeps the jobs launched under it when
+    # it finishes; a dynamic member finishing leaves its own children to the
+    # root's lifecycle. Set in _load_dag; the class default keeps controllers
+    # built without __init__ (tests) from sweeping anything.
+    _is_tree_root: bool = False
+    # Set once the jobs launched from this job (dynamic job group members)
+    # have been swept, so the job-group sweep and run()'s completion backstop
+    # don't signal them twice. Class default for the same reason.
+    _dynamic_members_swept: bool = False
+
     def __init__(
         self,
         job_id: int,
@@ -321,6 +332,7 @@ class JobController:
         in_job_tree = (self._dag.is_job_group() or
                        own_row.root_job_id is not None)
         root_job_id = own_row.tree_root_job_id if in_job_tree else None
+        self._is_tree_root = own_row.root_job_id is None
 
         for i, task in enumerate(self._dag.tasks):
             task_envs = task.envs or {}
@@ -2263,7 +2275,55 @@ class JobController:
             at: tid for tid, at in monitor_async_tasks.items()
         }
 
+        def primary_task_succeeded(tid: int) -> bool:
+            # For terminal tasks, check their status; for others, the result.
+            if is_terminal(tid):
+                return (task_resume_info[tid][0] ==
+                        managed_job_state.ManagedJobStatus.SUCCEEDED)
+            return task_results.get(tid, True) is True
+
+        async def on_all_primaries_done() -> None:
+            """Everything that happens once the last primary task is done.
+
+            The declared auxiliaries are terminated first (after their
+            termination_delay if every primary succeeded). Only then are the
+            jobs launched from this group swept: by that point no member of
+            the group is alive to launch another, so one pass catches
+            everything, including what a watcher launched during its delay,
+            and those launches got the same grace period the watcher did.
+            Sweeping before the auxiliaries are gone would race with exactly
+            those launches.
+            """
+            all_primary_succeeded = all(
+                primary_task_succeeded(tid) for tid in primary_task_ids)
+            if monitor_async_tasks:
+                await self._terminate_auxiliary_jobs(tasks, monitor_async_tasks,
+                                                     cluster_names,
+                                                     all_primary_succeeded)
+            await self._cancel_dynamic_members(
+                f'with job group {self._job_id}: all primary tasks '
+                f'{"finished" if all_primary_succeeded else "ended (a primary task failed)"}'  # pylint: disable=line-too-long
+            )
+
         try:
+            if (primary_task_ids and not remaining_primary and
+                    monitor_async_tasks):
+                # Every primary task had already finished before this
+                # controller (re)started, e.g. a restart after the trainer
+                # succeeded while the watcher was still running. The loop
+                # below only reaches the primaries-done path when a live
+                # primary completes, which can never happen here, so it would
+                # wait on the auxiliaries forever. Do the primaries-done work
+                # now instead. (An auxiliary's termination_delay restarts from
+                # zero here; when the primaries finished is not recorded.)
+                logger.info('All primary jobs had already completed before '
+                            'this controller started; terminating auxiliary '
+                            'jobs')
+                await on_all_primaries_done()
+                # Mirror the live path, which breaks out of the loop without
+                # recording results for the terminated auxiliaries.
+                monitor_async_tasks.clear()
+
             # Monitor with primary/auxiliary termination logic
             while monitor_async_tasks:
                 # Wait for any task to complete
@@ -2307,30 +2367,12 @@ class JobController:
                         remaining_primary.discard(completed_task_id)
 
                         if not remaining_primary:
-                            # All primary jobs are done
+                            # That was the last primary. Sweep and terminate
+                            # the auxiliaries; their cancelled monitors come
+                            # back through asyncio.wait on the next iteration
+                            # and are recorded as terminated there.
                             logger.info('All primary jobs completed')
-
-                            # Check if all primary jobs succeeded. For terminal
-                            # tasks, check their status; for others, check
-                            # result.
-                            def primary_task_succeeded(tid: int) -> bool:
-                                if is_terminal(tid):
-                                    return (task_resume_info[tid][0] ==
-                                            managed_job_state.ManagedJobStatus.
-                                            SUCCEEDED)
-                                return task_results.get(tid, True) is True
-
-                            all_primary_succeeded = all(
-                                primary_task_succeeded(tid)
-                                for tid in primary_task_ids)
-
-                            # Terminate remaining auxiliary jobs
-                            if monitor_async_tasks:
-                                await self._terminate_auxiliary_jobs(
-                                    tasks, monitor_async_tasks, cluster_names,
-                                    all_primary_succeeded)
-                                # All auxiliary jobs terminated, exit loop
-                                break
+                            await on_all_primaries_done()
 
         except Exception as e:
             logger.error(f'Monitoring failed: {e}')
@@ -2592,6 +2634,13 @@ class JobController:
                         msg)
                     attempt_done = True
         finally:
+            if not cancelled:
+                # Jobs launched from this job go down with it when it
+                # finishes on its own. A user cancel already took the whole
+                # subtree server-side (cancel_jobs_by_id expands to
+                # descendants), so nothing to do in that case.
+                await self._cancel_dynamic_members(
+                    f'with job {self._job_id}: it finished')
             callback_func = managed_job_utils.event_callback_func(
                 job_id=self._job_id,
                 task_id=task_id,
@@ -2605,6 +2654,35 @@ class JobController:
                 # the resources first so this will be done later.
                 await managed_job_state.set_cancelled_async(
                     job_id=self._job_id, callback_func=callback_func)
+
+    async def _cancel_dynamic_members(self, note: str) -> None:
+        """Cancel the jobs launched under this job, if it is a tree root.
+
+        Lifetime is owned by the root: when the top-level job finishes (its
+        primaries for a job group, the job itself otherwise) everything
+        launched under it, at any depth, is swept. A dynamic member finishing
+        sweeps nothing; its children stay under the root. (Explicit cancel of
+        any node still takes that node's subtree; that is the cancel path,
+        not this one.)
+
+        Idempotent per controller: the job-group primaries-done sweep and
+        run()'s completion backstop may both reach here. Best-effort: a
+        failure to sweep must never change this job's own final state.
+        """
+        if not self._is_tree_root or self._dynamic_members_swept:
+            return
+        self._dynamic_members_swept = True
+        try:
+            msg = await asyncio.to_thread(
+                managed_job_utils.cancel_descendant_jobs, self._job_id, note)
+        except Exception as e:  # pylint: disable=broad-except
+            logger.warning(
+                'Failed to cancel jobs launched from job '
+                f'{self._job_id}: {common_utils.format_exception(e)}')
+            return
+        if msg != 'No job to cancel.':
+            logger.info(f'Cancelling jobs launched from job {self._job_id}: '
+                        f'{msg}')
 
     async def _handle_unexpected_error(
             self, error: Union[Exception, SystemExit]) -> Optional[str]:
