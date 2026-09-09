@@ -291,11 +291,13 @@ async def test_websocket_unavailable_is_rejected_with_the_real_503():
 
 
 @pytest.mark.asyncio
-async def test_websocket_unauthorized_is_rejected_with_a_401():
+async def test_websocket_unauthorized_is_rejected_with_a_403():
+    """Not the middleware's 401: see `_AUTH_REFUSAL_STATUS` and the contract
+    test below."""
     middleware = _make_middleware(lambda *a: None, behavior='unauthorized')
     sent = await _run(middleware, _scope_with_extension())
     assert sent[0]['type'] == 'websocket.http.response.start'
-    assert sent[0]['status'] == 401
+    assert sent[0]['status'] == 403
     assert sent[1] == {'type': 'websocket.http.response.body', 'body': b''}
 
 
@@ -372,13 +374,14 @@ def test_mark_rejection_round_trips_through_the_scope_state():
 # A middleware that answers the handshake itself with a 2xx/3xx (the oauth2
 # sign-in redirect for an expired session) is a rejection the client cannot
 # act on as-is: `websockets` follows redirects to ws(s):// URLs only, and the
-# ssh client would print "HTTP 307". It is told to authenticate instead.
+# ssh client would print "HTTP 307". It is told to authenticate instead, with
+# the 403 every client maps to the login hint.
 # ─────────────────────────────────────────────────────────────────────────
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize('behavior', ['redirect', 'answered'])
-async def test_websocket_signin_redirect_is_rejected_with_a_401(behavior):
+async def test_websocket_signin_redirect_is_rejected_with_a_403(behavior):
     app_called = False
 
     async def app(scope, receive, send):
@@ -395,7 +398,7 @@ async def test_websocket_signin_redirect_is_rejected_with_a_401(behavior):
         'websocket.http.response.start', 'websocket.http.response.body'
     ]
     start, body = sent
-    assert start['status'] == 401
+    assert start['status'] == 403
     headers = dict(start['headers'])
     # No Location: a WebSocket client could not follow it anyway, and the
     # status must read as a rejection, not a redirect.
@@ -434,9 +437,89 @@ async def test_websocket_redirect_does_not_override_a_stamped_reason():
         lambda *a: None)
     scope = _scope_with_extension()
     sent = await _run(middleware, scope)
-    assert sent[0]['status'] == 401
+    assert sent[0]['status'] == 403
     assert middleware_utils.get_rejection_reason(scope) == \
         middleware_utils.REJECT_REASON_FORBIDDEN
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# The contract with older ssh clients. Every `websocket_proxy.py` shipped
+# before this code maps exactly HTTP 403 on the handshake to the "run
+# `sky api login`" hint and prints a bare `HTTP <code>` for anything else;
+# servers have always rendered a refused handshake as an empty 403. So an
+# authentication or authorization refusal must stay a 403 on the wire even
+# though the middleware's own answer is a 401. Everything else (the 5xx this
+# extension exists for, other 4xx) keeps its real status.
+# ─────────────────────────────────────────────────────────────────────────
+
+
+class _AuthRefusalMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
+    """Refuses like the bearer/basic auth middlewares do: JSON 401 with a
+    `WWW-Authenticate` challenge, or a JSON 403, reason stamped."""
+
+    def __init__(self, app, status_code, reason):
+        super().__init__(app)
+        self.status_code = status_code
+        self.reason = reason
+
+    async def dispatch(self, request, call_next):
+        del call_next
+        middleware_utils.mark_rejection(request, self.reason)
+        headers = {}
+        if self.status_code == http.HTTPStatus.UNAUTHORIZED:
+            headers['WWW-Authenticate'] = 'Bearer'
+        return fastapi.responses.JSONResponse(
+            status_code=self.status_code,
+            headers=headers,
+            content={'detail': 'Authentication required'})
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('status_code, reason, expected', [
+    (http.HTTPStatus.UNAUTHORIZED, middleware_utils.REJECT_REASON_UNAUTHORIZED,
+     403),
+    (http.HTTPStatus.FORBIDDEN, middleware_utils.REJECT_REASON_FORBIDDEN, 403),
+    (http.HTTPStatus.SERVICE_UNAVAILABLE,
+     middleware_utils.REJECT_REASON_AUTH_DB_TIMEOUT, 503),
+    (http.HTTPStatus.PAYMENT_REQUIRED, middleware_utils.REJECT_REASON_FORBIDDEN,
+     402),
+])
+async def test_auth_refusals_keep_the_403_older_clients_understand(
+        status_code, reason, expected):
+    middleware = middleware_utils.websocket_aware(_AuthRefusalMiddleware)(
+        lambda *a: None, status_code=status_code, reason=reason)
+    scope = _scope_with_extension()
+    sent = await _run(middleware, scope)
+
+    assert [m['type'] for m in sent] == [
+        'websocket.http.response.start', 'websocket.http.response.body'
+    ]
+    assert sent[0]['status'] == expected
+    assert middleware_utils._AUTH_REFUSAL_STATUS == 403  # pylint: disable=protected-access
+    headers = dict(sent[0]['headers'])
+    # The middleware's explanation still travels with the response...
+    assert headers[b'content-type'] == b'application/json'
+    assert sent[1]['body'] == b'{"detail":"Authentication required"}'
+    # ...but a 401 challenge does not: it makes no sense on a 403 and no
+    # WebSocket client acts on it.
+    assert b'www-authenticate' not in headers
+    # The metric keeps the finer-grained cause even where the wire says 403.
+    assert middleware_utils.get_rejection_reason(scope) == reason
+
+
+@pytest.mark.asyncio
+async def test_auth_refusal_without_the_extension_still_closes_4401():
+    """The fallback close codes are untouched; servers render them as 403."""
+    middleware = middleware_utils.websocket_aware(_AuthRefusalMiddleware)(
+        lambda *a: None,
+        status_code=http.HTTPStatus.UNAUTHORIZED,
+        reason=middleware_utils.REJECT_REASON_UNAUTHORIZED)
+    sent = await _run(middleware, _make_websocket_scope())
+    assert sent == [{
+        'type': 'websocket.close',
+        'code': 4401,
+        'reason': 'Unauthorized',
+    }]
 
 
 # ─────────────────────────────────────────────────────────────────────────

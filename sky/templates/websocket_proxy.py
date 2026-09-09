@@ -269,11 +269,12 @@ def _print_handshake_rejection(e: websockets.exceptions.InvalidStatus,
                                login_url: str) -> None:
     """Explain a rejected WebSocket handshake to the user.
 
-    The server answers a rejected handshake with the real HTTP status of the
-    middleware that refused it: 401/403 for authentication and authorization,
-    503 when it cannot serve right now (its authentication pool is saturated,
-    its database is slow, it is draining). Older servers close the connection
-    instead, which arrives as a bare 403.
+    The server answers a rejected handshake with the HTTP status of the
+    middleware that refused it: 403 for authentication and authorization
+    (the status every client release maps to the login hint; a 401 is read
+    the same way), 503 when it cannot serve right now (its authentication
+    pool is saturated, its database is slow, it is draining). Older servers
+    close the connection instead, which arrives as a bare 403.
     """
     status_code = e.response.status_code
     if status_code in (401, 403):

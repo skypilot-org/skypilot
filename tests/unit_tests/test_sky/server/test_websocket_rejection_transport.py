@@ -74,10 +74,12 @@ class GateMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
                 headers={'Retry-After': '5'},
                 content={'detail': 'auth worker pool exhausted'})
         if gate == 'unauthorized':
+            # The shape the bearer/basic auth middlewares produce.
             middleware_utils.mark_rejection(
                 request, middleware_utils.REJECT_REASON_UNAUTHORIZED)
             return fastapi.responses.JSONResponse(
                 status_code=http.HTTPStatus.UNAUTHORIZED,
+                headers={'WWW-Authenticate': 'Bearer'},
                 content={'detail': 'Authentication required'})
         if gate == 'unrenderable':
             # A status no WebSocket client can act on and uvicorn's
@@ -291,13 +293,28 @@ async def test_rejection_without_the_extension_is_the_old_empty_403(ws_impl):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize('ws_impl', _ws_impls())
-async def test_unauthorized_rejection_carries_a_401(ws_impl):
+async def test_unauthorized_rejection_is_the_403_older_clients_understand(
+        ws_impl):
+    """The middleware said 401; the wire says 403, the status every shipped
+    `websocket_proxy.py` maps to the `sky api login` hint (it prints a bare
+    `HTTP <code>` for anything else). The JSON body still travels, the 401
+    challenge header does not, and the counters record the 403 the client
+    saw with the finer-grained reason."""
     async with _serve(_build_app(), ws_impl) as (url, errors):
         outcome, response = await _handshake(url, 'unauthorized')
     assert outcome == 'rejected'
-    assert response.status_code == 401
+    assert response.status_code == 403
     assert bytes(response.body) == b'{"detail":"Authentication required"}'
+    assert 'www-authenticate' not in {k.lower() for k in response.headers}
     _assert_clean_server_log(errors, ws_impl)
+    assert _sample(metrics_utils.SKY_APISERVER_WEBSOCKET_HANDSHAKES_TOTAL,
+                   path=_WS_PATH,
+                   outcome='rejected',
+                   status='403') == 1.0
+    assert _sample(metrics_utils.SKY_APISERVER_REQUEST_REJECTIONS_TOTAL,
+                   reason=middleware_utils.REJECT_REASON_UNAUTHORIZED,
+                   status='403',
+                   kind='websocket') == 1.0
 
 
 @pytest.mark.asyncio

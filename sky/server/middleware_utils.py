@@ -3,7 +3,7 @@ import enum
 import http
 import threading
 import time
-from typing import Any, Callable, Optional, Tuple, Type
+from typing import Any, Callable, List, Optional, Tuple, Type
 
 import fastapi
 import starlette.middleware.base
@@ -176,8 +176,24 @@ class WebSocketDecision(enum.Enum):
 # Response headers worth forwarding on a rejected handshake. Anything else the
 # HTTP middleware set (security headers, CORS, ...) is dropped: the handshake
 # response is consumed by a WebSocket client, not a browser page.
-_REJECTION_HEADERS_TO_FORWARD = frozenset(
-    ('content-type', 'retry-after', 'www-authenticate'))
+# `www-authenticate` is not in the list on purpose: it belongs to a 401, and
+# every authentication refusal leaves here as a 403 (`_AUTH_REFUSAL_STATUS`).
+_REJECTION_HEADERS_TO_FORWARD = frozenset(('content-type', 'retry-after'))
+
+# The status put on the wire for a refused handshake whose cause is
+# authentication or authorization, whatever the middleware's own status (401,
+# 403, or a 2xx/3xx sign-in redirect answered without `call_next`).
+#
+# Servers have always rendered a refused handshake as an empty HTTP 403, and
+# every ssh client shipped before this code (`sky/templates/websocket_proxy.py`)
+# maps exactly that status to "Authentication required ... run `sky api login`"
+# and prints a bare status code for anything else. Sending the middleware's
+# 401 would turn the hint into `HTTP 401` for every older client, and an
+# expired or revoked token is the everyday refusal. Newer clients treat 401
+# and 403 alike, so nothing is lost for them. The metrics still tell the two
+# apart: the reason stamped on the scope stays `unauthorized` / `forbidden`;
+# `status` records the 403 the client saw.
+_AUTH_REFUSAL_STATUS = int(http.HTTPStatus.FORBIDDEN)
 
 # ASGI extension through which a server lets the application answer a
 # WebSocket handshake with an arbitrary HTTP response instead of a 101 or a
@@ -216,6 +232,16 @@ def _renderable_status(status_code: int) -> int:
     return int(status_code)
 
 
+def _forwardable_parts(
+        response: fastapi.Response) -> Tuple[bytes, List[Tuple[bytes, bytes]]]:
+    """The body and the headers of a rejection worth sending to a client."""
+    body = bytes(getattr(response, 'body', b'') or b'')
+    headers = [(k.encode('latin-1'), v.encode('latin-1'))
+               for k, v in response.headers.items()
+               if k.lower() in _REJECTION_HEADERS_TO_FORWARD]
+    return body, headers
+
+
 def websocket_aware(
         middleware_cls: Type[starlette.middleware.base.BaseHTTPMiddleware]):
     """Decorator to adapt BaseHTTPMiddleware to handle WebSockets.
@@ -232,11 +258,14 @@ def websocket_aware(
     (uvicorn does, with either WebSocket implementation), a rejected
     handshake is answered with the HTTP middleware's real status code and
     JSON body, so a client sees e.g. ``503 {"detail": "...exhausted..."}``
-    and can retry, instead of a bare 403 that reads as "log in again".
-    Without the extension (key absent, None, or listing other extensions
-    only) the connection is closed with 4401 / 4403 / 1011 as before; servers
-    render any pre-accept close as an empty HTTP 403. A status the server
-    cannot render is replaced by one it can (see `_renderable_status`).
+    and can retry, instead of a bare 403 that reads as "log in again". The
+    one exception is an authentication or authorization refusal: it keeps the
+    403 every shipped client already maps to the login hint, with the JSON
+    body (see `_AUTH_REFUSAL_STATUS`). Without the extension (key absent,
+    None, or listing other extensions only) the connection is closed with
+    4401 / 4403 / 1011 as before; servers render any pre-accept close as an
+    empty HTTP 403. A status the server cannot render is replaced by one it
+    can (see `_renderable_status`).
     This wrapper records no metric itself. The metrics layer outside
     (`sky.server.metrics.PrometheusMiddleware`) counts every handshake in
     `sky_apiserver_websocket_handshakes_total` with the status the client
@@ -282,7 +311,7 @@ def websocket_aware(
             # sees the message sent below and records the status the client
             # saw together with the reason stamped on the scope.
             if supports_websocket_http_response(scope):
-                await self._reject_with_http_response(send, response)
+                await self._reject_with_http_response(send, decision, response)
                 return
             if decision == WebSocketDecision.UNAUTHORIZED:
                 await send({
@@ -305,9 +334,15 @@ def websocket_aware(
 
         @staticmethod
         async def _reject_with_http_response(
-                send: starlette.types.Send,
+                send: starlette.types.Send, decision: WebSocketDecision,
                 response: Optional[fastapi.Response]) -> None:
-            """Reject the handshake with the middleware's real HTTP response."""
+            """Reject the handshake with an HTTP response.
+
+            The status is the middleware's own, except for an authentication
+            or authorization refusal, which goes out as the 403 older clients
+            understand (`_AUTH_REFUSAL_STATUS`) whatever the middleware
+            answered with.
+            """
             status_code: int
             if response is None:
                 # The middleware raised; mirror what Starlette's error handler
@@ -315,25 +350,26 @@ def websocket_aware(
                 status_code = int(http.HTTPStatus.INTERNAL_SERVER_ERROR)
                 body = b'{"detail":"Internal Server Error"}'
                 headers = [(b'content-type', b'application/json')]
-            elif 400 <= response.status_code < 600:
-                status_code = _renderable_status(response.status_code)
-                body = bytes(getattr(response, 'body', b'') or b'')
-                headers = [(k.encode('latin-1'), v.encode('latin-1'))
-                           for k, v in response.headers.items()
-                           if k.lower() in _REJECTION_HEADERS_TO_FORWARD]
+            elif decision in (WebSocketDecision.UNAUTHORIZED,
+                              WebSocketDecision.FORBIDDEN):
+                status_code = _AUTH_REFUSAL_STATUS
+                if 400 <= response.status_code < 600:
+                    # A 401 or 403 from the middleware: keep its explanation.
+                    body, headers = _forwardable_parts(response)
+                else:
+                    # The middleware answered the handshake itself with a
+                    # 2xx/3xx instead of letting it through -- the oauth2
+                    # sign-in redirect for an expired session is the real
+                    # case. Forwarding that status would only confuse the
+                    # client: `websockets` follows redirects to ws(s):// URLs
+                    # only, and a 2xx/3xx is not a rejection it can explain
+                    # (the ssh client would print "HTTP 307"). Say what it
+                    # needs to do instead: authenticate.
+                    body = b'{"detail":"Authentication required"}'
+                    headers = [(b'content-type', b'application/json')]
             else:
-                # The middleware answered the handshake itself with a 2xx/3xx
-                # instead of letting it through -- the oauth2 sign-in redirect
-                # for an expired session is the real case. Forwarding that
-                # status would only confuse the client: `websockets` follows
-                # redirects to ws(s):// URLs only, and a 2xx/3xx is not a
-                # rejection it can explain (the ssh client would print
-                # "HTTP 307"). Say what it needs to do instead: authenticate.
-                # This also keeps the handshake metric's status label to real
-                # rejection statuses.
-                status_code = int(http.HTTPStatus.UNAUTHORIZED)
-                body = b'{"detail":"Authentication required"}'
-                headers = [(b'content-type', b'application/json')]
+                status_code = _renderable_status(response.status_code)
+                body, headers = _forwardable_parts(response)
             await send({
                 'type': 'websocket.http.response.start',
                 'status': int(status_code),
