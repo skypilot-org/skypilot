@@ -217,10 +217,21 @@ job_info_table = sqlalchemy.Table(
     sqlalchemy.Column('last_emergency_recovery_at',
                       sqlalchemy.Float,
                       server_default=None),
-    # The managed job (and task within it) that launched this job, when it
-    # was launched from inside another managed job (e.g. an eval job launched
-    # by a job group's watcher task). NULL for top-level jobs. Written once on
-    # the child's row; parent rows are never mutated.
+    # Where a job launched from inside another managed job came from (e.g.
+    # an eval job launched by a job group's watcher task). All NULL for
+    # top-level jobs. Written once on the child's row; parent rows are never
+    # mutated.
+    #   root_job_id: the top-level job of the tree. Load-bearing: the group
+    #     the job is shown under and the lifecycle it shares (cancelled with
+    #     the root, swept when the root's primary tasks finish).
+    #   parent_job_id: the job that launched this one (== root for a direct
+    #     member).
+    #   parent_task_id: the task within the parent that launched this one.
+    #     Display only.
+    sqlalchemy.Column('root_job_id',
+                      sqlalchemy.Integer,
+                      server_default=None,
+                      index=True),
     sqlalchemy.Column('parent_job_id',
                       sqlalchemy.Integer,
                       server_default=None,
@@ -515,6 +526,7 @@ def _get_jobs_dict(r: 'row.RowMapping') -> Dict[str, Any]:
         'node_names': common_utils.get_display_node_names(r.get('node_names')),
         # The job/task that launched this job, when launched from inside
         # another managed job. NULL for top-level jobs.
+        'root_job_id': r.get('root_job_id'),
         'parent_job_id': r.get('parent_job_id'),
         'parent_task_id': r.get('parent_task_id'),
     }
@@ -916,7 +928,8 @@ def set_job_info_without_job_id(name: str,
                                 is_batch: bool = False,
                                 file_mounts_blob_id: Optional[str] = None,
                                 parent_job_id: Optional[int] = None,
-                                parent_task_id: Optional[int] = None) -> int:
+                                parent_task_id: Optional[int] = None,
+                                root_job_id: Optional[int] = None) -> int:
     engine = _db_manager.get_engine()
     with orm.Session(engine) as session:
         if engine.dialect.name == db_utils.SQLAlchemyDialect.SQLITE.value:
@@ -938,6 +951,7 @@ def set_job_info_without_job_id(name: str,
             execution=execution,
             is_batch=is_batch,
             file_mounts_blob_id=file_mounts_blob_id,
+            root_job_id=root_job_id,
             parent_job_id=parent_job_id,
             parent_task_id=parent_task_id,
         )
@@ -3845,7 +3859,8 @@ def set_job_info(job_id: int,
                  execution: Optional[str] = None,
                  is_batch: bool = False,
                  parent_job_id: Optional[int] = None,
-                 parent_task_id: Optional[int] = None):
+                 parent_task_id: Optional[int] = None,
+                 root_job_id: Optional[int] = None):
     engine = _db_manager.get_engine()
     with orm.Session(engine) as session:
         if engine.dialect.name == db_utils.SQLAlchemyDialect.SQLITE.value:
@@ -3866,11 +3881,43 @@ def set_job_info(job_id: int,
             user_hash=user_hash,
             execution=execution,
             is_batch=is_batch,
+            root_job_id=root_job_id,
             parent_job_id=parent_job_id,
             parent_task_id=parent_task_id,
         )
         session.execute(insert_stmt)
         session.commit()
+
+
+def get_root_job_id(job_id: int) -> Optional[int]:
+    """The top-level job of ``job_id``'s tree.
+
+    ``job_id``'s own ``root_job_id`` if it was launched from another job,
+    else ``job_id`` itself. None if there is no such job.
+    """
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
+        row = session.execute(
+            sqlalchemy.select(job_info_table.c.root_job_id).where(
+                job_info_table.c.spot_job_id == job_id)).fetchone()
+        if row is None:
+            return None
+        return row[0] if row[0] is not None else job_id
+
+
+def get_tree_job_ids(root_job_id: int) -> List[int]:
+    """Every job launched (at any depth) from top-level job ``root_job_id``.
+
+    One indexed query; the root itself is not included. For the subtree of a
+    non-root job use ``get_descendant_job_ids``.
+    """
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
+        rows = session.execute(
+            sqlalchemy.select(job_info_table.c.spot_job_id).where(
+                job_info_table.c.root_job_id == root_job_id).order_by(
+                    job_info_table.c.spot_job_id.asc())).fetchall()
+        return [row[0] for row in rows]
 
 
 def get_parent_job(job_id: int) -> Tuple[Optional[int], Optional[int]]:

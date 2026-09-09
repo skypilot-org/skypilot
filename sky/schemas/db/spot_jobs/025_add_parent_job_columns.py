@@ -1,13 +1,21 @@
-"""Add parent_job_id and parent_task_id columns to job_info table.
+"""Add root_job_id, parent_job_id and parent_task_id columns to job_info.
 
 A managed job launched from inside another managed job (for example an
-eval job launched by the watcher task of a job group) records the launching
-job and task here. The link is written once on the child's row at launch
-and never mutates the parent's rows, so a running job group's controller
-is not touched when members are added dynamically.
+eval job launched by the watcher task of a job group) records where it came
+from. The links are written once on the child's row at launch and never
+mutate the parent's rows, so a running job group's controller is not
+touched when members are added dynamically.
 
-``parent_job_id`` is indexed: descendant lookups (cancel cascade, queue and
-dashboard grouping) filter on it.
+- ``root_job_id``: the top-level job of the tree. Load-bearing: the group
+  the job is shown under, and the lifecycle it shares (cancelled with the
+  root, swept when the root's primary tasks finish). One indexed column
+  answers both "which group" and "everything in this group".
+- ``parent_job_id``: the job that launched this one. Equals the root for a
+  direct member; differs only for a job launched by a dynamic member.
+- ``parent_task_id``: the task within the parent that launched this one.
+  Display only (only meaningful next to ``parent_job_id``).
+
+All three are NULL for top-level jobs.
 
 Revision ID: 025
 Revises: 024
@@ -30,10 +38,14 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade():
-    """Add parent_job_id (indexed) and parent_task_id to job_info."""
+    """Add root_job_id (indexed), parent_job_id (indexed), parent_task_id."""
     with op.get_context().autocommit_block():
-        # Nullable, no default: NULL is "no parent", for existing jobs and
-        # for any insert that leaves the column out.
+        # Nullable, no default: NULL is "top-level job", for existing jobs
+        # and for any insert that leaves the columns out.
+        db_utils.add_column_to_table_alembic('job_info',
+                                             'root_job_id',
+                                             sa.Integer(),
+                                             index=True)
         db_utils.add_column_to_table_alembic('job_info',
                                              'parent_job_id',
                                              sa.Integer(),

@@ -23,7 +23,7 @@ DEFAULT_MANAGED_JOB_FIELDS = ('job_id', 'task_id', 'workspace', 'job_name',
                               'end_at', 'job_duration', 'recovery_count',
                               'status', 'pool', 'is_primary_in_job_group',
                               'batch_total_batches', 'batch_completed_batches',
-                              'parent_job_id', 'parent_task_id')
+                              'root_job_id', 'parent_job_id', 'parent_task_id')
 
 JOB_CONTROLLER_INDICATOR_FILE = '~/.sky/is_jobs_controller'
 
@@ -85,7 +85,7 @@ JOBS_CLUSTER_NAME_PREFIX_LENGTH = 25
 # job.utils.ManagedJobCodeGen to handle the version update.
 # WARNING: If you update this due to a codegen change, make sure to make the
 # corresponding change in the ManagedJobsService AND bump the SKYLET_VERSION.
-MANAGED_JOBS_VERSION = 25  # add parent_job_id/parent_task_id to job table
+MANAGED_JOBS_VERSION = 25  # add root/parent_job_id, parent_task_id to job table
 
 # Emergency recovery: when the job controller hits an unexpected internal
 # error (e.g. external mutation of the job state, or an unhandled exception

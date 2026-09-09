@@ -4169,7 +4169,7 @@ class ManagedJobCodeGen:
         if managed_job_version < 18 and _fields is not None:
             _fields = [f for f in _fields if f not in _BATCH_FIELDS]
         # Filter out parent-link fields for older controllers (< 25)
-        _PARENT_FIELDS = {{'parent_job_id', 'parent_task_id'}}
+        _PARENT_FIELDS = {{'root_job_id', 'parent_job_id', 'parent_task_id'}}
         if managed_job_version < 25 and _fields is not None:
             _fields = [f for f in _fields if f not in _PARENT_FIELDS]
         if managed_job_version < 9:

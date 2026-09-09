@@ -577,7 +577,8 @@ class ManagedJobsServiceImpl(managed_jobsv1_pb2_grpc.ManagedJobsServiceServicer
                     is_batch=job.get('is_batch'),
                     batch_total_batches=job.get('batch_total_batches'),
                     batch_completed_batches=job.get('batch_completed_batches'),
-                    # Parent link (None for top-level jobs)
+                    # Parent links (None for top-level jobs)
+                    root_job_id=job.get('root_job_id'),
                     parent_job_id=job.get('parent_job_id'),
                     parent_task_id=job.get('parent_task_id'))
                 jobs_info.append(job_info)

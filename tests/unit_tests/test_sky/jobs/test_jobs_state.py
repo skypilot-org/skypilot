@@ -1891,7 +1891,12 @@ class TestParentJobLinks:
     def _new_job(name: str,
                  parent_job_id=None,
                  parent_task_id=None,
+                 root_job_id=None,
                  with_task: bool = True) -> int:
+        # Mirror the launch path: the root is the parent's root, else the
+        # parent itself.
+        if parent_job_id is not None and root_job_id is None:
+            root_job_id = state.get_root_job_id(parent_job_id)
         job_id = state.set_job_info_without_job_id(
             name=name,
             workspace='ws',
@@ -1899,6 +1904,7 @@ class TestParentJobLinks:
             pool=None,
             pool_hash=None,
             user_hash='user1',
+            root_job_id=root_job_id,
             parent_job_id=parent_job_id,
             parent_task_id=parent_task_id)
         if with_task:
@@ -1912,17 +1918,23 @@ class TestParentJobLinks:
     def test_top_level_job_has_no_parent(self, _mock_managed_jobs_db_conn):
         job_id = self._new_job('root')
         assert state.get_parent_job(job_id) == (None, None)
+        # A top-level job is its own root.
+        assert state.get_root_job_id(job_id) == job_id
+        assert not state.get_tree_job_ids(job_id)
         assert not state.get_children_job_ids(job_id)
         assert not state.get_descendant_job_ids([job_id])
 
     def test_unknown_job_has_no_parent(self, _mock_managed_jobs_db_conn):
         assert state.get_parent_job(12345) == (None, None)
+        assert state.get_root_job_id(12345) is None
 
     def test_parent_link_round_trips(self, _mock_managed_jobs_db_conn):
         root = self._new_job('root')
         child = self._new_job('child', parent_job_id=root, parent_task_id=1)
         assert state.get_parent_job(child) == (root, 1)
         assert state.get_children_job_ids(root) == [child]
+        assert state.get_root_job_id(child) == root
+        assert state.get_tree_job_ids(root) == [child]
 
     def test_codegen_set_job_info_persists_parent(self,
                                                   _mock_managed_jobs_db_conn):
@@ -1935,10 +1947,13 @@ class TestParentJobLinks:
                            pool=None,
                            pool_hash=None,
                            user_hash='user1',
+                           root_job_id=root,
                            parent_job_id=root,
                            parent_task_id=0)
         assert state.get_parent_job(900) == (root, 0)
         assert state.get_children_job_ids(root) == [900]
+        assert state.get_root_job_id(900) == root
+        assert state.get_tree_job_ids(root) == [900]
 
     def test_descendants_walk_all_levels(self, _mock_managed_jobs_db_conn):
         root = self._new_job('root')
@@ -1969,13 +1984,26 @@ class TestParentJobLinks:
         assert not state.get_descendant_job_ids([gg1])
         assert not state.get_descendant_job_ids([])
 
+        # Every level carries the same root, so the whole tree is one
+        # indexed query; a grandchild's root is the top, not its parent.
+        assert state.get_root_job_id(gg1) == root
+        assert state.get_root_job_id(g1) == root
+        assert state.get_tree_job_ids(root) == sorted({c1, c2, g1, gg1})
+        assert state.get_tree_job_ids(unrelated) == [unrelated_child]
+        # A non-root node has no tree of its own under root_job_id; its
+        # subtree is the descendant walk.
+        assert not state.get_tree_job_ids(c1)
+        assert state.get_descendant_job_ids([c1]) == [g1, gg1]
+
     def test_queue_returns_parent_fields(self, _mock_managed_jobs_db_conn):
         root = self._new_job('root')
         child = self._new_job('child', parent_job_id=root, parent_task_id=1)
         jobs, _ = state.get_managed_jobs_with_filters(
-            fields=['job_id', 'parent_job_id', 'parent_task_id'])
+            fields=['job_id', 'root_job_id', 'parent_job_id', 'parent_task_id'])
         by_id = {j['job_id']: j for j in jobs}
+        assert by_id[root]['root_job_id'] is None
         assert by_id[root]['parent_job_id'] is None
         assert by_id[root]['parent_task_id'] is None
+        assert by_id[child]['root_job_id'] == root
         assert by_id[child]['parent_job_id'] == root
         assert by_id[child]['parent_task_id'] == 1
