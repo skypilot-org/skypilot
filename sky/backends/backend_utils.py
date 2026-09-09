@@ -2184,27 +2184,40 @@ def check_network_connection():
 async def async_check_network_connection():
     """Check if the network connection is available.
 
-    Tolerates 3 retries as it is observed that connections can fail.
     Uses aiohttp for async HTTP requests.
+
+    `trust_env=True` so this reads the proxy environment, which is what its
+    synchronous twin above does implicitly: `requests.Session` trusts the
+    environment by default, aiohttp does not. Without it, a deployment whose
+    outbound HTTPS goes through a proxy fails this check forever while the
+    sync version passes, and every caller that gates on it stalls -- the
+    managed job controller checks it before each job-status poll, so a job
+    whose task has already succeeded stays RUNNING indefinitely, logging
+    "Network is not available" once per attempt.
     """
-    # Create a session with retry logic
     timeout = ClientTimeout(total=15)
     connector = TCPConnector(limit=1)  # Limit to 1 connection at a time
 
     async with aiohttp.ClientSession(timeout=timeout,
-                                     connector=connector) as session:
-        for i, ip in enumerate(_TEST_IP_LIST):
+                                     connector=connector,
+                                     trust_env=True) as session:
+        last_error: Optional[Exception] = None
+        for ip in _TEST_IP_LIST:
             try:
                 async with session.head(ip) as response:
                     if response.status < 400:  # Any 2xx or 3xx status is good
                         return
             except (aiohttp.ClientError, asyncio.TimeoutError) as e:
-                if i == len(_TEST_IP_LIST) - 1:
-                    raise exceptions.NetworkError(
-                        'Could not refresh the cluster. '
-                        'Network seems down.') from e
-                # If not the last IP, continue to try the next one
+                last_error = e
                 continue
+        # Raised whether the last address failed to answer or answered with an
+        # error status. Returning success on a >= 400 from the last address --
+        # which the previous `i == len - 1` form did, since a bad status is not
+        # an exception -- told the caller the network was fine when it had just
+        # been refused, and gating a job-status poll on that is the false alarm
+        # this check exists to prevent.
+        raise exceptions.NetworkError('Could not refresh the cluster. '
+                                      'Network seems down.') from last_error
 
 
 # Kubeconfig assembly may rewrite a context's cluster/user `name` fields to
