@@ -2064,6 +2064,11 @@ def _slurm_allocations(
     "why did this wait six hours" answerable after the fact; without it the
     timeline would only ever be visible while the job was still running.
     """
+    # Once a cluster record is gone there is no cheap way to know which cloud
+    # it ran on, so the fallback below would otherwise run for every finished
+    # job on every cloud. A deployment with no Slurm cluster configured skips
+    # it outright: reading ~/.slurm/config is a stat, the lookup is not.
+    slurm_configured: Optional[bool] = None
     allocations: List[_SlurmAllocation] = []
     for cluster_name, task_id in clusters:
         try:
@@ -2083,6 +2088,15 @@ def _slurm_allocations(
                 continue
         if record is not None:
             # The cluster is there and is not on Slurm.
+            continue
+        if slurm_configured is None:
+            try:
+                slurm_configured = bool(
+                    clouds.Slurm.existing_allowed_clusters(silent=True))
+            except Exception as e:  # pylint: disable=broad-except
+                logger.debug(f'Could not list Slurm clusters: {e}')
+                slurm_configured = False
+        if not slurm_configured:
             continue
         allocations.extend(_recorded_allocations(cluster_name, task_id))
     return allocations
@@ -2110,8 +2124,12 @@ def _recorded_allocations(cluster_name: str,
         ids = by_cluster.setdefault(match.group('cluster'), [])
         if match.group('job_id') not in ids:
             ids.append(match.group('job_id'))
+    # Events arrive newest first; the ids are reversed so the *oldest*
+    # attempt is read first, because the deadline can cut the read short and
+    # the early attempt is the one a "why did this wait so long" question is
+    # about.
     return [
-        _SlurmAllocation(slurm_cluster, None, ids, task_id)
+        _SlurmAllocation(slurm_cluster, None, list(reversed(ids)), task_id)
         for slurm_cluster, ids in by_cluster.items()
     ]
 

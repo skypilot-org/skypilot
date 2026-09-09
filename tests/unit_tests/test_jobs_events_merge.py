@@ -751,12 +751,31 @@ def test_a_torn_down_cluster_resolves_from_its_recorded_allocations(
             },
             _alloc_event('17269', at=100),
         ])
+    monkeypatch.setattr(clouds.Slurm, 'existing_allowed_clusters',
+                        classmethod(lambda cls, silent=False: ['dev-slurm']))
     allocations = core._slurm_allocations([('gone-cluster', 0)])
-    # Both attempts, oldest first, under the one Slurm cluster; the
+    # Both attempts under the one Slurm cluster, oldest first so a deadline
+    # cuts the newest rather than the one being asked about; the
     # pending-reason event is not mistaken for an allocation.
     assert allocations == [
-        core._SlurmAllocation('dev-slurm', None, ['17300', '17269'], 0)
+        core._SlurmAllocation('dev-slurm', None, ['17269', '17300'], 0)
     ]
+
+
+def test_no_slurm_configured_skips_the_allocation_lookup(monkeypatch):
+    """The fallback cannot know which cloud a reclaimed cluster ran on, so
+    without this gate every finished job on every cloud pays for it."""
+    monkeypatch.setattr(global_user_state, 'get_cluster_from_name',
+                        lambda name, **kwargs: None)
+    monkeypatch.setattr(clouds.Slurm, 'existing_allowed_clusters',
+                        classmethod(lambda cls, silent=False: []))
+
+    def _should_not_be_called(*args, **kwargs):
+        raise AssertionError('no Slurm cluster is configured')
+
+    monkeypatch.setattr(global_user_state, 'get_cluster_events_by_name',
+                        _should_not_be_called)
+    assert core._slurm_allocations([('gone-cluster', 0)]) == []
 
 
 def test_a_live_cluster_record_wins_over_the_recorded_events(monkeypatch):
@@ -782,6 +801,8 @@ def test_a_recorded_allocation_is_read_by_id_not_by_name(monkeypatch):
                         lambda **kwargs: [])
     monkeypatch.setattr(managed_job_state, 'get_managed_job_tasks',
                         lambda job_id: [dict(_task(), submitted_at=50)])
+    monkeypatch.setattr(clouds.Slurm, 'existing_allowed_clusters',
+                        classmethod(lambda cls, silent=False: ['dev-slurm']))
     monkeypatch.setattr(global_user_state, 'get_cluster_from_name',
                         lambda name, **kwargs: None)
     monkeypatch.setattr(global_user_state, 'get_cluster_events_by_name',

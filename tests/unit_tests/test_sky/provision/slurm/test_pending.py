@@ -665,3 +665,15 @@ def test_a_running_job_is_not_counted_as_ahead():
 def test_an_unparseable_id_at_the_same_priority_is_not_guessed():
     mine = {'job_id': '17269', 'partition': 'dev', 'priority': '1'}
     assert sp.pending_ahead([_queued('weird', 1, partition='dev')], mine) == 0
+
+
+def test_two_elements_of_one_array_do_not_count_each_other():
+    """A known limit, locked in deliberately. Both elements collapse to the
+    same base id, so neither counts the other as ahead -- an element with a
+    late index can therefore under-report. Ordering array elements against
+    each other needs the index, which squeue does not give here; before the
+    tie-break existed no tie counted at all, so this is unchanged behaviour
+    rather than a regression."""
+    mine = {'job_id': '17221_9', 'partition': 'dev', 'priority': '1'}
+    sweep = [_queued('17221_2', 1, partition='dev')]
+    assert sp.pending_ahead(sweep, mine) == 0
