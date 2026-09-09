@@ -1882,3 +1882,100 @@ class TestInfraFilterCodegenCompatibility:
         with pytest.raises(RuntimeError,
                            match=jobs_utils.INFRA_FILTER_UNSUPPORTED_MARKER):
             self._run_branch(code, one_older)
+
+
+class TestParentJobLinks:
+    """parent_job_id / parent_task_id persistence and descendant walks."""
+
+    @staticmethod
+    def _new_job(name: str,
+                 parent_job_id=None,
+                 parent_task_id=None,
+                 with_task: bool = True) -> int:
+        job_id = state.set_job_info_without_job_id(
+            name=name,
+            workspace='ws',
+            entrypoint='ep',
+            pool=None,
+            pool_hash=None,
+            user_hash='user1',
+            parent_job_id=parent_job_id,
+            parent_task_id=parent_task_id)
+        if with_task:
+            state.set_pending(job_id,
+                              task_id=0,
+                              task_name=name,
+                              resources_str='{}',
+                              metadata='{}')
+        return job_id
+
+    def test_top_level_job_has_no_parent(self, _mock_managed_jobs_db_conn):
+        job_id = self._new_job('root')
+        assert state.get_parent_job(job_id) == (None, None)
+        assert not state.get_children_job_ids(job_id)
+        assert not state.get_descendant_job_ids([job_id])
+
+    def test_unknown_job_has_no_parent(self, _mock_managed_jobs_db_conn):
+        assert state.get_parent_job(12345) == (None, None)
+
+    def test_parent_link_round_trips(self, _mock_managed_jobs_db_conn):
+        root = self._new_job('root')
+        child = self._new_job('child', parent_job_id=root, parent_task_id=1)
+        assert state.get_parent_job(child) == (root, 1)
+        assert state.get_children_job_ids(root) == [child]
+
+    def test_codegen_set_job_info_persists_parent(self,
+                                                  _mock_managed_jobs_db_conn):
+        root = self._new_job('root')
+        # The remote-controller (codegen) path supplies the job id itself.
+        state.set_job_info(job_id=900,
+                           name='child',
+                           workspace='ws',
+                           entrypoint='ep',
+                           pool=None,
+                           pool_hash=None,
+                           user_hash='user1',
+                           parent_job_id=root,
+                           parent_task_id=0)
+        assert state.get_parent_job(900) == (root, 0)
+        assert state.get_children_job_ids(root) == [900]
+
+    def test_descendants_walk_all_levels(self, _mock_managed_jobs_db_conn):
+        root = self._new_job('root')
+        c1 = self._new_job('c1', parent_job_id=root, parent_task_id=1)
+        c2 = self._new_job('c2', parent_job_id=root, parent_task_id=1)
+        g1 = self._new_job('g1', parent_job_id=c1, parent_task_id=0)
+        gg1 = self._new_job('gg1', parent_job_id=g1, parent_task_id=0)
+        unrelated = self._new_job('other')
+        unrelated_child = self._new_job('other-child', parent_job_id=unrelated)
+
+        descendants = state.get_descendant_job_ids([root])
+        # Excludes the input, includes every level, no unrelated jobs.
+        assert set(descendants) == {c1, c2, g1, gg1}
+        assert root not in descendants
+        assert unrelated not in descendants
+        assert unrelated_child not in descendants
+        # Breadth-first: children before grandchildren.
+        assert descendants.index(c1) < descendants.index(g1)
+        assert descendants.index(g1) < descendants.index(gg1)
+
+        # Multiple roots, overlapping subtrees: each id at most once, and
+        # an input id is never reported as its own descendant.
+        both = state.get_descendant_job_ids([root, c1])
+        assert sorted(both) == sorted({c2, g1, gg1})
+        assert len(both) == len(set(both))
+
+        # A leaf has no descendants; an empty input has none.
+        assert not state.get_descendant_job_ids([gg1])
+        assert not state.get_descendant_job_ids([])
+
+    def test_queue_returns_parent_fields(self, _mock_managed_jobs_db_conn):
+        root = self._new_job('root')
+        child = self._new_job('child', parent_job_id=root, parent_task_id=1)
+        jobs, _ = state.get_managed_jobs_with_filters(
+            fields=['job_id', 'parent_job_id', 'parent_task_id'])
+        by_id = {j['job_id']: j for j in jobs}
+        assert by_id[root]['parent_job_id'] is None
+        assert by_id[root]['parent_task_id'] is None
+        assert by_id[child]['parent_job_id'] == root
+        assert by_id[child]['parent_task_id'] == 1
