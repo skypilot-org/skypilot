@@ -649,6 +649,7 @@ SKIPPED_CLIENT_OVERRIDE_KEYS: List[Tuple[str, ...]] = [
     # Slurm submit identity and cluster settings are managed server-side.
     ('slurm', 'cluster_configs'),
     ('slurm', 'submit_as_user'),
+    ('slurm', 'username_map'),
 ]
 
 # Constants for Azure blob storage

@@ -1865,6 +1865,17 @@ _CONTEXT_CONFIG_SCHEMA_KUBERNETES = {
     },
 }
 
+_SLURM_USERNAME_MAP_SCHEMA = {
+    'type': 'object',
+    'propertyNames': {
+        'minLength': 1
+    },
+    'additionalProperties': {
+        'type': 'string',
+        'pattern': '^[a-z_][a-z0-9_.-]*$'
+    }
+}
+
 
 def get_config_schema():
     # pylint: disable=import-outside-toplevel
@@ -2226,6 +2237,7 @@ def get_config_schema():
                 'submit_as_user': {
                     'type': 'boolean',
                 },
+                'username_map': (_SLURM_USERNAME_MAP_SCHEMA),
                 'pricing': _PRICING_SCHEMA,
                 'sbatch_options': _SBATCH_OPTIONS_SCHEMA,
                 'quota': _SLURM_QUOTA_SCHEMA,
@@ -2273,6 +2285,11 @@ def get_config_schema():
                             },
                             'submit_as_user': {
                                 'type': 'boolean',
+                            },
+                            'username_map': (_SLURM_USERNAME_MAP_SCHEMA),
+                            'default_service_account_user': {
+                                'type': 'string',
+                                'pattern': '^[a-z_][a-z0-9_.-]*$'
                             },
                             # The Prometheus this cluster's GPU metrics are
                             # federated from.

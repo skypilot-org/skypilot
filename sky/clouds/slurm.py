@@ -295,7 +295,7 @@ class Slurm(clouds.Cloud):
                     partitions = [p for p in partitions if p == zone]
                 zones = [clouds.Zone(p) for p in partitions]
             except Exception as e:  # pylint: disable=broad-except
-                logger.debug(f'Failed to get partitions for {cluster}: {e}')
+                logger.warning(f'Failed to get partitions for {cluster}: {e}')
                 zones = []
 
             r = clouds.Region(cluster)
