@@ -621,3 +621,158 @@ def test_record_rejection_labels_an_http_status_enum_by_number():
                    reason='auth_db_timeout',
                    status='503',
                    kind='websocket') == 1.0
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# Transport support for the `websocket.http.response` extension. The
+# extension is optional in the ASGI spec: a server may omit `extensions`,
+# set it to None, or advertise other extensions only. Every such scope must
+# take the pre-extension close path; none may raise.
+# ─────────────────────────────────────────────────────────────────────────
+
+
+@pytest.mark.parametrize(
+    'extensions',
+    [
+        # Key absent altogether (what `_make_websocket_scope` builds).
+        None,
+        {},
+        {
+            'http.response.push': {}
+        },
+    ],
+    ids=['absent', 'empty', 'other-extensions-only'])
+def test_extension_support_is_detected_only_when_advertised(extensions):
+    scope = _make_websocket_scope()
+    if extensions is not None:
+        scope['extensions'] = extensions
+    assert not middleware_utils.supports_websocket_http_response(scope)
+    assert middleware_utils.supports_websocket_http_response(
+        _scope_with_extension())
+
+
+def test_extension_support_tolerates_a_none_extensions_value():
+    scope = _make_websocket_scope(extensions=None)
+    assert not middleware_utils.supports_websocket_http_response(scope)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('extensions', [
+    {},
+    {
+        'http.response.push': {}
+    },
+    None,
+],
+                         ids=['empty', 'other-extensions-only', 'none'])
+@pytest.mark.parametrize('behavior, close_frame', [
+    ('unavailable', {
+        'type': 'websocket.close',
+        'code': 1011,
+        'reason': 'Internal Server Error',
+    }),
+    ('unauthorized', {
+        'type': 'websocket.close',
+        'code': 4401,
+        'reason': 'Unauthorized',
+    }),
+    ('forbidden', {
+        'type': 'websocket.close',
+        'code': 4403,
+        'reason': 'Forbidden',
+    }),
+    ('error', {
+        'type': 'websocket.close',
+        'code': 1011,
+        'reason': 'Internal Server Error',
+    }),
+    ('redirect', {
+        'type': 'websocket.close',
+        'code': 4401,
+        'reason': 'Unauthorized',
+    }),
+])
+async def test_a_scope_without_the_extension_takes_the_close_path(
+        extensions, behavior, close_frame):
+    """Servers render a pre-accept close as an empty HTTP 403; this is the
+    behaviour every client saw before the extension was used."""
+    app_called = False
+
+    async def app(scope, receive, send):
+        del scope, receive, send
+        nonlocal app_called
+        app_called = True
+
+    middleware = _make_middleware(app, behavior=behavior)
+    scope = _make_websocket_scope(extensions=extensions)
+    sent = await _run(middleware, scope)
+
+    assert not app_called
+    assert sent == [close_frame]
+    # The refusal is still counted by decision.
+    assert _sample(
+        metrics_utils.SKY_APISERVER_WEBSOCKET_HANDSHAKE_REJECTIONS_TOTAL) == 1.0
+
+
+class _StatusMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
+    """Rejects every request with a configurable status."""
+
+    def __init__(self, app, status_code):
+        super().__init__(app)
+        self.status_code = status_code
+
+    async def dispatch(self, request, call_next):
+        del call_next
+        middleware_utils.mark_rejection(
+            request, middleware_utils.REJECT_REASON_FORBIDDEN)
+        return fastapi.responses.JSONResponse(status_code=self.status_code,
+                                              headers={'Retry-After': '1'},
+                                              content={'detail': 'no'})
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('status_code, expected', [
+    (460, 403),
+    (499, 403),
+    (599, 500),
+    (429, 429),
+    (503, 503),
+])
+async def test_a_status_the_server_cannot_render_is_replaced(
+        status_code, expected):
+    """uvicorn's `websockets` implementation looks the status up in
+    http.HTTPStatus and raises on a non-member; the server then logs a
+    traceback and answers 500. Send a status every implementation renders."""
+    middleware = middleware_utils.websocket_aware(_StatusMiddleware)(
+        lambda *a: None, status_code=status_code)
+    scope = _scope_with_extension()
+    sent = await _run(middleware, scope)
+
+    assert [m['type'] for m in sent] == [
+        'websocket.http.response.start', 'websocket.http.response.body'
+    ]
+    assert sent[0]['status'] == expected
+    assert isinstance(sent[0]['status'], int)
+    assert http.HTTPStatus(sent[0]['status'])  # renderable everywhere
+    # Body and the forwardable headers are kept whatever the status.
+    headers = dict(sent[0]['headers'])
+    assert headers[b'content-type'] == b'application/json'
+    assert headers[b'retry-after'] == b'1'
+    assert sent[1]['body'] == b'{"detail":"no"}'
+    assert middleware_utils.get_rejection_reason(scope) == \
+        middleware_utils.REJECT_REASON_FORBIDDEN
+
+
+@pytest.mark.parametrize('status_code, expected', [
+    (401, 401),
+    (403, 403),
+    (404, 404),
+    (429, 429),
+    (500, 500),
+    (502, 502),
+    (503, 503),
+    (460, 403),
+    (599, 500),
+])
+def test_renderable_status(status_code, expected):
+    assert middleware_utils._renderable_status(status_code) == expected  # pylint: disable=protected-access

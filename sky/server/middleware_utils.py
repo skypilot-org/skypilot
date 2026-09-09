@@ -197,6 +197,42 @@ class WebSocketDecision(enum.Enum):
 _REJECTION_HEADERS_TO_FORWARD = frozenset(
     ('content-type', 'retry-after', 'www-authenticate'))
 
+# ASGI extension through which a server lets the application answer a
+# WebSocket handshake with an arbitrary HTTP response instead of a 101 or a
+# close. uvicorn advertises it with every WebSocket implementation it ships
+# (`websockets`, `wsproto`, `websockets-sansio`); so does Starlette's
+# TestClient.
+_WS_HTTP_RESPONSE_EXTENSION = 'websocket.http.response'
+
+
+def supports_websocket_http_response(scope: starlette.types.Scope) -> bool:
+    """Whether the server accepts `websocket.http.response.*` messages.
+
+    `extensions` is optional in the ASGI spec; a server may omit the key or
+    set it to None. Both mean "not supported".
+    """
+    extensions = scope.get('extensions') or {}
+    return _WS_HTTP_RESPONSE_EXTENSION in extensions
+
+
+def _renderable_status(status_code: int) -> int:
+    """A status the server can put on a rejected handshake.
+
+    uvicorn's default `websockets` implementation looks the status up in
+    `http.HTTPStatus`; a code that is not a member (460, 599, ...) makes the
+    lookup raise inside the server, which then logs a traceback and answers
+    with a bare 500. Such a code carries no meaning a WebSocket client could
+    act on anyway, so send what the client would have seen before the
+    extension was used (an empty 403) for a 4xx, and a plain 500 for a 5xx.
+    """
+    try:
+        http.HTTPStatus(status_code)
+    except ValueError:
+        if status_code < 500:
+            return int(http.HTTPStatus.FORBIDDEN)
+        return int(http.HTTPStatus.INTERNAL_SERVER_ERROR)
+    return int(status_code)
+
 
 def websocket_aware(
         middleware_cls: Type[starlette.middleware.base.BaseHTTPMiddleware]):
@@ -215,8 +251,10 @@ def websocket_aware(
     handshake is answered with the HTTP middleware's real status code and
     JSON body, so a client sees e.g. ``503 {"detail": "...exhausted..."}``
     and can retry, instead of a bare 403 that reads as "log in again".
-    Without the extension the connection is closed with 4401 / 4403 / 1011
-    as before; servers render any pre-accept close as an empty HTTP 403.
+    Without the extension (key absent, None, or listing other extensions
+    only) the connection is closed with 4401 / 4403 / 1011 as before; servers
+    render any pre-accept close as an empty HTTP 403. A status the server
+    cannot render is replaced by one it can (see `_renderable_status`).
     Either way a refused handshake is counted by decision in
     `sky_apiserver_websocket_handshake_rejections_total{path,outcome}`; the
     metrics layer records the client-visible status and the stamped reason.
@@ -261,7 +299,7 @@ def websocket_aware(
             # counter must not change what the client gets.
             record_safely('WebSocket handshake rejection',
                           self._count_rejection, scope, decision)
-            if 'websocket.http.response' in scope.get('extensions', {}):
+            if supports_websocket_http_response(scope):
                 await self._reject_with_http_response(send, response)
                 return
             if decision == WebSocketDecision.UNAUTHORIZED:
@@ -295,14 +333,15 @@ def websocket_aware(
                 send: starlette.types.Send,
                 response: Optional[fastapi.Response]) -> None:
             """Reject the handshake with the middleware's real HTTP response."""
+            status_code: int
             if response is None:
                 # The middleware raised; mirror what Starlette's error handler
                 # would have sent for an HTTP request.
-                status_code = http.HTTPStatus.INTERNAL_SERVER_ERROR
+                status_code = int(http.HTTPStatus.INTERNAL_SERVER_ERROR)
                 body = b'{"detail":"Internal Server Error"}'
                 headers = [(b'content-type', b'application/json')]
             elif 400 <= response.status_code < 600:
-                status_code = response.status_code
+                status_code = _renderable_status(response.status_code)
                 body = bytes(getattr(response, 'body', b'') or b'')
                 headers = [(k.encode('latin-1'), v.encode('latin-1'))
                            for k, v in response.headers.items()
@@ -317,7 +356,7 @@ def websocket_aware(
                 # "HTTP 307"). Say what it needs to do instead: authenticate.
                 # This also keeps the handshake metric's client_status label
                 # to real rejection statuses.
-                status_code = http.HTTPStatus.UNAUTHORIZED
+                status_code = int(http.HTTPStatus.UNAUTHORIZED)
                 body = b'{"detail":"Authentication required"}'
                 headers = [(b'content-type', b'application/json')]
             await send({
