@@ -39,10 +39,8 @@ def _get_df():
             ])
         else:
             df = df[df['InstanceType'].notna()]
-            if 'AcceleratorName' in df.columns:
-                df = df[df['AcceleratorName'].notna()]
-                df = df.assign(AcceleratorName=df['AcceleratorName'].astype(
-                    str).str.strip())
+            # Keep CPU rows (empty AcceleratorName). Do not stringify NaN to
+            # 'nan'; Resources would infer {'nan': 0}.
             _df = df.reset_index(drop=True)
     return _df
 
