@@ -8,6 +8,7 @@ import pathlib
 import threading
 import time
 from unittest import mock
+import zipfile
 
 import fastapi
 import prometheus_client as prom
@@ -1790,3 +1791,99 @@ async def test_receive_chunks_skips_the_directory_listing_for_one_chunk(
     assert result is None
     assert listed == []
     assert (tmp_path / 'upload.zip').read_bytes() == b'chunk'
+
+
+def _chunks_for(total_bytes: int) -> int:
+    """Chunk count a client would declare for an upload of *total_bytes*."""
+    return -(-total_bytes // server_constants.UPLOAD_CHUNK_BYTES)
+
+
+@pytest.mark.asyncio
+async def test_receive_chunks_rejects_a_chunk_group_over_the_total_cap(
+        tmp_path):
+    """The cap is checked from the declared chunk count, before any write.
+
+    The upload and its extraction are not synchronous, so the space free at
+    extraction time cannot be known here; the cap is absolute.
+    """
+    over_cap = _chunks_for(server_constants.MAX_UPLOAD_TOTAL_BYTES) + 1
+
+    with pytest.raises(fastapi.HTTPException) as exc_info:
+        await server._receive_and_assemble_chunks(base_dir=tmp_path,
+                                                  zip_name='upload',
+                                                  request=_FakeUploadRequest(),
+                                                  chunk_index=0,
+                                                  total_chunks=over_cap,
+                                                  extract=False,
+                                                  assemble=False)
+
+    assert exc_info.value.status_code == 413
+    assert list(tmp_path.iterdir()) == []
+
+
+@pytest.mark.asyncio
+async def test_receive_chunks_accepts_a_chunk_group_at_the_total_cap(tmp_path):
+    at_cap = server_constants.MAX_UPLOAD_TOTAL_BYTES \
+        // server_constants.UPLOAD_CHUNK_BYTES
+
+    result = await server._receive_and_assemble_chunks(
+        base_dir=tmp_path,
+        zip_name='upload',
+        request=_FakeUploadRequest(),
+        chunk_index=0,
+        total_chunks=at_cap,
+        extract=False,
+        assemble=False)
+
+    assert result is not None
+    assert result.status == api_responses.UploadStatus.UPLOADING.value
+
+
+def _write_zip(path: pathlib.Path, member_bytes: int) -> None:
+    with zipfile.ZipFile(path, 'w') as zipf:
+        zipf.writestr('payload.bin', b'\0' * member_bytes)
+
+
+@pytest.mark.asyncio
+async def test_unzip_refuses_an_extraction_that_would_not_fit(
+        tmp_path, monkeypatch):
+    zip_path = tmp_path / 'upload.zip'
+    _write_zip(zip_path, 4096)
+    monkeypatch.setattr(server.local_disk, 'available_bytes', lambda: 1024)
+    target = tmp_path / 'out'
+    target.mkdir()
+
+    with pytest.raises(fastapi.HTTPException) as exc_info:
+        await server.unzip_file(zip_path, target)
+
+    assert exc_info.value.status_code == 507
+    assert list(target.iterdir()) == []
+    # The zip is garbage once refused, and the existing cleanup removes it.
+    assert not zip_path.exists()
+
+
+@pytest.mark.asyncio
+async def test_unzip_proceeds_when_the_extraction_fits(tmp_path, monkeypatch):
+    zip_path = tmp_path / 'upload.zip'
+    _write_zip(zip_path, 4096)
+    monkeypatch.setattr(server.local_disk, 'available_bytes', lambda: 1024**3)
+    target = tmp_path / 'out'
+    target.mkdir()
+
+    await server.unzip_file(zip_path, target)
+
+    assert (target / 'payload.bin').stat().st_size == 4096
+
+
+@pytest.mark.asyncio
+async def test_unzip_proceeds_when_no_budget_is_declared(tmp_path, monkeypatch):
+    """With no budget exposed there is nothing to check against."""
+    zip_path = tmp_path / 'upload.zip'
+    _write_zip(zip_path, 4096)
+    monkeypatch.setattr(server.local_disk, 'available_bytes', lambda: None)
+    target = tmp_path / 'out'
+    target.mkdir()
+
+    await server.unzip_file(zip_path, target)
+
+    assert (target / 'payload.bin').stat().st_size == 4096

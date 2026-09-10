@@ -345,3 +345,38 @@ def test_a_root_inside_another_root_is_measured_once(tmp_path, monkeypatch):
 
     assert list(snapshot.roots) == ['outer']
     assert snapshot.roots['outer'].files == 1
+
+
+def test_available_is_absent_without_a_declared_budget(roots):
+    present, _ = roots
+    _write(str(present / 'a.log'), 4096)
+
+    assert local_disk.available_bytes() is None
+
+
+def test_available_counts_a_request_as_well_as_a_limit(roots, monkeypatch):
+    """A guard measures against whatever the deployment declared.
+
+    Unlike the published headroom gauge, which reports only an enforced
+    limit, refusing work that would overrun a declared request is correct
+    on its own terms.
+    """
+    present, _ = roots
+    _write(str(present / 'a.log'), 64 * 1024)
+    used = local_disk.scan().used_bytes
+
+    monkeypatch.setenv(local_disk.EPHEMERAL_STORAGE_REQUEST_ENV_VAR,
+                       str(1024**3))
+    assert local_disk.available_bytes() == 1024**3 - used
+
+    monkeypatch.setenv(local_disk.EPHEMERAL_STORAGE_LIMIT_ENV_VAR,
+                       str(2 * 1024**3))
+    assert local_disk.available_bytes() == 2 * 1024**3 - used
+
+
+def test_available_never_goes_negative(roots, monkeypatch):
+    present, _ = roots
+    _write(str(present / 'a.log'), 64 * 1024)
+    monkeypatch.setenv(local_disk.EPHEMERAL_STORAGE_LIMIT_ENV_VAR, '1')
+
+    assert local_disk.available_bytes() == 0

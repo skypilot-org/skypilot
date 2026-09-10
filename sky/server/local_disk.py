@@ -257,6 +257,20 @@ def budget() -> Optional[Budget]:
     return None
 
 
+def available_bytes() -> Optional[int]:
+    """Bytes still writable before this container reaches its budget.
+
+    Measures against the declared allowance -- the limit if there is one,
+    otherwise the request -- so a caller can refuse work that would not
+    fit. Returns None when neither field is exposed, which means the
+    caller has no budget to check against.
+    """
+    declared = budget()
+    if declared is None:
+        return None
+    return max(declared.total_bytes - scan().used_bytes, 0)
+
+
 def _count_unreadable(error: OSError) -> int:
     """Returns 1 if *error* hides bytes from the walk, 0 if it does not."""
     return 0 if error.errno == errno.ENOENT else 1

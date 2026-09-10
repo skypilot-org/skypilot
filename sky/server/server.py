@@ -68,6 +68,7 @@ from sky.server import constants as server_constants
 from sky.server import csp_utils
 from sky.server import daemons
 from sky.server import download_utils
+from sky.server import local_disk
 from sky.server import loop_stall
 from sky.server import metrics
 from sky.server import middleware_utils
@@ -1792,6 +1793,25 @@ def _publish_chunk(zip_file_path: pathlib.Path, final_path: pathlib.Path,
     return set(f'part{i}' for i in range(total_chunks)) - existing
 
 
+def _gb(num_bytes: int) -> str:
+    return f'{num_bytes / 1000 ** 3:.1f} GB'
+
+
+def _check_extraction_fits(members: List[zipfile.ZipInfo]) -> None:
+    """Raises if extracting *members* would exhaust the local-disk budget."""
+    available = local_disk.available_bytes()
+    if available is None:
+        return
+    needed = sum(member.file_size for member in members)
+    if needed > available:
+        raise fastapi.HTTPException(
+            status_code=507,
+            detail=(f'Extracting this upload needs {_gb(needed)} of local '
+                    f'disk, but only {_gb(available)} of the API server\'s '
+                    'ephemeral-storage budget is left. Upload fewer or '
+                    'smaller files.'))
+
+
 async def _receive_and_assemble_chunks(
     base_dir: pathlib.Path,
     zip_name: str,
@@ -1828,6 +1848,14 @@ async def _receive_and_assemble_chunks(
         raise ValueError(
             f'Invalid total_chunks: {total_chunks}. Please use a valid integer.'
         )
+    declared_bytes = total_chunks * server_constants.UPLOAD_CHUNK_BYTES
+    if declared_bytes > server_constants.MAX_UPLOAD_TOTAL_BYTES:
+        raise fastapi.HTTPException(
+            status_code=413,
+            detail=(
+                f'Upload of {_gb(declared_bytes)} exceeds the '
+                f'{_gb(server_constants.MAX_UPLOAD_TOTAL_BYTES)} limit on a '
+                'single upload. Upload fewer or smaller files.'))
     # Write chunk to a unique private path first, so concurrent uploads for
     # a same blob does not interleave with each other.
     if total_chunks == 1:
@@ -2063,7 +2091,9 @@ async def unzip_file(zip_file_path: pathlib.Path,
     def _do_unzip() -> None:
         try:
             with zipfile.ZipFile(zip_file_path, 'r') as zipf:
-                for member in zipf.infolist():
+                members = zipf.infolist()
+                _check_extraction_fits(members)
+                for member in members:
                     # Determine the new path
                     original_path = os.path.normpath(member.filename)
                     new_path = client_file_mounts_dir / original_path.lstrip(
@@ -2117,6 +2147,10 @@ async def unzip_file(zip_file_path: pathlib.Path,
             raise fastapi.HTTPException(
                 status_code=400,
                 detail=f'Invalid zip file: {common_utils.format_exception(e)}')
+        except fastapi.HTTPException:
+            # Keep a deliberate status code; the handler below would
+            # rewrite it to a 500.
+            raise
         except Exception as e:
             logger.error(f'Error unzipping file: {zip_file_path}')
             raise fastapi.HTTPException(
