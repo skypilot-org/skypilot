@@ -1017,7 +1017,11 @@ async def schedule_on_boot_check_async():
 @contextlib.asynccontextmanager
 async def lifespan(app: fastapi.FastAPI):  # pylint: disable=redefined-outer-name
     """FastAPI lifespan context manager."""
-    del app  # unused
+    if metrics_utils.METRICS_ENABLED:
+        # The metrics middleware only sees middleware-produced responses from
+        # the outermost position. Checked here, where the stack is final and
+        # plugin middlewares are registered, not just in the unit test.
+        metrics.warn_unless_outermost(app)
 
     # Startup: Run background tasks. Delete any persisted daemon rows whose
     # ids are no longer in INTERNAL_REQUEST_DAEMONS first (daemon renamed /
@@ -1302,8 +1306,10 @@ app.add_middleware(BearerTokenMiddleware)
 # middleware above.
 app.add_middleware(InitializeRequestAuthUserMiddleware)
 app.add_middleware(RequestIDMiddleware)
-# SecurityHeadersMiddleware is the outermost middleware to ensure security
-# headers (CSP, X-Content-Type-Options, etc.) are added to all responses.
+# SecurityHeadersMiddleware is the outermost middleware that touches a
+# response, so its security headers (CSP, X-Content-Type-Options, etc.) are
+# added to all of them. The metrics middleware below is registered outside it
+# but only observes; it neither adds nor removes headers.
 app.add_middleware(SecurityHeadersMiddleware)
 
 # Load plugins after all the middlewares are added, to keep the core

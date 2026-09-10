@@ -22,6 +22,7 @@ from unittest import mock
 import fastapi
 from fastapi.testclient import TestClient
 import pytest
+import starlette.middleware
 import starlette.middleware.base
 from starlette.websockets import WebSocketDisconnect
 
@@ -343,3 +344,177 @@ def test_the_real_server_registers_the_metrics_middleware_outermost():
     assert names[0] == 'PrometheusMiddleware', names
     # ...and nothing else in the stack is a second copy of it.
     assert names.count('PrometheusMiddleware') == 1, names
+
+
+import starlette.middleware
+
+
+def _break(target: str):
+    """Make one recording call site raise."""
+    return mock.patch(target, side_effect=RuntimeError('multiproc dir full'))
+
+
+@pytest.fixture
+def recording_log():
+    """A fresh rate limiter, so failure counts are per test."""
+    original = middleware_utils._recording_failure_log  # pylint: disable=protected-access
+    fresh = middleware_utils.RecordingFailureLog()
+    middleware_utils._recording_failure_log = fresh  # pylint: disable=protected-access
+    yield fresh
+    middleware_utils._recording_failure_log = original  # pylint: disable=protected-access
+
+
+@pytest.mark.parametrize('broken', [
+    'sky.metrics.utils.SKY_APISERVER_REQUESTS_TOTAL.labels',
+    'sky.metrics.utils.SKY_APISERVER_REQUESTS_BY_USER_TOTAL.labels',
+    'sky.metrics.utils.SKY_APISERVER_REQUEST_DURATION_SECONDS.labels',
+    'sky.metrics.utils.SKY_APISERVER_REQUEST_REJECTIONS_TOTAL.labels',
+])
+def test_a_recording_failure_never_reaches_the_client(broken, recording_log):
+    """This layer is outermost, so it sees 100% of responses: a fault while
+    recording must not turn a served request into a 500. Compared against the
+    same requests with recording healthy, byte for byte."""
+    app = _app()
+    failure = exceptions.ConcurrentWorkerExhaustedError('32 of 32')
+
+    def exchange():
+        client = _client(app)
+        ok = client.get('/status', headers=_AUTH_HEADER)
+        with _broken_auth(failure):
+            rejected = client.get('/status', headers=_AUTH_HEADER)
+        return [
+            (r.status_code, r.content, dict(r.headers)) for r in (ok, rejected)
+        ]
+
+    with _healthy_auth():
+        baseline = exchange()
+    with mock.patch.object(middleware_utils.logger, 'warning'):
+        with _break(broken):
+            with _healthy_auth():
+                faulted = exchange()
+
+    for (want, got) in zip(baseline, faulted):
+        assert want[0] == got[0]
+        assert want[1] == got[1]
+        # `date` moves between the two exchanges; everything else must not.
+        assert {k: v for k, v in want[2].items() if k != 'date'} == \
+               {k: v for k, v in got[2].items() if k != 'date'}
+    assert recording_log.failures > 0, 'the failure was not even noticed'
+
+
+def test_a_broken_path_resolver_still_counts_the_request(recording_log):
+    """The path label is the one part of recording that reads state this
+    layer does not own (the app's route table). Mislabelled beats uncounted:
+    the request must still land in the counter, in the catch-all bucket."""
+    app = _app()
+    with mock.patch.object(middleware_utils.logger, 'warning'):
+        with _break('sky.server.metrics._unrouted_path_label'):
+            with _broken_auth(
+                    exceptions.ConcurrentWorkerExhaustedError('32 of 32')):
+                response = _client(app).get('/status', headers=_AUTH_HEADER)
+
+    assert response.status_code == 503
+    assert _sample(metrics_utils.SKY_APISERVER_REQUESTS_TOTAL,
+                   path=metrics.OTHER_PATH_LABEL,
+                   status='5xx') == 1.0
+    assert recording_log.failures == 1
+
+
+def test_an_application_exception_still_propagates(recording_log):
+    """`record_safely` swallows recording faults only. A handler that raises
+    must still reach the client as a 500 and be counted as one."""
+
+    app = _app()
+
+    @app.get('/boom')
+    async def boom():  # pylint: disable=unused-variable
+        raise RuntimeError('handler exploded')
+
+    app.build_middleware_stack()
+    with _healthy_auth():
+        response = _client(app).get('/boom', headers=_AUTH_HEADER)
+
+    assert response.status_code == 500
+    assert _sample(metrics_utils.SKY_APISERVER_REQUESTS_TOTAL,
+                   path='/boom',
+                   status='5xx') == 1.0
+    assert recording_log.failures == 0, 'no recording call should have failed'
+
+
+class TestRecordingFailureLog:
+    """The rate limiter: a persistent fault must not log at request rate."""
+
+    @staticmethod
+    def _log(interval=300.0):
+        clock = {'now': 1000.0}
+        log = middleware_utils.RecordingFailureLog(interval_seconds=interval,
+                                                   clock=lambda: clock['now'])
+        return log, clock
+
+    def test_the_first_failure_is_logged_with_its_traceback(self):
+        log, _ = self._log()
+        with mock.patch.object(middleware_utils.logger, 'warning') as warn:
+            log.note('the request counter', RuntimeError('boom'))
+        assert warn.call_count == 1
+        assert warn.call_args.kwargs['exc_info'] is not None
+        assert log.failures == 1
+
+    def test_failures_inside_the_interval_are_counted_but_not_logged(self):
+        log, clock = self._log()
+        with mock.patch.object(middleware_utils.logger, 'warning') as warn:
+            log.note('x', RuntimeError('1'))
+            for _ in range(50):
+                clock['now'] += 1.0
+                log.note('x', RuntimeError('n'))
+        assert warn.call_count == 1, 'a persistent fault flooded the log'
+        assert log.failures == 51
+
+    def test_the_next_message_reports_what_was_dropped(self):
+        log, clock = self._log(interval=10.0)
+        with mock.patch.object(middleware_utils.logger, 'warning') as warn:
+            log.note('x', RuntimeError('1'))
+            for _ in range(3):
+                clock['now'] += 1.0
+                log.note('x', RuntimeError('n'))
+            clock['now'] += 100.0
+            log.note('x', RuntimeError('last'))
+        assert warn.call_count == 2
+        assert '3 more failure(s) were dropped' in warn.call_args.args[0]
+        # Only the first message carries a traceback.
+        assert warn.call_args.kwargs['exc_info'] is None
+
+
+class TestOutermostGuard:
+    """The runtime counterpart of the ordering test: a deployment whose
+    plugins register middleware is not covered by a unit test on the
+    plugin-less app, and being wrong is silent."""
+
+    def test_the_production_order_passes_without_a_warning(self):
+        app = _app()
+        with mock.patch.object(metrics.logger, 'warning') as warn:
+            assert metrics.warn_unless_outermost(app) is True
+        warn.assert_not_called()
+
+    def test_a_layer_outside_the_metrics_middleware_is_reported(self):
+        """How the invariant actually breaks in a deployment: the plugin API
+        (`add_middleware_last`) appends straight to `app.user_middleware`, so
+        it bypasses `add_middleware` -- which would refuse after startup --
+        and can seat a layer outside this one with no error anywhere."""
+        app = fastapi.FastAPI()
+        app.add_middleware(metrics.PrometheusMiddleware)
+        app.user_middleware.insert(
+            0,
+            starlette.middleware.Middleware(
+                server.InitializeRequestAuthUserMiddleware))
+
+        with mock.patch.object(metrics.logger, 'warning') as warn:
+            assert metrics.warn_unless_outermost(app) is False
+        assert warn.call_count == 1
+        message = warn.call_args.args[0]
+        assert 'InitializeRequestAuthUserMiddleware is' in message
+        assert 'PrometheusMiddleware' in message
+
+    def test_no_middleware_at_all_is_reported(self):
+        with mock.patch.object(metrics.logger, 'warning') as warn:
+            assert metrics.warn_unless_outermost(fastapi.FastAPI()) is False
+        warn.assert_called_once()

@@ -1589,6 +1589,37 @@ _UNROUTED_PATH_PREFIXES = (
 OTHER_PATH_LABEL = 'other'
 
 
+def warn_unless_outermost(app) -> bool:
+    """Warn at startup if this layer is not the outermost middleware.
+
+    Everything this middleware exists to count -- the 401/403/503s an
+    authentication, RBAC, shutdown or plugin middleware answers itself -- is
+    invisible to it from anywhere else in the stack, and the symptom of being
+    wrong is silence: dashboards go quiet exactly as they did during the
+    outage this was written for. The ordering is asserted by a unit test on
+    the plugin-less app, which cannot see a deployment whose plugins register
+    middleware -- and the plugin API appends straight to `user_middleware`,
+    so it bypasses `add_middleware` and raises nothing. This says so in the
+    server's own log instead.
+
+    `user_middleware[0]` is the outermost layer: Starlette wraps the list in
+    reverse, and `add_middleware` inserts at the front.
+    """
+    stack = getattr(app, 'user_middleware', None) or []
+    outermost = stack[0].cls if stack else None
+    if outermost is PrometheusMiddleware:
+        return True
+    logger.warning(
+        f'{PrometheusMiddleware.__name__} is not the outermost middleware '
+        f'({getattr(outermost, "__name__", outermost)} is). Responses that a '
+        'middleware outside it produces -- authentication and RBAC failures, '
+        'drains -- will not be counted in sky_apiserver_requests_total, so an '
+        'outage on those paths shows up as a drop in successful traffic '
+        'instead of as errors. Middleware order: '
+        f'{[m.cls.__name__ for m in stack]}')
+    return False
+
+
 def _reached_router(request: fastapi.Request) -> bool:
     """Whether the request got past every middleware to the router.
 
@@ -1694,19 +1725,36 @@ class PrometheusMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
             status_code = 500
             raise
         finally:
-            self._record(request, method, status_code, start_time)
+            # This layer is outermost, so it sees 100% of responses: a
+            # recording fault must not turn a served request into a 500.
+            middleware_utils.record_safely('request', self._record, request,
+                                           method, status_code, start_time)
 
         return response
+
+    def _path_label(self, request: fastapi.Request, raw_path: str) -> str:
+        """`path` label, never raising: a fault must not lose the count.
+
+        Labelling an unrouted request reads the app's route table, so it is
+        the one part of recording that depends on state this layer does not
+        own. Falling back to the catch-all bucket keeps the request in
+        `sky_apiserver_requests_total`: mislabelled beats uncounted.
+        """
+        if _reached_router(request):
+            return raw_path
+        try:
+            return _unrouted_path_label(
+                raw_path, self._literal_route_paths(request.scope.get('app')))
+        except Exception as e:  # pylint: disable=broad-except
+            middleware_utils.note_recording_failure('the request path label', e)
+            return OTHER_PATH_LABEL
 
     def _record(self, request: fastapi.Request, method: str, status_code: int,
                 start_time: float) -> None:
         # Read after the inner layers ran: the scope dict is shared down the
         # stack, so this is the (possibly rewritten) path the router saw.
         raw_path = request.scope.get('path', '')
-        path = raw_path
-        if not _reached_router(request):
-            path = _unrouted_path_label(
-                raw_path, self._literal_route_paths(request.scope.get('app')))
+        path = self._path_label(request, raw_path)
         status_code_group = _get_status_code_group(status_code)
         metrics_utils.SKY_APISERVER_REQUESTS_TOTAL.labels(
             path=path, method=method, status=status_code_group).inc()

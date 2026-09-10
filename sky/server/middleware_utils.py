@@ -1,7 +1,9 @@
 """Utilities for building middlewares."""
 import enum
 import http
-from typing import Optional, Tuple, Type
+import threading
+import time
+from typing import Any, Callable, Optional, Tuple, Type
 
 import fastapi
 import starlette.middleware.base
@@ -11,6 +13,82 @@ from sky import sky_logging
 from sky.metrics import utils as metrics_utils
 
 logger = sky_logging.init_logger(__name__)
+
+# The metrics middleware is the outermost one, so it observes 100% of
+# responses. A failure while *recording* -- a full or unwritable
+# PROMETHEUS_MULTIPROC_DIR, a label value the client library rejects -- must
+# never reach a client, or a monitoring bug becomes an outage on the very
+# path the metrics exist to watch. Recording on the request path runs through
+# `record_safely`: the observation is dropped, the response is returned
+# unchanged, and the failure is logged.
+#
+# The log is rate-limited per process. The first failure is logged at WARNING
+# with its traceback; later ones at most once per
+# `RECORDING_FAILURE_LOG_INTERVAL_SECONDS`, with a count of the failures
+# dropped silently in between, so a persistent fault cannot flood the log at
+# request rate.
+RECORDING_FAILURE_LOG_INTERVAL_SECONDS = 300.0
+
+
+class RecordingFailureLog:
+    """Rate-limited WARNING for metrics-recording failures."""
+
+    def __init__(
+            self,
+            interval_seconds: float = RECORDING_FAILURE_LOG_INTERVAL_SECONDS,
+            clock: Callable[[], float] = time.time):
+        self._interval_seconds = interval_seconds
+        self._clock = clock
+        self._lock = threading.Lock()
+        self._last_logged_at: Optional[float] = None
+        self._suppressed = 0
+        # Total failures noted in this process, logged or not.
+        self.failures = 0
+
+    def note(self, what: str, exc: BaseException) -> None:
+        """Log that recording `what` failed with `exc`, unless rate-limited."""
+        now = self._clock()
+        with self._lock:
+            self.failures += 1
+            if (self._last_logged_at is not None and
+                    now - self._last_logged_at < self._interval_seconds):
+                self._suppressed += 1
+                return
+            first = self._last_logged_at is None
+            suppressed = self._suppressed
+            self._suppressed = 0
+            self._last_logged_at = now
+        detail = (f' {suppressed} more failure(s) were dropped silently '
+                  'since the previous message.' if suppressed else '')
+        logger.warning(
+            f'Failed to record API server metrics for {what}: '
+            f'{type(exc).__name__}: {exc}. The request was served '
+            f'normally and this observation was dropped.{detail} Further '
+            f'failures are logged at most once every '
+            f'{self._interval_seconds:g} seconds.',
+            exc_info=exc if first else None)
+
+
+_recording_failure_log = RecordingFailureLog()
+
+
+def note_recording_failure(what: str, exc: BaseException) -> None:
+    """Log a metrics-recording failure through the process rate limiter."""
+    _recording_failure_log.note(what, exc)
+
+
+def record_safely(what: str, record: Callable[..., Any], *args: Any,
+                  **kwargs: Any) -> None:
+    """Call `record(*args, **kwargs)`; log and swallow any exception.
+
+    For metrics recording on the request path only: the caller must be able
+    to carry on exactly as if the call had succeeded.
+    """
+    try:
+        record(*args, **kwargs)
+    except Exception as e:  # pylint: disable=broad-except
+        note_recording_failure(what, e)
+
 
 # Reasons a middleware answers a request itself instead of letting a route
 # handler run. Stamped on the request with `mark_rejection` by the code that
