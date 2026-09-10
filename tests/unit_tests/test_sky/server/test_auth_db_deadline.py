@@ -665,7 +665,7 @@ def _never_runs():
 def _timeouts(**labels) -> float:
     """Current value of the auth-DB-timeout counter for these labels."""
     total = 0.0
-    counter = metrics_utils.SKY_APISERVER_AUTH_DB_TIMEOUTS_TOTAL
+    counter = metrics_utils.SKY_APISERVER_AUTH_TIMEOUTS_TOTAL
     for family in counter.collect():
         for sample in family.samples:
             if not sample.name.endswith('_total'):
@@ -676,10 +676,13 @@ def _timeouts(**labels) -> float:
 
 
 @pytest.fixture
-def clear_timeouts():
-    metrics_utils.SKY_APISERVER_AUTH_DB_TIMEOUTS_TOTAL.clear()
+def clear_timeouts(monkeypatch):
+    # Recording is gated on METRICS_ENABLED, which is a module constant read
+    # at import and false unless the server was started with metrics on.
+    monkeypatch.setattr(metrics_utils, 'METRICS_ENABLED', True)
+    metrics_utils.SKY_APISERVER_AUTH_TIMEOUTS_TOTAL.clear()
     yield
-    metrics_utils.SKY_APISERVER_AUTH_DB_TIMEOUTS_TOTAL.clear()
+    metrics_utils.SKY_APISERVER_AUTH_TIMEOUTS_TOTAL.clear()
 
 
 class TestAuthDBTimeoutCounter:
@@ -704,7 +707,8 @@ class TestAuthDBTimeoutCounter:
             await db_lookup.call_with_deadline(_parked)
 
         assert _timeouts(site='_parked',
-                         cause=db_lookup.TIMEOUT_CAUSE_DEADLINE) == 1.0
+                         cause=db_lookup.TIMEOUT_CAUSE_DEADLINE,
+                         pool=db_lookup.POOL_AUTH) == 1.0
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize('pgcode, cause', [
@@ -737,8 +741,12 @@ class TestAuthDBTimeoutCounter:
         with pytest.raises(asyncio.TimeoutError):
             await db_lookup._call_on_request_pool(_parked_on_request_pool)
 
+        # The larger pool, and the one whose blocker is often a policy
+        # lock rather than the database: it must not read as auth pressure.
         assert _timeouts(site='_parked_on_request_pool',
-                         cause=db_lookup.TIMEOUT_CAUSE_DEADLINE) == 1.0
+                         cause=db_lookup.TIMEOUT_CAUSE_DEADLINE,
+                         pool=db_lookup.POOL_REQUEST) == 1.0
+        assert _timeouts(pool=db_lookup.POOL_AUTH) == 0.0
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize('pgcode', ['23505', '08006', '40P01', None])
@@ -768,6 +776,21 @@ class TestAuthDBTimeoutCounter:
         assert _timeouts() == 0.0
 
     @pytest.mark.asyncio
+    async def test_nothing_is_counted_when_metrics_are_disabled(
+            self, monkeypatch, clear_timeouts):
+        """Every instrument outside the metrics middleware is a no-op when
+        metrics are off; this one runs on the auth path, so it has to check
+        for itself rather than relying on the middleware not being
+        registered."""
+        monkeypatch.setattr(metrics_utils, 'METRICS_ENABLED', False)
+        monkeypatch.setattr(db_lookup, 'AUTH_DB_TIMEOUT_SECONDS', 5)
+
+        with pytest.raises(db_lookup.AuthDBTimeoutError):
+            await db_lookup.call_with_deadline(_raises_db_error('55P03'))
+
+        assert _timeouts() == 0.0
+
+    @pytest.mark.asyncio
     async def test_a_counting_failure_does_not_change_the_auth_answer(
             self, monkeypatch, clear_timeouts):
         """This runs with an auth-path exception in flight. A recording fault
@@ -776,10 +799,9 @@ class TestAuthDBTimeoutCounter:
         for."""
         monkeypatch.setattr(db_lookup, 'AUTH_DB_TIMEOUT_SECONDS', 5)
 
-        with mock.patch.object(
-                metrics_utils.SKY_APISERVER_AUTH_DB_TIMEOUTS_TOTAL,
-                'labels',
-                side_effect=RuntimeError('multiproc dir full')):
+        with mock.patch.object(metrics_utils.SKY_APISERVER_AUTH_TIMEOUTS_TOTAL,
+                               'labels',
+                               side_effect=RuntimeError('multiproc dir full')):
             with pytest.raises(db_lookup.AuthDBTimeoutError):
                 await db_lookup.call_with_deadline(_raises_db_error('55P03'))
 

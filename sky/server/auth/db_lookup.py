@@ -95,25 +95,39 @@ def _server_timeout_pgcode(exc: BaseException) -> Optional[str]:
 # `_SERVER_TIMEOUT_PGCODES`).
 TIMEOUT_CAUSE_DEADLINE = 'deadline'
 
+# `pool` label values: which executor's slot the timed-out call is holding.
+# Spelled as `sky_apiserver_threads_exhausted_total{name}` spells it, so a
+# timeout can be read next to that pool's exhaustion and saturation.
+POOL_AUTH = 'auth_thread_executor'
+POOL_REQUEST = 'request_thread_executor'
 
-def _count_timeout(func: Callable[..., Any], cause: str) -> None:
-    """Count one auth-path DB timeout.
+
+def _count_timeout(func: Callable[..., Any], cause: str, pool: str) -> None:
+    """Count one auth-path timeout, on the pool whose slot it holds.
+
+    A no-op when metrics are off, like every other instrument outside the
+    metrics middleware (see `OnDemandThreadExecutor`, which does not even
+    materialise its counter children, and `record_federation_phase`).
 
     Guarded: this runs while an exception from the auth path is in flight, so
     a failure to record must not replace it. That would turn a retryable 503
-    into a bare 500 during exactly the database incident the counter exists
-    to make visible.
+    into a bare 500 during exactly the incident the counter exists to make
+    visible.
     """
+    if not metrics_utils.METRICS_ENABLED:
+        return
     try:
-        metrics_utils.SKY_APISERVER_AUTH_DB_TIMEOUTS_TOTAL.labels(
-            site=getattr(func, '__name__', 'unknown'), cause=cause).inc()
+        metrics_utils.SKY_APISERVER_AUTH_TIMEOUTS_TOTAL.labels(site=getattr(
+            func, '__name__', 'unknown'),
+                                                               cause=cause,
+                                                               pool=pool).inc()
     except Exception as e:  # pylint: disable=broad-except
-        logger.warning(f'Failed to count an auth DB timeout: '
+        logger.warning(f'Failed to count an auth-path timeout: '
                        f'{common_utils.format_exception(e)}')
 
 
-async def _run_with_deadline(pool: Any, func: Callable[..., Any],
-                             *args: Any) -> Any:
+async def _run_with_deadline(pool: Any, pool_name: str,
+                             func: Callable[..., Any], *args: Any) -> Any:
     try:
         return await asyncio.wait_for(context_utils.to_thread_with_executor(
             pool, func, *args),
@@ -123,15 +137,15 @@ async def _run_with_deadline(pool: Any, func: Callable[..., Any],
         if pgcode is None:
             if isinstance(e, asyncio.TimeoutError):
                 # The deadline elapsed. Counted here, at the one choke point
-                # every auth DB call goes through, rather than at the call
+                # every auth-path call goes through, rather than at the call
                 # sites: several of them convert the timeout to a 503 and one
                 # (the /api/health probe) swallows it entirely, so counting
                 # per caller would miss the cases with no client-visible
                 # symptom -- which are the early ones.
-                _count_timeout(func, TIMEOUT_CAUSE_DEADLINE)
+                _count_timeout(func, TIMEOUT_CAUSE_DEADLINE, pool_name)
             raise
         reason = _SERVER_TIMEOUT_PGCODES[pgcode]
-        _count_timeout(func, reason)
+        _count_timeout(func, reason, pool_name)
         logger.warning(f'Auth DB call {getattr(func, "__name__", func)} was '
                        f'cut off by the database\'s {reason} '
                        f'(pgcode {pgcode}): '
@@ -147,8 +161,8 @@ async def call_with_deadline(func: Callable[..., Any], *args: Any) -> Any:
     `_SERVER_TIMEOUT_PGCODES`) and ``ConcurrentWorkerExhaustedError`` when
     the executor is saturated.
     """
-    return await _run_with_deadline(executor.get_auth_thread_executor(), func,
-                                    *args)
+    return await _run_with_deadline(executor.get_auth_thread_executor(),
+                                    POOL_AUTH, func, *args)
 
 
 async def _call_on_request_pool(func: Callable[..., Any], *args: Any) -> Any:
@@ -163,7 +177,7 @@ async def _call_on_request_pool(func: Callable[..., Any], *args: Any) -> Any:
     logins exhaust authentication for every other request on this worker.
     """
     return await _run_with_deadline(executor.get_request_thread_executor(),
-                                    func, *args)
+                                    POOL_REQUEST, func, *args)
 
 
 async def ensure_role_for_authenticated_user(

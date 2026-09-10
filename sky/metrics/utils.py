@@ -341,25 +341,34 @@ SKY_APISERVER_THREADS_EXHAUSTED_TOTAL = prom.Counter(
     ['name'],
 )
 
-# Auth-path DB calls that ended in a timeout instead of a result. This is the
+# Auth-path work that ended in a timeout instead of a result. This is the
 # earliest signal that authentication is degrading: in a production incident
 # the first one landed 13 minutes before the first client-visible 503, and it
 # was log-only, so nothing could alert on it.
 #
-# `cause` says which timeout ended the call, and the two kinds mean opposite
-# things:
-#   `deadline` -- the client-side `asyncio.wait_for` deadline elapsed. The
-#       caller is freed but the THREAD IS NOT: `wait_for` cannot cancel a
-#       thread parked in a blocking libpq call, so each of these holds an auth
-#       executor slot until the call returns on its own. This is the signal
-#       that runs ahead of pool exhaustion.
+# `pool` is the executor the work ran on, spelled as
+# `sky_apiserver_threads_exhausted_total{name}` spells it so the two can be
+# read together. It matters because the deadline frees the caller and never
+# the thread (`wait_for` cannot cancel a thread parked on a blocking call),
+# so every `cause="deadline"` costs a slot in THAT pool until the call
+# returns on its own:
+#   `auth_thread_executor` (32) -- short DB lookups. Losing slots here locks
+#       every authenticated request out, so this is the pre-exhaustion signal.
+#   `request_thread_executor` (128) -- role seeding, which reloads config and
+#       runs policy operations. Its blocker is often a policy lock rather
+#       than the database, and it is deliberately on the larger pool for
+#       exactly that reason, so do not read it as auth-pool pressure.
+#
+# `cause` says which timeout ended the call:
+#   `deadline` -- the client-side `asyncio.wait_for` deadline elapsed; the
+#       thread is still held (see above).
 #   anything else -- the database ended the call at one of the server-side
 #       timeouts the auth path sets on its own transaction (`lock_timeout`,
 #       `statement_timeout`, `idle_in_transaction_session_timeout`). The
 #       thread comes back; a `lock_timeout` says another session holds the
 #       row lock.
 #
-# `site` is the name of the DB function that was called: a closed set, since
+# `site` is the name of the function that was called: a closed set, since
 # every call site passes a module-level function or a bound method.
 #
 # Two things are deliberately NOT counted here. Executor exhaustion, which
@@ -369,10 +378,10 @@ SKY_APISERVER_THREADS_EXHAUSTED_TOTAL = prom.Counter(
 # unauthenticated, so it yields no client-visible error at all -- those
 # requests reach no request-level metric, and this counter is the only place
 # they appear.
-SKY_APISERVER_AUTH_DB_TIMEOUTS_TOTAL = prom.Counter(
-    'sky_apiserver_auth_db_timeouts_total',
-    'Auth-path DB calls that timed out, by call site and which timeout',
-    ['site', 'cause'],
+SKY_APISERVER_AUTH_TIMEOUTS_TOTAL = prom.Counter(
+    'sky_apiserver_auth_timeouts_total',
+    'Auth-path work that timed out, by call site, cause and executor pool',
+    ['site', 'cause', 'pool'],
 )
 
 # Time a request spends waiting in the task queue (from creation to dequeue).
