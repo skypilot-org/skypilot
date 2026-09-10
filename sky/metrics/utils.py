@@ -368,8 +368,13 @@ SKY_APISERVER_THREADS_EXHAUSTED_TOTAL = prom.Counter(
 #       thread comes back; a `lock_timeout` says another session holds the
 #       row lock.
 #
-# `site` is the name of the function that was called: a closed set, since
-# every call site passes a module-level function or a bound method.
+# `site` is the name of the function that was called. Bounded, not
+# attacker-influenced: every call site passes a module-level function or a
+# bound method, so the values are fixed at build time. It is not only the
+# eight OSS names, though -- `call_with_deadline` is also called from the
+# enterprise plugin's session and RBAC middlewares and its volume gate, which
+# contribute their own, so a hosted deployment has more. A callable with no
+# `__name__` (a partial) records `unknown` rather than widening the label.
 #
 # Two things are deliberately NOT counted here. Executor exhaustion, which
 # already has `sky_apiserver_threads_exhausted_total`; and whatever response

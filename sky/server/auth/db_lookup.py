@@ -101,6 +101,10 @@ TIMEOUT_CAUSE_DEADLINE = 'deadline'
 POOL_AUTH = 'auth_thread_executor'
 POOL_REQUEST = 'request_thread_executor'
 
+# Whether this process has already reported a metrics-recording failure; see
+# `_count_timeout`.
+_recording_failure_logged = False
+
 
 def _count_timeout(func: Callable[..., Any], cause: str, pool: str) -> None:
     """Count one auth-path timeout, on the pool whose slot it holds.
@@ -116,14 +120,29 @@ def _count_timeout(func: Callable[..., Any], cause: str, pool: str) -> None:
     """
     if not metrics_utils.METRICS_ENABLED:
         return
+    site = getattr(func, '__name__', 'unknown')
     try:
-        metrics_utils.SKY_APISERVER_AUTH_TIMEOUTS_TOTAL.labels(site=getattr(
-            func, '__name__', 'unknown'),
+        metrics_utils.SKY_APISERVER_AUTH_TIMEOUTS_TOTAL.labels(site=site,
                                                                cause=cause,
                                                                pool=pool).inc()
     except Exception as e:  # pylint: disable=broad-except
-        logger.warning(f'Failed to count an auth-path timeout: '
-                       f'{common_utils.format_exception(e)}')
+        # Once per process at WARNING, then quietly. The faults this guards
+        # against are persistent (a full or unwritable
+        # PROMETHEUS_MULTIPROC_DIR, a label value the client library rejects)
+        # and they happen on a path that fires at request rate during the
+        # incident this counter exists for, so an unconditional warning would
+        # flood the log exactly when it needs reading.
+        # TODO(hailong): use middleware_utils.note_recording_failure once
+        # #10691 lands; it rate-limits per process with a dropped count.
+        global _recording_failure_logged  # pylint: disable=global-statement
+        detail = common_utils.format_exception(e)
+        if _recording_failure_logged:
+            logger.debug(f'Failed to count an auth-path timeout: {detail}')
+            return
+        _recording_failure_logged = True
+        logger.warning(f'Failed to count an auth-path timeout: {detail}. The '
+                       f'request was answered normally and this observation '
+                       f'was dropped; further failures are logged at debug.')
 
 
 async def _run_with_deadline(pool: Any, pool_name: str,

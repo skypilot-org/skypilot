@@ -791,6 +791,49 @@ class TestAuthDBTimeoutCounter:
         assert _timeouts() == 0.0
 
     @pytest.mark.asyncio
+    async def test_a_callable_without_a_name_does_not_widen_the_label(
+            self, monkeypatch, clear_timeouts):
+        """`site` is claimed to be a closed set. Every call site in the
+        server passes a function or a bound method, but a callable with no
+        `__name__` (a partial, a class instance) must fall into one fixed
+        bucket rather than become an unbounded label value."""
+        monkeypatch.setattr(db_lookup, 'AUTH_DB_TIMEOUT_SECONDS', 5)
+        partial = functools.partial(_raises_db_error('55P03'))
+
+        with pytest.raises(db_lookup.AuthDBTimeoutError):
+            await db_lookup.call_with_deadline(partial)
+
+        assert _timeouts(site='unknown', cause='lock_timeout') == 1.0
+
+    @pytest.mark.asyncio
+    async def test_repeated_counting_failures_warn_once(self, monkeypatch,
+                                                        clear_timeouts):
+        """The faults this guards against are persistent, on a path that
+        fires at request rate during the very incident the counter exists
+        for, so an unconditional warning would flood the log exactly when it
+        needs reading."""
+        monkeypatch.setattr(db_lookup, 'AUTH_DB_TIMEOUT_SECONDS', 5)
+        monkeypatch.setattr(db_lookup, '_recording_failure_logged', False)
+
+        with mock.patch.object(metrics_utils.SKY_APISERVER_AUTH_TIMEOUTS_TOTAL,
+                               'labels',
+                               side_effect=RuntimeError('multiproc dir full')):
+            with mock.patch.object(db_lookup.logger, 'warning') as warn:
+                with mock.patch.object(db_lookup.logger, 'debug') as debug:
+                    for _ in range(5):
+                        with pytest.raises(db_lookup.AuthDBTimeoutError):
+                            await db_lookup.call_with_deadline(
+                                _raises_db_error('55P03'))
+
+        # The deadline mapping logs its own warning per call, so count only
+        # the recording-failure ones.
+        recording = [
+            c for c in warn.call_args_list if 'Failed to count' in c.args[0]
+        ]
+        assert len(recording) == 1, warn.call_args_list
+        assert debug.call_count == 4, debug.call_count
+
+    @pytest.mark.asyncio
     async def test_a_counting_failure_does_not_change_the_auth_answer(
             self, monkeypatch, clear_timeouts):
         """This runs with an auth-path exception in flight. A recording fault
@@ -837,18 +880,3 @@ class TestHealthProbeTimeoutIsOnlyVisibleHere:
         assert mock_request.state.auth_user is None
         # ...and the timeout is no longer invisible.
         assert _timeouts(cause=db_lookup.TIMEOUT_CAUSE_DEADLINE) == 1.0
-
-    @pytest.mark.asyncio
-    async def test_a_callable_without_a_name_does_not_widen_the_label(
-            self, monkeypatch, clear_timeouts):
-        """`site` is claimed to be a closed set. Every call site in the
-        server passes a function or a bound method, but a callable with no
-        `__name__` (a partial, a class instance) must fall into one fixed
-        bucket rather than become an unbounded label value."""
-        monkeypatch.setattr(db_lookup, 'AUTH_DB_TIMEOUT_SECONDS', 5)
-        partial = functools.partial(_raises_db_error('55P03'))
-
-        with pytest.raises(db_lookup.AuthDBTimeoutError):
-            await db_lookup.call_with_deadline(partial)
-
-        assert _timeouts(site='unknown', cause='lock_timeout') == 1.0
