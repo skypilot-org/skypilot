@@ -995,6 +995,8 @@ def resolve_mount_commands(
         exceptions.StorageExternalDeletionError: if a bucket no longer exists.
     """
     # pylint: disable=import-outside-toplevel
+    # Imported in-function as a last resort: sky.data.storage imports
+    # mounting_utils at module scope, so a top-level import here is a cycle.
     from sky.data import storage as storage_lib
 
     specs: typing.List[typing.Tuple[str, str, str, Optional[str]]] = []

@@ -76,6 +76,12 @@ srun --nodes=1 touch /tmp/test-cluster/.sky/.sky_slurm_cluster
 echo 'cgroup' > /home/testuser/.sky_clusters/test-cluster/.sky_proctrack_type
 # Suppress login messages.
 touch /home/testuser/.sky_clusters/test-cluster/.hushlogin
+# Storage-mount keeper readiness: published BEFORE the ready signal above
+# so the runtime never observes a ready cluster whose mount keeper is not
+# up -- the pre-keeper fallback is the ephemeral-step mount this change
+# removes. Only genuinely old batch scripts lack the marker.
+mkdir -p /home/testuser/.sky_clusters/test-cluster/.sky/storage_mounts
+touch /home/testuser/.sky_clusters/test-cluster/.sky/storage_mounts/keeper_ready
 srun --nodes=1 mkdir -p /tmp/ccache_$(id -u)
 CONTAINER_START=$SECONDS
 echo "[container] Initializing test-cluster on all nodes"
@@ -136,8 +142,7 @@ touch /home/testuser/.sky_clusters/test-cluster/.sky_sbatch_ready
 SKY_HEAD_NODE=$(scontrol show hostnames "$SLURM_JOB_NODELIST" | head -n1)
 ( while true; do srun --overlap --jobid=$SLURM_JOB_ID --nodes=1 --ntasks=1 --job-name=sky-skylet-keeper --nodelist=$SKY_HEAD_NODE bash -c 'while true; do if [ -f /tmp/test-cluster/.sky/skylet_start ]; then HOME=/home/testuser/.sky_clusters/test-cluster bash /tmp/test-cluster/.sky/skylet_start; fi; sleep 5; done'; sleep 5; done ) &
 # Storage-mount keeper: launches mount specs as persistent steps.
-( mkdir -p /home/testuser/.sky_clusters/test-cluster/.sky/storage_mounts && touch /home/testuser/.sky_clusters/test-cluster/.sky/storage_mounts/keeper_ready
-  while true; do
+( while true; do
     for spec in /home/testuser/.sky_clusters/test-cluster/.sky/storage_mounts/spec-*.sh; do
       [ -e "$spec" ] || continue
       gen=${spec##*/spec-}; gen=${gen%.sh}

@@ -1200,9 +1200,7 @@ exit 1
     pyxis_mount_args = (f'{_build_pyxis_args(cluster_name_on_cloud)} '
                         if container_image is not None else '')
     storage_mount_keeper_block = (
-        f'( mkdir -p {mount_dir} && '
-        f'touch {mount_dir}/{slurm_storage_mount.KEEPER_READY_MARKER}\n'
-        f'  while true; do\n'
+        f'( while true; do\n'
         f'    for spec in {mount_dir}/spec-*.sh; do\n'
         f'      [ -e "$spec" ] || continue\n'
         f'      gen=${{spec##*/spec-}}; gen=${{gen%.sh}}\n'
@@ -1312,6 +1310,12 @@ srun --nodes={num_nodes} touch {skypilot_runtime_dir}/.sky/{slurm_utils.SLURM_MA
 echo '{proctrack_type or "unknown"}' > {sky_cluster_home_dir}/{skylet_constants.SLURM_PROCTRACK_TYPE_FILE}
 # Suppress login messages.
 touch {sky_cluster_home_dir}/.hushlogin
+# Storage-mount keeper readiness: published BEFORE the ready signal above
+# so the runtime never observes a ready cluster whose mount keeper is not
+# up -- the pre-keeper fallback is the ephemeral-step mount this change
+# removes. Only genuinely old batch scripts lack the marker.
+mkdir -p {mount_dir}
+touch {mount_dir}/{slurm_storage_mount.KEEPER_READY_MARKER}
 {container_block}
 {f'touch {ready_signal}' if container_image is None else ''}
 # Host-side keeper step that starts skylet and restarts it if it dies.

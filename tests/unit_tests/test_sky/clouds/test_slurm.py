@@ -2105,9 +2105,17 @@ class TestCreateVirtualInstance:
 
         mount_dir = (f'/home/testuser/.sky_clusters/test-mount-keeper'
                      f'/.sky/{slurm_storage_mount.STORAGE_MOUNTS_DIR_NAME}')
-        # The keeper marks itself ready before scanning for specs.
-        assert (f'touch {mount_dir}/'
-                f'{slurm_storage_mount.KEEPER_READY_MARKER}' in script)
+        # The keeper marks itself ready BEFORE the ready signal is published:
+        # the runtime checks keeper_ready as soon as provisioning returns,
+        # and a missing marker silently selects the ephemeral-step fallback.
+        ready_marker = (f'touch {mount_dir}/'
+                        f'{slurm_storage_mount.KEEPER_READY_MARKER}')
+        assert ready_marker in script
+        ready_signal_idx = script.index(
+            'touch /home/testuser/.sky_clusters/test-mount-keeper'
+            '/.sky_sbatch_ready')
+        assert script.index(ready_marker) < ready_signal_idx
+        # The keeper loop scans for specs and launches persistent steps.
         assert f'for spec in {mount_dir}/spec-*.sh; do' in script
         # Launched specs are never relaunched (started marker).
         assert '[ -e "$spec" ] || continue' in script
@@ -2180,6 +2188,18 @@ class TestCreateVirtualInstance:
         )
         script = self._run_and_capture_script('test-mount-keeper-ctr', config)
 
+        mount_dir = (f'/home/testuser/.sky_clusters/test-mount-keeper-ctr'
+                     f'/.sky/{slurm_storage_mount.STORAGE_MOUNTS_DIR_NAME}')
+        # The keeper readiness marker precedes both the container
+        # initialization and the ready signal the container block publishes.
+        ready_marker = (f'touch {mount_dir}/'
+                        f'{slurm_storage_mount.KEEPER_READY_MARKER}')
+        assert script.index(ready_marker) < script.index(
+            'echo "[container] Initializing test-mount-keeper-ctr on all '
+            'nodes"')
+        assert script.index(ready_marker) < script.index(
+            'touch /home/testuser/.sky_clusters/test-mount-keeper-ctr'
+            '/.sky_sbatch_ready')
         keeper_idx = script.index('--job-name=sky-storage-mount-keeper')
         keeper_cmd = script[keeper_idx:script.index('\n', keeper_idx)]
         # The mount step attaches to the running container so the FUSE

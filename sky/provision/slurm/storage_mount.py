@@ -27,6 +27,7 @@ import shlex
 import tempfile
 import time
 from typing import Dict, List, Optional, Tuple
+import uuid
 
 from sky import exceptions
 from sky import sky_logging
@@ -127,7 +128,9 @@ def execute_storage_mounts(
             'relaunching it picks up the fix.')
         return False
 
-    generation = str(int(time.time() * 1000))
+    # The random suffix makes collisions impossible without having to
+    # reason about launch serialization across API-server replicas.
+    generation = f'{int(time.time() * 1000)}-{uuid.uuid4().hex[:8]}'
     spec_script = _build_spec_script(mount_specs, mount_dir)
     _write_spec(head_runner, mount_dir, generation, spec_script)
 
