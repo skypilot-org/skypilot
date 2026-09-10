@@ -1385,7 +1385,7 @@ def get_effective_queue_admission_timeout(
     over global, context over cloud), with ``override_configs`` (a task's
     ``config`` block) merged in at every scope.
     """
-    value = _get_effective_k8s_config_value(
+    value = _get_effective_scoped_config_value(
         cloud=cloud,
         property_keys=_QUEUE_ADMISSION_TIMEOUT_KEYS,
         region=region,
