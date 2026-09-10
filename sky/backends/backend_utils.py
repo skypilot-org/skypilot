@@ -2716,11 +2716,23 @@ def _update_cluster_status(
             ready_workers = 0
             output = ''
             stderr = ''
+            # Whether any attempt actually executed `ray status` and returned a
+            # parseable result. If this stays False, every attempt failed to
+            # even reach the cluster (a transient control-plane/transport
+            # error), meaning we have NO measurement of Ray's health -- which is
+            # very different from having measured that nodes are missing.
+            got_successful_ray_status = False
+            # The last CommandError seen, surfaced in the warning below so the
+            # underlying transport failure is visible (it is otherwise only
+            # logged at debug level).
+            last_command_error: Optional[exceptions.CommandError] = None
             for i in range(5):
                 try:
                     ready_head, ready_workers, output, stderr = (
                         get_node_counts_from_ray_status(head_runner))
+                    got_successful_ray_status = True
                 except exceptions.CommandError as e:
+                    last_command_error = e
                     logger.debug(f'Refreshing status ({cluster_name!r}) attempt'
                                  f' {i}: {common_utils.format_exception(e)}')
                     if cloud_name != 'kubernetes':
@@ -2773,6 +2785,55 @@ def _update_cluster_status(
                 # - The ray cluster is somehow degraded so not all instances are
                 #   showing up
                 time.sleep(1)
+
+            # We exhausted all retries with no successful `ray status`. Two very
+            # different situations reach here and CommandError cannot tell them
+            # apart (get_node_counts_from_ray_status raises for any non-zero rc,
+            # and kubectl exec propagates the remote exit code):
+            #   (a) `ray status` never executed -- the control plane was
+            #       transiently unreachable (connection refused/timeout, a 521
+            #       from a CF-fronted endpoint, or `connect: operation not
+            #       permitted` from a CNI/conntrack hiccup).
+            #   (b) `ray status` executed but exited non-zero -- Ray itself is
+            #       down (a GCS crash or OOM-killed ray process) under a pod the
+            #       cloud API still reports as Running.
+            # Only (a) should keep the cluster UP; (b) is a real failure that
+            # must go INIT. Probe the head node with a trivial command through
+            # the same runner: if it also fails the control plane is unreachable
+            # (a) -> keep UP; if it succeeds the pod is reachable so Ray is down
+            # (b) -> fall through to the INIT path below. Gated on the prior
+            # status being UP (only preserve an existing UP, never promote to
+            # it) and on Kubernetes (the only cloud reaching here with
+            # got_successful_ray_status False; others raise on the first
+            # CommandError above).
+            if (not got_successful_ray_status and
+                    status == status_lib.ClusterStatus.UP and
+                    cloud_name == 'kubernetes'):
+                try:
+                    probe_rc = head_runner.run('true',
+                                               stream_logs=False,
+                                               require_outputs=True,
+                                               separate_stderr=True)[0]
+                    head_node_reachable = probe_rc == 0
+                except Exception as probe_e:  # pylint: disable=broad-except
+                    logger.debug(
+                        f'Refreshing status ({cluster_name!r}): head node '
+                        f'reachability probe failed: '
+                        f'{common_utils.format_exception(probe_e)}')
+                    head_node_reachable = False
+                if not head_node_reachable:
+                    last_error = (_summarize_probe_failure(last_command_error)
+                                  if last_command_error is not None else
+                                  'unknown')
+                    logger.warning(
+                        f'Refreshing status ({cluster_name!r}): `ray status` '
+                        'never succeeded and the head node is unreachable; '
+                        'keeping the current UP status (transient '
+                        'control-plane error, will re-check next refresh). '
+                        f'Last error: {last_error}')
+                    return True
+                # Head node reachable -> Ray itself is down -> fall through to
+                # the INIT path below (pre-PR behavior).
 
             ray_status_details = (
                 f'{ready_head + ready_workers}/{total_nodes} ready')
