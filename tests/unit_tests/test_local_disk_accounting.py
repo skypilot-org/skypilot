@@ -36,6 +36,12 @@ def roots(tmp_path, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _fresh_used_bytes_cache(monkeypatch):
+    """The used-bytes cache is module-level, so it would cross tests."""
+    monkeypatch.setattr(local_disk, '_used_bytes_cache', None)
+
+
+@pytest.fixture(autouse=True)
 def _no_budget(monkeypatch):
     monkeypatch.delenv(local_disk.EPHEMERAL_STORAGE_LIMIT_ENV_VAR,
                        raising=False)
@@ -380,3 +386,59 @@ def test_available_never_goes_negative(roots, monkeypatch):
     monkeypatch.setenv(local_disk.EPHEMERAL_STORAGE_LIMIT_ENV_VAR, '1')
 
     assert local_disk.available_bytes() == 0
+
+
+def _counting_scan(monkeypatch):
+    """Replaces the walk with a counter over the real one."""
+    calls = []
+    real_scan = local_disk.scan
+
+    def counting(*args, **kwargs):
+        calls.append(1)
+        return real_scan(*args, **kwargs)
+
+    monkeypatch.setattr(local_disk, 'scan', counting)
+    return calls
+
+
+def test_available_reuses_one_walk_within_the_ttl(roots, monkeypatch):
+    """The walk costs the same whatever the caller is about to write."""
+    present, _ = roots
+    _write(str(present / 'a.log'), 4096)
+    monkeypatch.setenv(local_disk.EPHEMERAL_STORAGE_LIMIT_ENV_VAR, str(1024**3))
+    calls = _counting_scan(monkeypatch)
+
+    first = local_disk.available_bytes()
+    for _ in range(20):
+        assert local_disk.available_bytes() == first
+
+    assert len(calls) == 1
+
+
+def test_available_walks_again_once_the_cache_ages_out(roots, monkeypatch):
+    present, _ = roots
+    _write(str(present / 'a.log'), 4096)
+    monkeypatch.setenv(local_disk.EPHEMERAL_STORAGE_LIMIT_ENV_VAR, str(1024**3))
+    calls = _counting_scan(monkeypatch)
+
+    local_disk.available_bytes()
+    local_disk.available_bytes(max_age_seconds=-1.0)
+
+    assert len(calls) == 2
+
+
+def test_available_reads_the_budget_fresh_even_on_a_cache_hit(
+        roots, monkeypatch):
+    """Only the walk is cached; the declared budget is env and cheap."""
+    present, _ = roots
+    _write(str(present / 'a.log'), 4096)
+    calls = _counting_scan(monkeypatch)
+
+    monkeypatch.setenv(local_disk.EPHEMERAL_STORAGE_LIMIT_ENV_VAR, str(1024**3))
+    first = local_disk.available_bytes()
+    monkeypatch.setenv(local_disk.EPHEMERAL_STORAGE_LIMIT_ENV_VAR,
+                       str(2 * 1024**3))
+    second = local_disk.available_bytes()
+
+    assert second - first == 1024**3
+    assert len(calls) == 1

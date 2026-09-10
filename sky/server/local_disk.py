@@ -31,6 +31,7 @@ Three notes on matching what the platform sees:
 import dataclasses
 import errno
 import os
+import threading
 import time
 from typing import Dict, List, Optional, Tuple
 
@@ -65,6 +66,12 @@ BUDGET_SOURCE_REQUEST = 'request'
 # is never mistaken for a small one.
 DEFAULT_SCAN_TIMEOUT_SECONDS = 20.0
 DEFAULT_SCAN_MAX_ENTRIES = 2_000_000
+
+# How long available_bytes() reuses one walk of the roots.
+DEFAULT_USED_BYTES_TTL_SECONDS = 10.0
+
+_used_bytes_lock = threading.Lock()
+_used_bytes_cache: Optional[Tuple[float, int]] = None
 
 # Bytes per st_blocks unit, fixed by POSIX regardless of the filesystem's
 # own block size.
@@ -257,18 +264,41 @@ def budget() -> Optional[Budget]:
     return None
 
 
-def available_bytes() -> Optional[int]:
+def available_bytes(
+        max_age_seconds: float = DEFAULT_USED_BYTES_TTL_SECONDS
+) -> Optional[int]:
     """Bytes still writable before this container reaches its budget.
 
     Measures against the declared allowance -- the limit if there is one,
     otherwise the request -- so a caller can refuse work that would not
     fit. Returns None when neither field is exposed, which means the
     caller has no budget to check against.
+
+    The walk behind the used-bytes term is cached for *max_age_seconds*.
+    Its cost scales with the number of files on disk and not with the
+    caller's payload, so walking per call would dominate a small one.
     """
     declared = budget()
     if declared is None:
         return None
-    return max(declared.total_bytes - scan().used_bytes, 0)
+    return max(declared.total_bytes - _used_bytes(max_age_seconds), 0)
+
+
+def _used_bytes(max_age_seconds: float) -> int:
+    """Returns the cached used-bytes total, walking if it has aged out.
+
+    The lock spans the walk so a burst of callers arriving on a cold
+    cache produces one walk rather than one each.
+    """
+    global _used_bytes_cache
+    with _used_bytes_lock:
+        cached = _used_bytes_cache
+        if (cached is not None and
+                time.monotonic() - cached[0] <= max_age_seconds):
+            return cached[1]
+        used = scan().used_bytes
+        _used_bytes_cache = (time.monotonic(), used)
+        return used
 
 
 def _count_unreadable(error: OSError) -> int:
