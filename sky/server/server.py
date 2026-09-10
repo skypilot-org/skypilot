@@ -147,8 +147,10 @@ _KUBECTL_PATH: Optional[str] = shutil.which('kubectl')
 # response will block other requests from being processed.
 
 
-def _basic_auth_401_response(content: str):
+def _basic_auth_401_response(request: fastapi.Request, content: str):
     """Return a 401 response with basic auth realm."""
+    middleware_utils.mark_rejection(request,
+                                    middleware_utils.REJECT_REASON_UNAUTHORIZED)
     return fastapi.responses.JSONResponse(
         status_code=401,
         headers={
@@ -161,8 +163,10 @@ def _basic_auth_401_response(content: str):
         content=content)
 
 
-def _bearer_auth_401_response(content):
+def _bearer_auth_401_response(request: fastapi.Request, content):
     """Return a 401 response for bearer token authentication failures."""
+    middleware_utils.mark_rejection(request,
+                                    middleware_utils.REJECT_REASON_UNAUTHORIZED)
     return fastapi.responses.JSONResponse(
         status_code=401,
         headers={
@@ -249,11 +253,13 @@ class RBACMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
                 request.url.path, request.method)
         except asyncio.TimeoutError:
             logger.error('RBAC check timed out, path: %s', request.url.path)
-            return db_lookup.db_timeout_response()
+            return db_lookup.db_timeout_response(request)
         except exceptions.ConcurrentWorkerExhaustedError as e:
             logger.error(f'Concurrent worker exhausted during RBAC check: {e}')
-            return db_lookup.worker_exhausted_response()
+            return db_lookup.worker_exhausted_response(request)
         if blocked:
+            middleware_utils.mark_rejection(
+                request, middleware_utils.REJECT_REASON_FORBIDDEN)
             return fastapi.responses.JSONResponse(
                 status_code=403, content={'detail': 'Forbidden'})
 
@@ -398,11 +404,12 @@ class BasicAuthMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
 
         auth_header = request.headers.get('authorization')
         if not auth_header:
-            return _basic_auth_401_response('Authentication required')
+            return _basic_auth_401_response(request, 'Authentication required')
 
         # Only handle basic auth
         if not auth_header.lower().startswith('basic '):
-            return _basic_auth_401_response('Invalid authentication method')
+            return _basic_auth_401_response(request,
+                                            'Invalid authentication method')
 
         # Check username and password
         encoded = auth_header.split(' ', 1)[1]
@@ -410,7 +417,7 @@ class BasicAuthMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
             decoded = base64.b64decode(encoded).decode()
             username, password = decoded.split(':', 1)
         except Exception:  # pylint: disable=broad-except
-            return _basic_auth_401_response('Invalid basic auth')
+            return _basic_auth_401_response(request, 'Invalid basic auth')
 
         # Offload the DB lookup + bcrypt verification to the bounded auth
         # thread executor under a deadline, so a slow DB (or the CPU-heavy
@@ -425,12 +432,12 @@ class BasicAuthMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
         except asyncio.TimeoutError:
             logger.error('Basic auth DB lookup timed out, path: %s',
                          request.url.path)
-            return db_lookup.db_timeout_response()
+            return db_lookup.db_timeout_response(request)
         except exceptions.ConcurrentWorkerExhaustedError as e:
             logger.error(f'Concurrent worker exhausted during basic auth: {e}')
-            return db_lookup.worker_exhausted_response()
+            return db_lookup.worker_exhausted_response(request)
         if user is None:
-            return _basic_auth_401_response('Invalid credentials')
+            return _basic_auth_401_response(request, 'Invalid credentials')
         request.state.auth_user = user
 
         return await call_next(request)
@@ -489,13 +496,13 @@ class BearerTokenMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
 
         if auth_header is None:
             return _bearer_auth_401_response(
-                {'detail': 'Authentication required'})
+                request, {'detail': 'Authentication required'})
 
         # Extract token
         split_header = auth_header.split(' ', 1)
         if split_header[0].lower() != 'bearer':
             return _bearer_auth_401_response(
-                {'detail': 'Invalid authentication method'})
+                request, {'detail': 'Invalid authentication method'})
         sa_token = split_header[1]
 
         # Handle SkyPilot service account tokens
@@ -510,7 +517,7 @@ class BearerTokenMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
                                     'false').lower()
         if sa_enabled != 'true':
             return _bearer_auth_401_response(
-                {'detail': 'Service account authentication disabled'})
+                request, {'detail': 'Service account authentication disabled'})
 
         service = token_service.token_service
 
@@ -537,6 +544,7 @@ class BearerTokenMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
             if payload is None:
                 logger.warning('Service account token verification failed')
                 return _bearer_auth_401_response(
+                    request,
                     {'detail': 'Invalid or expired service account token'})
 
             # Extract user information from JWT payload
@@ -548,7 +556,7 @@ class BearerTokenMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
                 logger.warning(
                     'Invalid token payload: missing user_id or token_id')
                 return _bearer_auth_401_response(
-                    {'detail': 'Invalid token payload'})
+                    request, {'detail': 'Invalid token payload'})
 
             # Look up the token row by its sha256 hash. This is what makes
             # revocation (row deleted) and rotation (row's hash replaced)
@@ -574,13 +582,14 @@ class BearerTokenMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
                     f'Service account token {token_id} not found in DB '
                     '(revoked or rotated)')
                 return _bearer_auth_401_response(
+                    request,
                     {'detail': 'Service account token revoked or rotated'})
 
             if (token_row['expires_at'] is not None and
                     token_row['expires_at'] < int(time.time())):
                 logger.warning(f'Service account token {token_id} has expired')
                 return _bearer_auth_401_response(
-                    {'detail': 'Service account token has expired'})
+                    request, {'detail': 'Service account token has expired'})
 
             # Verify user still exists in database
             user_info = await db_lookup.call_with_deadline(
@@ -589,6 +598,7 @@ class BearerTokenMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
                 logger.warning(
                     f'Service account user {user_id} no longer exists')
                 return _bearer_auth_401_response(
+                    request,
                     {'detail': 'Service account user no longer exists'})
 
             # Update last used timestamp for token tracking, skipped while
@@ -628,23 +638,24 @@ class BearerTokenMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
             # an exception raised in a middleware surfaces as a bare 500,
             # which clients do not retry.
             logger.error('Service account auth DB lookup timed out')
-            return db_lookup.db_timeout_response()
+            return db_lookup.db_timeout_response(request)
         except exceptions.ConcurrentWorkerExhaustedError as e:
             # Same reasoning as the timeout above: convert in-middleware so
             # the client sees a retryable 503 instead of a bare 500.
             logger.error(f'Concurrent worker exhausted during service account '
                          f'auth: {e}')
-            return db_lookup.worker_exhausted_response()
+            return db_lookup.worker_exhausted_response(request)
         except token_service.JWTSecretUnavailableError as e:
             # Above the catch-all on purpose: a 401 would tell the caller its
             # token is bad and send it off to rotate credentials, when the
             # token is fine and the database is not.
             logger.error(f'Service account auth unavailable: {e}')
-            return db_lookup.jwt_secret_unavailable_response()
+            return db_lookup.jwt_secret_unavailable_response(request)
         except Exception as e:  # pylint: disable=broad-except
             logger.error(f'Service account authentication failed: {e}',
                          exc_info=True)
             return _bearer_auth_401_response(
+                request,
                 {'detail': f'Service account authentication failed: {str(e)}'})
 
         return await call_next(request)
@@ -699,15 +710,15 @@ class AuthProxyMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
                     global_user_state.add_or_update_user, auth_user)
             except asyncio.TimeoutError:
                 logger.error('Auth proxy user upsert timed out')
-                return db_lookup.db_timeout_response()
+                return db_lookup.db_timeout_response(request)
             except exceptions.ConcurrentWorkerExhaustedError as e:
                 logger.error(f'Concurrent worker exhausted during auth proxy '
                              f'user upsert: {e}')
-                return db_lookup.worker_exhausted_response()
+                return db_lookup.worker_exhausted_response(request)
             # Same deadline as the upsert above; see the helper for why a new
             # user's seed is awaited while a returning one's repair is queued.
             failed = await db_lookup.ensure_role_for_authenticated_user(
-                auth_user.id, newly_added)
+                auth_user.id, newly_added, request=request)
             if failed is not None:
                 return failed
 
@@ -1006,8 +1017,9 @@ async def schedule_on_boot_check_async():
 @contextlib.asynccontextmanager
 async def lifespan(app: fastapi.FastAPI):  # pylint: disable=redefined-outer-name
     """FastAPI lifespan context manager."""
-    del app  # unused
-
+    # Unused: the middleware-order check that used to live here runs at
+    # import instead, right after the metrics middleware registration.
+    del app
     # Startup: Run background tasks. Delete any persisted daemon rows whose
     # ids are no longer in INTERNAL_REQUEST_DAEMONS first (daemon renamed /
     # removed in code), then submit each current daemon.
@@ -1162,6 +1174,8 @@ class PathCleanMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
             parent = pathlib.Path('/dashboard')
             request_path = pathlib.Path(posixpath.normpath(request.url.path))
             if not _is_relative_to(request_path, parent):
+                middleware_utils.mark_rejection(
+                    request, middleware_utils.REJECT_REASON_FORBIDDEN)
                 return fastapi.responses.JSONResponse(
                     status_code=403, content={'detail': 'Forbidden'})
         return await call_next(request)
@@ -1177,6 +1191,8 @@ class GracefulShutdownMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
             # on-going requests but will not submit new requests.
             if not request.url.path.startswith('/api/'):
                 # Client will retry on 503 error.
+                middleware_utils.mark_rejection(
+                    request, middleware_utils.REJECT_REASON_SHUTTING_DOWN)
                 return fastapi.responses.JSONResponse(
                     status_code=503,
                     content={
@@ -1220,6 +1236,8 @@ class APIVersionMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
             versions.set_remote_version(version_info.version)
             response = await call_next(request)
         else:
+            middleware_utils.mark_rejection(
+                request, middleware_utils.REJECT_REASON_API_VERSION)
             response = fastapi.responses.JSONResponse(
                 status_code=400,
                 content={
@@ -1242,9 +1260,7 @@ app = fastapi.FastAPI(prefix='/api/v1', debug=True, lifespan=lifespan)
 #   Middleware3(Middleware2(Middleware1(request)))
 # If MiddlewareN does something like print(n); call_next(); print(n), you'll get
 #   3; 2; 1; <request>; 1; 2; 3
-# Use environment variable to make the metrics middleware optional.
-if os.environ.get(constants.ENV_VAR_SERVER_METRICS_ENABLED):
-    app.add_middleware(metrics.PrometheusMiddleware)
+# The metrics middleware is added last, i.e. outermost; see below.
 # APIVersionMiddleware also records the dispatched endpoint for workspace-access
 # classification. Added near-first => inner to PathCleanMiddleware /
 # InternalDashboardPrefixMiddleware, so the path it records is the router-
@@ -1287,8 +1303,10 @@ app.add_middleware(BearerTokenMiddleware)
 # middleware above.
 app.add_middleware(InitializeRequestAuthUserMiddleware)
 app.add_middleware(RequestIDMiddleware)
-# SecurityHeadersMiddleware is the outermost middleware to ensure security
-# headers (CSP, X-Content-Type-Options, etc.) are added to all responses.
+# SecurityHeadersMiddleware is the outermost middleware that touches a
+# response, so its security headers (CSP, X-Content-Type-Options, etc.) are
+# added to all of them. The metrics middleware below is registered outside it
+# but only observes; it neither adds nor removes headers.
 app.add_middleware(SecurityHeadersMiddleware)
 
 # Load plugins after all the middlewares are added, to keep the core
@@ -1302,6 +1320,25 @@ if __name__ == 'sky.server.server':
     plugins.load_plugins(
         plugins.ExtensionContext(context=plugins.PluginContext.UVICORN,
                                  app=app))
+
+# The metrics middleware must be the OUTERMOST middleware, so it is added
+# after every core and plugin middleware: it counts the response the client
+# actually receives, including the 401/403/503s the authentication, RBAC,
+# shutdown and plugin middlewares answer themselves without calling the next
+# layer. Placed inside the stack (where it used to be, as the first
+# middleware added), none of those were counted and an authentication outage
+# showed up on dashboards as a drop in successful requests rather than as
+# errors. Use environment variable to make the metrics middleware optional.
+if os.environ.get(constants.ENV_VAR_SERVER_METRICS_ENABLED):
+    app.add_middleware(metrics.PrometheusMiddleware)
+
+# The middleware stack is final here: plugins loaded above, the metrics layer
+# registered, and only `include_router` follows. Report a stack that would
+# make the metrics layer blind to middleware-produced responses -- which is
+# silent otherwise, and looks exactly like a quiet system. Called
+# unconditionally: the check reads the stack, so it says nothing when the
+# layer is not installed at all.
+metrics.warn_unless_outermost(app)
 
 app.include_router(jobs_rest.router, prefix='/jobs', tags=['jobs'])
 app.include_router(serve_rest.router, prefix='/serve', tags=['serve'])
@@ -1322,7 +1359,9 @@ resource.setrlimit(resource.RLIMIT_NOFILE, (hard, hard))
 @app.exception_handler(exceptions.ConcurrentWorkerExhaustedError)
 def handle_concurrent_worker_exhausted_error(
         request: fastapi.Request, e: exceptions.ConcurrentWorkerExhaustedError):
-    del request  # request is not used
+    # Let the metrics middleware count this 503 by cause.
+    middleware_utils.mark_rejection(
+        request, middleware_utils.REJECT_REASON_REQUEST_WORKER_EXHAUSTED)
     # Print detailed error message to server log
     logger.error('Concurrent worker exhausted: '
                  f'{common_utils.format_exception(e)}')

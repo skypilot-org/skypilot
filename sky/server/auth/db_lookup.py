@@ -21,6 +21,14 @@ Both timeout and executor exhaustion must be converted to responses
 *inside* the middleware: app-level exception handlers wrap the router
 only, so an exception raised in a middleware surfaces as a bare 500,
 which clients do not retry.
+
+Every response helper here accepts the request it answers and, when given
+one, stamps the rejection reason on it (``middleware_utils.mark_rejection``)
+so the metrics middleware can count these 503s by cause: a middleware
+answering a request itself is otherwise invisible to request-level metrics.
+The request is optional so that callers outside this repository, which call
+the helpers with no arguments, keep getting the same 503; they only lose the
+per-reason attribution until they pass the request too.
 """
 import asyncio
 from typing import Any, Callable, Optional
@@ -29,6 +37,7 @@ import fastapi
 
 from sky import exceptions
 from sky import sky_logging
+from sky.server import middleware_utils
 from sky.server.requests import executor
 from sky.users import permission
 from sky.utils import common_utils
@@ -134,9 +143,18 @@ async def _call_on_request_pool(func: Callable[..., Any], *args: Any) -> Any:
                                     func, *args)
 
 
+def _mark(request: Optional[fastapi.Request], reason: str) -> None:
+    """Attribute a canned rejection for the metrics layer, if we know which
+    request it answers."""
+    if request is not None:
+        middleware_utils.mark_rejection(request, reason)
+
+
 async def ensure_role_for_authenticated_user(
-        user_id: str,
-        newly_added: bool) -> Optional[fastapi.responses.JSONResponse]:
+    user_id: str,
+    newly_added: bool,
+    request: Optional[fastapi.Request] = None
+) -> Optional[fastapi.responses.JSONResponse]:
     """Give an authenticated principal a role. A response to send, or None.
 
     Both auth front-ends (the auth-proxy middleware and the oauth2-proxy one)
@@ -164,7 +182,7 @@ async def ensure_role_for_authenticated_user(
             logger.error(f'Concurrent worker exhausted seeding a role for '
                          f'{user_id}: {e}')
             permission.permission_service.queue_role_repair(user_id)
-            return worker_exhausted_response()
+            return worker_exhausted_response(request=request)
         except asyncio.TimeoutError:
             # Separated from the clause below for the log, not the answer: the
             # deadline elapsed but the seed is still running in its thread and
@@ -175,7 +193,7 @@ async def ensure_role_for_authenticated_user(
                          f'finish within {AUTH_DB_TIMEOUT_SECONDS}s; queueing '
                          f'it off the request')
             permission.permission_service.queue_role_repair(user_id)
-            return role_seed_unavailable_response()
+            return role_seed_unavailable_response(request=request)
         except Exception as e:  # pylint: disable=broad-except
             # Everything else, because an exception raised in a middleware
             # surfaces as a bare 500, which clients do not retry (see this
@@ -187,14 +205,16 @@ async def ensure_role_for_authenticated_user(
                          f'queueing it off the request: '
                          f'{common_utils.format_exception(e)}')
             permission.permission_service.queue_role_repair(user_id)
-            return role_seed_unavailable_response()
+            return role_seed_unavailable_response(request=request)
         return None
     if not permission.permission_service.probably_has_role(user_id):
         permission.permission_service.queue_role_repair(user_id)
     return None
 
 
-def db_timeout_response() -> fastapi.responses.JSONResponse:
+def db_timeout_response(
+    request: Optional[fastapi.Request] = None
+) -> fastapi.responses.JSONResponse:
     """503 for an auth lookup that timed out on a degraded database.
 
     503 (not 504/429) because the client maps exactly 503 to
@@ -203,6 +223,7 @@ def db_timeout_response() -> fastapi.responses.JSONResponse:
     The detail message is distinct from the worker-exhausted 503 so
     operators can tell the two apart in logs.
     """
+    _mark(request, middleware_utils.REJECT_REASON_AUTH_DB_TIMEOUT)
     return fastapi.responses.JSONResponse(
         status_code=503,
         headers={'Retry-After': str(max(1, int(AUTH_DB_TIMEOUT_SECONDS)))},
@@ -212,7 +233,9 @@ def db_timeout_response() -> fastapi.responses.JSONResponse:
         })
 
 
-def role_seed_unavailable_response() -> fastapi.responses.JSONResponse:
+def role_seed_unavailable_response(
+    request: Optional[fastapi.Request] = None
+) -> fastapi.responses.JSONResponse:
     """503 for a new user whose role could not be assigned in time.
 
     Not `db_timeout_response`: that one names a slow database, and the reason
@@ -220,6 +243,7 @@ def role_seed_unavailable_response() -> fastapi.responses.JSONResponse:
     healthy database doing exactly what it should. Same 503 so the client
     retries with backoff, and by then the queued repair has normally landed.
     """
+    _mark(request, middleware_utils.REJECT_REASON_ROLE_SEED_UNAVAILABLE)
     return fastapi.responses.JSONResponse(
         status_code=503,
         headers={'Retry-After': str(max(1, int(AUTH_DB_TIMEOUT_SECONDS)))},
@@ -230,13 +254,16 @@ def role_seed_unavailable_response() -> fastapi.responses.JSONResponse:
         })
 
 
-def jwt_secret_unavailable_response() -> fastapi.responses.JSONResponse:
+def jwt_secret_unavailable_response(
+    request: Optional[fastapi.Request] = None
+) -> fastapi.responses.JSONResponse:
     """503 for service-account auth that cannot load its signing secret.
 
     Not a 401: the token is well-formed and the server simply cannot reach the
     secret to check it. A 401 reads as "this credential is bad" and pushes
     operators to rotate tokens over what is a transient database problem.
     """
+    _mark(request, middleware_utils.REJECT_REASON_JWT_SECRET_UNAVAILABLE)
     return fastapi.responses.JSONResponse(
         status_code=503,
         headers={'Retry-After': str(max(1, int(AUTH_DB_TIMEOUT_SECONDS)))},
@@ -248,7 +275,9 @@ def jwt_secret_unavailable_response() -> fastapi.responses.JSONResponse:
         })
 
 
-def worker_exhausted_response() -> fastapi.responses.JSONResponse:
+def worker_exhausted_response(
+    request: Optional[fastapi.Request] = None
+) -> fastapi.responses.JSONResponse:
     """503 for auth-path work rejected by a saturated thread executor.
 
     Either pool: the auth executor for lookups, or the request executor for a
@@ -259,6 +288,7 @@ def worker_exhausted_response() -> fastapi.responses.JSONResponse:
     exceptions raised in middlewares, so middlewares must convert the
     error themselves or it surfaces as a bare 500.
     """
+    _mark(request, middleware_utils.REJECT_REASON_AUTH_WORKER_EXHAUSTED)
     return fastapi.responses.JSONResponse(
         status_code=503,
         content={
