@@ -72,6 +72,9 @@ DEFAULT_USED_BYTES_TTL_SECONDS = 10.0
 
 _used_bytes_lock = threading.Lock()
 _used_bytes_cache: Optional[Tuple[float, int]] = None
+# Bytes callers have admitted but that no walk has counted yet. Cleared by
+# the next walk, which sees them on disk.
+_admitted_bytes = 0
 
 # Bytes per st_blocks unit, fixed by POSIX regardless of the filesystem's
 # own block size.
@@ -284,21 +287,72 @@ def available_bytes(
     return max(declared.total_bytes - _used_bytes(max_age_seconds), 0)
 
 
+def debit(num_bytes: int) -> None:
+    """Counts *num_bytes* as used until the next walk of the roots.
+
+    Lets concurrent callers see work each other has admitted but not yet
+    written. Without it they measure against the same free space and
+    overcommit together, and a caller arriving just after a completed
+    write measures against a total that predates it.
+    """
+    global _admitted_bytes
+    if num_bytes <= 0:
+        return
+    with _used_bytes_lock:
+        _admitted_bytes += num_bytes
+
+
 def _used_bytes(max_age_seconds: float) -> int:
-    """Returns the cached used-bytes total, walking if it has aged out.
+    """Returns the used-bytes total, walking if the cache has aged out.
 
     The lock spans the walk so a burst of callers arriving on a cold
     cache produces one walk rather than one each.
     """
-    global _used_bytes_cache
+    global _used_bytes_cache, _admitted_bytes
     with _used_bytes_lock:
         cached = _used_bytes_cache
         if (cached is not None and
                 time.monotonic() - cached[0] <= max_age_seconds):
-            return cached[1]
+            return cached[1] + _admitted_bytes
         used = scan().used_bytes
         _used_bytes_cache = (time.monotonic(), used)
+        _admitted_bytes = 0
         return used
+
+
+def _nearest_existing(path: str) -> str:
+    """Returns *path*, or its closest ancestor that exists."""
+    current = os.path.abspath(path)
+    while not os.path.exists(current):
+        parent = os.path.dirname(current)
+        if parent == current:
+            break
+        current = parent
+    return current
+
+
+def available_for_path(
+    path: str,
+    max_age_seconds: float = DEFAULT_USED_BYTES_TTL_SECONDS,
+) -> Optional[int]:
+    """Bytes writable at *path*, by whichever boundary applies to it.
+
+    A destination the platform does not charge to this container -- a
+    persistent volume, say -- is bounded by the free space on its own
+    filesystem and not by the container's ephemeral-storage budget. A
+    destination that is charged is bounded by both. Returns None when
+    neither boundary can be determined.
+    """
+    filesystems = _filesystem_usage([_nearest_existing(path)])
+    if not filesystems:
+        return None
+    filesystem = next(iter(filesystems.values()))
+    bounds = [filesystem.avail_bytes]
+    if filesystem.charged_to_ephemeral:
+        against_budget = available_bytes(max_age_seconds)
+        if against_budget is not None:
+            bounds.append(against_budget)
+    return min(bounds)
 
 
 def _count_unreadable(error: OSError) -> int:

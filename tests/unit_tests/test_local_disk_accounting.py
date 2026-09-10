@@ -37,8 +37,9 @@ def roots(tmp_path, monkeypatch):
 
 @pytest.fixture(autouse=True)
 def _fresh_used_bytes_cache(monkeypatch):
-    """The used-bytes cache is module-level, so it would cross tests."""
+    """The cache and the debit are module-level, so they cross tests."""
     monkeypatch.setattr(local_disk, '_used_bytes_cache', None)
+    monkeypatch.setattr(local_disk, '_admitted_bytes', 0)
 
 
 @pytest.fixture(autouse=True)
@@ -442,3 +443,61 @@ def test_available_reads_the_budget_fresh_even_on_a_cache_hit(
 
     assert second - first == 1024**3
     assert len(calls) == 1
+
+
+def test_debit_counts_against_available_until_the_next_walk(roots, monkeypatch):
+    """Concurrent callers have to see work each other has admitted."""
+    present, _ = roots
+    _write(str(present / 'a.log'), 4096)
+    monkeypatch.setenv(local_disk.EPHEMERAL_STORAGE_LIMIT_ENV_VAR, str(1024**3))
+
+    before = local_disk.available_bytes()
+    local_disk.debit(100 * 1024)
+
+    assert local_disk.available_bytes() == before - 100 * 1024
+    # A fresh walk sees those bytes on disk, so the debit is cleared.
+    local_disk.available_bytes(max_age_seconds=-1.0)
+    assert local_disk.available_bytes() == before
+
+
+def test_debit_ignores_a_non_positive_amount(roots, monkeypatch):
+    present, _ = roots
+    _write(str(present / 'a.log'), 4096)
+    monkeypatch.setenv(local_disk.EPHEMERAL_STORAGE_LIMIT_ENV_VAR, str(1024**3))
+    before = local_disk.available_bytes()
+
+    local_disk.debit(0)
+    local_disk.debit(-5)
+
+    assert local_disk.available_bytes() == before
+
+
+def test_a_destination_not_charged_to_this_container_ignores_the_budget(
+        tmp_path, monkeypatch):
+    """A persistent volume's bytes belong to the volume, not the budget.
+
+    The chart mounts one over part of the tree, so an extraction's
+    destination is not always charged to this container.
+    """
+    monkeypatch.setattr(local_disk, '_charged_to_ephemeral',
+                        lambda mountpoint, sources, device: False)
+    monkeypatch.setattr(local_disk, 'available_bytes', lambda *a, **k: 0)
+
+    assert local_disk.available_for_path(str(tmp_path)) > 0
+
+
+def test_a_charged_destination_is_bounded_by_the_budget_too(
+        tmp_path, monkeypatch):
+    monkeypatch.setattr(local_disk, '_charged_to_ephemeral',
+                        lambda mountpoint, sources, device: True)
+    monkeypatch.setattr(local_disk, 'available_bytes', lambda *a, **k: 4096)
+
+    assert local_disk.available_for_path(str(tmp_path)) == 4096
+
+
+def test_availability_resolves_a_path_that_does_not_exist_yet(tmp_path):
+    """An extraction target may not have been created yet."""
+    missing = tmp_path / 'not' / 'created' / 'yet'
+
+    assert local_disk.available_for_path(str(missing)) == \
+        local_disk.available_for_path(str(tmp_path))
