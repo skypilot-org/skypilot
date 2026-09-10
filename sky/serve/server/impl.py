@@ -635,6 +635,14 @@ def update(
                 raise ValueError(f'Failed to parse version: {version_string}; '
                                  f'Returncode: {returncode}') from e
 
+    if not pool:
+        # Recovery must use the installed files, not temporary API upload paths.
+        task.service.tls_credential = (serve_utils.TLSCredential(
+            serve_utils.generate_remote_tls_keyfile_name(service_name),
+            serve_utils.generate_remote_tls_certfile_name(service_name))
+                                       if service_record['tls_encrypted'] else
+                                       None)
+
     with tempfile.NamedTemporaryFile(
             prefix=f'{service_name}-v{current_version}',
             mode='w') as service_file:
