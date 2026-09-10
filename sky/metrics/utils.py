@@ -241,6 +241,34 @@ SKY_APISERVER_EVENT_LOOP_STALL_TOTAL = prom.Counter(
     ['source'],
 )
 
+# Requests a middleware answered itself with a canned rejection instead of
+# letting a route handler run: authentication failures, auth-path database
+# deadlines, auth executor exhaustion, RBAC denials. These responses never
+# reach a route handler, so they are only visible to the request counters
+# because the metrics middleware is the outermost one; this counter says
+# *why* they were rejected. Bounded on purpose: `reason` is a closed set (see
+# sky/server/middleware_utils.py), `status` is the HTTP status the middleware
+# answered with and `kind` is `http` or `websocket` (a rejected WebSocket
+# handshake). No path label: the paths of rejected requests are chosen by
+# unauthenticated clients.
+SKY_APISERVER_REQUEST_REJECTIONS_TOTAL = prom.Counter(
+    'sky_apiserver_request_rejections_total',
+    'Requests a middleware rejected with a canned response, by reason',
+    ['reason', 'status', 'kind'],
+)
+
+# WebSocket handshakes refused by a middleware, by the decision that refused
+# them (the close-code set in sky/server/middleware_utils.websocket_aware:
+# unauthorized / forbidden / error). Handshakes are not HTTP requests from
+# the request counter's point of view, so without this counter a storm of
+# refused handshakes is invisible: it only shows up as fewer connections.
+# `path` is restricted to the registered WebSocket routes, else `other`.
+SKY_APISERVER_WEBSOCKET_HANDSHAKE_REJECTIONS_TOTAL = prom.Counter(
+    'sky_apiserver_websocket_handshake_rejections_total',
+    'WebSocket handshakes refused by a middleware, by decision',
+    ['path', 'outcome'],
+)
+
 SKY_APISERVER_WEBSOCKET_CONNECTIONS = prom.Gauge(
     'sky_apiserver_websocket_connections',
     'Number of websocket connections',
