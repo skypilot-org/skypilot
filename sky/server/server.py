@@ -1962,7 +1962,9 @@ async def check_blob_exists(
     user_hash: str,
     blob_id: str,
     size_bytes: Optional[int] = fastapi.Query(
-        None, ge=0,
+        None,
+        ge=0,
+        le=2**63 - 1,
         description='Client-reported compressed ZIP size in bytes.'),
 ) -> Dict[str, bool]:
     """Check if a file mount blob already exists."""

@@ -117,7 +117,9 @@ def test_client_upload_records_size_on_miss_and_hit(blob_upload_app, tmp_path,
     assert not list(tmp_path.glob('*.zip'))
 
 
-@pytest.mark.parametrize('size', [None, '-1', 'nan', '1.5'])
+@pytest.mark.parametrize(
+    'size', [None, '-1', 'nan', '1.5',
+             str(2**63), str(10**309)])
 def test_missing_or_invalid_size_not_observed(blob_upload_app, size):
     app, _, registry = blob_upload_app
     before = _sample(registry, 'count', 'miss')
