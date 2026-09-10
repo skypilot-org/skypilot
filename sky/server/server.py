@@ -1017,11 +1017,11 @@ async def schedule_on_boot_check_async():
 @contextlib.asynccontextmanager
 async def lifespan(app: fastapi.FastAPI):  # pylint: disable=redefined-outer-name
     """FastAPI lifespan context manager."""
-    if metrics_utils.METRICS_ENABLED:
-        # The metrics middleware only sees middleware-produced responses from
-        # the outermost position. Checked here, where the stack is final and
-        # plugin middlewares are registered, not just in the unit test.
-        metrics.warn_unless_outermost(app)
+    # The metrics middleware only sees middleware-produced responses from the
+    # outermost position. Checked here, where the stack is final and plugin
+    # middlewares are registered, not just in the unit test. Unconditional:
+    # the check reads the stack, so it is silent when metrics are off.
+    metrics.warn_unless_outermost(app)
 
     # Startup: Run background tasks. Delete any persisted daemon rows whose
     # ids are no longer in INTERNAL_REQUEST_DAEMONS first (daemon renamed /

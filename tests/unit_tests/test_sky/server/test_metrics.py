@@ -589,7 +589,7 @@ async def test_a_middleware_rejection_keeps_a_registered_route_path(
     ('/dashboard/_next/static/chunks/main.js', '/dashboard/*'),
     ('/internal/dashboard/clusters', '/internal/dashboard/*'),
     ('/plugins/api/foo/list', '/plugins/*'),
-    ('/jobs/queue', '/jobs/*'),
+    ('/jobs/no-such-thing', '/jobs/*'),
     ('/users', '/users/*'),
 ])
 async def test_a_middleware_rejection_on_an_unknown_path_is_bucketed(

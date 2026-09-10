@@ -14,6 +14,7 @@ and check that what the client sees is unchanged and that the counters now
 record it.
 """
 import asyncio
+import http
 import os
 import subprocess
 import sys
@@ -33,6 +34,7 @@ from sky.server import metrics
 from sky.server import middleware_utils
 from sky.server import server
 from sky.server.auth import db_lookup
+from sky.server.auth import oauth2_proxy
 
 _AUTH_HEADER = {'X-Auth-Request-Email': 'bob@example.com'}
 _PROXY_CONFIG = server_config.ExternalProxyConfig(
@@ -514,7 +516,154 @@ class TestOutermostGuard:
         assert 'InitializeRequestAuthUserMiddleware is' in message
         assert 'PrometheusMiddleware' in message
 
-    def test_no_middleware_at_all_is_reported(self):
+    def test_an_app_without_the_metrics_layer_is_not_reported(self):
+        """Metrics off (or registration skipped): there is no invariant to
+        hold, so the startup log must stay quiet."""
         with mock.patch.object(metrics.logger, 'warning') as warn:
-            assert metrics.warn_unless_outermost(fastapi.FastAPI()) is False
+            assert metrics.warn_unless_outermost(fastapi.FastAPI()) is True
+        warn.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_a_client_disconnect_is_counted_in_a_known_bucket():
+    """A `BaseException` (the cancellation a client disconnect produces)
+    unwinds past `except Exception`, so nothing sets a status and the request
+    records `0xx`. Counting it beats dropping it -- a disconnect is a real
+    request -- but it is a label value operators will see, so pin it
+    deliberately instead of leaving it to `_get_status_code_group(0)`."""
+    middleware = metrics.PrometheusMiddleware(app=mock.Mock())
+    request = fastapi.Request({
+        'type': 'http',
+        'method': 'GET',
+        'path': '/status',
+        'headers': [],
+        'query_string': b'',
+        'state': {},
+        'router': object(),
+    })
+
+    async def cancelled(_):
+        raise asyncio.CancelledError()
+
+    with pytest.raises(asyncio.CancelledError):
+        await middleware.dispatch(request, cancelled)
+
+    assert _sample(metrics_utils.SKY_APISERVER_REQUESTS_TOTAL,
+                   path='/status',
+                   status='0xx') == 1.0
+
+
+class TestOutermostGuardIsNotEnvGated:
+    """Regression: the guard used to read `metrics_utils.METRICS_ENABLED`
+    (`== 'true'`) while the registration used the env var's truthiness, so
+    `SKY_API_SERVER_METRICS_ENABLED=1` installed the layer and skipped the
+    check -- an enabled deployment with the check silently off. It now reads
+    the stack, so no predicate can drift."""
+
+    def test_no_metrics_layer_means_nothing_to_check(self):
+        app = fastapi.FastAPI()
+        app.add_middleware(server.InitializeRequestAuthUserMiddleware)
+        with mock.patch.object(metrics.logger, 'warning') as warn:
+            assert metrics.warn_unless_outermost(app) is True
+        warn.assert_not_called()
+
+    def test_an_installed_but_displaced_layer_is_reported(self):
+        app = fastapi.FastAPI()
+        app.add_middleware(metrics.PrometheusMiddleware)
+        app.user_middleware.insert(
+            0,
+            starlette.middleware.Middleware(
+                server.InitializeRequestAuthUserMiddleware))
+        with mock.patch.object(metrics.logger, 'warning') as warn:
+            assert metrics.warn_unless_outermost(app) is False
         warn.assert_called_once()
+
+    @pytest.mark.parametrize('value', ['1', 'true', 'True', 'yes'])
+    def test_the_check_runs_whatever_the_env_var_spelling(
+            self, monkeypatch, value):
+        """Any spelling the registration accepts must be checked too."""
+        monkeypatch.setenv('SKY_API_SERVER_METRICS_ENABLED', value)
+        app = fastapi.FastAPI()
+        app.add_middleware(metrics.PrometheusMiddleware)
+        app.user_middleware.insert(
+            0,
+            starlette.middleware.Middleware(
+                server.InitializeRequestAuthUserMiddleware))
+        with mock.patch.object(metrics.logger, 'warning') as warn:
+            assert metrics.warn_unless_outermost(app) is False
+        warn.assert_called_once()
+
+
+class _StubAuthResponse:
+    """The oauth2-proxy `/oauth2/auth` answer, as an async context manager."""
+
+    def __init__(self, status):
+        self.status = status
+        self.headers = {}
+        self.cookies = {}
+        self.text = ''
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *exc):
+        return False
+
+
+class _StubSession:
+
+    def __init__(self, status):
+        self._status = status
+
+    def request(self, **kwargs):
+        del kwargs
+        return _StubAuthResponse(self._status)
+
+
+class TestAuthProxyReasonsAreDistinct:
+    """`auth_proxy_unavailable` used to cover two different failures. They
+    need different fixes -- one is "the proxy is down", the other is "the
+    proxy answered and we cannot use it" -- so they are separate reasons.
+    """
+
+    @staticmethod
+    async def _run(status, get_auth_user):
+        request = fastapi.Request({
+            'type': 'http',
+            'method': 'GET',
+            'path': '/status',
+            'headers': [],
+            'query_string': b'',
+            'scheme': 'http',
+            'server': ('testserver', 80),
+            'state': {},
+        })
+        # `websocket_aware` wraps the class, so the real middleware -- the
+        # one carrying `get_auth_user` and `_authenticate` -- is the
+        # instance it holds.
+        middleware = oauth2_proxy.OAuth2ProxyMiddleware(
+            app=mock.Mock()).middleware
+        with mock.patch.object(middleware, 'get_auth_user', get_auth_user):
+            response = await middleware._authenticate(  # pylint: disable=protected-access
+                request, mock.AsyncMock(), _StubSession(status))
+        return request, response
+
+    @pytest.mark.asyncio
+    async def test_authenticated_without_user_info_is_a_bad_response(self):
+        """The proxy is reachable and says the user is authenticated; it just
+        did not send the user info. A setup problem, not an outage."""
+        request, response = await self._run(http.HTTPStatus.ACCEPTED,
+                                            lambda _: None)
+        assert response.status_code == 500
+        assert middleware_utils.get_rejection_reason(request.scope) == (
+            middleware_utils.REJECT_REASON_AUTH_PROXY_BAD_RESPONSE)
+
+    @pytest.mark.asyncio
+    async def test_an_unexpected_proxy_status_is_a_bad_response_too(self):
+        """The other half of the same axis, which the first pass missed: the
+        proxy answered something this server cannot act on."""
+        request, response = await self._run(http.HTTPStatus.IM_A_TEAPOT,
+                                            lambda _: None)
+        assert response.status_code == int(http.HTTPStatus.IM_A_TEAPOT)
+        assert middleware_utils.get_rejection_reason(request.scope) == (
+            middleware_utils.REJECT_REASON_AUTH_PROXY_BAD_RESPONSE)

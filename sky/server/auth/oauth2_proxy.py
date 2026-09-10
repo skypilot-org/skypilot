@@ -160,7 +160,7 @@ class OAuth2ProxyMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
                 if not auth_user:
                     middleware_utils.mark_rejection(
                         request,
-                        middleware_utils.REJECT_REASON_AUTH_PROXY_UNAVAILABLE)
+                        middleware_utils.REJECT_REASON_AUTH_PROXY_BAD_RESPONSE)
                     return fastapi.responses.JSONResponse(
                         status_code=http.HTTPStatus.INTERNAL_SERVER_ERROR,
                         content={
@@ -221,7 +221,7 @@ class OAuth2ProxyMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
                              f'{auth_response.status}: {auth_response.text}')
                 middleware_utils.mark_rejection(
                     request,
-                    middleware_utils.REJECT_REASON_AUTH_PROXY_UNAVAILABLE)
+                    middleware_utils.REJECT_REASON_AUTH_PROXY_BAD_RESPONSE)
                 return fastapi.responses.JSONResponse(
                     status_code=auth_response.status,
                     content={'detail': 'oauth2-proxy error'})

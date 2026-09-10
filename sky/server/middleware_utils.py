@@ -22,6 +22,12 @@ logger = sky_logging.init_logger(__name__)
 # `record_safely`: the observation is dropped, the response is returned
 # unchanged, and the failure is logged.
 #
+# These helpers live here, next to `record_rejection`, rather than in
+# sky/server/metrics.py: that module imports this one, so anything here that
+# needed them would close an import cycle. This module's dependency on
+# sky.metrics.utils is not new -- `record_rejection` and the handshake
+# counter already have it.
+#
 # The log is rate-limited per process. The first failure is logged at WARNING
 # with its traceback; later ones at most once per
 # `RECORDING_FAILURE_LOG_INTERVAL_SECONDS`, with a count of the failures
@@ -105,7 +111,15 @@ REJECT_REASON_UNAUTHORIZED = 'unauthorized'
 REJECT_REASON_FORBIDDEN = 'forbidden'
 REJECT_REASON_SHUTTING_DOWN = 'shutting_down'
 REJECT_REASON_API_VERSION = 'api_version'
+# Could not reach the auth proxy at all (connection error, timeout).
 REJECT_REASON_AUTH_PROXY_UNAVAILABLE = 'auth_proxy_unavailable'
+# Reached it, and the answer was unusable: authenticated but no user info, or
+# a status this server does not know how to act on. A different failure from
+# unavailability and a different fix, so it gets its own reason. Note that
+# the `status` recorded alongside it can be the proxy's own status code --
+# the one label value in this counter that upstream chooses rather than this
+# code (bounded by the HTTP status set).
+REJECT_REASON_AUTH_PROXY_BAD_RESPONSE = 'auth_proxy_bad_response'
 REJECT_REASON_REQUEST_WORKER_EXHAUSTED = 'request_worker_exhausted'
 
 # Key in `scope['state']` (i.e. `request.state`) the reason is stored under.

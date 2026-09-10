@@ -1590,7 +1590,15 @@ OTHER_PATH_LABEL = 'other'
 
 
 def warn_unless_outermost(app) -> bool:
-    """Warn at startup if this layer is not the outermost middleware.
+    """Warn at startup if this layer is installed but not outermost.
+
+    Returns whether the ordering invariant holds or does not apply. Reads
+    the answer out of the middleware stack rather than from the metrics
+    env-var: the registration below uses the variable's truthiness while
+    `metrics_utils.METRICS_ENABLED` requires the literal `true`, so a guard
+    with its own predicate would go silent under
+    `SKY_API_SERVER_METRICS_ENABLED=1` -- an enabled deployment, and one of
+    the configurations where a misordered stack would go unnoticed.
 
     Everything this middleware exists to count -- the 401/403/503s an
     authentication, RBAC, shutdown or plugin middleware answers itself -- is
@@ -1606,9 +1614,13 @@ def warn_unless_outermost(app) -> bool:
     reverse, and `add_middleware` inserts at the front.
     """
     stack = getattr(app, 'user_middleware', None) or []
-    outermost = stack[0].cls if stack else None
-    if outermost is PrometheusMiddleware:
+    classes = [m.cls for m in stack]
+    if PrometheusMiddleware not in classes:
+        # Metrics are off, or registration was skipped: nothing to check.
         return True
+    if classes[0] is PrometheusMiddleware:
+        return True
+    outermost = classes[0]
     logger.warning(
         f'{PrometheusMiddleware.__name__} is not the outermost middleware '
         f'({getattr(outermost, "__name__", outermost)} is). Responses that a '
@@ -1616,7 +1628,7 @@ def warn_unless_outermost(app) -> bool:
         'drains -- will not be counted in sky_apiserver_requests_total, so an '
         'outage on those paths shows up as a drop in successful traffic '
         'instead of as errors. Middleware order: '
-        f'{[m.cls.__name__ for m in stack]}')
+        f'{[c.__name__ for c in classes]}')
     return False
 
 
@@ -1634,11 +1646,13 @@ def _reached_router(request: fastapi.Request) -> bool:
 def _literal_route_paths(app) -> FrozenSet[str]:
     """The registered route paths without path parameters.
 
-    "Registered route" means a route on the app's own table: with current
-    FastAPI, `include_router` adds one opaque entry per router, so the
-    routes of the included core and plugin routers are not in it and fold
-    into their prefix bucket (see `_unrouted_path_label`). Bounded either
-    way.
+    `include_router` expands each sub-route onto `app.routes` with the
+    prefix applied, so the core and plugin routers' own routes are in here
+    too: on the real app, 132 routes of which 126 are parameterless
+    (`/jobs/queue`, `/users/update`, `/volumes/apply`, ...). An unrouted
+    request to any of them keeps its exact path; only a path that matches
+    no route at all falls back to a prefix bucket. Bounded either way --
+    126 literal routes plus 13 buckets plus `other`.
     """
     routes = getattr(app, 'routes', None)
     if not isinstance(routes, (list, tuple)):
@@ -1660,6 +1674,11 @@ def _unrouted_path_label(path: str, literal_routes: FrozenSet[str]) -> str:
     folded into one of the fixed `_UNROUTED_PATH_PREFIXES` buckets, as
     `<prefix>*`, or into `other`. A request that did reach the router keeps
     its raw path, 404s included, exactly as before.
+
+    Registered routes include the ones `include_router` expanded (see
+    `_literal_route_paths`), so the buckets catch what matches no route at
+    all: scanner probes, and the concrete values of the parameterised
+    routes (`/dashboard/_next/...`, `/ssh_node_pools/<name>/status`).
     """
     if path in literal_routes:
         return path
