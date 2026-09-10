@@ -158,10 +158,19 @@ _LATENCY_BUCKETS = (0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30,
 # Interactive-SSH scale, for the round trips a keystroke takes. _LATENCY_BUCKETS
 # starts at 5ms and runs to 1000s because it is sized for request durations; a
 # healthy API-server-to-pod round trip inside one cluster is sub-millisecond to
-# a few ms, so every good value would land in that ladder's first bucket. Top
-# out at 10s: an SSH echo that slow is a dead session, not a slow one.
+# a few ms, so every good value would land in that ladder's first bucket.
+#
+# The ladder stops at 2s because that is the largest value the sampler can
+# produce: _BackendTurnaroundSampler discards a reply that takes longer than
+# _MAX_PENDING_SECONDS, since past that it is far more likely to be unrelated
+# output than a very slow echo. Buckets above the cap would be structurally
+# empty and would advertise a reach the measurement does not have. Keep the two
+# numbers in step -- raising one without the other is what made 2.5/5/10 dead
+# boundaries. A reply that never arrives inside the cap is not silently lost:
+# it increments SKY_APISERVER_SSH_BACKEND_TURNAROUND_DROPPED_TOTAL, which is
+# how a backend too slow to measure stays visible.
 _SSH_ROUND_TRIP_BUCKETS = (0.001, 0.002, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25,
-                           0.5, 1, 2.5, 5, 10, float('inf'))
+                           0.5, 1, 2, float('inf'))
 
 # Time spent processing a piece of code, refer to time_it().
 SKY_APISERVER_CODE_DURATION_SECONDS = prom.Histogram(
@@ -333,6 +342,28 @@ SKY_APISERVER_SSH_BACKEND_TURNAROUND_SECONDS = prom.Histogram(
      'unpaired backend traffic can attach a read to the wrong write.'),
     ['path'],
     buckets=_SSH_ROUND_TRIP_BUCKETS,
+)
+
+# The histogram's blind spot, made visible. A keystroke-sized write whose reply
+# does not arrive within _MAX_PENDING_SECONDS is dropped rather than observed,
+# because at that age a reply is far more likely to be unrelated output than a
+# very slow echo -- admitting it would put a multi-second sample in a
+# distribution whose real values are single-digit milliseconds, and one such
+# sample moves p99 by four orders of magnitude.
+#
+# Dropping is right for the distribution and wrong as the whole story: a
+# backend that genuinely echoes slower than the cap would go quiet rather than
+# look slow. So count the drops. A rising ratio of dropped to observed is the
+# signal for "too slow to measure", which the distribution cannot express and
+# the session counter cannot either.
+SKY_APISERVER_SSH_BACKEND_TURNAROUND_DROPPED_TOTAL = prom.Counter(
+    'sky_apiserver_ssh_backend_turnaround_dropped_total',
+    ('Keystroke-sized writes whose backend reply did not arrive within the '
+     'pairing window, so no turnaround sample was taken. Read against '
+     'sky_apiserver_ssh_backend_turnaround_seconds_count: a rising share of '
+     'drops means the backend is slower than the measurement can express, '
+     'not that SSH went idle.'),
+    ['path'],
 )
 
 # Denominator for the histograms above. Without it an empty

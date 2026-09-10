@@ -98,10 +98,14 @@ class _BackendTurnaroundSampler:
     def __init__(self, path: str) -> None:
         self._enabled = metrics_utils.METRICS_ENABLED
         self._histogram = None
+        self._dropped = None
         if self._enabled:
             self._histogram = (
                 metrics_utils.SKY_APISERVER_SSH_BACKEND_TURNAROUND_SECONDS.
                 labels(path=path))
+            self._dropped = (
+                metrics_utils.SKY_APISERVER_SSH_BACKEND_TURNAROUND_DROPPED_TOTAL
+                .labels(path=path))
         self._pending_at: Optional[float] = None
 
     def on_write(self, size: int) -> None:
@@ -130,6 +134,11 @@ class _BackendTurnaroundSampler:
             return
         elapsed = time.monotonic() - pending_at
         if elapsed > self._MAX_PENDING_SECONDS:
+            # Too old to trust as an echo. Count it instead of observing it,
+            # so a backend that is slower than the pairing window shows up as
+            # drops rather than as silence -- see the counter's docstring.
+            assert self._dropped is not None
+            self._dropped.inc()
             return
         assert self._histogram is not None
         self._histogram.observe(elapsed)

@@ -5,6 +5,7 @@ from unittest import mock
 
 import pytest
 
+from sky.metrics import utils as metrics_utils
 from sky.server import websocket_utils
 
 
@@ -15,6 +16,7 @@ def _sampler(enabled=True):
         sampler = websocket_utils._BackendTurnaroundSampler('portforward')
     observed = []
     sampler._histogram = mock.Mock(observe=observed.append)
+    sampler._dropped = mock.Mock()
     return sampler, observed
 
 
@@ -110,6 +112,53 @@ def test_stale_reply_is_discarded():
         sampler.on_write(64)
         sampler.on_read()
     assert observed == []
+
+
+def test_stale_reply_is_counted_not_silently_lost():
+    """A backend too slow to measure must look slow, not idle.
+
+    Dropping the sample keeps the distribution honest, but on its own it makes
+    a genuinely slow backend indistinguishable from nobody typing. The drop
+    counter is what carries that signal, so it has to move on exactly the
+    reads the histogram refuses.
+    """
+    sampler, observed = _sampler()
+    cap = websocket_utils._BackendTurnaroundSampler._MAX_PENDING_SECONDS
+    with mock.patch.object(websocket_utils.time,
+                           'monotonic',
+                           side_effect=[100.0, 100.0 + cap + 0.1]):
+        sampler.on_write(64)
+        sampler.on_read()
+    assert observed == []
+    sampler._dropped.inc.assert_called_once()
+
+
+def test_paired_reply_does_not_count_a_drop():
+    """The counter is the blind spot's size, not a request tally."""
+    sampler, observed = _sampler()
+    with mock.patch.object(websocket_utils.time,
+                           'monotonic',
+                           side_effect=[10.0, 10.007]):
+        sampler.on_write(64)
+        sampler.on_read()
+    assert observed == [pytest.approx(0.007)]
+    sampler._dropped.inc.assert_not_called()
+
+
+def test_buckets_do_not_promise_more_reach_than_the_sampler_has():
+    """Bucket boundaries above the pairing cap can never be filled.
+
+    They previously ran to 10s while the sampler discarded anything over
+    _MAX_PENDING_SECONDS, so 2.5/5/10 were dead boundaries that advertised a
+    reach the measurement did not have. Keep the two in step.
+    """
+    cap = websocket_utils._BackendTurnaroundSampler._MAX_PENDING_SECONDS
+    finite = [
+        b for b in metrics_utils._SSH_ROUND_TRIP_BUCKETS if b != float('inf')
+    ]
+    assert max(finite) <= cap, (
+        f'bucket ladder reaches {max(finite)}s but the sampler cannot emit '
+        f'anything above {cap}s, so those boundaries are structurally empty')
 
 
 def test_elapsed_is_measured_not_guessed():
