@@ -95,12 +95,22 @@ SKY_PIP_CMD = f'{SKY_PYTHON_CMD} -m pip'
 SKY_RAY_CMD = (f'{SKY_PYTHON_CMD} $([ -s {SKY_RAY_PATH_FILE} ] && '
                f'cat {SKY_RAY_PATH_FILE} 2> /dev/null || command -v ray)')
 
-# Use $(which env) to find env, falling back to /usr/bin/env if which is
-# unavailable. This works around a Slurm quirk where srun's execvp() doesn't
-# check execute permissions, failing when $HOME/.local/bin/env (non-executable,
-# from uv installation) shadows /usr/bin/env.
-SKY_SLURM_UNSET_PYTHONPATH = ('$(which env 2>/dev/null || echo /usr/bin/env) '
-                              '-u PYTHONPATH')
+# Resolve `env` with the POSIX builtin `command -v` (as SKY_GET_PYTHON_PATH_CMD
+# and SKY_RAY_CMD above already do), falling back to /usr/bin/env. Using
+# `command -v` instead of `which` avoids two failure modes at once:
+#   1. A non-executable $HOME/.local/bin/env (left by a uv installation)
+#      shadowing /usr/bin/env on PATH: `command -v` only reports an executable
+#      match, so it skips the shadow, whereas a Slurm srun execvp() would pick
+#      it without an exec check.
+#   2. A `which` bash *function* re-imported into a container by
+#      `srun --export=ALL`: Debian/Ubuntu export one that calls `/usr/bin/which`
+#      with GNU-only flags. A minimal image's `/usr/bin/which` rejects them and
+#      prints "Usage: ..." to stdout, poisoning `$(which env ...)` so the run
+#      command begins with `Usage:` -> exit 127. `command -v` is a shell builtin
+#      and is immune to the exported function.
+SKY_SLURM_UNSET_PYTHONPATH = (
+    '$(command -v env 2>/dev/null || echo /usr/bin/env) '
+    '-u PYTHONPATH')
 SKY_SLURM_PYTHON_CMD = (f'{SKY_SLURM_UNSET_PYTHONPATH} '
                         f'$({SKY_GET_PYTHON_PATH_CMD})')
 
