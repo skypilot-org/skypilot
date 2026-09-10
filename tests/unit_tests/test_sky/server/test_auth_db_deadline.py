@@ -30,6 +30,7 @@ These tests pin the containment behavior:
 # pylint: disable=protected-access,redefined-outer-name,missing-class-docstring
 
 import asyncio
+import concurrent.futures
 import os
 import time
 import unittest.mock as mock
@@ -44,6 +45,8 @@ from sky.server import server
 from sky.server.auth import db_lookup
 from sky.server.requests import threads
 from sky.skylet import constants
+from sky.utils import context_utils
+from sky.utils.db import deadline as db_deadline
 
 # Lookups sleep _SLOW_DB_SECONDS while the deadline is patched to
 # _DEADLINE_SECONDS, so every "slow DB" test trips the deadline quickly and
@@ -653,3 +656,100 @@ class TestServerSideTimeoutMapping:
 
         _assert_retryable_timeout_503(response)
         assert not call_next_sentinel.reached
+
+
+class TestDeadlineHandedToTheDbLayer:
+    """`_run_with_deadline` sets the thread-local deadline the DB layer honours.
+
+    Without it the SET LOCAL listener is inert and the thread is only ever
+    freed by the database -- the pin this change removes.
+    """
+
+    @pytest.mark.asyncio
+    async def test_thread_local_deadline_is_set_inside_the_call(
+            self, monkeypatch):
+        monkeypatch.setattr(db_lookup, 'AUTH_DB_TIMEOUT_SECONDS', 5)
+        seen = {}
+
+        def _probe():
+            seen['deadline'] = db_deadline.get_deadline()
+            seen['now'] = time.monotonic()
+            return 'ok'
+
+        assert await db_lookup.call_with_deadline(_probe) == 'ok'
+        assert seen[
+            'deadline'] is not None, 'no deadline handed to the DB layer'
+        remaining = seen['deadline'] - seen['now']
+        # The inner budget: the 5s deadline minus the client margin.
+        assert 4.0 < remaining <= 5 - db_lookup._CLIENT_DEADLINE_MARGIN_SECONDS
+
+    @pytest.mark.asyncio
+    async def test_deadline_origin_is_the_submit_not_the_thread_start(
+            self, monkeypatch):
+        """Same origin as `wait_for`: time the call spends between submit
+        and thread start (a busy pool, a loop stall) comes off the DB
+        layer's budget too, so the two deadlines cannot disagree."""
+        monkeypatch.setattr(db_lookup, 'AUTH_DB_TIMEOUT_SECONDS', 5)
+        real = context_utils.to_thread_with_executor
+        delay = 0.3
+
+        async def _start_late(pool, fn, *args, **kwargs):
+            await asyncio.sleep(delay)
+            return await real(pool, fn, *args, **kwargs)
+
+        monkeypatch.setattr(context_utils, 'to_thread_with_executor',
+                            _start_late)
+        seen = {}
+
+        def _probe():
+            seen['remaining'] = db_deadline.get_deadline() - time.monotonic()
+
+        await db_lookup.call_with_deadline(_probe)
+        inner = 5 - db_lookup._CLIENT_DEADLINE_MARGIN_SECONDS
+        # A deadline computed at thread start would show ~inner remaining.
+        assert seen['remaining'] < inner - delay + 0.1, seen
+        assert seen['remaining'] > inner - delay - 1.0, seen
+
+    @pytest.mark.asyncio
+    async def test_request_pool_variant_sets_it_too(self, monkeypatch):
+        monkeypatch.setattr(db_lookup, 'AUTH_DB_TIMEOUT_SECONDS', 5)
+        seen = {}
+
+        def _probe():
+            seen['deadline'] = db_deadline.get_deadline()
+
+        await db_lookup._call_on_request_pool(_probe)
+        assert seen['deadline'] is not None
+
+    @pytest.mark.asyncio
+    async def test_deadline_is_cleared_after_the_call(self, monkeypatch):
+        # One worker thread, so the check runs on the thread the call used.
+        monkeypatch.setattr(db_lookup, 'AUTH_DB_TIMEOUT_SECONDS', 5)
+        pool = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+        try:
+
+            def _lock_timeout():
+                # Duck-typed like a raw driver error the database cut off
+                # at `lock_timeout` (55P03): the caller-side classification
+                # maps it to the retryable AuthDBTimeoutError.
+                raise _PgError('55P03', 'lock not available')
+
+            await db_lookup._run_with_deadline(pool, lambda: 'ok')
+            with pytest.raises(db_lookup.AuthDBTimeoutError) as excinfo:
+                await db_lookup._run_with_deadline(pool, _lock_timeout)
+            assert 'lock_timeout' in excinfo.value.args
+            assert pool.submit(db_deadline.get_deadline).result(5) is None
+        finally:
+            pool.shutdown(wait=True)
+
+    @pytest.mark.asyncio
+    async def test_a_tiny_budget_still_leaves_a_positive_deadline(
+            self, monkeypatch):
+        monkeypatch.setattr(db_lookup, 'AUTH_DB_TIMEOUT_SECONDS', 0.2)
+        seen = {}
+
+        def _probe():
+            seen['remaining'] = db_deadline.get_deadline() - time.monotonic()
+
+        await db_lookup.call_with_deadline(_probe)
+        assert seen['remaining'] > 0
