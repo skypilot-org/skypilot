@@ -6,6 +6,7 @@ from unittest import mock
 import pytest
 import pytest_asyncio
 import sqlalchemy
+from sqlalchemy.ext import asyncio as sqlalchemy_async
 
 from sky.utils.db import db_utils
 
@@ -694,3 +695,140 @@ class TestConnStringResolution:
             'postgresql://u:p@pooler:6432/db?sslmode=verify-full')
         assert db_utils._resolve_conn_string(direct=False) == (
             'postgresql://u:p@pooler:6432/db?sslmode=verify-full')
+
+
+class TestIdleInTransactionTimeout:
+    """Tests for the per-transaction idle_in_transaction_session_timeout
+    bound that get_engine installs on Postgres engines."""
+
+    @staticmethod
+    def _begin_listeners(engine):
+        return list(engine.dispatch.begin)
+
+    def test_not_installed_on_sqlite(self, tmp_path):
+        engine = sqlalchemy.create_engine(
+            f'sqlite:///{tmp_path}/idle_tx_sqlite.db')
+        before = len(self._begin_listeners(engine))
+        db_utils._install_idle_in_transaction_timeout(engine)
+        assert len(self._begin_listeners(engine)) == before
+        # A real sqlite transaction runs no SET statement.
+        statements = []
+
+        @sqlalchemy.event.listens_for(engine, 'before_cursor_execute')
+        def _spy(conn, cursor, statement, parameters, context, executemany):
+            del conn, cursor, parameters, context, executemany
+            statements.append(statement)
+
+        with engine.begin() as conn:
+            conn.execute(sqlalchemy.text('select 1'))
+        assert not any(s.startswith('SET LOCAL') for s in statements)
+
+    def test_installed_on_postgres_engine_emits_set_local(self):
+        # create_engine does not connect, so a Postgres URL is safe here.
+        engine = sqlalchemy.create_engine('postgresql+psycopg2://u:p@h/db',
+                                          poolclass=sqlalchemy.NullPool)
+        before = len(self._begin_listeners(engine))
+        db_utils._install_idle_in_transaction_timeout(engine)
+        listeners = self._begin_listeners(engine)
+        assert len(listeners) == before + 1
+        listener = listeners[-1]
+
+        conn = self._fake_connection(autocommit=False)
+        listener(conn)
+        conn.exec_driver_sql.assert_called_once_with(
+            db_utils._IDLE_IN_TRANSACTION_TIMEOUT_SQL)
+        # The result is closed so nothing is left unconsumed on the cursor
+        # (matters for the asyncpg adapter).
+        conn.exec_driver_sql.return_value.close.assert_called_once_with()
+
+    @staticmethod
+    def _fake_connection(autocommit: bool) -> mock.MagicMock:
+        """A stand-in for sqlalchemy.engine.Connection as the listener sees
+        it: a DBAPI connection with an ``autocommit`` attribute."""
+        conn = mock.MagicMock()
+        conn.connection.dbapi_connection.autocommit = autocommit
+        return conn
+
+    def _installed_listener(self):
+        engine = sqlalchemy.create_engine('postgresql+psycopg2://u:p@h/db',
+                                          poolclass=sqlalchemy.NullPool)
+        db_utils._install_idle_in_transaction_timeout(engine)
+        return self._begin_listeners(engine)[-1]
+
+    def test_skipped_on_autocommit_connection(self):
+        """A transaction-local setting outside a transaction block is a
+        no-op, so an autocommit DBAPI connection gets no statement."""
+        listener = self._installed_listener()
+        conn = self._fake_connection(autocommit=True)
+        listener(conn)
+        conn.exec_driver_sql.assert_not_called()
+
+    def test_statement_only_lowers_the_timeout(self):
+        """The bound is applied only when the value in effect is 0 or looser
+        than ours, so a tighter bound is kept whether it came from a
+        server/role default, from a caller's SET LOCAL issued before this
+        statement (e.g. prepended to it by a before_cursor_execute hook), or
+        from one issued after it. That is what makes the statement safe to
+        run first in every transaction regardless of other hooks' order."""
+        sql = db_utils._IDLE_IN_TRANSACTION_TIMEOUT_SQL
+        value = db_utils._IDLE_IN_TRANSACTION_TIMEOUT_MS
+        # Transaction-local (SET LOCAL semantics): reset at COMMIT/ROLLBACK,
+        # so it cannot leak through a transaction-mode pooler.
+        assert ('set_config(\'idle_in_transaction_session_timeout\', '
+                f'\'{value}\', true)') in sql
+        # Conditional on the value currently in effect for this session, read
+        # with current_setting() and compared as an interval (the GUC's text
+        # form carries a unit: '0', '30s', '90500ms', '1d').
+        assert ('current_setting(\'idle_in_transaction_session_timeout\')'
+                '::interval = interval \'0\'') in sql
+        assert ('current_setting(\'idle_in_transaction_session_timeout\')'
+                f'::interval > interval \'{value} ms\'') in sql
+        # Never through pg_settings: that view formats every GUC on each call
+        # (~0.8 ms of server CPU per transaction on Postgres 16, ~20x the
+        # statement itself), and this runs once per transaction fleet-wide.
+        assert 'pg_settings' not in sql
+        assert ' FROM ' not in sql.upper()
+        # One statement: no `;`, so it is safe for the asyncpg adapter too
+        # (extended protocol rejects multi-statement strings).
+        assert ';' not in sql
+
+    def test_statement_is_transaction_local_not_session_wide(self):
+        # A session-wide SET would leak onto the next client that borrows
+        # the server connection through a transaction-mode pooler.
+        sql = db_utils._IDLE_IN_TRANSACTION_TIMEOUT_SQL.upper()
+        assert 'SET_CONFIG(' in sql and ', TRUE)' in sql
+        assert not sql.startswith('SET ')
+
+    def test_installed_on_async_engine_sync_side(self):
+        """For an AsyncEngine the listener goes on sync_engine, where
+        SQLAlchemy emits connection events."""
+        pytest.importorskip('asyncpg')
+        engine = sqlalchemy_async.create_async_engine(
+            'postgresql+asyncpg://u:p@h/db', poolclass=sqlalchemy.NullPool)
+        before = len(self._begin_listeners(engine.sync_engine))
+        db_utils._install_idle_in_transaction_timeout(engine)
+        assert len(self._begin_listeners(engine.sync_engine)) == before + 1
+
+    def test_timeout_value_is_a_sane_default(self):
+        # A minute: far above the milliseconds of in-process work any of our
+        # transactions does between statements, far below the time an
+        # orphaned row lock needs to stall a thread pool.
+        assert db_utils._IDLE_IN_TRANSACTION_TIMEOUT_MS == 60_000
+
+    def test_get_engine_installs_on_postgres(self, monkeypatch):
+        monkeypatch.setenv('IS_SKYPILOT_SERVER', 'true')
+        monkeypatch.setenv('SKYPILOT_DB_CONNECTION_URI',
+                           'postgresql://u:p@h:5432/db')
+        monkeypatch.delenv('SKYPILOT_DB_POOL_HOSTPORT', raising=False)
+        monkeypatch.delenv('SKYPILOT_DB_POOL_CONNECTION_URI', raising=False)
+        db_utils._postgres_engine_cache.clear()
+        db_utils.set_max_connections(0)
+        try:
+            with mock.patch.object(
+                    db_utils, '_install_idle_in_transaction_timeout') as inst:
+                engine = db_utils.get_engine(None)
+                # cached on the second call: installed exactly once.
+                assert db_utils.get_engine(None) is engine
+            inst.assert_called_once_with(engine)
+        finally:
+            db_utils._postgres_engine_cache.clear()
