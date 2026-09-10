@@ -1847,3 +1847,25 @@ class TestWaitingLineFallback:
     def test_nothing_to_show(self):
         """Neither available renders the plain waiting line."""
         assert jobs_utils._waiting_line_detail(None, None) is None
+
+
+class TestFieldsForController:
+    """Queue fields are trimmed to what a remote controller's skylet knows."""
+
+    _NEW = ['root_job_id', 'parent_job_id', 'parent_task_id']
+
+    def test_new_controller_keeps_everything(self):
+        fields = ['job_id', 'status'] + self._NEW
+        assert jobs_utils.fields_for_controller(fields, '41') == fields
+        assert jobs_utils.fields_for_controller(fields, '57') == fields
+
+    def test_old_controller_loses_the_parent_link_fields(self):
+        fields = ['job_id', 'status'] + self._NEW
+        assert jobs_utils.fields_for_controller(fields,
+                                                '40') == ['job_id', 'status']
+
+    def test_none_fields_and_unknown_versions_pass_through(self):
+        assert jobs_utils.fields_for_controller(None, '40') is None
+        fields = ['job_id'] + self._NEW
+        assert jobs_utils.fields_for_controller(fields, None) == fields
+        assert jobs_utils.fields_for_controller(fields, 'dev') == fields
