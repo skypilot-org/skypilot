@@ -578,20 +578,35 @@ class TestOutermostGuardIsNotEnvGated:
             assert metrics.warn_unless_outermost(app) is False
         warn.assert_called_once()
 
-    @pytest.mark.parametrize('value', ['1', 'true', 'True', 'yes'])
-    def test_the_check_runs_whatever_the_env_var_spelling(
-            self, monkeypatch, value):
-        """Any spelling the registration accepts must be checked too."""
-        monkeypatch.setenv('SKY_API_SERVER_METRICS_ENABLED', value)
-        app = fastapi.FastAPI()
-        app.add_middleware(metrics.PrometheusMiddleware)
-        app.user_middleware.insert(
-            0,
-            starlette.middleware.Middleware(
-                server.InitializeRequestAuthUserMiddleware))
-        with mock.patch.object(metrics.logger, 'warning') as warn:
-            assert metrics.warn_unless_outermost(app) is False
-        warn.assert_called_once()
+    def test_the_call_site_is_not_gated_by_an_env_var(self):
+        """The defect was the call site, not the function: a gate on the
+        metrics env var meant the check never ran under
+        `SKY_API_SERVER_METRICS_ENABLED=1` (truthy for the registration,
+        not the literal `true` that `METRICS_ENABLED` requires). Patch the
+        guard, import the real server module in a fresh process, and assert
+        it was called -- any gate that is false in this environment, which
+        is every gate on that variable, fails this.
+        """
+        code = ('import unittest.mock as mock\n'
+                'from sky.server import metrics\n'
+                'with mock.patch.object(metrics, "warn_unless_outermost") '
+                'as guard:\n'
+                '    from sky.server import server\n'
+                '    del server\n'
+                'assert guard.call_count == 1, guard.call_count\n'
+                'print("called")')
+        env = {
+            k: v
+            for k, v in os.environ.items()
+            if k != 'SKY_API_SERVER_METRICS_ENABLED'
+        }
+        out = subprocess.run([sys.executable, '-c', code],
+                             env=env,
+                             check=True,
+                             capture_output=True,
+                             text=True,
+                             timeout=300)
+        assert out.stdout.strip().splitlines()[-1] == 'called', out.stdout
 
 
 class _StubAuthResponse:
