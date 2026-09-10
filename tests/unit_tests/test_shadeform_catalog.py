@@ -111,7 +111,7 @@ def test_catalog_keeps_cpu_rows_and_empty_accelerators(reset_shadeform_df):
     csv_text = ('InstanceType,AcceleratorName,AcceleratorCount,vCPUs,'
                 'MemoryGiB,Price,Region,GpuInfo,SpotPrice\n'
                 'massedcompute_cpu-mini,,,8.0,32,0.12,us-east-5,,\n'
-                'massedcompute_A6000,A6000,1.0,8.0,48,0.49,us-east-5,,\n')
+                'massedcompute_A6000, A6000 ,1.0,8.0,48,0.49,us-east-5,,\n')
     df = pd.read_csv(io.StringIO(csv_text))
 
     with mock.patch.object(shadeform_catalog.common,
@@ -122,10 +122,15 @@ def test_catalog_keeps_cpu_rows_and_empty_accelerators(reset_shadeform_df):
     cpu_rows = loaded[loaded['InstanceType'] == 'massedcompute_cpu-mini']
     assert len(cpu_rows) == 1
     assert pd.isna(cpu_rows.iloc[0]['AcceleratorName'])
+    assert cpu_rows.iloc[0]['AcceleratorName'] != 'nan'
 
     accelerators = catalog_common.get_accelerators_from_instance_type_impl(
         loaded, 'massedcompute_cpu-mini')
     assert accelerators is None
+
+    gpu_name = loaded.loc[loaded['InstanceType'] == 'massedcompute_A6000',
+                          'AcceleratorName'].iloc[0]
+    assert gpu_name == 'A6000'
 
     gpu_acc = catalog_common.get_accelerators_from_instance_type_impl(
         loaded, 'massedcompute_A6000')

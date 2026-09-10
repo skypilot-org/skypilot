@@ -39,8 +39,13 @@ def _get_df():
             ])
         else:
             df = df[df['InstanceType'].notna()]
-            # Keep CPU rows (empty AcceleratorName). Do not stringify NaN to
-            # 'nan'; Resources would infer {'nan': 0}.
+            # Keep CPU rows (empty AcceleratorName). Still strip GPU names.
+            # Do not use astype(str): that stringifies NaN to 'nan' and
+            # Resources would infer {'nan': 0}. pandas .str.strip() leaves
+            # NA as NA.
+            if 'AcceleratorName' in df.columns:
+                df = df.assign(
+                    AcceleratorName=df['AcceleratorName'].str.strip())
             _df = df.reset_index(drop=True)
     return _df
 
