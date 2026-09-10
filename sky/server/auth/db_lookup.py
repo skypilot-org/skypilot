@@ -8,14 +8,17 @@ thread running it, for as long as the DB layer allows. At a hold time of
 minutes the bounded auth executor saturates within seconds and every
 authenticated endpoint fails for the duration of the DB incident.
 
-``call_with_deadline`` puts a client-side total deadline on each lookup.
-``asyncio.wait_for`` is deliberately the bounding layer: a server-side
-``statement_timeout`` cannot cover time spent queued inside a transaction
-pooler (no server connection is assigned yet) or waiting for a pool
-checkout. On timeout the request fails fast with a 503 the client retries
-with backoff; note the executor thread itself keeps running until the DB
-layer releases it, so the auth executor still acts as a saturation
-buffer — requests beyond it fail fast with the worker-exhausted 503.
+``call_with_deadline`` puts a total deadline on each lookup, enforced at
+two levels. ``asyncio.wait_for`` bounds the *caller*: it also covers time
+spent queued inside a transaction pooler (no server connection is assigned
+yet) or waiting for a pool checkout, and on timeout the request fails fast
+with a 503 the client retries with backoff. The same deadline is handed to
+the DB layer (`sky.utils.db.deadline`: ``SET LOCAL`` timeouts on the
+transaction) so the *thread* gives up too. Without that, a thread parked in
+the DB driver keeps running until the DB layer releases it, and enough of
+them saturate the auth executor -- every authenticated endpoint then fails
+until the process restarts. The executor still acts as a saturation
+buffer: requests beyond it fail fast with the worker-exhausted 503.
 
 Both timeout and executor exhaustion must be converted to responses
 *inside* the middleware: app-level exception handlers wrap the router
@@ -23,6 +26,8 @@ only, so an exception raised in a middleware surfaces as a bare 500,
 which clients do not retry.
 """
 import asyncio
+import concurrent.futures
+import time
 from typing import Any, Callable, Optional
 
 import fastapi
@@ -34,6 +39,7 @@ from sky.users import permission
 from sky.utils import common_utils
 from sky.utils import context_utils
 from sky.utils.db import db_utils
+from sky.utils.db import deadline as db_deadline
 
 logger = sky_logging.init_logger(__name__)
 
@@ -65,6 +71,25 @@ _SERVER_TIMEOUT_PGCODES = {
     '25P03': 'idle_in_transaction_session_timeout',
 }
 
+# The DB work gives up this far before the caller's `wait_for`, so the
+# DB layer's own bounds fire first -- the server-side SET LOCAL bounds in
+# `sky.utils.db.deadline` -- before `wait_for` releases only the caller.
+# The server-side bounds fire a further margin earlier (see
+# `deadline._SERVER_MARGIN_MS` / `_LOCK_UNDER_MS`), so for a configured
+# deadline D the order is: lock D-1.1s < statement D-1.0s < DB-layer
+# deadline D-0.5s < wait_for D (e.g. D = 5 s: 3.9 < 4.0 < 4.5 < 5.0).
+_CLIENT_DEADLINE_MARGIN_SECONDS = 0.5
+# Floor on the inner (DB-layer) budget. `db_utils.get_auth_db_timeout_seconds`
+# already refuses a deadline that is not a positive number, and the users
+# upsert refuses one too small to order its own percentage-derived timeouts
+# (tens of ms); this floor covers the deadlines in between that are shorter
+# than the margin above (< 0.55 s): the DB layer then gets 50 ms rather than
+# nothing, and the SET LOCAL values collapse to their own floor
+# (`deadline._MIN_TIMEOUT_MS`, so lock == statement and a lock wait reports
+# 57014 rather than 55P03). A deadline that small is a misconfiguration, but
+# it must not turn every auth call into an instant failure.
+_MIN_INNER_BUDGET_SECONDS = 0.05
+
 
 class AuthDBTimeoutError(asyncio.TimeoutError):
     """An auth DB call was cut off by the database's own timeout.
@@ -89,18 +114,41 @@ def _server_timeout_pgcode(exc: BaseException) -> Optional[str]:
     return None
 
 
-async def _run_with_deadline(pool: Any, func: Callable[..., Any],
-                             *args: Any) -> Any:
+async def _run_with_deadline(pool: concurrent.futures.Executor,
+                             func: Callable[..., Any], *args: Any) -> Any:
+    """Run a sync auth DB call on ``pool`` with a deadline the DB layer honours.
+
+    Sets a thread-local deadline for the call (same origin as ``wait_for``, so
+    a busy pool or a loop stall cannot make the two disagree). The DB layer --
+    the ``SET LOCAL`` bounds the engine listener adds to the transaction --
+    gives up at that deadline, which frees the executor thread; ``wait_for``
+    only ever frees the caller. A server-side timeout the database raises is
+    classified by the caller below, exactly as before.
+    """
+    budget = AUTH_DB_TIMEOUT_SECONDS
+    inner = max(_MIN_INNER_BUDGET_SECONDS,
+                budget - _CLIENT_DEADLINE_MARGIN_SECONDS)
+    start = time.monotonic()
+    deadline_at = start + inner
+    name = getattr(func, '__name__', repr(func))
+
+    def _run() -> Any:
+        db_deadline.set_deadline(deadline_at)
+        try:
+            return func(*args)
+        finally:
+            db_deadline.clear_deadline()
+
     try:
         return await asyncio.wait_for(context_utils.to_thread_with_executor(
-            pool, func, *args),
-                                      timeout=AUTH_DB_TIMEOUT_SECONDS)
+            pool, _run),
+                                      timeout=budget)
     except Exception as e:  # pylint: disable=broad-except
         pgcode = _server_timeout_pgcode(e)
         if pgcode is None:
             raise
         reason = _SERVER_TIMEOUT_PGCODES[pgcode]
-        logger.warning(f'Auth DB call {getattr(func, "__name__", func)} was '
+        logger.warning(f'Auth DB call {name} was '
                        f'cut off by the database\'s {reason} '
                        f'(pgcode {pgcode}): '
                        f'{common_utils.format_exception(e)}')
@@ -110,8 +158,11 @@ async def _run_with_deadline(pool: Any, func: Callable[..., Any],
 async def call_with_deadline(func: Callable[..., Any], *args: Any) -> Any:
     """Run a sync auth DB lookup on the auth executor with a total deadline.
 
-    Raises ``asyncio.TimeoutError`` when the deadline elapses (or when the
-    database cut the call off at its own, aligned timeout -- see
+    The same deadline is handed to the DB layer as a thread-local deadline
+    (the ``SET LOCAL`` bounds `sky.utils.db.deadline` adds to the
+    transaction), so the executor thread gives up too. Raises
+    ``asyncio.TimeoutError`` when the deadline elapses (or when the database
+    cut the call off at its own, aligned timeout -- see
     `_SERVER_TIMEOUT_PGCODES`) and ``ConcurrentWorkerExhaustedError`` when
     the executor is saturated.
     """
