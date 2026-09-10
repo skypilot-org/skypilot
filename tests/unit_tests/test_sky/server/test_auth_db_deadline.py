@@ -741,13 +741,15 @@ def clear_timeouts(monkeypatch):
     # Recording is gated on METRICS_ENABLED, which is a module constant read
     # at import and false unless the server was started with metrics on.
     monkeypatch.setattr(metrics_utils, 'METRICS_ENABLED', True)
-    # `_recording_failure_logged` is process-global and sticky: one test
-    # setting it as a side effect would otherwise decide whether another
-    # test sees the first-failure WARNING, and the failure would look like a
-    # logging bug rather than an ordering one.
-    monkeypatch.setattr(db_lookup, '_recording_failure_logged', False)
+    # The rate limiter is process-global and stateful: one test tripping it
+    # as a side effect would otherwise decide whether another test sees the
+    # first-failure WARNING, and the failure would look like a logging bug
+    # rather than an ordering one. Swap in a fresh one, as
+    # test_edge_error_counting.py does.
+    fresh = middleware_utils.RecordingFailureLog()
+    monkeypatch.setattr(middleware_utils, '_recording_failure_log', fresh)
     metrics_utils.SKY_APISERVER_AUTH_TIMEOUTS_TOTAL.clear()
-    yield
+    yield fresh
     metrics_utils.SKY_APISERVER_AUTH_TIMEOUTS_TOTAL.clear()
 
 
@@ -877,29 +879,28 @@ class TestAuthDBTimeoutCounter:
         """The faults this guards against are persistent, on a path that
         fires at request rate during the very incident the counter exists
         for, so an unconditional warning would flood the log exactly when it
-        needs reading."""
+        needs reading. Rate limiting is the shared one in middleware_utils,
+        so this pins that the auth path is wired into it, not that it works.
+        """
         monkeypatch.setattr(db_lookup, 'AUTH_DB_TIMEOUT_SECONDS', 5)
 
         with mock.patch.object(metrics_utils.SKY_APISERVER_AUTH_TIMEOUTS_TOTAL,
                                'labels',
                                side_effect=RuntimeError('multiproc dir full')):
-            with mock.patch.object(db_lookup.logger, 'warning') as warn:
-                with mock.patch.object(db_lookup.logger, 'debug') as debug:
-                    for _ in range(5):
-                        with pytest.raises(db_lookup.AuthDBTimeoutError):
-                            await db_lookup.call_with_deadline(
-                                _raises_db_error('55P03'))
+            with mock.patch.object(middleware_utils.logger, 'warning') as warn:
+                for _ in range(5):
+                    with pytest.raises(db_lookup.AuthDBTimeoutError):
+                        await db_lookup.call_with_deadline(
+                            _raises_db_error('55P03'))
 
-        # The deadline mapping logs its own warning per call, so count only
-        # the recording-failure ones.
         recording = [
-            c for c in warn.call_args_list if 'Failed to count' in c.args[0]
+            c for c in warn.call_args_list
+            if 'an auth-path timeout' in c.args[0]
         ]
         assert len(recording) == 1, warn.call_args_list
-        quiet = [
-            c for c in debug.call_args_list if 'Failed to count' in c.args[0]
-        ]
-        assert len(quiet) == 4, debug.call_args_list
+        # Every failure is still counted, so the suppressed ones are
+        # reported rather than lost.
+        assert clear_timeouts.failures == 5
 
     @pytest.mark.asyncio
     async def test_a_counting_failure_does_not_change_the_auth_answer(
