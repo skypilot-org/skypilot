@@ -1085,6 +1085,9 @@ class GetJobEventsBody(RequestBody):
     """The request body for the get job task events endpoint."""
     job_id: int
     task_id: Optional[int] = None
+    # Task name or id, resolved server-side. Mirrors the `task` argument of
+    # `sky jobs logs`; `task_id` stays for callers that already have the id.
+    task: Optional[Union[str, int]] = None
     limit: Optional[int] = 10  # Default to 10 most recent task events
     # When True, merge in launch-progress events from the job's underlying
     # cluster (e.g. image pulling) so the timeline shows provisioning
