@@ -2436,6 +2436,44 @@ Example:
 :ref:`cluster_configs <config-yaml-slurm-cluster-configs>`. The per-cluster
 value overrides the global value.
 
+.. _config-yaml-slurm-service-account-user-mapping:
+
+``slurm.username_map``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Map full SkyPilot usernames or service-account names to Unix users when
+``slurm.submit_as_user`` is enabled. Use the name shown in the dashboard.
+
+.. code-block:: yaml
+
+  slurm:
+    submit_as_user: true
+    username_map:
+      jane.doe@example.com: jdoe
+      inference-prod: inference-svc
+    cluster_configs:
+      training:
+        username_map:
+          inference-prod: inference-training
+
+A cluster-specific mapping overrides the tenant mapping for the same name.
+A service account without an entry uses its creator's Unix identity: the
+creator's cluster mapping, then tenant mapping, then email local part. If the
+creator is another service account, the same resolution applies to that account.
+Human users without an entry use their email local part. If the creator cannot
+be found, configure an explicit mapping for the service account.
+
+This changes the Unix submit identity only; it does not grant SkyPilot roles
+or workspace access.
+All mapped accounts need the same login-node impersonation permissions as
+human submit users. Account existence and impersonation are checked before
+allocation creation, with a 15-second timeout.
+
+These are API-server settings and cannot be overridden by clients or tasks.
+They only apply when ``submit_as_user`` is enabled. SkyPilot ownership remains
+the authenticated service account; Slurm ownership uses the mapped Unix user.
+Existing allocation lifecycle operations use the stored submit identity.
+
 .. _config-yaml-slurm-provision-timeout:
 
 ``slurm.provision_timeout``

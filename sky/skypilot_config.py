@@ -1301,6 +1301,51 @@ def get_effective_slurm_account(
                                               partition=partition)
 
 
+def get_effective_slurm_quota_value(
+        key: str,
+        cluster: Optional[str] = None,
+        partition: Optional[str] = None,
+        workspace: Optional[str] = None,
+        override_configs: Optional[Dict[str, Any]] = None) -> Any:
+    """Returns a ``slurm.quota.<key>`` value, scope-resolved.
+
+    The ``slurm.quota`` block is deliberately permissive
+    (``additionalProperties: True``) so that consumers can carry
+    scheduler-specific sub-fields beyond the ``queue`` and ``account`` that
+    :func:`get_effective_queue_name` and :func:`get_effective_slurm_account`
+    read. This is the generic counterpart to those two: it resolves any such
+    sub-field over the same scopes -- workspace > global, and within each,
+    partition > cluster > cloud -- so a consumer does not have to reimplement
+    the walk and risk resolving its own field differently from ``queue``.
+
+    Returns ``Any`` rather than ``Optional[str]``, unlike the two named
+    getters: their fields are declared ``{'type': 'string'}`` and so are
+    validated as strings before they get here, while ``additionalProperties``
+    constrains nothing, so a sub-field can hold a number, a bool, a list or a
+    mapping. Narrowing the annotation would let a caller run string
+    operations on a value the schema never promised was a string. Validating
+    the type is the caller's job, the same split the ``slurm.quota`` schema
+    comment already describes.
+
+    Args:
+        key: The sub-field under ``slurm.quota`` to read.
+        cluster: Slurm cluster, selecting the ``cluster_configs`` level.
+        partition: Partition, selecting the ``partition_configs`` level.
+        workspace: Workspace to read first; defaults to the active one.
+        override_configs: Task-level ``config`` overrides.
+
+    Returns:
+        The resolved value as configured, or None if the field is unset at
+        every scope.
+    """
+    return _get_effective_scoped_config_value(cloud='slurm',
+                                              property_keys=[('quota', key)],
+                                              region=cluster,
+                                              workspace=workspace,
+                                              override_configs=override_configs,
+                                              partition=partition)
+
+
 def get_effective_namespace(
         cloud: str,
         region: Optional[str] = None,
