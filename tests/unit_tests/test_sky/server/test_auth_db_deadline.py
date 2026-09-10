@@ -680,6 +680,11 @@ def clear_timeouts(monkeypatch):
     # Recording is gated on METRICS_ENABLED, which is a module constant read
     # at import and false unless the server was started with metrics on.
     monkeypatch.setattr(metrics_utils, 'METRICS_ENABLED', True)
+    # `_recording_failure_logged` is process-global and sticky: one test
+    # setting it as a side effect would otherwise decide whether another
+    # test sees the first-failure WARNING, and the failure would look like a
+    # logging bug rather than an ordering one.
+    monkeypatch.setattr(db_lookup, '_recording_failure_logged', False)
     metrics_utils.SKY_APISERVER_AUTH_TIMEOUTS_TOTAL.clear()
     yield
     metrics_utils.SKY_APISERVER_AUTH_TIMEOUTS_TOTAL.clear()
@@ -813,7 +818,6 @@ class TestAuthDBTimeoutCounter:
         for, so an unconditional warning would flood the log exactly when it
         needs reading."""
         monkeypatch.setattr(db_lookup, 'AUTH_DB_TIMEOUT_SECONDS', 5)
-        monkeypatch.setattr(db_lookup, '_recording_failure_logged', False)
 
         with mock.patch.object(metrics_utils.SKY_APISERVER_AUTH_TIMEOUTS_TOTAL,
                                'labels',
@@ -831,7 +835,10 @@ class TestAuthDBTimeoutCounter:
             c for c in warn.call_args_list if 'Failed to count' in c.args[0]
         ]
         assert len(recording) == 1, warn.call_args_list
-        assert debug.call_count == 4, debug.call_count
+        quiet = [
+            c for c in debug.call_args_list if 'Failed to count' in c.args[0]
+        ]
+        assert len(quiet) == 4, debug.call_args_list
 
     @pytest.mark.asyncio
     async def test_a_counting_failure_does_not_change_the_auth_answer(
