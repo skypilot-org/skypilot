@@ -927,9 +927,12 @@ def _get_service_status(
         provisioning_hashes = set()
         for info in replica_infos:
             cluster_record = cluster_records[info.cluster_name]
-            if (cluster_record is not None and
+            if cluster_record is None:
+                continue
+            cluster_hash = cluster_record.get('cluster_hash')
+            if (cluster_hash is not None and
                     info.status == serve_state.ReplicaStatus.PROVISIONING):
-                provisioning_hashes.add(cluster_record['cluster_hash'])
+                provisioning_hashes.add(cluster_hash)
         launch_progress_by_hash = (
             global_user_state.get_last_cluster_event_of_type_multiple(
                 provisioning_hashes,
@@ -940,7 +943,7 @@ def _get_service_status(
             launch_progress = None
             if cluster_record is not None:
                 launch_progress = launch_progress_by_hash.get(
-                    cluster_record['cluster_hash'])
+                    cluster_record.get('cluster_hash'))
             replica_info_dicts.append(
                 info.to_info_dict(
                     with_handle=True,
