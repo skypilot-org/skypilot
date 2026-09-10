@@ -1206,6 +1206,17 @@ def _wait_for_pods_to_schedule(namespace, context, new_nodes, timeout: int,
             provision_clock_start = time.time()
             logger.info('All pods admitted (scheduling gates removed); '
                         f'waiting up to {timeout}s for scheduling.')
+            # Record the transition: the latest LAUNCH_PROGRESS event is
+            # surfaced as the status detail of a provisioning SkyServe
+            # replica / pool worker, so it must stop reading as a queue
+            # wait once the pods are admitted.
+            global_user_state.add_cluster_event(
+                cluster_name,
+                new_status=None,
+                reason='Launching (admitted by queue, waiting for scheduling)',
+                event_type=global_user_state.ClusterEventType.LAUNCH_PROGRESS,
+                nop_if_duplicate=True,
+            )
 
         # A pod is considered scheduled once the kube-scheduler has bound it
         # to a node (capacity found). We deliberately do not wait for the

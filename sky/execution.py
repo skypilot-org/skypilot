@@ -3,13 +3,14 @@
 See `Stage` for a Task's life cycle.
 """
 import asyncio
+import contextlib
 import enum
 import logging
 import os
 import tempfile
 import time
 import typing
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, Dict, Iterator, List, Optional, Tuple, Union
 
 import colorama
 
@@ -43,6 +44,35 @@ if typing.TYPE_CHECKING:
     from sky import resources as resources_lib
 
 logger = sky_logging.init_logger(__name__)
+
+_QUEUE_ADMISSION_TIMEOUT_KEYS = ('kubernetes', 'kueue', 'admission_timeout')
+
+
+@contextlib.contextmanager
+def _replica_queue_admission_wait(
+        is_launched_by_sky_serve_controller: bool) -> Iterator[None]:
+    """Lets replica launches wait indefinitely for queue admission by default.
+
+    A SkyServe replica or pool worker is a standing request for capacity: the
+    controller relaunches it until it is up. When the cluster is placed in a
+    Kueue local queue and quota is short, its pods are held by an admission
+    gate. With the default ``kubernetes.kueue.admission_timeout`` the launch
+    would fail after 24 hours and the relaunch would create a new Workload at
+    the back of the queue, so replica launches default to waiting
+    indefinitely (``-1``) instead. An explicitly configured
+    ``admission_timeout`` still wins, at the global or the workspace scope.
+    """
+    if not is_launched_by_sky_serve_controller:
+        yield
+        return
+    config = skypilot_config.to_dict()
+    if config.get_nested(_QUEUE_ADMISSION_TIMEOUT_KEYS,
+                         default_value=None) is not None:
+        yield
+        return
+    config.set_nested(_QUEUE_ADMISSION_TIMEOUT_KEYS, -1)
+    with skypilot_config.replace_skypilot_config(config):
+        yield
 
 
 class Stage(enum.Enum):
@@ -558,15 +588,18 @@ def _execute_dag(
                 'Provisioning requested, but handle is already set. PROVISION '
                 'should be excluded from stages or '
                 'skip_unecessary_provisioning should be set. ')
-            (handle, provisioning_skipped) = backend.provision(
-                task,
-                task.best_resources,
-                dryrun=dryrun,
-                stream_logs=stream_logs,
-                cluster_name=cluster_name,
-                retry_until_up=retry_until_up,
-                skip_unnecessary_provisioning=skip_unnecessary_provisioning,
-                resize=resize)
+            with _replica_queue_admission_wait(
+                    _is_launched_by_sky_serve_controller):
+                (handle, provisioning_skipped) = backend.provision(
+                    task,
+                    task.best_resources,
+                    dryrun=dryrun,
+                    stream_logs=stream_logs,
+                    cluster_name=cluster_name,
+                    retry_until_up=retry_until_up,
+                    skip_unnecessary_provisioning=(
+                        skip_unnecessary_provisioning),
+                    resize=resize)
 
         if handle is None:
             assert dryrun, ('If not dryrun, handle must be set or '

@@ -1891,6 +1891,46 @@ class TestWaitForPodsToScheduleQueueGating:
         ]
         assert len(queue_events) == 1
 
+    def test_admission_is_recorded_as_launch_progress(self, monkeypatch):
+        """Once the gates come off, a LAUNCH_PROGRESS event records the
+        admission. The serve/pool controller surfaces a replica's latest
+        LAUNCH_PROGRESS event as its status detail, so without this event an
+        admitted replica would keep reading 'waiting for queue admission'
+        until it is scheduled."""
+        cluster = 'my-cluster'
+        gated = self._add_gate(self._make_pending_pod('pod-0', cluster))
+        ungated = self._make_pending_pod('pod-0', cluster)
+        scheduled = self._make_pending_pod('pod-0', cluster)
+        scheduled.status.phase = 'Running'
+        _, _, add_event = self._setup(monkeypatch,
+                                      pod_timeline=[(0.0, gated),
+                                                    (20.0, ungated),
+                                                    (40.0, scheduled)])
+
+        node = self._make_node('pod-0', cluster)
+        import datetime  # pylint: disable=import-outside-toplevel
+
+        instance._wait_for_pods_to_schedule(
+            namespace='ns',
+            context='test-context',
+            new_nodes=[node],
+            timeout=60,
+            cluster_name='cn',
+            create_pods_start=datetime.datetime.now(datetime.timezone.utc))
+
+        reasons = [
+            call.kwargs.get('reason', '') for call in add_event.call_args_list
+        ]
+        queue_idx = [
+            i for i, r in enumerate(reasons)
+            if 'waiting for queue admission' in r
+        ]
+        admitted_idx = [
+            i for i, r in enumerate(reasons) if 'admitted by queue' in r
+        ]
+        assert len(queue_idx) == 1 and len(admitted_idx) == 1, reasons
+        assert queue_idx[0] < admitted_idx[0], reasons
+
     def test_spinner_message_updates_while_gated(self, monkeypatch):
         """The per-poll spinner update must keep running while pods are
         gated. The gated branch sets a status message once, on entry; the

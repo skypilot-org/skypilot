@@ -920,13 +920,35 @@ def _get_service_status(
         cluster_names = [info.cluster_name for info in replica_infos]
         cluster_records = global_user_state.get_clusters_from_names(
             cluster_names)
-        record['replica_info'] = [
-            info.to_info_dict(
-                with_handle=True,
-                with_url=not pool,
-                cluster_record=cluster_records[info.cluster_name],
-            ) for info in replica_infos
-        ]
+        # Latest launch-progress event of each replica that is still being
+        # provisioned, e.g. 'Launching (waiting for queue admission)' for a
+        # worker held by Kueue until quota frees up. Surfaced as the
+        # replica's status detail. One batched query for all replicas.
+        provisioning_hashes = set()
+        for info in replica_infos:
+            cluster_record = cluster_records[info.cluster_name]
+            if (cluster_record is not None and
+                    info.status == serve_state.ReplicaStatus.PROVISIONING):
+                provisioning_hashes.add(cluster_record['cluster_hash'])
+        launch_progress_by_hash = (
+            global_user_state.get_last_cluster_event_of_type_multiple(
+                provisioning_hashes,
+                global_user_state.ClusterEventType.LAUNCH_PROGRESS))
+        replica_info_dicts = []
+        for info in replica_infos:
+            cluster_record = cluster_records[info.cluster_name]
+            launch_progress = None
+            if cluster_record is not None:
+                launch_progress = launch_progress_by_hash.get(
+                    cluster_record['cluster_hash'])
+            replica_info_dicts.append(
+                info.to_info_dict(
+                    with_handle=True,
+                    with_url=not pool,
+                    cluster_record=cluster_record,
+                    launch_progress=launch_progress,
+                ))
+        record['replica_info'] = replica_info_dicts
         if pool:
             # Fetch all nonterminal job ids in the pool in a single query,
             # grouped by current_cluster_name. Avoids the N+1 pattern of
@@ -2017,6 +2039,12 @@ def _format_replica_table(replica_records: List[Dict[str, Any]], show_all: bool,
         resources_str = '-'
         replica_status = record['status']
         status_str = replica_status.colored_str()
+        # Why the replica is still PROVISIONING, when the provisioner
+        # reported it (e.g. waiting for queue admission). Only sent by
+        # newer servers.
+        status_detail = record.get('status_detail')
+        if status_detail:
+            status_str += f' ({status_detail})'
         used_by = record.get('used_by', None)
         if used_by is None:
             used_by_str = '-'
