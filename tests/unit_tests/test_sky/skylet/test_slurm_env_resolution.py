@@ -30,8 +30,7 @@ _WHICH_FUNCTION_PREAMBLE = (
     'which() { echo "Usage: /usr/bin/which [-as] args"; }; export -f which')
 
 # An exported `env` function that would hijack a bare-name resolution.
-_ENV_FUNCTION_PREAMBLE = (
-    'env() { echo INTERCEPTED "$@"; }; export -f env')
+_ENV_FUNCTION_PREAMBLE = ('env() { echo INTERCEPTED "$@"; }; export -f env')
 
 _SENTINEL = 'RESOLVED_OK'
 
