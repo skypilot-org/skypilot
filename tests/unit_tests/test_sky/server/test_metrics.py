@@ -5,6 +5,7 @@ import os
 import socket
 import threading
 import time
+import types
 from unittest.mock import AsyncMock
 from unittest.mock import MagicMock
 from unittest.mock import patch
@@ -21,6 +22,7 @@ import pytest
 
 from sky.metrics import utils as metrics_utils
 from sky.server import metrics
+from sky.server import middleware_utils
 from sky.server.server import BasicAuthMiddleware
 
 
@@ -343,6 +345,41 @@ async def test_metrics_endpoint_with_multiprocess():
             mock_gen.assert_called_once_with(mock_registry_instance)
 
 
+def _http_request(path,
+                  method='GET',
+                  *,
+                  reached_router=True,
+                  state=None,
+                  app=None,
+                  headers=None) -> fastapi.Request:
+    """A real Request on a minimal ASGI scope.
+
+    `reached_router` models whether the request got past every middleware to
+    the router: Starlette's router stamps `scope['router']` when it runs, and
+    a request a middleware answered itself never gets there.
+    """
+    scope = {
+        'type': 'http',
+        'method': method,
+        'path': path,
+        'headers': [(k.lower().encode(), v.encode())
+                    for k, v in (headers or {}).items()],
+        'query_string': b'',
+        'state': {} if state is None else state,
+    }
+    if reached_router:
+        scope['router'] = object()
+    if app is not None:
+        scope['app'] = app
+    return fastapi.Request(scope)
+
+
+def _response(status_code: int) -> MagicMock:
+    response = MagicMock()
+    response.status_code = status_code
+    return response
+
+
 @pytest.fixture
 def prometheus_middleware():
     """Create PrometheusMiddleware instance for testing."""
@@ -352,6 +389,7 @@ def prometheus_middleware():
     metrics_utils.SKY_APISERVER_REQUESTS_TOTAL.clear()
     metrics_utils.SKY_APISERVER_REQUEST_DURATION_SECONDS.clear()
     metrics_utils.SKY_APISERVER_REQUEST_GET_DURATION_SECONDS.clear()
+    metrics_utils.SKY_APISERVER_REQUEST_REJECTIONS_TOTAL.clear()
 
     return middleware
 
@@ -359,13 +397,8 @@ def prometheus_middleware():
 @pytest.mark.asyncio
 async def test_middleware_successful_request(prometheus_middleware):
     """Test middleware with successful non-streaming request."""
-    request = MagicMock()
-    request.url.path = "/api/v1/status"
-    request.method = "GET"
-
-    response = MagicMock()
-    response.status_code = 200
-
+    request = _http_request('/api/v1/status')
+    response = _response(200)
     call_next = AsyncMock(return_value=response)
 
     start_time = time.time()
@@ -405,13 +438,8 @@ async def test_middleware_successful_request(prometheus_middleware):
 @pytest.mark.asyncio
 async def test_middleware_streaming_request(prometheus_middleware):
     """Test middleware with streaming API request."""
-    request = MagicMock()
-    request.url.path = "/api/v1/logs"
-    request.method = "GET"
-
-    response = MagicMock()
-    response.status_code = 200
-
+    request = _http_request('/api/v1/logs')
+    response = _response(200)
     call_next = AsyncMock(return_value=response)
 
     result = await prometheus_middleware.dispatch(request, call_next)
@@ -439,10 +467,7 @@ async def test_middleware_streaming_request(prometheus_middleware):
 @pytest.mark.asyncio
 async def test_middleware_exception_handling(prometheus_middleware):
     """Test middleware handles exceptions properly."""
-    request = MagicMock()
-    request.url.path = "/api/v1/failing"
-    request.method = "POST"
-
+    request = _http_request('/api/v1/failing', 'POST')
     call_next = AsyncMock(side_effect=Exception("Test error"))
 
     with pytest.raises(Exception, match="Test error"):
@@ -467,14 +492,8 @@ async def test_middleware_different_status_codes(prometheus_middleware):
     ]
 
     for status_code, expected_group in test_cases:
-        request = MagicMock()
-        request.url.path = f"/test/{status_code}"
-        request.method = "GET"
-
-        response = MagicMock()
-        response.status_code = status_code
-
-        call_next = AsyncMock(return_value=response)
+        request = _http_request(f'/test/{status_code}')
+        call_next = AsyncMock(return_value=_response(status_code))
 
         await prometheus_middleware.dispatch(request, call_next)
 
@@ -486,6 +505,180 @@ async def test_middleware_different_status_codes(prometheus_middleware):
                 'status': expected_group
             })
         assert total_requests == 1.0
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# The metrics middleware is the outermost one, so it also sees the responses
+# other middlewares produce. Their paths are bounded; everything that reached
+# the router keeps the raw path as before.
+# ─────────────────────────────────────────────────────────────────────────
+
+
+def _app_with_routes() -> fastapi.FastAPI:
+    app = fastapi.FastAPI()
+
+    @app.get('/status')
+    async def status():  # pylint: disable=unused-variable
+        return {}
+
+    @app.get('/api/get')
+    async def api_get():  # pylint: disable=unused-variable
+        return {}
+
+    @app.get('/dashboard/{full_path:path}')
+    async def dashboard(full_path: str):  # pylint: disable=unused-variable
+        return {'path': full_path}
+
+    return app
+
+
+@pytest.mark.asyncio
+async def test_path_label_is_read_after_the_inner_layers_ran(
+        prometheus_middleware):
+    """Inner middlewares rewrite `scope['path']` in place (the internal
+    dashboard prefix); the scope dict is shared down the stack, so reading it
+    after `call_next` gives the path the router saw, as before the move."""
+    request = _http_request('/internal/dashboard/status', reached_router=False)
+
+    async def call_next(req):
+        req.scope['path'] = '/status'
+        req.scope['router'] = object()
+        return _response(200)
+
+    await prometheus_middleware.dispatch(request, call_next)
+
+    assert _get_metric_value('sky_apiserver_requests_total', {
+        'path': '/status',
+        'status': '2xx'
+    }) == 1.0
+    assert _get_metric_value('sky_apiserver_requests_total',
+                             {'path': '/internal/dashboard/status'}) == 0.0
+
+
+@pytest.mark.asyncio
+async def test_a_404_from_the_router_keeps_the_raw_path(prometheus_middleware):
+    request = _http_request('/no/such/route')
+    await prometheus_middleware.dispatch(request,
+                                         AsyncMock(return_value=_response(404)))
+    assert _get_metric_value('sky_apiserver_requests_total', {
+        'path': '/no/such/route',
+        'status': '4xx'
+    }) == 1.0
+
+
+@pytest.mark.asyncio
+async def test_a_middleware_rejection_keeps_a_registered_route_path(
+        prometheus_middleware):
+    """A 503 an auth middleware answered for `/status` lands in the same
+    series as the successes of `/status`."""
+    app = _app_with_routes()
+    request = _http_request('/status', reached_router=False, app=app)
+    await prometheus_middleware.dispatch(request,
+                                         AsyncMock(return_value=_response(503)))
+    assert _get_metric_value('sky_apiserver_requests_total', {
+        'path': '/status',
+        'status': '5xx'
+    }) == 1.0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('raw_path, label', [
+    ('/wp-admin/setup.php', metrics.OTHER_PATH_LABEL),
+    ('/.env', metrics.OTHER_PATH_LABEL),
+    ('/api/no-such-endpoint', '/api/*'),
+    ('/dashboard/_next/static/chunks/main.js', '/dashboard/*'),
+    ('/internal/dashboard/clusters', '/internal/dashboard/*'),
+    ('/plugins/api/foo/list', '/plugins/*'),
+    ('/jobs/queue', '/jobs/*'),
+    ('/users', '/users/*'),
+])
+async def test_a_middleware_rejection_on_an_unknown_path_is_bucketed(
+        prometheus_middleware, raw_path, label):
+    """Rejected requests' paths are chosen by unauthenticated clients, so
+    anything that is not a registered route folds into a fixed prefix or
+    `other`. The `<prefix>*` form keeps the prefix regexes dashboards use
+    (`/api/.*`, `/dashboard/.*`) matching."""
+    app = _app_with_routes()
+    request = _http_request(raw_path, reached_router=False, app=app)
+    await prometheus_middleware.dispatch(request,
+                                         AsyncMock(return_value=_response(401)))
+    assert _get_metric_value('sky_apiserver_requests_total', {
+        'path': label,
+        'status': '4xx'
+    }) == 1.0
+    assert _get_metric_value('sky_apiserver_requests_total',
+                             {'path': raw_path}) == 0.0
+
+
+@pytest.mark.asyncio
+async def test_a_middleware_rejection_without_an_app_is_still_bounded(
+        prometheus_middleware):
+    """No app on the scope (bare ASGI callable): nothing to match against,
+    so every rejected path folds into a prefix or `other`."""
+    request = _http_request('/status', reached_router=False)
+    await prometheus_middleware.dispatch(request,
+                                         AsyncMock(return_value=_response(503)))
+    assert _get_metric_value('sky_apiserver_requests_total', {
+        'path': metrics.OTHER_PATH_LABEL,
+        'status': '5xx'
+    }) == 1.0
+
+
+def test_unrouted_path_label():
+    literal = frozenset(('/status', '/api/get'))
+    label = metrics._unrouted_path_label
+    assert label('/status', literal) == '/status'
+    assert label('/api/get', literal) == '/api/get'
+    assert label('/api/stream', literal) == '/api/*'
+    assert label('/dashboard/clusters', literal) == '/dashboard/*'
+    # A router's root route is the bare prefix.
+    assert label('/workspaces', literal) == '/workspaces/*'
+    assert label('/status/', literal) == metrics.OTHER_PATH_LABEL
+    assert label('/wp-admin', literal) == metrics.OTHER_PATH_LABEL
+    assert label('', literal) == metrics.OTHER_PATH_LABEL
+
+
+def test_literal_route_paths_skip_parameterized_routes():
+    paths = metrics._literal_route_paths(_app_with_routes())
+    assert '/status' in paths
+    assert '/api/get' in paths
+    assert not any('{' in path for path in paths)
+    assert metrics._literal_route_paths(None) == frozenset()
+    assert metrics._literal_route_paths(MagicMock()) == frozenset()
+
+
+def test_reached_router_uses_the_router_scope_key():
+    assert metrics._reached_router(_http_request('/x', reached_router=True))
+    assert not metrics._reached_router(_http_request('/x',
+                                                     reached_router=False))
+
+
+@pytest.mark.asyncio
+async def test_a_stamped_rejection_is_counted_by_reason(prometheus_middleware):
+    """The auth helpers stamp why they answered; the metrics middleware
+    turns the stamp into `sky_apiserver_request_rejections_total`."""
+    request = _http_request('/status', reached_router=False)
+    middleware_utils.mark_rejection(
+        request, middleware_utils.REJECT_REASON_AUTH_DB_TIMEOUT)
+    await prometheus_middleware.dispatch(request,
+                                         AsyncMock(return_value=_response(503)))
+    collectors = [metrics_utils.SKY_APISERVER_REQUEST_REJECTIONS_TOTAL]
+    assert _get_metric_value('sky_apiserver_request_rejections_total', {
+        'reason': middleware_utils.REJECT_REASON_AUTH_DB_TIMEOUT,
+        'status': '503',
+        'kind': 'http'
+    },
+                             collectors=collectors) == 1.0
+
+
+@pytest.mark.asyncio
+async def test_an_unstamped_response_is_not_a_rejection(prometheus_middleware):
+    request = _http_request('/status')
+    await prometheus_middleware.dispatch(request,
+                                         AsyncMock(return_value=_response(500)))
+    collectors = [metrics_utils.SKY_APISERVER_REQUEST_REJECTIONS_TOTAL]
+    assert _get_metric_value('sky_apiserver_request_rejections_total',
+                             collectors=collectors) == 0.0
 
 
 def test_get_user_label_with_auth_user():
@@ -575,16 +768,10 @@ def prometheus_middleware_user():
 @pytest.mark.asyncio
 async def test_middleware_records_user_metrics(prometheus_middleware_user):
     """Test that middleware records per-user metrics for authenticated user."""
-    request = MagicMock()
-    request.url.path = '/api/v1/status'
-    request.method = 'GET'
-    request.state.auth_user = MagicMock()
-    request.state.auth_user.name = 'alice@example.com'
-
-    response = MagicMock()
-    response.status_code = 200
-
-    call_next = AsyncMock(return_value=response)
+    request = _http_request(
+        '/api/v1/status',
+        state={'auth_user': types.SimpleNamespace(name='alice@example.com')})
+    call_next = AsyncMock(return_value=_response(200))
 
     await prometheus_middleware_user.dispatch(request, call_next)
 
@@ -603,15 +790,8 @@ async def test_middleware_records_user_metrics(prometheus_middleware_user):
 async def test_middleware_records_anonymous_user_metrics(
         prometheus_middleware_user):
     """Test that middleware records 'anonymous' for unauthenticated requests."""
-    request = MagicMock(spec=['url', 'method', 'state'])
-    request.url.path = '/api/v1/status'
-    request.method = 'GET'
-    request.state = MagicMock(spec=[])  # No auth_user attribute
-
-    response = MagicMock()
-    response.status_code = 200
-
-    call_next = AsyncMock(return_value=response)
+    request = _http_request('/api/v1/status')  # No auth_user in the state.
+    call_next = AsyncMock(return_value=_response(200))
 
     await prometheus_middleware_user.dispatch(request, call_next)
 
@@ -629,23 +809,23 @@ async def test_middleware_records_anonymous_user_metrics(
 @pytest.mark.asyncio
 async def test_middleware_user_metrics_with_basic_auth(
         prometheus_middleware_user):
-    """E2E test: BasicAuthMiddleware -> PrometheusMiddleware chain records
+    """E2E test: PrometheusMiddleware -> BasicAuthMiddleware chain records
     correct user label for basic auth.
 
-    Verifies that when BasicAuthMiddleware authenticates via Basic auth
-    and sets request.state.auth_user, PrometheusMiddleware records the
-    correct username in per-user metrics.
+    Verifies that when BasicAuthMiddleware (inside the metrics middleware, as
+    in production) authenticates via Basic auth and sets
+    request.state.auth_user, PrometheusMiddleware records the correct
+    username in per-user metrics.
     """
     # Create request with Basic Auth header (bob:secret)
-    request = MagicMock(spec=['url', 'method', 'headers', 'state'])
-    request.url = MagicMock()
-    request.url.path = '/api/v1/clusters'
-    request.method = 'POST'
-    request.headers = {
-        'authorization': 'Basic ' + base64.b64encode(b'bob:secret').decode(),
-    }
-    request.state = MagicMock()
-    request.state.auth_user = None  # As InitializeRequestAuthUserMiddleware
+    request = _http_request(
+        '/api/v1/clusters',
+        'POST',
+        headers={
+            'authorization': 'Basic ' +
+                             base64.b64encode(b'bob:secret').decode(),
+        },
+        state={'auth_user': None})  # As InitializeRequestAuthUserMiddleware
 
     # Final handler returning success
     async def final_handler(_req):
@@ -653,9 +833,9 @@ async def test_middleware_user_metrics_with_basic_auth(
 
     basic_auth_middleware = BasicAuthMiddleware(app=MagicMock())
 
-    # Chain: BasicAuth -> Prometheus -> final_handler
-    async def prometheus_call_next(req):
-        return await prometheus_middleware_user.dispatch(req, final_handler)
+    # Chain: Prometheus -> BasicAuth -> final_handler
+    async def basic_auth_call_next(req):
+        return await basic_auth_middleware.dispatch(req, final_handler)
 
     mock_user = MagicMock()
     mock_user.name = 'bob'
@@ -668,8 +848,8 @@ async def test_middleware_user_metrics_with_basic_auth(
                return_value=False), \
          patch('sky.jobs.utils.is_consolidation_mode', return_value=False):
 
-        response = await basic_auth_middleware.dispatch(request,
-                                                        prometheus_call_next)
+        response = await prometheus_middleware_user.dispatch(
+            request, basic_auth_call_next)
 
     assert response.status_code == 200
     # BasicAuth should have set auth_user
@@ -687,21 +867,58 @@ async def test_middleware_user_metrics_with_basic_auth(
 
 
 @pytest.mark.asyncio
+async def test_middleware_user_metrics_with_basic_auth_rejection(
+        prometheus_middleware_user):
+    """A 401 BasicAuthMiddleware answers itself is counted, attributed, and
+    recorded as anonymous."""
+    request = _http_request('/api/v1/clusters',
+                            'POST',
+                            reached_router=False,
+                            state={'auth_user': None})
+
+    basic_auth_middleware = BasicAuthMiddleware(app=MagicMock())
+    final_handler = AsyncMock()
+
+    async def basic_auth_call_next(req):
+        return await basic_auth_middleware.dispatch(req, final_handler)
+
+    with patch('sky.server.auth.loopback.is_loopback_request',
+               return_value=False), \
+         patch('sky.jobs.utils.is_consolidation_mode', return_value=False):
+        response = await prometheus_middleware_user.dispatch(
+            request, basic_auth_call_next)
+
+    assert response.status_code == 401
+    final_handler.assert_not_awaited()
+    assert _get_metric_value(
+        'sky_apiserver_requests_by_user_total', {
+            'user': 'anonymous',
+            'method': 'POST',
+            'status': '4xx'
+        },
+        collectors=[metrics_utils.SKY_APISERVER_REQUESTS_BY_USER_TOTAL]) == 1.0
+    assert _get_metric_value(
+        'sky_apiserver_request_rejections_total', {
+            'reason': middleware_utils.REJECT_REASON_UNAUTHORIZED,
+            'status': '401',
+            'kind': 'http'
+        },
+        collectors=[metrics_utils.SKY_APISERVER_REQUEST_REJECTIONS_TOTAL
+                   ]) == 1.0
+
+
+@pytest.mark.asyncio
 async def test_middleware_records_api_get_duration_by_name(
         prometheus_middleware):
     """/api/get latency is recorded under the request name the handler stamps."""
-    request = MagicMock()
-    request.url.path = '/api/v1/api/get'
-    request.method = 'GET'
-    request.state.auth_user = None
     # The api_get handler stamps request.state.request_name once it knows which
     # request is being fetched.
-    request.state.request_name = 'status'
-
-    response = MagicMock()
-    response.status_code = 200
-
-    call_next = AsyncMock(return_value=response)
+    request = _http_request('/api/v1/api/get',
+                            state={
+                                'auth_user': None,
+                                'request_name': 'status'
+                            })
+    call_next = AsyncMock(return_value=_response(200))
 
     await prometheus_middleware.dispatch(request, call_next)
 
@@ -719,16 +936,8 @@ async def test_middleware_records_api_get_duration_by_name(
 async def test_middleware_no_api_get_duration_without_name(
         prometheus_middleware):
     """No per-name /api/get series is recorded when the name is not stamped."""
-    request = MagicMock(spec=['url', 'method', 'state'])
-    request.url.path = '/api/v1/status'
-    request.method = 'GET'
-    request.state = MagicMock(
-        spec=[])  # No request_name / auth_user attributes.
-
-    response = MagicMock()
-    response.status_code = 200
-
-    call_next = AsyncMock(return_value=response)
+    request = _http_request('/api/v1/status')  # No request_name / auth_user.
+    call_next = AsyncMock(return_value=_response(200))
 
     await prometheus_middleware.dispatch(request, call_next)
 
@@ -750,6 +959,7 @@ def cleanup_metrics():
     metrics_utils.SKY_APISERVER_REQUEST_DURATION_SECONDS.clear()
     metrics_utils.SKY_APISERVER_REQUEST_GET_DURATION_SECONDS.clear()
     metrics_utils.SKY_APISERVER_REQUESTS_BY_USER_TOTAL.clear()
+    metrics_utils.SKY_APISERVER_REQUEST_REJECTIONS_TOTAL.clear()
 
 
 # ─────────────────────────────────────────────────────────────────────────
