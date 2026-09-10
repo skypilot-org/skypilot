@@ -1958,8 +1958,16 @@ async def upload_zip_file(request: fastapi.Request, user_hash: str,
 
 
 @app.get('/upload_v2/blob')
-async def check_blob_exists(request: fastapi.Request, user_hash: str,
-                            blob_id: str) -> Dict[str, bool]:
+async def check_blob_exists(
+    request: fastapi.Request,
+    user_hash: str,
+    blob_id: str,
+    size_bytes: Optional[int] = fastapi.Query(
+        None,
+        ge=0,
+        le=2**63 - 1,
+        description='Client-reported compressed ZIP size in bytes.'),
+) -> Dict[str, bool]:
     """Check if a file mount blob already exists."""
     if not re.match(r'^[0-9a-f]{64}$', blob_id):
         raise fastapi.HTTPException(status_code=400,
@@ -1968,6 +1976,9 @@ async def check_blob_exists(request: fastapi.Request, user_hash: str,
     if request.state.auth_user is not None:
         user_id = request.state.auth_user.id
     exists = await bs.get_blob_storage().blob_exists(user_id, blob_id)
+    if metrics_utils.METRICS_ENABLED and size_bytes is not None:
+        metrics_utils.SKY_APISERVER_BLOB_CHECK_SIZE_BYTES.labels(
+            result='hit' if exists else 'miss').observe(size_bytes)
     return {'exists': exists}
 
 
