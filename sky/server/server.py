@@ -1017,7 +1017,9 @@ async def schedule_on_boot_check_async():
 @contextlib.asynccontextmanager
 async def lifespan(app: fastapi.FastAPI):  # pylint: disable=redefined-outer-name
     """FastAPI lifespan context manager."""
-    del app  # unused; the middleware-order check runs at import (see below)
+    # Unused: the middleware-order check that used to live here runs at
+    # import instead, right after the metrics middleware registration.
+    del app
     # Startup: Run background tasks. Delete any persisted daemon rows whose
     # ids are no longer in INTERNAL_REQUEST_DAEMONS first (daemon renamed /
     # removed in code), then submit each current daemon.

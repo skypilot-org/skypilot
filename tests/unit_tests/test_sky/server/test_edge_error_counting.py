@@ -587,14 +587,24 @@ class TestOutermostGuardIsNotEnvGated:
         it was called -- any gate that is false in this environment, which
         is every gate on that variable, fails this.
         """
-        code = ('import unittest.mock as mock\n'
-                'from sky.server import metrics\n'
-                'with mock.patch.object(metrics, "warn_unless_outermost") '
-                'as guard:\n'
-                '    from sky.server import server\n'
-                '    del server\n'
-                'assert guard.call_count == 1, guard.call_count\n'
-                'print("called")')
+        code = (
+            'import sys\n'
+            'import unittest.mock as mock\n'
+            'from sky.server import metrics\n'
+            # The patch has to be in place before the module-level call runs,
+            # so assert it has not been imported already: if the import graph
+            # ever pulls it in, say so instead of failing as though the call
+            # site had regressed.
+            "assert 'sky.server.server' not in sys.modules, (\n"
+            "    'importing sky.server.metrics now pulls in '\n"
+            "    'sky.server.server; this test can no longer observe the '\n"
+            "    'module-level call and needs rewriting')\n"
+            'with mock.patch.object(metrics, "warn_unless_outermost") '
+            'as guard:\n'
+            '    from sky.server import server\n'
+            '    del server\n'
+            'assert guard.call_count == 1, guard.call_count\n'
+            'print("called")')
         env = {
             k: v
             for k, v in os.environ.items()
