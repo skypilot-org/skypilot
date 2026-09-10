@@ -67,6 +67,7 @@ from sky.server import config as server_config
 from sky.server import constants as server_constants
 from sky.server import csp_utils
 from sky.server import daemons
+from sky.server import download_utils
 from sky.server import loop_stall
 from sky.server import metrics
 from sky.server import middleware_utils
@@ -1977,8 +1978,16 @@ async def upload_zip_file(request: fastapi.Request, user_hash: str,
 
 
 @app.get('/upload_v2/blob')
-async def check_blob_exists(request: fastapi.Request, user_hash: str,
-                            blob_id: str) -> Dict[str, bool]:
+async def check_blob_exists(
+    request: fastapi.Request,
+    user_hash: str,
+    blob_id: str,
+    size_bytes: Optional[int] = fastapi.Query(
+        None,
+        ge=0,
+        le=2**63 - 1,
+        description='Client-reported compressed ZIP size in bytes.'),
+) -> Dict[str, bool]:
     """Check if a file mount blob already exists."""
     if not re.match(r'^[0-9a-f]{64}$', blob_id):
         raise fastapi.HTTPException(status_code=400,
@@ -1987,6 +1996,9 @@ async def check_blob_exists(request: fastapi.Request, user_hash: str,
     if request.state.auth_user is not None:
         user_id = request.state.auth_user.id
     exists = await bs.get_blob_storage().blob_exists(user_id, blob_id)
+    if metrics_utils.METRICS_ENABLED and size_bytes is not None:
+        metrics_utils.SKY_APISERVER_BLOB_CHECK_SIZE_BYTES.labels(
+            result='hit' if exists else 'miss').observe(size_bytes)
     return {'exists': exists}
 
 
@@ -2397,7 +2409,7 @@ async def download_logs(
         request: fastapi.Request,
         cluster_jobs_body: payloads.ClusterJobsDownloadLogsBody) -> None:
     """Downloads the logs of a job."""
-    user_hash = cluster_jobs_body.env_vars[constants.USER_ID_ENV_VAR]
+    user_hash = download_utils.download_user_id(request, cluster_jobs_body)
     logs_dir_on_api_server = pathlib.Path(
         bs.get_blob_storage().download_tmp_dir(user_hash))
     logs_dir_on_api_server.expanduser().mkdir(parents=True, exist_ok=True)
@@ -2419,26 +2431,25 @@ async def download_logs(
 async def download(download_body: payloads.DownloadBody,
                    request: fastapi.Request) -> None:
     """Downloads a folder from the cluster to the local machine."""
-    folder_paths = [
-        pathlib.Path(folder_path) for folder_path in download_body.folder_paths
-    ]
-    user_hash = download_body.env_vars[constants.USER_ID_ENV_VAR]
+    user_hash = download_utils.download_user_id(request, download_body)
     logs_dir_on_api_server = common.api_server_user_logs_dir_prefix(user_hash)
     download_tmp = bs.get_blob_storage().download_tmp_dir(user_hash)
-    for folder_path in folder_paths:
-        folder_str = str(folder_path)
-        expanded_str = str(runtime_utils.expanduser_path(folder_path))
-        if not (folder_str.startswith(str(logs_dir_on_api_server)) or
-                folder_str.startswith(download_tmp) or expanded_str.startswith(
-                    runtime_utils.expanduser(download_tmp))):
+    allowed_roots = [
+        runtime_utils.expanduser_path(pathlib.Path(root)).resolve()
+        for root in (logs_dir_on_api_server, download_tmp)
+    ]
+    folder_paths = []
+    for folder_path in download_body.folder_paths:
+        resolved_path = runtime_utils.expanduser_path(
+            pathlib.Path(folder_path)).resolve()
+        if not any(resolved_path == root or root in resolved_path.parents
+                   for root in allowed_roots):
             raise fastapi.HTTPException(
-                status_code=400,
-                detail=
-                f'Invalid folder path: {folder_path}; {logs_dir_on_api_server}')
-
-        if not runtime_utils.expanduser_path(folder_path).resolve().exists():
+                status_code=400, detail=f'Invalid folder path: {folder_path}')
+        if not resolved_path.exists():
             raise fastapi.HTTPException(
                 status_code=404, detail=f'Folder not found: {folder_path}')
+        folder_paths.append(resolved_path)
 
     # Create a temporary zip file
     log_id = str(uuid.uuid4().hex)
@@ -2449,10 +2460,7 @@ async def download(download_body: payloads.DownloadBody,
     try:
 
         def _zip_files_and_folders(folder_paths, zip_path):
-            folders = [
-                str(runtime_utils.expanduser_path(folder_path).resolve())
-                for folder_path in folder_paths
-            ]
+            folders = [str(folder_path) for folder_path in folder_paths]
             # Check for optional query parameter to control zip entry structure
             relative = request.query_params.get('relative', 'home')
             if relative == 'items':

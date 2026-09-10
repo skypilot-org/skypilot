@@ -13,6 +13,7 @@ from unittest import mock
 import pytest
 
 from sky import exceptions
+from sky import global_user_state
 from sky import skypilot_config
 from sky.server import config as server_config
 from sky.server import constants as server_constants
@@ -25,6 +26,7 @@ from sky.server.requests import process
 from sky.server.requests import requests as requests_lib
 from sky.skylet import constants
 from sky.utils import context_utils
+from sky.utils.db import db_utils
 
 
 @pytest.fixture()
@@ -1521,6 +1523,42 @@ def test_override_env_applied_for_client_request(stub_override_request_env_deps,
             body, request_id='not-a-daemon-uuid', request_name='sky.launch'):
         assert os.environ['SKYPILOT_POD_MEMORY_BYTES_LIMIT'] == str(100 * 1024 *
                                                                     1024)
+
+
+@pytest.mark.parametrize('server_value', [None, '8'])
+def test_client_cannot_override_auth_db_timeout(stub_override_request_env_deps,
+                                                monkeypatch, server_value):
+    """A client-supplied SKYPILOT_AUTH_DB_TIMEOUT_SECONDS is dropped.
+
+    The users upsert inside the overlay derives its server-side SET LOCAL
+    timeouts from that variable at call time, so a client (an older one
+    still forwards every SKYPILOT_* variable) must not be able to loosen
+    or break them: the worker keeps the server's own setting, or none.
+    """
+    if server_value is None:
+        monkeypatch.delenv(constants.ENV_VAR_AUTH_DB_TIMEOUT_SECONDS,
+                           raising=False)
+    else:
+        monkeypatch.setenv(constants.ENV_VAR_AUTH_DB_TIMEOUT_SECONDS,
+                           server_value)
+    expected_deadline = db_utils.get_auth_db_timeout_seconds()
+    expected_timeouts = global_user_state._user_upsert_timeouts_ms()  # pylint: disable=protected-access
+
+    body = payloads.RequestBody(
+        env_vars={
+            constants.ENV_VAR_AUTH_DB_TIMEOUT_SECONDS: '1000000',
+            constants.USER_ID_ENV_VAR: 'client-user-id',
+            constants.USER_ENV_VAR: 'client-user',
+        })
+
+    with executor.override_request_env_and_config(
+            body, request_id='not-a-daemon-uuid', request_name='sky.launch'):
+        assert os.environ.get(
+            constants.ENV_VAR_AUTH_DB_TIMEOUT_SECONDS) == server_value
+        assert db_utils.get_auth_db_timeout_seconds() == expected_deadline
+        assert (global_user_state._user_upsert_timeouts_ms()  # pylint: disable=protected-access
+                == expected_timeouts)
+    assert constants.ENV_VAR_AUTH_DB_TIMEOUT_SECONDS not in body.env_vars
 
 
 def test_daemon_env_mutations_reverted_on_exit(stub_override_request_env_deps,

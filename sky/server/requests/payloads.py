@@ -103,6 +103,10 @@ def request_body_env_vars() -> dict:
     # Any new environment variables that are server-specific should
     # use SKYPILOT_SERVER_ENV_VAR_PREFIX.
     env_vars.pop(constants.ENV_VAR_DB_CONNECTION_URI, None)
+    # The auth DB deadline is a server-side setting: the server derives the
+    # timeouts it puts on its own users upsert from it, so a client must not
+    # be able to supply it.
+    env_vars.pop(constants.ENV_VAR_AUTH_DB_TIMEOUT_SECONDS, None)
     # Remove the in-cluster context name - this is only meaningful for the
     # local Kubernetes environment and should not be forwarded to the server,
     # which has its own cluster context configuration.

@@ -31,7 +31,6 @@ the helpers with no arguments, keep getting the same 503; they only lose the
 per-reason attribution until they pass the request too.
 """
 import asyncio
-import os
 from typing import Any, Callable, Optional
 
 import fastapi
@@ -43,6 +42,7 @@ from sky.server.requests import executor
 from sky.users import permission
 from sky.utils import common_utils
 from sky.utils import context_utils
+from sky.utils.db import db_utils
 
 logger = sky_logging.init_logger(__name__)
 
@@ -51,19 +51,81 @@ logger = sky_logging.init_logger(__name__)
 # trouble, while staying well below the SQLAlchemy pool checkout timeout
 # (30s) and typical pooler queue-wait timeouts so requests fail fast
 # before executor threads pile up.
-AUTH_DB_TIMEOUT_SECONDS = float(
-    os.environ.get('SKYPILOT_AUTH_DB_TIMEOUT_SECONDS', '5'))
+#
+# Configured by `constants.ENV_VAR_AUTH_DB_TIMEOUT_SECONDS` (default 5 s),
+# read through the shared helper so the server-side timeouts the users
+# upsert derives from the same value cannot drift from this one. A value
+# that is not a positive number fails here, at server startup, with a
+# message naming the variable.
+AUTH_DB_TIMEOUT_SECONDS = db_utils.get_auth_db_timeout_seconds()
+
+# Postgres SQLSTATE codes raised when the database itself gives up on an
+# auth-path call at a server-side timeout. The users upsert sets these
+# timeouts on its own transaction (see `global_user_state.add_or_update_user`),
+# derived from the same configured deadline as `AUTH_DB_TIMEOUT_SECONDS` and
+# strictly below or equal to it, so the database normally fails the call
+# *before* `asyncio.wait_for` does -- and, unlike `wait_for`, actually
+# releases the executor thread. Such an error is the same condition as the
+# client-side deadline (a slow or locked database) and gets the same
+# retryable 503; anything else still propagates unchanged.
+_SERVER_TIMEOUT_PGCODES = {
+    '55P03': 'lock_timeout',  # LockNotAvailable
+    '57014': 'statement_timeout',  # QueryCanceled
+    '25P03': 'idle_in_transaction_session_timeout',
+}
+
+
+class AuthDBTimeoutError(asyncio.TimeoutError):
+    """An auth DB call was cut off by the database's own timeout.
+
+    Subclasses ``asyncio.TimeoutError`` so every ``except asyncio.TimeoutError``
+    in the auth middlewares keeps answering ``db_timeout_response()`` unchanged.
+    """
+
+
+def _server_timeout_pgcode(exc: BaseException) -> Optional[str]:
+    """``exc``'s SQLSTATE if it is one of the server-side timeouts, else None.
+
+    ``sqlalchemy.exc.DBAPIError`` wraps the driver's error as ``.orig``; a
+    driver error that escaped unwrapped (raw connections) carries ``pgcode``
+    itself. Duck-typed so this module does not import psycopg2, which is a
+    server-only dependency.
+    """
+    orig = getattr(exc, 'orig', exc)
+    pgcode = getattr(orig, 'pgcode', None)
+    if pgcode in _SERVER_TIMEOUT_PGCODES:
+        return pgcode
+    return None
+
+
+async def _run_with_deadline(pool: Any, func: Callable[..., Any],
+                             *args: Any) -> Any:
+    try:
+        return await asyncio.wait_for(context_utils.to_thread_with_executor(
+            pool, func, *args),
+                                      timeout=AUTH_DB_TIMEOUT_SECONDS)
+    except Exception as e:  # pylint: disable=broad-except
+        pgcode = _server_timeout_pgcode(e)
+        if pgcode is None:
+            raise
+        reason = _SERVER_TIMEOUT_PGCODES[pgcode]
+        logger.warning(f'Auth DB call {getattr(func, "__name__", func)} was '
+                       f'cut off by the database\'s {reason} '
+                       f'(pgcode {pgcode}): '
+                       f'{common_utils.format_exception(e)}')
+        raise AuthDBTimeoutError(reason) from e
 
 
 async def call_with_deadline(func: Callable[..., Any], *args: Any) -> Any:
     """Run a sync auth DB lookup on the auth executor with a total deadline.
 
-    Raises ``asyncio.TimeoutError`` when the deadline elapses and
-    ``ConcurrentWorkerExhaustedError`` when the executor is saturated.
+    Raises ``asyncio.TimeoutError`` when the deadline elapses (or when the
+    database cut the call off at its own, aligned timeout -- see
+    `_SERVER_TIMEOUT_PGCODES`) and ``ConcurrentWorkerExhaustedError`` when
+    the executor is saturated.
     """
-    return await asyncio.wait_for(context_utils.to_thread_with_executor(
-        executor.get_auth_thread_executor(), func, *args),
-                                  timeout=AUTH_DB_TIMEOUT_SECONDS)
+    return await _run_with_deadline(executor.get_auth_thread_executor(), func,
+                                    *args)
 
 
 async def _call_on_request_pool(func: Callable[..., Any], *args: Any) -> Any:
@@ -77,9 +139,8 @@ async def _call_on_request_pool(func: Callable[..., Any], *args: Any) -> Any:
     `POLICY_UPDATE_LOCK_TIMEOUT_SECONDS` would otherwise let a burst of first
     logins exhaust authentication for every other request on this worker.
     """
-    return await asyncio.wait_for(context_utils.to_thread_with_executor(
-        executor.get_request_thread_executor(), func, *args),
-                                  timeout=AUTH_DB_TIMEOUT_SECONDS)
+    return await _run_with_deadline(executor.get_request_thread_executor(),
+                                    func, *args)
 
 
 def _mark(request: Optional[fastapi.Request], reason: str) -> None:

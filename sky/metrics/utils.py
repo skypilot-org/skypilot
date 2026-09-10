@@ -173,6 +173,13 @@ SKY_APISERVER_REQUESTS_TOTAL = prom.Counter(
     ['path', 'method', 'status'],
 )
 
+SKY_APISERVER_BLOB_CHECK_SIZE_BYTES = prom.Histogram(
+    'sky_apiserver_blob_check_size_bytes',
+    'Client-reported compressed blob bytes per existence check.',
+    ['result'],
+    buckets=[2**exponent for exponent in range(10, 37, 2)],
+)
+
 # Total number of API server requests per user.
 # This is a separate metric to avoid high cardinality in the primary metric.
 SKY_APISERVER_REQUESTS_BY_USER_TOTAL = prom.Counter(
