@@ -81,6 +81,7 @@ SKY_GET_PYTHON_PATH_CMD = (
     f'cat {SKY_PYTHON_PATH_FILE} 2> /dev/null || '
     # POSIX builtin, present even when the `which` binary
     # is not (e.g. minimal RHEL/Rocky images ship no which).
+    # Stays POSIX (not bash's type -P): used across backends, not only Slurm.
     'command -v python3')
 # Python executable, e.g., /opt/conda/bin/python3
 SKY_PYTHON_CMD = (f'{SKY_UNSET_PYTHONPATH_AND_SET_CWD} '
