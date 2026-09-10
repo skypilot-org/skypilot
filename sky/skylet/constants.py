@@ -96,25 +96,30 @@ SKY_RAY_CMD = (f'{SKY_PYTHON_CMD} $([ -s {SKY_RAY_PATH_FILE} ] && '
                f'cat {SKY_RAY_PATH_FILE} 2> /dev/null || command -v ray)')
 
 # Resolve `env` by preferring the absolute path /usr/bin/env when it is an
-# executable file, then falling back to `command -v env`, then to a literal
-# /usr/bin/env. Every piece is POSIX (`[ -x ]`, `command -v`, `echo`), so it is
-# safe in any shell (bash/zsh/sh/dash) -- unlike bash's `type -P`, which in a
-# non-bash shell prints an error to stdout and poisons the substitution. This
-# avoids three failure modes:
+# executable file, then falling back to bash's `type -P env` (a PATH search
+# returning only an on-disk executable, ignoring functions/aliases/builtins),
+# then to a literal /usr/bin/env. `type -P` is a bashism, but it is safe here:
+# both consumers run this command under bash (task_codegen.py's
+# `build_task_runner_cmd` and slurm/instance.py's `_srun_on_node`, each
+# `bash -c ...`), and on standard layouts the `[ -x /usr/bin/env ]` branch
+# short-circuits before `type -P` is ever evaluated, so a non-bash shell never
+# reaches it. This avoids three failure modes:
 #   1. A non-executable $HOME/.local/bin/env (left by a uv installation)
 #      shadowing /usr/bin/env on PATH: `[ -x /usr/bin/env ]` selects the real
-#      binary first, and `command -v` only reports executables anyway, whereas
-#      a Slurm srun execvp() would pick the shadow without an exec check.
+#      binary first, and `type -P` only reports executables anyway, whereas a
+#      Slurm srun execvp() would pick the shadow without an exec check.
 #   2. A `which` bash function re-imported into a container by
 #      `srun --export=ALL` (Debian/Ubuntu export one calling `/usr/bin/which`
 #      with GNU-only flags); a minimal image's `/usr/bin/which` rejects them
 #      and prints "Usage: ..." to stdout, which would poison `$(which env ...)`
 #      -> the run command begins with `Usage:` -> exit 127. This never calls
 #      `which`.
-#   3. An exported `env` *function*: it would be invoked instead of the binary,
-#      but the common branch here expands to the literal path /usr/bin/env.
+#   3. An exported `env` *function*: the common branch expands to the literal
+#      path /usr/bin/env; and if that is absent, `type -P` returns only the
+#      on-disk executable, never the function (whereas `command -v env` would
+#      return the bare name `env` and invoke the function).
 SKY_SLURM_UNSET_PYTHONPATH = (
-    '$([ -x /usr/bin/env ] && echo /usr/bin/env || command -v env || '
+    '$([ -x /usr/bin/env ] && echo /usr/bin/env || type -P env 2>/dev/null || '
     'echo /usr/bin/env) -u PYTHONPATH')
 SKY_SLURM_PYTHON_CMD = (f'{SKY_SLURM_UNSET_PYTHONPATH} '
                         f'$({SKY_GET_PYTHON_PATH_CMD})')
