@@ -25,6 +25,10 @@ REJECT_REASON_ROLE_SEED_UNAVAILABLE = 'role_seed_unavailable'
 REJECT_REASON_JWT_SECRET_UNAVAILABLE = 'jwt_secret_unavailable'
 REJECT_REASON_UNAUTHORIZED = 'unauthorized'
 REJECT_REASON_FORBIDDEN = 'forbidden'
+REJECT_REASON_SHUTTING_DOWN = 'shutting_down'
+REJECT_REASON_API_VERSION = 'api_version'
+REJECT_REASON_AUTH_PROXY_UNAVAILABLE = 'auth_proxy_unavailable'
+REJECT_REASON_REQUEST_WORKER_EXHAUSTED = 'request_worker_exhausted'
 
 # Key in `scope['state']` (i.e. `request.state`) the reason is stored under.
 REJECT_REASON_STATE_KEY = 'reject_reason'

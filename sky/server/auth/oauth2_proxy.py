@@ -108,6 +108,9 @@ class OAuth2ProxyMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
                     return fastapi_response
             except (aiohttp.ClientError, asyncio.TimeoutError) as e:
                 logger.error(f'Error forwarding to OAuth2 proxy: {e}')
+                middleware_utils.mark_rejection(
+                    request,
+                    middleware_utils.REJECT_REASON_AUTH_PROXY_UNAVAILABLE)
                 return fastapi.responses.JSONResponse(
                     status_code=http.HTTPStatus.BAD_GATEWAY,
                     content={'detail': 'oauth2-proxy service unavailable'})
@@ -126,6 +129,9 @@ class OAuth2ProxyMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
             except (aiohttp.ClientError, asyncio.TimeoutError) as e:
                 logger.error(f'Error communicating with OAuth2 proxy: {e}'
                              f'{traceback.format_exc()}')
+                middleware_utils.mark_rejection(
+                    request,
+                    middleware_utils.REJECT_REASON_AUTH_PROXY_UNAVAILABLE)
                 return fastapi.responses.JSONResponse(
                     status_code=http.HTTPStatus.BAD_GATEWAY,
                     content={'detail': 'oauth2-proxy service unavailable'})
@@ -152,6 +158,9 @@ class OAuth2ProxyMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
                 # User is authenticated, extract user info from headers
                 auth_user = self.get_auth_user(auth_response)
                 if not auth_user:
+                    middleware_utils.mark_rejection(
+                        request,
+                        middleware_utils.REJECT_REASON_AUTH_PROXY_UNAVAILABLE)
                     return fastapi.responses.JSONResponse(
                         status_code=http.HTTPStatus.INTERNAL_SERVER_ERROR,
                         content={
@@ -210,6 +219,9 @@ class OAuth2ProxyMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
             else:
                 logger.error('oauth2-proxy returned unexpected status '
                              f'{auth_response.status}: {auth_response.text}')
+                middleware_utils.mark_rejection(
+                    request,
+                    middleware_utils.REJECT_REASON_AUTH_PROXY_UNAVAILABLE)
                 return fastapi.responses.JSONResponse(
                     status_code=auth_response.status,
                     content={'detail': 'oauth2-proxy error'})

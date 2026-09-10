@@ -296,6 +296,31 @@ def test_a_middleware_calling_the_503_helpers_bare_still_answers_503(helper):
     assert _sample(metrics_utils.SKY_APISERVER_REQUEST_REJECTIONS_TOTAL) == 0.0
 
 
+def test_route_level_executor_exhaustion_is_counted_with_its_reason():
+    """The other exhaustion 503: raised inside a route handler and converted
+    by the app-level exception handler. Always was counted as a 5xx; now it
+    is attributed too."""
+    app = fastapi.FastAPI()
+    app.add_exception_handler(exceptions.ConcurrentWorkerExhaustedError,
+                              server.handle_concurrent_worker_exhausted_error)
+
+    @app.get('/logs')
+    async def logs():  # pylint: disable=unused-variable
+        raise exceptions.ConcurrentWorkerExhaustedError('128 of 128')
+
+    app.add_middleware(metrics.PrometheusMiddleware)
+    response = _client(app).get('/logs')
+    assert response.status_code == 503
+    assert _sample(
+        metrics_utils.SKY_APISERVER_REQUEST_REJECTIONS_TOTAL,
+        reason=middleware_utils.REJECT_REASON_REQUEST_WORKER_EXHAUSTED,
+        status='503',
+        kind='http') == 1.0
+    assert _sample(metrics_utils.SKY_APISERVER_REQUESTS_TOTAL,
+                   path='/logs',
+                   status='5xx') == 1.0
+
+
 def test_the_real_server_registers_the_metrics_middleware_outermost():
     """Order regression guard on sky.server.server itself.
 
