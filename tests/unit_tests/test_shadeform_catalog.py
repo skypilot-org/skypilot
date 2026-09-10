@@ -40,6 +40,17 @@ def _instance(*,
     }
 
 
+def _load_cpu_catalog():
+    csv_text = ('InstanceType,AcceleratorName,AcceleratorCount,vCPUs,'
+                'MemoryGiB,Price,Region,GpuInfo,SpotPrice\n'
+                'massedcompute_cpu-mini,,,8.0,32,0.12,us-east-5,,\n')
+    df = pd.read_csv(io.StringIO(csv_text))
+    with mock.patch.object(shadeform_catalog.common,
+                           'read_catalog',
+                           return_value=df):
+        shadeform_catalog._get_df()
+
+
 @pytest.fixture
 def reset_shadeform_df():
     shadeform_catalog._df = None
@@ -139,3 +150,30 @@ def test_catalog_keeps_cpu_rows_and_empty_accelerators(reset_shadeform_df):
     cheapest = catalog_common.get_instance_type_for_cpus_mem_impl(
         loaded, cpus='2+', memory_gb_or_ratio=None)
     assert cheapest == 'massedcompute_cpu-mini'
+
+
+def test_catalog_cpu_only_keeps_empty_accelerators(reset_shadeform_df):
+    _load_cpu_catalog()
+
+    loaded = shadeform_catalog._get_df()
+    acc = loaded.iloc[0]['AcceleratorName']
+
+    assert pd.isna(acc)
+    assert acc != 'nan'
+
+
+def test_validate_region_zone_rejects_zones(reset_shadeform_df):
+    _load_cpu_catalog()
+
+    with pytest.raises(ValueError, match='does not support zones'):
+        shadeform_catalog.validate_region_zone(None, 'us-west2-a')
+
+
+def test_validate_region_zone_accepts_region(reset_shadeform_df):
+    _load_cpu_catalog()
+
+    actual_region, actual_zone = shadeform_catalog.validate_region_zone(
+        'us-east-5', None)
+
+    assert actual_region == 'us-east-5'
+    assert actual_zone is None
