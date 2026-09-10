@@ -624,9 +624,9 @@ async def test_a_middleware_rejection_without_an_app_is_still_bounded(
     }) == 1.0
 
 
-def test_middleware_rejected_path_label():
+def test_unrouted_path_label():
     literal = frozenset(('/status', '/api/get'))
-    label = metrics._middleware_rejected_path_label
+    label = metrics._unrouted_path_label
     assert label('/status', literal) == '/status'
     assert label('/api/get', literal) == '/api/get'
     assert label('/api/stream', literal) == '/api/*'

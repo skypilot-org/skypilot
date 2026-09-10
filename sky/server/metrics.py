@@ -1565,25 +1565,13 @@ def _get_user_label(request: fastapi.Request) -> str:
     return 'anonymous'
 
 
-# `path` label for a response produced by a middleware, i.e. a request that
-# never reached the router (an authentication 401/503, an RBAC 403, ...).
-# The metrics middleware is the outermost one, so these responses are
-# counted, and their paths are chosen by whoever sent them -- unauthenticated
-# scanners included -- so the raw path cannot be the label value. The raw
-# path is kept only when it is exactly a registered (parameterless) route;
-# anything else is folded into one of these fixed prefixes, as `<prefix>*`,
-# or into `other`. The prefixes are the routers mounted in
-# sky/server/server.py plus the plugin route root; the `*` form keeps the
-# prefix regexes dashboards and rules already use (e.g. `/api/.*`,
-# `/dashboard/.*`) matching. The bare prefix (`/users`, a router's root
-# route) folds into the same bucket. A request that did reach the router
-# keeps its raw path, 404s included, exactly as before.
-#
-# "Registered route" means a route on the app's own table: with current
-# FastAPI, `include_router` adds one opaque entry per router, so the routes
-# of the included core and plugin routers are not in it and fold into their
-# prefix bucket. Bounded either way.
-_MIDDLEWARE_REJECTED_PATH_PREFIXES = (
+# Prefixes that bound the `path` label of an unrouted request -- one a
+# middleware answered without the router running; see `_unrouted_path_label`.
+# The prefixes are the routers mounted in sky/server/server.py plus the
+# plugin route root; the `*` form keeps the prefix regexes dashboards and
+# rules already use (e.g. `/api/.*`, `/dashboard/.*`) matching, and a
+# router's bare root (`/users`) folds into the same bucket.
+_UNROUTED_PATH_PREFIXES = (
     '/api/',
     '/dashboard/',
     '/internal/dashboard/',
@@ -1607,13 +1595,20 @@ def _reached_router(request: fastapi.Request) -> bool:
     Starlette's router stamps itself on the scope when it runs
     (`scope['router']`); a request a middleware answered itself never gets
     there. This is what tells a route's own 4xx/5xx (raw path, as before)
-    from a middleware's canned rejection (bounded path).
+    from a middleware's canned response (bounded path).
     """
     return 'router' in request.scope
 
 
 def _literal_route_paths(app) -> FrozenSet[str]:
-    """The registered route paths without path parameters."""
+    """The registered route paths without path parameters.
+
+    "Registered route" means a route on the app's own table: with current
+    FastAPI, `include_router` adds one opaque entry per router, so the
+    routes of the included core and plugin routers are not in it and fold
+    into their prefix bucket (see `_unrouted_path_label`). Bounded either
+    way.
+    """
     routes = getattr(app, 'routes', None)
     if not isinstance(routes, (list, tuple)):
         return frozenset()
@@ -1623,12 +1618,21 @@ def _literal_route_paths(app) -> FrozenSet[str]:
                      '{' not in route.path)
 
 
-def _middleware_rejected_path_label(path: str,
-                                    literal_routes: FrozenSet[str]) -> str:
-    """Bounded `path` label for a response a middleware produced."""
+def _unrouted_path_label(path: str, literal_routes: FrozenSet[str]) -> str:
+    """Bounded `path` label for a response a middleware produced.
+
+    The request never reached the router (an authentication 401/503, an
+    RBAC 403, a CORS preflight, a sign-in redirect, ...), and its path is
+    chosen by whoever sent it -- unauthenticated scanners included -- so
+    the raw path cannot be the label value. The raw path is kept only when
+    it is exactly a registered (parameterless) route; anything else is
+    folded into one of the fixed `_UNROUTED_PATH_PREFIXES` buckets, as
+    `<prefix>*`, or into `other`. A request that did reach the router keeps
+    its raw path, 404s included, exactly as before.
+    """
     if path in literal_routes:
         return path
-    for prefix in _MIDDLEWARE_REJECTED_PATH_PREFIXES:
+    for prefix in _UNROUTED_PATH_PREFIXES:
         if path.startswith(prefix) or path == prefix[:-1]:
             return prefix + '*'
     return OTHER_PATH_LABEL
@@ -1649,7 +1653,7 @@ class PrometheusMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
     the router saw (inner middlewares rewrite `scope['path']` in place, e.g.
     the internal dashboard prefix): the same value as before. For a response
     produced by a middleware the path is bounded instead; see
-    `_middleware_rejected_path_label`. When the middleware that answered
+    `_unrouted_path_label`. When the middleware that answered
     stamped a reason (`middleware_utils.mark_rejection`), the response is
     also counted in `sky_apiserver_request_rejections_total`.
 
@@ -1701,7 +1705,7 @@ class PrometheusMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
         raw_path = request.scope.get('path', '')
         path = raw_path
         if not _reached_router(request):
-            path = _middleware_rejected_path_label(
+            path = _unrouted_path_label(
                 raw_path, self._literal_route_paths(request.scope.get('app')))
         status_code_group = _get_status_code_group(status_code)
         metrics_utils.SKY_APISERVER_REQUESTS_TOTAL.labels(
