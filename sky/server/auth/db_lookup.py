@@ -29,6 +29,7 @@ import fastapi
 
 from sky import exceptions
 from sky import sky_logging
+from sky.metrics import utils as metrics_utils
 from sky.server.requests import executor
 from sky.users import permission
 from sky.utils import common_utils
@@ -89,6 +90,28 @@ def _server_timeout_pgcode(exc: BaseException) -> Optional[str]:
     return None
 
 
+# `cause` of a timeout the client-side deadline produced, as opposed to one
+# the database itself ended (those are named by their Postgres setting, see
+# `_SERVER_TIMEOUT_PGCODES`).
+TIMEOUT_CAUSE_DEADLINE = 'deadline'
+
+
+def _count_timeout(func: Callable[..., Any], cause: str) -> None:
+    """Count one auth-path DB timeout.
+
+    Guarded: this runs while an exception from the auth path is in flight, so
+    a failure to record must not replace it. That would turn a retryable 503
+    into a bare 500 during exactly the database incident the counter exists
+    to make visible.
+    """
+    try:
+        metrics_utils.SKY_APISERVER_AUTH_DB_TIMEOUTS_TOTAL.labels(
+            site=getattr(func, '__name__', 'unknown'), cause=cause).inc()
+    except Exception as e:  # pylint: disable=broad-except
+        logger.warning(f'Failed to count an auth DB timeout: '
+                       f'{common_utils.format_exception(e)}')
+
+
 async def _run_with_deadline(pool: Any, func: Callable[..., Any],
                              *args: Any) -> Any:
     try:
@@ -98,8 +121,17 @@ async def _run_with_deadline(pool: Any, func: Callable[..., Any],
     except Exception as e:  # pylint: disable=broad-except
         pgcode = _server_timeout_pgcode(e)
         if pgcode is None:
+            if isinstance(e, asyncio.TimeoutError):
+                # The deadline elapsed. Counted here, at the one choke point
+                # every auth DB call goes through, rather than at the call
+                # sites: several of them convert the timeout to a 503 and one
+                # (the /api/health probe) swallows it entirely, so counting
+                # per caller would miss the cases with no client-visible
+                # symptom -- which are the early ones.
+                _count_timeout(func, TIMEOUT_CAUSE_DEADLINE)
             raise
         reason = _SERVER_TIMEOUT_PGCODES[pgcode]
+        _count_timeout(func, reason)
         logger.warning(f'Auth DB call {getattr(func, "__name__", func)} was '
                        f'cut off by the database\'s {reason} '
                        f'(pgcode {pgcode}): '
