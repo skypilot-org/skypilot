@@ -30,6 +30,7 @@ These tests pin the containment behavior:
 # pylint: disable=protected-access,redefined-outer-name,missing-class-docstring
 
 import asyncio
+import functools
 import os
 import time
 import unittest.mock as mock
@@ -40,6 +41,7 @@ import sqlalchemy.exc
 
 from sky import exceptions
 from sky import models
+from sky.metrics import utils as metrics_utils
 from sky.server import middleware_utils
 from sky.server import server
 from sky.server.auth import db_lookup
@@ -714,3 +716,236 @@ class TestServerSideTimeoutMapping:
 
         _assert_retryable_timeout_503(response)
         assert not call_next_sentinel.reached
+
+
+def _never_runs():
+    """A call the executor rejects before it ever runs."""
+    raise AssertionError('should not have been called')
+
+
+def _timeouts(**labels) -> float:
+    """Current value of the auth-DB-timeout counter for these labels."""
+    total = 0.0
+    counter = metrics_utils.SKY_APISERVER_AUTH_TIMEOUTS_TOTAL
+    for family in counter.collect():
+        for sample in family.samples:
+            if not sample.name.endswith('_total'):
+                continue
+            if all(sample.labels.get(k) == v for k, v in labels.items()):
+                total += sample.value
+    return total
+
+
+@pytest.fixture
+def clear_timeouts(monkeypatch):
+    # Recording is gated on METRICS_ENABLED, which is a module constant read
+    # at import and false unless the server was started with metrics on.
+    monkeypatch.setattr(metrics_utils, 'METRICS_ENABLED', True)
+    # The rate limiter is process-global and stateful: one test tripping it
+    # as a side effect would otherwise decide whether another test sees the
+    # first-failure WARNING, and the failure would look like a logging bug
+    # rather than an ordering one. Swap in a fresh one, as
+    # test_edge_error_counting.py does.
+    fresh = middleware_utils.RecordingFailureLog()
+    monkeypatch.setattr(middleware_utils, '_recording_failure_log', fresh)
+    metrics_utils.SKY_APISERVER_AUTH_TIMEOUTS_TOTAL.clear()
+    yield fresh
+    metrics_utils.SKY_APISERVER_AUTH_TIMEOUTS_TOTAL.clear()
+
+
+class TestAuthDBTimeoutCounter:
+    """An auth DB call that times out must leave a trace in the metrics.
+
+    The deadline frees the caller but not the thread, so each of these costs
+    an auth executor slot until the call returns on its own. It was log-only:
+    in the 2026-09-08 incident the first one preceded the first
+    client-visible 503 by 13 minutes with nothing to alert on.
+    """
+
+    @pytest.mark.asyncio
+    async def test_the_client_side_deadline_is_counted(self, monkeypatch,
+                                                       clear_timeouts):
+        monkeypatch.setattr(db_lookup, 'AUTH_DB_TIMEOUT_SECONDS', 0.05)
+
+        def _parked(*args, **kwargs):
+            del args, kwargs
+            time.sleep(5)
+
+        with pytest.raises(asyncio.TimeoutError):
+            await db_lookup.call_with_deadline(_parked)
+
+        assert _timeouts(site='_parked',
+                         cause=db_lookup.TIMEOUT_CAUSE_DEADLINE,
+                         pool=db_lookup.POOL_AUTH) == 1.0
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize('pgcode, cause', [
+        ('55P03', 'lock_timeout'),
+        ('57014', 'statement_timeout'),
+        ('25P03', 'idle_in_transaction_session_timeout'),
+    ])
+    async def test_a_database_side_timeout_is_counted_by_its_setting(
+            self, monkeypatch, clear_timeouts, pgcode, cause):
+        """The two kinds mean opposite things -- the thread comes back from a
+        DB-side timeout and does not from a deadline -- so `cause` must tell
+        them apart, and a `lock_timeout` must be readable on its own."""
+        monkeypatch.setattr(db_lookup, 'AUTH_DB_TIMEOUT_SECONDS', 5)
+
+        with pytest.raises(db_lookup.AuthDBTimeoutError):
+            await db_lookup.call_with_deadline(_raises_db_error(pgcode))
+
+        assert _timeouts(cause=cause) == 1.0
+        assert _timeouts(cause=db_lookup.TIMEOUT_CAUSE_DEADLINE) == 0.0
+
+    @pytest.mark.asyncio
+    async def test_the_request_pool_variant_is_counted_too(
+            self, monkeypatch, clear_timeouts):
+        monkeypatch.setattr(db_lookup, 'AUTH_DB_TIMEOUT_SECONDS', 0.05)
+
+        def _parked_on_request_pool(*args, **kwargs):
+            del args, kwargs
+            time.sleep(5)
+
+        with pytest.raises(asyncio.TimeoutError):
+            await db_lookup._call_on_request_pool(_parked_on_request_pool)
+
+        # The larger pool, and the one whose blocker is often a policy
+        # lock rather than the database: it must not read as auth pressure.
+        assert _timeouts(site='_parked_on_request_pool',
+                         cause=db_lookup.TIMEOUT_CAUSE_DEADLINE,
+                         pool=db_lookup.POOL_REQUEST) == 1.0
+        assert _timeouts(pool=db_lookup.POOL_AUTH) == 0.0
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize('pgcode', ['23505', '08006', '40P01', None])
+    async def test_other_db_errors_are_not_counted(self, monkeypatch,
+                                                   clear_timeouts, pgcode):
+        """Only timeouts. A unique violation or a dropped connection is a
+        different problem and must not dilute this counter."""
+        monkeypatch.setattr(db_lookup, 'AUTH_DB_TIMEOUT_SECONDS', 5)
+        with pytest.raises(sqlalchemy.exc.OperationalError):
+            await db_lookup.call_with_deadline(_raises_db_error(pgcode))
+        assert _timeouts() == 0.0
+
+    @pytest.mark.asyncio
+    async def test_executor_exhaustion_is_not_counted(self, monkeypatch,
+                                                      clear_timeouts):
+        """Exhaustion already has `sky_apiserver_threads_exhausted_total`;
+        counting it here too would double-count one event across two
+        metrics."""
+        monkeypatch.setattr(db_lookup, 'AUTH_DB_TIMEOUT_SECONDS', 5)
+        exhausted = threads.OnDemandThreadExecutor(name='test-exhausted-count',
+                                                   max_workers=0)
+        with mock.patch.object(db_lookup.executor,
+                               'get_auth_thread_executor',
+                               return_value=exhausted):
+            with pytest.raises(exceptions.ConcurrentWorkerExhaustedError):
+                await db_lookup.call_with_deadline(_never_runs)
+        assert _timeouts() == 0.0
+
+    @pytest.mark.asyncio
+    async def test_nothing_is_counted_when_metrics_are_disabled(
+            self, monkeypatch, clear_timeouts):
+        """Every instrument outside the metrics middleware is a no-op when
+        metrics are off; this one runs on the auth path, so it has to check
+        for itself rather than relying on the middleware not being
+        registered."""
+        monkeypatch.setattr(metrics_utils, 'METRICS_ENABLED', False)
+        monkeypatch.setattr(db_lookup, 'AUTH_DB_TIMEOUT_SECONDS', 5)
+
+        with pytest.raises(db_lookup.AuthDBTimeoutError):
+            await db_lookup.call_with_deadline(_raises_db_error('55P03'))
+
+        assert _timeouts() == 0.0
+
+    @pytest.mark.asyncio
+    async def test_a_callable_without_a_name_does_not_widen_the_label(
+            self, monkeypatch, clear_timeouts):
+        """`site` is claimed to be a closed set. Every call site in the
+        server passes a function or a bound method, but a callable with no
+        `__name__` (a partial, a class instance) must fall into one fixed
+        bucket rather than become an unbounded label value."""
+        monkeypatch.setattr(db_lookup, 'AUTH_DB_TIMEOUT_SECONDS', 5)
+        partial = functools.partial(_raises_db_error('55P03'))
+
+        with pytest.raises(db_lookup.AuthDBTimeoutError):
+            await db_lookup.call_with_deadline(partial)
+
+        assert _timeouts(site='unknown', cause='lock_timeout') == 1.0
+
+    @pytest.mark.asyncio
+    async def test_repeated_counting_failures_warn_once(self, monkeypatch,
+                                                        clear_timeouts):
+        """The faults this guards against are persistent, on a path that
+        fires at request rate during the very incident the counter exists
+        for, so an unconditional warning would flood the log exactly when it
+        needs reading. Rate limiting is the shared one in middleware_utils,
+        so this pins that the auth path is wired into it, not that it works.
+        """
+        monkeypatch.setattr(db_lookup, 'AUTH_DB_TIMEOUT_SECONDS', 5)
+
+        with mock.patch.object(metrics_utils.SKY_APISERVER_AUTH_TIMEOUTS_TOTAL,
+                               'labels',
+                               side_effect=RuntimeError('multiproc dir full')):
+            with mock.patch.object(middleware_utils.logger, 'warning') as warn:
+                for _ in range(5):
+                    with pytest.raises(db_lookup.AuthDBTimeoutError):
+                        await db_lookup.call_with_deadline(
+                            _raises_db_error('55P03'))
+
+        recording = [
+            c for c in warn.call_args_list
+            if 'an auth-path timeout' in c.args[0]
+        ]
+        assert len(recording) == 1, warn.call_args_list
+        # Every failure is still counted, so the suppressed ones are
+        # reported rather than lost.
+        assert clear_timeouts.failures == 5
+
+    @pytest.mark.asyncio
+    async def test_a_counting_failure_does_not_change_the_auth_answer(
+            self, monkeypatch, clear_timeouts):
+        """This runs with an auth-path exception in flight. A recording fault
+        must not replace it: that would turn the retryable 503 the client
+        needs into a bare 500, during the very DB incident this counter is
+        for."""
+        monkeypatch.setattr(db_lookup, 'AUTH_DB_TIMEOUT_SECONDS', 5)
+
+        with mock.patch.object(metrics_utils.SKY_APISERVER_AUTH_TIMEOUTS_TOTAL,
+                               'labels',
+                               side_effect=RuntimeError('multiproc dir full')):
+            with pytest.raises(db_lookup.AuthDBTimeoutError):
+                await db_lookup.call_with_deadline(_raises_db_error('55P03'))
+
+
+class TestHealthProbeTimeoutIsOnlyVisibleHere:
+    """The case that motivates counting at the choke point.
+
+    `/api/health` keeps its basic-auth lookup best-effort: on timeout it
+    proceeds unauthenticated so probes survive a DB incident. That is the
+    right behaviour and it means the request produces no error status, no
+    rejection, nothing a request-level metric can see -- while still having
+    leaked an auth executor thread. This counter is its only trace.
+    """
+
+    @pytest.mark.asyncio
+    async def test_a_swallowed_timeout_still_moves_the_counter(
+            self, mock_request, call_next_sentinel, clear_timeouts):
+        mock_request.url.path = '/api/health'
+        mock_request.headers = {'authorization': 'Basic dXNlcjpwYXNz'}
+        middleware = server.BasicAuthMiddleware(app=mock.Mock())
+
+        with mock.patch.object(server.loopback,
+                               'is_loopback_request',
+                               return_value=False), \
+                mock.patch('sky.global_user_state.get_user_by_name',
+                           _slow([])):
+            response = await middleware.dispatch(mock_request,
+                                                 call_next_sentinel)
+
+        # Unchanged: the probe still succeeds, unauthenticated.
+        assert response.status_code == 200
+        assert call_next_sentinel.reached
+        assert mock_request.state.auth_user is None
+        # ...and the timeout is no longer invisible.
+        assert _timeouts(cause=db_lookup.TIMEOUT_CAUSE_DEADLINE) == 1.0
