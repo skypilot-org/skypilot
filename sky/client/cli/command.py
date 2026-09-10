@@ -281,8 +281,20 @@ def _get_cluster_records_and_set_ssh_config(
     for record in cluster_records:
         handle = record['handle']
         name = record['name']
-        if not (handle is not None and handle.cached_external_ips is not None
-                and 'credentials' in record):
+        is_up_cloud_vm_handle = (
+            isinstance(handle, backends.CloudVmRayResourceHandle) and
+            record['status'] == status_lib.ClusterStatus.UP)
+        if (is_up_cloud_vm_handle and handle.cached_cluster_info is not None):
+            # Materialize connection fields from the status response without
+            # another cloud-provider query.
+            if handle.cached_external_ips is None:
+                handle.update_cluster_ips(
+                    cluster_info=handle.cached_cluster_info)
+            if handle.cached_external_ssh_ports is None:
+                handle.update_ssh_ports()
+        if not (is_up_cloud_vm_handle and handle.cached_external_ips is not None
+                and handle.cached_external_ssh_ports is not None and
+                'credentials' in record):
             # If the cluster is not UP or does not have credentials available,
             # we need to remove the cluster from the SSH config.
             cluster_utils.SSHConfigHelper.remove_cluster(name)
