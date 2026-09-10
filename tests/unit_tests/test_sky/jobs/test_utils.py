@@ -86,12 +86,18 @@ class TestUpdateFields:
         assert 'task_name' in updated_fields
 
     def test_adds_dependencies_for_details(self):
-        """Test that schedule_state, priority, and failure_reason are added when details is present."""
+        """Test the columns `details` is assembled from are selected.
+
+        task_name/task_id/pool and the attempt-start columns are what the
+        launch-progress lookup keys on, so a caller that asks only for
+        `details` (e.g. the dashboard) must still get them.
+        """
         fields = ['details']
         updated_fields, _ = jobs_utils._update_fields(fields)
-        assert 'schedule_state' in updated_fields
-        assert 'priority' in updated_fields
-        assert 'failure_reason' in updated_fields
+        for field in ('schedule_state', 'priority', 'failure_reason',
+                      'task_name', 'task_id', 'pool', 'last_recovered_at',
+                      'submitted_at'):
+            assert field in updated_fields, field
 
     def test_adds_original_user_yaml_path_for_user_yaml(self):
         """Test that original_user_yaml_path is added when user_yaml is present."""

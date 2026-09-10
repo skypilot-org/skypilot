@@ -1396,3 +1396,203 @@ class TestQueryInstances:
         expected_rounds = 1 + instance._MAX_QUERY_INSTANCES_RETRIES
         assert mock_client.query_jobs.call_count == 7 * expected_rounds
         read_manifest.assert_called_once()
+
+
+class TestRecordPendingReason:
+    """The squeue pending reason is persisted as a launch-progress event."""
+
+    def test_records_reason_with_dedup(self):
+        with mock.patch.object(instance.global_user_state,
+                               'add_cluster_event') as add_event:
+            instance._record_pending_reason(_CLUSTER, 'QOSGrpGRES', 'h200')
+        add_event.assert_called_once_with(
+            _CLUSTER,
+            new_status=None,
+            reason='Launching (pending: QOSGrpGRES; partition: h200)',
+            event_type=instance.global_user_state.ClusterEventType.
+            LAUNCH_PROGRESS,
+            nop_if_duplicate=True,
+        )
+
+    def test_records_without_a_partition(self):
+        """The partition is optional: a reader has to cope with the shape that
+        carries no partition, since events written before this existed do
+        not."""
+        with mock.patch.object(instance.global_user_state,
+                               'add_cluster_event') as add_event:
+            instance._record_pending_reason(_CLUSTER, 'Resources', None)
+        assert (add_event.call_args.kwargs['reason'] ==
+                'Launching (pending: Resources)')
+
+    @pytest.mark.parametrize('reason', [None, ''])
+    def test_skips_empty_reason(self, reason):
+        with mock.patch.object(instance.global_user_state,
+                               'add_cluster_event') as add_event:
+            instance._record_pending_reason(_CLUSTER, reason, 'h200')
+        add_event.assert_not_called()
+
+    def test_swallows_db_errors(self):
+        with mock.patch.object(instance.global_user_state,
+                               'add_cluster_event',
+                               side_effect=RuntimeError('db down')):
+            instance._record_pending_reason(_CLUSTER, 'Resources', 'h200')
+
+
+class TestPendingCallback:
+    """The pending callback records the reason and gates repeated polls."""
+
+    def test_records_once_per_distinct_reason(self):
+        on_pending = instance._make_pending_callback(_CLUSTER)
+        with mock.patch.object(instance, '_record_pending_reason') as record, \
+             mock.patch.object(instance.rich_utils, 'force_update_status'):
+            # Same reason, moving pending count: one record, several spinner
+            # updates.
+            on_pending('PENDING', 'Resources', 3)
+            on_pending('PENDING', 'Resources', 2)
+            on_pending('PENDING', 'Resources', None)
+            assert record.call_args_list == [
+                mock.call(_CLUSTER, 'Resources', None)
+            ]
+            # A new reason records again.
+            on_pending('PENDING', 'Priority', None)
+            assert record.call_args_list[-1] == mock.call(
+                _CLUSTER, 'Priority', None)
+            assert record.call_count == 2
+
+    def test_spinner_reflects_reason_and_count(self):
+        on_pending = instance._make_pending_callback(_CLUSTER)
+        with mock.patch.object(instance, '_record_pending_reason'), \
+             mock.patch.object(instance.rich_utils,
+                               'force_update_status') as spinner:
+            on_pending('PENDING', 'Resources', 2)
+            on_pending('CONFIGURING', None, None)
+        msgs = [call.args[0] for call in spinner.call_args_list]
+        assert 'pending: Resources' in msgs[0] and '2 others pending' in msgs[0]
+        assert 'Launching' in msgs[1] and 'pending:' not in msgs[1]
+
+    def test_reasonless_polls_never_touch_the_db(self):
+        # squeue reports no reason yet: the callback starts out remembering
+        # None, so nothing is recorded at all.
+        on_pending = instance._make_pending_callback(_CLUSTER)
+        with mock.patch.object(instance, '_record_pending_reason') as record, \
+             mock.patch.object(instance.rich_utils, 'force_update_status'):
+            on_pending('PENDING', None, 0)
+            on_pending('CONFIGURING', None, None)
+            record.assert_not_called()
+            # A reason appearing later is recorded, and going back to no
+            # reason records that transition once.
+            on_pending('PENDING', 'Resources', None)
+            on_pending('PENDING', None, None)
+        assert record.call_args_list == [
+            mock.call(_CLUSTER, 'Resources', None),
+            mock.call(_CLUSTER, None, None),
+        ]
+
+
+class TestRecordAllocation:
+    """Which Slurm allocation backs a cluster, persisted as an event.
+
+    The cluster row carries the same facts, but teardown removes it while
+    cluster events outlive it -- and reading a job's accounting history is
+    exactly what you want *after* the job is over.
+    """
+
+    def test_records_the_id_and_the_cluster(self):
+        with mock.patch.object(instance.global_user_state,
+                               'add_cluster_event') as add_event:
+            instance._record_allocation(_CLUSTER, 'hyperpod-slurm', '17269')
+        add_event.assert_called_once_with(
+            _CLUSTER,
+            new_status=None,
+            reason='Slurm allocation 17269 on hyperpod-slurm',
+            event_type=instance.global_user_state.ClusterEventType.DEBUG,
+            nop_if_duplicate=True,
+        )
+
+    def test_the_identity_is_not_a_launch_progress_event(self):
+        """It used to be, and it was written in the same second as the first
+        pending reason -- so which of the two `details` showed came down to
+        the database's text collation, which orders them the other way round
+        under a locale collation than under SQLite's binary one.
+        """
+        with mock.patch.object(instance.global_user_state,
+                               'add_cluster_event') as add_event:
+            instance._record_allocation(_CLUSTER, 'hyperpod-slurm', '17269')
+            instance._record_pending_reason(_CLUSTER, 'Resources', 'dev')
+        types = [c.kwargs['event_type'] for c in add_event.call_args_list]
+        progress = instance.global_user_state.ClusterEventType.LAUNCH_PROGRESS
+        assert types == [
+            instance.global_user_state.ClusterEventType.DEBUG, progress
+        ]
+
+    def test_the_nodes_are_granted_as_launch_progress(self):
+        """The progress half, written once the wait returns: later than any
+        pending reason, so recency alone settles which one a reader sees.
+        """
+        with mock.patch.object(instance.global_user_state,
+                               'add_cluster_event') as add_event:
+            instance._record_nodes_allocated(_CLUSTER, 'hyperpod-slurm',
+                                             '17269')
+        add_event.assert_called_once_with(
+            _CLUSTER,
+            new_status=None,
+            reason=('Launching (nodes allocated; Slurm job 17269 '
+                    'on hyperpod-slurm)'),
+            event_type=instance.global_user_state.ClusterEventType.
+            LAUNCH_PROGRESS,
+            nop_if_duplicate=True,
+        )
+
+    def test_the_text_does_not_collide_with_a_pending_reason(self):
+        """A reader of the timeline tells the rows apart by their text."""
+        with mock.patch.object(instance.global_user_state,
+                               'add_cluster_event') as add_event:
+            instance._record_allocation(_CLUSTER, 'hyperpod-slurm', '17269')
+            allocation = add_event.call_args.kwargs['reason']
+            instance._record_nodes_allocated(_CLUSTER, 'hyperpod-slurm',
+                                             '17269')
+            granted = add_event.call_args.kwargs['reason']
+            instance._record_pending_reason(_CLUSTER, 'Resources', 'dev')
+            pending = add_event.call_args.kwargs['reason']
+        assert len({allocation, granted, pending}) == 3
+        assert 'pending:' not in allocation and 'pending:' not in granted
+        assert 'Slurm job' not in pending
+
+    def test_swallows_db_errors(self):
+        """Provisioning must not fail because an event could not be written."""
+        with mock.patch.object(instance.global_user_state,
+                               'add_cluster_event',
+                               side_effect=RuntimeError('db is down')):
+            instance._record_allocation(_CLUSTER, 'hyperpod-slurm', '17269')
+            instance._record_nodes_allocated(_CLUSTER, 'hyperpod-slurm',
+                                             '17269')
+
+
+class TestWaitForJobNodes:
+    """The wait loop's ordering, which decides what shares a second."""
+
+    def test_no_pending_reason_is_recorded_once_the_nodes_are_granted(self):
+        """The state read can say CONFIGURING while the nodes land in the same
+        iteration. Recording a reason then would put it in the same whole
+        second as the caller's node-allocated event, leaving the two to be
+        separated by the database's collation alone.
+        """
+        client = mock.MagicMock()
+        client.get_job_state.return_value = 'CONFIGURING'
+        client.check_job_has_nodes.return_value = True
+        on_pending = mock.MagicMock()
+        instance._wait_for_job_nodes(client, '17269', 60, 'dev', on_pending)
+        on_pending.assert_not_called()
+        client.get_job_reason.assert_not_called()
+
+    def test_a_pending_job_still_reports_its_reason(self):
+        """The mirror: the reorder must not silence the wait it is about."""
+        client = mock.MagicMock()
+        client.get_job_state.return_value = 'PENDING'
+        client.check_job_has_nodes.side_effect = [False, True]
+        client.get_job_reason.return_value = 'Resources'
+        client.get_pending_job_count.return_value = 2
+        on_pending = mock.MagicMock()
+        with mock.patch.object(instance.time, 'sleep'):
+            instance._wait_for_job_nodes(client, '17269', 60, 'dev', on_pending)
+        on_pending.assert_called_once_with('PENDING', 'Resources', 2)

@@ -289,6 +289,12 @@ cluster_event_table = sqlalchemy.Table(
     sqlalchemy.Column('transitioned_at', sqlalchemy.Integer, primary_key=True),
     sqlalchemy.Column('type', sqlalchemy.Text),
     sqlalchemy.Column('request_id', sqlalchemy.Text, server_default=None),
+    # The primary key is (cluster_hash, reason, transitioned_at), but the two
+    # readers that have to survive a cluster's teardown look events up by
+    # `name` instead -- see get_latest_cluster_events and
+    # get_cluster_events_by_name. Without this they scan the whole table.
+    sqlalchemy.Index('ix_cluster_events_name_type', 'name', 'type',
+                     'transitioned_at'),
 )
 
 ssh_key_table = sqlalchemy.Table(
@@ -1505,6 +1511,72 @@ def get_cluster_events(
             'transitioned_at': row.transitioned_at
         } for row in rows]
     return [row.reason for row in rows]
+
+
+@db_retries.retry
+def get_latest_cluster_events(
+    cluster_names: List[str],
+    event_types: List[ClusterEventType],
+) -> Dict[str, Tuple[str, int]]:
+    """{cluster_name: (reason, transitioned_at)} of the newest matching event.
+
+    Looks up by the persisted ``name`` column (like get_cluster_events_by_name)
+    in a single query, so callers can annotate many clusters without a
+    per-cluster round trip. Clusters with no matching event are omitted; the
+    timestamp lets a caller ignore events left by an earlier attempt on a
+    reused cluster name.
+    """
+    if not cluster_names or not event_types:
+        return {}
+    engine = _db_manager.get_engine()
+    type_values = [event_type.value for event_type in event_types]
+    events: Dict[str, Tuple[str, int]] = {}
+    names_list = list(cluster_names)
+    with orm.Session(engine) as session:
+        # Chunked for the same reason as every other name/hash IN query in
+        # this module: SQLite caps a statement at 999 bound parameters, and a
+        # deployment with that many clusters provisioning at once would
+        # otherwise raise -- which the caller swallows, so *every* cluster
+        # would lose its launch reason rather than the excess.
+        for offset in range(0, len(names_list), _CLUSTER_IN_QUERY_CHUNK_SIZE):
+            batch = names_list[offset:offset + _CLUSTER_IN_QUERY_CHUNK_SIZE]
+            # Latest transitioned_at per cluster in SQL, so the read does not
+            # grow with a cluster's event history.
+            latest = session.query(
+                cluster_event_table.c.name.label('name'),
+                sqlalchemy.func.max(
+                    cluster_event_table.c.transitioned_at).label('latest_at'),
+            ).filter(
+                cluster_event_table.c.name.in_(batch),
+                cluster_event_table.c.type.in_(type_values),
+            ).group_by(cluster_event_table.c.name).subquery()
+            rows = session.query(
+                cluster_event_table.c.name,
+                cluster_event_table.c.reason,
+                cluster_event_table.c.transitioned_at,
+            ).join(
+                latest,
+                sqlalchemy.and_(
+                    cluster_event_table.c.name == latest.c.name,
+                    cluster_event_table.c.transitioned_at == latest.c.latest_at,
+                ),
+            ).filter(cluster_event_table.c.type.in_(type_values)).order_by(
+                cluster_event_table.c.transitioned_at.desc(),
+                # transitioned_at is whole seconds and the table has no
+                # insertion order to fall back on, so a second key is what
+                # makes the answer stable instead of whatever the database
+                # happened to return. Which row of a tied pair it prefers is
+                # arbitrary: text ordering is the database's collation, and
+                # the same two rows sort the other way round under a locale
+                # collation than under SQLite's binary one. No caller may
+                # rely on the direction -- writers whose rows must not be
+                # confused for each other must not share a second.
+                cluster_event_table.c.reason.desc(),
+            ).all()
+            for name, reason, transitioned_at in rows:
+                if name not in events and reason:
+                    events[name] = (reason, transitioned_at)
+    return events
 
 
 @db_retries.retry
