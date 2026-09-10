@@ -5,13 +5,12 @@ import os
 import socket
 import threading
 import time
-import types
-from unittest.mock import AsyncMock
 from unittest.mock import MagicMock
 from unittest.mock import patch
 import urllib.request
 
 import fastapi
+from fastapi.testclient import TestClient
 from prometheus_client import CollectorRegistry
 from prometheus_client import CONTENT_TYPE_LATEST
 from prometheus_client import core as prom_core
@@ -19,6 +18,10 @@ from prometheus_client import generate_latest
 from prometheus_client import multiprocess
 import prometheus_client as prom
 import pytest
+import starlette.responses
+import starlette.routing
+from starlette.staticfiles import StaticFiles
+import starlette.websockets
 
 from sky.metrics import utils as metrics_utils
 from sky.server import metrics
@@ -345,68 +348,114 @@ async def test_metrics_endpoint_with_multiprocess():
             mock_gen.assert_called_once_with(mock_registry_instance)
 
 
-def _http_request(path,
-                  method='GET',
-                  *,
-                  reached_router=True,
-                  state=None,
-                  app=None,
-                  headers=None) -> fastapi.Request:
-    """A real Request on a minimal ASGI scope.
-
-    `reached_router` models whether the request got past every middleware to
-    the router: Starlette's router stamps `scope['router']` when it runs, and
-    a request a middleware answered itself never gets there.
-    """
-    scope = {
-        'type': 'http',
-        'method': method,
-        'path': path,
-        'headers': [(k.lower().encode(), v.encode())
-                    for k, v in (headers or {}).items()],
-        'query_string': b'',
-        'state': {} if state is None else state,
-    }
-    if reached_router:
-        scope['router'] = object()
-    if app is not None:
-        scope['app'] = app
-    return fastapi.Request(scope)
-
-
-def _response(status_code: int) -> MagicMock:
-    response = MagicMock()
-    response.status_code = status_code
-    return response
-
-
 @pytest.fixture
 def prometheus_middleware():
-    """Create PrometheusMiddleware instance for testing."""
-    middleware = metrics.PrometheusMiddleware(app=MagicMock())
+    """A PrometheusMiddleware wrapping a configurable ASGI app.
 
-    # Clear metric values before each test
+    The middleware is pure ASGI (it observes `http.response.start` /
+    `websocket.*` messages), so the tests drive it with a scope, a receive
+    and a send instead of a `dispatch(request, call_next)` call.
+    """
+    _clear_request_metrics()
+    return _Harness()
+
+
+def _clear_request_metrics():
     metrics_utils.SKY_APISERVER_REQUESTS_TOTAL.clear()
     metrics_utils.SKY_APISERVER_REQUEST_DURATION_SECONDS.clear()
     metrics_utils.SKY_APISERVER_REQUEST_GET_DURATION_SECONDS.clear()
+    metrics_utils.SKY_APISERVER_REQUESTS_BY_USER_TOTAL.clear()
     metrics_utils.SKY_APISERVER_REQUEST_REJECTIONS_TOTAL.clear()
+    metrics_utils.SKY_APISERVER_WEBSOCKET_HANDSHAKES_TOTAL.clear()
 
-    return middleware
+
+def _responding_app(status_code=200, state_updates=None, exc=None):
+    """An inner ASGI app: optionally mutates request state, then answers."""
+
+    async def app(scope, receive, send):
+        del receive
+        if state_updates:
+            scope['state'].update(state_updates)
+        if exc is not None:
+            raise exc
+        await send({
+            'type': 'http.response.start',
+            'status': status_code,
+            'headers': [],
+        })
+        await send({'type': 'http.response.body', 'body': b''})
+
+    return app
+
+
+def _ws_app(messages, state_updates=None, exc=None):
+    """An inner ASGI app for websocket scopes that sends `messages`."""
+
+    async def app(scope, receive, send):
+        del receive
+        if state_updates:
+            scope['state'].update(state_updates)
+        if exc is not None:
+            raise exc
+        for message in messages:
+            await send(message)
+
+    return app
+
+
+class _Harness:
+    """Runs a PrometheusMiddleware over an inner app with a synthetic scope."""
+
+    def __init__(self):
+        self.sent = []
+
+    @staticmethod
+    def _scope(scope_type, path, method, state, app):
+        scope = {
+            'type': scope_type,
+            'path': path,
+            'root_path': '',
+            'query_string': b'',
+            'headers': [],
+            'state': dict(state or {}),
+        }
+        if scope_type == 'http':
+            scope['method'] = method
+        if app is not None:
+            scope['app'] = app
+        return scope
+
+    async def run(self,
+                  inner_app,
+                  path,
+                  method='GET',
+                  state=None,
+                  scope_type='http',
+                  app=None):
+        middleware = metrics.PrometheusMiddleware(inner_app)
+        scope = self._scope(scope_type, path, method, state, app)
+
+        async def receive():
+            return {'type': 'http.request', 'body': b'', 'more_body': False}
+
+        async def send(message):
+            self.sent.append(message)
+
+        await middleware(scope, receive, send)
+        return scope
 
 
 @pytest.mark.asyncio
 async def test_middleware_successful_request(prometheus_middleware):
     """Test middleware with successful non-streaming request."""
-    request = _http_request('/api/v1/status')
-    response = _response(200)
-    call_next = AsyncMock(return_value=response)
-
     start_time = time.time()
-    result = await prometheus_middleware.dispatch(request, call_next)
+    await prometheus_middleware.run(_responding_app(200), '/api/v1/status')
     end_time = time.time()
 
-    assert result == response
-    call_next.assert_called_once_with(request)
+    # The response reached the client unchanged.
+    assert [m['type'] for m in prometheus_middleware.sent
+           ] == ['http.response.start', 'http.response.body']
+    assert prometheus_middleware.sent[0]['status'] == 200
 
     # Check that request count was recorded
     total_requests = _get_metric_value('sky_apiserver_requests_total', {
@@ -438,13 +487,7 @@ async def test_middleware_successful_request(prometheus_middleware):
 @pytest.mark.asyncio
 async def test_middleware_streaming_request(prometheus_middleware):
     """Test middleware with streaming API request."""
-    request = _http_request('/api/v1/logs')
-    response = _response(200)
-    call_next = AsyncMock(return_value=response)
-
-    result = await prometheus_middleware.dispatch(request, call_next)
-
-    assert result == response
+    await prometheus_middleware.run(_responding_app(200), '/api/v1/logs')
 
     # Check that request count was recorded
     total_requests = _get_metric_value('sky_apiserver_requests_total', {
@@ -466,12 +509,16 @@ async def test_middleware_streaming_request(prometheus_middleware):
 
 @pytest.mark.asyncio
 async def test_middleware_exception_handling(prometheus_middleware):
-    """Test middleware handles exceptions properly."""
-    request = _http_request('/api/v1/failing', 'POST')
-    call_next = AsyncMock(side_effect=Exception("Test error"))
+    """An exception escaping every inner layer is counted as a 5xx.
 
+    Starlette's ServerErrorMiddleware (outside the metrics layer) turns it
+    into a bare 500, so that is what the client sees.
+    """
     with pytest.raises(Exception, match="Test error"):
-        await prometheus_middleware.dispatch(request, call_next)
+        await prometheus_middleware.run(
+            _responding_app(exc=Exception("Test error")),
+            '/api/v1/failing',
+            method='POST')
 
     # Check that 5xx metric was recorded even with exception
     total_requests = _get_metric_value('sky_apiserver_requests_total', {
@@ -480,6 +527,11 @@ async def test_middleware_exception_handling(prometheus_middleware):
         'status': '5xx'
     })
     assert total_requests == 1.0
+    # ...and attributed to an unhandled exception in the rejection counter.
+    assert _rejections(
+        reason=middleware_utils.REJECT_REASON_UNHANDLED_EXCEPTION,
+        status='500',
+        kind='http') == 1.0
 
 
 @pytest.mark.asyncio
@@ -492,10 +544,8 @@ async def test_middleware_different_status_codes(prometheus_middleware):
     ]
 
     for status_code, expected_group in test_cases:
-        request = _http_request(f'/test/{status_code}')
-        call_next = AsyncMock(return_value=_response(status_code))
-
-        await prometheus_middleware.dispatch(request, call_next)
+        await prometheus_middleware.run(_responding_app(status_code),
+                                        f'/test/{status_code}')
 
         # Verify the correct status group was recorded
         total_requests = _get_metric_value(
@@ -507,216 +557,77 @@ async def test_middleware_different_status_codes(prometheus_middleware):
         assert total_requests == 1.0
 
 
-# ─────────────────────────────────────────────────────────────────────────
-# The metrics middleware is the outermost one, so it also sees the responses
-# other middlewares produce. Their paths are bounded; everything that reached
-# the router keeps the raw path as before.
-# ─────────────────────────────────────────────────────────────────────────
-
-
-def _app_with_routes() -> fastapi.FastAPI:
-    app = fastapi.FastAPI()
-
-    @app.get('/status')
-    async def status():  # pylint: disable=unused-variable
-        return {}
-
-    @app.get('/api/get')
-    async def api_get():  # pylint: disable=unused-variable
-        return {}
-
-    @app.get('/dashboard/{full_path:path}')
-    async def dashboard(full_path: str):  # pylint: disable=unused-variable
-        return {'path': full_path}
-
-    return app
-
-
 @pytest.mark.asyncio
-async def test_path_label_is_read_after_the_inner_layers_ran(
+async def test_middleware_counts_a_response_answered_by_a_middleware(
         prometheus_middleware):
-    """Inner middlewares rewrite `scope['path']` in place (the internal
-    dashboard prefix); the scope dict is shared down the stack, so reading it
-    after `call_next` gives the path the router saw, as before the move."""
-    request = _http_request('/internal/dashboard/status', reached_router=False)
+    """The whole point of the layer being outermost.
 
-    async def call_next(req):
-        req.scope['path'] = '/status'
-        req.scope['router'] = object()
-        return _response(200)
-
-    await prometheus_middleware.dispatch(request, call_next)
+    An inner middleware that answers a request itself (here: the auth
+    executor is saturated) never calls the next layer. The metrics layer
+    sees the response anyway, counts it as a 5xx on the path, and records
+    the reason the middleware stamped on the request.
+    """
+    inner = _responding_app(
+        503,
+        state_updates={
+            middleware_utils.REJECT_REASON_STATE_KEY:
+                middleware_utils.REJECT_REASON_AUTH_WORKER_EXHAUSTED
+        })
+    await prometheus_middleware.run(inner, '/status')
 
     assert _get_metric_value('sky_apiserver_requests_total', {
         'path': '/status',
-        'status': '2xx'
-    }) == 1.0
-    assert _get_metric_value('sky_apiserver_requests_total',
-                             {'path': '/internal/dashboard/status'}) == 0.0
-
-
-@pytest.mark.asyncio
-async def test_a_404_from_the_router_keeps_the_raw_path(prometheus_middleware):
-    request = _http_request('/no/such/route')
-    await prometheus_middleware.dispatch(request,
-                                         AsyncMock(return_value=_response(404)))
-    assert _get_metric_value('sky_apiserver_requests_total', {
-        'path': '/no/such/route',
-        'status': '4xx'
-    }) == 1.0
-
-
-@pytest.mark.asyncio
-async def test_a_middleware_rejection_keeps_a_registered_route_path(
-        prometheus_middleware):
-    """A 503 an auth middleware answered for `/status` lands in the same
-    series as the successes of `/status`."""
-    app = _app_with_routes()
-    request = _http_request('/status', reached_router=False, app=app)
-    await prometheus_middleware.dispatch(request,
-                                         AsyncMock(return_value=_response(503)))
-    assert _get_metric_value('sky_apiserver_requests_total', {
-        'path': '/status',
+        'method': 'GET',
         'status': '5xx'
     }) == 1.0
+    assert _rejections(
+        reason=middleware_utils.REJECT_REASON_AUTH_WORKER_EXHAUSTED,
+        status='503',
+        kind='http') == 1.0
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize('raw_path, label', [
-    ('/wp-admin/setup.php', metrics.OTHER_PATH_LABEL),
-    ('/.env', metrics.OTHER_PATH_LABEL),
-    ('/api/no-such-endpoint', '/api/*'),
-    ('/dashboard/_next/static/chunks/main.js', '/dashboard/*'),
-    ('/internal/dashboard/clusters', '/internal/dashboard/*'),
-    ('/plugins/api/foo/list', '/plugins/*'),
-    ('/jobs/queue', '/jobs/*'),
-    ('/users', '/users/*'),
-])
-async def test_a_middleware_rejection_on_an_unknown_path_is_bucketed(
-        prometheus_middleware, raw_path, label):
-    """Rejected requests' paths are chosen by unauthenticated clients, so
-    anything that is not a registered route folds into a fixed prefix or
-    `other`. The `<prefix>*` form keeps the prefix regexes dashboards use
-    (`/api/.*`, `/dashboard/.*`) matching."""
-    app = _app_with_routes()
-    request = _http_request(raw_path, reached_router=False, app=app)
-    await prometheus_middleware.dispatch(request,
-                                         AsyncMock(return_value=_response(401)))
+async def test_middleware_does_not_count_a_rejection_without_a_reason(
+        prometheus_middleware):
+    """A plain 404 from the router is a request, not a rejection."""
+    await prometheus_middleware.run(_responding_app(404), '/nope')
     assert _get_metric_value('sky_apiserver_requests_total', {
-        'path': label,
+        'path': '/nope',
         'status': '4xx'
     }) == 1.0
-    assert _get_metric_value('sky_apiserver_requests_total',
-                             {'path': raw_path}) == 0.0
-
-
-@pytest.mark.asyncio
-async def test_a_middleware_rejection_without_an_app_is_still_bounded(
-        prometheus_middleware):
-    """No app on the scope (bare ASGI callable): nothing to match against,
-    so every rejected path folds into a prefix or `other`."""
-    request = _http_request('/status', reached_router=False)
-    await prometheus_middleware.dispatch(request,
-                                         AsyncMock(return_value=_response(503)))
-    assert _get_metric_value('sky_apiserver_requests_total', {
-        'path': metrics.OTHER_PATH_LABEL,
-        'status': '5xx'
-    }) == 1.0
-
-
-def test_unrouted_path_label():
-    literal = frozenset(('/status', '/api/get'))
-    label = metrics._unrouted_path_label
-    assert label('/status', literal) == '/status'
-    assert label('/api/get', literal) == '/api/get'
-    assert label('/api/stream', literal) == '/api/*'
-    assert label('/dashboard/clusters', literal) == '/dashboard/*'
-    # A router's root route is the bare prefix.
-    assert label('/workspaces', literal) == '/workspaces/*'
-    assert label('/status/', literal) == metrics.OTHER_PATH_LABEL
-    assert label('/wp-admin', literal) == metrics.OTHER_PATH_LABEL
-    assert label('', literal) == metrics.OTHER_PATH_LABEL
-
-
-def test_literal_route_paths_skip_parameterized_routes():
-    paths = metrics._literal_route_paths(_app_with_routes())
-    assert '/status' in paths
-    assert '/api/get' in paths
-    assert not any('{' in path for path in paths)
-    assert metrics._literal_route_paths(None) == frozenset()
-    assert metrics._literal_route_paths(MagicMock()) == frozenset()
-
-
-def test_reached_router_uses_the_router_scope_key():
-    assert metrics._reached_router(_http_request('/x', reached_router=True))
-    assert not metrics._reached_router(_http_request('/x',
-                                                     reached_router=False))
-
-
-@pytest.mark.asyncio
-async def test_a_stamped_rejection_is_counted_by_reason(prometheus_middleware):
-    """The auth helpers stamp why they answered; the metrics middleware
-    turns the stamp into `sky_apiserver_request_rejections_total`."""
-    request = _http_request('/status', reached_router=False)
-    middleware_utils.mark_rejection(
-        request, middleware_utils.REJECT_REASON_AUTH_DB_TIMEOUT)
-    await prometheus_middleware.dispatch(request,
-                                         AsyncMock(return_value=_response(503)))
-    collectors = [metrics_utils.SKY_APISERVER_REQUEST_REJECTIONS_TOTAL]
-    assert _get_metric_value('sky_apiserver_request_rejections_total', {
-        'reason': middleware_utils.REJECT_REASON_AUTH_DB_TIMEOUT,
-        'status': '503',
-        'kind': 'http'
-    },
-                             collectors=collectors) == 1.0
-
-
-@pytest.mark.asyncio
-async def test_an_unstamped_response_is_not_a_rejection(prometheus_middleware):
-    request = _http_request('/status')
-    await prometheus_middleware.dispatch(request,
-                                         AsyncMock(return_value=_response(500)))
-    collectors = [metrics_utils.SKY_APISERVER_REQUEST_REJECTIONS_TOTAL]
-    assert _get_metric_value('sky_apiserver_request_rejections_total',
-                             collectors=collectors) == 0.0
+    assert _rejections() == 0.0
 
 
 def test_get_user_label_with_auth_user():
     """Test _get_user_label with authenticated user."""
-    request = MagicMock()
-    request.state.auth_user = MagicMock()
-    request.state.auth_user.name = 'alice@example.com'
+    auth_user = MagicMock()
+    auth_user.name = 'alice@example.com'
 
-    result = metrics._get_user_label(request)
+    result = metrics._get_user_label({'auth_user': auth_user})
     assert result == 'alice@example.com'
 
 
 def test_get_user_label_anonymous():
     """Test _get_user_label with no auth_user."""
-    request = MagicMock(spec=['state'])
-    request.state = MagicMock(spec=[])  # No auth_user attribute
-
-    result = metrics._get_user_label(request)
-    assert result == 'anonymous'
+    assert metrics._get_user_label({}) == 'anonymous'
+    assert metrics._get_user_label({'auth_user': None}) == 'anonymous'
 
 
 def test_get_user_label_no_name():
     """Test _get_user_label when auth_user has no name."""
-    request = MagicMock()
-    request.state.auth_user = MagicMock()
-    request.state.auth_user.name = None
+    auth_user = MagicMock()
+    auth_user.name = None
 
-    result = metrics._get_user_label(request)
+    result = metrics._get_user_label({'auth_user': auth_user})
     assert result == 'anonymous'
 
 
 def test_get_user_label_empty_name():
     """Test _get_user_label when auth_user has empty name."""
-    request = MagicMock()
-    request.state.auth_user = MagicMock()
-    request.state.auth_user.name = ''
+    auth_user = MagicMock()
+    auth_user.name = ''
 
-    result = metrics._get_user_label(request)
+    result = metrics._get_user_label({'auth_user': auth_user})
     assert result == 'anonymous'
 
 
@@ -759,21 +670,29 @@ def _get_metric_value(metric_name, labels=None, collectors=None):
     return 0.0
 
 
-@pytest.fixture
-def prometheus_middleware_user():
-    """Create PrometheusMiddleware instance for user metrics testing."""
-    return metrics.PrometheusMiddleware(app=MagicMock())
+def _handshakes(**labels):
+    return _get_metric_value(
+        'sky_apiserver_websocket_handshakes_total',
+        labels,
+        collectors=[metrics_utils.SKY_APISERVER_WEBSOCKET_HANDSHAKES_TOTAL])
+
+
+def _rejections(**labels):
+    return _get_metric_value(
+        'sky_apiserver_request_rejections_total',
+        labels,
+        collectors=[metrics_utils.SKY_APISERVER_REQUEST_REJECTIONS_TOTAL])
 
 
 @pytest.mark.asyncio
-async def test_middleware_records_user_metrics(prometheus_middleware_user):
-    """Test that middleware records per-user metrics for authenticated user."""
-    request = _http_request(
-        '/api/v1/status',
-        state={'auth_user': types.SimpleNamespace(name='alice@example.com')})
-    call_next = AsyncMock(return_value=_response(200))
-
-    await prometheus_middleware_user.dispatch(request, call_next)
+async def test_middleware_records_user_metrics(prometheus_middleware):
+    """Per-user metrics use the auth user an inner middleware stored."""
+    auth_user = MagicMock()
+    auth_user.name = 'alice@example.com'
+    # The inner (auth) middleware sets request.state.auth_user, which is
+    # backed by the scope's state dict the outer metrics layer reads.
+    inner = _responding_app(200, state_updates={'auth_user': auth_user})
+    await prometheus_middleware.run(inner, '/api/v1/status')
 
     # Check that user metric was recorded
     user_collectors = [metrics_utils.SKY_APISERVER_REQUESTS_BY_USER_TOTAL]
@@ -787,13 +706,9 @@ async def test_middleware_records_user_metrics(prometheus_middleware_user):
 
 
 @pytest.mark.asyncio
-async def test_middleware_records_anonymous_user_metrics(
-        prometheus_middleware_user):
+async def test_middleware_records_anonymous_user_metrics(prometheus_middleware):
     """Test that middleware records 'anonymous' for unauthenticated requests."""
-    request = _http_request('/api/v1/status')  # No auth_user in the state.
-    call_next = AsyncMock(return_value=_response(200))
-
-    await prometheus_middleware_user.dispatch(request, call_next)
+    await prometheus_middleware.run(_responding_app(200), '/api/v1/status')
 
     # Check that anonymous user metric was recorded
     user_collectors = [metrics_utils.SKY_APISERVER_REQUESTS_BY_USER_TOTAL]
@@ -807,35 +722,48 @@ async def test_middleware_records_anonymous_user_metrics(
 
 
 @pytest.mark.asyncio
-async def test_middleware_user_metrics_with_basic_auth(
-        prometheus_middleware_user):
+async def test_middleware_user_metrics_with_basic_auth(prometheus_middleware):
     """E2E test: PrometheusMiddleware -> BasicAuthMiddleware chain records
-    correct user label for basic auth.
+    the correct user label for basic auth.
 
-    Verifies that when BasicAuthMiddleware (inside the metrics middleware, as
-    in production) authenticates via Basic auth and sets
-    request.state.auth_user, PrometheusMiddleware records the correct
-    username in per-user metrics.
+    The metrics layer is OUTSIDE the auth middleware (as in server.py).
+    BasicAuthMiddleware authenticates and sets request.state.auth_user on
+    the shared scope state; the outer metrics layer must still see it when
+    the response passes through.
     """
-    # Create request with Basic Auth header (bob:secret)
-    request = _http_request(
-        '/api/v1/clusters',
-        'POST',
-        headers={
-            'authorization': 'Basic ' +
-                             base64.b64encode(b'bob:secret').decode(),
+
+    async def final_app(scope, receive, send):
+        del scope, receive
+        await send({
+            'type': 'http.response.start',
+            'status': 200,
+            'headers': [(b'content-type', b'application/json')]
+        })
+        await send({'type': 'http.response.body', 'body': b'{"status":"ok"}'})
+
+    basic_auth_middleware = BasicAuthMiddleware(app=final_app)
+    middleware = metrics.PrometheusMiddleware(basic_auth_middleware)
+
+    scope = {
+        'type': 'http',
+        'method': 'POST',
+        'path': '/api/v1/clusters',
+        'root_path': '',
+        'query_string': b'',
+        'headers': [(b'authorization',
+                     b'Basic ' + base64.b64encode(b'bob:secret'))],
+        # As InitializeRequestAuthUserMiddleware would have set it.
+        'state': {
+            'auth_user': None
         },
-        state={'auth_user': None})  # As InitializeRequestAuthUserMiddleware
+    }
+    sent = []
 
-    # Final handler returning success
-    async def final_handler(_req):
-        return fastapi.responses.JSONResponse({'status': 'ok'})
+    async def receive():
+        return {'type': 'http.request', 'body': b'', 'more_body': False}
 
-    basic_auth_middleware = BasicAuthMiddleware(app=MagicMock())
-
-    # Chain: Prometheus -> BasicAuth -> final_handler
-    async def basic_auth_call_next(req):
-        return await basic_auth_middleware.dispatch(req, final_handler)
+    async def send(message):
+        sent.append(message)
 
     mock_user = MagicMock()
     mock_user.name = 'bob'
@@ -847,13 +775,12 @@ async def test_middleware_user_metrics_with_basic_auth(
          patch('sky.server.auth.loopback.is_loopback_request',
                return_value=False), \
          patch('sky.jobs.utils.is_consolidation_mode', return_value=False):
+        await middleware(scope, receive, send)
 
-        response = await prometheus_middleware_user.dispatch(
-            request, basic_auth_call_next)
-
-    assert response.status_code == 200
+    assert sent[0]['type'] == 'http.response.start'
+    assert sent[0]['status'] == 200
     # BasicAuth should have set auth_user
-    assert request.state.auth_user.name == 'bob'
+    assert scope['state']['auth_user'].name == 'bob'
 
     # PrometheusMiddleware should have recorded the correct user label
     user_collectors = [metrics_utils.SKY_APISERVER_REQUESTS_BY_USER_TOTAL]
@@ -867,60 +794,13 @@ async def test_middleware_user_metrics_with_basic_auth(
 
 
 @pytest.mark.asyncio
-async def test_middleware_user_metrics_with_basic_auth_rejection(
-        prometheus_middleware_user):
-    """A 401 BasicAuthMiddleware answers itself is counted, attributed, and
-    recorded as anonymous."""
-    request = _http_request('/api/v1/clusters',
-                            'POST',
-                            reached_router=False,
-                            state={'auth_user': None})
-
-    basic_auth_middleware = BasicAuthMiddleware(app=MagicMock())
-    final_handler = AsyncMock()
-
-    async def basic_auth_call_next(req):
-        return await basic_auth_middleware.dispatch(req, final_handler)
-
-    with patch('sky.server.auth.loopback.is_loopback_request',
-               return_value=False), \
-         patch('sky.jobs.utils.is_consolidation_mode', return_value=False):
-        response = await prometheus_middleware_user.dispatch(
-            request, basic_auth_call_next)
-
-    assert response.status_code == 401
-    final_handler.assert_not_awaited()
-    assert _get_metric_value(
-        'sky_apiserver_requests_by_user_total', {
-            'user': 'anonymous',
-            'method': 'POST',
-            'status': '4xx'
-        },
-        collectors=[metrics_utils.SKY_APISERVER_REQUESTS_BY_USER_TOTAL]) == 1.0
-    assert _get_metric_value(
-        'sky_apiserver_request_rejections_total', {
-            'reason': middleware_utils.REJECT_REASON_UNAUTHORIZED,
-            'status': '401',
-            'kind': 'http'
-        },
-        collectors=[metrics_utils.SKY_APISERVER_REQUEST_REJECTIONS_TOTAL
-                   ]) == 1.0
-
-
-@pytest.mark.asyncio
 async def test_middleware_records_api_get_duration_by_name(
         prometheus_middleware):
     """/api/get latency is recorded under the request name the handler stamps."""
     # The api_get handler stamps request.state.request_name once it knows which
     # request is being fetched.
-    request = _http_request('/api/v1/api/get',
-                            state={
-                                'auth_user': None,
-                                'request_name': 'status'
-                            })
-    call_next = AsyncMock(return_value=_response(200))
-
-    await prometheus_middleware.dispatch(request, call_next)
+    inner = _responding_app(200, state_updates={'request_name': 'status'})
+    await prometheus_middleware.run(inner, '/api/v1/api/get')
 
     get_collectors = [metrics_utils.SKY_APISERVER_REQUEST_GET_DURATION_SECONDS]
     duration_count = _get_metric_value(
@@ -936,10 +816,7 @@ async def test_middleware_records_api_get_duration_by_name(
 async def test_middleware_no_api_get_duration_without_name(
         prometheus_middleware):
     """No per-name /api/get series is recorded when the name is not stamped."""
-    request = _http_request('/api/v1/status')  # No request_name / auth_user.
-    call_next = AsyncMock(return_value=_response(200))
-
-    await prometheus_middleware.dispatch(request, call_next)
+    await prometheus_middleware.run(_responding_app(200), '/api/v1/status')
 
     # No per-name series recorded: every _count sample stays at 0.
     registry = CollectorRegistry()
@@ -950,16 +827,643 @@ async def test_middleware_no_api_get_duration_without_name(
             assert float(line.split()[-1]) == 0.0
 
 
+# ─────────────────────────────────────────────────────────────────────────
+# WebSocket handshakes
+# ─────────────────────────────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_websocket_accepted_handshake_is_counted(prometheus_middleware):
+    inner = _ws_app([{'type': 'websocket.accept'}])
+    await prometheus_middleware.run(inner, '/ws', scope_type='websocket')
+
+    assert _handshakes(path='/ws', outcome='accepted', status='101') == 1.0
+    # A handshake is not an HTTP request.
+    assert _get_metric_value('sky_apiserver_requests_total',
+                             {'path': '/ws'}) == 0.0
+    assert _rejections(kind='websocket') == 0.0
+    assert prometheus_middleware.sent == [{'type': 'websocket.accept'}]
+
+
+@pytest.mark.asyncio
+async def test_websocket_rejected_by_close_is_counted_as_a_403(
+        prometheus_middleware):
+    """A close before the accept is what servers render as an empty 403."""
+    inner = _ws_app(
+        [{
+            'type': 'websocket.close',
+            'code': 4401,
+            'reason': 'Unauthorized'
+        }],
+        state_updates={
+            middleware_utils.REJECT_REASON_STATE_KEY:
+                middleware_utils.REJECT_REASON_UNAUTHORIZED
+        })
+    await prometheus_middleware.run(inner, '/ws', scope_type='websocket')
+
+    assert _handshakes(path='/ws', outcome='rejected', status='403') == 1.0
+    assert _rejections(reason=middleware_utils.REJECT_REASON_UNAUTHORIZED,
+                       status='403',
+                       kind='websocket') == 1.0
+
+
+@pytest.mark.asyncio
+async def test_websocket_rejected_with_http_response_keeps_its_status(
+        prometheus_middleware):
+    """Rejections through the websocket.http.response extension carry the
+    real status the client received."""
+    inner = _ws_app(
+        [{
+            'type': 'websocket.http.response.start',
+            'status': 503,
+            'headers': []
+        }, {
+            'type': 'websocket.http.response.body',
+            'body': b'{"detail":"busy"}'
+        }],
+        state_updates={
+            middleware_utils.REJECT_REASON_STATE_KEY:
+                middleware_utils.REJECT_REASON_AUTH_WORKER_EXHAUSTED
+        })
+    await prometheus_middleware.run(inner, '/ws', scope_type='websocket')
+
+    assert _handshakes(path='/ws', outcome='rejected', status='503') == 1.0
+    assert _rejections(
+        reason=middleware_utils.REJECT_REASON_AUTH_WORKER_EXHAUSTED,
+        status='503',
+        kind='websocket') == 1.0
+
+
+@pytest.mark.asyncio
+async def test_websocket_close_without_a_reason_is_still_a_rejection(
+        prometheus_middleware):
+    inner = _ws_app([{'type': 'websocket.close', 'code': 1008}])
+    await prometheus_middleware.run(inner, '/ws', scope_type='websocket')
+    assert _rejections(reason=middleware_utils.REJECT_REASON_UNSPECIFIED,
+                       status='403',
+                       kind='websocket') == 1.0
+
+
+@pytest.mark.asyncio
+async def test_websocket_exception_before_accept_is_counted_as_a_500(
+        prometheus_middleware):
+    with pytest.raises(RuntimeError):
+        await prometheus_middleware.run(_ws_app([], exc=RuntimeError('boom')),
+                                        '/ws',
+                                        scope_type='websocket')
+    assert _handshakes(path='/ws', outcome='rejected', status='500') == 1.0
+    assert _rejections(
+        reason=middleware_utils.REJECT_REASON_UNHANDLED_EXCEPTION,
+        status='500',
+        kind='websocket') == 1.0
+
+
+@pytest.mark.asyncio
+async def test_websocket_close_after_accept_is_not_a_rejection(
+        prometheus_middleware):
+    inner = _ws_app([{
+        'type': 'websocket.accept'
+    }, {
+        'type': 'websocket.close',
+        'code': 1000
+    }])
+    await prometheus_middleware.run(inner, '/ws', scope_type='websocket')
+    assert _handshakes(path='/ws', outcome='accepted', status='101') == 1.0
+    assert _handshakes(outcome='rejected') == 0.0
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# path label: route templates bound the cardinality
+# ─────────────────────────────────────────────────────────────────────────
+
+
+def _routed_app():
+    """A FastAPI app with the route shapes the label resolver must handle."""
+    app = fastapi.FastAPI()
+
+    @app.get('/status')
+    async def status():  # pylint: disable=unused-variable
+        return {}
+
+    @app.get('/items/{item_id}')
+    async def item(item_id: str):  # pylint: disable=unused-variable
+        return {'item_id': item_id}
+
+    @app.get('/dashboard/{full_path:path}')
+    async def dashboard(full_path: str):  # pylint: disable=unused-variable
+        return {'full_path': full_path}
+
+    @app.websocket('/ws/{session_id}')
+    async def ws(websocket: fastapi.WebSocket, session_id: str):  # pylint: disable=unused-variable
+        del session_id
+        await websocket.accept()
+
+    sub = fastapi.FastAPI()
+
+    @sub.get('/things/{name}')
+    async def thing(name: str):  # pylint: disable=unused-variable
+        return {'name': name}
+
+    app.mount('/plugins/demo', sub)
+
+    class _Static:
+        """Stands in for StaticFiles: an ASGI app with no routes."""
+
+        async def __call__(self, scope, receive, send):
+            pass
+
+    app.mount('/static', _Static())
+    return app
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    'path, expected',
+    [
+        ('/status', '/status'),
+        ('/items/42', '/items/{item_id}'),
+        ('/items/someone-elses-name', '/items/{item_id}'),
+        ('/dashboard/_next/static/chunks/abc.js',
+         '/dashboard/{full_path:path}'),
+        # Mounted sub-application with routes of its own: resolved through.
+        ('/plugins/demo/things/x', '/plugins/demo/things/{name}'),
+        # Mounted app without routes (static files): mount path + fixed tail.
+        ('/static/css/site.css', '/static/{path}'),
+        # Not an endpoint: one fixed label, never the raw path.
+        ('/wp-admin/login.php', metrics.UNMATCHED_PATH_LABEL),
+        # The dashboard proxy prefix is stripped before matching, so a request
+        # rejected before InternalDashboardPrefixMiddleware rewrote it lands
+        # in the same series as the ones that got through.
+        ('/internal/dashboard/items/7', '/items/{item_id}'),
+    ])
+async def test_path_label_is_the_route_template(prometheus_middleware, path,
+                                                expected):
+    await prometheus_middleware.run(_responding_app(200),
+                                    path,
+                                    app=_routed_app())
+    assert _get_metric_value('sky_apiserver_requests_total', {
+        'path': expected,
+        'method': 'GET',
+        'status': '2xx'
+    }) == 1.0
+    if expected != path:
+        assert _get_metric_value('sky_apiserver_requests_total',
+                                 {'path': path}) == 0.0
+
+
+@pytest.mark.asyncio
+async def test_path_label_method_mismatch_still_maps_to_the_route(
+        prometheus_middleware):
+    """A 405 belongs to the route it hit, as in Starlette's partial match."""
+    await prometheus_middleware.run(_responding_app(405),
+                                    '/items/1',
+                                    method='DELETE',
+                                    app=_routed_app())
+    assert _get_metric_value('sky_apiserver_requests_total', {
+        'path': '/items/{item_id}',
+        'method': 'DELETE',
+        'status': '4xx'
+    }) == 1.0
+
+
+@pytest.mark.asyncio
+async def test_path_label_for_websocket_routes(prometheus_middleware):
+    inner = _ws_app([{'type': 'websocket.accept'}])
+    await prometheus_middleware.run(inner,
+                                    '/ws/abc123',
+                                    scope_type='websocket',
+                                    app=_routed_app())
+    assert _handshakes(path='/ws/{session_id}', outcome='accepted') == 1.0
+    await prometheus_middleware.run(inner,
+                                    '/ws-not-here',
+                                    scope_type='websocket',
+                                    app=_routed_app())
+    assert _handshakes(path=metrics.UNMATCHED_PATH_LABEL,
+                       outcome='accepted') == 1.0
+
+
+@pytest.mark.asyncio
+async def test_path_label_falls_back_to_the_raw_path_without_a_router(
+        prometheus_middleware):
+    """No app on the scope (a bare ASGI callable): nothing to match against."""
+    await prometheus_middleware.run(_responding_app(200), '/whatever/1')
+    assert _get_metric_value('sky_apiserver_requests_total',
+                             {'path': '/whatever/1'}) == 1.0
+
+
+def test_route_template_cache_is_bounded():
+    middleware = metrics.PrometheusMiddleware(_responding_app(200))
+    app = _routed_app()
+    for i in range(metrics._ROUTE_TEMPLATE_CACHE_SIZE + 10):
+        scope = {'type': 'http', 'method': 'GET', 'path': f'/x/{i}', 'app': app}
+        middleware._path_label(scope)
+    assert len(middleware._route_template_cache) <= \
+        metrics._ROUTE_TEMPLATE_CACHE_SIZE
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# path label: end to end through the real router, routes registered late
+# ─────────────────────────────────────────────────────────────────────────
+
+
+class _RejectOnHeader:
+    """A pure-ASGI inner middleware standing in for an auth layer.
+
+    When the `x-reject` header is present it answers the request itself --
+    403 for HTTP, a pre-accept close for a WebSocket handshake -- so the
+    router never runs; otherwise it passes the request through.
+    """
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        headers = dict(scope.get('headers') or [])
+        if scope['type'] in ('http', 'websocket') and b'x-reject' in headers:
+            if scope['type'] == 'http':
+                await send({
+                    'type': 'http.response.start',
+                    'status': 403,
+                    'headers': []
+                })
+                await send({'type': 'http.response.body', 'body': b''})
+            else:
+                await send({'type': 'websocket.close', 'code': 1008})
+            return
+        await self.app(scope, receive, send)
+
+
+async def _ok():
+    return {}
+
+
+async def _plain_ok(request):
+    del request
+    return starlette.responses.JSONResponse({})
+
+
+async def _accept_and_close(websocket: fastapi.WebSocket):
+    await websocket.accept()
+    await websocket.close()
+
+
+def _late_registered_app(static_dir) -> fastapi.FastAPI:
+    """Metrics layer first, every route after it -- the production order.
+
+    server.py adds the metrics middleware after all core and plugin
+    middlewares and only then includes the core routers; plugins register
+    their routes in between, and Starlette instantiates the middleware stack
+    on the first request. So every route here is added after the middleware
+    exists, in the shapes plugins and the core use: plain routes, routers
+    with their own prefix or one given at include time (nested too), a
+    mounted sub-application, a mounted plain router, WebSocket routes and
+    static files.
+    """
+    app = fastapi.FastAPI()
+    app.add_middleware(_RejectOnHeader)  # inner, like an auth middleware
+    app.add_middleware(metrics.PrometheusMiddleware)  # outermost
+    app.build_middleware_stack()
+    # Instantiate the stack before anything is registered.
+    TestClient(app).get('/__probe__')
+
+    # (a) plain routes; an HTTP catch-all and a WebSocket route share a path.
+    app.add_api_route('/items/{item_id}', _ok, methods=['GET'])
+    app.add_api_route('/proxy/{name}/{path:path}', _ok, methods=['GET', 'POST'])
+    app.add_api_websocket_route('/proxy/{name}/{path:path}', _accept_and_close)
+    # (b) a router with its own prefix (HTTP + WebSocket), one prefixed at
+    #     include time, and a prefixed router nested in a prefixed router.
+    alpha = fastapi.APIRouter(prefix='/ext/api/alpha')
+    alpha.add_api_route('/things/{name}', _ok, methods=['GET'])
+    alpha.add_api_websocket_route('/attach', _accept_and_close)
+    app.include_router(alpha)
+    beta = fastapi.APIRouter()
+    beta.add_api_route('/jobs/{job_id}/cancel', _ok, methods=['POST'])
+    beta.add_api_websocket_route('/jobs/{job_id}/attach', _accept_and_close)
+    app.include_router(beta, prefix='/ext/api/beta')
+    inner = fastapi.APIRouter(prefix='/v1')
+    inner.add_api_route('/status', _ok, methods=['GET'])
+    gamma = fastapi.APIRouter(prefix='/ext/api/gamma')
+    gamma.include_router(inner)
+    app.include_router(gamma)
+    # (c) a mounted sub-application with routes of its own.
+    sub = fastapi.FastAPI()
+    sub.add_api_route('/inner', _ok, methods=['GET'])
+    sub.add_api_route('/inner/{name}', _ok, methods=['GET'])
+    sub.add_api_websocket_route('/ws', _accept_and_close)
+    app.mount('/sub', sub)
+    # (c2) a mounted plain Starlette router.
+    app.router.routes.append(
+        starlette.routing.Mount(
+            '/raw', routes=[starlette.routing.Route('/r/{x}', _plain_ok)]))
+    # (d) a top-level WebSocket route with a parameter.
+    app.add_api_websocket_route('/ws/{session_id}', _accept_and_close)
+    # (e) static files.
+    (static_dir / 'site.css').write_text('body {}')
+    app.mount('/static', StaticFiles(directory=str(static_dir)), name='static')
+    _clear_request_metrics()
+    return app
+
+
+def _requests_total(**labels):
+    return _get_metric_value('sky_apiserver_requests_total', labels)
+
+
+@pytest.mark.parametrize(
+    'method, path, status, expected',
+    [
+        ('GET', '/items/42', 200, '/items/{item_id}'),
+        ('POST', '/proxy/dev1/a/b/c', 200, '/proxy/{name}/{path:path}'),
+        ('GET', '/ext/api/alpha/things/x', 200, '/ext/api/alpha/things/{name}'),
+        ('POST', '/ext/api/beta/jobs/7/cancel', 200,
+         '/ext/api/beta/jobs/{job_id}/cancel'),
+        ('GET', '/ext/api/gamma/v1/status', 200, '/ext/api/gamma/v1/status'),
+        ('GET', '/sub/inner', 200, '/sub/inner'),
+        ('GET', '/sub/inner/zz', 200, '/sub/inner/{name}'),
+        ('GET', '/raw/r/1', 200, '/raw/r/{x}'),
+        ('GET', '/static/site.css', 200, '/static/{path}'),
+        # FastAPI does not add HEAD to GET routes: a 405, on the route it hit.
+        ('HEAD', '/items/1', 405, '/items/{item_id}'),
+        ('OPTIONS', '/items/1', 405, '/items/{item_id}'),
+        ('GET', '/wp-admin/login.php', 404, metrics.UNMATCHED_PATH_LABEL),
+    ])
+def test_late_registered_routes_resolve_to_their_template(
+        tmp_path, method, path, status, expected):
+    app = _late_registered_app(tmp_path)
+    response = TestClient(app,
+                          raise_server_exceptions=False).request(method, path)
+    assert response.status_code == status
+    assert _requests_total(path=expected,
+                           method=method,
+                           status=f'{status // 100}xx') == 1.0
+    if expected != path:
+        # Never the raw path.
+        assert _requests_total(path=path) == 0.0
+    if expected != metrics.UNMATCHED_PATH_LABEL:
+        # And never `unmatched` for a registered route.
+        assert _requests_total(path=metrics.UNMATCHED_PATH_LABEL) == 0.0
+
+
+def test_requests_rejected_before_the_router_land_in_the_route_series(tmp_path):
+    """A middleware answering first: same template as the successes."""
+    app = _late_registered_app(tmp_path)
+    client = TestClient(app, raise_server_exceptions=False)
+    cases = [
+        ('/items/9', '/items/{item_id}'),
+        ('/ext/api/alpha/things/x', '/ext/api/alpha/things/{name}'),
+        ('/ext/api/gamma/v1/status', '/ext/api/gamma/v1/status'),
+        ('/sub/inner/zz', '/sub/inner/{name}'),
+        ('/raw/r/1', '/raw/r/{x}'),
+        ('/static/site.css', '/static/{path}'),
+        ('/internal/dashboard/items/9', '/items/{item_id}'),
+    ]
+    for path, _ in cases:
+        assert client.get(path, headers={'x-reject': '1'}).status_code == 403
+    for path, expected in cases:
+        assert _requests_total(path=expected, method='GET',
+                               status='4xx') >= 1.0, path
+    assert _requests_total(path='/items/{item_id}', status='4xx') == 2.0
+    assert _requests_total(path=metrics.UNMATCHED_PATH_LABEL) == 0.0
+    assert client.get('/wp-admin/x', headers={
+        'x-reject': '1'
+    }).status_code == 403
+    assert _requests_total(path=metrics.UNMATCHED_PATH_LABEL,
+                           status='4xx') == 1.0
+
+
+def test_late_registered_websocket_routes_resolve_to_their_template(tmp_path):
+    app = _late_registered_app(tmp_path)
+    client = TestClient(app)
+    accepted = [
+        ('/ws/abc123', '/ws/{session_id}'),
+        ('/sub/ws', '/sub/ws'),
+        ('/ext/api/alpha/attach', '/ext/api/alpha/attach'),
+        ('/ext/api/beta/jobs/7/attach', '/ext/api/beta/jobs/{job_id}/attach'),
+        ('/proxy/dev1/x/y', '/proxy/{name}/{path:path}'),
+    ]
+    for path, _ in accepted:
+        with client.websocket_connect(path):
+            pass
+    for path, expected in accepted:
+        assert _handshakes(path=expected, outcome='accepted') == 1.0, path
+    # Rejected by the inner middleware before the router ran.
+    with pytest.raises(starlette.websockets.WebSocketDisconnect):
+        with client.websocket_connect('/sub/ws', headers={'x-reject': '1'}):
+            pass
+    assert _handshakes(path='/sub/ws', outcome='rejected', status='403') == 1.0
+    # No such route: the router closes the handshake; one fixed label.
+    with pytest.raises(starlette.websockets.WebSocketDisconnect):
+        with client.websocket_connect('/ws-not-here'):
+            pass
+    assert _handshakes(path=metrics.UNMATCHED_PATH_LABEL,
+                       outcome='rejected') == 1.0
+    assert _handshakes(path='/ws-not-here') == 0.0
+
+
+def test_a_route_registered_after_its_path_was_labeled_is_resolved(tmp_path):
+    """The memo is dropped when the route table grows."""
+    app = _late_registered_app(tmp_path)
+    client = TestClient(app, raise_server_exceptions=False)
+    assert client.get('/late/1').status_code == 404
+    assert _requests_total(path=metrics.UNMATCHED_PATH_LABEL,
+                           status='4xx') == 1.0
+    app.add_api_route('/late/{n}', _ok, methods=['GET'])
+    assert client.get('/late/1').status_code == 200
+    assert _requests_total(path='/late/{n}', method='GET', status='2xx') == 1.0
+    assert _requests_total(path='/late/1') == 0.0
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# path label: resolution cost does not depend on the number of routes
+# ─────────────────────────────────────────────────────────────────────────
+
+
+def _distinct_ok():
+    """A fresh handler function: one endpoint per route, as in the server."""
+
+    async def ok():
+        return {}
+
+    return ok
+
+
+def _wide_app(num_literal=300) -> fastapi.FastAPI:
+    """Many parameterless routes, a few parameterized ones, one catch-all."""
+    app = fastapi.FastAPI()
+    app.add_middleware(metrics.PrometheusMiddleware)
+    for i in range(num_literal):
+        app.add_api_route(f'/literal/{i}', _distinct_ok(), methods=['GET'])
+    app.add_api_route('/items/{item_id}', _distinct_ok(), methods=['GET'])
+    app.add_api_route('/items/{item_id}/status',
+                      _distinct_ok(),
+                      methods=['GET'])
+    app.add_api_route('/pools/{name}', _distinct_ok(), methods=['GET'])
+    app.add_api_route('/dashboard/{full_path:path}',
+                      _distinct_ok(),
+                      methods=['GET'])
+    return app
+
+
+def _metrics_layer(app: fastapi.FastAPI) -> metrics.PrometheusMiddleware:
+    """The PrometheusMiddleware instance in the app's built stack."""
+    layer = app.middleware_stack.app  # inside Starlette's ServerErrorMiddleware
+    assert isinstance(layer, metrics.PrometheusMiddleware)
+    return layer
+
+
+def _match_scope(path, method='GET', root_path=''):
+    return {
+        'type': 'http',
+        'method': method,
+        'path': path,
+        'root_path': root_path,
+        'path_params': {},
+    }
+
+
+def test_routed_requests_resolve_from_the_dispatched_endpoint():
+    """No per-path matching for routed requests: the router already chose."""
+    app = _wide_app()
+    client = TestClient(app)
+    for i in range(50):
+        assert client.get(f'/items/cluster-{i}/status').status_code == 200
+    for i in range(20):
+        assert client.get(f'/literal/{i}').status_code == 200
+    assert _requests_total(path='/items/{item_id}/status',
+                           method='GET',
+                           status='2xx') == 50.0
+    assert _requests_total(path='/items/cluster-1/status') == 0.0
+    # The unrouted memo was never needed: every request carried an endpoint.
+    assert len(_metrics_layer(app)._route_template_cache) == 0
+
+
+def test_unrouted_requests_try_only_the_candidates_that_can_match(monkeypatch):
+    app = _wide_app()
+    routes = app.router.routes
+    index = metrics._RouteIndex(routes)
+    tried = []
+    real = metrics._match_candidates
+
+    def counting(candidates, match_scope):
+        tried.append(len(candidates))
+        return real(candidates, match_scope)
+
+    monkeypatch.setattr(metrics, '_match_candidates', counting)
+    cases = [
+        # (path, expected template, max candidates tried)
+        ('/literal/7', '/literal/7', 1),
+        ('/items/9', '/items/{item_id}', 2),
+        ('/items/9/status', '/items/{item_id}/status', 2),
+        ('/pools/p1', '/pools/{name}', 1),
+        ('/dashboard/a/b.js', '/dashboard/{full_path:path}', 1),
+        ('/wp-admin/setup.php', None, 0),
+        ('/literal/7/extra', None, 0),
+    ]
+    for path, expected, max_tried in cases:
+        tried.clear()
+        assert index.resolve_unrouted(_match_scope(path)) == expected, path
+        assert tried == [len(routes)] or tried[0] <= max_tried, (path, tried)
+        # And always the same answer as scanning the whole table.
+        assert metrics._match_route_template(
+            routes, _match_scope(path)) == expected, path
+
+
+def test_unrouted_resolution_keeps_the_dispatch_order():
+    """A literal route behind a parameterized one that also matches its path
+    is shadowed at dispatch; the label says so too. And the other way round."""
+    shadowed = fastapi.FastAPI()
+    shadowed.add_api_route('/items/{item_id}', _ok, methods=['GET'])
+    shadowed.add_api_route('/items/all', _ok, methods=['GET'])
+    index = metrics._RouteIndex(shadowed.router.routes)
+    assert index.resolve_unrouted(_match_scope('/items/all')) == \
+        '/items/{item_id}'
+    first = fastapi.FastAPI()
+    first.add_api_route('/items/all', _ok, methods=['GET'])
+    first.add_api_route('/items/{item_id}', _ok, methods=['GET'])
+    index = metrics._RouteIndex(first.router.routes)
+    assert index.resolve_unrouted(_match_scope('/items/all')) == '/items/all'
+    assert index.resolve_unrouted(_match_scope('/items/7')) == \
+        '/items/{item_id}'
+
+
+def test_root_path_is_removed_before_matching():
+    index = metrics._RouteIndex(_routed_app().router.routes)
+    assert index.resolve_unrouted(
+        _match_scope('/prefix/status', root_path='/prefix')) == '/status'
+    assert index.resolve_unrouted(
+        _match_scope('/prefix/items/1', root_path='/prefix')) == \
+        '/items/{item_id}'
+
+
+def test_one_function_under_two_templates_is_resolved_by_path():
+    app = fastapi.FastAPI()
+    app.add_middleware(metrics.PrometheusMiddleware)
+    app.add_api_route('/a/{x}', _ok, methods=['GET'])
+    app.add_api_route('/b/{x}', _ok, methods=['GET'])
+    client = TestClient(app)
+    assert client.get('/a/1').status_code == 200
+    assert client.get('/b/2').status_code == 200
+    assert _requests_total(path='/a/{x}', method='GET', status='2xx') == 1.0
+    assert _requests_total(path='/b/{x}', method='GET', status='2xx') == 1.0
+    assert _requests_total(path=metrics.UNMATCHED_PATH_LABEL) == 0.0
+
+
+def test_a_route_added_to_an_included_router_later_is_resolved():
+    """Adding to an already-included router keeps the top-level table's
+    size; the index versions on the whole tree. The new route reuses the
+    function of an indexed one on purpose: a stale endpoint map would label
+    it `/ext/first`."""
+    app = fastapi.FastAPI()
+    app.add_middleware(metrics.PrometheusMiddleware)
+    router = fastapi.APIRouter()
+    router.add_api_route('/first', _ok, methods=['GET'])
+    app.include_router(router, prefix='/ext')
+    client = TestClient(app)
+    assert client.get('/ext/first').status_code == 200
+    router.add_api_route('/late/{n}', _ok, methods=['GET'])
+    response = client.get('/ext/late/1')
+    if response.status_code == 404:
+        pytest.skip('this FastAPI flattens included routers on include')
+    assert response.status_code == 200
+    assert _requests_total(path='/ext/late/{n}', method='GET',
+                           status='2xx') == 1.0
+    assert _requests_total(path='/ext/late/1') == 0.0
+    assert _requests_total(path=metrics.UNMATCHED_PATH_LABEL) == 0.0
+
+
+def test_a_foreign_endpoint_rebuilds_the_index_once(monkeypatch):
+    app = _wide_app()
+    layer = metrics.PrometheusMiddleware(_responding_app(200))
+    builds = []
+    real_init = metrics._RouteIndex.__init__
+
+    def counting_init(self, routes):
+        builds.append(len(routes))
+        real_init(self, routes)
+
+    monkeypatch.setattr(metrics._RouteIndex, '__init__', counting_init)
+    foreign = object()  # an endpoint no route in the table owns
+    scope = {
+        'type': 'http',
+        'method': 'GET',
+        'path': '/literal/1',
+        'app': app,
+        'endpoint': foreign,
+    }
+    # Falls back to matching the path; one rebuild for the unknown endpoint.
+    assert layer._path_label(dict(scope)) == '/literal/1'
+    assert len(builds) == 2
+    assert layer._path_label(dict(scope)) == '/literal/1'
+    scope['path'] = '/literal/2'
+    assert layer._path_label(dict(scope)) == '/literal/2'
+    assert len(builds) == 2
+
+
 @pytest.fixture(autouse=True)
 def cleanup_metrics():
     """Clean up metrics after each test to avoid interference."""
     yield
     # Clear all metrics after each test
-    metrics_utils.SKY_APISERVER_REQUESTS_TOTAL.clear()
-    metrics_utils.SKY_APISERVER_REQUEST_DURATION_SECONDS.clear()
-    metrics_utils.SKY_APISERVER_REQUEST_GET_DURATION_SECONDS.clear()
-    metrics_utils.SKY_APISERVER_REQUESTS_BY_USER_TOTAL.clear()
-    metrics_utils.SKY_APISERVER_REQUEST_REJECTIONS_TOTAL.clear()
+    _clear_request_metrics()
 
 
 # ─────────────────────────────────────────────────────────────────────────

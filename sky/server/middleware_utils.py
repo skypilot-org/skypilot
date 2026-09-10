@@ -1,7 +1,9 @@
 """Utilities for building middlewares."""
 import enum
 import http
-from typing import Optional, Tuple, Type
+import threading
+import time
+from typing import Any, Callable, List, Optional, Tuple, Type
 
 import fastapi
 import starlette.middleware.base
@@ -12,13 +14,12 @@ from sky.metrics import utils as metrics_utils
 
 logger = sky_logging.init_logger(__name__)
 
-# Reasons a middleware answers a request itself instead of letting a route
-# handler run. Stamped on the request with `mark_rejection` by the code that
-# produces the response and read back by whoever records the response: the
-# metrics middleware for HTTP requests, `websocket_aware` for handshakes. This
-# is a closed set on purpose: the reason is a metric label
-# (`sky_apiserver_request_rejections_total{reason}`), so every value added
-# here is a new series per (status, kind).
+# Reasons a middleware (or the app-level exhaustion handler) answers a request
+# itself instead of letting a route handler run. Stamped on the request with
+# `mark_rejection` and read back by the metrics middleware, which records them
+# in `sky_apiserver_request_rejections_total{reason}`. This is a closed set on
+# purpose: the reason is a metric label, so every value added here is a new
+# series per (status, kind).
 REJECT_REASON_AUTH_WORKER_EXHAUSTED = 'auth_worker_exhausted'
 REJECT_REASON_AUTH_DB_TIMEOUT = 'auth_db_timeout'
 REJECT_REASON_ROLE_SEED_UNAVAILABLE = 'role_seed_unavailable'
@@ -29,6 +30,13 @@ REJECT_REASON_SHUTTING_DOWN = 'shutting_down'
 REJECT_REASON_API_VERSION = 'api_version'
 REJECT_REASON_AUTH_PROXY_UNAVAILABLE = 'auth_proxy_unavailable'
 REJECT_REASON_REQUEST_WORKER_EXHAUSTED = 'request_worker_exhausted'
+# Set by the metrics middleware itself when an exception escapes every
+# middleware and Starlette turns it into a bare 500.
+REJECT_REASON_UNHANDLED_EXCEPTION = 'unhandled_exception'
+# Used by the metrics middleware for a WebSocket handshake that was rejected
+# without anyone stamping a reason (e.g. a route handler closing before it
+# accepted).
+REJECT_REASON_UNSPECIFIED = 'unspecified'
 
 # Key in `scope['state']` (i.e. `request.state`) the reason is stored under.
 REJECT_REASON_STATE_KEY = 'reject_reason'
@@ -37,24 +45,15 @@ REJECT_REASON_STATE_KEY = 'reject_reason'
 REJECTION_KIND_HTTP = 'http'
 REJECTION_KIND_WEBSOCKET = 'websocket'
 
-# `path` label of the handshake-rejection counter: the registered WebSocket
-# routes (sky/server/server.py) or this fixed value. Handshake paths are
-# chosen by the client, so the raw path cannot be a label value.
-WEBSOCKET_ROUTE_PATHS = frozenset((
-    '/kubernetes-pod-ssh-proxy',
-    '/slurm-job-ssh-proxy',
-    '/ssh-interactive-auth',
-))
-OTHER_WEBSOCKET_PATH_LABEL = 'other'
-
 
 def mark_rejection(request: fastapi.Request, reason: str) -> None:
     """Record why this request is being answered with a canned response.
 
-    Call it right before returning the response from a middleware.
-    `request.state` is backed by the ASGI scope's `state` dict, which every
-    middleware layer shares, so the layer that records the response sees the
-    value. Explicit parameter on purpose: no contextvars.
+    Call it right before returning the response from a middleware (or an
+    app-level exception handler). `request.state` is backed by the ASGI
+    scope's `state` dict, which every middleware layer shares, so the
+    outermost metrics middleware sees the value when the response passes
+    through it. Explicit parameter on purpose: no contextvars.
     """
     setattr(request.state, REJECT_REASON_STATE_KEY, reason)
 
@@ -89,12 +88,82 @@ def record_rejection(scope: starlette.types.Scope, status_code: int,
         reason=reason, status=str(int(status_code)), kind=kind).inc()
 
 
-def websocket_path_label(scope: starlette.types.Scope) -> str:
-    """Bounded `path` label for a WebSocket handshake."""
-    path = scope.get('path', '')
-    if path in WEBSOCKET_ROUTE_PATHS:
-        return path
-    return OTHER_WEBSOCKET_PATH_LABEL
+# --- fail-open recording ---------------------------------------------------
+#
+# The metrics layer sits in front of every request and every WebSocket
+# handshake. A fault in the metrics path -- a full disk under
+# PROMETHEUS_MULTIPROC_DIR, a label value the client library rejects, a route
+# type the template resolver cannot evaluate -- must never reach a client, or
+# a monitoring bug becomes an outage. Every recording call on the request
+# path runs through `record_safely`: the observation is dropped, the ASGI
+# message that triggered it is forwarded unchanged, and the failure is logged.
+#
+# The log is rate-limited per process. The first failure is logged at WARNING
+# with its traceback; later ones at most once per
+# `RECORDING_FAILURE_LOG_INTERVAL_SECONDS`, with a count of the failures that
+# were dropped silently in between. A persistent fault therefore cannot flood
+# the log at request rate.
+RECORDING_FAILURE_LOG_INTERVAL_SECONDS = 300.0
+
+
+class RecordingFailureLog:
+    """Rate-limited WARNING for metrics-recording failures."""
+
+    def __init__(
+            self,
+            interval_seconds: float = RECORDING_FAILURE_LOG_INTERVAL_SECONDS,
+            clock: Callable[[], float] = time.time):
+        self._interval_seconds = interval_seconds
+        self._clock = clock
+        self._lock = threading.Lock()
+        self._last_logged_at: Optional[float] = None
+        self._suppressed = 0
+        # Total failures noted in this process, logged or not.
+        self.failures = 0
+
+    def note(self, what: str, exc: BaseException) -> None:
+        """Log that recording `what` failed with `exc`, unless rate-limited."""
+        now = self._clock()
+        with self._lock:
+            self.failures += 1
+            if (self._last_logged_at is not None and
+                    now - self._last_logged_at < self._interval_seconds):
+                self._suppressed += 1
+                return
+            first = self._last_logged_at is None
+            suppressed = self._suppressed
+            self._suppressed = 0
+            self._last_logged_at = now
+        detail = (f' {suppressed} more failure(s) were dropped silently '
+                  'since the previous message.' if suppressed else '')
+        logger.warning(
+            f'Failed to record API server metrics for {what}: '
+            f'{type(exc).__name__}: {exc}. The request was served '
+            'normally and this observation was dropped.'
+            f'{detail} Further failures are logged at most once every '
+            f'{self._interval_seconds:g} seconds.',
+            exc_info=exc if first else None)
+
+
+_recording_failure_log = RecordingFailureLog()
+
+
+def note_recording_failure(what: str, exc: BaseException) -> None:
+    """Log a metrics-recording failure through the process rate limiter."""
+    _recording_failure_log.note(what, exc)
+
+
+def record_safely(what: str, record: Callable[..., Any], *args: Any,
+                  **kwargs: Any) -> None:
+    """Call `record(*args, **kwargs)`; log and swallow any exception.
+
+    For metrics recording on the request path only: the caller must be
+    able to carry on exactly as if the call had succeeded.
+    """
+    try:
+        record(*args, **kwargs)
+    except Exception as e:  # pylint: disable=broad-except
+        note_recording_failure(what, e)
 
 
 class WebSocketDecision(enum.Enum):
@@ -104,6 +173,75 @@ class WebSocketDecision(enum.Enum):
     ERROR = 'error'
 
 
+# Response headers worth forwarding on a rejected handshake. Anything else the
+# HTTP middleware set (security headers, CORS, ...) is dropped: the handshake
+# response is consumed by a WebSocket client, not a browser page.
+# `www-authenticate` is not in the list on purpose: it belongs to a 401, and
+# every authentication refusal leaves here as a 403 (`_AUTH_REFUSAL_STATUS`).
+_REJECTION_HEADERS_TO_FORWARD = frozenset(('content-type', 'retry-after'))
+
+# The status put on the wire for a refused handshake whose cause is
+# authentication or authorization, whatever the middleware's own status (401,
+# 403, or a 2xx/3xx sign-in redirect answered without `call_next`).
+#
+# Servers have always rendered a refused handshake as an empty HTTP 403, and
+# every ssh client shipped before this code (`sky/templates/websocket_proxy.py`)
+# maps exactly that status to "Authentication required ... run `sky api login`"
+# and prints a bare status code for anything else. Sending the middleware's
+# 401 would turn the hint into `HTTP 401` for every older client, and an
+# expired or revoked token is the everyday refusal. Newer clients treat 401
+# and 403 alike, so nothing is lost for them. The metrics still tell the two
+# apart: the reason stamped on the scope stays `unauthorized` / `forbidden`;
+# `status` records the 403 the client saw.
+_AUTH_REFUSAL_STATUS = int(http.HTTPStatus.FORBIDDEN)
+
+# ASGI extension through which a server lets the application answer a
+# WebSocket handshake with an arbitrary HTTP response instead of a 101 or a
+# close. uvicorn advertises it with every WebSocket implementation it ships
+# (`websockets`, `wsproto`, `websockets-sansio`); so does Starlette's
+# TestClient.
+_WS_HTTP_RESPONSE_EXTENSION = 'websocket.http.response'
+
+
+def supports_websocket_http_response(scope: starlette.types.Scope) -> bool:
+    """Whether the server accepts `websocket.http.response.*` messages.
+
+    `extensions` is optional in the ASGI spec; a server may omit the key or
+    set it to None. Both mean "not supported".
+    """
+    extensions = scope.get('extensions') or {}
+    return _WS_HTTP_RESPONSE_EXTENSION in extensions
+
+
+def _renderable_status(status_code: int) -> int:
+    """A status the server can put on a rejected handshake.
+
+    uvicorn's default `websockets` implementation looks the status up in
+    `http.HTTPStatus`; a code that is not a member (460, 599, ...) makes the
+    lookup raise inside the server, which then logs a traceback and answers
+    with a bare 500. Such a code carries no meaning a WebSocket client could
+    act on anyway, so send what the client would have seen before the
+    extension was used (an empty 403) for a 4xx, and a plain 500 for a 5xx.
+    """
+    try:
+        http.HTTPStatus(status_code)
+    except ValueError:
+        if status_code < 500:
+            return int(http.HTTPStatus.FORBIDDEN)
+        return int(http.HTTPStatus.INTERNAL_SERVER_ERROR)
+    return int(status_code)
+
+
+def _forwardable_parts(
+        response: fastapi.Response) -> Tuple[bytes, List[Tuple[bytes, bytes]]]:
+    """The body and the headers of a rejection worth sending to a client."""
+    body = bytes(getattr(response, 'body', b'') or b'')
+    headers = [(k.encode('latin-1'), v.encode('latin-1'))
+               for k, v in response.headers.items()
+               if k.lower() in _REJECTION_HEADERS_TO_FORWARD]
+    return body, headers
+
+
 def websocket_aware(
         middleware_cls: Type[starlette.middleware.base.BaseHTTPMiddleware]):
     """Decorator to adapt BaseHTTPMiddleware to handle WebSockets.
@@ -111,16 +249,28 @@ def websocket_aware(
     It assembles an HTTP-style request like the HTTP upgrade request during
     websocket handshake and then delegates it to the real HTTP middleware.
     The websocket connection will be rejected if the HTTP middleware returns
-    a 4xx or 5xx status code.
+    a 4xx or 5xx status code, or if it answers the handshake itself with any
+    other status instead of calling ``call_next`` (in practice a redirect to
+    a sign-in page): that counts as 401, since a WebSocket client cannot
+    follow an http(s) redirect and has to authenticate first.
 
-    A refused handshake is counted in
-    `sky_apiserver_websocket_handshake_rejections_total{path,outcome}` and,
-    when the HTTP middleware stamped a reason (`mark_rejection`), in
-    `sky_apiserver_request_rejections_total{kind="websocket"}` with the
-    status the middleware answered with. Only the outermost middleware that
-    refuses runs, so each refused handshake is counted once. What the client
-    receives is unchanged: the close codes below, which ASGI servers render
-    as an empty HTTP 403.
+    When the ASGI server supports the ``websocket.http.response`` extension
+    (uvicorn does, with either WebSocket implementation), a rejected
+    handshake is answered with the HTTP middleware's real status code and
+    JSON body, so a client sees e.g. ``503 {"detail": "...exhausted..."}``
+    and can retry, instead of a bare 403 that reads as "log in again". The
+    one exception is an authentication or authorization refusal: it keeps the
+    403 every shipped client already maps to the login hint, with the JSON
+    body (see `_AUTH_REFUSAL_STATUS`). Without the extension (key absent,
+    None, or listing other extensions only) the connection is closed with
+    4401 / 4403 / 1011 as before; servers render any pre-accept close as an
+    empty HTTP 403. A status the server cannot render is replaced by one it
+    can (see `_renderable_status`).
+    This wrapper records no metric itself. The metrics layer outside
+    (`sky.server.metrics.PrometheusMiddleware`) counts every handshake in
+    `sky_apiserver_websocket_handshakes_total` with the status the client
+    saw and, for a refused one, the reason stamped on the scope in
+    `sky_apiserver_request_rejections_total{kind="websocket"}`.
 
     Note: for websocket connection, the mutation made by the underlying HTTP
     middleware on the request and response will be discarded.
@@ -157,7 +307,12 @@ def websocket_aware(
             if decision == WebSocketDecision.ACCEPT:
                 await self.app(scope, receive, send)
                 return
-            self._count_rejection(scope, decision, response)
+            # Refused. Nothing is counted here: the metrics layer outside
+            # sees the message sent below and records the status the client
+            # saw together with the reason stamped on the scope.
+            if supports_websocket_http_response(scope):
+                await self._reject_with_http_response(send, decision, response)
+                return
             if decision == WebSocketDecision.UNAUTHORIZED:
                 await send({
                     'type': 'websocket.close',
@@ -178,18 +333,52 @@ def websocket_aware(
                 })
 
         @staticmethod
-        def _count_rejection(scope: starlette.types.Scope,
-                             decision: WebSocketDecision,
-                             response: Optional[fastapi.Response]) -> None:
-            """Count a refused handshake; the client's answer is unchanged."""
-            metrics_utils.SKY_APISERVER_WEBSOCKET_HANDSHAKE_REJECTIONS_TOTAL \
-                .labels(path=websocket_path_label(scope),
-                        outcome=decision.value).inc()
-            if response is not None:
-                # The status the HTTP middleware answered with (e.g. 503 for
-                # an exhausted auth executor), not the 403 the client sees.
-                record_rejection(scope, response.status_code,
-                                 REJECTION_KIND_WEBSOCKET)
+        async def _reject_with_http_response(
+                send: starlette.types.Send, decision: WebSocketDecision,
+                response: Optional[fastapi.Response]) -> None:
+            """Reject the handshake with an HTTP response.
+
+            The status is the middleware's own, except for an authentication
+            or authorization refusal, which goes out as the 403 older clients
+            understand (`_AUTH_REFUSAL_STATUS`) whatever the middleware
+            answered with.
+            """
+            status_code: int
+            if response is None:
+                # The middleware raised; mirror what Starlette's error handler
+                # would have sent for an HTTP request.
+                status_code = int(http.HTTPStatus.INTERNAL_SERVER_ERROR)
+                body = b'{"detail":"Internal Server Error"}'
+                headers = [(b'content-type', b'application/json')]
+            elif decision in (WebSocketDecision.UNAUTHORIZED,
+                              WebSocketDecision.FORBIDDEN):
+                status_code = _AUTH_REFUSAL_STATUS
+                if 400 <= response.status_code < 600:
+                    # A 401 or 403 from the middleware: keep its explanation.
+                    body, headers = _forwardable_parts(response)
+                else:
+                    # The middleware answered the handshake itself with a
+                    # 2xx/3xx instead of letting it through -- the oauth2
+                    # sign-in redirect for an expired session is the real
+                    # case. Forwarding that status would only confuse the
+                    # client: `websockets` follows redirects to ws(s):// URLs
+                    # only, and a 2xx/3xx is not a rejection it can explain
+                    # (the ssh client would print "HTTP 307"). Say what it
+                    # needs to do instead: authenticate.
+                    body = b'{"detail":"Authentication required"}'
+                    headers = [(b'content-type', b'application/json')]
+            else:
+                status_code = _renderable_status(response.status_code)
+                body, headers = _forwardable_parts(response)
+            await send({
+                'type': 'websocket.http.response.start',
+                'status': int(status_code),
+                'headers': headers,
+            })
+            await send({
+                'type': 'websocket.http.response.body',
+                'body': body,
+            })
 
         async def _run_websocket_dispatch(
             self, scope: starlette.types.Scope
@@ -197,7 +386,7 @@ def websocket_aware(
             """Run the HTTP middleware against the handshake.
 
             Returns the decision and the response the middleware produced
-            (None when it raised).
+            (None when it raised), so a rejection can carry the real status.
             """
             http_scope = self._build_http_scope(scope)
             http_receive = self._http_receive_adapter()
@@ -219,6 +408,7 @@ def websocket_aware(
             except Exception as e:  # pylint: disable=broad-except
                 logger.error('Exception occurred in middleware dispatch for '
                              f'WebSocket scope: {e}')
+                mark_rejection(request, REJECT_REASON_UNHANDLED_EXCEPTION)
                 return WebSocketDecision.ERROR, None
 
             if response is None:
@@ -229,6 +419,15 @@ def websocket_aware(
             if call_next_called and 200 <= status_code < 400:
                 return WebSocketDecision.ACCEPT, response
             if status_code == http.HTTPStatus.UNAUTHORIZED:
+                return WebSocketDecision.UNAUTHORIZED, response
+            if status_code < 400:
+                # Answered without `call_next`: the middleware served the
+                # handshake itself (a sign-in redirect, typically). The client
+                # must authenticate; see `_reject_with_http_response`. Without
+                # the extension this closes with 4401 rather than 1011 -- both
+                # reach the client as an empty HTTP 403, as before.
+                if get_rejection_reason(scope) is None:
+                    mark_rejection(request, REJECT_REASON_UNAUTHORIZED)
                 return WebSocketDecision.UNAUTHORIZED, response
             if status_code == http.HTTPStatus.FORBIDDEN:
                 return WebSocketDecision.FORBIDDEN, response
