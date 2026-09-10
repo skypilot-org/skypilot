@@ -1008,6 +1008,13 @@ async def lifespan(app: fastapi.FastAPI):  # pylint: disable=redefined-outer-nam
     """FastAPI lifespan context manager."""
     del app  # unused
 
+    # Bound every psycopg2 wait in this web process by the caller's deadline,
+    # so a hung auth DB lookup gives up and frees its executor thread instead
+    # of pinning it. Installed here (from the process that serves the app),
+    # not as an import side effect, so it never lands in request-executor
+    # processes that merely import the auth modules.
+    db_lookup.install_auth_db_deadline()
+
     # Startup: Run background tasks. Delete any persisted daemon rows whose
     # ids are no longer in INTERNAL_REQUEST_DAEMONS first (daemon renamed /
     # removed in code), then submit each current daemon.
