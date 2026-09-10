@@ -19,8 +19,15 @@ These tests pin the containment behavior:
   not retry;
 * the basic-auth path on ``/api/health`` stays best-effort: probes must
   survive a DB incident, so it proceeds unauthenticated instead of
-  failing.
+  failing;
+* a lookup the *database* cut off at one of the server-side timeouts the
+  auth path sets on its own transaction (``lock_timeout``,
+  ``statement_timeout``, ``idle_in_transaction_session_timeout``) gets the
+  same retryable 503 as the client-side deadline, while every other DB
+  error still propagates unchanged.
 """
+
+# pylint: disable=protected-access,redefined-outer-name,missing-class-docstring
 
 import asyncio
 import os
@@ -29,6 +36,7 @@ import unittest.mock as mock
 
 import fastapi
 import pytest
+import sqlalchemy.exc
 
 from sky import exceptions
 from sky import models
@@ -77,7 +85,8 @@ def mock_request():
 def call_next_sentinel():
     """call_next that records whether the request reached the router."""
 
-    async def call_next(_request):
+    async def call_next(request):
+        del request  # unused
         call_next.reached = True
         return fastapi.responses.JSONResponse({'message': 'success'})
 
@@ -478,3 +487,169 @@ class TestEnsureRoleForAuthenticatedUser:
         # contention on the policy lock, a healthy database doing its job.
         assert b'assigning roles' in response.body
         perm.queue_role_repair.assert_called_once_with('u-broken')
+
+
+class _PgError(Exception):
+    """Stand-in for a psycopg2 error: carries the SQLSTATE as ``pgcode``.
+
+    Duck-typed on purpose -- `db_lookup` must not depend on psycopg2 (a
+    server-only extra), and a manually constructed psycopg2 error has no
+    pgcode anyway; only the C layer sets it from a real server reply.
+    """
+
+    def __init__(self, pgcode, message):
+        super().__init__(message)
+        self.pgcode = pgcode
+
+
+def _raises_db_error(pgcode, message='canceling statement due to timeout'):
+    """A synchronous stand-in for a DB call the database itself cut off."""
+
+    def _call(*args, **kwargs):
+        del args, kwargs
+        raise sqlalchemy.exc.OperationalError('INSERT INTO users ...', {},
+                                              _PgError(pgcode, message))
+
+    return _call
+
+
+# The three timeouts `global_user_state.add_or_update_user` sets on its own
+# Postgres transaction, and the SQLSTATE each produces.
+_SERVER_TIMEOUT_PGCODES = (
+    '55P03',  # lock_timeout: lock_not_available
+    '57014',  # statement_timeout: query_canceled
+    '25P03',  # idle_in_transaction_session_timeout (next statement)
+)
+
+
+class TestServerSideTimeoutMapping:
+    """A DB-side timeout on the auth path is the deadline path's 503."""
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize('pgcode', _SERVER_TIMEOUT_PGCODES)
+    async def test_server_timeout_pgcodes_become_timeout_errors(
+            self, monkeypatch, pgcode):
+        # The database gives up well before the client deadline here.
+        monkeypatch.setattr(db_lookup, 'AUTH_DB_TIMEOUT_SECONDS', 5)
+        with pytest.raises(asyncio.TimeoutError) as excinfo:
+            await db_lookup.call_with_deadline(_raises_db_error(pgcode))
+        assert isinstance(excinfo.value, db_lookup.AuthDBTimeoutError)
+        # The original DB error is kept as the cause for the log/debugging.
+        assert isinstance(excinfo.value.__cause__,
+                          sqlalchemy.exc.OperationalError)
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize('pgcode', _SERVER_TIMEOUT_PGCODES)
+    async def test_request_pool_variant_maps_the_same_way(
+            self, monkeypatch, pgcode):
+        monkeypatch.setattr(db_lookup, 'AUTH_DB_TIMEOUT_SECONDS', 5)
+        with pytest.raises(asyncio.TimeoutError):
+            await db_lookup._call_on_request_pool(_raises_db_error(pgcode))
+
+    @pytest.mark.asyncio
+    async def test_raw_driver_error_with_pgcode_is_mapped_too(
+            self, monkeypatch):
+        """Raw connections raise the driver error unwrapped (no `.orig`)."""
+        monkeypatch.setattr(db_lookup, 'AUTH_DB_TIMEOUT_SECONDS', 5)
+
+        def _raw(*args, **kwargs):
+            del args, kwargs
+            raise _PgError('55P03', 'lock timeout')
+
+        with pytest.raises(asyncio.TimeoutError):
+            await db_lookup.call_with_deadline(_raw)
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        'pgcode',
+        [
+            '23505',  # unique_violation: a real data error
+            '08006',  # connection_failure
+            '40P01',  # deadlock_detected
+            None,  # driver error with no SQLSTATE (e.g. socket EBADF)
+        ])
+    async def test_other_db_errors_still_propagate_unchanged(
+            self, monkeypatch, pgcode):
+        """The mapping is narrow: only the aligned server-side timeouts."""
+        monkeypatch.setattr(db_lookup, 'AUTH_DB_TIMEOUT_SECONDS', 5)
+        with pytest.raises(sqlalchemy.exc.OperationalError) as excinfo:
+            await db_lookup.call_with_deadline(_raises_db_error(pgcode))
+        assert not isinstance(excinfo.value, asyncio.TimeoutError)
+
+    @pytest.mark.asyncio
+    async def test_non_db_errors_still_propagate_unchanged(self, monkeypatch):
+        monkeypatch.setattr(db_lookup, 'AUTH_DB_TIMEOUT_SECONDS', 5)
+
+        def _boom(*args, **kwargs):
+            del args, kwargs
+            raise RuntimeError('not a database error')
+
+        with pytest.raises(RuntimeError):
+            await db_lookup.call_with_deadline(_boom)
+
+    @pytest.mark.asyncio
+    async def test_exhaustion_is_not_swallowed_by_the_mapping(
+            self, monkeypatch):
+        monkeypatch.setattr(db_lookup, 'AUTH_DB_TIMEOUT_SECONDS', 5)
+        exhausted = threads.OnDemandThreadExecutor(name='test-exhausted-map',
+                                                   max_workers=0)
+        with mock.patch.object(db_lookup.executor,
+                               'get_auth_thread_executor',
+                               return_value=exhausted):
+            with pytest.raises(exceptions.ConcurrentWorkerExhaustedError):
+                await db_lookup.call_with_deadline(lambda: 'never runs')
+
+    @pytest.mark.asyncio
+    async def test_auth_proxy_upsert_cut_off_by_lock_timeout_is_503(
+            self, monkeypatch, mock_request, call_next_sentinel):
+        """The incident shape: the users row is locked by another session
+        and this request's upsert waits. With `lock_timeout` set on the
+        transaction the database fails the wait (55P03) and the thread is
+        freed; the client must see the same retryable 503 as a deadline."""
+        monkeypatch.setattr(db_lookup, 'AUTH_DB_TIMEOUT_SECONDS', 5)
+        proxy_config = mock.Mock()
+        proxy_config.enabled = True
+        with mock.patch.object(server.server_config,
+                               'load_external_proxy_config',
+                               return_value=proxy_config):
+            middleware = server.AuthProxyMiddleware(app=mock.Mock())
+
+        with mock.patch.object(
+                server,
+                '_extract_user_from_header',
+                return_value=models.User(id='u-1', name='tester')), \
+                mock.patch(
+                    'sky.global_user_state.add_or_update_user',
+                    _raises_db_error(
+                        '55P03',
+                        'canceling statement due to lock timeout')):
+            response = await middleware.dispatch(mock_request,
+                                                 call_next_sentinel)
+
+        _assert_retryable_timeout_503(response)
+        assert not call_next_sentinel.reached
+
+    @pytest.mark.asyncio
+    async def test_bearer_token_lookup_cut_off_by_statement_timeout_is_503(
+            self, monkeypatch, mock_request, call_next_sentinel):
+        monkeypatch.setattr(db_lookup, 'AUTH_DB_TIMEOUT_SECONDS', 5)
+        mock_request.headers = {'authorization': 'Bearer sky_token'}
+        middleware = server.BearerTokenMiddleware(app=mock.Mock())
+
+        with mock.patch.dict(
+                os.environ,
+            {constants.ENV_VAR_ENABLE_SERVICE_ACCOUNTS: 'true'}), \
+                mock.patch('sky.users.token_service.token_service') as tks, \
+                mock.patch(
+                    'sky.global_user_state.get_service_account_token_by_hash',
+                    _raises_db_error('57014')):
+            tks.verify_token.return_value = {
+                'sub': 'sa-1',
+                'name': 'sa',
+                'token_id': 'tok-1'
+            }
+            response = await middleware.dispatch(mock_request,
+                                                 call_next_sentinel)
+
+        _assert_retryable_timeout_503(response)
+        assert not call_next_sentinel.reached

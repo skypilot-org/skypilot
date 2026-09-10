@@ -729,6 +729,18 @@ ENV_VAR_DB_POOL_CONNECTION_URI = (
     f'{SKYPILOT_ENV_VAR_PREFIX}DB_POOL_CONNECTION_URI')
 ENV_VAR_DB_POOL_HOSTPORT = (f'{SKYPILOT_ENV_VAR_PREFIX}DB_POOL_HOSTPORT')
 
+# Total deadline, in seconds, on each DB lookup the API server's
+# authentication middlewares make (`sky.server.auth.db_lookup`). The users
+# upsert derives the server-side timeouts it sets on its own transaction
+# from the same value (`sky.global_user_state.add_or_update_user`), so read
+# it through `sky.utils.db.db_utils.get_auth_db_timeout_seconds()` rather
+# than from the environment directly: that keeps the two from drifting
+# apart. Server-side only: it is stripped from client request payloads and
+# from the per-request environment overlay on the server.
+ENV_VAR_AUTH_DB_TIMEOUT_SECONDS = (
+    f'{SKYPILOT_ENV_VAR_PREFIX}AUTH_DB_TIMEOUT_SECONDS')
+DEFAULT_AUTH_DB_TIMEOUT_SECONDS = 5.0
+
 # Environment variable that is set to 'true' if basic
 # authentication is enabled in the API server.
 ENV_VAR_ENABLE_BASIC_AUTH = 'ENABLE_BASIC_AUTH'
