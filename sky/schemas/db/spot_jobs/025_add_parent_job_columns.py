@@ -42,16 +42,20 @@ def upgrade():
     with op.get_context().autocommit_block():
         # Nullable, no default: NULL is "top-level job", for existing jobs
         # and for any insert that leaves the columns out.
-        db_utils.add_column_to_table_alembic('job_info',
-                                             'root_job_id',
-                                             sa.Integer(),
-                                             index=True)
-        db_utils.add_column_to_table_alembic('job_info',
-                                             'parent_job_id',
-                                             sa.Integer(),
-                                             index=True)
-        db_utils.add_column_to_table_alembic('job_info', 'parent_task_id',
-                                             sa.Integer())
+        for column_name in ('root_job_id', 'parent_job_id', 'parent_task_id'):
+            db_utils.add_column_to_table_alembic('job_info', column_name,
+                                                 sa.Integer())
+        # Indexes created explicitly (as migrations 020/023/024 do) rather
+        # than through Column(index=True), so they exist regardless of how
+        # the installed Alembic handles the flag on add_column.
+        bind = op.get_bind()
+        existing = {
+            ix['name'] for ix in sa.inspect(bind).get_indexes('job_info')
+        }
+        for column_name in ('root_job_id', 'parent_job_id'):
+            index_name = f'ix_job_info_{column_name}'
+            if index_name not in existing:
+                op.create_index(index_name, 'job_info', [column_name])
 
 
 def downgrade():
