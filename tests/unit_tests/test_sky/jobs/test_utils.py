@@ -664,15 +664,13 @@ class TestGetManagedJobQueue:
         monkeypatch.setattr(jobs_utils.backends, 'CloudVmRayResourceHandle',
                             type(mock_handle))
 
-        # Mock InfraInfo
-        class MockInfraInfo:
+        # Mock InfraInfo. Subclass the real one: the patch replaces the
+        # shared infra_utils attribute, so the state layer's
+        # InfraInfo(...).to_str() (infra filter options) sees it too and
+        # must keep working; only the display string is pinned here.
+        class MockInfraInfo(jobs_utils.infra_utils.InfraInfo):
 
-            def __init__(self, cloud, region, zone):
-                self.cloud = cloud
-                self.region = region
-                self.zone = zone
-
-            def formatted_str(self):
+            def formatted_str(self, truncate: bool = True):
                 return f'{self.cloud}/{self.region}/{self.zone}'
 
         monkeypatch.setattr(jobs_utils.infra_utils, 'InfraInfo', MockInfraInfo)
