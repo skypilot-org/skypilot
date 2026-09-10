@@ -1077,15 +1077,17 @@ def get_mounting_command(
     # srun --nodes=N step mounting on every node, where ~ is the shared
     # cluster home). A baked name collides across those nodes: they race on
     # the same file, and the trailing removal fails on all but one node.
-    # The subshell scopes the EXIT trap so several of these commands can run
-    # in one script (the trap removes the file even when the mount fails).
+    # The EXIT trap removes the file even when the mount fails; command
+    # runners wrap commands as "... && (cmd)", so the command must not
+    # START with "(" or the two parens fuse into bash's arithmetic
+    # compound "((" (the trap is scoped by that wrapper subshell anyway).
     # The template must end in the X's: BusyBox mktemp (e.g. Alpine images,
     # which have no coreutils) rejects a suffix after them. Falls back to
     # TMPDIR if ~/.sky is unavailable.
-    command = ('( mount_script=$(mktemp ~/.sky/mount_XXXXXX 2>/dev/null '
+    command = ('mount_script=$(mktemp ~/.sky/mount_XXXXXX 2>/dev/null '
                '|| mktemp -t sky_mount_XXXXXX) && '
                'trap \'rm -f "$mount_script"\' EXIT && '
                f'echo {shlex.quote(script)} > "$mount_script" && '
                'chmod +x "$mount_script" && '
-               'bash "$mount_script" )')
+               'bash "$mount_script"')
     return command

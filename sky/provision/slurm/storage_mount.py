@@ -161,7 +161,10 @@ def _build_spec_script(
     for dst, mount_cmd, action_message, src_print in mount_specs:
         lines.append(
             f'echo {shlex.quote(f"{action_message} {src_print} -> {dst}")}')
-        lines.append(mount_cmd)
+        # The subshell scopes each mount's EXIT-trap cleanup: several mounts
+        # share this one shell, and a bare trap would be overwritten by the
+        # next mount line.
+        lines.append(f'( {mount_cmd} )')
         # Record the expanded mount path (without a trailing slash, which
         # fusermount does not match) so teardown (sky down / sky stop) can
         # unmount it; each node appends its own copy.
