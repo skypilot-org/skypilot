@@ -67,6 +67,7 @@ from sky.server import config as server_config
 from sky.server import constants as server_constants
 from sky.server import csp_utils
 from sky.server import daemons
+from sky.server import download_utils
 from sky.server import loop_stall
 from sky.server import metrics
 from sky.server import middleware_utils
@@ -146,8 +147,10 @@ _KUBECTL_PATH: Optional[str] = shutil.which('kubectl')
 # response will block other requests from being processed.
 
 
-def _basic_auth_401_response(content: str):
+def _basic_auth_401_response(request: fastapi.Request, content: str):
     """Return a 401 response with basic auth realm."""
+    middleware_utils.mark_rejection(request,
+                                    middleware_utils.REJECT_REASON_UNAUTHORIZED)
     return fastapi.responses.JSONResponse(
         status_code=401,
         headers={
@@ -160,8 +163,10 @@ def _basic_auth_401_response(content: str):
         content=content)
 
 
-def _bearer_auth_401_response(content):
+def _bearer_auth_401_response(request: fastapi.Request, content):
     """Return a 401 response for bearer token authentication failures."""
+    middleware_utils.mark_rejection(request,
+                                    middleware_utils.REJECT_REASON_UNAUTHORIZED)
     return fastapi.responses.JSONResponse(
         status_code=401,
         headers={
@@ -248,11 +253,13 @@ class RBACMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
                 request.url.path, request.method)
         except asyncio.TimeoutError:
             logger.error('RBAC check timed out, path: %s', request.url.path)
-            return db_lookup.db_timeout_response()
+            return db_lookup.db_timeout_response(request)
         except exceptions.ConcurrentWorkerExhaustedError as e:
             logger.error(f'Concurrent worker exhausted during RBAC check: {e}')
-            return db_lookup.worker_exhausted_response()
+            return db_lookup.worker_exhausted_response(request)
         if blocked:
+            middleware_utils.mark_rejection(
+                request, middleware_utils.REJECT_REASON_FORBIDDEN)
             return fastapi.responses.JSONResponse(
                 status_code=403, content={'detail': 'Forbidden'})
 
@@ -397,11 +404,12 @@ class BasicAuthMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
 
         auth_header = request.headers.get('authorization')
         if not auth_header:
-            return _basic_auth_401_response('Authentication required')
+            return _basic_auth_401_response(request, 'Authentication required')
 
         # Only handle basic auth
         if not auth_header.lower().startswith('basic '):
-            return _basic_auth_401_response('Invalid authentication method')
+            return _basic_auth_401_response(request,
+                                            'Invalid authentication method')
 
         # Check username and password
         encoded = auth_header.split(' ', 1)[1]
@@ -409,7 +417,7 @@ class BasicAuthMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
             decoded = base64.b64decode(encoded).decode()
             username, password = decoded.split(':', 1)
         except Exception:  # pylint: disable=broad-except
-            return _basic_auth_401_response('Invalid basic auth')
+            return _basic_auth_401_response(request, 'Invalid basic auth')
 
         # Offload the DB lookup + bcrypt verification to the bounded auth
         # thread executor under a deadline, so a slow DB (or the CPU-heavy
@@ -424,12 +432,12 @@ class BasicAuthMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
         except asyncio.TimeoutError:
             logger.error('Basic auth DB lookup timed out, path: %s',
                          request.url.path)
-            return db_lookup.db_timeout_response()
+            return db_lookup.db_timeout_response(request)
         except exceptions.ConcurrentWorkerExhaustedError as e:
             logger.error(f'Concurrent worker exhausted during basic auth: {e}')
-            return db_lookup.worker_exhausted_response()
+            return db_lookup.worker_exhausted_response(request)
         if user is None:
-            return _basic_auth_401_response('Invalid credentials')
+            return _basic_auth_401_response(request, 'Invalid credentials')
         request.state.auth_user = user
 
         return await call_next(request)
@@ -488,13 +496,13 @@ class BearerTokenMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
 
         if auth_header is None:
             return _bearer_auth_401_response(
-                {'detail': 'Authentication required'})
+                request, {'detail': 'Authentication required'})
 
         # Extract token
         split_header = auth_header.split(' ', 1)
         if split_header[0].lower() != 'bearer':
             return _bearer_auth_401_response(
-                {'detail': 'Invalid authentication method'})
+                request, {'detail': 'Invalid authentication method'})
         sa_token = split_header[1]
 
         # Handle SkyPilot service account tokens
@@ -509,7 +517,7 @@ class BearerTokenMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
                                     'false').lower()
         if sa_enabled != 'true':
             return _bearer_auth_401_response(
-                {'detail': 'Service account authentication disabled'})
+                request, {'detail': 'Service account authentication disabled'})
 
         service = token_service.token_service
 
@@ -536,6 +544,7 @@ class BearerTokenMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
             if payload is None:
                 logger.warning('Service account token verification failed')
                 return _bearer_auth_401_response(
+                    request,
                     {'detail': 'Invalid or expired service account token'})
 
             # Extract user information from JWT payload
@@ -547,7 +556,7 @@ class BearerTokenMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
                 logger.warning(
                     'Invalid token payload: missing user_id or token_id')
                 return _bearer_auth_401_response(
-                    {'detail': 'Invalid token payload'})
+                    request, {'detail': 'Invalid token payload'})
 
             # Look up the token row by its sha256 hash. This is what makes
             # revocation (row deleted) and rotation (row's hash replaced)
@@ -573,13 +582,14 @@ class BearerTokenMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
                     f'Service account token {token_id} not found in DB '
                     '(revoked or rotated)')
                 return _bearer_auth_401_response(
+                    request,
                     {'detail': 'Service account token revoked or rotated'})
 
             if (token_row['expires_at'] is not None and
                     token_row['expires_at'] < int(time.time())):
                 logger.warning(f'Service account token {token_id} has expired')
                 return _bearer_auth_401_response(
-                    {'detail': 'Service account token has expired'})
+                    request, {'detail': 'Service account token has expired'})
 
             # Verify user still exists in database
             user_info = await db_lookup.call_with_deadline(
@@ -588,6 +598,7 @@ class BearerTokenMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
                 logger.warning(
                     f'Service account user {user_id} no longer exists')
                 return _bearer_auth_401_response(
+                    request,
                     {'detail': 'Service account user no longer exists'})
 
             # Update last used timestamp for token tracking, skipped while
@@ -627,23 +638,24 @@ class BearerTokenMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
             # an exception raised in a middleware surfaces as a bare 500,
             # which clients do not retry.
             logger.error('Service account auth DB lookup timed out')
-            return db_lookup.db_timeout_response()
+            return db_lookup.db_timeout_response(request)
         except exceptions.ConcurrentWorkerExhaustedError as e:
             # Same reasoning as the timeout above: convert in-middleware so
             # the client sees a retryable 503 instead of a bare 500.
             logger.error(f'Concurrent worker exhausted during service account '
                          f'auth: {e}')
-            return db_lookup.worker_exhausted_response()
+            return db_lookup.worker_exhausted_response(request)
         except token_service.JWTSecretUnavailableError as e:
             # Above the catch-all on purpose: a 401 would tell the caller its
             # token is bad and send it off to rotate credentials, when the
             # token is fine and the database is not.
             logger.error(f'Service account auth unavailable: {e}')
-            return db_lookup.jwt_secret_unavailable_response()
+            return db_lookup.jwt_secret_unavailable_response(request)
         except Exception as e:  # pylint: disable=broad-except
             logger.error(f'Service account authentication failed: {e}',
                          exc_info=True)
             return _bearer_auth_401_response(
+                request,
                 {'detail': f'Service account authentication failed: {str(e)}'})
 
         return await call_next(request)
@@ -698,15 +710,15 @@ class AuthProxyMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
                     global_user_state.add_or_update_user, auth_user)
             except asyncio.TimeoutError:
                 logger.error('Auth proxy user upsert timed out')
-                return db_lookup.db_timeout_response()
+                return db_lookup.db_timeout_response(request)
             except exceptions.ConcurrentWorkerExhaustedError as e:
                 logger.error(f'Concurrent worker exhausted during auth proxy '
                              f'user upsert: {e}')
-                return db_lookup.worker_exhausted_response()
+                return db_lookup.worker_exhausted_response(request)
             # Same deadline as the upsert above; see the helper for why a new
             # user's seed is awaited while a returning one's repair is queued.
             failed = await db_lookup.ensure_role_for_authenticated_user(
-                auth_user.id, newly_added)
+                auth_user.id, newly_added, request=request)
             if failed is not None:
                 return failed
 
@@ -1005,8 +1017,9 @@ async def schedule_on_boot_check_async():
 @contextlib.asynccontextmanager
 async def lifespan(app: fastapi.FastAPI):  # pylint: disable=redefined-outer-name
     """FastAPI lifespan context manager."""
-    del app  # unused
-
+    # Unused: the middleware-order check that used to live here runs at
+    # import instead, right after the metrics middleware registration.
+    del app
     # Startup: Run background tasks. Delete any persisted daemon rows whose
     # ids are no longer in INTERNAL_REQUEST_DAEMONS first (daemon renamed /
     # removed in code), then submit each current daemon.
@@ -1161,6 +1174,8 @@ class PathCleanMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
             parent = pathlib.Path('/dashboard')
             request_path = pathlib.Path(posixpath.normpath(request.url.path))
             if not _is_relative_to(request_path, parent):
+                middleware_utils.mark_rejection(
+                    request, middleware_utils.REJECT_REASON_FORBIDDEN)
                 return fastapi.responses.JSONResponse(
                     status_code=403, content={'detail': 'Forbidden'})
         return await call_next(request)
@@ -1176,6 +1191,8 @@ class GracefulShutdownMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
             # on-going requests but will not submit new requests.
             if not request.url.path.startswith('/api/'):
                 # Client will retry on 503 error.
+                middleware_utils.mark_rejection(
+                    request, middleware_utils.REJECT_REASON_SHUTTING_DOWN)
                 return fastapi.responses.JSONResponse(
                     status_code=503,
                     content={
@@ -1219,6 +1236,8 @@ class APIVersionMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
             versions.set_remote_version(version_info.version)
             response = await call_next(request)
         else:
+            middleware_utils.mark_rejection(
+                request, middleware_utils.REJECT_REASON_API_VERSION)
             response = fastapi.responses.JSONResponse(
                 status_code=400,
                 content={
@@ -1241,9 +1260,7 @@ app = fastapi.FastAPI(prefix='/api/v1', debug=True, lifespan=lifespan)
 #   Middleware3(Middleware2(Middleware1(request)))
 # If MiddlewareN does something like print(n); call_next(); print(n), you'll get
 #   3; 2; 1; <request>; 1; 2; 3
-# Use environment variable to make the metrics middleware optional.
-if os.environ.get(constants.ENV_VAR_SERVER_METRICS_ENABLED):
-    app.add_middleware(metrics.PrometheusMiddleware)
+# The metrics middleware is added last, i.e. outermost; see below.
 # APIVersionMiddleware also records the dispatched endpoint for workspace-access
 # classification. Added near-first => inner to PathCleanMiddleware /
 # InternalDashboardPrefixMiddleware, so the path it records is the router-
@@ -1286,8 +1303,10 @@ app.add_middleware(BearerTokenMiddleware)
 # middleware above.
 app.add_middleware(InitializeRequestAuthUserMiddleware)
 app.add_middleware(RequestIDMiddleware)
-# SecurityHeadersMiddleware is the outermost middleware to ensure security
-# headers (CSP, X-Content-Type-Options, etc.) are added to all responses.
+# SecurityHeadersMiddleware is the outermost middleware that touches a
+# response, so its security headers (CSP, X-Content-Type-Options, etc.) are
+# added to all of them. The metrics middleware below is registered outside it
+# but only observes; it neither adds nor removes headers.
 app.add_middleware(SecurityHeadersMiddleware)
 
 # Load plugins after all the middlewares are added, to keep the core
@@ -1301,6 +1320,25 @@ if __name__ == 'sky.server.server':
     plugins.load_plugins(
         plugins.ExtensionContext(context=plugins.PluginContext.UVICORN,
                                  app=app))
+
+# The metrics middleware must be the OUTERMOST middleware, so it is added
+# after every core and plugin middleware: it counts the response the client
+# actually receives, including the 401/403/503s the authentication, RBAC,
+# shutdown and plugin middlewares answer themselves without calling the next
+# layer. Placed inside the stack (where it used to be, as the first
+# middleware added), none of those were counted and an authentication outage
+# showed up on dashboards as a drop in successful requests rather than as
+# errors. Use environment variable to make the metrics middleware optional.
+if os.environ.get(constants.ENV_VAR_SERVER_METRICS_ENABLED):
+    app.add_middleware(metrics.PrometheusMiddleware)
+
+# The middleware stack is final here: plugins loaded above, the metrics layer
+# registered, and only `include_router` follows. Report a stack that would
+# make the metrics layer blind to middleware-produced responses -- which is
+# silent otherwise, and looks exactly like a quiet system. Called
+# unconditionally: the check reads the stack, so it says nothing when the
+# layer is not installed at all.
+metrics.warn_unless_outermost(app)
 
 app.include_router(jobs_rest.router, prefix='/jobs', tags=['jobs'])
 app.include_router(serve_rest.router, prefix='/serve', tags=['serve'])
@@ -1321,7 +1359,9 @@ resource.setrlimit(resource.RLIMIT_NOFILE, (hard, hard))
 @app.exception_handler(exceptions.ConcurrentWorkerExhaustedError)
 def handle_concurrent_worker_exhausted_error(
         request: fastapi.Request, e: exceptions.ConcurrentWorkerExhaustedError):
-    del request  # request is not used
+    # Let the metrics middleware count this 503 by cause.
+    middleware_utils.mark_rejection(
+        request, middleware_utils.REJECT_REASON_REQUEST_WORKER_EXHAUSTED)
     # Print detailed error message to server log
     logger.error('Concurrent worker exhausted: '
                  f'{common_utils.format_exception(e)}')
@@ -1957,8 +1997,16 @@ async def upload_zip_file(request: fastapi.Request, user_hash: str,
 
 
 @app.get('/upload_v2/blob')
-async def check_blob_exists(request: fastapi.Request, user_hash: str,
-                            blob_id: str) -> Dict[str, bool]:
+async def check_blob_exists(
+    request: fastapi.Request,
+    user_hash: str,
+    blob_id: str,
+    size_bytes: Optional[int] = fastapi.Query(
+        None,
+        ge=0,
+        le=2**63 - 1,
+        description='Client-reported compressed ZIP size in bytes.'),
+) -> Dict[str, bool]:
     """Check if a file mount blob already exists."""
     if not re.match(r'^[0-9a-f]{64}$', blob_id):
         raise fastapi.HTTPException(status_code=400,
@@ -1967,6 +2015,9 @@ async def check_blob_exists(request: fastapi.Request, user_hash: str,
     if request.state.auth_user is not None:
         user_id = request.state.auth_user.id
     exists = await bs.get_blob_storage().blob_exists(user_id, blob_id)
+    if metrics_utils.METRICS_ENABLED and size_bytes is not None:
+        metrics_utils.SKY_APISERVER_BLOB_CHECK_SIZE_BYTES.labels(
+            result='hit' if exists else 'miss').observe(size_bytes)
     return {'exists': exists}
 
 
@@ -2377,7 +2428,7 @@ async def download_logs(
         request: fastapi.Request,
         cluster_jobs_body: payloads.ClusterJobsDownloadLogsBody) -> None:
     """Downloads the logs of a job."""
-    user_hash = cluster_jobs_body.env_vars[constants.USER_ID_ENV_VAR]
+    user_hash = download_utils.download_user_id(request, cluster_jobs_body)
     logs_dir_on_api_server = pathlib.Path(
         bs.get_blob_storage().download_tmp_dir(user_hash))
     logs_dir_on_api_server.expanduser().mkdir(parents=True, exist_ok=True)
@@ -2399,26 +2450,25 @@ async def download_logs(
 async def download(download_body: payloads.DownloadBody,
                    request: fastapi.Request) -> None:
     """Downloads a folder from the cluster to the local machine."""
-    folder_paths = [
-        pathlib.Path(folder_path) for folder_path in download_body.folder_paths
-    ]
-    user_hash = download_body.env_vars[constants.USER_ID_ENV_VAR]
+    user_hash = download_utils.download_user_id(request, download_body)
     logs_dir_on_api_server = common.api_server_user_logs_dir_prefix(user_hash)
     download_tmp = bs.get_blob_storage().download_tmp_dir(user_hash)
-    for folder_path in folder_paths:
-        folder_str = str(folder_path)
-        expanded_str = str(runtime_utils.expanduser_path(folder_path))
-        if not (folder_str.startswith(str(logs_dir_on_api_server)) or
-                folder_str.startswith(download_tmp) or expanded_str.startswith(
-                    runtime_utils.expanduser(download_tmp))):
+    allowed_roots = [
+        runtime_utils.expanduser_path(pathlib.Path(root)).resolve()
+        for root in (logs_dir_on_api_server, download_tmp)
+    ]
+    folder_paths = []
+    for folder_path in download_body.folder_paths:
+        resolved_path = runtime_utils.expanduser_path(
+            pathlib.Path(folder_path)).resolve()
+        if not any(resolved_path == root or root in resolved_path.parents
+                   for root in allowed_roots):
             raise fastapi.HTTPException(
-                status_code=400,
-                detail=
-                f'Invalid folder path: {folder_path}; {logs_dir_on_api_server}')
-
-        if not runtime_utils.expanduser_path(folder_path).resolve().exists():
+                status_code=400, detail=f'Invalid folder path: {folder_path}')
+        if not resolved_path.exists():
             raise fastapi.HTTPException(
                 status_code=404, detail=f'Folder not found: {folder_path}')
+        folder_paths.append(resolved_path)
 
     # Create a temporary zip file
     log_id = str(uuid.uuid4().hex)
@@ -2429,10 +2479,7 @@ async def download(download_body: payloads.DownloadBody,
     try:
 
         def _zip_files_and_folders(folder_paths, zip_path):
-            folders = [
-                str(runtime_utils.expanduser_path(folder_path).resolve())
-                for folder_path in folder_paths
-            ]
+            folders = [str(folder_path) for folder_path in folder_paths]
             # Check for optional query parameter to control zip entry structure
             relative = request.query_params.get('relative', 'home')
             if relative == 'items':
@@ -3421,35 +3468,55 @@ async def kubernetes_pod_ssh_proxy(websocket: fastapi.WebSocket,
     loop = asyncio.get_running_loop()
     proc = await loop.run_in_executor(None, _spawn_sync)
     logger.info(f'Started kubectl port-forward with command: {kubectl_cmd}')
-
-    # Wrap the sync Popen's stdout pipe as an asyncio StreamReader so the
-    # rest of this handler can stay async.
     assert proc.stdout is not None
-    stdout_reader = asyncio.StreamReader(loop=loop)
-    await loop.connect_read_pipe(
-        lambda: asyncio.StreamReaderProtocol(stdout_reader, loop=loop),
-        proc.stdout)
 
-    # Wait for port-forward to be ready and get the local port
-    local_port = None
-    while True:
-        stdout_line = await stdout_reader.readline()
-        if stdout_line:
+    # Watch kubectl's stdout without handing its fd to the event loop.
+    #
+    # `loop.connect_read_pipe(..., proc.stdout)` must not be used here: it
+    # gives the loop an object that owns the fd. Under uvloop the pipe
+    # transport then closes the fd twice on the same number when it is torn
+    # down: once through libuv (`uv_close`) and once through
+    # `proc.stdout.close()`; whichever runs second gets EBADF, which is
+    # swallowed. The order depends on whether the transport is closed
+    # explicitly or collected by the cyclic GC. CPython releases the GIL
+    # around its close(), so any other thread that allocates an fd in that
+    # window (a DB connection, a /proc read, a socket) gets the freed number
+    # and has it closed under it.
+    # NonOwningPipeReader only watches the fd; `proc.stdout` stays its single
+    # owner and is closed exactly once in the `finally` below.
+    stdout_reader = asyncio_utils.NonOwningPipeReader(loop,
+                                                      proc.stdout.fileno())
+    conn_gauge = metrics_utils.SKY_APISERVER_WEBSOCKET_CONNECTIONS.labels(
+        pid=os.getpid())
+    proxying = False
+    stdout_eof = False
+    ssh_failed = False
+    try:
+        stdout_reader.start()
+        # Wait for port-forward to be ready and get the local port
+        local_port = None
+        while True:
+            stdout_line = await stdout_reader.readline()
+            if not stdout_line:
+                # kubectl closed its stdout, i.e. it exited (or is exiting)
+                # before the port-forward came up, e.g. the pod is gone. The
+                # `finally` below reaps it.
+                stdout_eof = True
+                await websocket.close()
+                return
             decoded_line = stdout_line.decode()
             logger.info(f'kubectl port-forward stdout: {decoded_line}')
             if 'Forwarding from 127.0.0.1' in decoded_line:
                 port_str = decoded_line.split(':')[-1]
                 local_port = int(port_str.replace(' -> ', ':').split(':')[0])
                 break
-        else:
-            await websocket.close()
-            return
+        # Nothing consumes kubectl's stdout during the session. The little it
+        # prints ("Handling connection for <port>") stays in the kernel pipe
+        # buffer and is drained for logging when the session ends.
+        stdout_reader.stop()
 
-    logger.info(f'Starting port-forward to local port: {local_port}')
-    conn_gauge = metrics_utils.SKY_APISERVER_WEBSOCKET_CONNECTIONS.labels(
-        pid=os.getpid())
-    ssh_failed = False
-    try:
+        logger.info(f'Starting port-forward to local port: {local_port}')
+        proxying = True
         conn_gauge.inc()
         # Connect to the local port
         reader, writer = await asyncio.open_connection('127.0.0.1', local_port)
@@ -3469,37 +3536,48 @@ async def kubernetes_pod_ssh_proxy(websocket: fastapi.WebSocket,
             timestamps_supported=timestamps_supported,
         )
     finally:
-        conn_gauge.dec()
-        reason = ''
+        if proxying:
+            conn_gauge.dec()
+        # Unregister the fd from the loop before anything closes it.
+        stdout_reader.stop()
+        exited_on_its_own = False
         try:
-            logger.info('Terminating kubectl port-forward process')
-            proc.terminate()
-        except ProcessLookupError:
-            stdout = await stdout_reader.read()
-            logger.error('kubectl port-forward was terminated before the '
-                         'ssh websocket connection was closed. Remaining '
-                         f'output: {str(stdout)}')
+            # poll() reaps the child if it already exited on its own (before
+            # the port-forward came up, or under an active session).
+            exited_on_its_own = proc.poll() is not None
+            if exited_on_its_own and proxying:
+                leftover = stdout_reader.drain()
+                logger.error('kubectl port-forward exited before the ssh '
+                             'websocket connection was closed. Remaining '
+                             f'output: {leftover!r}')
+            if not exited_on_its_own:
+                logger.info('Terminating kubectl port-forward process')
+                proc.terminate()
+                # Reap the kubectl child. `asyncio.create_subprocess_exec`
+                # had this handled by asyncio's child watcher;
+                # `subprocess.Popen` is outside that watcher so we must
+                # wait() ourselves or leave a zombie.
+                try:
+                    waiter = loop.run_in_executor(None, proc.wait)
+                    await asyncio.wait_for(waiter, timeout=5)
+                except asyncio.TimeoutError:
+                    logger.warning('kubectl did not exit 5s after SIGTERM; '
+                                   'sending SIGKILL.')
+                    proc.kill()
+                    await loop.run_in_executor(None, proc.wait)
+        finally:
+            # The one and only close of the stdout pipe fd. Unconditional, so
+            # a cancellation or an executor error while waiting for kubectl
+            # cannot skip it.
+            proc.stdout.close()
+        if exited_on_its_own or stdout_eof:
             reason = 'KubectlPortForwardExit'
-            metrics_utils.SKY_APISERVER_WEBSOCKET_CLOSED_TOTAL.labels(
-                pid=os.getpid(), reason=reason).inc()
+        elif ssh_failed:
+            reason = 'SSHToPodDisconnected'
         else:
-            if ssh_failed:
-                reason = 'SSHToPodDisconnected'
-            else:
-                reason = 'ClientClosed'
+            reason = 'ClientClosed'
         metrics_utils.SKY_APISERVER_WEBSOCKET_CLOSED_TOTAL.labels(
             pid=os.getpid(), reason=reason).inc()
-        # Reap the kubectl child. `asyncio.create_subprocess_exec` had this
-        # handled by asyncio's child watcher; `subprocess.Popen` is outside
-        # that watcher so we must wait() ourselves or leave a zombie.
-        try:
-            await asyncio.wait_for(loop.run_in_executor(None, proc.wait),
-                                   timeout=5)
-        except asyncio.TimeoutError:
-            logger.warning(
-                'kubectl did not exit 5s after SIGTERM; sending SIGKILL.')
-            proc.kill()
-            await loop.run_in_executor(None, proc.wait)
 
 
 def _build_slurm_job_ssh_command(

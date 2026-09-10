@@ -357,6 +357,21 @@ class _DefaultManagedJobRunner:
                 raise RuntimeError(e.error_msg) from e
         return stdout
 
+    def events(
+        self,
+        *,
+        job_id: int,
+        task_id: Optional[int],
+        task: Optional[Union[str, int]],
+        limit: Optional[int],
+        include_cluster_events: bool,
+    ) -> List[Dict[str, Any]]:
+        return _job_events(job_id=job_id,
+                           task_id=task_id,
+                           task=task,
+                           limit=limit,
+                           include_cluster_events=include_cluster_events)
+
     def tail_managed_job_logs(
         self,
         *,
@@ -1956,8 +1971,9 @@ def pool_sync_down_logs(
                                pool=True)
 
 
-def _get_job_cluster_names(job_id: int,
-                           task_id: Optional[int] = None) -> List[str]:
+def _get_job_clusters(
+        job_id: int,
+        task_id: Optional[int] = None) -> List[Tuple[str, Optional[int]]]:
     """Reconstruct the underlying cluster name(s) for a managed job.
 
     Mirrors the derivation used by the controller (see ``jobs/controller.py``):
@@ -1969,10 +1985,11 @@ def _get_job_cluster_names(job_id: int,
     skipped, since their cluster is shared across jobs and its events are not
     attributable to a single job.
 
-    Returns a de-duplicated list of cluster names (a multi-task pipeline uses
-    one cluster per task).
+    Returns de-duplicated ``(cluster_name, task_id)`` pairs (a multi-task
+    pipeline uses one cluster per task), so a caller merging the clusters'
+    events can attribute each one to the task that owns it.
     """
-    cluster_names: List[str] = []
+    clusters: List[Tuple[str, Optional[int]]] = []
     for task in managed_job_state.get_managed_job_tasks(job_id):
         if task_id is not None and task.get('task_id') != task_id:
             continue
@@ -1984,11 +2001,37 @@ def _get_job_cluster_names(job_id: int,
         task_name = task.get('task_name')
         if not task_name:
             continue
-        cluster_names.append(
-            managed_job_utils.generate_managed_job_cluster_name(
-                task_name, job_id))
+        clusters.append((managed_job_utils.generate_managed_job_cluster_name(
+            task_name, job_id), task.get('task_id')))
     # De-duplicate while preserving order.
-    return list(dict.fromkeys(cluster_names))
+    return list(dict.fromkeys(clusters))
+
+
+def _resolve_task_id(job_id: int, task: Union[str, int]) -> int:
+    """Resolve a task name or id to a task id, the way `sky jobs logs` does.
+
+    An int is taken as the id; a numeric string too, matching the CLI's
+    documented behavior. Raises ValueError when nothing matches, so the
+    caller does not silently get the whole job's events instead.
+    """
+    tasks = managed_job_state.get_managed_job_tasks(job_id)
+    if not tasks:
+        raise ValueError(f'Managed job {job_id} not found.')
+    if isinstance(task, str) and task.isdigit():
+        task = int(task)
+    if isinstance(task, int):
+        if any(t.get('task_id') == task for t in tasks):
+            return task
+        raise ValueError(f'Task {task} not found in managed job {job_id}.')
+    for candidate in tasks:
+        if candidate.get('task_name') == task:
+            task_id = candidate.get('task_id')
+            assert task_id is not None, candidate
+            return task_id
+    names = ', '.join(
+        repr(t.get('task_name')) for t in tasks if t.get('task_name'))
+    raise ValueError(f'Task {task!r} not found in managed job {job_id}. '
+                     f'Tasks: {names}.')
 
 
 @usage_lib.entrypoint
@@ -1997,12 +2040,51 @@ def get_job_events(
     task_id: Optional[int] = None,
     limit: Optional[int] = 10,
     include_cluster_events: bool = False,
+    task: Optional[Union[str, int]] = None,
+) -> List[Dict[str, Any]]:
+    """Get task events for a managed job.
+
+    Routed through the registered ``ManagedJobRunner`` so a runner can add
+    what the infrastructure knows about the same job -- on Slurm, what the
+    allocation waited on and for how long. The default implementation
+    answers from the jobs database and the cluster's own events; see
+    ``_job_events`` for the arguments and the row shape.
+    """
+    runner = managed_job_runner.current()
+    # A runner that predates this method: the plugins that register one are
+    # distributed separately from the server, so an older one can be
+    # installed against a newer OSS. Answer from the default rather than
+    # failing the endpoint on an interface it never saw.
+    if not hasattr(runner, 'events'):
+        logger.debug(f'{type(runner).__name__} does not implement events(); '
+                     'using the default')
+        return _job_events(job_id=job_id,
+                           task_id=task_id,
+                           task=task,
+                           limit=limit,
+                           include_cluster_events=include_cluster_events)
+    return runner.events(job_id=job_id,
+                         task_id=task_id,
+                         task=task,
+                         limit=limit,
+                         include_cluster_events=include_cluster_events)
+
+
+def _job_events(
+    *,
+    job_id: int,
+    task_id: Optional[int],
+    task: Optional[Union[str, int]],
+    limit: Optional[int],
+    include_cluster_events: bool,
 ) -> List[Dict[str, Any]]:
     """Get task events for a managed job.
 
     Args:
         job_id: The job ID to get task events for.
         task_id: Optional task ID to filter by.
+        task: Optional task name or id to filter by, resolved here. Takes
+            precedence over task_id. A name that matches no task raises.
         limit: Optional limit on number of task events to return (default 10).
         include_cluster_events: When True, merge launch-progress events from
             the job's underlying cluster (e.g. image pulling) into the
@@ -2012,6 +2094,8 @@ def get_job_events(
     Returns:
         List of task event records, ordered newest first.
     """
+    if task is not None:
+        task_id = _resolve_task_id(job_id, task)
     events = managed_job_state.get_job_events(job_id=job_id,
                                               task_id=task_id,
                                               limit=limit)
@@ -2019,7 +2103,7 @@ def get_job_events(
         return events
 
     try:
-        cluster_names = _get_job_cluster_names(job_id, task_id)
+        clusters = _get_job_clusters(job_id, task_id)
     except Exception as e:  # pylint: disable=broad-except
         # The merge is best-effort: never fail the job-events request because
         # the cluster name(s) could not be reconstructed.
@@ -2033,13 +2117,14 @@ def get_job_events(
         global_user_state.ClusterEventType.STATUS_CHANGE,
         global_user_state.ClusterEventType.LAUNCH_PROGRESS,
     ]
-    cluster_events: List[Dict[str, Any]] = []
-    for cluster_name in cluster_names:
+    # (event, task_id) so each merged row keeps the task it belongs to.
+    cluster_events: List[Tuple[Dict[str, Any], Optional[int]]] = []
+    for cluster_name, cluster_task_id in clusters:
         try:
             cluster_events.extend(
-                global_user_state.get_cluster_events_by_name(cluster_name,
-                                                             event_types,
-                                                             limit=limit))
+                (event, cluster_task_id)
+                for event in global_user_state.get_cluster_events_by_name(
+                    cluster_name, event_types, limit=limit))
         except Exception as e:  # pylint: disable=broad-except
             # Best-effort: skip a cluster whose events cannot be read.
             logger.debug(f'Failed to read cluster events for job {job_id} '
@@ -2052,21 +2137,34 @@ def get_job_events(
     # transitioned_at is a UTC epoch, so fromtimestamp(tz=...) yields the
     # correct instant in whichever timezone the job events use.
     tz = events[0]['timestamp'].tzinfo if events else None
-    for cluster_event in cluster_events:
-        events.append({
+    converted = [
+        {
             'spot_job_id': job_id,
-            'task_id': None,
+            'task_id': cluster_task_id,
             # These happen while the job is launching its cluster.
             'new_status': managed_job_state.ManagedJobStatus.STARTING,
             'code': None,
             'reason': cluster_event['reason'],
             'timestamp': datetime.datetime.fromtimestamp(
                 cluster_event['transitioned_at'], tz=tz),
-        })
+        } for cluster_event, cluster_task_id in cluster_events
+    ]
 
     # Every event's 'timestamp' is a datetime (job events from the DB, cluster
     # events converted above). datetime.timestamp() gives a comparable epoch.
-    events.sort(key=lambda event: event['timestamp'].timestamp(), reverse=True)
-    if limit is not None:
-        events = events[:limit]
-    return events
+    def _newest_first(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        return sorted(rows,
+                      key=lambda event: event['timestamp'].timestamp(),
+                      reverse=True)
+
+    # Plain recency: the window is exactly the most recent `limit` rows of
+    # the merged list. Reserving a share for the cluster side was tried and
+    # dropped -- it made the window neither "the most recent N" nor reliably
+    # inclusive (a job with ten recent transitions gave slots away to
+    # provisioning rows from long ago, while a cluster row newer than every
+    # job row could still lose to an older one). "Why has this not started"
+    # is answered by the `details` column instead, which is guaranteed rather
+    # than budget-dependent. `converted` is already bounded per cluster by
+    # the same `limit`, so nothing runs away here.
+    merged = _newest_first(events + converted)
+    return merged if limit is None else merged[:limit]
