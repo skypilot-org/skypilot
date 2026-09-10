@@ -1007,6 +1007,28 @@ def override_skypilot_config(
 
 
 @contextlib.contextmanager
+def replace_skypilot_config_in_process(
+        new_configs: config_utils.Config) -> Iterator[None]:
+    """Replaces the loaded config for the current process or context only.
+
+    Unlike :func:`replace_skypilot_config`, no temporary config file is
+    written and ``SKYPILOT_CONFIG`` is left untouched, so subprocesses
+    spawned inside the block keep seeing the original config. Use it when
+    only in-process readers need the replacement, e.g. a per-launch default
+    consumed by the provisioner.
+    """
+    original_config = _get_loaded_config()
+    if new_configs == original_config:
+        yield
+        return
+    _set_loaded_config(new_configs)
+    try:
+        yield
+    finally:
+        _set_loaded_config(original_config)
+
+
+@contextlib.contextmanager
 def replace_skypilot_config(new_configs: config_utils.Config) -> Iterator[None]:
     """Replaces the global config with the new configs.
 
@@ -1059,6 +1081,10 @@ _QUEUE_NAME_KEYS: List[Tuple[str, ...]] = [
 ]
 
 _NAMESPACE_KEYS: List[Tuple[str, ...]] = [('namespace',)]
+
+_QUEUE_ADMISSION_TIMEOUT_KEYS: List[Tuple[str, ...]] = [
+    ('kueue', 'admission_timeout'),
+]
 
 # Hooks invoked at the end of `update_api_server_config_no_lock`, after the
 # new config has been persisted and reloaded in-process. Plugins use this to
@@ -1241,6 +1267,30 @@ def get_effective_queue_name(
                                            region=region,
                                            workspace=workspace,
                                            override_configs=override_configs)
+
+
+def get_effective_queue_admission_timeout(
+        cloud: str,
+        region: Optional[str] = None,
+        workspace: Optional[str] = None,
+        override_configs: Optional[Dict[str, Any]] = None) -> Optional[int]:
+    """Returns the effective ``kueue.admission_timeout``, or None if unset.
+
+    Bound, in seconds, on how long a launch waits for pods held by a
+    scheduling gate to be admitted; ``-1`` waits indefinitely. Resolved with
+    the same scope precedence as :func:`get_effective_queue_name` (workspace
+    over global, context over cloud), with ``override_configs`` (a task's
+    ``config`` block) merged in at every scope.
+    """
+    value = _get_effective_k8s_config_value(
+        cloud=cloud,
+        property_keys=_QUEUE_ADMISSION_TIMEOUT_KEYS,
+        region=region,
+        workspace=workspace,
+        override_configs=override_configs)
+    if value is None:
+        return None
+    return int(value)
 
 
 def get_effective_namespace(

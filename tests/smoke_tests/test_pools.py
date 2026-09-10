@@ -3198,8 +3198,15 @@ def test_pool_kueue_quota_admission():
                 wait_until_worker_status(
                     pool_name, 'READY', timeout=timeout, num_occurrences=2),
                 # The held-back workers say why they are still provisioning.
-                f's=$(sky jobs pool status {pool_name}); echo "$s"; '
-                f'[[ $(echo "$s" | grep -c "PROVISIONING (waiting for queue admission)") == 2 ]]',
+                # Polled rather than checked once: a transient launch
+                # failure of an admitted worker (e.g. a flaky Kubernetes
+                # API call during setup) relaunches it into the queue and
+                # briefly changes which workers are gated.
+                wait_until_worker_status(
+                    pool_name,
+                    'PROVISIONING (waiting for queue admission)',
+                    timeout=timeout,
+                    num_occurrences=2),
                 # The pool is usable with the admitted workers.
                 _LAUNCH_JOB_AND_CHECK_SUCCESS_WITH_NAME.format(
                     pool_name=pool_name,

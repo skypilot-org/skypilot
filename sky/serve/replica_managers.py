@@ -1216,22 +1216,27 @@ class SkyPilotReplicaManager(ReplicaManager):
         if not info.is_spot and not self._should_check_termination(info):
             return False
 
-        # Get cluster handle first for zone information. The following
-        # backend_utils.refresh_cluster_status_handle might delete the
-        # cluster record from the cluster table.
+        # The refresh below may delete the cluster record, so look the
+        # record up first.
         handle = global_user_state.get_handle_from_cluster_name(
             info.cluster_name)
         if handle is None:
-            logger.error(f'Cannot find cluster {info.cluster_name} for '
-                         f'replica {info.replica_id} in the cluster table. '
-                         'Skipping preemption handling.')
-            return False
-        assert isinstance(handle, backends.CloudVmRayResourceHandle)
-        # Pull the actual cluster status from the cloud provider to
-        # determine whether the cluster is preempted.
-        cluster_status, _ = backend_utils.refresh_cluster_status_handle(
-            info.cluster_name,
-            force_refresh_statuses=set(status_lib.ClusterStatus))
+            # The replica launched successfully (only launched replicas are
+            # probed) and SkyPilot has not torn it down, yet its cluster
+            # record is gone: a status refresh (e.g. the API server's
+            # periodic one) already saw the cluster disappear and dropped
+            # the record. That is an external termination too.
+            logger.info(f'Cluster {info.cluster_name} of replica '
+                        f'{info.replica_id} no longer exists in the cluster '
+                        'table; treating it as preempted.')
+            cluster_status = None
+        else:
+            assert isinstance(handle, backends.CloudVmRayResourceHandle)
+            # Pull the actual cluster status from the cloud provider to
+            # determine whether the cluster is preempted.
+            cluster_status, _ = backend_utils.refresh_cluster_status_handle(
+                info.cluster_name,
+                force_refresh_statuses=set(status_lib.ClusterStatus))
 
         if cluster_status in (status_lib.ClusterStatus.UP,
                               status_lib.ClusterStatus.AUTOSTOPPING):

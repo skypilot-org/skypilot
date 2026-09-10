@@ -59,8 +59,15 @@ def _replica_queue_admission_wait(
     gate. With the default ``kubernetes.kueue.admission_timeout`` the launch
     would fail after 24 hours and the relaunch would create a new Workload at
     the back of the queue, so replica launches default to waiting
-    indefinitely (``-1``) instead. An explicitly configured
-    ``admission_timeout`` still wins, at the global or the workspace scope.
+    indefinitely (``-1``) instead.
+
+    The default is installed at the global cloud scope, the lowest in the
+    resolution order (see ``skypilot_config.get_effective_queue_admission_
+    timeout``), and only when that scope has no value of its own. An
+    explicit ``admission_timeout`` at any scope (global, workspace, context,
+    or the task's ``config`` block) therefore still wins. The replacement is
+    in-process only: the provisioner reads it while the launch runs, no
+    subprocess needs it, and no temporary config file is left behind.
     """
     if not is_launched_by_sky_serve_controller:
         yield
@@ -71,7 +78,7 @@ def _replica_queue_admission_wait(
         yield
         return
     config.set_nested(_QUEUE_ADMISSION_TIMEOUT_KEYS, -1)
-    with skypilot_config.replace_skypilot_config(config):
+    with skypilot_config.replace_skypilot_config_in_process(config):
         yield
 
 

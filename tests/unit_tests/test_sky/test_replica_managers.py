@@ -245,6 +245,23 @@ class TestHandlePreemption:
         manager._handle_preemption(info)
         assert refresh.call_count == 2
 
+    def test_missing_cluster_record_counts_as_terminated(self, monkeypatch):
+        # A status refresh (e.g. the API server's periodic one) can drop the
+        # cluster record before the probe runs; the replica must still be
+        # recycled rather than skipped into FAILED_PROBING.
+        manager, refresh = self._make_manager(
+            monkeypatch, cluster_status=status_lib.ClusterStatus.UP)
+        monkeypatch.setattr(replica_managers.global_user_state,
+                            'get_handle_from_cluster_name',
+                            lambda cluster_name: None)
+        info = _make_replica_info(is_spot=False)
+        info.status_property.first_ready_time = 100.0
+
+        assert manager._handle_preemption(info) is True
+        refresh.assert_not_called()
+        assert info.status_property.preempted is True
+        manager._terminate_replica.assert_called_once()
+
     def test_spot_placer_only_notified_for_spot_replicas(self, monkeypatch):
         placer = mock.MagicMock()
         manager, _ = self._make_manager(monkeypatch,

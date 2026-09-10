@@ -18,8 +18,8 @@ def _install(monkeypatch, config):
         replaced.append(new_config)
         yield
 
-    monkeypatch.setattr(execution.skypilot_config, 'replace_skypilot_config',
-                        fake_replace)
+    monkeypatch.setattr(execution.skypilot_config,
+                        'replace_skypilot_config_in_process', fake_replace)
     return replaced
 
 

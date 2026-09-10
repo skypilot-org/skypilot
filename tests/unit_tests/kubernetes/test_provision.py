@@ -1995,6 +1995,35 @@ class TestWaitForPodsToScheduleQueueGating:
             f'at t>=55, but the loop exited at {clock.now}s.')
         assert raise_errors.called
 
+    def test_admission_timeout_from_cluster_yaml_wins(self, monkeypatch):
+        """The provider config carries the admission timeout resolved at
+        launch time (task config overrides, workspace scope); when present
+        it takes precedence over the request config lookup."""
+        cluster = 'my-cluster'
+        gated = self._add_gate(self._make_pending_pod('pod-0', cluster))
+        # Request config would allow a long wait; the cluster YAML bounds it
+        # to 20s.
+        clock, _, _ = self._setup(monkeypatch,
+                                  pod_timeline=[(0.0, gated)],
+                                  admission_timeout=10_000)
+
+        node = self._make_node('pod-0', cluster)
+        import datetime  # pylint: disable=import-outside-toplevel
+
+        with pytest.raises(config_lib.KubernetesError, match='queue admission'):
+            instance._wait_for_pods_to_schedule(
+                namespace='ns',
+                context='test-context',
+                new_nodes=[node],
+                timeout=5,
+                cluster_name='cn',
+                create_pods_start=datetime.datetime.now(datetime.timezone.utc),
+                admission_timeout=20)
+
+        assert 20.0 <= clock.now < 100.0, (
+            f'Expected the 20s cluster-YAML bound to apply, but the loop '
+            f'exited at {clock.now}s.')
+
     def test_admission_wait_is_bounded(self, monkeypatch):
         """A pod gated forever fails with a queue-admission error once the
         admission timeout elapses — bounded, not infinite. The bound is the

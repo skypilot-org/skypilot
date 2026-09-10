@@ -36,6 +36,12 @@ provider:
 
     timeout: {{timeout}}
 
+    {% if k8s_kueue_admission_timeout is defined and k8s_kueue_admission_timeout is not none %}
+    # Bound, in seconds, on the wait for queue admission (e.g. Kueue) before
+    # the launch fails; -1 waits indefinitely.
+    queue_admission_timeout: {{k8s_kueue_admission_timeout}}
+    {% endif %}
+
     # Namespace used to host SkyPilot system components, such as fuse device
     # manager.
     skypilot_system_namespace: {{k8s_skypilot_system_namespace}}
