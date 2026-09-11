@@ -1,0 +1,35 @@
+# Dynamic JobGroup members smoke test template.
+#
+# A two-task job group: a `trainer` and a `watcher` that launches further
+# managed jobs from inside its task with `sky jobs launch`. Those jobs attach
+# to this group automatically (every task of a job group has
+# SKYPILOT_ROOT_JOB_ID set), are cancelled with it and are swept when it
+# finishes. The launches use the SkyPilot runtime already installed on the
+# pod, which carries the code under test; the API server endpoint and token
+# come from api_server_access, which is on by default for managed jobs.
+---
+name: {{name}}
+execution: parallel
+primary_tasks: [{{primary_tasks}}]
+inter_connection: false
+---
+name: trainer
+resources:
+  cpus: 2
+  memory: 4+
+  infra: {{cloud}}
+run: |
+  echo "trainer starting: group ${SKYPILOT_JOBGROUP_NAME}, root job ${SKYPILOT_ROOT_JOB_ID}"
+{{trainer_run | indent(2, true)}}
+  echo "trainer done"
+---
+name: watcher
+resources:
+  cpus: 2
+  memory: 4+
+  infra: {{cloud}}
+run: |
+  echo "watcher starting: root job ${SKYPILOT_ROOT_JOB_ID}, task ${SKYPILOT_TASK_ID}"
+  test -n "${SKYPILOT_ROOT_JOB_ID}" || { echo "FAIL: SKYPILOT_ROOT_JOB_ID not set"; exit 1; }
+{{watcher_run | indent(2, true)}}
+  echo "watcher done"
