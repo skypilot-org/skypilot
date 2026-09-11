@@ -22,6 +22,7 @@ _HAS_SO_REUSEPORT = hasattr(socket, 'SO_REUSEPORT')
 def _config(**kwargs) -> uvicorn_lib.Config:
     kwargs.setdefault('host', '127.0.0.1')
     kwargs.setdefault('port', 0)
+    kwargs.setdefault('workers', 2)
     return uvicorn_lib.Config('dummy:app', **kwargs)
 
 
@@ -76,6 +77,15 @@ def test_reuse_port_disabled_off_linux(monkeypatch, platform):
     monkeypatch.setattr(sys, 'platform', platform)
     monkeypatch.setenv(constants.ENV_VAR_SERVER_REUSE_PORT, '1')
     assert not uvicorn._reuse_port_enabled(_config())
+
+
+@pytest.mark.parametrize('workers', [None, 1])
+def test_reuse_port_disabled_for_single_worker(monkeypatch, on_linux, workers):
+    """One worker has nothing to balance against, and keeps the EADDRINUSE
+    guard that SO_REUSEPORT would drop."""
+    del on_linux
+    monkeypatch.setenv(constants.ENV_VAR_SERVER_REUSE_PORT, '1')
+    assert not uvicorn._reuse_port_enabled(_config(workers=workers))
 
 
 @pytest.mark.skipif(not _HAS_SO_REUSEPORT, reason='Platform lacks SO_REUSEPORT')

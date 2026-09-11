@@ -76,7 +76,12 @@ def _reuse_port_enabled(config: uvicorn.Config) -> bool:
     which concentrates all traffic on one worker.
     SO_REUSEPORT only applies to TCP host/port binding, so it is disabled when
     the server listens on a Unix domain socket or an inherited file descriptor.
+    A single worker has nothing to balance against, and binding with
+    SO_REUSEPORT there would drop the EADDRINUSE guard that keeps two servers
+    off the same port.
     """
+    if config.workers <= 1:
+        return False
     if not sys.platform.startswith('linux'):
         return False
     if not hasattr(socket, 'SO_REUSEPORT'):
@@ -391,13 +396,10 @@ def run(config: uvicorn.Config, max_db_connections: Optional[int] = None):
                 # Do not pre-bind a shared socket in the parent: each worker
                 # binds its own SO_REUSEPORT socket in Server.run() so the
                 # kernel spreads connections across workers. An empty socket
-                # list is forwarded to every (re)started worker.
-                logger.info('SO_REUSEPORT enabled: each worker binds its own '
-                            'listening socket.')
-                # Test bind in the parent to fail fast on startup errors (e.g.
-                # port already taken by a non-SO_REUSEPORT process, or
-                # permission denied). Otherwise the parent starts fine and only
-                # the workers crash-loop as they each hit the bind error.
+                # list is forwarded to every (re)started worker. The parent
+                # still test-binds to fail fast on startup errors (port taken
+                # by a non-SO_REUSEPORT process, permission denied); otherwise
+                # only the workers crash-loop as they each hit the bind error.
                 probe_socket = _bind_reuse_port_socket(config)
                 # Each worker binds on its own, so an ephemeral port has to be
                 # resolved here or every worker would land on a different port.
@@ -405,6 +407,14 @@ def run(config: uvicorn.Config, max_db_connections: Optional[int] = None):
                     config.port = probe_socket.getsockname()[1]
                 probe_socket.close()
                 sockets = []
+                # Neither uvicorn's parent (no bind_socket() call) nor its
+                # workers (they get a non-None socket list) log the bound
+                # address in this path.
+                scheme = 'https' if config.is_ssl else 'http'
+                host = config.host or '0.0.0.0'
+                addr = f'[{host}]' if ':' in host else host
+                logger.info(f'Uvicorn running on {scheme}://{addr}:'
+                            f'{config.port} (SO_REUSEPORT, per-worker sockets)')
             else:
                 sockets = [config.bind_socket()]
             SlowStartMultiprocess(config, target=server.run,
