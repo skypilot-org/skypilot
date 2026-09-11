@@ -4,6 +4,7 @@ import concurrent.futures
 import datetime
 import functools
 import hashlib
+import inspect
 import json
 import logging
 import os
@@ -12,10 +13,11 @@ import platform
 import posixpath
 import re
 import shutil
+import threading
 import time
 import traceback
-from typing import (Any, Callable, Dict, List, Optional, Set, Tuple, TypedDict,
-                    TypeVar)
+from typing import (Any, Callable, Dict, Iterator, List, Optional, Set, Tuple,
+                    TypedDict, TypeVar)
 import zipfile
 
 import sky
@@ -104,69 +106,281 @@ def _run_with_deadline(
     *,
     component: str,
     resource: str,
-    errors: Optional[List[Dict[str, str]]] = None,
+    errors: Optional[List[Dict[str, Any]]] = None,
     orphans: Optional[List[Dict[str, Any]]] = None,
+    stop_event: Optional[threading.Event] = None,
+    executor: Optional[concurrent.futures.ThreadPoolExecutor] = None,
+    executor_slots: Optional[threading.Semaphore] = None,
+    orphan_extras: Optional[Dict[str, Any]] = None,
 ) -> Tuple[bool, Optional[T]]:
     """Run ``fn()`` in a worker thread bounded by a wall-clock timeout.
+
+    Invariant: no op is recorded as timed out unless a real attempt was
+    started. Plainly queueing behind already-abandoned workers on a
+    shared executor would violate that (the op would sit unstarted until
+    its own timeout), so a caller-provided executor is guarded with a
+    free-slot semaphore and a saturated pool falls back to a fresh
+    single-worker executor below.
 
     Returns ``(True, result)`` if ``fn()`` completes within ``timeout``. On
     timeout a partial-failure record is appended to ``errors`` (mirroring the
     shared error-record shape) and ``(False, None)`` is returned -- but note
-    the worker is NOT stopped: Python can't kill a thread, and
-    ``future.result(timeout=)`` only stops us *waiting*, so ``fn`` keeps
-    running in the background until it returns on its own. The abandoned op is
-    appended to ``orphans`` (the per-dump list threaded alongside ``errors``)
-    so _log_timed_out_stragglers can report at dump end which ones are still
-    running (see there for why we don't reap). Any OTHER exception raised by
-    ``fn()`` propagates to the caller, so each call site keeps its own existing
-    non-timeout handling.
+    the worker is NOT killed: Python can't kill a thread, and
+    ``future.result(timeout=)`` only stops us *waiting``, so ``fn`` keeps
+    running in the background until it returns on its own. The timeout path
+    first sets ``stop_event`` (when given, so a cooperating op such as the
+    chunked log copy terminates at its next checkpoint) and cancels the
+    future (a no-op for a running future; it prevents queued-not-started
+    work from running late). The abandoned op is appended to ``orphans``
+    (the per-dump list threaded alongside ``errors``) with a direct
+    ``error_entry`` reference to the record just appended, so
+    _reconcile_timed_out_ops can rewrite it in place, plus any merged
+    ``orphan_extras`` (e.g. a late-publish closure for staged log copies).
+    Any OTHER exception raised by ``fn()`` propagates to the caller, so each
+    call site keeps its own existing non-timeout handling.
 
-    Same executor-deadline pattern as the sky-check probe. We shut the executor
-    down with ``wait=False`` in a ``finally`` -- covering success, timeout, and
-    any other exception, so the executor object is never leaked -- while never
-    re-blocking on a still-running worker (which a ``with`` / the default
-    ``shutdown(wait=True)`` would do on timeout, defeating the whole point).
+    Executor discipline: an executor created here is shut down with
+    ``wait=False`` in a ``finally`` -- covering success, timeout, and any
+    other exception, so it is never leaked -- while never re-blocking on a
+    still-running worker (which a ``with`` / the default ``shutdown(wait=True)``
+    would do on timeout, defeating the whole point). A caller-provided
+    ``executor`` is NEVER shut down by this call. When ``executor_slots`` is
+    given alongside it, the submission is guarded by a non-blocking acquire
+    released via a done-callback (fires on completion, exception, AND
+    cancellation) and on a submit failure; on acquire failure (all shared
+    workers held by orphans) a fresh single-worker executor is created so
+    the op still gets a real attempt with real timeout semantics.
     """
-    executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
     started = time.monotonic()
+    # Executor we created for this call (shut down in the finally);
+    # a caller-provided executor is never shut down here.
+    own_executor: Optional[concurrent.futures.ThreadPoolExecutor] = None
     try:
-        future = executor.submit(fn)
+        if executor is not None and executor_slots is not None and not (
+                executor_slots.acquire(blocking=False)):
+            # All shared workers are held by abandoned timed-out copies;
+            # fall back to a fresh executor so this op still gets a real
+            # attempt (see the invariant in the docstring).
+            executor = None
+        if executor is None:
+            own_executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+            future = own_executor.submit(fn)
+        elif executor_slots is not None:
+            try:
+                future = executor.submit(fn)
+            except Exception:  # pylint: disable=broad-except
+                # submit failed after taking a slot (e.g. the shared
+                # executor was shut down concurrently): give the slot
+                # back and fall back to a fresh executor.
+                executor_slots.release()
+                own_executor = concurrent.futures.ThreadPoolExecutor(
+                    max_workers=1)
+                future = own_executor.submit(fn)
+            else:
+                future.add_done_callback(lambda _f: executor_slots.release())
+        else:
+            future = executor.submit(fn)
         try:
             return True, future.result(timeout=timeout)
         except concurrent.futures.TimeoutError:
+            # Signal the worker first (if the op cooperates via
+            # stop_event) so an abandoned copy stops at its next
+            # checkpoint; then cancel, which only matters for work that
+            # never started.
+            if stop_event is not None:
+                stop_event.set()
+            future.cancel()
             msg = (f'{component}/{resource} timed out after {timeout}s; '
                    'recorded as a partial failure and skipped so the rest of '
                    'the dump still completes.')
             logger.warning(msg)
+            error_entry = None
             if errors is not None:
-                errors.append({
+                error_entry = {
                     'component': component,
                     'resource': resource,
                     'error': msg,
                     'traceback': _full_traceback(),
-                })
+                }
+                errors.append(error_entry)
             if orphans is not None:
-                orphans.append({
+                orphan_record = {
                     'component': component,
                     'resource': resource,
                     'future': future,
                     'started': started,
-                })
+                    # Direct reference to the error record just appended
+                    # (None when ``errors`` is), so reconciliation rewrites
+                    # it in place with no matching heuristics.
+                    'error_entry': error_entry,
+                }
+                if orphan_extras:
+                    orphan_record.update(orphan_extras)
+                orphans.append(orphan_record)
             return False, None
     finally:
-        executor.shutdown(wait=False)
+        if own_executor is not None:
+            own_executor.shutdown(wait=False)
+
+
+# Fixed grace period given to timed-out ops' worker threads to finish
+# before the dump's error records are finalized. Deliberately NOT clamped
+# to the remaining dump budget: orphans exist exactly when the budget is
+# already exhausted, so clamping would zero the grace and make
+# reconciliation dead code (the zip step already runs past the deadline).
+# Read at call time (not bound as a default arg) so tests can monkeypatch
+# the constant.
+_ORPHAN_GRACE_S = 5.0
+
+
+def _reconcile_done_orphan(orphan: Dict[str, Any]) -> None:
+    """Fold one finished orphan's outcome back into its error record.
+
+    Assumes the caller already verified the future is done and not
+    cancelled. Mutates ``orphan['error_entry']`` in place.
+    """
+    future: concurrent.futures.Future = orphan['future']
+    error_entry = orphan.get('error_entry')
+    component, resource = orphan.get('component'), orphan.get('resource')
+    try:
+        result = future.result()
+    except Exception:  # pylint: disable=broad-except
+        tb = _full_traceback()
+        logger.warning(
+            '[debug-dump] worker for %s/%s, timed out earlier, '
+            'later raised:\n%s', component, resource, tb)
+        if error_entry is not None:
+            error_entry['error'] += (' The worker raised an exception after '
+                                     'the timeout (see late_traceback).')
+            error_entry['late_traceback'] = tb
+        return
+    if not result:
+        # Falsy outcome (e.g. a copy that returned False): the existing
+        # timed-out record is already accurate -- nothing was published.
+        return
+    publish = orphan.get('publish')
+    if publish is not None:
+        try:
+            published = publish()
+        except Exception:  # pylint: disable=broad-except
+            logger.exception(
+                '[debug-dump] failed to publish the late '
+                'completion of %s/%s', component, resource)
+            published = False
+        if published:
+            note = ('The worker completed after the timeout; its output is '
+                    'included in the dump.')
+        else:
+            note = ('The worker completed after the timeout; its output '
+                    'could not be published.')
+    else:
+        # _run_with_deadline returned (False, None) to the caller, so no
+        # caller captured the result -- this wording is accurate for every
+        # section and does not imply data exists.
+        note = ('The worker completed after the timeout; its result was '
+                'not captured.')
+    if error_entry is not None:
+        error_entry['error'] += f' {note}'
+
+
+def _quarantine_orphan(orphan: Dict[str, Any]) -> None:
+    """Mark a still-running orphan so its output stays out of the archive.
+
+    The error record is left unchanged (it accurately says the op timed
+    out, and the worker-side publish gate means nothing lands at a final
+    name); a logging done-callback is attached so the eventual post-grace
+    outcome is at least visible in the log.
+    """
+    orphan['excluded_from_archive'] = True
+    future: concurrent.futures.Future = orphan['future']
+    component, resource = orphan.get('component'), orphan.get('resource')
+
+    def _log_outcome(fut: concurrent.futures.Future) -> None:
+        try:
+            if fut.cancelled():
+                return
+            exc = fut.exception()
+            if exc is not None:
+                logger.warning(
+                    '[debug-dump] worker for %s/%s, timed out and '
+                    'excluded from the archive, later raised: %s', component,
+                    resource, exc)
+            else:
+                logger.warning(
+                    '[debug-dump] worker for %s/%s, timed out and '
+                    'excluded from the archive, later completed; '
+                    'its output was not published.', component, resource)
+        except Exception:  # pylint: disable=broad-except
+            pass
+
+    future.add_done_callback(_log_outcome)
+
+
+def _reconcile_timed_out_ops(orphans: List[Dict[str, Any]],
+                             grace_s: Optional[float] = None) -> None:
+    """Reconcile timed-out ops' eventual outcomes into their error records.
+
+    Runs after collection but before errors.json is written, so the
+    serialized error file can never contradict the archive: within the
+    grace period, an orphan that completed successfully is published (for
+    staged log copies) and its error record annotated; an orphan that
+    raised gets a ``late_traceback``; an orphan still running at the end
+    of the grace keeps its accurate timed-out record, is marked
+    ``excluded_from_archive`` (its final output path, if any, is pruned
+    from the zip walk), and gets a logging done-callback.
+
+    Best-effort and per-orphan: one bad orphan cannot abort reconciliation
+    of the rest. The records live in ``timed_out_ops`` and are mutated in
+    place.
+    """
+    if grace_s is None:
+        # Read at call time (not a default-arg binding) so tests can
+        # monkeypatch _ORPHAN_GRACE_S.
+        grace_s = _ORPHAN_GRACE_S
+    pending: List[Dict[str, Any]] = []
+    for orphan in orphans:
+        future = orphan.get('future')
+        if future is None:
+            continue
+        try:
+            if future.cancelled():
+                # A cancelled op never ran; .result() would raise
+                # CancelledError and be misread as a late failure.
+                continue
+            if future.done():
+                _reconcile_done_orphan(orphan)
+            else:
+                pending.append(orphan)
+        except Exception:  # pylint: disable=broad-except
+            logger.exception('[debug-dump] failed to reconcile timed-out '
+                             f'op {orphan.get("resource")!r}')
+    if not pending:
+        return
+    concurrent.futures.wait([o['future'] for o in pending], timeout=grace_s)
+    for orphan in pending:
+        try:
+            if orphan['future'].done():
+                _reconcile_done_orphan(orphan)
+            else:
+                _quarantine_orphan(orphan)
+        except Exception:  # pylint: disable=broad-except
+            logger.exception('[debug-dump] failed to reconcile timed-out '
+                             f'op {orphan.get("resource")!r}')
 
 
 def _log_timed_out_stragglers(orphans: List[Dict[str, Any]]) -> None:
-    """Log any timed-out op in ``orphans`` whose worker thread is STILL running
-    at dump end.
+    """Log any timed-out op in ``orphans`` whose worker thread is STILL
+    running at dump end (i.e. past the reconciliation grace period).
 
-    Backstop visibility: Python can't kill the thread (see _run_with_deadline),
-    so we don't actively reap it here -- it exits when its underlying call
-    (typically a command-runner subprocess) returns. This surfaces what leaked
-    and for how long, so we can decide whether it's worth escalating (targeted
-    timeouts / subprocess isolation). Best-effort: logs and swallows its own
-    errors so it can never break the dump's final steps.
+    Backstop visibility: Python can't kill the thread (see
+    _run_with_deadline), so we don't actively reap it here -- it exits when
+    its underlying call (typically a command-runner subprocess, or a
+    stop-aware log copy at its next chunk) returns. Quarantined orphans
+    already have a logging done-callback attached by
+    _reconcile_timed_out_ops; this reports them one last time, with how
+    long they have leaked, so we can decide whether it's worth escalating.
+    Best-effort: logs and swallows its own errors so it can never break
+    the dump's final steps.
     """
     try:
         now = time.monotonic()
@@ -317,10 +531,10 @@ class DebugDumpContext(TypedDict):
     # into the dump.
     request_ids_via_job: Set[str]
     request_ids_via_cluster: Set[str]
-    errors: List[Dict[str, str]]
+    errors: List[Dict[str, Any]]
     # Per-dump accumulator (sibling of ``errors``) of deadline-timed-out ops
     # whose worker thread was abandoned; see _run_with_deadline /
-    # _log_timed_out_stragglers.
+    # _reconcile_timed_out_ops / _log_timed_out_stragglers.
     timed_out_ops: List[Dict[str, Any]]
 
 
@@ -1038,19 +1252,6 @@ def _sanitize_request_body(request) -> Optional[Dict[str, Any]]:
     return data
 
 
-def _copy_request_log_file(request_id: str, request_dir: str,
-                           log_type: log_provider.RequestLogType,
-                           filename: str) -> bool:
-    """Copy one request's log via the LogProvider (bounded by the caller).
-
-    Standalone (not a per-iteration closure) so the deadline wrapper can call it
-    via functools.partial without capturing the loop variable.
-    """
-    return log_provider.get_log_provider().copy_log_file(
-        request_id, log_type,
-        pathlib.Path(request_dir) / filename)
-
-
 # Per-log-copy cap. A copy is normally instant, but copy_log_file on a
 # long-running/streaming request (e.g. a status-refresh daemon whose log is
 # still being appended) can block for tens of seconds before returning -- so one
@@ -1058,13 +1259,169 @@ def _copy_request_log_file(request_id: str, request_dir: str,
 # section. Clamped further by the overall deadline via _bounded_timeout.
 _REQUEST_LOG_COPY_TIMEOUT = 30
 
+# Directory (under each request's dump dir) where log copies are staged
+# before reaching their final name. A copy is published only via an
+# idempotent os.replace after the provider copy completed and the copy was
+# not abandoned, so the archive never contains a partial file and an
+# orphaned copy that completes late lands in a path the zip walk prunes.
+_LOG_STAGING_DIRNAME = '.staging'
+
+# Workers in the shared per-section log-copy executor (one for the whole
+# requests section instead of two per request, which added up to tens of
+# thousands of create/destroy cycles on a large dump). The requests loop is
+# sequential, so this bounds concurrency only via accumulated timed-out
+# copies, each holding a worker until its underlying call returns; a
+# saturated pool falls back to a fresh executor per op (see
+# _run_with_deadline).
+_REQUEST_LOG_EXECUTOR_WORKERS = 8
+
+
+@functools.lru_cache(maxsize=None)
+def _provider_accepts_stop_event(provider: 'log_provider.LogProvider') -> bool:
+    """True if the provider's copy_log_file accepts a stop_event kwarg.
+
+    Cached on the provider object (production providers are singletons,
+    so the cache holds ~one entry); providers that predate the parameter
+    keep the old 3-argument signature and must not be passed the kwarg.
+    inspect.signature raises for some callables; treat that as not
+    capable.
+    """
+    try:
+        sig = inspect.signature(provider.copy_log_file)
+    except (ValueError, TypeError):
+        return False
+    if any(p.kind == inspect.Parameter.VAR_KEYWORD
+           for p in sig.parameters.values()):
+        return True
+    return 'stop_event' in sig.parameters
+
+
+def _provider_copy_log_file(request_id: str,
+                            log_type: log_provider.RequestLogType,
+                            dest_path: str,
+                            stop_event: Optional[threading.Event]) -> bool:
+    """Copy a log via the LogProvider, forwarding stop_event when supported."""
+    provider = log_provider.get_log_provider()
+    dest = pathlib.Path(dest_path)
+    if _provider_accepts_stop_event(provider):
+        return provider.copy_log_file(request_id,
+                                      log_type,
+                                      dest,
+                                      stop_event=stop_event)
+    return provider.copy_log_file(request_id, log_type, dest)
+
+
+def _publish_staged_log(request_dir: str, filename: str) -> bool:
+    """Move a staged log copy to its final name (idempotent).
+
+    Returns True when the final file is in place -- including when the
+    copy was already published (the worker won the check-then-act race
+    against its own stop event), which keeps late reconciliation from
+    reporting a published file as missing.
+    """
+    final_path = os.path.join(request_dir, filename)
+    staged_path = os.path.join(request_dir, _LOG_STAGING_DIRNAME, filename)
+    if os.path.exists(final_path) and not os.path.exists(staged_path):
+        return True
+    try:
+        os.replace(staged_path, final_path)
+        return True
+    except OSError as e:
+        logger.warning(f'Failed to publish staged log {staged_path} -> '
+                       f'{final_path}: {e}')
+        return False
+
+
+def _copy_request_log_file(
+        request_id: str,
+        request_dir: str,
+        log_type: log_provider.RequestLogType,
+        filename: str,
+        stop_event: Optional[threading.Event] = None) -> bool:
+    """Copy one request's log via the LogProvider into a staging dir.
+
+    Standalone (not a per-iteration closure) so the deadline wrapper can call it
+    via functools.partial without capturing the loop variable.
+
+    The copy lands in ``request_dir/.staging/<filename>`` (creating the
+    request dir lazily, so no empty request dir is ever left behind) and
+    reaches its final name only via _publish_staged_log after the provider
+    copy completed and the copy was not abandoned. An abandoned copy that
+    finishes anyway leaves its complete file in .staging for
+    _reconcile_timed_out_ops to publish late (worker-side gate).
+    """
+    staging_dir = os.path.join(request_dir, _LOG_STAGING_DIRNAME)
+    os.makedirs(staging_dir, exist_ok=True)
+    staged_path = os.path.join(staging_dir, filename)
+    if not _provider_copy_log_file(request_id, log_type, staged_path,
+                                   stop_event):
+        try:
+            os.unlink(staged_path)
+        except OSError:
+            pass
+        return False
+    if stop_event is not None and stop_event.is_set():
+        # Abandoned after the copy finished: leave the complete file in
+        # .staging for the reconciler to publish.
+        return True
+    return _publish_staged_log(request_dir, filename)
+
+
+def _empty_request_outcomes() -> Dict[str, Any]:
+    """Zeroed outcomes for the requests section (empty or fully skipped)."""
+    return {
+        'in_scope': 0,
+        'attempted': 0,
+        'skipped_deadline': 0,
+        'not_in_db': 0,
+        'db_errors': 0,
+        'info_written': 0,
+        'skipped_request_ids': [],
+        'request_log': {
+            'found': 0,
+            'not_found': 0,
+            'timed_out': 0
+        },
+        'request_debug_log': {
+            'found': 0,
+            'not_found': 0,
+            'timed_out': 0
+        },
+    }
+
+
+def _write_stub_request_info(request_dir: str,
+                             request_id: str,
+                             error: str,
+                             logs: Optional[Dict[str, str]] = None) -> None:
+    """Write a minimal request_info.json for an un-dumpable request.
+
+    Every attempted request leaves an artifact the zip contains, so the
+    collected ID list can be reconciled from the dump alone. The request
+    dir is created lazily here (never upfront), so a request that is
+    skipped, or fails before any write, leaves no empty directory the zip
+    would silently drop. Written after the log copies (like the full
+    request_info.json) so the stub can carry the per-log outcomes too.
+    """
+    stub: Dict[str, Any] = {'request_id': request_id, 'error': error}
+    if logs is not None:
+        stub['logs'] = logs
+    try:
+        os.makedirs(request_dir, exist_ok=True)
+        stub_path = os.path.join(request_dir, 'request_info.json')
+        with open(stub_path, 'w', encoding='utf-8') as f:
+            json.dump(stub, f, indent=2)
+    except OSError as e:
+        logger.warning(
+            f'Failed to write stub request info for {request_id}: {e}')
+
 
 def _dump_request_id_info(
         request_ids: Set[str],
         dump_dir: str,
-        errors: Optional[List[Dict[str, str]]] = None,
+        errors: Optional[List[Dict[str, Any]]] = None,
         deadline: Optional[float] = None,
-        orphans: Optional[List[Dict[str, Any]]] = None) -> None:
+        orphans: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
     """Collect request logs and metadata.
 
     ``deadline`` (absolute monotonic) bounds the section two ways: each
@@ -1073,142 +1430,249 @@ def _dump_request_id_info(
     budget is gone we stop starting new requests and skip the rest -- so the
     dump still zips what it gathered. Per-request wall-clock is written to
     ``requests/_timings.json``.
+
+    Returns an outcomes dict surfaced in summary.json's
+    ``section_outcomes``: ``in_scope = attempted + skipped_deadline`` and
+    ``attempted = info_written + not_in_db + db_errors`` (each of those
+    buckets implies a request_info.json artifact, full or stub), plus
+    per-log-type coverage counts, so every gap between the summary counts
+    and the on-disk artifacts is explainable from the dump alone.
     """
+    outcomes = _empty_request_outcomes()
     if not request_ids:
         logger.debug('No requests to dump')
-        return
+        return outcomes
     logger.debug(f'Entering _dump_request_id_info for '
                  f'{len(request_ids)} requests')
+    outcomes['in_scope'] = len(request_ids)
 
     requests_dir = os.path.join(dump_dir, 'requests')
     os.makedirs(requests_dir, exist_ok=True)
 
-    timings: List[Dict[str, Any]] = []
-    for request_id in request_ids:
-        if _deadline_exceeded(deadline):
-            if errors is not None:
-                errors.append({
-                    'component': 'requests',
-                    'resource': request_id,
-                    'error': 'Skipped: overall debug-dump deadline exceeded.',
-                })
-            continue
-        request_start = time.monotonic()
-        request_dir = os.path.join(requests_dir, request_id)
-        os.makedirs(request_dir, exist_ok=True)
+    # One shared bounded executor (plus its matching free-slot semaphore)
+    # for the whole section instead of two per request, which added up to
+    # tens of thousands of executor create/destroy cycles on a large
+    # dump. The loop below is sequential, so the semaphore only saturates
+    # via accumulated timed-out copies (each holding a worker until its
+    # underlying call returns); _run_with_deadline then falls back to a
+    # fresh executor per op.
+    executor = concurrent.futures.ThreadPoolExecutor(
+        max_workers=_REQUEST_LOG_EXECUTOR_WORKERS,
+        thread_name_prefix='debug-dump-log-copy')
+    executor_slots = threading.Semaphore(_REQUEST_LOG_EXECUTOR_WORKERS)
 
-        # Get request metadata from DB
-        try:
-            request = requests_lib.get_request(request_id)
-            if request is not None:
-                request_info: Dict[str, Any] = {
-                    'request_id': request.request_id,
-                    'name': request.name,
-                    'status': request.status.value if request.status else None,
-                    'created_at': request.created_at,
-                    'created_at_human': debug_dump_helpers.epoch_to_human(
-                        request.created_at),
-                    'finished_at': request.finished_at,
-                    'finished_at_human': debug_dump_helpers.epoch_to_human(
-                        request.finished_at),
-                    'cluster_name': request.cluster_name,
-                    'user_id': request.user_id,
-                    'status_msg': request.status_msg,
-                    'schedule_type': (request.schedule_type.value
-                                      if request.schedule_type else None),
-                    'request_body': _sanitize_request_body(request),
-                }
+    def _copy_one_log(log_type: log_provider.RequestLogType, filename: str,
+                      resource: str, log_key: str) -> str:
+        """Deadline-bounded copy of one log type via the LogProvider.
 
-                # Include error info if present
-                try:
-                    error = request.get_error()
-                    if error:
-                        request_info['error'] = {
-                            'type': error.get('type'),
-                            'message': error.get('message'),
-                        }
-                except Exception:  # pylint: disable=broad-except
-                    pass
-
-                request_info_path = os.path.join(request_dir,
-                                                 'request_info.json')
-                with open(request_info_path, 'w', encoding='utf-8') as f:
-                    json.dump(request_info, f, indent=2, default=str)
-                logger.debug(
-                    f'Dumped request {request_id} '
-                    f'(name={request.name}, '
-                    f'status='
-                    f'{request.status.value if request.status else None})')
-            else:
-                logger.debug(f'Request {request_id} not found in DB')
-        except Exception as e:  # pylint: disable=broad-except
-            logger.warning(f'Failed to get info for request {request_id}: {e}')
-            if errors is not None:
-                errors.append({
-                    'component': 'requests',
-                    'resource': request_id,
-                    'error': str(e),
-                    'traceback': _full_traceback()
-                })
-
-        # Copy request log file. Routed through the LogProvider so that
-        # deployments whose request logs are not on the local filesystem
-        # can fetch them from wherever they live. Deadline-bounded: a
-        # streaming/active request's copy can block for tens of seconds.
+        Returns the outcome ('found' / 'not_found' / 'copy_timed_out')
+        and bumps the matching coverage counter. Routed through the
+        LogProvider so that deployments whose request logs are not on the
+        local filesystem can fetch them from wherever they live.
+        Deadline-bounded: a streaming/active request's copy can block for
+        tens of seconds.
+        """
+        stop_event = threading.Event()
         try:
             ok, copied = _run_with_deadline(
                 functools.partial(_copy_request_log_file, request_id,
-                                  request_dir,
-                                  log_provider.RequestLogType.REQUEST,
-                                  'request.log'),
+                                  request_dir, log_type, filename, stop_event),
                 _bounded_timeout(_REQUEST_LOG_COPY_TIMEOUT, deadline),
                 component='requests',
-                resource=f'{request_id}/log',
+                resource=resource,
                 errors=errors,
-                orphans=orphans)
+                orphans=orphans,
+                stop_event=stop_event,
+                executor=executor,
+                executor_slots=executor_slots,
+                orphan_extras={
+                    # Lets the reconciler publish a late completion and
+                    # the zip walk exclude an unresolved orphan's final
+                    # path.
+                    'publish': functools.partial(_publish_staged_log,
+                                                 request_dir, filename),
+                    'final_path': os.path.join(request_dir, filename),
+                })
+        except Exception as e:  # pylint: disable=broad-except
+            logger.warning(f'Failed to copy {filename} for {request_id}: {e}')
+            if errors is not None:
+                errors.append({
+                    'component': 'requests',
+                    'resource': resource,
+                    'error': str(e),
+                    'traceback': _full_traceback()
+                })
+            outcome = 'not_found'
+        else:
             if ok and copied:
-                logger.debug(f'Copied request log for {request_id}')
+                logger.debug(f'Copied {filename} for {request_id}')
+                outcome = 'found'
             elif ok:
                 logger.debug(f'Request log not found for {request_id}')
-        except Exception as e:  # pylint: disable=broad-except
-            logger.warning(f'Failed to copy log for request {request_id}: {e}')
-            if errors is not None:
-                errors.append({
-                    'component': 'requests',
-                    'resource': f'{request_id}/log',
-                    'error': str(e),
-                    'traceback': _full_traceback()
-                })
+                outcome = 'not_found'
+            else:
+                # Timed out. Whether the abandoned worker eventually
+                # delivered the log is folded into errors.json by
+                # _reconcile_timed_out_ops; final resolution lives there,
+                # not in this counter.
+                outcome = 'copy_timed_out'
+        # Counter keys use 'timed_out'; the per-request 'logs' outcome in
+        # request_info.json uses the more explicit 'copy_timed_out'.
+        counter_key = 'timed_out' if outcome == 'copy_timed_out' else outcome
+        outcomes[log_key][counter_key] += 1
+        return outcome
 
-        # Copy debug log file (only exists when
-        # ENABLE_REQUEST_DEBUG_LOGGING is enabled). Deadline-bounded too.
-        try:
-            ok, copied = _run_with_deadline(
-                functools.partial(_copy_request_log_file, request_id,
-                                  request_dir,
-                                  log_provider.RequestLogType.DEBUG,
-                                  'request_debug.log'),
-                _bounded_timeout(_REQUEST_LOG_COPY_TIMEOUT, deadline),
-                component='requests',
-                resource=f'{request_id}/request_debug.log',
-                errors=errors,
-                orphans=orphans)
-            if ok and copied:
-                logger.debug(f'Copied debug log for {request_id}')
-        except Exception as e:  # pylint: disable=broad-except
-            logger.warning(
-                f'Failed to copy debug log for request {request_id}: {e}')
-            if errors is not None:
-                errors.append({
-                    'component': 'requests',
-                    'resource': f'{request_id}/request_debug.log',
-                    'error': str(e),
-                    'traceback': _full_traceback()
-                })
+    # Deadline-exhaustion bookkeeping: ONE aggregate error record at the
+    # end instead of one identical record per skipped request (which, on
+    # a large dump, buried the few entries with real diagnostic content).
+    skipped_request_ids: List[str] = []
+    budget_exhausted_at: Optional[str] = None
+    skip_warned = False
 
-        timings.append({
-            'request_id': request_id,
-            'duration_s': round(time.monotonic() - request_start, 2),
+    timings: List[Dict[str, Any]] = []
+    # Sorted (raw set order is hash-randomized per process) so the
+    # aggregate skip record's first_skipped_id is the first request in
+    # processing order that hit the exhausted budget -- and the dump is
+    # deterministic.
+    try:
+        for request_id in sorted(request_ids):
+            if _deadline_exceeded(deadline):
+                if not skip_warned:
+                    remaining = (len(request_ids) - len(skipped_request_ids) -
+                                 outcomes['attempted'])
+                    logger.warning(
+                        'Overall debug-dump deadline exceeded; skipping '
+                        'remaining requests, starting with '
+                        f'{request_id} ({remaining} left).')
+                    skip_warned = True
+                    budget_exhausted_at = datetime.datetime.now().isoformat()
+                skipped_request_ids.append(request_id)
+                continue
+            request_start = time.monotonic()
+            request_dir = os.path.join(requests_dir, request_id)
+            outcomes['attempted'] += 1
+
+            request_info: Optional[Dict[str, Any]] = None
+            # Set when the request could not be read from the DB; a stub
+            # request_info.json is written for it after the log copies.
+            stub_error: Optional[str] = None
+            # Get request metadata from DB
+            try:
+                request = requests_lib.get_request(request_id)
+                if request is not None:
+                    request_info = {
+                        'request_id': request.request_id,
+                        'name': request.name,
+                        'status': request.status.value
+                                  if request.status else None,
+                        'created_at': request.created_at,
+                        'created_at_human': debug_dump_helpers.epoch_to_human(
+                            request.created_at),
+                        'finished_at': request.finished_at,
+                        'finished_at_human': debug_dump_helpers.epoch_to_human(
+                            request.finished_at),
+                        'cluster_name': request.cluster_name,
+                        'user_id': request.user_id,
+                        'status_msg': request.status_msg,
+                        'schedule_type': (request.schedule_type.value
+                                          if request.schedule_type else None),
+                        'request_body': _sanitize_request_body(request),
+                    }
+
+                    # Include error info if present
+                    try:
+                        error = request.get_error()
+                        if error:
+                            request_info['error'] = {
+                                'type': error.get('type'),
+                                'message': error.get('message'),
+                            }
+                    except Exception:  # pylint: disable=broad-except
+                        pass
+                else:
+                    logger.debug(f'Request {request_id} not found in DB')
+                    outcomes['not_in_db'] += 1
+                    stub_error = ('Request not found in database (row may '
+                                  'have been garbage-collected); no data '
+                                  'collected.')
+                    if errors is not None:
+                        errors.append({
+                            'component': 'requests',
+                            'resource': request_id,
+                            'error': stub_error,
+                        })
+            except Exception as e:  # pylint: disable=broad-except
+                logger.warning(
+                    f'Failed to get info for request {request_id}: {e}')
+                outcomes['db_errors'] += 1
+                stub_error = str(e)
+                if errors is not None:
+                    errors.append({
+                        'component': 'requests',
+                        'resource': request_id,
+                        'error': str(e),
+                        'traceback': _full_traceback()
+                    })
+
+            log_outcomes = {
+                'request_log': _copy_one_log(
+                    log_provider.RequestLogType.REQUEST, 'request.log',
+                    f'{request_id}/log', 'request_log'),
+                'request_debug_log': _copy_one_log(
+                    log_provider.RequestLogType.DEBUG, 'request_debug.log',
+                    f'{request_id}/request_debug.log', 'request_debug_log'),
+            }
+
+            # Written after the log copies (independent data) and carrying
+            # the per-log outcomes, so a reader of request_info.json knows
+            # which logs to expect next to it.
+            if request_info is not None:
+                request_info['logs'] = log_outcomes
+                try:
+                    request_info_path = os.path.join(request_dir,
+                                                     'request_info.json')
+                    with open(request_info_path, 'w', encoding='utf-8') as f:
+                        json.dump(request_info, f, indent=2, default=str)
+                    outcomes['info_written'] += 1
+                    logger.debug(f'Dumped request {request_id} '
+                                 f'(name={request_info["name"]}, '
+                                 f'status={request_info["status"]})')
+                except OSError as e:
+                    logger.warning(
+                        f'Failed to write request info for {request_id}: {e}')
+                    if errors is not None:
+                        errors.append({
+                            'component': 'requests',
+                            'resource': request_id,
+                            'error': str(e),
+                            'traceback': _full_traceback()
+                        })
+            elif stub_error is not None:
+                # Un-dumpable request: still leave an artifact (with the
+                # log outcomes) so the collected ID list reconciles.
+                _write_stub_request_info(request_dir, request_id, stub_error,
+                                         log_outcomes)
+
+            timings.append({
+                'request_id': request_id,
+                'duration_s': round(time.monotonic() - request_start, 2),
+            })
+    finally:
+        executor.shutdown(wait=False)
+
+    outcomes['skipped_deadline'] = len(skipped_request_ids)
+    outcomes['skipped_request_ids'] = skipped_request_ids
+    if skipped_request_ids and errors is not None:
+        errors.append({
+            'component': 'requests',
+            'resource': 'requests_deadline_skips',
+            'error': ('Skipped: overall debug-dump deadline exceeded. '
+                      f'{len(skipped_request_ids)} requests were skipped '
+                      'after the budget ran out; the full sorted list is '
+                      'in ids_manifest.json.'),
+            'skipped_count': len(skipped_request_ids),
+            'first_skipped_id': skipped_request_ids[0],
+            'budget_exhausted_at': budget_exhausted_at,
         })
 
     try:
@@ -1219,6 +1683,7 @@ def _dump_request_id_info(
     except OSError as e:
         logger.debug(f'Failed to write request timings: {e}')
     logger.debug('Exiting _dump_request_id_info')
+    return outcomes
 
 
 # Short connection timeout for the skylet-log-path resolution command. The
@@ -2302,7 +2767,7 @@ def _build_debug_dump(
     # deadline-aware (its internal calls are bounded and it's skipped once the
     # budget is gone), so the build always reaches the zip step with a coherent
     # partial instead of being hard-killed mid-section.
-    sections: List[Tuple[str, Callable[[], None]]] = [
+    sections: List[Tuple[str, Callable[[], Any]]] = [
         ('server_info', lambda: _dump_server_info(
             dump_dir, errors=errors, deadline=deadline, orphans=orphans)),
         ('request_ids',
@@ -2337,6 +2802,13 @@ def _build_debug_dump(
     # see where the budget went (and which sections were skipped) without
     # grepping the worker log.
     section_timings: List[Dict[str, Any]] = []
+    # Structured per-section outcomes (only the sections that return one,
+    # e.g. the requests section's outcome counters). Deliberately an
+    # isinstance check rather than a truthiness check: section functions
+    # are frequently replaced by test doubles whose return values are not
+    # JSON-serializable, and summary.json's json.dump below has no
+    # default=str -- any junk return is simply not captured.
+    section_outcomes: Dict[str, Any] = {}
     for name, dump_section in sections:
         if _deadline_exceeded(deadline):
             logger.warning(f'Skipping debug-dump section {name!r}: overall '
@@ -2362,14 +2834,22 @@ def _build_debug_dump(
         remaining = _remaining_budget(deadline)
         logger.info(f'debug dump: section {name!r} start' + (
             '' if remaining is None else f' ({remaining:.0f}s budget left)'))
-        dump_section()
+        ret = dump_section()
         duration = time.monotonic() - section_start
         logger.info(f'debug dump: section {name!r} done in {duration:.1f}s')
+        if isinstance(ret, dict):
+            section_outcomes[name] = ret
         section_timings.append({
             'section': name,
             'status': 'completed',
             'duration_s': round(duration, 2),
         })
+
+    # Fold the eventual outcome of every timed-out op (completed late,
+    # raised late, or still running) into its error record BEFORE
+    # errors.json is written, so the serialized error file matches the
+    # tree at zip time and can never contradict the archive.
+    _reconcile_timed_out_ops(orphans)
 
     # Write client info if provided
     if client_info:
@@ -2385,6 +2865,32 @@ def _build_debug_dump(
     with open(errors_path, 'w', encoding='utf-8') as f:
         json.dump(errors, f, indent=2, default=str)
 
+    # ID lists (and the requests skipped for a dead budget) live in their
+    # own manifest so summary.json stays scannable; summary.json points at
+    # both files instead of inlining their contents.
+    request_outcomes = section_outcomes.get('request_ids', {})
+
+    def _log_coverage(log_key: str) -> Dict[str, int]:
+        counts = request_outcomes.get(log_key, {})
+        # missing = not_found + copy_timed_out: a timed-out copy whose
+        # worker later delivered the log is annotated in errors.json, but
+        # the log only counts as present when the copy returned in time.
+        found = counts.get('found', 0)
+        missing = counts.get('not_found', 0) + counts.get('timed_out', 0)
+        return {'found': found, 'missing': missing}
+
+    request_logs = _log_coverage('request_log')
+    request_debug_logs = _log_coverage('request_debug_log')
+    ids_manifest: Dict[str, Any] = {
+        'request_ids': sorted(debug_dump_context['request_ids']),
+        'cluster_names': sorted(debug_dump_context['cluster_names']),
+        'managed_job_ids': sorted(debug_dump_context['managed_job_ids']),
+        'skipped_request_ids': request_outcomes.get('skipped_request_ids', []),
+    }
+    ids_manifest_path = os.path.join(dump_dir, 'ids_manifest.json')
+    with open(ids_manifest_path, 'w', encoding='utf-8') as f:
+        json.dump(ids_manifest, f, indent=2)
+
     # Write summary file
     summary: Dict[str, Any] = {
         'requested': requested,
@@ -2392,16 +2898,40 @@ def _build_debug_dump(
             'request_count': len(debug_dump_context['request_ids']),
             'cluster_count': len(debug_dump_context['cluster_names']),
             'managed_job_count': len(debug_dump_context['managed_job_ids']),
-            'request_ids': sorted(debug_dump_context['request_ids']),
-            'cluster_names': sorted(debug_dump_context['cluster_names']),
-            'managed_job_ids': sorted(debug_dump_context['managed_job_ids']),
+            'request_logs_found': request_logs['found'],
+            'request_logs_missing': request_logs['missing'],
+            'request_debug_logs_found': request_debug_logs['found'],
+            'request_debug_logs_missing': request_debug_logs['missing'],
         },
         'section_timings': section_timings,
-        'errors': errors,
+        'section_outcomes': section_outcomes,
+        'errors_count': len(errors),
+        'errors_file': 'errors.json',
+        'ids_manifest_file': 'ids_manifest.json',
     }
     summary_path = os.path.join(dump_dir, 'summary.json')
     with open(summary_path, 'w', encoding='utf-8') as f:
         json.dump(summary, f, indent=2)
+
+
+def _iter_dump_files(dump_dir: str, excluded_paths: Set[str]) -> Iterator[str]:
+    """Iterate the dump's files for the pre-zip size sum and the zip walk.
+
+    Prunes staging directories (a log copy reaches its final name only
+    via an atomic rename after completing, so anything still in .staging
+    is partial or quarantined) and any file whose absolute path is in
+    ``excluded_paths`` -- the final paths of orphans the reconciler could
+    not resolve, computed once before the walk (a fixed set, so a file
+    landing at an excluded path after the set was built still cannot
+    enter the archive or the size total).
+    """
+    for root, dirs, files in os.walk(dump_dir):
+        dirs[:] = [d for d in dirs if d != _LOG_STAGING_DIRNAME]
+        for file in files:
+            file_path = os.path.join(root, file)
+            if os.path.abspath(file_path) in excluded_paths:
+                continue
+            yield file_path
 
 
 def create_debug_dump(
@@ -2543,10 +3073,21 @@ def create_debug_dump(
             debug_handler.flush()
             debug_handler.close()
 
+        # Fixed set (computed once, before the walk) of the final paths of
+        # orphans the reconciler could not resolve: their output must stay
+        # out of the archive even if a worker lands a file at the final
+        # name between the reconciliation and the zip (e.g. a stalled
+        # rename that finally completes). See _iter_dump_files.
+        excluded_paths = {
+            os.path.abspath(op['final_path'])
+            for op in debug_dump_context['timed_out_ops']
+            if op.get('excluded_from_archive') and op.get('final_path')
+        }
+
         # Log total dump size before zipping
-        total_dump_size = sum(f.stat().st_size
-                              for f in pathlib.Path(dump_dir).rglob('*')
-                              if f.is_file())
+        total_dump_size = sum(
+            os.stat(file_path).st_size
+            for file_path in _iter_dump_files(dump_dir, excluded_paths))
 
         # Create zip file in PERSISTENT location (outside temp dir)
         zip_filename = f'debug_dump_{timestamp}.zip'
@@ -2560,12 +3101,10 @@ def create_debug_dump(
         zip_start = time.monotonic()
         file_count = 0
         with zipfile.ZipFile(zip_file_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
-            for root, _, files in os.walk(dump_dir):
-                for file in files:
-                    file_path = os.path.join(root, file)
-                    arcname = os.path.relpath(file_path, temp_dir)
-                    zipf.write(file_path, arcname)
-                    file_count += 1
+            for file_path in _iter_dump_files(dump_dir, excluded_paths):
+                arcname = os.path.relpath(file_path, temp_dir)
+                zipf.write(file_path, arcname)
+                file_count += 1
 
         logger.info(f'debug dump: created {zip_filename} ({file_count} files) '
                     f'in {time.monotonic() - zip_start:.1f}s')

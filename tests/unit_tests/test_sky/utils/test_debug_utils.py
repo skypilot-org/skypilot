@@ -1428,16 +1428,30 @@ class TestCreateDebugDump:
             summary_files = [n for n in names if n.endswith('summary.json')]
             assert len(summary_files) == 1
 
-            # Verify summary content
+            # Verify summary content. The full error records and ID lists
+            # live in errors.json / ids_manifest.json; summary.json only
+            # carries a count and file pointers.
             summary_data = json.loads(zf.read(summary_files[0]))
             assert 'requested' in summary_data
             assert 'collected' in summary_data
-            assert 'errors' in summary_data
+            assert 'errors' not in summary_data
+            assert summary_data['errors_file'] == 'errors.json'
+            assert isinstance(summary_data['errors_count'], int)
             assert 'warnings' not in summary_data
             assert 'req-1' in summary_data['requested']['request_ids']
 
             errors_files = [n for n in names if n.endswith('errors.json')]
             assert len(errors_files) == 1
+
+            manifest_files = [
+                n for n in names if n.endswith('ids_manifest.json')
+            ]
+            assert len(manifest_files) == 1
+            manifest = json.loads(zf.read(manifest_files[0]))
+            assert 'request_ids' in manifest
+            assert 'cluster_names' in manifest
+            assert 'managed_job_ids' in manifest
+            assert 'skipped_request_ids' in manifest
 
             # debug_dump.log should be present (from the file handler)
             log_files = [n for n in names if n.endswith('debug_dump.log')]
@@ -1734,11 +1748,11 @@ class TestRequestIdPrefixResolution:
             result = debug_utils.create_debug_dump(request_ids=['abc'])
 
         with zipfile.ZipFile(result, 'r') as zf:
-            summary = json.loads(
+            manifest = json.loads(
                 zf.read([
-                    n for n in zf.namelist() if n.endswith('summary.json')
+                    n for n in zf.namelist() if n.endswith('ids_manifest.json')
                 ][0]))
-        collected_ids = summary['collected']['request_ids']
+        collected_ids = manifest['request_ids']
         assert 'abc-111' in collected_ids
         assert 'abc-222' in collected_ids
 
@@ -1765,13 +1779,13 @@ class TestRequestIdPrefixResolution:
             result = debug_utils.create_debug_dump(request_ids=['nonexistent'])
 
         with zipfile.ZipFile(result, 'r') as zf:
-            summary = json.loads(
+            manifest = json.loads(
                 zf.read([
-                    n for n in zf.namelist() if n.endswith('summary.json')
+                    n for n in zf.namelist() if n.endswith('ids_manifest.json')
                 ][0]))
         # The unmatched prefix should not appear in collected IDs
         # (only system request IDs should be present)
-        assert 'nonexistent' not in summary['collected']['request_ids']
+        assert 'nonexistent' not in manifest['request_ids']
 
 
 # ---------------------------------------------------------------------------
@@ -3098,17 +3112,27 @@ class TestDumpRequestIdInfo:
 
     @mock.patch('sky.utils.debug_utils.requests_lib.get_request')
     def test_request_not_found(self, mock_get_request, tmp_path):
-        """Should handle request not found gracefully."""
+        """A request missing from the DB gets an errors.json entry and a
+        stub request_info.json (not-found is not an exception, so the
+        entry carries no traceback), so the collected ID list can be
+        reconciled from the dump alone."""
         mock_get_request.return_value = None
 
-        errors: List[Dict[str, str]] = []
+        errors: List[Dict[str, Any]] = []
         debug_utils._dump_request_id_info({'req-missing'}, str(tmp_path),
                                           errors)
 
-        # No crash, no error recorded (not-found is not an error)
-        assert not errors
+        assert len(errors) == 1
+        assert errors[0]['component'] == 'requests'
+        assert errors[0]['resource'] == 'req-missing'
+        assert 'not found in database' in errors[0]['error']
+        assert 'traceback' not in errors[0]
         info_path = tmp_path / 'requests' / 'req-missing' / 'request_info.json'
-        assert not info_path.exists()
+        assert info_path.exists()
+        with open(info_path) as f:
+            stub = json.load(f)
+        assert stub['request_id'] == 'req-missing'
+        assert 'not found in database' in stub['error']
 
     @mock.patch('sky.utils.debug_utils.requests_lib.get_request')
     def test_db_failure_records_error(self, mock_get_request, tmp_path):
@@ -3122,6 +3146,12 @@ class TestDumpRequestIdInfo:
         assert errors[0]['component'] == 'requests'
         assert 'DB is down' in errors[0]['error']
         assert 'traceback' in errors[0]
+        # The failed request still leaves a stub artifact.
+        info_path = tmp_path / 'requests' / 'req-fail' / 'request_info.json'
+        with open(info_path) as f:
+            stub = json.load(f)
+        assert stub['request_id'] == 'req-fail'
+        assert 'DB is down' in stub['error']
 
     def test_empty_request_ids_is_noop(self, tmp_path):
         """Empty request_ids should not create any files."""
@@ -3506,13 +3536,14 @@ class TestDumpRequestIdInfoLogCollection:
     @pytest.fixture(autouse=True)
     def _mock_get_request(self):
         with mock.patch('sky.utils.debug_utils.requests_lib.get_request',
-                        return_value=None):
+                        side_effect=lambda request_id: _make_request(
+                            request_id=request_id)):
             yield
 
     def test_logs_collected_via_log_provider(self, tmp_path):
         provider = mock.MagicMock()
 
-        def _fake_copy(request_id, log_type, dest_path):
+        def _fake_copy(request_id, log_type, dest_path, stop_event=None):
             del request_id  # unused
             if log_type == log_provider_lib.RequestLogType.REQUEST:
                 dest_path.write_text('request log content')
@@ -4324,10 +4355,86 @@ class TestRunWithDeadline:
             assert errors[0]['component'] == 'comp'
             assert len(orphans) == 1
             assert orphans[0]['resource'] == 'res'
+            # The orphan record carries a direct reference to the error
+            # record just appended, so reconciliation can rewrite it.
+            assert orphans[0]['error_entry'] is errors[0]
             # The worker thread is orphaned, still running (not killed).
             assert not orphans[0]['future'].done()
         finally:
             release.set()  # let the orphaned worker exit promptly
+
+    def test_timeout_sets_stop_event(self):
+        """On timeout the caller's stop_event is set first, so a
+        cooperating op terminates at its next checkpoint."""
+        stop_event = threading.Event()
+        errors: List[Dict[str, Any]] = []
+        orphans: List[Dict[str, Any]] = []
+        try:
+            ok, _ = debug_utils._run_with_deadline(stop_event.wait,
+                                                   timeout=0.05,
+                                                   component='comp',
+                                                   resource='res',
+                                                   errors=errors,
+                                                   orphans=orphans,
+                                                   stop_event=stop_event)
+            assert ok is False
+            assert stop_event.is_set()
+        finally:
+            stop_event.set()
+
+    def test_timeout_shared_executor_not_shut_down(self):
+        """A caller-provided executor is never shut down by a timeout, and
+        stays usable afterwards."""
+        executor = concurrent.futures.ThreadPoolExecutor(max_workers=2)
+        release = threading.Event()
+        errors: List[Dict[str, Any]] = []
+        orphans: List[Dict[str, Any]] = []
+        try:
+            ok, _ = debug_utils._run_with_deadline(release.wait,
+                                                   timeout=0.05,
+                                                   component='comp',
+                                                   resource='res',
+                                                   errors=errors,
+                                                   orphans=orphans,
+                                                   executor=executor)
+            assert ok is False
+            # Still usable after the timeout (submit + run a real op).
+            assert executor.submit(lambda: 'alive').result() == 'alive'
+        finally:
+            release.set()
+            executor.shutdown(wait=True)
+
+    def test_saturated_shared_pool_falls_back_to_fresh_executor(self):
+        """When every shared worker is held by an orphan, a new op still
+        gets a real attempt via a fresh single-worker executor instead of
+        being recorded as timed out without ever starting."""
+        executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+        slots = threading.Semaphore(1)
+        release = threading.Event()
+        orphans: List[Dict[str, Any]] = []
+        try:
+            # First op times out and holds the only shared worker.
+            ok, _ = debug_utils._run_with_deadline(release.wait,
+                                                   timeout=0.05,
+                                                   component='c',
+                                                   resource='orphaned',
+                                                   orphans=orphans,
+                                                   executor=executor,
+                                                   executor_slots=slots)
+            assert ok is False
+            # The slot is still held by the orphan, so the second op must
+            # fall back -- and still succeed with a real timeout.
+            ok, result = debug_utils._run_with_deadline(lambda: 'ran',
+                                                        timeout=5,
+                                                        component='c',
+                                                        resource='second',
+                                                        executor=executor,
+                                                        executor_slots=slots)
+            assert ok is True
+            assert result == 'ran'
+        finally:
+            release.set()
+            executor.shutdown(wait=True)
 
     def test_non_timeout_exception_propagates(self):
         """A non-timeout error from fn propagates (each call site keeps its own
@@ -4493,3 +4600,644 @@ class TestOverallDeadlineDump:
         assert result.exists()
         for fn, m in section_mocks.items():
             assert m.call_count == 1, f'{fn} should have run exactly once'
+
+
+# ---------------------------------------------------------------------------
+# Tests for _reconcile_timed_out_ops
+# ---------------------------------------------------------------------------
+class TestReconcileTimedOutOps:
+    """_reconcile_timed_out_ops folds orphan outcomes into error records."""
+
+    @staticmethod
+    def _make_orphan(error_entry=None,
+                     result=None,
+                     exc=None,
+                     publish=None,
+                     resource='res'):
+        future = concurrent.futures.Future()
+        if exc is not None:
+            future.set_exception(exc)
+        else:
+            future.set_result(result)
+        orphan = {
+            'component': 'c',
+            'resource': resource,
+            'future': future,
+            'started': time.monotonic(),
+            'error_entry': error_entry,
+        }
+        if publish is not None:
+            orphan['publish'] = publish
+        return orphan
+
+    def test_done_truthy_with_publish_closure_publishes_and_annotates(
+            self, tmp_path):
+        request_dir = tmp_path / 'requests' / 'req-1'
+        staging = request_dir / '.staging'
+        staging.mkdir(parents=True)
+        (staging / 'request.log').write_text('late content')
+        error_entry = {
+            'component': 'requests',
+            'resource': 'req-1/log',
+            'error': 'req-1/log timed out after 30s; skipped.'
+        }
+        orphan = self._make_orphan(
+            error_entry,
+            result=True,
+            publish=lambda: debug_utils._publish_staged_log(
+                str(request_dir), 'request.log'))
+        debug_utils._reconcile_timed_out_ops([orphan])
+
+        assert (request_dir / 'request.log').read_text() == 'late content'
+        assert not (staging / 'request.log').exists()
+        assert 'completed after the timeout' in error_entry['error']
+        assert 'output is included' in error_entry['error']
+
+    def test_done_truthy_already_published_is_idempotent(self, tmp_path):
+        """A file the worker already published (staging gone, final present)
+        must not be reported as 'could not be published'."""
+        request_dir = tmp_path / 'requests' / 'req-1'
+        request_dir.mkdir(parents=True)
+        (request_dir / 'request.log').write_text('content')
+        error_entry = {'error': 'timed out'}
+        orphan = self._make_orphan(
+            error_entry,
+            result=True,
+            publish=lambda: debug_utils._publish_staged_log(
+                str(request_dir), 'request.log'))
+        debug_utils._reconcile_timed_out_ops([orphan])
+
+        assert 'could not be published' not in error_entry['error']
+        assert 'output is included' in error_entry['error']
+
+    def test_done_truthy_without_closure_says_not_captured(self):
+        error_entry = {'error': 'timed out'}
+        orphan = self._make_orphan(error_entry, result={'some': 'data'})
+        debug_utils._reconcile_timed_out_ops([orphan])
+
+        assert 'completed after the timeout' in error_entry['error']
+        assert 'result was not captured' in error_entry['error']
+
+    def test_done_exception_gets_late_traceback_and_warning(self, monkeypatch):
+        warnings = []
+        monkeypatch.setattr(debug_utils.logger, 'warning',
+                            lambda *a, **k: warnings.append(a))
+        error_entry = {'error': 'timed out'}
+        orphan = self._make_orphan(error_entry, exc=RuntimeError('late boom'))
+        debug_utils._reconcile_timed_out_ops([orphan])
+
+        assert 'raised an exception after the timeout' in error_entry['error']
+        assert 'RuntimeError: late boom' in error_entry['late_traceback']
+        assert warnings
+
+    def test_cancelled_future_is_skipped(self):
+        """A cancelled op never ran; it must not be misread as a late
+        failure (a bare .result() would raise CancelledError)."""
+        error_entry = {'error': 'timed out'}
+        future = concurrent.futures.Future()
+        assert future.cancel()
+        orphan = {
+            'component': 'c',
+            'resource': 'res',
+            'future': future,
+            'started': time.monotonic(),
+            'error_entry': error_entry,
+        }
+        debug_utils._reconcile_timed_out_ops([orphan])
+
+        assert error_entry['error'] == 'timed out'
+        assert 'excluded_from_archive' not in orphan
+
+    def test_still_running_past_grace_is_quarantined(self):
+        release = threading.Event()
+        executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+        try:
+            future = executor.submit(release.wait)
+            error_entry = {'error': 'timed out'}
+            orphan = {
+                'component': 'c',
+                'resource': 'res',
+                'future': future,
+                'started': time.monotonic(),
+                'error_entry': error_entry,
+            }
+            debug_utils._reconcile_timed_out_ops([orphan], grace_s=0)
+
+            # The error entry stays accurate (nothing was published), and
+            # the orphan is marked so its final path is pruned from the
+            # zip walk.
+            assert error_entry['error'] == 'timed out'
+            assert orphan['excluded_from_archive'] is True
+            # A logging done-callback is attached: it fires once the
+            # worker eventually finishes.
+            fired = threading.Event()
+            future.add_done_callback(lambda _f: fired.set())
+            release.set()
+            assert fired.wait(5)
+        finally:
+            executor.shutdown(wait=True)
+
+    def test_publish_raising_does_not_abort_other_orphans(self):
+        error_entry1 = {'error': 'timed out'}
+        error_entry2 = {'error': 'timed out'}
+
+        def _bad_publish():
+            raise RuntimeError('publish failed')
+
+        orphan1 = self._make_orphan(error_entry1,
+                                    result=True,
+                                    publish=_bad_publish)
+        orphan2 = self._make_orphan(error_entry2, result=True, resource='res-2')
+        debug_utils._reconcile_timed_out_ops([orphan1, orphan2])
+
+        assert 'could not be published' in error_entry1['error']
+        assert 'result was not captured' in error_entry2['error']
+
+
+# ---------------------------------------------------------------------------
+# Tests for _copy_request_log_file / _publish_staged_log
+# ---------------------------------------------------------------------------
+class TestCopyRequestLogFile:
+    """Staging, the worker-side publish gate, and cleanup."""
+
+    def test_success_publishes_via_rename(self, tmp_path):
+        request_dir = tmp_path / 'requests' / 'req-1'
+        provider = mock.MagicMock()
+
+        def _fake_copy(request_id, log_type, dest_path, stop_event=None):
+            del request_id, log_type, stop_event
+            dest_path.write_text('content')
+            return True
+
+        provider.copy_log_file.side_effect = _fake_copy
+        with mock.patch('sky.utils.debug_utils.log_provider.get_log_provider',
+                        return_value=provider):
+            copied = debug_utils._copy_request_log_file(
+                'req-1', str(request_dir),
+                log_provider_lib.RequestLogType.REQUEST, 'request.log')
+        assert copied
+        assert (request_dir / 'request.log').read_text() == 'content'
+        assert not (request_dir / '.staging' / 'request.log').exists()
+
+    def test_missing_log_returns_false_and_cleans_staging(self, tmp_path):
+        request_dir = tmp_path / 'requests' / 'req-1'
+        provider = mock.MagicMock()
+
+        def _fake_copy(request_id, log_type, dest_path, stop_event=None):
+            del request_id, log_type, stop_event
+            # A provider that touched the dest and still returned False.
+            dest_path.write_text('partial')
+            return False
+
+        provider.copy_log_file.side_effect = _fake_copy
+        with mock.patch('sky.utils.debug_utils.log_provider.get_log_provider',
+                        return_value=provider):
+            copied = debug_utils._copy_request_log_file(
+                'req-1', str(request_dir),
+                log_provider_lib.RequestLogType.REQUEST, 'request.log')
+        assert not copied
+        assert not (request_dir / 'request.log').exists()
+        assert not (request_dir / '.staging' / 'request.log').exists()
+
+    def test_stop_set_leaves_file_in_staging(self, tmp_path):
+        """An abandoned copy that finishes anyway returns True but does not
+        publish: the complete file waits in .staging for the reconciler
+        (worker-side gate)."""
+        request_dir = tmp_path / 'requests' / 'req-1'
+        provider = mock.MagicMock()
+
+        def _fake_copy(request_id, log_type, dest_path, stop_event=None):
+            del request_id, log_type, stop_event
+            dest_path.write_text('complete')
+            return True
+
+        provider.copy_log_file.side_effect = _fake_copy
+        stop_event = threading.Event()
+        stop_event.set()
+        with mock.patch('sky.utils.debug_utils.log_provider.get_log_provider',
+                        return_value=provider):
+            copied = debug_utils._copy_request_log_file(
+                'req-1',
+                str(request_dir),
+                log_provider_lib.RequestLogType.REQUEST,
+                'request.log',
+                stop_event=stop_event)
+        assert copied
+        assert (request_dir / '.staging' /
+                'request.log').read_text() == 'complete'
+        assert not (request_dir / 'request.log').exists()
+
+    def test_publish_oserror_returns_false(self, tmp_path, monkeypatch):
+        request_dir = tmp_path / 'requests' / 'req-1'
+        staging = request_dir / '.staging'
+        staging.mkdir(parents=True)
+        (staging / 'request.log').write_text('content')
+        monkeypatch.setattr(debug_utils.os, 'replace',
+                            mock.Mock(side_effect=OSError('stalled')))
+        assert not debug_utils._publish_staged_log(str(request_dir),
+                                                   'request.log')
+
+
+# ---------------------------------------------------------------------------
+# Tests for the stop_event capability check on providers
+# ---------------------------------------------------------------------------
+class _OldStyleProvider:
+    """A provider whose copy_log_file predates the stop_event parameter."""
+
+    def __init__(self):
+        self.calls = []
+
+    def copy_log_file(self, request_id, log_type, dest_path):
+        self.calls.append((request_id, log_type, dest_path))
+        return True
+
+
+class _NewStyleProvider:
+    """A provider whose copy_log_file accepts the stop_event parameter."""
+
+    def __init__(self):
+        self.calls = []
+
+    def copy_log_file(self, request_id, log_type, dest_path, stop_event=None):
+        self.calls.append((request_id, log_type, dest_path, stop_event))
+        return True
+
+
+class TestProviderCopyLogFileSignature:
+    """stop_event is forwarded only to providers that accept it."""
+
+    def test_old_signature_called_without_kwarg(self, tmp_path):
+        provider = _OldStyleProvider()
+        with mock.patch('sky.utils.debug_utils.log_provider.get_log_provider',
+                        return_value=provider):
+            assert debug_utils._provider_copy_log_file(
+                'r', log_provider_lib.RequestLogType.REQUEST,
+                str(tmp_path / 'dest.log'), None)
+        assert len(provider.calls) == 1
+        assert len(provider.calls[0]) == 3  # no stop_event forwarded
+
+    def test_new_signature_receives_kwarg(self, tmp_path):
+        provider = _NewStyleProvider()
+        stop_event = threading.Event()
+        with mock.patch('sky.utils.debug_utils.log_provider.get_log_provider',
+                        return_value=provider):
+            assert debug_utils._provider_copy_log_file(
+                'r', log_provider_lib.RequestLogType.REQUEST,
+                str(tmp_path / 'dest.log'), stop_event)
+        assert provider.calls[0][3] is stop_event
+
+    def test_signature_error_treated_as_not_capable(self, tmp_path,
+                                                    monkeypatch):
+        provider = _OldStyleProvider()
+
+        def _boom(func):
+            del func
+            raise ValueError('no signature for this callable')
+
+        monkeypatch.setattr(debug_utils.inspect, 'signature', _boom)
+        with mock.patch('sky.utils.debug_utils.log_provider.get_log_provider',
+                        return_value=provider):
+            # Falls back to the old 3-arg call shape instead of raising.
+            assert debug_utils._provider_copy_log_file(
+                'r', log_provider_lib.RequestLogType.REQUEST,
+                str(tmp_path / 'dest.log'), None)
+        assert len(provider.calls[0]) == 3
+
+
+# ---------------------------------------------------------------------------
+# Tests for _dump_request_id_info outcome accounting and executor discipline
+# ---------------------------------------------------------------------------
+class TestDumpRequestIdInfoOutcomes:
+    """Aggregate skip record, closing arithmetic, shared executor."""
+
+    def test_past_deadline_one_aggregate_entry(self, tmp_path, monkeypatch):
+        warnings = []
+        monkeypatch.setattr(debug_utils.logger, 'warning',
+                            lambda *a, **k: warnings.append(a))
+        errors: List[Dict[str, Any]] = []
+        outcomes = debug_utils._dump_request_id_info({'r1', 'r2', 'r3'},
+                                                     str(tmp_path),
+                                                     errors,
+                                                     deadline=time.monotonic() -
+                                                     1)
+
+        # Exactly ONE aggregate entry, not one identical record per
+        # skipped request.
+        skips = [
+            e for e in errors if e['resource'] == 'requests_deadline_skips'
+        ]
+        assert len(skips) == 1
+        skip = skips[0]
+        assert skip['component'] == 'requests'
+        assert skip['error'].startswith(
+            'Skipped: overall debug-dump deadline exceeded.')
+        assert skip['skipped_count'] == 3
+        assert skip['first_skipped_id'] == 'r1'
+        assert skip['budget_exhausted_at'] is not None
+        # Exactly one WARNING, logged at the first per-request skip.
+        deadline_warnings = [w for w in warnings if 'deadline exceeded' in w[0]]
+        assert len(deadline_warnings) == 1
+        # Outcomes arithmetic closes.
+        assert outcomes['in_scope'] == 3
+        assert outcomes['attempted'] == 0
+        assert outcomes['skipped_deadline'] == 3
+        assert (outcomes['in_scope'] == outcomes['attempted'] +
+                outcomes['skipped_deadline'])
+        assert outcomes['skipped_request_ids'] == ['r1', 'r2', 'r3']
+        # No request dir is created for a skipped request.
+        assert not (tmp_path / 'requests' / 'r1').exists()
+
+    def test_outcomes_arithmetic_closes(self, tmp_path):
+
+        def _fake_get(request_id):
+            if request_id == 'r-ok':
+                return _make_request(request_id='r-ok',
+                                     name='sky.launch',
+                                     status='SUCCEEDED')
+            if request_id == 'r-fail':
+                raise RuntimeError('DB is down')
+            return None  # r-missing
+
+        provider = mock.MagicMock()
+
+        def _fake_copy(request_id, log_type, dest_path, stop_event=None):
+            del stop_event  # unused
+            if (request_id == 'r-ok' and
+                    log_type == log_provider_lib.RequestLogType.REQUEST):
+                dest_path.write_text('log')
+                return True
+            return False
+
+        provider.copy_log_file.side_effect = _fake_copy
+        with mock.patch('sky.utils.debug_utils.requests_lib.get_request',
+                        side_effect=_fake_get), \
+             mock.patch(
+                 'sky.utils.debug_utils.log_provider.get_log_provider',
+                 return_value=provider):
+            errors: List[Dict[str, Any]] = []
+            outcomes = debug_utils._dump_request_id_info(
+                {'r-ok', 'r-missing', 'r-fail'}, str(tmp_path), errors)
+
+        assert outcomes['in_scope'] == 3
+        assert outcomes['attempted'] == 3
+        assert outcomes['skipped_deadline'] == 0
+        assert outcomes['info_written'] == 1
+        assert outcomes['not_in_db'] == 1
+        assert outcomes['db_errors'] == 1
+        assert (outcomes['attempted'] == outcomes['info_written'] +
+                outcomes['not_in_db'] + outcomes['db_errors'])
+        assert outcomes['request_log'] == {
+            'found': 1,
+            'not_found': 2,
+            'timed_out': 0
+        }
+        # request_info.json carries the per-log outcomes...
+        with open(tmp_path / 'requests' / 'r-ok' / 'request_info.json',
+                  encoding='utf-8') as f:
+            info = json.load(f)
+        assert info['logs'] == {
+            'request_log': 'found',
+            'request_debug_log': 'not_found'
+        }
+        # ...and every attempted request leaves an artifact (stub or full).
+        for req in ('r-ok', 'r-missing', 'r-fail'):
+            assert (tmp_path / 'requests' / req / 'request_info.json').exists()
+
+    def test_one_shared_executor_for_section(self, tmp_path, monkeypatch):
+        real_executor = concurrent.futures.ThreadPoolExecutor
+        constructions = []
+
+        class _CountingExecutor(real_executor):
+
+            def __init__(self, *args, **kwargs):
+                constructions.append(kwargs.get('thread_name_prefix'))
+                super().__init__(*args, **kwargs)
+
+        monkeypatch.setattr(debug_utils.concurrent.futures,
+                            'ThreadPoolExecutor', _CountingExecutor)
+        with mock.patch('sky.utils.debug_utils.requests_lib.get_request',
+                        return_value=None), \
+             mock.patch('sky.utils.debug_utils.log_provider.get_log_provider',
+                        return_value=mock.MagicMock()):
+            debug_utils._dump_request_id_info({f'r-{i}' for i in range(5)},
+                                              str(tmp_path), [])
+
+        # Exactly one executor for the whole section (previously two were
+        # created per request).
+        assert constructions == ['debug-dump-log-copy']
+
+    def test_saturated_pool_falls_back_per_op(self, tmp_path, monkeypatch):
+        """8 Event-blocked copies hold all shared workers; the next copy
+        still gets a real attempt via a fresh per-op executor."""
+        monkeypatch.setattr(debug_utils, '_REQUEST_LOG_COPY_TIMEOUT', 0.05)
+        real_executor = concurrent.futures.ThreadPoolExecutor
+        constructions = []
+
+        class _CountingExecutor(real_executor):
+
+            def __init__(self, *args, **kwargs):
+                constructions.append(kwargs.get('thread_name_prefix'))
+                super().__init__(*args, **kwargs)
+
+        monkeypatch.setattr(debug_utils.concurrent.futures,
+                            'ThreadPoolExecutor', _CountingExecutor)
+        block = threading.Event()
+        provider = mock.MagicMock()
+
+        def _fake_copy(request_id, log_type, dest_path, stop_event=None):
+            del stop_event  # ignored on purpose: see block.wait() below
+            if request_id.startswith('block'):
+                # Holds its worker until released, ignoring the stop
+                # event (an uninterruptible provider).
+                block.wait()
+                return False
+            if log_type == log_provider_lib.RequestLogType.REQUEST:
+                dest_path.write_text('fast log')
+                return True
+            return False
+
+        provider.copy_log_file.side_effect = _fake_copy
+        request_ids = {f'block-{i}' for i in range(8)} | {'fast'}
+        try:
+            with mock.patch(
+                    'sky.utils.debug_utils.requests_lib.get_request',
+                    return_value=None), \
+                 mock.patch(
+                     'sky.utils.debug_utils.log_provider.get_log_provider',
+                     return_value=provider):
+                debug_utils._dump_request_id_info(request_ids, str(tmp_path),
+                                                  [])
+        finally:
+            block.set()  # release the orphaned workers
+
+        # The fast request's log was really copied and published via the
+        # fallback executor.
+        assert (tmp_path / 'requests' / 'fast' /
+                'request.log').read_text() == 'fast log'
+        # One shared executor + one fresh fallback executor per op that
+        # found the pool saturated (8 blocked requests x 2 log types fill
+        # the 8 workers after 8 ops; the remaining 10 ops fall back, the
+        # last of which is the fast request's debug-log copy).
+        assert constructions.count('debug-dump-log-copy') == 1
+        assert constructions.count(None) == 10
+
+
+# ---------------------------------------------------------------------------
+# Tests for _iter_dump_files
+# ---------------------------------------------------------------------------
+class TestIterDumpFiles:
+    """The pre-zip size sum and zip walk prune .staging and excluded paths."""
+
+    def test_prunes_staging_and_excluded_paths(self, tmp_path):
+        dump_dir = tmp_path / 'dump'
+        r1_staging = dump_dir / 'requests' / 'r1' / '.staging'
+        r1_staging.mkdir(parents=True)
+        (r1_staging / 'request.log').write_text('partial')
+        (dump_dir / 'requests' / 'r1' / 'request.log').write_text('done')
+        (dump_dir / 'requests' / 'r2').mkdir(parents=True)
+        (dump_dir / 'requests' / 'r2' / 'request.log').write_text('quarantined')
+        excluded = {
+            os.path.abspath(str(dump_dir / 'requests' / 'r2' / 'request.log'))
+        }
+        files = list(debug_utils._iter_dump_files(str(dump_dir), excluded))
+        rel = {os.path.relpath(f, str(dump_dir)) for f in files}
+        assert rel == {os.path.join('requests', 'r1', 'request.log')}
+
+    def test_no_exclusions_keeps_everything(self, tmp_path):
+        dump_dir = tmp_path / 'dump'
+        (dump_dir / 'requests' / 'r2').mkdir(parents=True)
+        (dump_dir / 'requests' / 'r2' / 'request.log').write_text('kept')
+        files = list(debug_utils._iter_dump_files(str(dump_dir), set()))
+        assert len(files) == 1
+
+
+# ---------------------------------------------------------------------------
+# End-to-end regression: an orphaned log copy must never contradict the
+# archive (fully event-gated, no sleep-based outcomes).
+# ---------------------------------------------------------------------------
+class TestOrphanedLogCopyDump:
+    """create_debug_dump with a request-log copy that outlives its timeout.
+
+    Variant A: the copy completes right after the timeout (the stop event
+    IS the release signal) -- it must be published during reconciliation
+    and its errors.json entry annotated accordingly.
+    Variant B: the copy is still running past the (zeroed) grace -- its
+    final path must be excluded from the zip while the entry accurately
+    says timed out.
+    """
+
+    _CROSSLINK_FNS = TestOverallDeadlineDump._CROSSLINK_FNS
+    _SECTION_FNS = (
+        '_dump_server_info',
+        '_dump_kube_contexts_info',
+        '_dump_cluster_info',
+        '_dump_managed_job_info',
+    )
+
+    def _run_dump(self, tmp_path, provider):
+        with contextlib.ExitStack() as stack:
+            for fn in self._CROSSLINK_FNS:
+                stack.enter_context(mock.patch(f'sky.utils.debug_utils.{fn}'))
+            # Everything except the requests section.
+            for fn in self._SECTION_FNS:
+                stack.enter_context(mock.patch(f'sky.utils.debug_utils.{fn}'))
+            stack.enter_context(
+                mock.patch(
+                    'sky.utils.debug_utils.requests_lib'
+                    '.get_requests_with_prefix',
+                    side_effect=lambda prefix, fields=None:
+                    [mock.MagicMock(request_id=prefix)]))
+            stack.enter_context(
+                mock.patch('sky.utils.debug_utils.requests_lib.get_request',
+                           side_effect=lambda request_id: _make_request(
+                               request_id=request_id,
+                               name='sky.launch',
+                               status='RUNNING')
+                           if request_id == 'req-orphan' else None))
+            stack.enter_context(
+                mock.patch(
+                    'sky.utils.debug_utils.log_provider.get_log_provider',
+                    return_value=provider))
+            stack.enter_context(
+                mock.patch('sky.utils.debug_utils.DEBUG_DUMP_DIR',
+                           str(tmp_path / 'debug_dumps')))
+            return debug_utils.create_debug_dump(request_ids=['req-orphan'])
+
+    @staticmethod
+    def _read_json(zip_path, suffix):
+        with zipfile.ZipFile(zip_path, 'r') as zf:
+            names = zf.namelist()
+            return names, json.loads(
+                zf.read(next(n for n in names if n.endswith(suffix))))
+
+    def test_orphan_completing_within_grace_is_published(
+            self, tmp_path, monkeypatch):
+        monkeypatch.setattr(debug_utils, '_REQUEST_LOG_COPY_TIMEOUT', 0.05)
+        provider = mock.MagicMock()
+
+        def _fake_copy(request_id, log_type, dest_path, stop_event=None):
+            if (request_id != 'req-orphan' or
+                    log_type != log_provider_lib.RequestLogType.REQUEST):
+                return False
+            # Block until the timeout abandons this copy: the stop event
+            # IS the release signal, so the copy completes
+            # deterministically right after the timeout is recorded, well
+            # inside the reconciliation grace.
+            stop_event.wait()
+            dest_path.write_text('late log content')
+            return True
+
+        provider.copy_log_file.side_effect = _fake_copy
+        result = self._run_dump(tmp_path, provider)
+
+        names, errors = self._read_json(result, 'errors.json')
+        assert not any('.staging' in n for n in names)
+        request_logs = [n for n in names if n.endswith('request.log')]
+        assert len(request_logs) == 1
+        with zipfile.ZipFile(result, 'r') as zf:
+            assert zf.read(request_logs[0]) == b'late log content'
+        # The errors entry says timed out AND that the output made it in.
+        log_entries = [e for e in errors if e['resource'] == 'req-orphan/log']
+        assert len(log_entries) == 1
+        assert 'timed out' in log_entries[0]['error']
+        assert 'completed after the timeout' in log_entries[0]['error']
+        assert 'output is included' in log_entries[0]['error']
+
+    def test_orphan_still_running_past_grace_is_excluded(
+            self, tmp_path, monkeypatch):
+        monkeypatch.setattr(debug_utils, '_REQUEST_LOG_COPY_TIMEOUT', 0.05)
+        # Read at call time by the reconciler, so monkeypatching works.
+        monkeypatch.setattr(debug_utils, '_ORPHAN_GRACE_S', 0)
+        provider = mock.MagicMock()
+        private = threading.Event()
+
+        def _fake_copy(request_id, log_type, dest_path, stop_event=None):
+            del stop_event  # ignored on purpose: a hard-stalled store
+            if (request_id != 'req-orphan' or
+                    log_type != log_provider_lib.RequestLogType.REQUEST):
+                return False
+            # Holds the worker until the test releases it, ignoring the
+            # stop event (a provider that predates the parameter, or a
+            # hard-stalled store).
+            private.wait()
+            dest_path.write_text('quarantined content')
+            return True
+
+        provider.copy_log_file.side_effect = _fake_copy
+        result = self._run_dump(tmp_path, provider)
+        try:
+            names, errors = self._read_json(result, 'errors.json')
+            assert not any('.staging' in n for n in names)
+            assert not any(n.endswith('request.log') for n in names)
+            log_entries = [
+                e for e in errors if e['resource'] == 'req-orphan/log'
+            ]
+            assert len(log_entries) == 1
+            assert 'timed out' in log_entries[0]['error']
+            assert 'completed after the timeout' not in log_entries[0]['error']
+            # The summary did not count the quarantined log as found.
+            _, summary = self._read_json(result, 'summary.json')
+            assert summary['collected']['request_logs_found'] == 0
+            assert summary['collected']['request_logs_missing'] >= 1
+        finally:
+            private.set()  # release the orphaned worker for thread hygiene
