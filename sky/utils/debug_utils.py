@@ -317,6 +317,11 @@ class DebugDumpContext(TypedDict):
     # into the dump.
     request_ids_via_job: Set[str]
     request_ids_via_cluster: Set[str]
+    # Attribution-only sidecar for the recent-activity request scan (see
+    # _populate_recent_context): which requests the scan first added to
+    # request_ids, surfaced in summary.json's provenance block. Unlike
+    # via_job / via_cluster it carries no expansion restriction.
+    request_ids_recent: Set[str]
     # Composition of the recent-activity request scan (see
     # _populate_recent_context), recorded at scan time and surfaced in
     # summary.json's provenance block so a scope explosion is explainable
@@ -791,6 +796,7 @@ def _populate_recent_context(
         # an unfinished request only counts as recent when it was created
         # within the window. Without it, stale rows match any cutoff and
         # explode the dump's context via cross-linking.
+        scan_start = time.time()
         requests = requests_lib.get_request_tasks(
             requests_lib.RequestTaskFilter(
                 finished_after=cutoff_time,
@@ -800,6 +806,7 @@ def _populate_recent_context(
         scan['included'] = 0
         scan['included_unfinished'] = 0
         scan['skipped_stale_unfinished'] = 0
+        scan['dropped_by_window_check'] = 0
         now = time.time()
         for request in requests:
             created_at = request.created_at or 0
@@ -808,6 +815,17 @@ def _populate_recent_context(
                     scan['skipped_stale_unfinished'] += 1
                     continue
                 scan['included_unfinished'] += 1
+            elif request.finished_at < cutoff_time:
+                # Fail-closed re-check of the DB-level finished_after
+                # filter. The default sqlite backend already excludes
+                # finished-before-cutoff rows in SQL, but
+                # register_request_storage (sky/server/plugins.py) can swap
+                # in a custom request backend, and finished_after drift
+                # there must not silently re-admit stale finished rows the
+                # NULL-only backstop above does not gate. Mirrors the
+                # cluster branch's client-side strict comparison below.
+                scan['dropped_by_window_check'] += 1
+                continue
             scan['included'] += 1
             logger.debug(f'Recent: including request {request.request_id} '
                          f'(status={request.status.value}, '
@@ -815,14 +833,30 @@ def _populate_recent_context(
                          f'age={now - created_at:.0f}s, '
                          f'finished_at={request.finished_at},'
                          f' cutoff={cutoff_time:.0f})')
+            if request.request_id not in debug_dump_context['request_ids']:
+                # Attribution-only tag (mirrors the via_cluster / via_job
+                # tag-only-new idiom): which requests the recent scan first
+                # added, for the summary provenance block. No expansion
+                # restriction.
+                debug_dump_context['request_ids_recent'].add(request.request_id)
             debug_dump_context['request_ids'].add(request.request_id)
-        logger.debug(
+        scan['duration_s'] = int(time.time() - scan_start)
+        composition = (
             f'Recent requests scan: {scan["scanned"]} rows matched the '
             f'finished_after filter; included {scan["included"]} '
             f'({scan["included_unfinished"]} unfinished, created within '
             f'the window); skipped {scan["skipped_stale_unfinished"]} '
             f'stale unfinished rows (finished_at=None, created before '
-            f'the cutoff)')
+            f'the cutoff); dropped {scan["dropped_by_window_check"]} by '
+            f'the client-side window check')
+        if (scan['skipped_stale_unfinished'] + scan['dropped_by_window_check'] >
+                0):
+            # WARNING, not debug: stale unfinished rows are a
+            # finished_at-hygiene signal operators should see at default
+            # log levels, not a tool failure.
+            logger.warning(composition)
+        else:
+            logger.debug(composition)
     except Exception as e:  # pylint: disable=broad-except
         logger.warning(f'Failed to get recent requests: {e}')
         debug_dump_context['errors'].append({
@@ -2426,6 +2460,26 @@ def _build_debug_dump(
         json.dump(errors, f, indent=2, default=str)
 
     # Write summary file
+    # Where the collected requests came from, so a scope explosion is
+    # explainable from summary.json alone. The six buckets are exclusive
+    # and sum exactly to collected.request_count: the sidecars are
+    # disjoint by construction (every request-ID adder tags only IDs it
+    # is first to add -- user seeds, then the recent scan, then the
+    # cluster/job cross-links, then SYSTEM_REQUEST_IDS), and the set
+    # subtractions below keep that explicit in attribution order even if
+    # the helpers are ever reordered. untracked != 0 is a tripwire for a
+    # future context adder that forgets to record provenance.
+    final_request_ids = debug_dump_context['request_ids']
+    user_ids = user_request_ids & final_request_ids
+    recent_ids = debug_dump_context['request_ids_recent'] - user_ids
+    via_cluster_ids = (debug_dump_context['request_ids_via_cluster'] -
+                       user_ids - recent_ids)
+    via_job_ids = (debug_dump_context['request_ids_via_job'] - user_ids -
+                   recent_ids - via_cluster_ids)
+    attributed_ids = (user_ids | recent_ids | via_cluster_ids | via_job_ids)
+    system_ids = ((set(SYSTEM_REQUEST_IDS) & final_request_ids) -
+                  attributed_ids)
+    untracked_ids = final_request_ids - attributed_ids - system_ids
     summary: Dict[str, Any] = {
         'requested': requested,
         'collected': {
@@ -2436,18 +2490,16 @@ def _build_debug_dump(
             'cluster_names': sorted(debug_dump_context['cluster_names']),
             'managed_job_ids': sorted(debug_dump_context['managed_job_ids']),
         },
-        # Where the collected requests came from, so a scope explosion is
-        # explainable from summary.json alone. Buckets may overlap
-        # slightly (e.g. a system daemon request also matched by the
-        # recent scan); recent_scan holds the request-scan composition
-        # recorded by _populate_recent_context ({} when it did not run).
+        # recent_scan holds the request-scan composition recorded by
+        # _populate_recent_context ({} when it did not run).
         'provenance': {
-            'user_requested': len(user_request_ids),
+            'user_requested': len(user_ids),
+            'via_recent_scan': len(recent_ids),
+            'via_cluster': len(via_cluster_ids),
+            'via_job': len(via_job_ids),
+            'system': len(system_ids),
+            'untracked': len(untracked_ids),
             'recent_scan': dict(debug_dump_context['recent_request_scan']),
-            'via_cluster': len(debug_dump_context['request_ids_via_cluster']),
-            'via_job': len(debug_dump_context['request_ids_via_job']),
-            'system': len(
-                set(SYSTEM_REQUEST_IDS) & debug_dump_context['request_ids']),
         },
         'section_timings': section_timings,
         'errors': errors,
@@ -2534,6 +2586,7 @@ def create_debug_dump(
         # populate these sidecars (see DebugDumpContext docstring).
         request_ids_via_job=set(),
         request_ids_via_cluster=set(),
+        request_ids_recent=set(),
         recent_request_scan={},
         errors=[],
         timed_out_ops=[],
