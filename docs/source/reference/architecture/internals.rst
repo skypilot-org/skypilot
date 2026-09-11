@@ -75,7 +75,7 @@ SkyPilot starts its Ray cluster when provisioning nodes:
 
 - On the head node: ``ray start --head`` with port 6380 and custom resource configurations
 - On worker nodes: ``ray start --address`` connecting to the head node's internal IP
-- Ray version is set to ``2.9.3`` in ``SKY_REMOTE_RAY_VERSION``
+- Ray version is set to ``2.56.1`` in ``SKY_REMOTE_RAY_VERSION``
 - Runtime environment: ``skypilot-runtime`` conda environment
 
 **Important considerations for users:**
