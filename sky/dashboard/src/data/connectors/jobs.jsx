@@ -90,6 +90,10 @@ const DEFAULT_FIELDS = [
   'batch_completed_batches',
   'node_names',
   'priority_class',
+  // Where a job launched from inside another managed job sits in its tree.
+  'root_job_id',
+  'parent_job_id',
+  'parent_task_id',
 ];
 
 /**
@@ -366,6 +370,12 @@ export async function getManagedJobs(options = {}) {
         is_job_group: job.is_job_group,
         execution: job.execution,
         is_primary_in_job_group: job.is_primary_in_job_group,
+        // Job tree fields, null for a top-level job: root_job_id is the
+        // top-level job of the tree, parent_job_id/parent_task_id the job
+        // and task that launched this one.
+        root_job_id: job.root_job_id ?? null,
+        parent_job_id: job.parent_job_id ?? null,
+        parent_task_id: job.parent_task_id ?? null,
         // Batch progress
         batch_total_batches: job.batch_total_batches,
         batch_completed_batches: job.batch_completed_batches,
@@ -654,6 +664,66 @@ export function useSingleManagedJob(jobId, refreshTrigger = 0) {
   }, [jobId, refreshTrigger]);
 
   return { jobData, loading };
+}
+
+// Fields needed to list the jobs launched under a job on its detail page.
+const JOB_TREE_MEMBER_FIELDS = [
+  'job_id',
+  '_job_id',
+  'job_name',
+  'task_name',
+  'status',
+  'job_duration',
+  'submitted_at',
+  'user_name',
+  'root_job_id',
+  'parent_job_id',
+  'parent_task_id',
+];
+
+/**
+ * Rows of every job launched from inside the job `jobId`, directly or
+ * through another launched job: the jobs whose root_job_id is jobId. Empty
+ * for a job that is not the top-level job of a tree. The queue API has no
+ * filter on root_job_id, so this reads the cached listing with a minimal
+ * field set and filters client-side, like the pool job counts do.
+ */
+export function useJobTreeMembers(jobId, refreshTrigger = 0) {
+  const [members, setMembers] = useState([]);
+  const prevRefreshTriggerRef = useRef(refreshTrigger);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function fetchMembers() {
+      if (!jobId) return;
+      const cacheArgs = [{ allUsers: true, fields: JOB_TREE_MEMBER_FIELDS }];
+      // Same refresh handling as useSingleManagedJob: drop the cached
+      // entry only when the trigger actually increments.
+      if (refreshTrigger > prevRefreshTriggerRef.current) {
+        dashboardCache.invalidate(getManagedJobs, cacheArgs);
+      }
+      prevRefreshTriggerRef.current = refreshTrigger;
+      try {
+        const data = await dashboardCache.get(getManagedJobs, cacheArgs);
+        if (cancelled) return;
+        setMembers(
+          data?.jobs?.filter(
+            (j) =>
+              j.root_job_id != null && String(j.root_job_id) === String(jobId)
+          ) || []
+        );
+      } catch (error) {
+        console.error('Error fetching jobs launched from job:', error);
+        if (!cancelled) setMembers([]);
+      }
+    }
+    fetchMembers();
+    return () => {
+      cancelled = true;
+    };
+  }, [jobId, refreshTrigger]);
+
+  return members;
 }
 
 export async function streamManagedJobLogs({
