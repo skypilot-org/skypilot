@@ -1,0 +1,61 @@
+# A job group whose eval watcher launches evaluation jobs from inside the group.
+#
+# The trainer produces a "checkpoint" every 30 seconds. The eval watcher
+# launches one evaluation job per checkpoint with `sky jobs launch`; each is a
+# member of this group, listed under it in `sky jobs queue` with its own job
+# id and cancelled with it. The watcher is a primary task, so the group stays
+# alive until the evaluations it launched have finished.
+#
+# Requires a remote API server running managed jobs in consolidation mode.
+# Runs as-is on Kubernetes; set `infra: slurm` on the tasks to run on Slurm.
+#
+# Usage:
+#   sky jobs launch examples/job-group-sdk/job_group_eval_watcher.yaml
+---
+name: train-and-eval
+execution: parallel
+primary_tasks: [trainer, eval-watcher]
+inter_connection: false
+---
+name: trainer
+resources:
+  cpus: 2
+  infra: kubernetes
+run: |
+  for step in 1 2 3; do
+    echo "Training step $step..."
+    sleep 30
+    echo "Checkpoint $step saved"
+  done
+  echo "Training complete"
+---
+name: eval-watcher
+resources:
+  cpus: 2
+  infra: kubernetes
+setup: |
+  pip install "skypilot-nightly[remote]" > /dev/null
+run: |
+  # In a real watcher, this loop would poll the checkpoint directory. Here it
+  # follows the trainer's schedule: one evaluation per checkpoint.
+  for step in 1 2 3; do
+    sleep 30
+    echo "Checkpoint $step: launching evaluation"
+    sky jobs launch -y -d -n "eval-step-$step" --cpus 1+ --memory 2+ \
+      "echo Evaluating checkpoint $step; sleep 60; echo Evaluation of checkpoint $step done"
+  done
+
+  # Wait for the evaluations before exiting. The group finishes when both
+  # primary tasks have; an evaluation still running then would be cancelled.
+  echo "Waiting for evaluations to finish..."
+  for i in $(seq 1 60); do
+    running=$(sky jobs queue 2>/dev/null | grep -E " eval-step-[0-9]+ " \
+      | grep -vcE "SUCCEEDED|FAILED|CANCELLED" || true)
+    if [ "$running" -eq 0 ]; then
+      echo "All evaluations finished"
+      exit 0
+    fi
+    echo "$running evaluation(s) still running"
+    sleep 10
+  done
+  echo "Timed out waiting for evaluations" && exit 1
