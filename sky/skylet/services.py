@@ -580,7 +580,8 @@ class ManagedJobsServiceImpl(managed_jobsv1_pb2_grpc.ManagedJobsServiceServicer
                     # Parent links (None for top-level jobs)
                     root_job_id=job.get('root_job_id'),
                     parent_job_id=job.get('parent_job_id'),
-                    parent_task_id=job.get('parent_task_id'))
+                    parent_task_id=job.get('parent_task_id'),
+                    dynamic_task_index=job.get('dynamic_task_index'))
                 jobs_info.append(job_info)
 
             return managed_jobsv1_pb2.GetJobTableResponse(

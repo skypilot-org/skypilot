@@ -480,6 +480,11 @@ def _maybe_submit_job_locally(
         # would drop back to the literal 'default' for users who never set
         # `active_workspace` server-side, which breaks users without
         # access to the 'default' workspace.
+        # A dynamic task gets its ordinal within the root's tree here, from
+        # the counter on the root's row (race-free without a lock of ours).
+        dynamic_task_index = (
+            managed_job_state.next_dynamic_task_index(root_job_id)
+            if root_job_id is not None else None)
         consolidation_mode_job_id = (
             managed_job_state.set_job_info_without_job_id(
                 dag.name,
@@ -493,7 +498,8 @@ def _maybe_submit_job_locally(
                 file_mounts_blob_id=file_mounts_blob_id,
                 parent_job_id=parent_job_id,
                 parent_task_id=parent_task_id,
-                root_job_id=root_job_id))
+                root_job_id=root_job_id,
+                dynamic_task_index=dynamic_task_index))
         for task_id, task in enumerate(dag.tasks):
             resources_str = backend_utils.get_task_resources_str(
                 task, is_managed_job=True)

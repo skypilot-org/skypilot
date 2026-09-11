@@ -98,6 +98,7 @@ function JobDetails() {
       user: rows[0].user,
       parent_job_id: rows[0].parent_job_id,
       parent_task_id: rows[0].parent_task_id,
+      dynamic_task_index: rows[0].dynamic_task_index,
       status: rows.length > 1 ? computeJobGroupStatus(rows) : rows[0].status,
       job_duration: rows.reduce((sum, r) => sum + (r.job_duration || 0), 0),
     }));
@@ -604,7 +605,10 @@ function JobDetails() {
                         <TableHeader>
                           <TableRow>
                             <TableHead className="whitespace-nowrap">
-                              ID
+                              Task
+                            </TableHead>
+                            <TableHead className="whitespace-nowrap">
+                              Job ID
                             </TableHead>
                             <TableHead className="whitespace-nowrap">
                               Name
@@ -626,6 +630,13 @@ function JobDetails() {
                         <TableBody>
                           {launchedJobs.map((job) => (
                             <TableRow key={job.id} className="hover:bg-gray-50">
+                              <TableCell className="whitespace-nowrap">
+                                {/* The task handle: `<root>-<index>`, what
+                                    `sky jobs cancel` takes. */}
+                                {job.dynamic_task_index != null
+                                  ? `${jobId}-${job.dynamic_task_index}`
+                                  : '-'}
+                              </TableCell>
                               <TableCell>
                                 <Link
                                   href={`/jobs/${job.id}`}
