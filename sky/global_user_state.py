@@ -1285,27 +1285,37 @@ def get_last_cluster_event_of_type_multiple(
         return {}
     event_types = ([event_type]
                    if isinstance(event_type, ClusterEventType) else event_type)
+    type_values = [t.value for t in event_types]
+    hashes_list = list(cluster_hashes)
+    result: Dict[str, str] = {}
     engine = _db_manager.get_engine()
     with orm.Session(engine) as session:
-        row_number = sqlalchemy.func.row_number().over(
-            partition_by=cluster_event_table.c.cluster_hash,
-            order_by=cluster_event_table.c.transitioned_at.desc()).label('rn')
+        # Chunk the IN clause to stay under SQLite's bind-parameter limit;
+        # see _CLUSTER_IN_QUERY_CHUNK_SIZE. Each chunk is partitioned by
+        # cluster_hash, so ranking per chunk is exact.
+        for offset in range(0, len(hashes_list), _CLUSTER_IN_QUERY_CHUNK_SIZE):
+            batch = hashes_list[offset:offset + _CLUSTER_IN_QUERY_CHUNK_SIZE]
+            row_number = sqlalchemy.func.row_number().over(
+                partition_by=cluster_event_table.c.cluster_hash,
+                order_by=cluster_event_table.c.transitioned_at.desc()).label(
+                    'rn')
 
-        ranked = session.query(
-            cluster_event_table.c.cluster_hash,
-            cluster_event_table.c.reason,
-            row_number,
-        ).filter(
-            cluster_event_table.c.cluster_hash.in_(cluster_hashes),
-            cluster_event_table.c.type.in_([t.value for t in event_types]),
-        ).subquery()
+            ranked = session.query(
+                cluster_event_table.c.cluster_hash,
+                cluster_event_table.c.reason,
+                row_number,
+            ).filter(
+                cluster_event_table.c.cluster_hash.in_(batch),
+                cluster_event_table.c.type.in_(type_values),
+            ).subquery()
 
-        rows = session.query(
-            ranked.c.cluster_hash,
-            ranked.c.reason,
-        ).filter(ranked.c.rn == 1).all()
+            rows = session.query(
+                ranked.c.cluster_hash,
+                ranked.c.reason,
+            ).filter(ranked.c.rn == 1).all()
+            result.update({row.cluster_hash: row.reason for row in rows})
 
-    return {row.cluster_hash: row.reason for row in rows}
+    return result
 
 
 def get_last_status_change_times(
