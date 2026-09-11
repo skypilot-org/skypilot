@@ -31,3 +31,4 @@ Table of contents
     nebius
     vsphere
     kubernetes
+    kubernetes-oidc-federation
