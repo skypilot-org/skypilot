@@ -1879,6 +1879,7 @@ class TestFieldsForController:
         assert jobs_utils.queue_fields_need_controller_version(
             ['job_id', 'root_job_id'])
 
+
 class TestFormatJobTableDynamicMembers:
     """`sky jobs queue` shows jobs launched from a group under that group."""
 
