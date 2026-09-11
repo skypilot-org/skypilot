@@ -1048,7 +1048,10 @@ class RequestTaskFilter:
             timestamp.
         finished_after: if provided, only include requests finished at or after
             this timestamp. Requests still in progress (finished_at IS NULL)
-            are always included.
+            are always included. This is a listing semantic: a caller using it
+            as a time window (e.g. a recent-activity scan) must additionally
+            bound those unfinished rows by created_at client-side; see
+            _populate_recent_context in sky/utils/debug_utils.py.
         limit: the number of requests to show. If None, show all requests.
 
     Raises:
