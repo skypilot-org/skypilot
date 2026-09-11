@@ -172,9 +172,11 @@ const STATUS_PRIORITY = {
  *
  * A job's own tasks share its id. A job launched from inside another managed
  * job (a dynamic job group member) carries root_job_id and is shown under
- * that top-level job when it is in the listing, after the job's own tasks;
- * a member whose root is not listed is shown as its own job, since there is
- * nothing on this page to nest it under.
+ * that top-level job when it is in the listing, after the job's own tasks
+ * and in attach order (its dynamic_task_index, assigned by the server so it
+ * numbers on from the group's own tasks); a member whose root is not listed
+ * is shown as its own job, since there is nothing on this page to nest it
+ * under.
  *
  * External rows never form job groups; they are keyed by their globally
  * unique task_job_id so equal Slurm ids across clusters (or a Slurm id
@@ -205,6 +207,19 @@ export function groupJobRowsByTree(rows) {
       groups.set(key, []);
     }
     groups.get(key).push(job);
+  });
+  // Members in attach order: by dynamic_task_index, else ascending job id
+  // (the listing is newest first); each member's task rows keep input order.
+  groups.forEach((rows, key) => {
+    const own = rows.filter((r) => r.id === key);
+    if (own.length === rows.length) return;
+    const members = rows.filter((r) => r.id !== key);
+    const orderKey = (r) =>
+      r.dynamic_task_index != null
+        ? Number(r.dynamic_task_index)
+        : Number(r.id);
+    members.sort((a, b) => orderKey(a) - orderKey(b));
+    groups.set(key, own.concat(members));
   });
   return groups;
 }
@@ -1414,9 +1429,11 @@ export function ManagedJobsTable({
               .join('\n')}\n\n★ = Primary task`
           : `Task statuses:\n${tasks.map((t, i) => `Task ${i}: ${t.status}`).join('\n')}`;
         const statusTooltip = memberRows.length
-          ? `${ownStatusTooltip}\n\nLaunched from this job:\n${memberRows
+          ? `${ownStatusTooltip}\n\nDynamic tasks (launched from this job):\n${memberRows
               .map(
-                (t) => `Job ${t.id}${t.task ? ` (${t.task})` : ''}: ${t.status}`
+                (t) =>
+                  `Task ${t.dynamic_task_index ?? `job ${t.id}`}: ${t.name}` +
+                  `${t.task ? ` / ${t.task}` : ''} (job ${t.id}): ${t.status}`
               )
               .join('\n')}`
           : ownStatusTooltip;
@@ -1680,18 +1697,27 @@ export function ManagedJobsTable({
             return (
               <TableCell className="whitespace-nowrap relative">
                 <div className="absolute left-0 top-0 bottom-0 w-0.5 bg-blue-300"></div>
-                {isMember ? (
-                  // A job launched from this group: its own job id (it has
-                  // its own logs and can be cancelled on its own), and its
-                  // task index only if it has several tasks.
+                {isMember && item.dynamic_task_index != null ? (
+                  // A dynamic task (a job launched from this group) reads
+                  // like one of the group's tasks: its server-assigned index
+                  // numbers on from the own tasks, and `<group>-<index>`
+                  // addresses it on the CLI. A multi-task member appends its
+                  // own task index. The job id is in the tooltip and behind
+                  // the name link.
+                  <span
+                    className="text-gray-500 pl-6"
+                    title={`Dynamic task ${jobId}-${item.dynamic_task_index} (job ${item.id}): sky jobs cancel ${jobId}-${item.dynamic_task_index}`}
+                  >
+                    {item.dynamic_task_index}
+                    {memberIsMultiTask ? `.${taskIndex}` : ''}
+                  </span>
+                ) : isMember ? (
+                  // A member from before indices existed: its job id.
                   <span className="pl-6">
                     <span className="text-gray-500">↳ </span>
                     <Link href={`/jobs/${item.id}`} className="text-blue-600">
                       {item.id}
                     </Link>
-                    {memberIsMultiTask && (
-                      <span className="text-gray-500">{` / ${taskIndex}`}</span>
-                    )}
                   </span>
                 ) : (
                   <span className="text-gray-500 pl-6">{taskIndex}</span>
@@ -1761,13 +1787,13 @@ export function ManagedJobsTable({
             const own = ownTasks || tasks;
             const launchedJobs = new Set((memberTasks || []).map((t) => t.id))
               .size;
-            const badgeParts = [];
-            if (own.length > 1) {
-              badgeParts.push(`${own.length} tasks`);
-            }
-            if (launchedJobs > 0) {
-              badgeParts.push(`${launchedJobs} launched`);
-            }
+            // One task count, with the dynamic ones (jobs launched from
+            // inside the group; own id, own logs, cancellable alone, no
+            // effect on the group's status) called out.
+            const totalTasks = own.length + launchedJobs;
+            const badgeLabel =
+              `${totalTasks} task${totalTasks === 1 ? '' : 's'}` +
+              (launchedJobs > 0 ? ` (${launchedJobs} dynamic)` : '');
             const badgeKind =
               own.length > 1 || item.is_job_group ? 'JobGroup' : 'Job';
             return (
@@ -1779,7 +1805,7 @@ export function ManagedJobsTable({
                     onClick={() => toggleJobGroup(jobId)}
                     className="ml-2 text-xs font-medium bg-gray-200 text-gray-700 hover:bg-gray-300 px-1.5 py-0.5 rounded cursor-pointer whitespace-nowrap"
                   >
-                    {badgeKind}: {badgeParts.join(', ')}
+                    {badgeKind}: {badgeLabel}
                   </button>
                 </div>
               </TableCell>
@@ -2010,7 +2036,7 @@ export function ManagedJobsTable({
           // For group parent, show simplified infra (no tooltip with region details)
           if (renderMode === 'groupParent') {
             return (
-              <TableCell>
+              <TableCell className="whitespace-nowrap">
                 {item.infra && item.infra !== '-' ? (
                   <span>{item.cloud || item.infra.split('(')[0].trim()}</span>
                 ) : (
@@ -2022,7 +2048,7 @@ export function ManagedJobsTable({
 
           // Single task or group child - show full infra with tooltip
           return (
-            <TableCell>
+            <TableCell className="whitespace-nowrap">
               {item.infra && item.infra !== '-' ? (
                 <NonCapitalizedTooltip
                   content={item.full_infra || item.infra}

@@ -302,7 +302,7 @@ Cancel managed jobs.
 - `--config` — Path to a config file or a single key-value pair. To add multiple key-value pairs add multiple flags (e.g. --config nested.key1=val1 --config nested.key2=val2).
 - `--name`, `-n` — Managed job name to cancel.
 - `--pool`, `-p` — Pool name to cancel.
-- `JOB_IDS` — integer
+- `JOB_IDS` — JOB_ID
 - `--graceful` — Wait for MOUNT_CACHED uploads to complete before stopping/terminating. Will cancel current jobs first.
 - `--graceful-timeout` — Timeout in seconds for `--graceful` flag. When not set, will wait for MOUNT_CACHED uploads until they are finished.
 - `--all`, `-a` — Cancel all managed jobs for the current user.
@@ -374,7 +374,7 @@ Tail or sync down the log of a managed job.
 - `--refresh`, `-r` — Query the latest job logs, restarting the jobs controller if stopped.
 - `--sync-down`, `-s` — Download logs for all jobs shown in the queue.
 - `--tail` (default: `-1`) — Number of lines to display from the end of the log file. Default is the last 1000 lines — sensible for multi-GB logs where downloading the full file is slow. Pass --tail 0 to print the entire log.
-- `JOB_ID` — integer
+- `JOB_ID` — JOB_ID
 - `TASK` — text
 
 ### `sky jobs pool` (subgroup)

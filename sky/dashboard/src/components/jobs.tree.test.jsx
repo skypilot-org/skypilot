@@ -83,6 +83,16 @@ describe('groupJobRowsByTree', () => {
     ]);
   });
 
+  it('orders members by launch (ascending id) under the root', () => {
+    const rows = [
+      row(45, 'later', { root_job_id: 42, parent_job_id: 42 }),
+      row(43, 'first', { root_job_id: 42, parent_job_id: 42 }),
+      row(42, 'trainer'),
+    ];
+    const groups = groupJobRowsByTree(rows);
+    expect(groups.get(42).map((r) => r.id)).toEqual([42, 43, 45]);
+  });
+
   it('never groups external rows, even with matching ids', () => {
     const rows = [
       row(42, 'trainer'),

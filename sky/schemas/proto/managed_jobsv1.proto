@@ -165,6 +165,9 @@ message ManagedJobInfo {
   optional int64 parent_job_id = 41;
   optional int64 parent_task_id = 42;
   optional int64 root_job_id = 43;
+  // A dynamic task's ordinal within its root's tree (unset for top-level
+  // jobs); `<root_job_id>-<dynamic_task_index>` names it on the CLI.
+  optional int64 dynamic_task_index = 44;
 }
 
 // A pair of internal and external IP addresses

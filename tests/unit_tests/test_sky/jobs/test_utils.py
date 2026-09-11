@@ -1871,6 +1871,13 @@ class TestFieldsForController:
         assert jobs_utils.fields_for_controller(fields, None) == fields
         assert jobs_utils.fields_for_controller(fields, 'dev') == fields
 
+    def test_dynamic_task_index_needs_controller_42(self):
+        fields = ['job_id'] + self._NEW + ['dynamic_task_index']
+        assert jobs_utils.fields_for_controller(fields, '42') == fields
+        assert jobs_utils.fields_for_controller(fields,
+                                                '41') == ['job_id'] + self._NEW
+        assert jobs_utils.fields_for_controller(fields, '40') == ['job_id']
+
     def test_version_is_only_asked_for_when_a_gated_field_is_requested(self):
         # The gRPC queue path pays the version round trip only when it must.
         assert not jobs_utils.queue_fields_need_controller_version(None)
@@ -1890,7 +1897,8 @@ class TestFormatJobTableDynamicMembers:
              root_job_id=None,
              status='RUNNING',
              is_primary=None,
-             job_name=None):
+             job_name=None,
+             dynamic_task_index=None):
         return {
             'job_id': job_id,
             'task_id': task_id,
@@ -1911,6 +1919,7 @@ class TestFormatJobTableDynamicMembers:
             'root_job_id': root_job_id,
             'parent_job_id': root_job_id,
             'parent_task_id': None if root_job_id is None else 1,
+            'dynamic_task_index': dynamic_task_index,
         }
 
     @staticmethod
@@ -2041,6 +2050,31 @@ class TestFormatJobTableDynamicMembers:
         assert cells == [
             ('42', '-', 'RUNNING'),
             (' ↳ 57', '-', 'RUNNING'),
+        ]
+
+    def test_members_with_an_index_read_like_tasks(self):
+        rows = [
+            self._row(58, task_id=1, root_job_id=42, dynamic_task_index=3),
+            self._row(58, task_id=0, root_job_id=42, dynamic_task_index=3),
+            self._row(57, root_job_id=42, dynamic_task_index=2),
+            self._row(42, task_id=1, task_name='watcher', job_name='rl'),
+            self._row(42, task_id=0, task_name='trainer', job_name='rl'),
+        ]
+        table = jobs_utils.format_job_table(rows,
+                                            show_all=False,
+                                            show_user=False,
+                                            return_rows=True)
+        cells = [c for c in self._id_task_status(table) if c != ('', '', '')]
+        # The group's own tasks are 0 and 1; the dynamic tasks number on as
+        # 2 and 3, the multi-task one as <index>.<task id>. No job id shown:
+        # `42-2` / `42-3` address them on the CLI.
+        assert cells == [
+            ('42', '', 'RUNNING'),
+            (' ↳', '1', 'RUNNING'),
+            (' ↳', '0', 'RUNNING'),
+            (' ↳', '3.1', 'RUNNING'),
+            (' ↳', '3.0', 'RUNNING'),
+            (' ↳', '2', 'RUNNING'),
         ]
 
     def test_member_with_unlisted_root_is_its_own_job(self):
