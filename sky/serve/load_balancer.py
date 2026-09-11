@@ -87,8 +87,7 @@ class SkyServeLoadBalancer:
             load_balancing_policy_name)
 
         # Set accelerator QPS for instance-aware policies
-        if (target_qps_per_replica and
-                isinstance(target_qps_per_replica, dict) and
+        if (isinstance(target_qps_per_replica, dict) and
                 isinstance(self._load_balancing_policy,
                            lb_policies.InstanceAwareLeastLoadPolicy)):
             self._load_balancing_policy.set_target_qps_per_accelerator(
@@ -117,8 +116,7 @@ class SkyServeLoadBalancer:
 
     async def _sync_with_controller_once(self) -> List[asyncio.Task]:
         close_client_tasks = []
-        ready_replica_urls = []
-        replica_info = {}
+        ready_replicas = []
 
         async with aiohttp.ClientSession() as session:
             try:
@@ -135,28 +133,34 @@ class SkyServeLoadBalancer:
                     self._request_aggregator.clear()
                     response.raise_for_status()
                     response_json = await response.json()
-                    replica_info = response_json.get('replica_info', {})
-                    ready_replica_urls = list(replica_info.keys())
+                    replica_infos = response_json.get('replica_info', [])
+                    if not isinstance(replica_infos, list):
+                        raise ValueError(
+                            'Expected replica_info to be a list of replica '
+                            f'descriptors, got {type(replica_infos).__name__}.')
+                    ready_replicas = [
+                        lb_policies.ReadyReplica(
+                            replica_id=replica_info['replica_id'],
+                            url=replica_info['url'],
+                            gpu_type=replica_info.get('gpu_type', 'unknown'))
+                        for replica_info in replica_infos
+                    ]
             except (aiohttp.ClientError, asyncio.TimeoutError) as e:
                 logger.error(f'An error occurred when syncing with '
                              f'the controller: {e}'
                              f'\nTraceback: {traceback.format_exc()}')
             else:
-                logger.info(f'Available Replica URLs: {ready_replica_urls}')
+                logger.info('Available replicas: %s', ready_replicas)
                 with self._client_pool_lock:
                     self._load_balancing_policy.set_ready_replicas(
-                        ready_replica_urls)
-                    # Set replica info for instance-aware policies
-                    if isinstance(self._load_balancing_policy,
-                                  lb_policies.InstanceAwareLeastLoadPolicy):
-                        self._load_balancing_policy.set_replica_info(
-                            replica_info)
-                    for replica_url in ready_replica_urls:
-                        if replica_url not in self._client_pool:
-                            self._client_pool[replica_url] = httpx.AsyncClient(
-                                base_url=replica_url)
-                    urls_to_close = set(
-                        self._client_pool.keys()) - set(ready_replica_urls)
+                        ready_replicas)
+                    for replica in ready_replicas:
+                        if replica.url not in self._client_pool:
+                            self._client_pool[replica.url] = httpx.AsyncClient(
+                                base_url=replica.url)
+                    urls_to_close = set(self._client_pool.keys()) - {
+                        replica.url for replica in ready_replicas
+                    }
                     client_to_close = []
                     for replica_url in urls_to_close:
                         client_to_close.append(
@@ -190,7 +194,7 @@ class SkyServeLoadBalancer:
                              f'\nTraceback: {traceback.format_exc()}')
 
     async def _proxy_request_to(
-        self, url: str, request: fastapi.Request
+        self, replica: lb_policies.ReadyReplica, request: fastapi.Request
     ) -> Union[fastapi.responses.Response, Exception]:
         """Proxy the request to the specified URL.
 
@@ -198,20 +202,20 @@ class SkyServeLoadBalancer:
             The response from the endpoint replica. Return the exception
             encountered if anything goes wrong.
         """
-        logger.info(f'Proxy request to {url}')
+        logger.info(f'Proxy request to {replica.url}')
         release_load: Optional[Callable[[], None]] = None
         try:
             release_load = self._load_balancing_policy.begin_request(
-                url, request)
+                replica, request)
             # We defer the get of the client here on purpose, for case when the
             # replica is ready in `_proxy_with_retries` but refreshed before
             # entering this function. In that case we will return an error here
             # and retry to find next ready replica. We also need to wait for the
             # update of the client pool to finish before getting the client.
             with self._client_pool_lock:
-                client = self._client_pool.get(url, None)
+                client = self._client_pool.get(replica.url, None)
             if client is None:
-                return RuntimeError(f'Client for {url} not found.')
+                return RuntimeError(f'Client for {replica.url} not found.')
             worker_url = httpx.URL(path=request.url.path,
                                    query=request.url.query.encode('utf-8'))
             proxy_request = client.build_request(
@@ -228,7 +232,7 @@ class SkyServeLoadBalancer:
                     await proxy_response.aclose()
                 except Exception:  # pylint: disable=broad-except
                     logger.exception(
-                        f'Error closing proxied response to {url}.')
+                        f'Error closing proxied response to {replica.url}.')
                 finally:
                     release_load()
 
@@ -242,7 +246,7 @@ class SkyServeLoadBalancer:
             release_load = None
             return response
         except (httpx.RequestError, httpx.HTTPStatusError) as e:
-            logger.error(f'Error when proxy request to {url}: '
+            logger.error(f'Error when proxy request to {replica.url}: '
                          f'{common_utils.format_exception(e)}'
                          f'\nTraceback: {traceback.format_exc()}')
             return e
@@ -266,9 +270,9 @@ class SkyServeLoadBalancer:
         while True:
             retry_cnt += 1
             with self._client_pool_lock:
-                ready_replica_url = self._load_balancing_policy.select_replica(
+                ready_replica = self._load_balancing_policy.select_replica(
                     request)
-            if ready_replica_url is None:
+            if ready_replica is None:
                 response_or_exception = fastapi.HTTPException(
                     # 503 means that the server is currently
                     # unable to handle the incoming requests.
@@ -278,7 +282,7 @@ class SkyServeLoadBalancer:
                     'to check the replica status.')
             else:
                 response_or_exception = await self._proxy_request_to(
-                    ready_replica_url, request)
+                    ready_replica, request)
             if not isinstance(response_or_exception, Exception):
                 return response_or_exception
             # When the user aborts the request during streaming, the request

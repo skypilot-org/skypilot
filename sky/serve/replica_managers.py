@@ -756,8 +756,8 @@ class ReplicaManager:
                        update_mode: serve_utils.UpdateMode) -> None:
         raise NotImplementedError
 
-    def get_active_replica_urls(self) -> List[str]:
-        """Get the urls of the active replicas."""
+    def get_active_replica_infos(self) -> List[ReplicaInfo]:
+        """Get the active replica information."""
         raise NotImplementedError
 
 
@@ -1507,19 +1507,18 @@ class SkyPilotReplicaManager(ReplicaManager):
             # TODO(MaoZiming): Probe cloud for early preemption warning.
             time.sleep(self._get_endpoint_probe_interval_seconds())
 
-    def get_active_replica_urls(self) -> List[str]:
-        """Get the urls of all active replicas."""
+    def get_active_replica_infos(self) -> List[ReplicaInfo]:
+        """Get the information of all active replicas."""
         record = serve_state.get_service_from_name(self._service_name)
         assert record is not None, (f'{self._service_name} not found on '
                                     'controller records.')
-        ready_replica_urls = []
         active_versions = set(record['active_versions'])
+        active_replica_infos = []
         for info in serve_state.get_replica_infos(self._service_name):
             if (info.status == serve_state.ReplicaStatus.READY and
                     info.version in active_versions):
-                assert info.url is not None, info
-                ready_replica_urls.append(info.url)
-        return ready_replica_urls
+                active_replica_infos.append(info)
+        return active_replica_infos
 
     ###########################################
     # SkyServe Update and replica versioning. #

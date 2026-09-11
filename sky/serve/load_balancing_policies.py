@@ -1,9 +1,10 @@
 """LoadBalancingPolicy: Policy to select endpoint."""
 import collections
+import dataclasses
 import random
 import threading
 import typing
-from typing import Any, Callable, Dict, List, Optional
+from typing import Callable, Dict, List, Optional
 
 from sky import sky_logging
 
@@ -11,6 +12,23 @@ if typing.TYPE_CHECKING:
     import fastapi
 
 logger = sky_logging.init_logger(__name__)
+
+
+@dataclasses.dataclass(frozen=True)
+class ReadyReplica:
+    """A ready replica's stable identity and current routing information.
+
+    ``replica_id`` is scoped to a service and is used as the load-accounting
+    key. Each load balancer currently handles a single service.
+    """
+
+    # TODO(jgsweets): Include service_name in the identity and accounting key if
+    # a load balancer ever handles multiple services.
+
+    replica_id: int
+    url: str
+    gpu_type: str = 'unknown'
+
 
 # Define a registry for load balancing policies
 LB_POLICIES = {}
@@ -29,7 +47,7 @@ class LoadBalancingPolicy:
     """Abstract class for load balancing policies."""
 
     def __init__(self) -> None:
-        self.ready_replicas: List[str] = []
+        self.ready_replicas: List[ReadyReplica] = []
 
     def __init_subclass__(cls, name: str, default: bool = False):
         LB_POLICIES[name] = cls
@@ -55,14 +73,16 @@ class LoadBalancingPolicy:
             raise ValueError(f'Unknown load balancing policy: {policy_name}')
         return LB_POLICIES[policy_name]()
 
-    def set_ready_replicas(self, ready_replicas: List[str]) -> None:
+    def set_ready_replicas(self, ready_replicas: List[ReadyReplica]) -> None:
         raise NotImplementedError
 
-    def select_replica(self, request: 'fastapi.Request') -> Optional[str]:
+    def select_replica(self,
+                       request: 'fastapi.Request') -> Optional[ReadyReplica]:
         replica = self._select_replica(request)
         if replica is not None:
-            logger.info(f'Selected replica {replica} '
-                        f'for request {_request_repr(request)}')
+            logger.info(
+                f'Selected replica {replica.replica_id} at {replica.url} '
+                f'for request {_request_repr(request)}')
         else:
             logger.warning('No replica selected for request '
                            f'{_request_repr(request)}')
@@ -70,21 +90,24 @@ class LoadBalancingPolicy:
 
     # TODO(tian): We should have an abstract class for Request to
     # compatible with all frameworks.
-    def _select_replica(self, request: 'fastapi.Request') -> Optional[str]:
+    def _select_replica(self,
+                        request: 'fastapi.Request') -> Optional[ReadyReplica]:
         raise NotImplementedError
 
-    def begin_request(self, replica_url: str,
+    def begin_request(self, replica: ReadyReplica,
                       request: 'fastapi.Request') -> Callable[[], None]:
         """Begin request accounting and return a release callback."""
-        del replica_url, request
+        del replica, request
         return lambda: None
 
-    def pre_execute_hook(self, replica_url: str,
+    def pre_execute_hook(self, replica: ReadyReplica,
                          request: 'fastapi.Request') -> None:
+        del replica, request
         pass
 
-    def post_execute_hook(self, replica_url: str,
+    def post_execute_hook(self, replica: ReadyReplica,
                           request: 'fastapi.Request') -> None:
+        del replica, request
         pass
 
 
@@ -95,9 +118,10 @@ class RoundRobinPolicy(LoadBalancingPolicy, name='round_robin'):
         super().__init__()
         self.index = 0
 
-    def set_ready_replicas(self, ready_replicas: List[str]) -> None:
+    def set_ready_replicas(self, ready_replicas: List[ReadyReplica]) -> None:
         if set(self.ready_replicas) == set(ready_replicas):
             return
+        ready_replicas = list(ready_replicas)
         # If the autoscaler keeps scaling up and down the replicas,
         # we need this shuffle to not let the first replica have the
         # most of the load.
@@ -105,13 +129,14 @@ class RoundRobinPolicy(LoadBalancingPolicy, name='round_robin'):
         self.ready_replicas = ready_replicas
         self.index = 0
 
-    def _select_replica(self, request: 'fastapi.Request') -> Optional[str]:
+    def _select_replica(self,
+                        request: 'fastapi.Request') -> Optional[ReadyReplica]:
         del request  # Unused.
         if not self.ready_replicas:
             return None
-        ready_replica_url = self.ready_replicas[self.index]
+        ready_replica = self.ready_replicas[self.index]
         self.index = (self.index + 1) % len(self.ready_replicas)
-        return ready_replica_url
+        return ready_replica
 
 
 class LeastLoadPolicy(LoadBalancingPolicy, name='least_load', default=True):
@@ -119,44 +144,45 @@ class LeastLoadPolicy(LoadBalancingPolicy, name='least_load', default=True):
 
     def __init__(self) -> None:
         super().__init__()
-        self.load_map: Dict[str, int] = collections.defaultdict(int)
+        self.load_map: Dict[int, int] = collections.defaultdict(int)
         self.lock = threading.Lock()
         self._tie_breaker_index = 0
 
-    def set_ready_replicas(self, ready_replicas: List[str]) -> None:
+    def set_ready_replicas(self, ready_replicas: List[ReadyReplica]) -> None:
         ready_replica_set = set(ready_replicas)
         if set(self.ready_replicas) == ready_replica_set:
             return
+        ready_replicas = list(ready_replicas)
+        ready_replica_ids = {replica.replica_id for replica in ready_replicas}
         with self.lock:
             self.ready_replicas = ready_replicas
-            for r in list(self.load_map.keys()):
-                # Delete retired replicas immediately. A late completion is
-                # ignored by post_execute_hook() instead of recreating the
-                # entry. This favors avoiding phantom load if a URL is reused
-                # over preserving accounting across a readiness flap. A URL
-                # that re-enters before an old request finishes can still be
-                # affected by that late completion; stable replica identity
-                # would be needed to eliminate that ambiguity.
-                if r not in ready_replica_set:
-                    del self.load_map[r]
+            # Retain retired replica IDs with in-flight requests so their
+            # completions can decrement the same identity. Remove idle
+            # retired IDs immediately.
+            for replica_id in list(self.load_map.keys()):
+                if (replica_id not in ready_replica_ids and
+                        self.load_map[replica_id] == 0):
+                    del self.load_map[replica_id]
             for replica in ready_replicas:
-                self.load_map[replica] = self.load_map.get(replica, 0)
+                self.load_map[replica.replica_id] = self.load_map.get(
+                    replica.replica_id, 0)
 
-    def _select_replica(self, request: 'fastapi.Request') -> Optional[str]:
+    def _select_replica(self,
+                        request: 'fastapi.Request') -> Optional[ReadyReplica]:
         del request  # Unused.
         if not self.ready_replicas:
             return None
         with self.lock:
             min_load = min(
-                self.load_map.get(replica, 0)
+                self.load_map.get(replica.replica_id, 0)
                 for replica in self.ready_replicas)
             tied_replicas = [
                 replica for replica in self.ready_replicas
-                if self.load_map.get(replica, 0) == min_load
+                if self.load_map.get(replica.replica_id, 0) == min_load
             ]
             return self._select_tied_replica(tied_replicas)
 
-    def begin_request(self, replica_url: str,
+    def begin_request(self, replica: ReadyReplica,
                       request: 'fastapi.Request') -> Callable[[], None]:
         load_released = False
 
@@ -165,16 +191,17 @@ class LeastLoadPolicy(LoadBalancingPolicy, name='least_load', default=True):
             if load_released:
                 return
             load_released = True
-            self.post_execute_hook(replica_url, request)
+            self.post_execute_hook(replica, request)
 
         # Keep this as the last operation before returning the release
         # callback. It increments load_map; a potentially-raising operation
         # after it would leak the increment before the callback is handed to
         # the caller.
-        self.pre_execute_hook(replica_url, request)
+        self.pre_execute_hook(replica, request)
         return release_load
 
-    def _select_tied_replica(self, replicas: List[str]) -> str:
+    def _select_tied_replica(self,
+                             replicas: List[ReadyReplica]) -> ReadyReplica:
         """Select among tied replicas without favoring the first one.
 
         The cursor is relative to all ready replicas, so changes to the set
@@ -192,26 +219,30 @@ class LeastLoadPolicy(LoadBalancingPolicy, name='least_load', default=True):
                 return replica
         raise RuntimeError('No tied replica found among ready replicas.')
 
-    def pre_execute_hook(self, replica_url: str,
+    def pre_execute_hook(self, replica: ReadyReplica,
                          request: 'fastapi.Request') -> None:
         del request  # Unused.
         with self.lock:
-            self.load_map[replica_url] += 1
+            self.load_map[replica.replica_id] += 1
 
-    def post_execute_hook(self, replica_url: str,
+    def post_execute_hook(self, replica: ReadyReplica,
                           request: 'fastapi.Request') -> None:
         del request  # Unused.
         with self.lock:
-            current_load = self.load_map.get(replica_url)
+            current_load = self.load_map.get(replica.replica_id)
             if current_load is None:
-                # Do not recreate an entry for a completion from a retired
-                # replica.
+                # The replica may have retired before this request completed.
                 return
             current_load = max(0, current_load - 1)
-            if current_load == 0 and replica_url not in self.ready_replicas:
-                del self.load_map[replica_url]
+            ready_replica_ids = {
+                ready_replica.replica_id
+                for ready_replica in self.ready_replicas
+            }
+            if (current_load == 0 and
+                    replica.replica_id not in ready_replica_ids):
+                del self.load_map[replica.replica_id]
             else:
-                self.load_map[replica_url] = current_load
+                self.load_map[replica.replica_id] = current_load
 
 
 class InstanceAwareLeastLoadPolicy(LeastLoadPolicy,
@@ -225,20 +256,8 @@ class InstanceAwareLeastLoadPolicy(LeastLoadPolicy,
 
     def __init__(self) -> None:
         super().__init__()
-        self.replica_info: Dict[str, Dict[str, Any]] = {}  # replica_url -> info
         self.target_qps_per_accelerator: Dict[str, float] = {
         }  # accelerator_type -> target_qps
-
-    def set_replica_info(self, replica_info: Dict[str, Dict[str, Any]]) -> None:
-        """Set replica information including accelerator types.
-
-        Args:
-            replica_info: Dict mapping replica URL to replica information
-                         e.g., {'http://url1': {'gpu_type': 'A100'}}
-        """
-        with self.lock:
-            self.replica_info = replica_info
-            logger.debug('Set replica info: %s', self.replica_info)
 
     def set_target_qps_per_accelerator(
             self, target_qps_per_accelerator: Dict[str, float]) -> None:
@@ -246,13 +265,11 @@ class InstanceAwareLeastLoadPolicy(LeastLoadPolicy,
         with self.lock:
             self.target_qps_per_accelerator = target_qps_per_accelerator
 
-    def _get_normalized_load(self, replica_url: str) -> float:
+    def _get_normalized_load(self, replica: ReadyReplica) -> float:
         """Get normalized load for a replica based on its accelerator type."""
-        current_load = self.load_map.get(replica_url, 0)
+        current_load = self.load_map.get(replica.replica_id, 0)
 
-        # Get accelerator type for this replica
-        replica_data = self.replica_info.get(replica_url, {})
-        accelerator_type = replica_data.get('gpu_type', 'unknown')
+        accelerator_type = replica.gpu_type
 
         # Get target QPS for this accelerator type with flexible matching
         target_qps = self._get_target_qps_for_accelerator(accelerator_type)
@@ -269,7 +286,7 @@ class InstanceAwareLeastLoadPolicy(LeastLoadPolicy,
         logger.debug(
             'InstanceAwareLeastLoadPolicy: Replica %s - GPU type: %s, '
             'current load: %s, target QPS: %s, normalized load: %s',
-            replica_url, accelerator_type, current_load, target_qps,
+            replica.replica_id, accelerator_type, current_load, target_qps,
             normalized_load)
 
         return normalized_load
@@ -294,7 +311,8 @@ class InstanceAwareLeastLoadPolicy(LeastLoadPolicy,
             f'Using default value 1.0 as fallback.')
         return 1.0
 
-    def _select_replica(self, request: 'fastapi.Request') -> Optional[str]:
+    def _select_replica(self,
+                        request: 'fastapi.Request') -> Optional[ReadyReplica]:
         del request  # Unused.
         if not self.ready_replicas:
             return None
