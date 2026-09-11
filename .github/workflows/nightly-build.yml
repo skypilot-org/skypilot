@@ -470,16 +470,18 @@ jobs:
 
   notify-slack-failure:
     runs-on: ubuntu-latest
-    needs: [check-date, nightly-build-pypi, smoke-tests-aws, smoke-tests-kubernetes-resource-heavy, smoke-tests-kubernetes-no-resource-heavy, smoke-tests-kubernetes-no-resource-heavy-limit-deps, smoke-tests-remote-server-kubernetes, smoke-tests-kubernetes-jobs-consolidation, smoke-tests-slurm-minimal, backward-compat-test-nightly, backward-compat-test-stable, publish-and-validate-both, trigger-docker-and-helm-release, tag-nightly-release, notify-downstream]
+    needs: [check-date, nightly-build-pypi, smoke-tests-aws, smoke-tests-kubernetes-resource-heavy, smoke-tests-kubernetes-no-resource-heavy, smoke-tests-kubernetes-no-resource-heavy-limit-deps, smoke-tests-remote-server-kubernetes, smoke-tests-kubernetes-jobs-consolidation, smoke-tests-slurm-minimal, backward-compat-test-nightly, backward-compat-test-stable, publish-and-validate-both, trigger-docker-and-helm-release, tag-nightly-release, notify-downstream, summary]
     # Fire when any upstream job failed OR the run was cancelled. A cancelled
     # run (e.g. someone stopping it while Buildkite lanes are still waiting)
     # publishes no nightly and dispatches nothing downstream, exactly like a
     # failure -- but `failure()` alone is false for it, so 2026-09-10's nightly
     # was skipped with no Slack message at all.
     #
-    # `notify-downstream` is in `needs` so this job stays pending until the
-    # downstream dispatch is terminal. Without it, a cancel landing while only
-    # that job is still running would find this one already evaluated+skipped.
+    # The `needs` list names every other job in the workflow -- including the
+    # parallel `notify-downstream` and `summary` -- so this job cannot be
+    # evaluated early. A job left out of it can reach a terminal state last,
+    # and a cancel landing after that would find this one already skipped.
+    # (`gate-tests` is covered transitively: every lane needs it.)
     if: failure() || cancelled()
     steps:
       - name: Prepare failure message
