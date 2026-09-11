@@ -124,33 +124,29 @@ class SkyServeController:
             logger.info(f'Received {len(timestamps)} inflight requests.')
             self._autoscaler.collect_request_information(request_aggregator)
 
-            # Get replica information for instance-aware load balancing
-            replica_infos = serve_state.get_replica_infos(self._service_name)
-            ready_replica_urls = self._replica_manager.get_active_replica_urls()
+            # Get replica information for load balancing. Keep the stable
+            # replica ID together with the current URL so the load balancer
+            # can use the URL for routing and the ID for accounting.
+            active_replica_infos = (
+                self._replica_manager.get_active_replica_infos())
+            replica_info = []
+            for info in active_replica_infos:
+                url = info.url
+                assert url is not None, info
 
-            # Use URL-to-info mapping to avoid duplication
-            replica_info = {}
-            for info in replica_infos:
-                if info.url in ready_replica_urls:
-                    # Get GPU type from handle.launched_resources.accelerators
-                    gpu_type = 'unknown'
-                    handle = info.handle()
-                    if handle is not None:
-                        accelerators = handle.launched_resources.accelerators
-                        if accelerators and len(accelerators) > 0:
-                            # Get the first accelerator type
-                            gpu_type = list(accelerators.keys())[0]
+                # Get GPU type from handle.launched_resources.accelerators.
+                gpu_type = 'unknown'
+                handle = info.handle()
+                if handle is not None:
+                    accelerators = handle.launched_resources.accelerators
+                    if accelerators:
+                        gpu_type = list(accelerators.keys())[0]
 
-                    replica_info[info.url] = {'gpu_type': gpu_type}
-
-            # Check that all ready replica URLs are included in replica_info
-            missing_urls = set(ready_replica_urls) - set(replica_info.keys())
-            if missing_urls:
-                logger.warning(f'Ready replica URLs missing from replica_info: '
-                               f'{missing_urls}')
-                # fallback: add missing URLs with unknown GPU type
-                for url in missing_urls:
-                    replica_info[url] = {'gpu_type': 'unknown'}
+                replica_info.append({
+                    'replica_id': info.replica_id,
+                    'url': url,
+                    'gpu_type': gpu_type,
+                })
 
             return responses.JSONResponse(
                 content={'replica_info': replica_info}, status_code=200)
