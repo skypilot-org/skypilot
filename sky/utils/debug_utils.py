@@ -804,30 +804,18 @@ def _populate_recent_context(
         f'Populating context with resources from last {minutes} minutes')
     cutoff_time = time.time() - (minutes * 60)
 
-    # The dump's own request is RUNNING while this scan runs, so without an
-    # explicit exclusion it would include itself -- and copying its
-    # request.log / request_debug.log would ship the dump's own output
-    # stream a second time inside the artifact. Only this accidental
-    # self-inclusion is excluded: explicitly requesting the dump's own
-    # request ID still dumps it. Outside a server-side request execution
-    # (e.g. tests, in-process callers) there is no own request to exclude.
-    own_request_id = (common_utils.get_current_request_id()
-                      if common_utils.is_in_request_context() else None)
-
     # Get recent requests (cluster names are handled by
-    # _get_clusters_from_requests during cross-linking)
+    # _get_clusters_from_requests during cross-linking). The dump's own
+    # (running) request intentionally stays in scope here: its
+    # request_info.json records who triggered the dump, when, and with what
+    # parameters. Its log copies are skipped separately, at the log-copy
+    # level in _dump_request_id_info (skip_log_request_ids).
     try:
         requests = requests_lib.get_request_tasks(
             requests_lib.RequestTaskFilter(finished_after=cutoff_time,
                                            fields=['request_id',
                                                    'finished_at']))
         for request in requests:
-            if own_request_id is not None and (request.request_id
-                                               == own_request_id):
-                logger.debug('Recent: excluding the debug dump\'s own '
-                             f'request {request.request_id} (its logs are '
-                             'the dump itself)')
-                continue
             logger.debug(f'Recent: including request {request.request_id} '
                          f'(finished_at={request.finished_at},'
                          f' cutoff={cutoff_time:.0f})')
@@ -1106,12 +1094,13 @@ _REQUEST_LOG_COPY_TIMEOUT = 30
 
 
 def _dump_request_id_info(
-        request_ids: Set[str],
-        dump_dir: str,
-        errors: Optional[List[Dict[str, str]]] = None,
-        deadline: Optional[float] = None,
-        orphans: Optional[List[Dict[str,
-                                    Any]]] = None) -> Optional[Dict[str, int]]:
+    request_ids: Set[str],
+    dump_dir: str,
+    errors: Optional[List[Dict[str, str]]] = None,
+    deadline: Optional[float] = None,
+    orphans: Optional[List[Dict[str, Any]]] = None,
+    skip_log_request_ids: Optional[Set[str]] = None
+) -> Optional[Dict[str, int]]:
     """Collect request logs and metadata.
 
     ``deadline`` (absolute monotonic) bounds the section two ways: each
@@ -1121,11 +1110,24 @@ def _dump_request_id_info(
     dump still zips what it gathered. Per-request wall-clock is written to
     ``requests/_timings.json``.
 
-    Returns per-item stats for summary.json -- ``dumped`` (request info
-    written), ``not_found`` (request ID no longer in the DB) and
-    ``skipped_deadline`` (never attempted, budget gone) -- which together
-    account for every request in the section's scope. ``None`` when there
-    are no requests to dump.
+    ``skip_log_request_ids`` lists requests whose metadata
+    (request_info.json) is still collected but whose log copies are skipped
+    -- used for the dump's own request, whose operational trail is already
+    archived in debug_dump.log.
+
+    Returns per-item stats for summary.json: ``planned`` (requests in the
+    section's scope), ``dumped``, ``not_found`` (request ID no longer in
+    the DB) and ``skipped_deadline`` (never attempted, budget gone), or
+    ``None`` when there are no requests to dump. ``dumped`` is DISK-DERIVED
+    (per-request directories containing at least one file -- exactly what
+    the os.walk-based zipping keeps), so it can OVERLAP ``not_found``: the
+    log-copy blocks below run for every attempted request, including a
+    DB-pruned one whose logs still exist on disk, and such a request counts
+    in both buckets. ``planned == dumped + not_found + skipped_deadline``
+    therefore holds exactly when every not-found request left no files on
+    disk. A request whose DB fetch raised but whose log copy landed counts
+    in ``dumped`` (and is recorded in errors.json); a DB-fetch failure that
+    wrote nothing to disk appears only in errors.json.
     """
     if not request_ids:
         logger.debug('No requests to dump')
@@ -1137,6 +1139,7 @@ def _dump_request_id_info(
     os.makedirs(requests_dir, exist_ok=True)
 
     stats: Dict[str, int] = {
+        'planned': len(request_ids),
         'dumped': 0,
         'not_found': 0,
         'skipped_deadline': 0,
@@ -1198,7 +1201,6 @@ def _dump_request_id_info(
                     f'(name={request.name}, '
                     f'status='
                     f'{request.status.value if request.status else None})')
-                stats['dumped'] += 1
             else:
                 stats['not_found'] += 1
                 logger.debug(f'Request {request_id} not found in DB')
@@ -1212,60 +1214,75 @@ def _dump_request_id_info(
                     'traceback': _full_traceback()
                 })
 
+        # A request listed in skip_log_request_ids (the dump's own request)
+        # keeps its metadata above but skips both log copies below:
+        # debug_dump.log already archives this dump's own operational trail
+        # (at INFO -- the request's DEBUG stream is deliberately not shipped
+        # in the artifact at all).
+        skip_logs = (skip_log_request_ids is not None and
+                     request_id in skip_log_request_ids)
+        if skip_logs:
+            logger.debug(f'Skipping log copies for request {request_id}: '
+                         'debug_dump.log archives this dump\'s own '
+                         'operational trail')
+
         # Copy request log file. Routed through the LogProvider so that
         # deployments whose request logs are not on the local filesystem
         # can fetch them from wherever they live. Deadline-bounded: a
         # streaming/active request's copy can block for tens of seconds.
-        try:
-            ok, copied = _run_with_deadline(
-                functools.partial(_copy_request_log_file, request_id,
-                                  request_dir,
-                                  log_provider.RequestLogType.REQUEST,
-                                  'request.log'),
-                _bounded_timeout(_REQUEST_LOG_COPY_TIMEOUT, deadline),
-                component='requests',
-                resource=f'{request_id}/log',
-                errors=errors,
-                orphans=orphans)
-            if ok and copied:
-                logger.debug(f'Copied request log for {request_id}')
-            elif ok:
-                logger.debug(f'Request log not found for {request_id}')
-        except Exception as e:  # pylint: disable=broad-except
-            logger.warning(f'Failed to copy log for request {request_id}: {e}')
-            if errors is not None:
-                errors.append({
-                    'component': 'requests',
-                    'resource': f'{request_id}/log',
-                    'error': str(e),
-                    'traceback': _full_traceback()
-                })
+        if not skip_logs:
+            try:
+                ok, copied = _run_with_deadline(
+                    functools.partial(_copy_request_log_file, request_id,
+                                      request_dir,
+                                      log_provider.RequestLogType.REQUEST,
+                                      'request.log'),
+                    _bounded_timeout(_REQUEST_LOG_COPY_TIMEOUT, deadline),
+                    component='requests',
+                    resource=f'{request_id}/log',
+                    errors=errors,
+                    orphans=orphans)
+                if ok and copied:
+                    logger.debug(f'Copied request log for {request_id}')
+                elif ok:
+                    logger.debug(f'Request log not found for {request_id}')
+            except Exception as e:  # pylint: disable=broad-except
+                logger.warning(
+                    f'Failed to copy log for request {request_id}: {e}')
+                if errors is not None:
+                    errors.append({
+                        'component': 'requests',
+                        'resource': f'{request_id}/log',
+                        'error': str(e),
+                        'traceback': _full_traceback()
+                    })
 
         # Copy debug log file (only exists when
         # ENABLE_REQUEST_DEBUG_LOGGING is enabled). Deadline-bounded too.
-        try:
-            ok, copied = _run_with_deadline(
-                functools.partial(_copy_request_log_file, request_id,
-                                  request_dir,
-                                  log_provider.RequestLogType.DEBUG,
-                                  'request_debug.log'),
-                _bounded_timeout(_REQUEST_LOG_COPY_TIMEOUT, deadline),
-                component='requests',
-                resource=f'{request_id}/request_debug.log',
-                errors=errors,
-                orphans=orphans)
-            if ok and copied:
-                logger.debug(f'Copied debug log for {request_id}')
-        except Exception as e:  # pylint: disable=broad-except
-            logger.warning(
-                f'Failed to copy debug log for request {request_id}: {e}')
-            if errors is not None:
-                errors.append({
-                    'component': 'requests',
-                    'resource': f'{request_id}/request_debug.log',
-                    'error': str(e),
-                    'traceback': _full_traceback()
-                })
+        if not skip_logs:
+            try:
+                ok, copied = _run_with_deadline(
+                    functools.partial(_copy_request_log_file, request_id,
+                                      request_dir,
+                                      log_provider.RequestLogType.DEBUG,
+                                      'request_debug.log'),
+                    _bounded_timeout(_REQUEST_LOG_COPY_TIMEOUT, deadline),
+                    component='requests',
+                    resource=f'{request_id}/request_debug.log',
+                    errors=errors,
+                    orphans=orphans)
+                if ok and copied:
+                    logger.debug(f'Copied debug log for {request_id}')
+            except Exception as e:  # pylint: disable=broad-except
+                logger.warning(
+                    f'Failed to copy debug log for request {request_id}: {e}')
+                if errors is not None:
+                    errors.append({
+                        'component': 'requests',
+                        'resource': f'{request_id}/request_debug.log',
+                        'error': str(e),
+                        'traceback': _full_traceback()
+                    })
 
         timings.append({
             'request_id': request_id,
@@ -1279,6 +1296,12 @@ def _dump_request_id_info(
             json.dump(timings, f, indent=2)
     except OSError as e:
         logger.debug(f'Failed to write request timings: {e}')
+    # Disk-derived, like the other itemized sections: count the per-request
+    # directories that actually hold a file (what the zip keeps), not an
+    # in-loop counter -- the two diverge when a DB fetch fails but a log
+    # copy lands, or when a not-found request's logs still exist (see the
+    # docstring for the overlap semantics).
+    stats['dumped'] = _count_item_dirs_with_files(requests_dir)
     logger.debug('Exiting _dump_request_id_info')
     return stats
 
@@ -1626,9 +1649,14 @@ def _dump_kube_contexts_info(
     ``orphans``) and whatever landed on disk is kept. Best-effort throughout:
     errors are recorded, never aborts the dump.
 
-    Returns per-item stats for summary.json (``dumped``: context directories
-    with at least one file -- whatever landed on disk, including a partial
-    batch cut off by the timeout), or ``None`` when there is nothing to dump.
+    Returns per-item stats for summary.json (``planned``: contexts in
+    scope; ``dumped``: context directories with at least one file --
+    whatever landed on disk, including a partial batch cut off by the
+    timeout, so it is a lower bound on what abandoned workers may still
+    write before the zip; ``skipped_deadline``: present only on the timeout
+    path, where it is inferred as ``planned - dumped`` -- the batch was
+    abandoned before completing), or ``None`` when there is nothing to
+    dump.
     """
     try:
         contexts = clouds.Kubernetes.existing_allowed_contexts(silent=True)
@@ -1688,8 +1716,19 @@ def _dump_kube_contexts_info(
     )
     if not ok or results is None:
         # Timed out: _run_with_deadline recorded the skip + orphan; per-context
-        # dirs written before the cutoff remain on disk as a partial.
-        return {'dumped': _count_item_dirs_with_files(contexts_root)}
+        # dirs written before the cutoff remain on disk as a partial. The
+        # abandoned workers' per-context errors are unrecoverable here, so
+        # the skipped count is inferred as planned minus what landed. Note
+        # both counts are taken at return time -- abandoned workers may
+        # still land context dirs before the zip's os.walk, so 'dumped' is
+        # a lower bound on the zip's contents.
+        planned = len(unique_contexts)
+        dumped = _count_item_dirs_with_files(contexts_root)
+        return {
+            'planned': planned,
+            'dumped': dumped,
+            'skipped_deadline': planned - dumped,
+        }
 
     timings: List[Dict[str, Any]] = []
     for context, (ctx_errors, duration_s) in zip(unique_contexts, results):
@@ -1714,7 +1753,10 @@ def _dump_kube_contexts_info(
             json.dump(timings, f, indent=2)
     except OSError as e:
         logger.debug(f'Failed to write kube-context timings: {e}')
-    return {'dumped': _count_item_dirs_with_files(contexts_root)}
+    return {
+        'planned': len(unique_contexts),
+        'dumped': _count_item_dirs_with_files(contexts_root),
+    }
 
 
 _KubeContextReachabilityChecker = Callable[[Optional[str]], bool]
@@ -1973,9 +2015,10 @@ def _dump_cluster_info(
     cluster. run_in_parallel keeps per-cluster best-effort isolation -- each
     worker returns its own error records, merged here after all finish.
 
-    Returns per-item stats for summary.json (``dumped``: cluster directories
-    with at least one file, i.e. what actually lands in the dump zip), or
-    ``None`` when there are no clusters to dump.
+    Returns per-item stats for summary.json (``planned``: clusters in
+    scope; ``dumped``: cluster directories with at least one file, i.e.
+    what actually lands in the dump zip), or ``None`` when there are no
+    clusters to dump.
     """
     if not cluster_names:
         logger.debug('No clusters to dump')
@@ -1998,6 +2041,7 @@ def _dump_cluster_info(
             errors.extend(cluster_errors)
 
     stats: Dict[str, int] = {
+        'planned': len(cluster_names),
         'dumped': _count_item_dirs_with_files(clusters_dir),
     }
     logger.debug('Exiting _dump_cluster_info')
@@ -2019,9 +2063,10 @@ def _dump_managed_job_info(
     memoized probe covers the whole section (and, via the shared cache,
     reuses the clusters section's probe of the same context).
 
-    Returns per-item stats for summary.json (``dumped``: managed-job
-    directories with at least one file, i.e. what actually lands in the
-    dump zip), or ``None`` when there are no managed jobs to dump.
+    Returns per-item stats for summary.json (``planned``: managed jobs in
+    scope; ``dumped``: managed-job directories with at least one file, i.e.
+    what actually lands in the dump zip), or ``None`` when there are no
+    managed jobs to dump.
     """
     if not managed_job_ids:
         logger.debug('No managed jobs to dump')
@@ -2041,7 +2086,14 @@ def _dump_managed_job_info(
                 _controller_skip_error('managed_jobs', 'controller_access',
                                        dead_context))
         logger.debug('Exiting _dump_managed_job_info')
-        return {'dumped': 0}
+        # Controller unreachable: nothing was attempted, so the section
+        # reads 'completed' with a legible planned/dumped disparity -- the
+        # per-item failure is already recorded in errors.json (see the
+        # canonical outcome-shape note at the section runner).
+        return {
+            'planned': len(managed_job_ids),
+            'dumped': 0,
+        }
 
     # Phase 1: Queue info from queue_v2 (works in both consolidation and
     # non-consolidation modes via existing gRPC/SSH plumbing)
@@ -2057,6 +2109,7 @@ def _dump_managed_job_info(
         # Per-job directories only: the controller-side phase also writes
         # non-per-job directories (controller_system/, controller_submit_logs/
         # ) under managed_jobs/, which are not scoped jobs.
+        'planned': len(managed_job_ids),
         'dumped': _count_item_dirs_with_files(jobs_dir,
                                               name_filter=str.isdigit),
     }
@@ -2301,6 +2354,7 @@ _SECTION_COLLECTED_KEYS = {
     'request_ids': 'request_count',
     'clusters': 'cluster_count',
     'managed_jobs': 'managed_job_count',
+    'kubernetes_contexts': 'kubernetes_context_count',
 }
 
 # Maps a dump section to the dump-root paths it writes, so summary.json can
@@ -2439,15 +2493,27 @@ def _build_debug_dump(
     # deadline-aware (its internal calls are bounded and it's skipped once the
     # budget is gone), so the build always reaches the zip step with a coherent
     # partial instead of being hard-killed mid-section.
+
+    # The dump's own request stays in scope (its request_info.json records
+    # who triggered the dump, when, and with what parameters), but its log
+    # copies are skipped: debug_dump.log already archives this dump's own
+    # operational trail. Resolved here rather than in create_debug_dump so
+    # direct _build_debug_dump callers keep their signature. Outside a
+    # server-side request execution (tests, in-process callers) there is no
+    # own request to skip.
+    own_request_id = (common_utils.get_current_request_id()
+                      if common_utils.is_in_request_context() else None)
     sections: List[Tuple[str, Callable[[], Optional[Dict[str, int]]]]] = [
         ('server_info', lambda: _dump_server_info(
             dump_dir, errors=errors, deadline=deadline, orphans=orphans)),
-        ('request_ids',
-         lambda: _dump_request_id_info(debug_dump_context['request_ids'],
-                                       dump_dir,
-                                       errors=errors,
-                                       deadline=deadline,
-                                       orphans=orphans)),
+        ('request_ids', lambda: _dump_request_id_info(
+            debug_dump_context['request_ids'],
+            dump_dir,
+            errors=errors,
+            deadline=deadline,
+            orphans=orphans,
+            skip_log_request_ids=({own_request_id}
+                                  if own_request_id is not None else None))),
         ('clusters',
          lambda: _dump_cluster_info(debug_dump_context['cluster_names'],
                                     dump_dir,
@@ -2479,6 +2545,7 @@ def _build_debug_dump(
         'request_count': 0,
         'cluster_count': 0,
         'managed_job_count': 0,
+        'kubernetes_context_count': 0,
     }
     for name, dump_section in sections:
         if _deadline_exceeded(deadline):
@@ -2513,11 +2580,36 @@ def _build_debug_dump(
             'status': 'completed',
             'duration_s': round(duration, 2),
         }
-        # Sections report what they actually collected by returning a stats
-        # dict (``None`` when there is nothing to itemize, e.g. server_info);
-        # anything else is ignored. A section that deadline-skipped some of
-        # its scoped items is marked partial, so a reader of summary.json
-        # alone sees the truncation without grepping errors.json.
+        # Canonical per-section outcome shape (each itemized section returns
+        # this; ``None`` or a non-dict when there is nothing to itemize,
+        # e.g. server_info, is ignored):
+        #   {planned, dumped, skipped_deadline, not_found?}
+        # * 'planned' is the section's scoped item count.
+        # * 'dumped' is DISK-DERIVED (item directories containing at least
+        #   one file -- exactly what the os.walk-based zipping keeps), so it
+        #   can OVERLAP 'not_found' when a DB-pruned request still has logs
+        #   on disk (the log-copy blocks run for every attempted request):
+        #   planned == dumped + skipped_deadline + not_found holds exactly
+        #   when not-found requests left no files. Requests whose DB fetch
+        #   raised but whose log copies landed count in 'dumped' and in
+        #   errors.json; DB-fetch failures that wrote nothing to disk appear
+        #   only in errors.json.
+        # * 'skipped_deadline' is an exact in-loop count for the requests
+        #   section, but on the kubernetes_contexts batch-timeout path it is
+        #   INFERRED (planned - dumped: the batch was abandoned before
+        #   completing). That timeout can fire from the fixed
+        #   _KUBE_CONTEXTS_TIMEOUT cap with no overall deadline at all -- in
+        #   which case the summary 'truncated' flag is still correct, since
+        #   the dump genuinely is incomplete. Both 'dumped' and the inferred
+        #   skip are return-time counts while abandoned workers may still
+        #   land directories before the zip's os.walk, so the counts are a
+        #   lower bound on the zip's contents, never an overstatement.
+        # 'completed_partial' keys on skipped_deadline > 0 (deadline / batch
+        # truncation) deliberately and NOT on dumped < planned: per-item
+        # failures are already recorded in errors.json -- which is why e.g.
+        # the managed-jobs controller-unreachable gate (planned=N, dumped=0,
+        # an errors.json record) still reads 'completed' with a legible
+        # planned/dumped disparity instead of a misleading 'partial'.
         if isinstance(stats, dict):
             timing_entry.update(stats)
             if stats.get('skipped_deadline', 0):
@@ -2795,14 +2887,17 @@ def create_debug_dump(
                                   if f.is_file())
 
             # Create zip file in PERSISTENT location (outside temp dir).
-            # debug_dump.log is deliberately excluded from this walk and
-            # written into the zip after the handler is closed below, so the
-            # archived copy includes the zip-stats lines -- detaching the
-            # handler first (the old behavior) meant the artifact's log ended
-            # at the straggler warnings, and the zip stats reached no
-            # artifact at all.
+            # debug_dump.log and manifest.json are deliberately excluded
+            # from this walk and appended after it: the log only once the
+            # handler is closed below, so the archived copy includes the
+            # zip-stats lines, and the manifest last of all, after the zip's
+            # own stats are known (see the append below). Detaching the
+            # handler before zipping (the old behavior) meant the
+            # artifact's log ended at the straggler warnings, and the zip
+            # stats reached no artifact at all.
             zip_filename = f'debug_dump_{timestamp}.zip'
             zip_file_path = dump_base_dir / zip_filename
+            manifest_path = os.path.join(dump_dir, 'manifest.json')
             # INFO so the zip step is visible in the worker log: it is the last
             # thing that runs before the dump is durable, and slow zips eat
             # into any outer deadline's buffer (see the per-section logging
@@ -2817,7 +2912,7 @@ def create_debug_dump(
                 for root, _, files in os.walk(dump_dir):
                     for file in files:
                         file_path = os.path.join(root, file)
-                        if file_path == debug_log_path:
+                        if file_path in (debug_log_path, manifest_path):
                             continue
                         arcname = os.path.relpath(file_path, temp_dir)
                         zipf.write(file_path, arcname)
@@ -2832,11 +2927,41 @@ def create_debug_dump(
             debug_handler.flush()
             debug_handler.close()
 
-        # The handler is closed, so debug_dump.log is complete; add it to the
-        # zip as the last entry.
+        # The handler is closed, so debug_dump.log is complete; add it to
+        # the zip.
         with zipfile.ZipFile(zip_file_path, 'a', zipfile.ZIP_DEFLATED) as zipf:
             zipf.write(debug_log_path, os.path.relpath(debug_log_path,
                                                        temp_dir))
+
+        # manifest.json goes in as the true final entry, after the zip's own
+        # stats are known: entry_count is exact (pass-1 files + debug_dump.log
+        # + the manifest itself) and compressed_size_bytes is measured after
+        # the log append, excluding the manifest entry (written after those
+        # stats). Best-effort: on failure the dump still returns -- a valid
+        # zip minus manifest.json already exists, and the warning lands in
+        # the worker log (the debug handler is closed by now).
+        try:
+            with open(manifest_path, 'r', encoding='utf-8') as f:
+                zip_manifest: Dict[str, Any] = json.load(f)
+            zip_manifest['zip'] = {
+                'entry_count': file_count + 2,
+                'zip_duration_s': round(time.monotonic() - zip_start, 2),
+                'compressed_size_bytes': os.path.getsize(zip_file_path),
+            }
+            zip_manifest['note'] = (
+                'Point-in-time inventory taken after collection finished, '
+                'before summary.json / manifest.json were written; '
+                'debug_dump.log sizes are as of handler close; '
+                'zip.entry_count and zip.compressed_size_bytes exclude the '
+                'manifest entry itself (written last, after those stats '
+                'were measured).')
+            with zipfile.ZipFile(zip_file_path, 'a',
+                                 zipfile.ZIP_DEFLATED) as zipf:
+                zipf.writestr(os.path.relpath(manifest_path, temp_dir),
+                              json.dumps(zip_manifest))
+        except Exception as e:  # pylint: disable=broad-except
+            logger.warning(f'Failed to append manifest.json to the debug '
+                           f'dump zip {zip_filename}: {e}')
 
     logger.info(f'debug dump: finished in {time.monotonic() - dump_start:.1f}s '
                 f'-> {zip_file_path}')
