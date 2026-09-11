@@ -3,6 +3,7 @@ import abc
 import enum
 import pathlib
 import shutil
+import threading
 from typing import AsyncGenerator, Optional
 
 from sky import sky_logging
@@ -20,6 +21,12 @@ class RequestLogType(enum.Enum):
     # The request debug log, written to DEBUG_LOG_DIR/<request_id>.log
     # when SKYPILOT_SERVER_ENABLE_REQUEST_DEBUG_LOGGING is enabled.
     DEBUG = 'debug'
+
+
+# Chunk size for the default local copy in LogProvider.copy_log_file:
+# large enough to keep a local copy effectively instant, small enough
+# that an abandoned copy notices the stop event at its next read.
+_LOG_COPY_CHUNK_BYTES = 1024 * 1024
 
 
 def local_log_path(request_id: str, log_type: RequestLogType) -> pathlib.Path:
@@ -72,21 +79,57 @@ class LogProvider(abc.ABC):
         del request_id, log_path, plain_logs, tail, follow, polling_interval
         yield ''
 
-    def copy_log_file(self, request_id: str, log_type: RequestLogType,
-                      dest_path: pathlib.Path) -> bool:
+    def copy_log_file(self,
+                      request_id: str,
+                      log_type: RequestLogType,
+                      dest_path: pathlib.Path,
+                      stop_event: Optional[threading.Event] = None) -> bool:
         """Copy a request's log file to dest_path (e.g. for a debug dump).
 
-        The default implementation copies from the local filesystem.
-        Providers backed by other log stores may override this to fetch
-        the log from wherever it lives.
+        The default implementation copies from the local filesystem in
+        bounded chunks. Providers backed by other log stores may override
+        this to fetch the log from wherever it lives; note that overrides
+        written before ``stop_event`` was added keep the old 3-argument
+        signature and will not receive the keyword.
+
+        Args:
+            stop_event: Optional cooperative-cancel signal. When set, the
+                caller has abandoned the copy: return False promptly --
+                checking the event before starting and between reads --
+                without creating or keeping the destination file. ``None``
+                (the default) keeps the copy uninterruptible.
 
         Returns:
             True if the log file was found and copied, False otherwise.
         """
         src_path = local_log_path(request_id, log_type)
+        if stop_event is not None and stop_event.is_set():
+            return False
         if not src_path.exists():
             return False
-        shutil.copy2(src_path, dest_path)
+        stopped = False
+        with open(src_path, 'rb') as src, open(dest_path, 'wb') as dest:
+            while True:
+                if stop_event is not None and stop_event.is_set():
+                    stopped = True
+                    break
+                chunk = src.read(_LOG_COPY_CHUNK_BYTES)
+                if not chunk:
+                    break
+                dest.write(chunk)
+        if stopped:
+            # Abandoned mid-copy: discard the partial output. The unlink
+            # is guarded so an error on a stalled filesystem cannot mask
+            # the stop contract.
+            try:
+                dest_path.unlink()
+            except OSError:
+                pass
+            return False
+        # copy2 = copyfile + copystat; the chunked copy above replaces
+        # copyfile, copystat preserves the metadata (notably mtime) the
+        # debug dump's forensic value relies on.
+        shutil.copystat(src_path, dest_path)
         return True
 
     def discard_log(self, request_id: str) -> None:
