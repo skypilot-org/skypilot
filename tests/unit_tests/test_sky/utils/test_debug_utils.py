@@ -4947,6 +4947,63 @@ class TestDumpRequestIdInfoOutcomes:
         # No request dir is created for a skipped request.
         assert not (tmp_path / 'requests' / 'r1').exists()
 
+    def test_skipped_id_list_only_in_manifest(self, tmp_path):
+        """The full skipped-ID list lives in ids_manifest.json only;
+        summary.json's section_outcomes keeps the count (skipped_deadline)
+        so the summary stays scannable on a dump with many deadline
+        skips."""
+        real_dump = debug_utils._dump_request_id_info
+        past_deadline = time.monotonic() - 1
+
+        def _dump_with_expired_budget(request_ids,
+                                      dump_dir,
+                                      errors=None,
+                                      deadline=None,
+                                      orphans=None):
+            # The section-level check sees the outer (None) deadline, so
+            # the section runs; every request then hits the injected past
+            # deadline inside the loop and is skipped.
+            return real_dump(request_ids,
+                             dump_dir,
+                             errors=errors,
+                             deadline=past_deadline,
+                             orphans=orphans)
+
+        with contextlib.ExitStack() as stack:
+            for fn in TestOverallDeadlineDump._CROSSLINK_FNS:
+                stack.enter_context(mock.patch(f'sky.utils.debug_utils.{fn}'))
+            for fn in ('_dump_server_info', '_dump_kube_contexts_info',
+                       '_dump_cluster_info', '_dump_managed_job_info'):
+                stack.enter_context(mock.patch(f'sky.utils.debug_utils.{fn}'))
+            stack.enter_context(
+                mock.patch('sky.utils.debug_utils._dump_request_id_info',
+                           side_effect=_dump_with_expired_budget))
+            stack.enter_context(
+                mock.patch(
+                    'sky.utils.debug_utils.requests_lib'
+                    '.get_requests_with_prefix',
+                    side_effect=lambda prefix, fields=None:
+                    [mock.MagicMock(request_id=prefix)]))
+            stack.enter_context(
+                mock.patch('sky.utils.debug_utils.DEBUG_DUMP_DIR',
+                           str(tmp_path / 'debug_dumps')))
+            result = debug_utils.create_debug_dump(
+                request_ids=['req-1', 'req-2'])
+
+        with zipfile.ZipFile(result, 'r') as zf:
+            names = zf.namelist()
+            summary = json.loads(
+                zf.read(next(n for n in names if n.endswith('summary.json'))))
+            manifest = json.loads(
+                zf.read(
+                    next(n for n in names if n.endswith('ids_manifest.json'))))
+        skipped = manifest['skipped_request_ids']
+        assert 'req-1' in skipped and 'req-2' in skipped
+        request_outcomes = summary['section_outcomes']['request_ids']
+        assert request_outcomes['skipped_deadline'] == len(skipped)
+        # The ID list itself must not be re-inlined into the summary.
+        assert 'skipped_request_ids' not in request_outcomes
+
     def test_outcomes_arithmetic_closes(self, tmp_path):
 
         def _fake_get(request_id):

@@ -1436,7 +1436,10 @@ def _dump_request_id_info(
     ``attempted = info_written + not_in_db + db_errors`` (each of those
     buckets implies a request_info.json artifact, full or stub), plus
     per-log-type coverage counts, so every gap between the summary counts
-    and the on-disk artifacts is explainable from the dump alone.
+    and the on-disk artifacts is explainable from the dump alone. The
+    ``skipped_request_ids`` list is the one exception: the caller moves it
+    into ids_manifest.json (summary.json keeps only the
+    ``skipped_deadline`` count) so the summary stays scannable.
     """
     outcomes = _empty_request_outcomes()
     if not request_ids:
@@ -2881,11 +2884,16 @@ def _build_debug_dump(
 
     request_logs = _log_coverage('request_log')
     request_debug_logs = _log_coverage('request_debug_log')
+    # The full skipped-ID list lives only in ids_manifest.json: popping it
+    # here keeps it out of the outcomes dict that summary.json embeds below
+    # (skipped_deadline already carries the count), so the summary stays
+    # scannable even when thousands of requests were skipped.
+    skipped_request_ids = request_outcomes.pop('skipped_request_ids', [])
     ids_manifest: Dict[str, Any] = {
         'request_ids': sorted(debug_dump_context['request_ids']),
         'cluster_names': sorted(debug_dump_context['cluster_names']),
         'managed_job_ids': sorted(debug_dump_context['managed_job_ids']),
-        'skipped_request_ids': request_outcomes.get('skipped_request_ids', []),
+        'skipped_request_ids': skipped_request_ids,
     }
     ids_manifest_path = os.path.join(dump_dir, 'ids_manifest.json')
     with open(ids_manifest_path, 'w', encoding='utf-8') as f:
