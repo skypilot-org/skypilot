@@ -159,6 +159,16 @@ _FETCH_IP_MAX_ATTEMPTS = 3
 _TEARDOWN_WAIT_MAX_ATTEMPTS = 10
 _TEARDOWN_WAIT_BETWEEN_ATTEMPS_SECONDS = 1
 
+# How long a teardown waits for the requests it just cancelled (typically an
+# in-flight launch of the same cluster) to release the cluster lock on their
+# own before force-unlocking it. A cancelled launch only releases the lock once
+# it has unwound, which includes joining any in-flight cloud create calls; if
+# we break the lock earlier, the pre-teardown status refresh can query the
+# cloud before those resources exist, conclude the cluster is gone, and leak
+# them. Force-unlock remains the fallback so `sky down` can never hang on a
+# wedged holder.
+_TEARDOWN_CANCELLED_REQUEST_GRACE_SECONDS = 30
+
 _TEARDOWN_FAILURE_MESSAGE = (
     f'\n{colorama.Fore.RED}Failed to terminate '
     '{cluster_name}. {extra_reason}'
@@ -4818,6 +4828,11 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     'Failed to kill other launch requests for the '
                     f'cluster {handle.cluster_name}: '
                     f'{common_utils.format_exception(e, use_bracket=True)}')
+            # The requests we just cancelled release the cluster lock only
+            # once they have unwound. Give them a bounded grace period to do
+            # so before breaking the lock: see
+            # _TEARDOWN_CANCELLED_REQUEST_GRACE_SECONDS.
+            self._wait_for_cluster_lock_release(lock_id)
             # In case other running cluster operations are still holding the
             # lock.
             lock.force_unlock()
@@ -4844,6 +4859,31 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     raise RuntimeError(
                         f'Cluster {cluster_name!r} is locked by {lock_id}. '
                         'Check to see if it is still being launched') from e
+
+    @staticmethod
+    def _wait_for_cluster_lock_release(lock_id: str) -> bool:
+        """Wait for the cluster status lock to be released by its holder.
+
+        Returns True if the lock became acquirable within
+        _TEARDOWN_CANCELLED_REQUEST_GRACE_SECONDS, False if the holder is
+        still hanging on to it (the caller then force-unlocks it).
+        """
+        grace_lock = locks.get_lock(
+            lock_id, timeout=_TEARDOWN_CANCELLED_REQUEST_GRACE_SECONDS)
+        start = time.perf_counter()
+        try:
+            with grace_lock:
+                pass
+        except locks.LockTimeout:
+            logger.warning(f'Cluster lock {lock_id} is still held after '
+                           f'{_TEARDOWN_CANCELLED_REQUEST_GRACE_SECONDS}s; '
+                           'force-unlocking it to proceed with the teardown.')
+            return False
+        waited = time.perf_counter() - start
+        if waited >= 1:
+            logger.debug(f'Waited {waited:.1f}s for cluster lock {lock_id} '
+                         'to be released before teardown.')
+        return True
 
     # --- CloudVMRayBackend Specific APIs ---
 
@@ -5540,6 +5580,70 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                      f'{colorama.Style.RESET_ALL}')
         return {str(job_id): local_log_dir}
 
+    def _terminate_unrecorded_cluster_resources(
+            self, handle: CloudVmRayResourceHandle, purge: bool) -> None:
+        """Terminate cloud resources of a cluster whose record is gone.
+
+        Called from teardown_no_lock when the pre-teardown status refresh
+        removed the cluster row because the cloud reported no nodes. Re-issues
+        the cloud-side terminate by cluster name so that nodes which appeared
+        after that report (a cancelled launch still creating them) are deleted
+        instead of leaked. Idempotent: a no-op when nothing exists.
+
+        Raises:
+            Exception: cloud errors from the teardown, unless purge is set.
+        """
+        cluster_name = handle.cluster_name
+        cluster_name_on_cloud = handle.cluster_name_on_cloud
+        try:
+            launched_resources = handle.launched_resources.assert_launchable()
+            cloud = launched_resources.cloud
+            # ProvisionerVersion only defines __ge__.
+            if not (cloud.PROVISIONER_VERSION >= clouds.ProvisionerVersion.
+                    RAY_PROVISIONER_SKYPILOT_TERMINATOR):
+                # Legacy provisioner clouds have no by-name terminate.
+                logger.warning(f'Cluster {cluster_name!r} is already '
+                               'terminated. Skipped.')
+                return
+            config = global_user_state.get_cluster_yaml_dict(
+                handle.cluster_yaml)
+            provider_config = config['provider']
+        except Exception as e:  # pylint: disable=broad-except
+            # Nothing usable left to act on (e.g. the cluster yaml is gone).
+            logger.warning(f'Cluster {cluster_name!r} is already terminated. '
+                           'Skipped.')
+            logger.debug(
+                'Could not load the cluster config to re-check '
+                f'cloud resources for {cluster_name!r}: '
+                f'{common_utils.format_exception(e, use_bracket=True)}')
+            return
+
+        logger.warning(
+            f'Cluster {cluster_name!r} is no longer in the cluster table. '
+            'Re-checking the cloud for resources left behind by an '
+            'interrupted launch and terminating any that exist.')
+        try:
+            provisioner.teardown_cluster(repr(cloud),
+                                         resources_utils.ClusterName(
+                                             cluster_name,
+                                             cluster_name_on_cloud),
+                                         terminate=True,
+                                         provider_config=provider_config)
+            # E.g. Kubernetes services; a no-op for other clouds.
+            provision_lib.cleanup_cluster_resources(repr(cloud),
+                                                    cluster_name_on_cloud,
+                                                    provider_config)
+        except Exception as e:  # pylint: disable=broad-except
+            if purge:
+                logger.warning(
+                    _TEARDOWN_PURGE_WARNING.format(
+                        reason='terminating cluster nodes left behind by an '
+                        'interrupted launch',
+                        details=common_utils.format_exception(
+                            e, use_bracket=True)))
+            else:
+                raise
+
     def teardown_no_lock(self,
                          handle: CloudVmRayResourceHandle,
                          terminate: bool,
@@ -5604,7 +5708,10 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                         # _LAUNCH_DOUBLE_CHECK_WINDOW in backend_utils.py.
                         force_refresh_statuses={status_lib.ClusterStatus.INIT},
                         cluster_lock_already_held=True,
-                        retry_if_missing=False))
+                        # Retry an empty node list: a cancelled launch may
+                        # still be creating the nodes (see the
+                        # prev_cluster_status is None branch below).
+                        retry_if_missing=True))
                 if refreshed_handle is not None:
                     # Use the latest handle from status refresh to avoid acting
                     # on stale runtime metadata persisted earlier in launch.
@@ -5620,13 +5727,24 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 handle.cluster_name)
             prev_cluster_status = status if status is not None else None
         if prev_cluster_status is None:
-            # When the cluster is not in the cluster table, we guarantee that
-            # all related resources / cache / config are cleaned up, i.e. it
-            # is safe to skip and return True.
+            # The cluster is not in the cluster table. Usually it was already
+            # torn down and there is nothing left to do. However, the row may
+            # also have been removed moments ago by the status refresh above,
+            # because the cloud reported zero nodes -- and for a cluster whose
+            # launch was just cancelled that report can be premature: the
+            # cancelled worker may still be inside the cloud's create calls
+            # (e.g. Kubernetes pod creation), so the nodes show up right
+            # after we looked. Returning here would leak them for good, with
+            # no record left to `sky down`. For a terminate, re-issue the
+            # (idempotent) cloud teardown by cluster name; it is a no-op when
+            # nothing exists.
             ux_utils.console_newline()
-            logger.warning(
-                f'Cluster {handle.cluster_name!r} is already terminated. '
-                'Skipped.')
+            if terminate and handle.cluster_yaml is not None:
+                self._terminate_unrecorded_cluster_resources(handle, purge)
+            else:
+                logger.warning(
+                    f'Cluster {handle.cluster_name!r} is already terminated. '
+                    'Skipped.')
             return
 
         if handle.cluster_yaml is None:

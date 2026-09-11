@@ -334,6 +334,22 @@ def bulk_provision(
                 repr(cloud), 'success',
                 time.time() - provision_start)
             return provision_record
+        except (KeyboardInterrupt, SystemExit):
+            # The launch was cancelled (a SIGTERM on the executor worker
+            # surfaces as KeyboardInterrupt). This is not a provisioning
+            # failure, so it must not enter the failover teardown below, but
+            # the cloud may already hold resources for this attempt: on
+            # Kubernetes, ``_create_pods`` fans pod creation out to a
+            # ThreadPool whose ``__exit__`` joins the in-flight creates before
+            # the interrupt reaches this frame, so those pods exist by now.
+            # Nothing else cleans them up: the request is already marked
+            # cancelled, and a concurrent ``sky down`` may find zero pods and
+            # conclude there is nothing to delete. Tear down best-effort here,
+            # then let the interrupt propagate.
+            _teardown_interrupted_provision(cloud, cluster_name,
+                                            prev_cluster_ever_up,
+                                            original_config['provider'])
+            raise
         except exceptions.NoClusterLaunchedError:
             # Skip the teardown if the cluster was never launched.
             raise
@@ -405,6 +421,41 @@ def bulk_provision(
                         'manually terminate the cluster. '
                         f'Details: {formatted_exception}') from e
             raise
+
+
+def _teardown_interrupted_provision(cloud: clouds.Cloud,
+                                    cluster_name: resources_utils.ClusterName,
+                                    prev_cluster_ever_up: bool,
+                                    provider_config: Dict) -> None:
+    """Best-effort teardown after a cancelled provisioning attempt.
+
+    Mirrors the failure path: a cluster that was ever UP is stopped so its
+    state survives, a brand-new one is terminated. Errors are logged and
+    swallowed so the caller can re-raise the pending interrupt.
+    """
+    terminate = not prev_cluster_ever_up
+    terminate_str = 'Terminating' if terminate else 'Stopping'
+    logger.debug(f'Provisioning of {cluster_name!r} was interrupted. '
+                 f'{terminate_str} any resources created so far.')
+    try:
+        teardown_cluster(repr(cloud),
+                         cluster_name,
+                         terminate=terminate,
+                         provider_config=provider_config)
+    except NotImplementedError:
+        # Stopping is not supported by this cloud (e.g. Kubernetes). The
+        # previously-UP cluster keeps its nodes; whoever cancelled the launch
+        # (e.g. the jobs controller) tears it down explicitly.
+        assert not terminate, 'Terminating must be supported by all clouds'
+        logger.debug(f'{cloud} does not support stopping; leaving '
+                     f'{cluster_name!r} to the caller\'s teardown.')
+    except Exception as e:  # pylint: disable=broad-except
+        logger.warning(
+            f'{terminate_str} {cluster_name.display_name!r} after the launch '
+            'was interrupted failed. Resources may be leaked; check the cloud '
+            f'console and run `sky down {cluster_name.display_name}`. '
+            f'Details: {common_utils.format_exception(e, use_bracket=True)}')
+        logger.debug(f'Stacktrace:\n{traceback.format_exc()}')
 
 
 def teardown_cluster(cloud_name: str, cluster_name: resources_utils.ClusterName,
