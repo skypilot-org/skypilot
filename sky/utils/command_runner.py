@@ -1210,40 +1210,6 @@ class SSHCommandRunner(CommandRunner):
             disable_identities_only=self.disable_identities_only,
         ) + [f'{self.ssh_user}@{self.ip}']
 
-    def _interactive_auth_ssh_options(self, command: List[str]) -> List[str]:
-        """The ssh options the interactive-auth retry adds to a command.
-
-        A function so the decision can be tested without standing up the pty
-        and the unix socket the retry needs.
-
-        `ControlPersist` alone does nothing: with no master and no path there
-        is no socket to persist, so the authenticated session this retry
-        exists to establish is thrown away and the user is asked again on the
-        next command. The command arrives without them when the caller passed
-        a `timeout`, which drops the master so the timeout can end the call --
-        a trade that does not apply here, because this retry is waiting on a
-        person and has no useful bound, and a reusable socket is the whole
-        point of the attempt.
-        """
-        options = [
-            # Override ControlPersist to reduce frequency of manual user
-            # intervention. The default from ssh_options_list is only 5m.
-            #
-            # NOTE: When used with ProxyJump, the connection can die
-            # earlier than expected, so it is recommended to also enable
-            # ControlMaster on the jump host's SSH config. It is hard to
-            # tell why exactly, because enabling -v makes this problem
-            # disappear for some reasons.
-            '-o',
-            'ControlPersist=1d',
-        ]
-        if 'ControlMaster=auto' in command or self.ssh_control_name is None:
-            return options
-        control_path = f'{_ssh_control_path(self.ssh_control_name)}/%C'
-        return options + [
-            '-o', 'ControlMaster=auto', '-o', f'ControlPath={control_path}'
-        ]
-
     def _retry_with_interactive_auth(
             self, session_id: str, command: List[str], log_path: str,
             require_outputs: bool, process_stream: bool, stream_logs: bool,
@@ -1263,7 +1229,18 @@ class SSHCommandRunner(CommandRunner):
         See ssh_options_list for when ControlMaster is not enabled.
         """
         with _INTERACTIVE_AUTH_LOCK:
-            extra_options = self._interactive_auth_ssh_options(command)
+            extra_options = [
+                # Override ControlPersist to reduce frequency of manual user
+                # intervention. The default from ssh_options_list is only 5m.
+                #
+                # NOTE: When used with ProxyJump, the connection can die
+                # earlier than expected, so it is recommended to also enable
+                # ControlMaster on the jump host's SSH config. It is hard to
+                # tell why exactly, because enabling -v makes this problem
+                # disappear for some reasons.
+                '-o',
+                'ControlPersist=1d',
+            ]
             if self._ssh_proxy_jump is not None:
                 logger.warning(
                     f'{colorama.Fore.YELLOW}When using ProxyJump, it is '
@@ -1452,6 +1429,18 @@ class SSHCommandRunner(CommandRunner):
         #
         # An unreachable host was always bounded -- no master is established
         # there -- which is why this survives a first look.
+        #
+        # KNOWN GAP: a runner with `enable_interactive_auth` loses the
+        # authenticated socket for bounded calls. The retry sets
+        # `ControlPersist=1d`, which needs a master and a path to persist
+        # anything, so a cluster that asks for a password asks again on the
+        # next bounded command. Giving the retry its master back does not
+        # close the gap: the master then holds the pipes for that call too,
+        # and a master is no less of a holder for being reused -- two calls in
+        # a row against an existing one both waited out the full command.
+        # Closing it means separating authentication from execution, so the
+        # auth invocation can keep a socket while the bounded one never
+        # touches one. That is more than this change should carry.
         base_ssh_command = self.ssh_base_command(
             ssh_mode=ssh_mode,
             port_forward=port_forward,
