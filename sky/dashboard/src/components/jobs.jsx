@@ -167,6 +167,48 @@ const STATUS_PRIORITY = {
 // Returns the "worst" status based on priority
 // For job groups with primary/auxiliary tasks, status is determined only by primary tasks
 // Uses is_primary_in_job_group per task: null (non-group), true (primary), false (auxiliary)
+/**
+ * Group table rows into the jobs they are shown under, in row order.
+ *
+ * A job's own tasks share its id. A job launched from inside another managed
+ * job (a dynamic job group member) carries root_job_id and is shown under
+ * that top-level job when it is in the listing, after the job's own tasks;
+ * a member whose root is not listed is shown as its own job, since there is
+ * nothing on this page to nest it under.
+ *
+ * External rows never form job groups; they are keyed by their globally
+ * unique task_job_id so equal Slurm ids across clusters (or a Slurm id
+ * matching a managed id) can't collapse into one group, with a prefixed id
+ * as a fallback if a producer ever omits task_job_id.
+ */
+export function groupJobRowsByTree(rows) {
+  const groups = new Map();
+  const ownKey = (job) =>
+    job.is_external ? (job.task_job_id ?? `external:${job.id}`) : job.id;
+  const isMember = (job) =>
+    !job.is_external && job.root_job_id != null && job.root_job_id !== job.id;
+  // Top-level jobs and their own tasks first, so every group starts with
+  // the job it is named after.
+  rows.forEach((job) => {
+    if (isMember(job)) return;
+    const key = ownKey(job);
+    if (!groups.has(key)) {
+      groups.set(key, []);
+    }
+    groups.get(key).push(job);
+  });
+  // Then the launched jobs, under their root when it is listed.
+  rows.forEach((job) => {
+    if (!isMember(job)) return;
+    const key = groups.has(job.root_job_id) ? job.root_job_id : job.id;
+    if (!groups.has(key)) {
+      groups.set(key, []);
+    }
+    groups.get(key).push(job);
+  });
+  return groups;
+}
+
 export function getAggregatedStatus(tasks) {
   if (!tasks || tasks.length === 0) return 'PENDING';
   if (tasks.length === 1) return tasks[0].status;
@@ -1334,31 +1376,25 @@ export function ManagedJobsTable({
   const totalPages = totalCount > 0 ? Math.ceil(totalCount / pageSize) : 0;
 
   // Group jobs by job_id for expandable row functionality
-  const groupedJobs = React.useMemo(() => {
-    const groups = new Map();
-    paginatedData.forEach((job) => {
-      // External rows never form job groups; key them by their globally
-      // unique task_job_id so equal Slurm ids across clusters (or a
-      // Slurm id matching a managed id) can't collapse into one group.
-      // Fall back to a prefixed id if a producer ever omits task_job_id,
-      // so such rows degrade to per-id groups instead of one undefined
-      // group rendering as a bogus JobGroup.
-      const jobId = job.is_external
-        ? (job.task_job_id ?? `external:${job.id}`)
-        : job.id;
-      if (!groups.has(jobId)) {
-        groups.set(jobId, []);
-      }
-      groups.get(jobId).push(job);
-    });
-    return groups;
-  }, [paginatedData]);
+  const groupedJobs = React.useMemo(
+    () => groupJobRowsByTree(paginatedData),
+    [paginatedData]
+  );
 
   // Pre-compute aggregated data for job groups to avoid inline computations during render
   const jobGroupAggregates = React.useMemo(() => {
     const aggregates = new Map();
-    groupedJobs.forEach((tasks, jobId) => {
-      if (tasks.length > 1) {
+    groupedJobs.forEach((rows, jobId) => {
+      if (rows.length > 1) {
+        // The group's own tasks aggregate. Jobs launched from it (dynamic
+        // members, each with its own job id) are listed in the tooltip but
+        // never change the group's status, duration or recovery count,
+        // matching the CLI's format_job_table.
+        const memberRows = rows.filter((t) => t.id !== jobId);
+        const tasks = memberRows.length
+          ? rows.filter((t) => t.id === jobId)
+          : rows;
+
         // Check if this job group has auxiliary tasks (is_primary_in_job_group=false)
         const hasAuxiliaryTasks = tasks.some(
           (t) => t.is_primary_in_job_group === false
@@ -1369,7 +1405,7 @@ export function ManagedJobsTable({
 
         // Compute status tooltip showing all task statuses
         // Also indicate which tasks are primary with a star marker
-        const statusTooltip = hasAuxiliaryTasks
+        const ownStatusTooltip = hasAuxiliaryTasks
           ? `Task statuses:\n${tasks
               .map((t, i) => {
                 const isPrimary = t.is_primary_in_job_group === true;
@@ -1377,6 +1413,13 @@ export function ManagedJobsTable({
               })
               .join('\n')}\n\n★ = Primary task`
           : `Task statuses:\n${tasks.map((t, i) => `Task ${i}: ${t.status}`).join('\n')}`;
+        const statusTooltip = memberRows.length
+          ? `${ownStatusTooltip}\n\nLaunched from this job:\n${memberRows
+              .map(
+                (t) => `Job ${t.id}${t.task ? ` (${t.task})` : ''}: ${t.status}`
+              )
+              .join('\n')}`
+          : ownStatusTooltip;
 
         // Compute aggregated resources
         const resourcesList = tasks
@@ -1582,6 +1625,9 @@ export function ManagedJobsTable({
   // - item: The task data
   // - renderMode: 'single' | 'groupParent' | 'groupChild'
   // - jobId, tasks, taskIndex, aggregates (for job groups)
+  // - ownTasks, memberTasks: the group's own tasks and the jobs launched
+  //   from it (dynamic members, own job ids); isMember, memberIsMultiTask
+  //   on a groupChild row that belongs to a launched job
   // - isExpanded, toggleJobGroup, hasAnyJobGroups (for job group UI)
   const baseColumns = React.useMemo(
     () => [
@@ -1604,6 +1650,8 @@ export function ManagedJobsTable({
             isExpanded,
             toggleJobGroup,
             hasAnyJobGroups,
+            isMember,
+            memberIsMultiTask,
           } = ctx || {};
 
           if (renderMode === 'groupParent') {
@@ -1632,7 +1680,22 @@ export function ManagedJobsTable({
             return (
               <TableCell className="whitespace-nowrap relative">
                 <div className="absolute left-0 top-0 bottom-0 w-0.5 bg-blue-300"></div>
-                <span className="text-gray-500 pl-6">{taskIndex}</span>
+                {isMember ? (
+                  // A job launched from this group: its own job id (it has
+                  // its own logs and can be cancelled on its own), and its
+                  // task index only if it has several tasks.
+                  <span className="pl-6">
+                    <span className="text-gray-500">↳ </span>
+                    <Link href={`/jobs/${item.id}`} className="text-blue-600">
+                      {item.id}
+                    </Link>
+                    {memberIsMultiTask && (
+                      <span className="text-gray-500">{` / ${taskIndex}`}</span>
+                    )}
+                  </span>
+                ) : (
+                  <span className="text-gray-500 pl-6">{taskIndex}</span>
+                )}
               </TableCell>
             );
           }
@@ -1676,14 +1739,37 @@ export function ManagedJobsTable({
           </TableHead>
         ),
         renderCell: (item, ctx) => {
-          const { renderMode, jobId, tasks, taskIndex, toggleJobGroup } =
-            ctx || {};
+          const {
+            renderMode,
+            jobId,
+            tasks,
+            ownTasks,
+            memberTasks,
+            taskIndex,
+            toggleJobGroup,
+            isMember,
+            memberIsMultiTask,
+          } = ctx || {};
 
           // Detect batch job via is_batch field or batch_total_batches presence
           const isBatch =
             item.is_batch === true || item.batch_total_batches != null;
 
           if (renderMode === 'groupParent') {
+            // The badge counts the group's own tasks and, separately, the
+            // jobs launched from it (dynamic members).
+            const own = ownTasks || tasks;
+            const launchedJobs = new Set((memberTasks || []).map((t) => t.id))
+              .size;
+            const badgeParts = [];
+            if (own.length > 1) {
+              badgeParts.push(`${own.length} tasks`);
+            }
+            if (launchedJobs > 0) {
+              badgeParts.push(`${launchedJobs} launched`);
+            }
+            const badgeKind =
+              own.length > 1 || item.is_job_group ? 'JobGroup' : 'Job';
             return (
               <TableCell className="whitespace-nowrap">
                 <div className="flex items-center">
@@ -1693,16 +1779,36 @@ export function ManagedJobsTable({
                     onClick={() => toggleJobGroup(jobId)}
                     className="ml-2 text-xs font-medium bg-gray-200 text-gray-700 hover:bg-gray-300 px-1.5 py-0.5 rounded cursor-pointer whitespace-nowrap"
                   >
-                    JobGroup: {tasks.length} tasks
+                    {badgeKind}: {badgeParts.join(', ')}
                   </button>
                 </div>
               </TableCell>
             );
           }
 
+          if (renderMode === 'groupChild' && isMember) {
+            // A job launched from this group: its own name, linking to its
+            // own detail page (to the task's page if it has several).
+            const href = memberIsMultiTask
+              ? `/jobs/${item.id}/${taskIndex}`
+              : `/jobs/${item.id}`;
+            return (
+              <TableCell className="whitespace-nowrap">
+                <Link href={href} className="text-blue-600 hover:underline">
+                  {item.name || `Job ${item.id}`}
+                  {memberIsMultiTask && (
+                    <span className="text-gray-500">
+                      {`: ${item.task || `Task ${taskIndex}`}`}
+                    </span>
+                  )}
+                </Link>
+              </TableCell>
+            );
+          }
+
           if (renderMode === 'groupChild') {
             // Check if this job group has auxiliary tasks
-            const hasAuxiliaryTasks = tasks.some(
+            const hasAuxiliaryTasks = (ownTasks || tasks).some(
               (t) => t.is_primary_in_job_group === false
             );
             return (
@@ -2614,6 +2720,20 @@ export function ManagedJobsTable({
                     const isMultiTask = tasks.length > 1;
                     const isExpanded = isJobGroupExpanded(jobId);
                     const firstTask = tasks[0];
+                    // The group's own tasks come first (see
+                    // groupJobRowsByTree), then the jobs launched from it,
+                    // each with its own job id and possibly several rows.
+                    const memberTasks = tasks.filter((t) => t.id !== jobId);
+                    const ownTasks = memberTasks.length
+                      ? tasks.filter((t) => t.id === jobId)
+                      : tasks;
+                    const memberRowCounts = new Map();
+                    memberTasks.forEach((t) =>
+                      memberRowCounts.set(
+                        t.id,
+                        (memberRowCounts.get(t.id) || 0) + 1
+                      )
+                    );
 
                     // For single-task jobs, render using plugin columns
                     if (!isMultiTask) {
@@ -2650,6 +2770,8 @@ export function ManagedJobsTable({
                       renderMode: 'groupParent',
                       jobId,
                       tasks,
+                      ownTasks,
+                      memberTasks,
                       aggregates,
                       isExpanded,
                       toggleJobGroup,
@@ -2670,11 +2792,26 @@ export function ManagedJobsTable({
 
                         {/* Child task rows when expanded */}
                         {isExpanded &&
-                          tasks.map((task, taskIndex) => {
+                          tasks.map((task, rowIndex) => {
+                            const isMember = task.id !== jobId;
+                            // Task index within the row's own job: own
+                            // tasks lead the group, so their row index is
+                            // their task index; a launched job's rows are
+                            // indexed among themselves.
+                            const taskIndex = isMember
+                              ? memberTasks
+                                  .filter((t) => t.id === task.id)
+                                  .indexOf(task)
+                              : rowIndex;
                             const childCtx = {
                               renderMode: 'groupChild',
                               jobId,
                               tasks,
+                              ownTasks,
+                              memberTasks,
+                              isMember,
+                              memberIsMultiTask:
+                                isMember && memberRowCounts.get(task.id) > 1,
                               taskIndex,
                               aggregates,
                               isExpanded,
