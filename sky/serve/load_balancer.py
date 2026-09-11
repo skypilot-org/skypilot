@@ -93,7 +93,7 @@ class SkyServeLoadBalancer:
             self._load_balancing_policy.set_target_qps_per_accelerator(
                 target_qps_per_replica)
 
-        logger.info('Starting load balancer with policy '
+        logger.info(f'Starting load balancer with policy '
                     f'{load_balancing_policy_name}.')
         self._request_aggregator: serve_utils.RequestsAggregator = (
             serve_utils.RequestTimestamp())
@@ -146,11 +146,11 @@ class SkyServeLoadBalancer:
                         for replica_info in replica_infos
                     ]
             except (aiohttp.ClientError, asyncio.TimeoutError) as e:
-                logger.error(f'An error occurred when syncing with '
-                             f'the controller: {e}'
-                             f'\nTraceback: {traceback.format_exc()}')
+                logger.error(f'An error occurred when syncing with the '
+                             f'controller: {e}\nTraceback: '
+                             f'{traceback.format_exc()}')
             else:
-                logger.info('Available replicas: %s', ready_replicas)
+                logger.info(f'Available replicas: {ready_replicas}')
                 with self._client_pool_lock:
                     self._load_balancing_policy.set_ready_replicas(
                         ready_replicas)
@@ -189,9 +189,9 @@ class SkyServeLoadBalancer:
                 # Await those tasks after the interval to avoid blocking.
                 await asyncio.gather(*close_client_tasks)
             except Exception as e:  # pylint: disable=broad-except
-                logger.error(f'An error occurred when syncing with '
-                             f'the controller: {e}'
-                             f'\nTraceback: {traceback.format_exc()}')
+                logger.error(f'An error occurred when syncing with the '
+                             f'controller: {e}\nTraceback: '
+                             f'{traceback.format_exc()}')
 
     async def _proxy_request_to(
         self, replica: lb_policies.ReadyReplica, request: fastapi.Request
@@ -247,8 +247,8 @@ class SkyServeLoadBalancer:
             return response
         except (httpx.RequestError, httpx.HTTPStatusError) as e:
             logger.error(f'Error when proxy request to {replica.url}: '
-                         f'{common_utils.format_exception(e)}'
-                         f'\nTraceback: {traceback.format_exc()}')
+                         f'{common_utils.format_exception(e)}\nTraceback: '
+                         f'{traceback.format_exc()}')
             return e
         finally:
             # If proxying failed before release ownership was transferred to
@@ -329,7 +329,7 @@ class SkyServeLoadBalancer:
 
         protocol = 'https' if self._tls_credential is not None else 'http'
 
-        logger.info('SkyServe Load Balancer started on '
+        logger.info(f'SkyServe Load Balancer started on '
                     f'{protocol}://0.0.0.0:{self._load_balancer_port}. '
                     f'PID: {os.getpid()}')
 

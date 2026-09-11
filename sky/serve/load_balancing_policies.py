@@ -84,7 +84,7 @@ class LoadBalancingPolicy:
                 f'Selected replica {replica.replica_id} at {replica.url} '
                 f'for request {_request_repr(request)}')
         else:
-            logger.warning('No replica selected for request '
+            logger.warning(f'No replica selected for request '
                            f'{_request_repr(request)}')
         return replica
 
@@ -275,19 +275,18 @@ class InstanceAwareLeastLoadPolicy(LeastLoadPolicy,
         target_qps = self._get_target_qps_for_accelerator(accelerator_type)
         if target_qps <= 0:
             logger.warning(
-                'Non-positive target QPS (%s) for accelerator type %s; '
-                'using default value 1.0 to avoid division by zero.',
-                target_qps, accelerator_type)
+                f'Non-positive target QPS ({target_qps}) for accelerator type '
+                f'{accelerator_type}; using default value 1.0 to avoid '
+                'division by zero.')
             target_qps = 1.0
 
         # Load is normalized by target QPS
         normalized_load = current_load / target_qps
 
         logger.debug(
-            'InstanceAwareLeastLoadPolicy: Replica %s - GPU type: %s, '
-            'current load: %s, target QPS: %s, normalized load: %s',
-            replica.replica_id, accelerator_type, current_load, target_qps,
-            normalized_load)
+            f'InstanceAwareLeastLoadPolicy: Replica {replica.replica_id} - '
+            f'GPU type: {accelerator_type}, current load: {current_load}, '
+            f'target QPS: {target_qps}, normalized load: {normalized_load}')
 
         return normalized_load
 
@@ -329,8 +328,8 @@ class InstanceAwareLeastLoadPolicy(LeastLoadPolicy,
                 replica for replica, load in replica_loads if load == min_load
             ]
             selected_replica = self._select_tied_replica(tied_replicas)
-            logger.debug('Available replicas and loads: %s', replica_loads)
-            logger.debug('Selected replica: %s', selected_replica)
+            logger.debug(f'Available replicas and loads: {replica_loads}')
+            logger.debug(f'Selected replica: {selected_replica}')
             return selected_replica
 
     # set_ready_replicas, begin_request, pre_execute_hook, and
