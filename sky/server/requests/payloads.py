@@ -1028,7 +1028,8 @@ class CreateDebugDumpBody(RequestBody):
     client_info: Optional[Dict[str, Any]] = None
     # Best-effort absolute wall-clock (time.time()) instant to stop the whole
     # collection by. When reached, collection stops early and a partial dump is
-    # returned. None (the default) means no deadline == previous behavior. An
+    # returned. None (the default) means the server applies its own backstop
+    # budget (see core.create_debug_dump), so the dump is always bounded. An
     # absolute deadline (rather than a relative timeout) is used because this
     # request is scheduled out-of-process: it charges executor queue wait
     # before the build starts against the budget rather than ignoring it.
