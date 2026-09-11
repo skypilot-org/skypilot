@@ -2023,9 +2023,9 @@ def create_debug_dump(request_ids: Optional[List[str]] = None,
             out-of-process caller charge already-elapsed time (e.g. executor
             queue wait) against the budget rather than ignoring it. When None
             (the default), the server applies its own backstop budget of
-            debug_utils._DEFAULT_DEBUG_DUMP_DEADLINE_S (1800s) so every
-            API-initiated dump is bounded; see that constant's comment for the
-            derivation. Explicit deadlines pass through verbatim.
+            debug_utils.DEBUG_DUMP_DEFAULT_DEADLINE_S so every
+            API-initiated dump is bounded; see that constant's comment for
+            the derivation. Explicit deadlines pass through verbatim.
 
     Returns:
         Path to the created zip file on the server.
@@ -2043,10 +2043,10 @@ def create_debug_dump(request_ids: Optional[List[str]] = None,
         # sends no deadline -- an unbounded dump holds an API-server worker
         # (and its executor slot) for as long as a single hung collection
         # call persists. 1800s ~ 2x the largest observed near-feasible run
-        # (see debug_utils._DEFAULT_DEBUG_DUMP_DEADLINE_S); callers that need
+        # (see debug_utils.DEBUG_DUMP_DEFAULT_DEADLINE_S); callers that need
         # more can always pass an explicit overall_deadline.
         overall_deadline = (time.time() +
-                            debug_utils._DEFAULT_DEBUG_DUMP_DEADLINE_S)  # pylint: disable=protected-access
+                            debug_utils.DEBUG_DUMP_DEFAULT_DEADLINE_S)
 
     debug_dump_path = debug_utils.create_debug_dump(
         request_ids=request_ids,

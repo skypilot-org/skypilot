@@ -1035,7 +1035,7 @@ def test_down_graceful_tolerates_missing_command_runners(monkeypatch) -> None:
             return_value='/tmp/fake_dump.zip')
 def test_create_debug_dump_applies_default_deadline(mock_create) -> None:
     """With no overall_deadline, the server applies its own backstop budget
-    (debug_utils._DEFAULT_DEBUG_DUMP_DEADLINE_S) so every API-initiated dump
+    (debug_utils.DEBUG_DUMP_DEFAULT_DEADLINE_S) so every API-initiated dump
     is bounded."""
     before = time.time()
 
@@ -1045,7 +1045,7 @@ def test_create_debug_dump_applies_default_deadline(mock_create) -> None:
     passed_deadline = mock_create.call_args.kwargs['overall_deadline']
     assert passed_deadline is not None
     # Approximately now + the default backstop.
-    default_s = debug_utils._DEFAULT_DEBUG_DUMP_DEADLINE_S  # pylint: disable=protected-access
+    default_s = debug_utils.DEBUG_DUMP_DEFAULT_DEADLINE_S
     assert (before + default_s) <= passed_deadline <= (after + default_s)
 
 

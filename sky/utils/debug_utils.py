@@ -303,8 +303,9 @@ DEBUG_DUMP_DIR = '~/.sky/debug_dumps'
 # truncates by design; 1800s gives ~2x headroom over the largest observed
 # near-feasible run while still bounding the previously unbounded no-deadline
 # case (a wedged dump used to hold an API-server worker forever). Explicit
-# caller deadlines always pass through verbatim.
-_DEFAULT_DEBUG_DUMP_DEADLINE_S = 1800.0
+# caller deadlines always pass through verbatim. Public (no leading
+# underscore) because core.create_debug_dump references it cross-module.
+DEBUG_DUMP_DEFAULT_DEADLINE_S = 1800.0
 
 # Env var names whose values should be redacted (show bool presence only).
 # Used for both server_info environment and request body sanitization.
@@ -1178,6 +1179,14 @@ def _dump_server_info(dump_dir: str,
     # and returns not-ok, so we skip enabled_clouds and move on rather than
     # hang the dump. The helper clamps the fixed cap to the remaining overall
     # budget so this probe can't overrun a set deadline.
+    # Which not-ok fate would the helper report if the wait fails: the
+    # overall budget (a skip) or the fixed sky-check cap (a genuine stall)?
+    # Decided here, before submission, mirroring the helper's own
+    # pre-submit attribution -- re-checking the deadline AFTER the wait
+    # would misreport a genuine full-cap stall that also exhausted the
+    # remaining budget as a skip.
+    clamp_binding = (_bounded_timeout(_SKY_CHECK_TIMEOUT, deadline) <
+                     _SKY_CHECK_TIMEOUT)
     try:
         ok, enabled_clouds = _run_with_deadline(
             functools.partial(sky_check.check, quiet=True),
@@ -1187,25 +1196,20 @@ def _dump_server_info(dump_dir: str,
             errors=errors,
             orphans=orphans,
             deadline=deadline,
-            op_desc=('enabled-clouds check; '
-                     'the dump omits the '
-                     'cloud status '
-                     'snapshot'))
+            op_desc=('enabled-clouds check; the dump omits the '
+                     'cloud status snapshot'))
         if ok:
             server_info['enabled_clouds'] = enabled_clouds
+        elif clamp_binding:
+            # The overall budget, not the check, ran out.
+            server_info['cloud_status_error'] = (
+                'sky check skipped: overall debug-dump deadline exceeded; '
+                'enabled_clouds omitted from the dump.')
         else:
-            # The helper's (False, None) covers both a genuine stall and a
-            # budget skip; pick the message from the deadline state so we
-            # never misreport one as the other.
-            if _deadline_exceeded(deadline):
-                server_info['cloud_status_error'] = (
-                    'sky check skipped: overall debug-dump deadline exceeded; '
-                    'enabled_clouds omitted from the dump.')
-            else:
-                server_info['cloud_status_error'] = (
-                    f'sky check timed out after {_SKY_CHECK_TIMEOUT}s (likely '
-                    f'a defunct/unreachable cloud or kube context); skipping '
-                    f'enabled_clouds in the dump.')
+            server_info['cloud_status_error'] = (
+                f'sky check timed out after {_SKY_CHECK_TIMEOUT}s (likely '
+                f'a defunct/unreachable cloud or kube context); skipping '
+                f'enabled_clouds in the dump.')
     except Exception as e:  # pylint: disable=broad-except
         server_info['cloud_status_error'] = str(e)
         if errors is not None:
@@ -2690,7 +2694,10 @@ def _build_debug_dump(
     # the budget can hold them, and a dump that is mathematically certain
     # to truncate should say so up front (the measured in-loop projection
     # in _dump_request_id_info catches mid-section slowdowns this cannot).
-    if budget is not None:
+    # Not fired once the budget is already gone: the section skip records
+    # report that truthfully, and a non-positive remainder would only add
+    # noise like '~Ns vs -0s of budget'.
+    if budget is not None and budget > 0:
         request_count = len(debug_dump_context['request_ids'])
         projected_requests = (request_count * _PROJECTED_SECONDS_PER_REQUEST)
         if projected_requests > budget:
@@ -2987,6 +2994,9 @@ def create_debug_dump(
             # In-archive zip stats (appended best-effort AFTER the zip closes,
             # so it can never fail the dump): the deterministic record of
             # whether the archive is complete or deadline-truncated.
+            # file_count excludes zip_stats.json itself -- this record is
+            # appended after the zip (and the count) is already final, so
+            # the finished archive holds file_count + 1 entries.
             try:
                 zip_stats = {
                     'duration_s': round(time.monotonic() - zip_start, 2),

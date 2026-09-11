@@ -4686,11 +4686,7 @@ class TestRunWithDeadline:
                 errors=errors,
                 orphans=orphans,
                 deadline=time.monotonic() + 100,
-                op_desc=('fetch that '
-                         'hung; its '
-                         'loss '
-                         'degrades '
-                         'the dump'))
+                op_desc=('fetch that hung; its loss degrades the dump'))
             assert ok is False
             assert result is None
             assert len(errors) == 1
@@ -4720,32 +4716,58 @@ class TestRunWithDeadline:
                                            resource='r')
 
     def test_log_stragglers_warns_running_skips_done(self, monkeypatch):
-        running: concurrent.futures.Future = concurrent.futures.Future()
-        done: concurrent.futures.Future = concurrent.futures.Future()
-        done.set_result(None)
-        orphans = [
-            {
-                'component': 'still',
-                'resource': 'running',
-                'future': running,
-                'started': time.monotonic() - 2,
-            },
-            {
-                'component': 'already',
-                'resource': 'done',
-                'future': done,
-                'started': time.monotonic() - 2,
-            },
-        ]
-        calls = []
-        monkeypatch.setattr(debug_utils.logger, 'warning',
-                            lambda *a, **k: calls.append(a))
-        debug_utils._log_timed_out_stragglers(orphans)
-        # One warning per fate: the still-running op leaks; the done one
-        # completed after timing out and its result was discarded.
-        assert len(calls) == 2
-        assert any('still running' in a[0] for a in calls)
-        assert any('completed' in a[0] and 'discarded' in a[0] for a in calls)
+        """One warning per orphan fate: a still-running op leaks (with its
+        current stack, best-effort), a done one completed after timing out
+        and its result was discarded. The still-running case is exercised
+        with a REAL orphan from _run_with_deadline so the worker's stack
+        genuinely has to reach the log."""
+        release = threading.Event()
+
+        def _stuck():  # MARKER_STRAGGLER_STUCK_FN
+            release.wait()  # MARKER_STRAGGLER_STUCK_FRAME
+
+        real_errors: List[Dict[str, Any]] = []
+        real_orphans: List[Dict[str, Any]] = []
+        try:
+            debug_utils._run_with_deadline(_stuck,
+                                           timeout=0.1,
+                                           component='stuck',
+                                           resource='worker',
+                                           errors=real_errors,
+                                           orphans=real_orphans,
+                                           deadline=time.monotonic() + 100)
+            running: concurrent.futures.Future = concurrent.futures.Future()
+            done: concurrent.futures.Future = concurrent.futures.Future()
+            done.set_result(None)
+            orphans = [
+                {
+                    'component': 'still',
+                    'resource': 'running',
+                    'future': running,
+                    'started': time.monotonic() - 2,
+                },
+                {
+                    'component': 'already',
+                    'resource': 'done',
+                    'future': done,
+                    'started': time.monotonic() - 2,
+                },
+            ] + real_orphans
+            calls = []
+            monkeypatch.setattr(debug_utils.logger, 'warning',
+                                lambda *a, **k: calls.append(a))
+            debug_utils._log_timed_out_stragglers(orphans)
+            # The synthetic still-running orphan has no thread id, so it
+            # gets one warning; the real one also gets its current stack.
+            assert len(calls) == 4
+            assert any('still running' in a[0] for a in calls)
+            assert any(
+                'completed' in a[0] and 'discarded' in a[0] for a in calls)
+            stack_logs = [a for a in calls if 'current stack' in a[0]]
+            assert len(stack_logs) == 1
+            assert 'MARKER_STRAGGLER_STUCK_FRAME' in stack_logs[0][-1]
+        finally:
+            release.set()
 
 
 class TestOverallDeadlineHelpers:
@@ -4993,6 +5015,26 @@ class TestOverallDeadlineDump:
         assert projections[0]['component'] == 'requests'
         assert 'projected overrun' in projections[0]['error']
 
+    def test_past_deadline_emits_no_budget_projection(self, tmp_path):
+        """A dump that reaches the sections with its budget already spent
+        reports that via the section skip records; the static projection
+        stays silent instead of warning against a non-positive remainder
+        ('~Ns vs -0s of budget')."""
+        with self._patched_dump(tmp_path) as (_crosslink_mocks, section_mocks):
+            result = debug_utils.create_debug_dump(
+                request_ids=[f'req-{i}' for i in range(1000)],
+                overall_deadline=time.time() - 1)
+
+        errors = self._read_errors(result)
+        assert not [e for e in errors if e['resource'] == 'budget_projection']
+        # The exhausted budget is still reported -- by the skip records.
+        skip_records = [
+            e for e in errors
+            if e.get('error') == 'Skipped: overall debug-dump deadline '
+            'exceeded.'
+        ]
+        assert skip_records
+
     def test_past_deadline_zip_truncates_but_stays_self_describing(
             self, tmp_path):
         """A deadline that expires before the zip finishes yields a VALID,
@@ -5014,7 +5056,7 @@ class TestOverallDeadlineDump:
                     f.write('x' * 128)
                 time.sleep(0.3)
 
-            section_mocks['_dump_server_info'].side_effect = (_slow_server_info)
+            section_mocks['_dump_server_info'].side_effect = _slow_server_info
             result = debug_utils.create_debug_dump(
                 cluster_names=['c'],
                 client_info={'client_version': '0.10.0'},
