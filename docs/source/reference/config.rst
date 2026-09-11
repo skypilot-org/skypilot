@@ -86,6 +86,7 @@ Below is the configuration syntax and some example values. See detailed explanat
       annotations:
         myannotation: myvalue
     :ref:`provision_timeout <config-yaml-kubernetes-provision-timeout>`: 10
+    :ref:`pod_startup_timeout <config-yaml-kubernetes-pod-startup-timeout>`: 3600
     :ref:`max_inline_command_length <config-yaml-kubernetes-max-inline-command-length>`: 32768
     :ref:`autoscaler <config-yaml-kubernetes-autoscaler>`: gke
     :ref:`pod_config <config-yaml-kubernetes-pod-config>`:
@@ -1873,6 +1874,26 @@ PVC must be provisioned; and 24 hours when a Kueue local queue is
 configured.
 
 Default: ``10``–``60`` seconds (see above).
+
+.. _config-yaml-kubernetes-pod-startup-timeout:
+
+``kubernetes.pod_startup_timeout``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Timeout for a scheduled pod to start running (optional).
+
+Timeout in seconds to wait for a pod that is already bound to a node to
+finish starting — pulling its image, attaching its volumes, and running its
+init containers — before giving up and failing over. Set to ``-1`` to wait
+indefinitely.
+
+This bounds the phase
+:ref:`kubernetes.provision_timeout <config-yaml-kubernetes-provision-timeout>`
+does not: that one runs until the scheduler places the pod, this one from
+there until its containers are up. Raise it if your images are large enough,
+or your registry slow enough, that a first pull legitimately takes longer.
+
+Default: ``3600`` (1 hour).
 
 .. _config-yaml-kubernetes-autoscaler:
 
