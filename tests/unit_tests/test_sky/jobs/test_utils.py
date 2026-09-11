@@ -1869,3 +1869,11 @@ class TestFieldsForController:
         fields = ['job_id'] + self._NEW
         assert jobs_utils.fields_for_controller(fields, None) == fields
         assert jobs_utils.fields_for_controller(fields, 'dev') == fields
+
+    def test_version_is_only_asked_for_when_a_gated_field_is_requested(self):
+        # The gRPC queue path pays the version round trip only when it must.
+        assert not jobs_utils.queue_fields_need_controller_version(None)
+        assert not jobs_utils.queue_fields_need_controller_version(
+            ['job_id', 'status'])
+        assert jobs_utils.queue_fields_need_controller_version(
+            ['job_id', 'root_job_id'])
